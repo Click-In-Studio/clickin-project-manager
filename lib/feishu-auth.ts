@@ -103,6 +103,81 @@ export async function checkIsTenantManager(openId: string): Promise<boolean> {
   }
 }
 
+// Fetch a user's email/phone/avatar using the contact API (app token).
+// These fields may be null if the app lacks the relevant contact permissions.
+export type FeishuContactInfo = {
+  email: string | null;
+  phone: string | null;
+  avatarUrl: string | null;
+};
+
+export async function getUserContactInfo(openId: string): Promise<FeishuContactInfo> {
+  try {
+    const appToken = await getAppAccessToken();
+    const res = await fetch(
+      `${BASE}/contact/v3/users/${openId}?user_id_type=open_id`,
+      { headers: { Authorization: `Bearer ${appToken}` } }
+    );
+    const body = (await res.json()) as {
+      code: number;
+      data?: {
+        user?: {
+          email?: string;
+          mobile?: string;
+          avatar?: { avatar_240?: string; avatar_72?: string };
+        };
+      };
+    };
+    if (body.code !== 0 || !body.data?.user) return { email: null, phone: null, avatarUrl: null };
+    const u = body.data.user;
+    return {
+      email: u.email || null,
+      phone: u.mobile || null,
+      avatarUrl: u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null,
+    };
+  } catch {
+    return { email: null, phone: null, avatarUrl: null };
+  }
+}
+
+export type FeishuSearchedUser = {
+  openId: string;
+  name: string;
+  avatarUrl: string | null;
+};
+
+// Requires app to have contact:user.base:readonly (same permission as checkIsTenantManager).
+export async function searchUsersByName(query: string): Promise<FeishuSearchedUser[]> {
+  const appToken = await getAppAccessToken();
+  const url = new URL(`${BASE}/contact/v3/users/search`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("user_id_type", "open_id");
+  url.searchParams.set("page_size", "20");
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${appToken}` },
+  });
+  const data = (await res.json()) as {
+    code: number;
+    msg: string;
+    data?: {
+      users?: {
+        open_id: string;
+        name: string;
+        avatar?: { avatar_240?: string; avatar_72?: string };
+      }[];
+    };
+  };
+
+  if (data.code !== 0) throw new Error(`searchUsers: ${data.msg}`);
+
+  return (data.data?.users ?? []).map((u) => ({
+    openId: u.open_id,
+    name: u.name,
+    avatarUrl: u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null,
+  }));
+}
+
 export async function exchangeCode(code: string): Promise<TokenData> {
   const appToken = await getAppAccessToken();
   const res = await fetch(`${BASE}/authen/v1/oidc/access_token`, {

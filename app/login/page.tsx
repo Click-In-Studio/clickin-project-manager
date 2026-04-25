@@ -5,7 +5,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-100">
       <div className="w-80 rounded-2xl bg-white px-8 py-10 shadow-sm text-center">
         <h1 className="mb-2 text-sm font-bold tracking-[0.2em] text-zinc-400 uppercase">
-          剧本编辑器
+          项目管理器
         </h1>
         <p className="mb-8 text-xs text-zinc-300">请使用飞书账号登录以继续</p>
         <a

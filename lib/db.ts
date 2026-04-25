@@ -355,3 +355,98 @@ export async function deleteComment(id: string, openId: string, isAdmin: boolean
     : await getPool().query("DELETE FROM block_comment WHERE id = $1 AND open_id = $2 RETURNING id", [id, openId]);
   return res.rows.length > 0;
 }
+
+// ─── Production detail ────────────────────────────────────────────────────────
+
+export async function getProductionName(id: string): Promise<string | null> {
+  const res = await getPool().query<{ name: string }>(
+    "SELECT name FROM production WHERE id = $1",
+    [id]
+  );
+  return res.rows[0]?.name ?? null;
+}
+
+export type MemberWithRoles = {
+  openId: string;
+  name: string;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  email: string | null;
+  phone: string | null;
+  roles: string[];
+  photoUrl: string | null;
+};
+
+export async function listProductionMembersWithRoles(productionId: string): Promise<MemberWithRoles[]> {
+  const res = await getPool().query<{
+    open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean;
+    email: string | null; phone: string | null; roles: string[]; photo_url: string | null;
+  }>(
+    `SELECT fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
+            fu.email, fu.phone, pm.roles, pm.photo_url
+     FROM production_member pm
+     JOIN feishu_user fu ON fu.open_id = pm.open_id
+     WHERE pm.production_id = $1
+     ORDER BY fu.name`,
+    [productionId]
+  );
+  return res.rows.map((r) => ({
+    openId: r.open_id,
+    name: r.name,
+    avatarUrl: r.avatar_url,
+    isAdmin: r.is_super_admin,
+    email: r.email,
+    phone: r.phone,
+    roles: r.roles,
+    photoUrl: r.photo_url,
+  }));
+}
+
+// ─── Contact import ───────────────────────────────────────────────────────────
+
+export async function findUserByName(name: string): Promise<{ openId: string } | null> {
+  const res = await getPool().query<{ open_id: string }>(
+    "SELECT open_id FROM feishu_user WHERE name = $1 LIMIT 1",
+    [name]
+  );
+  return res.rows[0] ? { openId: res.rows[0].open_id } : null;
+}
+
+// Writes a user sourced from the contact sheet. Email/phone only overwrite if non-null.
+export async function upsertContactUser(
+  openId: string,
+  name: string,
+  avatarUrl: string | null,
+  email: string | null,
+  phone: string | null
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO feishu_user (open_id, name, avatar_url, email, phone, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (open_id) DO UPDATE
+       SET name       = EXCLUDED.name,
+           avatar_url = COALESCE(EXCLUDED.avatar_url, feishu_user.avatar_url),
+           email      = COALESCE(EXCLUDED.email,      feishu_user.email),
+           phone      = COALESCE(EXCLUDED.phone,      feishu_user.phone),
+           updated_at = now()`,
+    [openId, name, avatarUrl, email, phone]
+  );
+}
+
+// Upserts a production member with roles and an optional production-specific photo.
+// Photo only overwrites if a new value is provided.
+export async function upsertProductionMemberWithRoles(
+  productionId: string,
+  openId: string,
+  roles: string[],
+  photoUrl: string | null
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO production_member (production_id, open_id, roles, photo_url)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (production_id, open_id) DO UPDATE
+       SET roles     = EXCLUDED.roles,
+           photo_url = EXCLUDED.photo_url`,
+    [productionId, openId, roles, photoUrl]
+  );
+}

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { listProductions, listAllUsers } from "@/lib/db";
+import { listProductions } from "@/lib/db";
 import HomeClient from "@/components/HomeClient";
 
 export default async function Home() {
@@ -9,17 +9,13 @@ export default async function Home() {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const [productions, allUsers] = await Promise.all([
-    listProductions({ openId: session.openId, isAdmin: session.isAdmin }),
-    session.isAdmin ? listAllUsers() : Promise.resolve([]),
-  ]);
+  const productions = await listProductions({ openId: session.openId, isAdmin: session.isAdmin });
 
   return (
     <HomeClient
       productions={productions}
       isAdmin={session.isAdmin}
       currentUser={{ name: session.name, avatarUrl: session.avatarUrl }}
-      allUsers={allUsers}
     />
   );
 }

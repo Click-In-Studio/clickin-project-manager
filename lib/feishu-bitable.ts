@@ -371,3 +371,113 @@ export async function batchDeleteRecords(
     );
   }
 }
+
+// ─── Contact sheet ────────────────────────────────────────────────────────────
+
+// Feishu field types used in contact sheet:
+// 1 = Text, 4 = MultiSelect, 11 = Person, 17 = Attachment
+
+export type ContactFieldMap = {
+  姓名: FieldInfo;
+  人员: FieldInfo | null; // type 11: directly carries open_id, skip name search when present
+  邮箱: FieldInfo | null;
+  电话: FieldInfo | null;
+  照片: FieldInfo | null;
+  职位: FieldInfo;
+};
+
+export type ContactValidationResult =
+  | { ok: true; fieldMap: ContactFieldMap }
+  | { ok: false; errors: string[] };
+
+export type ContactRow = {
+  name: string;
+  feishuOpenId: string | null; // from 人员 column when available
+  email: string | null;
+  phone: string | null;
+  photoUrl: string | null; // first attachment only
+  roles: string[];
+};
+
+export function validateContactSchema(fields: FieldInfo[]): ContactValidationResult {
+  const byName = new Map(fields.map((f) => [f.field_name, f]));
+  const errors: string[] = [];
+
+  const nameField = byName.get("姓名");
+  const rolesField = byName.get("职位");
+
+  if (!nameField) errors.push('缺少列 "姓名"');
+  if (!rolesField) errors.push('缺少列 "职位"');
+  else if (rolesField.type !== 4) errors.push('"职位" 列类型必须为多选');
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  const personField = byName.get("人员");
+
+  return {
+    ok: true,
+    fieldMap: {
+      姓名: nameField!,
+      人员: personField?.type === 11 ? personField : null,
+      邮箱: byName.get("邮箱") ?? null,
+      电话: byName.get("电话") ?? null,
+      照片: byName.get("照片") ?? null,
+      职位: rolesField!,
+    },
+  };
+}
+
+// Person field value: [{id: open_id, name: "..."}, ...]
+function extractPersonOpenId(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const first = value[0] as Record<string, unknown>;
+  const id = first["id"];
+  return typeof id === "string" && id ? id : null;
+}
+
+// Attachment field: extract the stable file_token (not the URL, which requires auth).
+// The token is passed to /api/media?token=... for proxied access.
+function extractAttachmentToken(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const first = value[0] as Record<string, unknown>;
+  const token = first["file_token"];
+  return typeof token === "string" && token ? token : null;
+}
+
+export function toContactRows(
+  fieldMap: ContactFieldMap,
+  records: RawRecord[],
+  validRoles: Set<string>
+): { rows: ContactRow[]; errors: string[] } {
+  const rows: ContactRow[] = [];
+  const errors: string[] = [];
+
+  for (const record of records) {
+    const f = record.fields;
+    const name = extractText(f[fieldMap.姓名.field_name]).trim();
+    if (!name) continue; // skip blank rows silently
+
+    const rawRoles = extractMultiSelectNames(f[fieldMap.职位.field_name]);
+    const roles = rawRoles.filter((r) => validRoles.has(r));
+    const unknownRoles = rawRoles.filter((r) => !validRoles.has(r));
+
+    if (unknownRoles.length > 0) {
+      errors.push(`"${name}": 未知职位 ${unknownRoles.map((r) => `"${r}"`).join("、")}`);
+    }
+    if (roles.length === 0) {
+      errors.push(`"${name}": 职位为空，已跳过`);
+      continue;
+    }
+
+    rows.push({
+      name,
+      feishuOpenId: fieldMap.人员 ? extractPersonOpenId(f[fieldMap.人员.field_name]) : null,
+      email: fieldMap.邮箱 ? extractText(f[fieldMap.邮箱.field_name]).trim() || null : null,
+      phone: fieldMap.电话 ? extractText(f[fieldMap.电话.field_name]).trim() || null : null,
+      photoUrl: fieldMap.照片 ? extractAttachmentToken(f[fieldMap.照片.field_name]) : null,
+      roles,
+    });
+  }
+
+  return { rows, errors };
+}

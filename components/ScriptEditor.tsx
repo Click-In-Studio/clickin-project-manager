@@ -2374,8 +2374,8 @@ export default function ScriptEditor({
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100">
         <p className="text-sm font-medium text-zinc-500">找不到文档</p>
         <p className="text-xs text-zinc-400">ID：{scriptId}</p>
-        <Link href="/" className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
-          返回首页
+        <Link href={productionId ? `/production/${productionId}` : "/"} className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
+          返回
         </Link>
       </div>
     );
@@ -2390,8 +2390,8 @@ export default function ScriptEditor({
             {loadError}
           </p>
         )}
-        <Link href="/" className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
-          返回首页
+        <Link href={productionId ? `/production/${productionId}` : "/"} className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
+          返回
         </Link>
       </div>
     );
@@ -2402,6 +2402,13 @@ export default function ScriptEditor({
       {/* Toolbar */}
       <header className="sticky top-0 z-20 border-b border-zinc-100 bg-white shadow-sm">
         <div className="mx-auto flex h-14 max-w-3xl flex-wrap items-center gap-3 px-6">
+          <Link
+            href={productionId ? `/production/${productionId}` : "/"}
+            className="shrink-0 text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+          >
+            ← 返回
+          </Link>
+          <div className="h-4 w-px shrink-0 bg-zinc-100" />
           <span className="shrink-0 text-xs font-bold tracking-widest text-zinc-300 uppercase">
             剧本
           </span>
