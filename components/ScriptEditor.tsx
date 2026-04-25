@@ -309,15 +309,38 @@ function TableOfContents({
   scenes: Scene[];
   blocks: Block[];
 }) {
-  const orderedScenes: Scene[] = [];
+  // Build ordered scene list matching the render: used scenes in block order,
+  // with unused scenes inserted at their correct position between used ones.
+  const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter(Boolean));
+  const usedOrdered: Scene[] = [];
   for (const b of blocks) {
     if (b.sceneId) {
       const scene = scenes.find((s) => s.id === b.sceneId);
-      if (scene && !orderedScenes.some((s) => s.id === scene.id)) {
-        orderedScenes.push(scene);
+      if (scene && !usedOrdered.some((s) => s.id === scene.id)) {
+        usedOrdered.push(scene);
       }
     }
   }
+  if (usedOrdered.length === 0 && usedSceneIds.size === 0) return null;
+
+  // Merge unused scenes into their correct position between used scenes.
+  const orderedScenes: Scene[] = [];
+  for (let i = 0; i < usedOrdered.length; i++) {
+    const prevIdx = i === 0 ? -1 : scenes.findIndex((s) => s.id === usedOrdered[i - 1].id);
+    const currIdx = scenes.findIndex((s) => s.id === usedOrdered[i].id);
+    for (let j = prevIdx + 1; j < currIdx; j++) {
+      if (!usedSceneIds.has(scenes[j].id)) orderedScenes.push(scenes[j]);
+    }
+    orderedScenes.push(usedOrdered[i]);
+  }
+  // Append any unused scenes that come after the last used scene.
+  const lastIdx = usedOrdered.length
+    ? scenes.findIndex((s) => s.id === usedOrdered[usedOrdered.length - 1].id)
+    : -1;
+  for (let j = lastIdx + 1; j < scenes.length; j++) {
+    if (!usedSceneIds.has(scenes[j].id)) orderedScenes.push(scenes[j]);
+  }
+
   if (orderedScenes.length === 0) return null;
 
   const scrollTo = (sceneId: string) => {
@@ -437,31 +460,35 @@ function ScenePanel({
         章节 ▾
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white p-3 shadow-xl">
-          {scenes.length > 0 ? (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
-                  <th className="pb-1 pr-2 font-medium">编号</th>
-                  <th className="pb-1 font-medium">名称</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {scenes.map((s) => (
-                  <SceneRow key={s.id} scene={s} onUpdate={onUpdate} onRemove={onRemove} />
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p className="mb-2 text-center text-xs text-zinc-300">暂无章节</p>
-          )}
-          <button
-            onClick={onAdd}
-            className="mt-2 w-full rounded-lg border border-dashed border-zinc-200 py-1.5 text-sm text-zinc-400 transition-colors hover:border-zinc-400 hover:text-zinc-600"
-          >
-            + 添加章节
-          </button>
+        <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
+          <div className="overflow-y-auto p-3">
+            {scenes.length > 0 ? (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
+                    <th className="pb-1 pr-2 font-medium">编号</th>
+                    <th className="pb-1 font-medium">名称</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenes.map((s) => (
+                    <SceneRow key={s.id} scene={s} onUpdate={onUpdate} onRemove={onRemove} />
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="mb-2 text-center text-xs text-zinc-300">暂无章节</p>
+            )}
+          </div>
+          <div className="shrink-0 border-t border-zinc-100 p-3">
+            <button
+              onClick={onAdd}
+              className="w-full rounded-lg border border-dashed border-zinc-200 py-1.5 text-sm text-zinc-400 transition-colors hover:border-zinc-400 hover:text-zinc-600"
+            >
+              + 添加章节
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -521,7 +548,7 @@ function ScenePicker({
         {current ? current.number : "章"}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 min-w-[9rem] rounded-xl border border-zinc-100 bg-white py-1 shadow-xl">
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-[9rem] rounded-xl border border-zinc-100 bg-white py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(20rem, calc(100vh - 12rem))" }}>
           <button
             onMouseDown={(e) => { e.preventDefault(); onChange(null); setOpen(false); }}
             className="w-full px-3 py-1.5 text-left text-xs text-zinc-400 hover:bg-zinc-50"
@@ -702,13 +729,14 @@ function CharacterPanel({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-xl border border-zinc-100 bg-white shadow-xl">
-          <div className="border-b border-zinc-100 px-4 py-2.5">
+        <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
+          <div className="shrink-0 border-b border-zinc-100 px-4 py-2.5">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">
               角色管理
             </span>
           </div>
 
+          <div className="overflow-y-auto">
           <table className="w-full">
             <tbody>
               {characters.length === 0 ? (
@@ -727,8 +755,9 @@ function CharacterPanel({
               )}
             </tbody>
           </table>
+          </div>
 
-          <div className="flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5">
+          <div className="shrink-0 flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5">
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -919,7 +948,7 @@ function BlockCharacterSelector({
         />
       </div>
       {suggestions.length > 0 && (
-        <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-xl border border-zinc-100 bg-white py-1 shadow-xl">
+        <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-xl border border-zinc-100 bg-white py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(16rem, calc(100vh - 12rem))" }}>
           {suggestions.map((c, i) => (
             <button
               key={c.id}
@@ -2519,9 +2548,11 @@ export default function ScriptEditor({
 
       {/* Document */}
       <main className="mx-auto max-w-3xl px-4 py-8">
-        <div className="min-h-[70vh] overflow-hidden rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
+        <div className="min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
           <TableOfContents scenes={scenes} blocks={blocks} />
-          {blocks.flatMap((block, bIdx) => {
+          {(() => {
+            const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter(Boolean));
+            return blocks.flatMap((block, bIdx) => {
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
 
             // Monotonicity-safe scene picker: only show scenes within the window
@@ -2555,7 +2586,21 @@ export default function ScriptEditor({
               >
                 {sceneStart && (() => {
                   const scene = scenes.find((s) => s.id === block.sceneId);
-                  return scene ? <SceneHeader scene={scene} /> : null;
+                  const currentIdx = scene ? scenes.findIndex((s) => s.id === block.sceneId) : -1;
+                  const prevIdx = prev?.sceneId != null ? scenes.findIndex((s) => s.id === prev.sceneId) : -1;
+                  const skipped = currentIdx > prevIdx + 1
+                    ? scenes.slice(prevIdx + 1, currentIdx).filter((s) => !usedSceneIds.has(s.id))
+                    : [];
+                  return (
+                    <>
+                      {skipped.map((s) => (
+                        <div key={`empty-${s.id}`} id={`scene-block-${s.id}`} className="scroll-mt-20">
+                          <SceneHeader scene={s} />
+                        </div>
+                      ))}
+                      {scene && <SceneHeader scene={scene} />}
+                    </>
+                  );
                 })()}
                 <ScriptBlock
                   block={block}
@@ -2593,7 +2638,8 @@ export default function ScriptEditor({
             return bIdx > 0
               ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
               : [blockEl];
-          })}
+          });
+          })()}
           {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
         </div>
         {canEditText && (
