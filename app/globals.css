@@ -24,3 +24,38 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Placeholder for contenteditable blocks */
+[contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: #e4e4e7;
+  pointer-events: none;
+}
+
+/* Inline stage directions within dialogue blocks */
+.stage-inline {
+  font-style: italic;
+  color: #a1a1aa;
+}
+
+/* 楷体 font stack — Windows: KaiTi, macOS: STKaiti / Kaiti SC */
+.font-kaiti {
+  font-family: 'KaiTi', 'STKaiti', 'Kaiti SC', 'AR PL UKai CN', serif;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Page break between consecutive print pages */
+  .print-page + .print-page {
+    break-before: page;
+  }
+}
