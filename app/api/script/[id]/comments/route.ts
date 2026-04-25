@@ -1,13 +1,14 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction, listProductionComments, createComment } from "@/lib/db";
+import { getProductionMemberContext, listProductionComments, createComment } from "@/lib/db";
+import { hasPermission } from "@/lib/roles";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.openId, productionId);
-    if (!ok) return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  if (!hasPermission("script:comment", session.isAdmin, memberRoles, overrides)) {
+    return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
   return { session, deny: null };
 }

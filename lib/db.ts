@@ -1,5 +1,6 @@
 import { getPool } from "./pg";
 import type { Block, Character, Scene, ScriptState } from "./script-types";
+import type { Permission, PermissionOverrides } from "./roles";
 
 // ─── Exported types ───────────────────────────────────────────────────────────
 
@@ -263,6 +264,84 @@ export async function canUserAccessProduction(openId: string, productionId: stri
     [openId, productionId]
   );
   return parseInt(res.rows[0].count) > 0;
+}
+
+/** Returns the user's roles in the production, or null if they are not a member. */
+export async function getProductionMemberRoles(
+  openId: string,
+  productionId: string,
+): Promise<string[] | null> {
+  const res = await getPool().query<{ roles: string[] }>(
+    "SELECT roles FROM production_member WHERE open_id = $1 AND production_id = $2",
+    [openId, productionId],
+  );
+  return res.rows.length ? res.rows[0].roles : null;
+}
+
+export async function getPermissionOverrides(
+  productionId: string,
+  openId: string,
+): Promise<PermissionOverrides> {
+  const res = await getPool().query<{ permission: string; granted: boolean }>(
+    "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND open_id = $2",
+    [productionId, openId],
+  );
+  const map: PermissionOverrides = new Map();
+  for (const row of res.rows) map.set(row.permission as Permission, row.granted);
+  return map;
+}
+
+export async function setPermissionOverride(
+  productionId: string,
+  openId: string,
+  permission: Permission,
+  granted: boolean | null,
+): Promise<void> {
+  if (granted === null) {
+    await getPool().query(
+      "DELETE FROM production_member_permission WHERE production_id = $1 AND open_id = $2 AND permission = $3",
+      [productionId, openId, permission],
+    );
+  } else {
+    await getPool().query(
+      `INSERT INTO production_member_permission (production_id, open_id, permission, granted)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (production_id, open_id, permission) DO UPDATE SET granted = EXCLUDED.granted`,
+      [productionId, openId, permission, granted],
+    );
+  }
+}
+
+/** Bulk-load all overrides for all members in a production (for the management UI). */
+export async function getAllPermissionOverrides(
+  productionId: string,
+): Promise<Record<string, Record<string, boolean>>> {
+  const res = await getPool().query<{ open_id: string; permission: string; granted: boolean }>(
+    "SELECT open_id, permission, granted FROM production_member_permission WHERE production_id = $1",
+    [productionId],
+  );
+  const result: Record<string, Record<string, boolean>> = {};
+  for (const row of res.rows) {
+    result[row.open_id] ??= {};
+    result[row.open_id][row.permission] = row.granted;
+  }
+  return result;
+}
+
+/** Fetch roles + overrides for a single user in one round-trip each (parallel). */
+export async function getProductionMemberContext(
+  openId: string,
+  isAdmin: boolean,
+  productionId: string,
+): Promise<{ memberRoles: string[] | null; overrides: PermissionOverrides }> {
+  const [memberRoles, overrides] = await Promise.all([
+    getProductionMemberRoles(openId, productionId),
+    getPermissionOverrides(productionId, openId),
+  ]);
+  // Admins with adminBypass perms don't need DB overrides to pass, but we still
+  // fetch them so explicit denies on non-bypass perms are respected.
+  void isAdmin; // kept in signature for symmetry with call sites
+  return { memberRoles, overrides };
 }
 
 export async function listProductionMembers(productionId: string): Promise<UserInfo[]> {

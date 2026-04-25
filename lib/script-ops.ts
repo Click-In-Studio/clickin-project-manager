@@ -125,3 +125,47 @@ export function diffState(
 
   return { clientSeq, blockOps, charOps, sceneOps };
 }
+
+// ─── Permission classification ────────────────────────────────────────────────
+
+export type ScriptPermissions = {
+  "script:edit": boolean;
+  "script:metadata": boolean;
+  "script:rehearsal_mark": boolean;
+};
+
+/**
+ * Returns the set of script permissions required by a patch, given the current
+ * server state (needed to diff block updates field-by-field).
+ */
+export function requiredPermissions(
+  patch: ScriptPatch,
+  prevState: ScriptState,
+): Set<keyof ScriptPermissions> {
+  const needed = new Set<keyof ScriptPermissions>();
+  const prevBlockMap = new Map(prevState.blocks.map((b) => [b.id, b]));
+
+  if (patch.charOps.length > 0) needed.add("script:metadata");
+  if (patch.sceneOps.length > 0) needed.add("script:metadata");
+
+  for (const op of patch.blockOps) {
+    if (op.op === "insert" || op.op === "delete" || op.op === "reorder") {
+      needed.add("script:edit");
+      continue;
+    }
+    // op === "update" — diff against previous block to see what changed
+    const old = prevBlockMap.get(op.block.id);
+    if (!old) { needed.add("script:edit"); continue; }
+
+    if (
+      op.block.content !== old.content ||
+      op.block.type !== old.type ||
+      op.block.lyric !== old.lyric ||
+      JSON.stringify(op.block.characterIds) !== JSON.stringify(old.characterIds)
+    ) needed.add("script:edit");
+    if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("script:rehearsal_mark");
+    if (op.block.sceneId !== old.sceneId) needed.add("script:metadata");
+  }
+
+  return needed;
+}

@@ -13,16 +13,20 @@ import {
   findUserByName,
   upsertContactUser,
   upsertProductionMemberWithRoles,
+  getProductionMemberContext,
 } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { ALL_ROLES } from "@/lib/roles";
+import { ALL_ROLES, hasPermission } from "@/lib/roles";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
 
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!session.isAdmin) return Response.json({ error: "仅超级管理员可操作" }, { status: 403 });
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  if (!hasPermission("import_contacts", session.isAdmin, memberRoles, overrides)) {
+    return Response.json({ error: "权限不足" }, { status: 403 });
+  }
 
   const body = (await req.json()) as { wikiUrl?: string };
   if (!body.wikiUrl) return Response.json({ error: "wikiUrl 为必填" }, { status: 400 });

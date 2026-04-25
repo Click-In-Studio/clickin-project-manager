@@ -759,6 +759,7 @@ function BlockCharacterSelector({
   editRequestToken,
   onArrowUp,
   onArrowDown,
+  readOnly = false,
 }: {
   block: Block;
   characters: Character[];
@@ -766,6 +767,7 @@ function BlockCharacterSelector({
   editRequestToken: number;
   onArrowUp: () => void;
   onArrowDown: () => void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
@@ -853,16 +855,22 @@ function BlockCharacterSelector({
   if (!editing) {
     return (
       <div className="mb-2 flex justify-center">
-        <button
-          onClick={() => setEditing(true)}
-          className={`text-sm font-bold tracking-[0.12em] transition-colors ${
-            selected.length
-              ? "text-zinc-800 hover:text-zinc-500"
-              : "text-zinc-300 hover:text-zinc-400"
-          }`}
-        >
-          {selected.length ? selected.map((c) => c.name).join("、") : "无角色"}
-        </button>
+        {readOnly ? (
+          <span className={`text-sm font-bold tracking-[0.12em] ${selected.length ? "text-zinc-800" : "text-zinc-300"}`}>
+            {selected.length ? selected.map((c) => c.name).join("、") : "无角色"}
+          </span>
+        ) : (
+          <button
+            onClick={() => setEditing(true)}
+            className={`text-sm font-bold tracking-[0.12em] transition-colors ${
+              selected.length
+                ? "text-zinc-800 hover:text-zinc-500"
+                : "text-zinc-300 hover:text-zinc-400"
+            }`}
+          >
+            {selected.length ? selected.map((c) => c.name).join("、") : "无角色"}
+          </button>
+        )}
       </div>
     );
   }
@@ -1397,6 +1405,9 @@ function ScriptBlock({
   isMarkStart,
   commentCount,
   onCommentClick,
+  canEditText = false,
+  canEditMetadata = false,
+  canEditRehearsalMark = false,
 }: {
   block: Block;
   characters: Character[];
@@ -1422,6 +1433,9 @@ function ScriptBlock({
   isMarkStart: boolean;
   commentCount: number;
   onCommentClick: () => void;
+  canEditText?: boolean;
+  canEditMetadata?: boolean;
+  canEditRehearsalMark?: boolean;
 }) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
@@ -1580,16 +1594,18 @@ function ScriptBlock({
       )}
 
       {/* Rehearsal mark — top left, visible at the start of a new mark section; hover to edit */}
-      <div className={`absolute left-2 top-1 transition-opacity ${isMarkStart && block.rehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-        <RehearsalMarkInput
-          mark={block.rehearsalMark}
-          onChange={onMarkChange}
-        />
-      </div>
+      {canEditRehearsalMark && (
+        <div className={`absolute left-2 top-1 transition-opacity ${isMarkStart && block.rehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+          <RehearsalMarkInput
+            mark={block.rehearsalMark}
+            onChange={onMarkChange}
+          />
+        </div>
+      )}
 
       {/* Right-side action buttons — flex row, no overlap */}
       <div className="absolute right-2 top-1 flex items-center">
-        {!isStage && (
+        {canEditText && !isStage && (
           <button
             onClick={onToggleLyric}
             className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
@@ -1597,20 +1613,24 @@ function ScriptBlock({
             {block.lyric ? "台词" : "歌词"}
           </button>
         )}
-        <div className={`transition-opacity ${block.sceneId ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-          <ScenePicker
-            scenes={scenes}
-            availableScenes={availableScenes}
-            sceneId={block.sceneId}
-            onChange={onSceneChange}
-          />
-        </div>
-        <button
-          onClick={onToggleType}
-          className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
-        >
-          {isStage ? "台词" : "舞台"}
-        </button>
+        {canEditMetadata && (
+          <div className={`transition-opacity ${block.sceneId ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+            <ScenePicker
+              scenes={scenes}
+              availableScenes={availableScenes}
+              sceneId={block.sceneId}
+              onChange={onSceneChange}
+            />
+          </div>
+        )}
+        {canEditText && (
+          <button
+            onClick={onToggleType}
+            className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
+          >
+            {isStage ? "台词" : "舞台"}
+          </button>
+        )}
         <button
           onClick={e => { e.stopPropagation(); onCommentClick(); }}
           title="评论"
@@ -1632,12 +1652,13 @@ function ScriptBlock({
           editRequestToken={charEditToken}
           onArrowUp={onArrowUpFromChar}
           onArrowDown={onArrowDownFromChar}
+          readOnly={!canEditText}
         />
       )}
 
       <div
         ref={refCallback}
-        contentEditable
+        contentEditable={canEditText}
         suppressContentEditableWarning
         onInput={handleInput}
         onCompositionStart={handleCompositionStart}
@@ -1857,10 +1878,17 @@ function CommentsPanel({
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
+  canEditText = true,
+  canEditMetadata = true,
+  canEditRehearsalMark = true,
 }: {
   scriptId?: string;
   productionId?: string;
+  canEditText?: boolean;
+  canEditMetadata?: boolean;
+  canEditRehearsalMark?: boolean;
 }) {
+  const canEdit = canEditText || canEditMetadata || canEditRehearsalMark;
   const effectiveScriptId = productionId ?? scriptId;
   const [characters, setCharacters] = useState<Character[]>([]);
   const [scenes, setScenes] = useState<Scene[]>([]);
@@ -1887,6 +1915,7 @@ export default function ScriptEditor({
 
   useEffect(() => {
     pushPatchRef.current = async (curr: ScriptState) => {
+      if (!canEdit) return;
       if (isSyncingRef.current) return;
       isSyncingRef.current = true;
       try {
@@ -2412,37 +2441,50 @@ export default function ScriptEditor({
           <span className="shrink-0 text-xs font-bold tracking-widest text-zinc-300 uppercase">
             剧本
           </span>
-          <div className="h-4 w-px shrink-0 bg-zinc-100" />
-          <button
-            onClick={undo}
-            disabled={!canUndo}
-            title="撤销 ⌘Z"
-            className={`rounded px-2 py-1 text-sm transition-colors ${canUndo ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800" : "cursor-not-allowed text-zinc-300"}`}
-          >
-            撤销
-          </button>
-          <button
-            onClick={redo}
-            disabled={!canRedo}
-            title="重做 ⌘⇧Z"
-            className={`rounded px-2 py-1 text-sm transition-colors ${canRedo ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800" : "cursor-not-allowed text-zinc-300"}`}
-          >
-            重做
-          </button>
-          <div className="h-4 w-px shrink-0 bg-zinc-100" />
-          <ScenePanel
-            scenes={scenes}
-            onAdd={addScene}
-            onUpdate={updateScene}
-            onRemove={removeScene}
-          />
-          <div className="h-4 w-px shrink-0 bg-zinc-100" />
-          <CharacterPanel
-            characters={characters}
-            onAdd={addChar}
-            onRemove={removeChar}
-            onRename={renameChar}
-          />
+          {!canEdit && (
+            <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+              只读
+            </span>
+          )}
+          {canEdit && (
+            <>
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="撤销 ⌘Z"
+                className={`rounded px-2 py-1 text-sm transition-colors ${canUndo ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800" : "cursor-not-allowed text-zinc-300"}`}
+              >
+                撤销
+              </button>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="重做 ⌘⇧Z"
+                className={`rounded px-2 py-1 text-sm transition-colors ${canRedo ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800" : "cursor-not-allowed text-zinc-300"}`}
+              >
+                重做
+              </button>
+            </>
+          )}
+          {canEditMetadata && (
+            <>
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              <ScenePanel
+                scenes={scenes}
+                onAdd={addScene}
+                onUpdate={updateScene}
+                onRemove={removeScene}
+              />
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              <CharacterPanel
+                characters={characters}
+                onAdd={addChar}
+                onRemove={removeChar}
+                onRename={renameChar}
+              />
+            </>
+          )}
           <div className="ml-auto flex items-center gap-2">
             {/* Online users: self (dimmed) + others */}
             <div className="flex items-center">
@@ -2542,18 +2584,23 @@ export default function ScriptEditor({
                   isMarkStart={isMarkStart}
                   commentCount={comments.filter(c => c.blockId === block.id).length}
                   onCommentClick={() => setActiveCommentBlockId(block.id)}
+                  canEditText={canEditText}
+                  canEditMetadata={canEditMetadata}
+                  canEditRehearsalMark={canEditRehearsalMark}
                 />
               </div>
             );
             return bIdx > 0
-              ? [<InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
+              ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
               : [blockEl];
           })}
-          <InsertZone onInsert={() => insertBlockAt(blocks.length)} />
+          {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
         </div>
-        <p className="mt-4 text-center text-xs text-zinc-300">
-          Enter 新建块 · Shift+Enter 块内换行 · Backspace（行首）合并到上一块
-        </p>
+        {canEditText && (
+          <p className="mt-4 text-center text-xs text-zinc-300">
+            Enter 新建块 · Shift+Enter 块内换行 · Backspace（行首）合并到上一块
+          </p>
+        )}
       </main>
 
       {activeCommentBlockId && productionId && (

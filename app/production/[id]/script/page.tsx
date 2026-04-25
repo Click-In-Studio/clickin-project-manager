@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { getProductionMemberContext } from "@/lib/db";
+import { hasPermission } from "@/lib/roles";
 import ScriptEditor from "@/components/ScriptEditor";
 
-export default async function ProductionPage({
+export default async function ProductionScriptPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -13,9 +14,19 @@ export default async function ProductionPage({
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.openId, id);
-    if (!ok) redirect("/");
-  }
-  return <ScriptEditor productionId={id} />;
+
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+
+  const p = (perm: Parameters<typeof hasPermission>[0]) =>
+    hasPermission(perm, session.isAdmin, memberRoles, overrides);
+
+  return (
+    <ScriptEditor
+      productionId={id}
+      canEditText={p("script:edit")}
+      canEditMetadata={p("script:metadata")}
+      canEditRehearsalMark={p("script:rehearsal_mark")}
+    />
+  );
 }

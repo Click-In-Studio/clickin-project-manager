@@ -1,10 +1,14 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
+import {
+  getProductionMemberContext,
+  getProductionName,
+  listProductionMembersWithRoles,
+  getAllPermissionOverrides,
+} from "@/lib/db";
+import { hasPermission } from "@/lib/roles";
 import ContactsClient from "@/components/ContactsClient";
-
-const MANAGER_ROLES = new Set(["制作人", "制作助理"]);
 
 export default async function ContactsPage({
   params,
@@ -16,27 +20,27 @@ export default async function ContactsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.openId, id);
-    if (!ok) redirect("/");
-  }
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  if (!hasPermission("view_contacts", session.isAdmin, memberRoles, overrides)) redirect("/");
 
-  const [name, members] = await Promise.all([
+  const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
+  const canImport = hasPermission("import_contacts", session.isAdmin, memberRoles, overrides);
+
+  const [name, members, allOverrides] = await Promise.all([
     getProductionName(id),
     listProductionMembersWithRoles(id),
+    canManage ? getAllPermissionOverrides(id) : Promise.resolve({} as Record<string, Record<string, boolean>>),
   ]);
   if (!name) redirect("/");
-
-  const currentMember = members.find((m) => m.openId === session.openId);
-  const canManage =
-    session.isAdmin || (currentMember?.roles.some((r) => MANAGER_ROLES.has(r)) ?? false);
 
   return (
     <ContactsClient
       productionId={id}
       productionName={name}
       initialMembers={members}
+      canImport={canImport}
       canManage={canManage}
+      initialOverrides={allOverrides}
     />
   );
 }
