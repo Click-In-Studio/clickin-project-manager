@@ -514,6 +514,38 @@ export async function upsertContactUser(
 
 // Upserts a production member with roles and an optional production-specific photo.
 // Photo only overwrites if a new value is provided.
+export async function listProductionCharacters(productionId: string): Promise<Character[]> {
+  const res = await getPool().query<{ id: string; name: string }>(
+    "SELECT id, name FROM character WHERE production_id = $1 ORDER BY sort_order, name",
+    [productionId]
+  );
+  return res.rows.map((r) => ({ id: r.id, name: r.name }));
+}
+
+export async function listProductionScenes(productionId: string): Promise<Scene[]> {
+  const res = await getPool().query<{ id: string; num: string; name: string }>(
+    "SELECT id, num, name FROM scene WHERE production_id = $1 ORDER BY sort_order",
+    [productionId]
+  );
+  return res.rows.map((r) => ({ id: r.id, number: r.num, name: r.name }));
+}
+
+export async function getCharacterById(id: string, productionId: string): Promise<Character | null> {
+  const res = await getPool().query<{ id: string; name: string }>(
+    "SELECT id, name FROM character WHERE id = $1 AND production_id = $2",
+    [id, productionId]
+  );
+  return res.rows[0] ? { id: res.rows[0].id, name: res.rows[0].name } : null;
+}
+
+export async function getSceneById(id: string, productionId: string): Promise<Scene | null> {
+  const res = await getPool().query<{ id: string; num: string; name: string }>(
+    "SELECT id, num, name FROM scene WHERE id = $1 AND production_id = $2",
+    [id, productionId]
+  );
+  return res.rows[0] ? { id: res.rows[0].id, number: res.rows[0].num, name: res.rows[0].name } : null;
+}
+
 export async function upsertProductionMemberWithRoles(
   productionId: string,
   openId: string,

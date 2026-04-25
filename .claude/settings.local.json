@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(psql -d script_editor -c \"\\\\dt\")",
+      "Bash(npm install *)"
+    ]
+  }
+}

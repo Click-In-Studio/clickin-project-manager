@@ -431,11 +431,13 @@ function SceneRow({
 
 function ScenePanel({
   scenes,
+  productionId,
   onAdd,
   onUpdate,
   onRemove,
 }: {
   scenes: Scene[];
+  productionId: string;
   onAdd: () => void;
   onUpdate: (id: string, number: string, name: string) => void;
   onRemove: (id: string) => void;
@@ -461,6 +463,12 @@ function ScenePanel({
       </button>
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
+          <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
+            <Link href={`/production/${productionId}/scenes`} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
+              管理页 →
+            </Link>
+          </div>
           <div className="overflow-y-auto p-3">
             {scenes.length > 0 ? (
               <table className="w-full">
@@ -685,11 +693,13 @@ function CharacterRow({
 
 function CharacterPanel({
   characters,
+  productionId,
   onAdd,
   onRemove,
   onRename,
 }: {
   characters: Character[];
+  productionId: string;
   onAdd: (name: string) => void;
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
@@ -730,10 +740,11 @@ function CharacterPanel({
 
       {open && (
         <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
-          <div className="shrink-0 border-b border-zinc-100 px-4 py-2.5">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">
-              角色管理
-            </span>
+          <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2.5">
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
+            <Link href={`/production/${productionId}/characters`} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
+              管理页 →
+            </Link>
           </div>
 
           <div className="overflow-y-auto">
@@ -2501,6 +2512,7 @@ export default function ScriptEditor({
               <div className="h-4 w-px shrink-0 bg-zinc-100" />
               <ScenePanel
                 scenes={scenes}
+                productionId={productionId ?? ""}
                 onAdd={addScene}
                 onUpdate={updateScene}
                 onRemove={removeScene}
@@ -2508,6 +2520,7 @@ export default function ScriptEditor({
               <div className="h-4 w-px shrink-0 bg-zinc-100" />
               <CharacterPanel
                 characters={characters}
+                productionId={productionId ?? ""}
                 onAdd={addChar}
                 onRemove={removeChar}
                 onRename={renameChar}
