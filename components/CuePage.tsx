@@ -953,6 +953,16 @@ export default function CuePage({
       .catch(() => {});
   }, [productionId]);
 
+  // Keep comment panel in sync with cue selection
+  useEffect(() => {
+    if (!activeCommentCueId) return;
+    if (selection.kind === "cue") {
+      setActiveCommentCueId(selection.cueId);
+    } else if (selection.kind === "none") {
+      setActiveCommentCueId(null);
+    }
+  }, [selection]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const sendCuePresence = useCallback((listId: string | null, cueId: string | null) => {
     if (!clientId || !userName) return;
     const key = `${listId}|${cueId}`;
