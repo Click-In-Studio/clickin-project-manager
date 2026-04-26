@@ -128,7 +128,7 @@ function InlineField({
 
 function BlockText({
   blockId, content, rangeHighlights, pendingHighlight, pointMarks, pendingCursor,
-  onClick, onSelect, onMarkDrag,
+  onClick, onSelect, onMarkDrag, onMarkClick,
 }: {
   blockId: string;
   content: string;
@@ -139,6 +139,7 @@ function BlockText({
   onClick: (blockId: string, offset: number) => void;
   onSelect: (blockId: string, start: number, end: number) => void;
   onMarkDrag?: (e: React.MouseEvent, cueId: string, dragType: DragType, origAnchor?: CueAnchor) => void;
+  onMarkClick?: (cueId: string) => void;
 }) {
   const containerRef = useRef<HTMLSpanElement>(null);
   const justRangeSelectedRef = useRef(false);
@@ -252,7 +253,7 @@ function BlockText({
       {items.map((item, i) =>
         item.kind === "text" ? (
           item.bgHex ? (
-            <mark key={i} title={item.rangeLabel} className="rounded-sm" style={{ backgroundColor: item.bgHex }}>{item.text}</mark>
+            <mark key={i} title={item.rangeLabel} className="rounded-sm cursor-pointer" style={{ backgroundColor: item.bgHex }}>{item.text}</mark>
           ) : item.pending ? (
             <mark key={i} className="bg-zinc-200 rounded-sm">{item.text}</mark>
           ) : (
@@ -265,8 +266,11 @@ function BlockText({
             onMouseDown={item.dragConfig && onMarkDrag
               ? (e) => onMarkDrag(e, item.cueId, item.dragConfig!.dragType, item.dragConfig!.origAnchor)
               : undefined}
+            onClick={onMarkClick
+              ? (e) => { e.stopPropagation(); onMarkClick(item.cueId); }
+              : undefined}
             className={`inline-block w-[3px] h-[1em] rounded-full align-middle mx-[-1px] transition-transform
-              ${item.dragConfig ? "cursor-ew-resize" : ""}
+              ${item.dragConfig ? "cursor-ew-resize" : "cursor-pointer"}
               ${item.selected ? "scale-y-125" : ""}`}
             style={{ backgroundColor: item.colorHex }}
           />
@@ -754,6 +758,12 @@ export default function CuePage({
     setSelection({ kind: "pending", start: { kind: "block", blockId, offset }, end: { kind: "block", blockId, offset } });
   }, [findRangeCueAtPosition]);
 
+  const handleMarkClick = useCallback((cueId: string) => {
+    if (justDraggedRef.current) { justDraggedRef.current = false; return; }
+    const realId = cueId.endsWith(":end") ? cueId.slice(0, -4) : cueId;
+    setSelection({ kind: "cue", cueId: realId });
+  }, []);
+
   const handleGapClick = useCallback((afterBlockId: string) => {
     if (justDraggedRef.current) { justDraggedRef.current = false; return; }
     const anchor: CueAnchor = { kind: "gap", afterBlockId };
@@ -938,7 +948,8 @@ export default function CuePage({
 
     for (const [blockId, rowEl] of blockRowRefs.current) {
       const blockChips = (cuesForBlock.get(blockId) ?? []).filter(c => c.cue.start.kind === "block");
-      if (blockChips.length < 2) continue;
+      if (blockChips.length === 0) continue;
+      const isMulti = blockChips.length >= 2;
       const rowRect = rowEl.getBoundingClientRect();
       const lines: GuideLineData[] = [];
 
@@ -948,13 +959,16 @@ export default function CuePage({
         if (!chipEl || !markEl) continue;
         const chipRect = chipEl.getBoundingClientRect();
         const markRect = markEl.getBoundingClientRect();
+        const chipY = Math.round((chipRect.top + chipRect.bottom) / 2 - rowRect.top);
+        const markY = Math.round((markRect.top + markRect.bottom) / 2 - rowRect.top);
+        if (!isMulti && chipY === markY) continue;
         lines.push({
           cueId: cue.id,
           color: LIST_COLORS[listIdx % LIST_COLORS.length].line,
           chipX: Math.round(chipRect.right - rowRect.left),
-          chipY: Math.round((chipRect.top + chipRect.bottom) / 2 - rowRect.top),
+          chipY,
           markX: Math.round((markRect.left + markRect.right) / 2 - rowRect.left),
-          markY: Math.round((markRect.top + markRect.bottom) / 2 - rowRect.top),
+          markY,
         });
       }
       if (lines.length > 0) {
@@ -1235,6 +1249,7 @@ export default function CuePage({
                         onClick={handleBlockClick}
                         onSelect={handleBlockSelect}
                         onMarkDrag={startCueDrag}
+                        onMarkClick={handleMarkClick}
                       />
                     </p>
                   </div>
