@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getCueList, listCueListPermissions, updateCue, deleteCue } from "@/lib/db";
 import { canEditCueList } from "@/lib/cue-list-types";
 import type { CueAnchor } from "@/lib/cue-types";
+import { broadcastCueUpdate } from "@/lib/server-cache";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -44,6 +45,7 @@ export async function PATCH(
     end:     body.end,
     warning: body.warning,
   });
+  broadcastCueUpdate(id);
   return Response.json({ ok: true });
 }
 
@@ -56,5 +58,6 @@ export async function DELETE(
   if (!check.ok) return Response.json({ error: "权限不足或不存在" }, { status: check.status });
 
   await deleteCue(cueId, cueListId);
+  broadcastCueUpdate(id);
   return Response.json({ ok: true });
 }

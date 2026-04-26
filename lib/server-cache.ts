@@ -660,3 +660,90 @@ function scheduleRetry(entry: CacheEntry) {
     scheduleRetry(entry);
   }), RETRY_DELAY_MS);
 }
+
+// ─── Cue SSE ──────────────────────────────────────────────────────────────────
+
+const gCue = global as typeof globalThis & {
+  __cueSSERegistry?: Map<string, Map<string, SSEPush>>;
+};
+
+function cueSSEReg(): Map<string, Map<string, SSEPush>> {
+  if (!gCue.__cueSSERegistry) gCue.__cueSSERegistry = new Map();
+  return gCue.__cueSSERegistry;
+}
+
+export function registerCueSSE(productionId: string, clientId: string, push: SSEPush): () => void {
+  const reg = cueSSEReg();
+  if (!reg.has(productionId)) reg.set(productionId, new Map());
+  reg.get(productionId)!.set(clientId, push);
+  return () => reg.get(productionId)?.delete(clientId);
+}
+
+export function broadcastCueUpdate(productionId: string): void {
+  const clients = cueSSEReg().get(productionId);
+  if (!clients) return;
+  const frame = `data: ${JSON.stringify({ updated: true })}\n\n`;
+  for (const push of clients.values()) {
+    try { push(frame); } catch { /* ignore broken pipe */ }
+  }
+}
+
+// ─── Cue Presence ─────────────────────────────────────────────────────────────
+
+export type CuePresenceClient = {
+  clientId: string;
+  userName: string;
+  color: string;
+  listId: string | null;
+  cueId: string | null;
+  updatedAt: number;
+};
+
+const gCuePres = global as typeof globalThis & {
+  __cuePresenceRegistry?: Map<string, Map<string, CuePresenceClient>>;
+};
+
+function cuePresReg(): Map<string, Map<string, CuePresenceClient>> {
+  if (!gCuePres.__cuePresenceRegistry) gCuePres.__cuePresenceRegistry = new Map();
+  return gCuePres.__cuePresenceRegistry;
+}
+
+function getCuePresence(productionId: string): CuePresenceClient[] {
+  const clients = cuePresReg().get(productionId);
+  if (!clients) return [];
+  const cutoff = Date.now() - 90_000;
+  return Array.from(clients.values()).filter(p => p.updatedAt >= cutoff);
+}
+
+export function cuePresenceFrame(productionId: string): string {
+  return `event: presence\ndata: ${JSON.stringify(getCuePresence(productionId))}\n\n`;
+}
+
+function broadcastCuePresence(productionId: string): void {
+  const clients = cueSSEReg().get(productionId);
+  if (!clients) return;
+  const frame = cuePresenceFrame(productionId);
+  for (const push of clients.values()) {
+    try { push(frame); } catch { /* ignore */ }
+  }
+}
+
+export function updateCuePresence(
+  productionId: string,
+  clientId: string,
+  userName: string,
+  listId: string | null,
+  cueId: string | null,
+): void {
+  const reg = cuePresReg();
+  if (!reg.has(productionId)) reg.set(productionId, new Map());
+  reg.get(productionId)!.set(clientId, {
+    clientId, userName, color: assignColor(clientId), listId, cueId, updatedAt: Date.now(),
+  });
+  broadcastCuePresence(productionId);
+}
+
+export function removeCuePresence(productionId: string, clientId: string): void {
+  cuePresReg().get(productionId)?.delete(clientId);
+  broadcastCuePresence(productionId);
+}

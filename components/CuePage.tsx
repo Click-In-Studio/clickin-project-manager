@@ -100,6 +100,27 @@ type GuideLineData = {
   chipX: number; chipY: number; markX: number; markY: number;
 };
 
+// ─── Presence ────────────────────────────────────────────────────────────────
+
+type CuePresence = {
+  clientId: string;
+  userName: string;
+  color: string;
+  listId: string | null;
+  cueId: string | null;
+};
+
+function getOrCreateClientId(): string {
+  const key = "presence_client_id";
+  let id = sessionStorage.getItem(key);
+  if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem(key, id); }
+  return id;
+}
+
+function anonymousName(clientId: string): string {
+  return "访客 " + clientId.slice(-4).toUpperCase();
+}
+
 // ─── Inline edit field ────────────────────────────────────────────────────────
 
 function InlineField({
@@ -285,9 +306,10 @@ function BlockText({
 // ─── Cue chip ─────────────────────────────────────────────────────────────────
 
 function CueChip({
-  cue, colorIdx, selected, warning, editable, onSelect, onCommitNumber, onCommitName, onDragStart,
+  cue, colorIdx, selected, warning, editable, presenceUsers, onSelect, onCommitNumber, onCommitName, onDragStart,
 }: {
   cue: Cue; colorIdx: number; selected: boolean; warning: boolean; editable: boolean;
+  presenceUsers: CuePresence[];
   onSelect: () => void;
   onCommitNumber: (v: string) => void;
   onCommitName: (v: string) => void;
@@ -334,6 +356,22 @@ function CueChip({
           <span className="font-bold">{cue.number}</span>
           {cue.name && <span className="opacity-70 max-w-[96px] truncate">{cue.name}</span>}
         </>
+      )}
+      {presenceUsers.length > 0 && (
+        <div
+          className="flex -space-x-1 ml-0.5 shrink-0"
+          title={presenceUsers.map(p => p.userName).join("、")}
+        >
+          {presenceUsers.slice(0, 3).map(p => (
+            <div
+              key={p.clientId}
+              style={{ backgroundColor: p.color, fontSize: "7px" }}
+              className="h-3.5 w-3.5 rounded-full ring-1 ring-white/70 flex items-center justify-center font-bold text-white shrink-0"
+            >
+              {p.userName.charAt(0)}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -523,9 +561,83 @@ export default function CuePage({
   // Stable refs for use inside event handlers (avoid stale closures in global listeners)
   const cuesRef = useRef(cues);
   useEffect(() => { cuesRef.current = cues; }, [cues]);
+  const visibleListIdsRef = useRef(visibleListIds);
+  useEffect(() => { visibleListIdsRef.current = visibleListIds; }, [visibleListIds]);
+  const activeListIdRef = useRef(activeListId);
+  useEffect(() => { activeListIdRef.current = activeListId; }, [activeListId]);
   const blockIndexMapRef = useRef<Map<string, number>>(new Map());
   // Suppresses the browser click event that fires immediately after a completed drag mouseup.
   const justDraggedRef = useRef(false);
+
+  // ── Presence ──────────────────────────────────────────────────────────────
+  const [clientId] = useState<string>(() =>
+    typeof window !== "undefined" ? getOrCreateClientId() : ""
+  );
+  const [userName, setUserName] = useState<string>(() =>
+    typeof window !== "undefined"
+      ? (localStorage.getItem("presence_name") || anonymousName(getOrCreateClientId()))
+      : ""
+  );
+  const [presenceMap, setPresenceMap] = useState<Map<string, CuePresence>>(new Map());
+  const lastSentPresRef = useRef("");
+  const presTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch real name from session (same localStorage key as ScriptEditor)
+  useEffect(() => {
+    fetch(`${BASE_PATH}/api/me`)
+      .then(r => r.json())
+      .then((d: { name: string | null }) => {
+        if (d.name) { setUserName(d.name); localStorage.setItem("presence_name", d.name); }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const sendCuePresence = useCallback((listId: string | null, cueId: string | null) => {
+    if (!clientId || !userName) return;
+    const key = `${listId}|${cueId}`;
+    if (lastSentPresRef.current === key) return;
+    lastSentPresRef.current = key;
+    if (presTimerRef.current) clearTimeout(presTimerRef.current);
+    presTimerRef.current = setTimeout(() => {
+      fetch(`${BASE_PATH}/api/production/${productionId}/cue-presence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, userName, listId, cueId }),
+      }).catch(() => {});
+    }, 200);
+  }, [clientId, userName, productionId]);
+
+  useEffect(() => {
+    if (selection.kind === "cue") {
+      sendCuePresence(activeListId, selection.cueId);
+    } else {
+      // Delay clearing cueId so brief transitions through "pending" (text-drag to
+      // create a selection) don't immediately wipe the cue presence indicator.
+      const t = setTimeout(() => sendCuePresence(activeListId, null), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [activeListId, selection, sendCuePresence]);
+
+  const presenceForCue = useMemo(() => {
+    const m = new Map<string, CuePresence[]>();
+    for (const p of presenceMap.values()) {
+      if (p.clientId === clientId || !p.cueId) continue;
+      if (!m.has(p.cueId)) m.set(p.cueId, []);
+      m.get(p.cueId)!.push(p);
+    }
+    return m;
+  }, [presenceMap, clientId]);
+
+  const presenceForList = useMemo(() => {
+    const m = new Map<string, CuePresence[]>();
+    for (const p of presenceMap.values()) {
+      if (p.clientId === clientId || !p.listId) continue;
+      if (!m.has(p.listId)) m.set(p.listId, []);
+      m.get(p.listId)!.push(p);
+    }
+    return m;
+  }, [presenceMap, clientId]);
 
   // Active list is always visible even if toggled off
   const visibleLists = cueLists.filter(cl => visibleListIds.has(cl.id) || cl.id === activeListId);
@@ -668,6 +780,36 @@ export default function CuePage({
       document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [anchorFromPoint]);
+
+  // ── Cue SSE: refetch visible lists when any client mutates cues ───────────
+  useEffect(() => {
+    const es = new EventSource(
+      `${BASE_PATH}/api/production/${productionId}/cue-stream${clientId ? `?cid=${encodeURIComponent(clientId)}` : ""}`
+    );
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    es.addEventListener("presence", (e: MessageEvent) => {
+      const list = JSON.parse(e.data as string) as CuePresence[];
+      setPresenceMap(new Map(list.map(p => [p.clientId, p])));
+    });
+    es.onmessage = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(async () => {
+        const ids = new Set(visibleListIdsRef.current);
+        if (activeListIdRef.current) ids.add(activeListIdRef.current);
+        const listIds = [...ids];
+        const results = await Promise.all(
+          listIds.map(listId =>
+            fetch(`${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues`)
+              .then(r => r.ok ? (r.json() as Promise<Cue[]>) : [])
+              .catch(() => [] as Cue[])
+          )
+        );
+        const fresh = results.flat();
+        setCues(prev => [...prev.filter(c => !ids.has(c.cueListId)), ...fresh]);
+      }, 300);
+    };
+    return () => { es.close(); if (debounce) clearTimeout(debounce); };
+  }, [productionId, clientId]);
 
   // ── blockIndexMap: stable sorted index for anchor comparisons ────────────
   const blockIndexMap = useMemo(() => {
@@ -1064,20 +1206,36 @@ export default function CuePage({
           {cueLists.map((cl, i) => {
             const c = colorFor(i);
             const on = visibleListIds.has(cl.id);
+            const lp = presenceForList.get(cl.id) ?? [];
             return (
-              <button
-                key={cl.id}
-                onClick={() => setVisibleListIds(prev => {
-                  const next = new Set(prev);
-                  if (next.has(cl.id)) next.delete(cl.id); else next.add(cl.id);
-                  return next;
-                })}
-                className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-all ${
-                  on ? `${c.bg} text-white` : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200"
-                }`}
-              >
-                {cl.name}
-              </button>
+              <div key={cl.id} className="flex flex-col items-center gap-0.5">
+                <button
+                  onClick={() => setVisibleListIds(prev => {
+                    const next = new Set(prev);
+                    if (next.has(cl.id)) next.delete(cl.id); else next.add(cl.id);
+                    return next;
+                  })}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-all ${
+                    on ? `${c.bg} text-white` : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200"
+                  }`}
+                >
+                  {cl.name}
+                </button>
+                {lp.length > 0 && (
+                  <div
+                    className="flex -space-x-0.5"
+                    title={lp.map(p => p.userName).join("、")}
+                  >
+                    {lp.slice(0, 4).map(p => (
+                      <div
+                        key={p.clientId}
+                        style={{ backgroundColor: p.color }}
+                        className="h-2 w-2 rounded-full ring-1 ring-white"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -1151,6 +1309,7 @@ export default function CuePage({
                           selected={selection.kind === "cue" && selection.cueId === cue.id}
                           warning={cue.warning}
                           editable={canEditCue(cue)}
+                          presenceUsers={presenceForCue.get(cue.id) ?? []}
                           onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
                           onCommitNumber={v => updateCueField(cue, { number: v })}
                           onCommitName={v => updateCueField(cue, { name: v })}
@@ -1215,6 +1374,7 @@ export default function CuePage({
                           selected={selection.kind === "cue" && selection.cueId === cue.id}
                           warning={cue.warning}
                           editable={canEditCue(cue)}
+                          presenceUsers={presenceForCue.get(cue.id) ?? []}
                           onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
                           onCommitNumber={v => updateCueField(cue, { number: v })}
                           onCommitName={v => updateCueField(cue, { name: v })}
@@ -1277,6 +1437,7 @@ export default function CuePage({
                     selected={selection.kind === "cue" && selection.cueId === cue.id}
                     warning={cue.warning}
                     editable={canEditCue(cue)}
+                    presenceUsers={presenceForCue.get(cue.id) ?? []}
                     onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
                     onCommitNumber={v => updateCueField(cue, { number: v })}
                     onCommitName={v => updateCueField(cue, { name: v })}

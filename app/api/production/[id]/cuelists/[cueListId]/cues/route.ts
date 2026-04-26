@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getCueList, listCueListPermissions, listCues, createCue } from "@/lib/db";
 import { canEditCueList } from "@/lib/cue-list-types";
 import type { CueAnchor } from "@/lib/cue-types";
+import { broadcastCueUpdate } from "@/lib/server-cache";
 
 let _seq = 0;
 const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -56,5 +57,6 @@ export async function POST(
   });
 
   const cues = await listCues(cueListId);
+  broadcastCueUpdate(id);
   return Response.json(cues, { status: 201 });
 }
