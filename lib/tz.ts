@@ -49,11 +49,11 @@ export function dateTimeToIso(date: string, time: string): string {
 
 // ─── Display formatters (all UTC+8) ──────────────────────────────────────────
 
-/** "M月D日 HH:mm" */
+/** "M月D日 HH:mm (UTC+8)" */
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = cst(iso);
-  return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日 ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日 ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} (UTC+8)`;
 }
 
 /** "M月D日" */
@@ -68,11 +68,11 @@ export function fmtDateLong(iso: string): string {
   return `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
 }
 
-/** "HH:mm" */
+/** "HH:mm (UTC+8)" */
 export function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = cst(iso);
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} (UTC+8)`;
 }
 
 /**

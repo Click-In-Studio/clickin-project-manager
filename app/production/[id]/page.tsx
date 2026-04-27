@@ -9,19 +9,7 @@ import {
 } from "@/lib/db";
 import { canEditCueList } from "@/lib/cue-list-types";
 import { listMyUpcomingCallTimes, listMyPendingTechReqs, listUnreadFollowedReports } from "@/lib/event-db";
-
-function fmtCallAt(iso: string): string {
-  const d = new Date(iso);
-  const day = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `周${day} ${hh}:${mm}`;
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
-}
+import { fmtCallAt, fmtDate } from "@/lib/tz";
 
 const REQ_STATUS_LABEL: Record<string, string> = {
   pending: "待处理", in_progress: "进行中", done: "完成",
