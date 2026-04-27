@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime as fmtDate } from "@/lib/tz";
+import Markdown from "./Markdown";
 import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/event-db";
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
@@ -88,7 +89,7 @@ function NoteCard({
           </button>
         </div>
       ) : (
-        <p className="text-sm text-zinc-700 whitespace-pre-wrap">{note.content}</p>
+        <Markdown content={note.content} size="sm" />
       )}
     </div>
   );
@@ -189,7 +190,7 @@ function ReplyThread({
                   )}
                 </div>
               </div>
-              <p className="text-sm text-zinc-700 whitespace-pre-wrap">{reply.content}</p>
+              <Markdown content={reply.content} size="sm" />
             </div>
 
             {isReplying && (
@@ -351,7 +352,7 @@ export default function ReportViewClient({
         <section className="mb-6">
           {report.body ? (
             <div className="bg-white rounded-2xl shadow-sm px-5 py-4">
-              <p className="text-sm text-zinc-700 whitespace-pre-wrap leading-relaxed">{report.body}</p>
+              <Markdown content={report.body} />
             </div>
           ) : (
             <p className="text-center text-sm text-zinc-300">暂无正文</p>
