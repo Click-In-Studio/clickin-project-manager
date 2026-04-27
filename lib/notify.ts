@@ -123,8 +123,10 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
       const entries = await getWeeklyCallDataForUser(open_id, weekStart, weekEnd);
       if (!entries.length) continue;
       const token = createCardToken(open_id, "weekly-call", weeklyTokenExp);
-      const weeklyUrl = feishuCardUrl(`${BASE_PATH}/my/weekly-call?t=${token}`);
+      const weeklyUrl = feishuCardUrl(`${BASE_PATH}/my/weekly-call/${token}`);
+      console.log("[notify] weekly card url for", open_id, weeklyUrl);
       const card = buildWeeklyCallCard(entries, weeklyUrl);
+      console.log("[notify] weekly card body:", JSON.stringify(card));
       if (dryRun) {
         dryCards.push({ openId: open_id, card });
       } else {
@@ -260,7 +262,6 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
   // CST date string "YYYY-MM-DD" for the event's start day
   const cstDate = new Date(new Date(event.start_time).getTime() + 8 * 3_600_000);
   const dateStr = `${cstDate.getUTCFullYear()}-${String(cstDate.getUTCMonth() + 1).padStart(2, "0")}-${String(cstDate.getUTCDate()).padStart(2, "0")}`;
-  const callsheetBasePath = `${BASE_PATH}/my/daily-call?date=${dateStr}`;
   // Token valid until the day after the event at 12:00 CST (= 04:00 UTC)
   const dailyTokenExp = new Date(Date.UTC(
     cstDate.getUTCFullYear(), cstDate.getUTCMonth(), cstDate.getUTCDate() + 1, 4, 0, 0, 0,
@@ -276,12 +277,14 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
     seen.add(row.open_id);
     try {
       const token = createCardToken(row.open_id, "daily-call", dailyTokenExp);
-      const callsheetUrl = feishuCardUrl(`${callsheetBasePath}&t=${token}`);
+      const callsheetUrl = feishuCardUrl(`${BASE_PATH}/my/daily-call/${dateStr}/${token}`);
+      console.log("[notify] daily card url for", row.open_id, callsheetUrl);
       const card = buildDailyCallCard(
         event.title, event.location, event.start_time,
         row.call_at, row.notes,
         scheduleItems, allCalls, callsheetUrl,
       );
+      console.log("[notify] daily card body:", JSON.stringify(card));
       if (dryRun) {
         dryCards.push({ openId: row.open_id, card });
       } else {
@@ -359,8 +362,10 @@ export async function dispatchReportNotification(
   for (const { open_id } of recipRes.rows) {
     try {
       const token = createCardToken(open_id, `report:${reportId}`, reportTokenExp);
-      const url = feishuCardUrl(`${reportBasePath}?t=${token}`);
+      const url = feishuCardUrl(`${reportBasePath}/${token}`);
+      console.log("[notify] report card url for", open_id, url);
       const card = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, url);
+      console.log("[notify] report card body:", JSON.stringify(card));
       if (dryRun) {
         dryCards.push({ openId: open_id, card });
       } else {
