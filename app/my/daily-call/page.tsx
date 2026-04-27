@@ -10,7 +10,6 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { BASE_PATH } from "@/lib/base-path";
 
 function fmtTime(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 8 * 3_600_000);
@@ -74,7 +73,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
       <div className="min-h-screen bg-zinc-100">
         <div className="max-w-lg mx-auto px-4 pt-8 pb-16">
           <div className="mb-6 flex items-center justify-between">
-            <Link href={`${BASE_PATH}/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
+            <Link href={`/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
             <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">当日 Call Sheet</h1>
           </div>
           <p className="text-center text-sm text-zinc-300 py-16">{fmtDateFull(`${dateStr}T00:00:00+08:00`)} 暂无 Call</p>
@@ -131,7 +130,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
     <div className="min-h-screen bg-zinc-100">
       <div className="max-w-lg mx-auto px-4 pt-8 pb-16">
         <div className="mb-2 flex items-center justify-between">
-          <Link href={`${BASE_PATH}/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
+          <Link href={`/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
           <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">当日 Call Sheet</h1>
         </div>
         <p className="text-center text-xs text-zinc-300 mb-6">{fmtDateFull(`${dateStr}T00:00:00+08:00`)}</p>
@@ -160,7 +159,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
                       )}
                     </div>
                     <Link
-                      href={`${BASE_PATH}/production/${ev.production_id}/events/${ev.event_id}/callsheet`}
+                      href={`/production/${ev.production_id}/events/${ev.event_id}/callsheet`}
                       className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-600 mt-1">
                       完整 →
                     </Link>

@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { BASE_PATH } from "@/lib/base-path";
 
 function cstNow(): Date {
   return new Date(Date.now() + 8 * 3_600_000);
@@ -109,7 +108,7 @@ export default async function WeeklyCallPage() {
     <div className="min-h-screen bg-zinc-100">
       <div className="max-w-lg mx-auto px-4 pt-8 pb-16">
         <div className="mb-6 flex items-center justify-between">
-          <Link href={`${BASE_PATH}/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
+          <Link href={`/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
           <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">本周 Call 安排</h1>
         </div>
 
@@ -130,7 +129,7 @@ export default async function WeeklyCallPage() {
                       )}
                     </div>
                     <Link
-                      href={`${BASE_PATH}/production/${ev.productionId}/events/${ev.eventId}/callsheet`}
+                      href={`/production/${ev.productionId}/events/${ev.eventId}/callsheet`}
                       className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-600 mt-1">
                       Call Sheet →
                     </Link>

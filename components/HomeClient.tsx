@@ -165,12 +165,12 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
 
         {/* Schedule quick nav — always visible */}
         <div className="grid grid-cols-2 gap-3">
-          <Link href={`${BASE_PATH}/my/weekly-call`}
+          <Link href={`/my/weekly-call`}
             className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Weekly</p>
             <p className="text-sm font-medium text-zinc-700">本周安排</p>
           </Link>
-          <Link href={`${BASE_PATH}/my/daily-call?date=${todayCSTStr()}`}
+          <Link href={`/my/daily-call?date=${todayCSTStr()}`}
             className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Today</p>
             <p className="text-sm font-medium text-zinc-700">今日 Call</p>
@@ -182,7 +182,7 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
           <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">本周我的 Call</h2>
-              <Link href={`${BASE_PATH}/my/weekly-call`}
+              <Link href={`/my/weekly-call`}
                 className="text-[11px] text-zinc-400 hover:text-zinc-600">
                 完整安排 →
               </Link>
@@ -198,7 +198,7 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
                 <div key={date} className="mb-3 last:mb-0">
                   <div className="flex items-center justify-between mb-1 px-1">
                     <span className="text-[11px] font-medium text-zinc-300">{formatCallAt(calls[0].callAt).split(" ")[0]}</span>
-                    <Link href={`${BASE_PATH}/my/daily-call?date=${date}`}
+                    <Link href={`/my/daily-call?date=${date}`}
                       className="text-[11px] text-zinc-400 hover:text-zinc-600">
                       当日 Call →
                     </Link>
