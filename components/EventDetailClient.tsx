@@ -373,7 +373,7 @@ function ScheduleTab({
 
   function resolveItemTime(val: string): string | null {
     if (!val) return null;
-    return singleDay && eventDate ? `${eventDate}T${val}` : val;
+    return datetimeLocalToIso(singleDay && eventDate ? `${eventDate}T${val}` : val);
   }
 
   async function addItem() {
@@ -521,7 +521,7 @@ function ScheduleItemRow({
 
   function resolveTime(val: string): string | null {
     if (!val) return null;
-    return singleDay && eventDate ? `${eventDate}T${val}` : val;
+    return datetimeLocalToIso(singleDay && eventDate ? `${eventDate}T${val}` : val);
   }
 
   async function save() {
