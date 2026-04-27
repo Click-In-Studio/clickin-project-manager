@@ -109,7 +109,9 @@ export default async function WeeklyCallPage() {
       <div className="max-w-lg mx-auto px-4 pt-8 pb-16">
         <div className="mb-6 flex items-center justify-between">
           <Link href={`/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>
-          <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">本周 Call 安排</h1>
+          <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">
+            本周 Call 安排 <span className="font-normal normal-case text-zinc-300 text-xs">UTC+8</span>
+          </h1>
         </div>
 
         {events.length === 0 ? (
