@@ -97,7 +97,9 @@ export default async function ProductionDashboard({
         {/* Call times */}
         {callTimes.length > 0 && (
           <section className="mb-5">
-            <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-2">本周我的 Call</h2>
+            <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-2">
+              本周我的 Call <span className="font-normal normal-case text-zinc-300">UTC+8</span>
+            </h2>
             <div className="rounded-2xl bg-white shadow-sm overflow-hidden divide-y divide-zinc-50">
               {callTimes.map(ct => (
                 <Link key={ct.id}

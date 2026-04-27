@@ -181,7 +181,9 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
         {myCallTimes.length > 0 && (
           <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">本周我的 Call</h2>
+              <h2 className="text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">
+                本周我的 Call <span className="font-normal normal-case text-zinc-300">UTC+8</span>
+              </h2>
               <Link href={`/my/weekly-call`}
                 className="text-[11px] text-zinc-400 hover:text-zinc-600">
                 完整安排 →
