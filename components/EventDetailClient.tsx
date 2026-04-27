@@ -924,7 +924,7 @@ function TechReqCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: editTitle.trim(),
-          description: editDesc.trim() || null,
+          description: editDesc.trim(),
           presetMinutes: editPreset ? parseInt(editPreset) : null,
         }),
       });
