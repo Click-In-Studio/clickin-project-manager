@@ -311,12 +311,23 @@ export async function dispatchReportNotification(
   const report = rptRes.rows[0];
   if (!report || !report.published_at) return { sent: 0, errors: [] };
 
-  // Event title
-  const evRes = await pool.query<{ title: string }>(
-    `SELECT title FROM production_event WHERE id = $1`,
-    [eventId],
-  );
+  // Event title + department notes
+  const [evRes, notesRes] = await Promise.all([
+    pool.query<{ title: string }>(
+      `SELECT title FROM production_event WHERE id = $1`,
+      [eventId],
+    ),
+    pool.query<{ dept_name: string; content: string }>(
+      `SELECT ed.name AS dept_name, ern.content
+       FROM event_report_note ern
+       JOIN event_department ed ON ed.id = ern.department_id
+       WHERE ern.report_id = $1
+       ORDER BY ed.display_order, ern.created_at`,
+      [reportId],
+    ),
+  ]);
   const eventTitle = evRes.rows[0]?.title ?? "";
+  const notes = notesRes.rows.map(r => ({ deptName: r.dept_name, content: r.content }));
 
   // Recipients: followers ∪ call-time participants, deduped
   const recipRes = await pool.query<{ open_id: string }>(
@@ -330,7 +341,7 @@ export async function dispatchReportNotification(
   if (!recipRes.rows.length) return { sent: 0, errors: [] };
 
   const url = `${base}/production/${productionId}/events/${eventId}/reports/${reportId}`;
-  const card = buildReportCard(report.title, eventTitle, report.body, report.published_at, url);
+  const card = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, url);
 
   let sent = 0;
   const errors: string[] = [];

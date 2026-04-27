@@ -173,15 +173,19 @@ export function buildReportCard(
   reportTitle: string,
   eventTitle: string,
   body: string,
+  notes: { deptName: string; content: string }[],
   publishedAt: string,
   url: string,
 ): object {
-  const preview = body.length > 180 ? body.slice(0, 180).trimEnd() + "…" : body;
+  const preview = body.length > 120 ? body.slice(0, 120).trimEnd() + "…" : body;
   const lines = [
     `📋 **${eventTitle}** — ${reportTitle}`,
     ...(preview ? ["", `> ${preview.replace(/\n/g, "\n> ")}`] : []),
-    "",
-    `_发布于 ${fmtDate(publishedAt)} ${fmtTime(publishedAt)}_`,
   ];
+  for (const note of notes) {
+    const snippet = note.content.length > 100 ? note.content.slice(0, 100).trimEnd() + "…" : note.content;
+    lines.push("", `**${note.deptName}**`, snippet);
+  }
+  lines.push("", `_发布于 ${fmtDate(publishedAt)} ${fmtTime(publishedAt)}_`);
   return makeCard(`新报告 — ${reportTitle}`, "green", lines.join("\n"), url, "查看报告");
 }
