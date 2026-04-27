@@ -164,7 +164,7 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
         </div>
 
         {/* Schedule quick nav — always visible */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <Link href={`/my/weekly-call`}
             className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Weekly</p>
@@ -174,6 +174,11 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
             className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Today</p>
             <p className="text-sm font-medium text-zinc-700">今日 Call</p>
+          </Link>
+          <Link href="/my/reqs"
+            className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
+            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Reqs</p>
+            <p className="text-sm font-medium text-zinc-700">我的需求</p>
           </Link>
         </div>
 
@@ -292,12 +297,15 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
         {/* Pending tech requirements I'm responsible for */}
         {myPendingReqs.length > 0 && (
           <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
-            <h2 className="mb-4 text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">我负责的待处理需求</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">我负责的待处理需求</h2>
+              <Link href="/my/reqs" className="text-[11px] text-zinc-400 hover:text-zinc-600">查看全部 →</Link>
+            </div>
             <ul className="space-y-2">
               {myPendingReqs.map(req => (
                 <li key={req.id}>
                   <button
-                    onClick={() => router.push(`/production/${req.productionId}/events/${req.eventId}/reqs`)}
+                    onClick={() => router.push(`/production/${req.productionId}/events/${req.eventId}/reqs/${req.id}`)}
                     className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-zinc-50 transition-colors"
                   >
                     <div className="flex items-baseline justify-between gap-2">

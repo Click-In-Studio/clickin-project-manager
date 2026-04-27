@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import { listProductionEvents, listUserEventParticipations } from "@/lib/event-db";
+import { listProductionEvents, listUserEventParticipations, listEventDepartments } from "@/lib/event-db";
 import EventsClient from "@/components/EventsClient";
 
 export default async function EventsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -18,10 +18,11 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
   const canCreate = hasPermission("event:create", session.isAdmin, memberRoles, overrides);
 
-  const [name, allEvents, myParticipations] = await Promise.all([
+  const [name, allEvents, myParticipations, departments] = await Promise.all([
     getProductionName(id),
     listProductionEvents(id),
     listUserEventParticipations(session.openId, id),
+    listEventDepartments(id),
   ]);
   if (!name) redirect("/");
 
@@ -39,6 +40,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
       canViewFull={canViewFull}
       myParticipations={myParticipations}
       currentUserOpenId={session.openId}
+      departments={canCreate ? departments : []}
     />
   );
 }

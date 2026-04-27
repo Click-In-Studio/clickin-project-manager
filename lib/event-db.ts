@@ -248,7 +248,7 @@ function rowToReportNote(r: ReportNoteRow): EventReportNote {
 
 // ─── Departments ──────────────────────────────────────────────────────────────
 
-type MemberRow = { department_id: string; open_id: string; is_poc: boolean };
+type MemberRow = { department_id: string; open_id: string; is_member: boolean; is_poc: boolean };
 
 export async function listEventDepartments(productionId: string): Promise<EventDepartment[]> {
   const pool = getPool();
@@ -259,7 +259,7 @@ export async function listEventDepartments(productionId: string): Promise<EventD
       [productionId]
     ),
     pool.query<MemberRow>(
-      `SELECT edm.department_id, edm.open_id, edm.is_poc
+      `SELECT edm.department_id, edm.open_id, edm.is_member, edm.is_poc
        FROM event_department_member edm
        JOIN event_department ed ON ed.id = edm.department_id
        WHERE ed.production_id = $1`,
@@ -273,7 +273,11 @@ export async function listEventDepartments(productionId: string): Promise<EventD
   }
   return deptRes.rows.map(r => {
     const rows = memberMap.get(r.id) ?? [];
-    return rowToDept(r, rows.map(m => m.open_id), rows.filter(m => m.is_poc).map(m => m.open_id));
+    return rowToDept(
+      r,
+      rows.filter(m => m.is_member).map(m => m.open_id),
+      rows.filter(m => m.is_poc).map(m => m.open_id),
+    );
   });
 }
 
@@ -285,15 +289,15 @@ export async function getEventDepartment(id: string, productionId: string): Prom
        FROM event_department WHERE id = $1 AND production_id = $2`,
       [id, productionId]
     ),
-    pool.query<{ open_id: string; is_poc: boolean }>(
-      "SELECT open_id, is_poc FROM event_department_member WHERE department_id = $1",
+    pool.query<{ open_id: string; is_member: boolean; is_poc: boolean }>(
+      "SELECT open_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
       [id]
     ),
   ]);
   if (!deptRes.rows[0]) return null;
   return rowToDept(
     deptRes.rows[0],
-    memberRes.rows.map(r => r.open_id),
+    memberRes.rows.filter(r => r.is_member).map(r => r.open_id),
     memberRes.rows.filter(r => r.is_poc).map(r => r.open_id),
   );
 }
@@ -334,21 +338,27 @@ export async function deleteEventDepartment(id: string, productionId: string): P
   );
 }
 
-/** Replace the full member list for a department in one transaction. */
+/** Replace the full member/POC list for a department in one transaction.
+ *  Entries with both isMember=false and isPoc=false are silently dropped.
+ */
 export async function setDepartmentMembers(
   deptId: string,
-  members: { openId: string; isPoc: boolean }[],
+  members: { openId: string; isMember: boolean; isPoc: boolean }[],
 ): Promise<void> {
   const seen = new Set<string>();
-  const unique = members.filter(m => { if (seen.has(m.openId)) return false; seen.add(m.openId); return true; });
+  const unique = members.filter(m => {
+    if (seen.has(m.openId)) return false;
+    seen.add(m.openId);
+    return m.isMember || m.isPoc;
+  });
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     await client.query("DELETE FROM event_department_member WHERE department_id = $1", [deptId]);
     for (const m of unique) {
       await client.query(
-        "INSERT INTO event_department_member (department_id, open_id, is_poc) VALUES ($1,$2,$3)",
-        [deptId, m.openId, m.isPoc],
+        "INSERT INTO event_department_member (department_id, open_id, is_member, is_poc) VALUES ($1,$2,$3,$4)",
+        [deptId, m.openId, m.isMember, m.isPoc],
       );
     }
     await client.query("COMMIT");
@@ -681,7 +691,7 @@ export async function listEventPeople(eventId: string): Promise<{ openId: string
      SELECT a.open_id, a.name
      FROM event_tech_assignee a
      JOIN event_tech_req tr ON tr.id = a.req_id
-     WHERE tr.event_id = $1
+     WHERE tr.event_id = $1 AND tr.status != 'awaiting'
      ORDER BY name`,
     [eventId]
   );
@@ -967,6 +977,58 @@ export async function deleteEventTechReq(id: string, eventId: string): Promise<v
   );
 }
 
+/**
+ * For each departmentId, find the existing 'awaiting' tech req for that dept in the event,
+ * and add scheduleItemId to it (if given). If no awaiting req exists, create a blank one.
+ * Content already filled in is preserved. Returns the upserted reqs.
+ */
+export async function upsertAwaitingTechReqs(
+  eventId: string,
+  departmentIds: string[],
+  scheduleItemId?: string,
+): Promise<EventTechReq[]> {
+  const pool = getPool();
+  const result: EventTechReq[] = [];
+  let seq = 0;
+  const uid = () => `tr${Date.now().toString(36)}${(++seq).toString(36)}`;
+
+  for (const deptId of departmentIds) {
+    const existing = await pool.query<{ id: string }>(
+      `SELECT id FROM event_tech_req WHERE event_id = $1 AND department_id = $2 AND status = 'awaiting'`,
+      [eventId, deptId],
+    );
+
+    let reqId: string;
+    if (existing.rows.length > 0) {
+      reqId = existing.rows[0].id;
+      if (scheduleItemId) {
+        await pool.query(
+          `INSERT INTO event_tech_req_item (req_id, item_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [reqId, scheduleItemId],
+        );
+      }
+    } else {
+      reqId = uid();
+      await pool.query(
+        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status)
+         VALUES ($1, $2, '', '', $3, 'awaiting')`,
+        [reqId, eventId, deptId],
+      );
+      if (scheduleItemId) {
+        await pool.query(
+          `INSERT INTO event_tech_req_item (req_id, item_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [reqId, scheduleItemId],
+        );
+      }
+    }
+
+    const req = await getEventTechReq(reqId, eventId);
+    if (req) result.push(req);
+  }
+
+  return result;
+}
+
 export async function completeAllEventTechReqs(eventId: string): Promise<void> {
   await getPool().query(
     "UPDATE event_tech_req SET status = 'done' WHERE event_id = $1 AND status != 'done'",
@@ -1243,6 +1305,100 @@ export async function isUserReqAssignee(reqId: string, openId: string): Promise<
   return res.rows[0].exists;
 }
 
+/** True if the user is a POC of a specific department. */
+export async function isUserDeptPoc(deptId: string, openId: string): Promise<boolean> {
+  const res = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM event_department_member
+       WHERE department_id = $1 AND open_id = $2 AND is_poc = true
+     ) AS exists`,
+    [deptId, openId]
+  );
+  return res.rows[0].exists;
+}
+
+export type MyTechReqFullEntry = {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  eventId: string;
+  eventTitle: string;
+  productionId: string;
+  productionName: string;
+  assignees: { openId: string; name: string }[];
+  deptPeople: { openId: string; name: string }[];
+  amPoc: boolean;
+};
+
+/** All tech reqs relevant to the user as POC or assignee, with full details for the personal page. */
+export async function listMyTechReqsFull(openId: string): Promise<MyTechReqFullEntry[]> {
+  const res = await getPool().query<{
+    id: string; title: string; description: string; status: string;
+    department_id: string | null; department_name: string | null;
+    event_id: string; event_title: string;
+    production_id: string; production_name: string;
+    am_poc: boolean;
+    assignees_json: { openId: string; name: string }[] | null;
+    dept_people_json: { openId: string; name: string }[] | null;
+  }>(
+    `SELECT
+       etr.id, etr.title, etr.description, etr.status, etr.department_id,
+       ed.name AS department_name,
+       pe.id AS event_id, pe.title AS event_title,
+       pe.production_id, p.name AS production_name,
+       (edm_poc.open_id IS NOT NULL) AS am_poc,
+       (
+         SELECT json_agg(json_build_object('openId', eta2.open_id, 'name', fu2.name)
+                ORDER BY fu2.name)
+         FROM event_tech_assignee eta2
+         JOIN feishu_user fu2 ON fu2.open_id = eta2.open_id
+         WHERE eta2.req_id = etr.id
+       ) AS assignees_json,
+       (
+         SELECT json_agg(json_build_object('openId', edm2.open_id, 'name', fu3.name)
+                ORDER BY fu3.name)
+         FROM event_department_member edm2
+         JOIN feishu_user fu3 ON fu3.open_id = edm2.open_id
+         WHERE edm2.department_id = etr.department_id
+           AND (edm2.is_member OR edm2.is_poc)
+       ) AS dept_people_json
+     FROM event_tech_req etr
+     JOIN production_event pe ON pe.id = etr.event_id
+     JOIN production p ON p.id = pe.production_id
+     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     LEFT JOIN event_department_member edm_poc
+       ON edm_poc.department_id = etr.department_id
+       AND edm_poc.open_id = $1 AND edm_poc.is_poc = true
+     LEFT JOIN event_tech_assignee eta
+       ON eta.req_id = etr.id AND eta.open_id = $1
+     WHERE pe.status != 'cancelled'
+       AND (
+         (etr.status = 'awaiting' AND edm_poc.open_id IS NOT NULL)
+         OR (etr.status != 'awaiting' AND (eta.open_id IS NOT NULL OR edm_poc.open_id IS NOT NULL))
+       )
+     ORDER BY pe.start_time NULLS LAST, etr.created_at`,
+    [openId]
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    departmentId: r.department_id,
+    departmentName: r.department_name,
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    productionId: r.production_id,
+    productionName: r.production_name,
+    amPoc: r.am_poc,
+    assignees: r.assignees_json ?? [],
+    deptPeople: r.dept_people_json ?? [],
+  }));
+}
+
 /** Batch-load the current user's participant role across all events in a production. */
 export async function listUserEventParticipations(
   openId: string, productionId: string,
@@ -1282,6 +1438,40 @@ export type MyPendingTechReqEntry = {
   productionId: string;
   productionName: string;
 };
+
+export type MyPocAwaitingReqEntry = {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  departmentName: string | null;
+};
+
+export async function listMyPocAwaitingReqs(openId: string, productionId?: string): Promise<MyPocAwaitingReqEntry[]> {
+  const params: unknown[] = [openId];
+  const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
+  const res = await getPool().query<{
+    id: string; event_id: string; event_title: string; department_name: string | null;
+  }>(
+    `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, ed.name AS department_name
+     FROM event_tech_req etr
+     JOIN production_event pe ON pe.id = etr.event_id
+     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     JOIN event_department_member edm_poc
+       ON edm_poc.department_id = etr.department_id
+       AND edm_poc.open_id = $1 AND edm_poc.is_poc = true
+     WHERE etr.status = 'awaiting'
+       AND pe.status != 'cancelled'
+       ${prodFilter}
+     ORDER BY pe.start_time NULLS LAST, etr.created_at`,
+    params
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    departmentName: r.department_name,
+  }));
+}
 
 export async function listMyUpcomingCallTimes(openId: string, productionId?: string): Promise<MyCallTimeEntry[]> {
   const params: unknown[] = [openId];
@@ -1370,7 +1560,7 @@ export async function listMyPendingTechReqs(openId: string, productionId?: strin
      JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.open_id = $1
      JOIN production_event pe ON pe.id = etr.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE etr.status != 'done'
+     WHERE etr.status NOT IN ('done', 'awaiting')
        ${prodFilter}
      ORDER BY etr.created_at`,
     params

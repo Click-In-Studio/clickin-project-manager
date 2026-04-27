@@ -35,9 +35,10 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-red-50 text-red-400",
 };
 const TECH_STATUS_LABELS: Record<string, string> = {
-  pending: "待处理", in_progress: "进行中", done: "完成",
+  awaiting: "待确认", pending: "待处理", in_progress: "进行中", done: "完成",
 };
 const TECH_STATUS_COLORS: Record<string, string> = {
+  awaiting: "bg-purple-50 text-purple-500",
   pending: "bg-amber-50 text-amber-600",
   in_progress: "bg-blue-50 text-blue-600",
   done: "bg-green-50 text-green-600",
@@ -60,14 +61,16 @@ function isSingleDayEvent(event: ProductionEvent): boolean {
 const SM_EVENT_TYPES = new Set(["rehearsal", "meeting"]);
 
 function InfoTab({
-  event, productionId, members, canEdit,
-  onUpdated, onDeleted,
+  event, productionId, members, canEdit, departments,
+  onUpdated, onDeleted, onTechReqsCreated,
 }: {
   event: ProductionEvent; productionId: string;
   members: MemberWithRoles[];
   canEdit: boolean;
+  departments: EventDepartment[];
   onUpdated: (ev: ProductionEvent) => void;
   onDeleted: () => void;
+  onTechReqsCreated?: (reqs: EventTechReq[]) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(event.title);
@@ -79,6 +82,7 @@ function InfoTab({
   const [endTime, setEndTime] = useState(toLocalInput(event.endTime));
   const [description, setDescription] = useState(event.description);
   const [stageManagers, setStageManagers] = useState<{ openId: string; name: string }[]>(event.stageManagers);
+  const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -103,7 +107,22 @@ function InfoTab({
     });
     const data = await res.json();
     setSaving(false);
-    if (data.event) { onUpdated(data.event); setEditing(false); }
+    if (data.event) {
+      if (notifyDeptIds.length > 0 && onTechReqsCreated) {
+        const awRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${event.id}/awaiting-reqs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ departmentIds: notifyDeptIds }),
+        });
+        if (awRes.ok) {
+          const awData = await awRes.json();
+          onTechReqsCreated(awData.techReqs);
+        }
+      }
+      setNotifyDeptIds([]);
+      onUpdated(data.event);
+      setEditing(false);
+    }
   }
 
   async function deleteEvent() {
@@ -180,6 +199,33 @@ function InfoTab({
                 onChange={setStageManagers}
               />
             )}
+          </div>
+        )}
+        {departments.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs text-zinc-500">通知部门（创建待确认需求）</label>
+              <button type="button"
+                onClick={() => setNotifyDeptIds(
+                  notifyDeptIds.length === departments.length ? [] : departments.map(d => d.id)
+                )}
+                className="text-xs text-zinc-400 hover:text-zinc-600"
+              >{notifyDeptIds.length === departments.length ? "取消全选" : "全选"}</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {departments.map(d => (
+                <button key={d.id} type="button"
+                  onClick={() => setNotifyDeptIds(prev =>
+                    prev.includes(d.id) ? prev.filter(x => x !== d.id) : [...prev, d.id]
+                  )}
+                  className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                    notifyDeptIds.includes(d.id)
+                      ? "bg-zinc-800 text-white border-zinc-800"
+                      : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                  }`}
+                >{d.name}</button>
+              ))}
+            </div>
           </div>
         )}
         <div className="flex gap-2">
@@ -351,6 +397,7 @@ function ParticipantPicker({
 function ScheduleTab({
   eventId, productionId, items, onItemsChange, canEdit, canAssignPeople, members,
   eventStart, eventEnd, singleDay, eventDate,
+  departments = [], onTechReqsCreated,
 }: {
   eventId: string; productionId: string;
   items: EventScheduleItemWithParticipants[];
@@ -359,6 +406,8 @@ function ScheduleTab({
   members: MemberWithRoles[];
   eventStart: string | null; eventEnd: string | null;
   singleDay: boolean; eventDate: string;
+  departments?: EventDepartment[];
+  onTechReqsCreated?: (reqs: EventTechReq[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -367,6 +416,7 @@ function ScheduleTab({
   const [newEnd, setNewEnd] = useState("");
   const [newLoc, setNewLoc] = useState("");
   const [newParticipants, setNewParticipants] = useState<ScheduleItemParticipant[]>([]);
+  const [newNotifyDepts, setNewNotifyDepts] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule`;
@@ -399,9 +449,24 @@ function ScheduleTab({
       });
       participants = newParticipants;
     }
+    if (newNotifyDepts.length > 0) {
+      const awRes = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/events/${eventId}/awaiting-reqs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ departmentIds: newNotifyDepts, scheduleItemId: newId }),
+        }
+      );
+      if (awRes.ok && onTechReqsCreated) {
+        const awData = await awRes.json() as { techReqs: EventTechReq[] };
+        onTechReqsCreated(awData.techReqs);
+      }
+    }
     onItemsChange([...items, { ...data.item, participants }]);
     setNewTitle(""); setNewType("custom"); setNewStart(""); setNewEnd(""); setNewLoc("");
     setNewParticipants([]);
+    setNewNotifyDepts([]);
     setAdding(false);
   }
 
@@ -435,6 +500,9 @@ function ScheduleTab({
           base={base}
           minTime={minAttr} maxTime={maxAttr}
           singleDay={singleDay} eventDate={eventDate}
+          departments={departments}
+          productionId={productionId} eventId={eventId}
+          onTechReqsCreated={onTechReqsCreated}
         />
       ))}
 
@@ -472,6 +540,33 @@ function ScheduleTab({
                 <ParticipantPicker members={members} selected={newParticipants} onChange={setNewParticipants} />
               </div>
             )}
+            {canEdit && departments.length > 0 && (
+              <div className="pt-2 border-t border-zinc-100">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-zinc-400">通知部门（创建待确认需求）</p>
+                  <button type="button"
+                    onClick={() => setNewNotifyDepts(
+                      newNotifyDepts.length === departments.length ? [] : departments.map(d => d.id)
+                    )}
+                    className="text-xs text-zinc-400 hover:text-zinc-600"
+                  >{newNotifyDepts.length === departments.length ? "取消全选" : "全选"}</button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {departments.map(d => (
+                    <button key={d.id} type="button"
+                      onClick={() => setNewNotifyDepts(prev =>
+                        prev.includes(d.id) ? prev.filter(x => x !== d.id) : [...prev, d.id]
+                      )}
+                      className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                        newNotifyDepts.includes(d.id)
+                          ? "bg-zinc-800 text-white border-zinc-800"
+                          : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                      }`}
+                    >{d.name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex gap-2">
               <button onClick={addItem}
                 className="px-4 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium hover:bg-zinc-700">
@@ -495,7 +590,7 @@ function ScheduleTab({
 function ScheduleItemRow({
   item, canEdit, canAssignPeople, members,
   editing, onEdit, onSaved, onDelete, base, minTime, maxTime,
-  singleDay, eventDate,
+  singleDay, eventDate, departments, productionId, eventId, onTechReqsCreated,
 }: {
   item: EventScheduleItemWithParticipants;
   canEdit: boolean; canAssignPeople: boolean; members: MemberWithRoles[];
@@ -505,6 +600,9 @@ function ScheduleItemRow({
   base: string;
   minTime?: string; maxTime?: string;
   singleDay: boolean; eventDate: string;
+  departments?: EventDepartment[];
+  productionId: string; eventId: string;
+  onTechReqsCreated?: (reqs: EventTechReq[]) => void;
 }) {
   const [title, setTitle] = useState(item.title);
   const [itemType, setItemType] = useState(item.itemType);
@@ -517,6 +615,7 @@ function ScheduleItemRow({
   const [location, setLocation] = useState(item.location);
   const [notes, setNotes] = useState(item.notes);
   const [localParticipants, setLocalParticipants] = useState<ScheduleItemParticipant[]>(item.participants);
+  const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   function resolveTime(val: string): string | null {
@@ -543,8 +642,26 @@ function ScheduleItemRow({
       }),
     ]);
     const data = await fieldRes.json();
+    if (data.item) {
+      if (notifyDeptIds.length > 0 && onTechReqsCreated) {
+        const awRes = await fetch(
+          `${BASE_PATH}/api/production/${productionId}/events/${eventId}/awaiting-reqs`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ departmentIds: notifyDeptIds, scheduleItemId: item.id }),
+          }
+        );
+        if (awRes.ok) {
+          const awData = await awRes.json() as { techReqs: EventTechReq[] };
+          onTechReqsCreated(awData.techReqs);
+        }
+      }
+      setNotifyDeptIds([]);
+      onSaved({ ...data.item, participants: localParticipants });
+      onEdit();
+    }
     setSaving(false);
-    if (data.item) { onSaved({ ...data.item, participants: localParticipants }); onEdit(); }
   }
 
   function cancel() {
@@ -553,6 +670,7 @@ function ScheduleItemRow({
     setEndTime(singleDay ? toLocalTimeInput(item.endTime) : toLocalInput(item.endTime));
     setLocation(item.location); setNotes(item.notes);
     setLocalParticipants(item.participants);
+    setNotifyDeptIds([]);
     onEdit();
   }
 
@@ -591,6 +709,34 @@ function ScheduleItemRow({
           <div className="pt-2 border-t border-zinc-100">
             <p className="text-xs text-zinc-400 mb-2">参与人员</p>
             <ParticipantPicker members={members} selected={localParticipants} onChange={setLocalParticipants} />
+          </div>
+        )}
+
+        {departments && departments.length > 0 && (
+          <div className="pt-2 border-t border-zinc-100">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-zinc-400">通知部门（创建待确认需求）</p>
+              <button type="button"
+                onClick={() => setNotifyDeptIds(
+                  notifyDeptIds.length === departments.length ? [] : departments.map(d => d.id)
+                )}
+                className="text-xs text-zinc-400 hover:text-zinc-600"
+              >{notifyDeptIds.length === departments.length ? "取消全选" : "全选"}</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {departments.map(d => (
+                <button key={d.id} type="button"
+                  onClick={() => setNotifyDeptIds(prev =>
+                    prev.includes(d.id) ? prev.filter(x => x !== d.id) : [...prev, d.id]
+                  )}
+                  className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                    notifyDeptIds.includes(d.id)
+                      ? "bg-zinc-800 text-white border-zinc-800"
+                      : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                  }`}
+                >{d.name}</button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -650,6 +796,7 @@ function computeSuggestedCallAt(
     }
   }
   for (const req of techReqs) {
+    if (req.status === "awaiting") continue;
     if (!req.assignees.some(a => a.openId === openId)) continue;
     if (req.presetMinutes == null) continue;
     for (const itemId of req.scheduleItemIds) {
@@ -1117,7 +1264,7 @@ function TechReqTab({
     if (!deptId) return members;
     const dept = departments.find(d => d.id === deptId);
     if (!dept) return members;
-    const set = new Set(dept.memberOpenIds);
+    const set = new Set([...dept.memberOpenIds, ...dept.pocOpenIds]);
     return members.filter(m => set.has(m.openId));
   }
 
@@ -1798,6 +1945,14 @@ export default function EventDetailClient({
   const [techReqs, setTechReqs] = useState(initialTechReqs);
   const [reports, setReports] = useState(initialReports);
 
+  function handleTechReqsCreated(newReqs: EventTechReq[]) {
+    setTechReqs(prev => {
+      const map = new Map(prev.map(r => [r.id, r]));
+      for (const r of newReqs) map.set(r.id, r);
+      return [...map.values()];
+    });
+  }
+
   // Derived: union of all schedule item participants + tech req assignees
   const eventPeople = useMemo(() => {
     const seen = new Set<string>();
@@ -1931,7 +2086,9 @@ export default function EventDetailClient({
           {tab === "info" && (
             <InfoTab
               event={event} productionId={productionId} members={members} canEdit={canEdit}
+              departments={departments}
               onUpdated={setEvent} onDeleted={handleDeleted}
+              onTechReqsCreated={handleTechReqsCreated}
             />
           )}
           {tab === "schedule" && (
@@ -1943,6 +2100,8 @@ export default function EventDetailClient({
               eventStart={event.startTime} eventEnd={event.endTime}
               singleDay={isSingleDayEvent(event)}
               eventDate={toLocalDate(event.startTime)}
+              departments={departments}
+              onTechReqsCreated={handleTechReqsCreated}
             />
           )}
           {tab === "call" && (

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { ProductionEvent } from "@/lib/event-db";
+import type { ProductionEvent, EventDepartment } from "@/lib/event-db";
 import { fmtDateTime, datetimeLocalToIso, dateTimeToIso } from "@/lib/tz";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
@@ -103,11 +103,12 @@ function EventCard({
 }
 
 function CreateEventModal({
-  productionId,
+  productionId, departments,
   onClose,
   onCreated,
 }: {
   productionId: string;
+  departments: EventDepartment[];
   onClose: () => void;
   onCreated: (ev: ProductionEvent) => void;
 }) {
@@ -119,6 +120,7 @@ function CreateEventModal({
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [description, setDescription] = useState("");
+  const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -144,6 +146,13 @@ function CreateEventModal({
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "创建失败"); return; }
+      if (notifyDeptIds.length > 0 && data.event?.id) {
+        await fetch(`${BASE_PATH}/api/production/${productionId}/events/${data.event.id}/awaiting-reqs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ departmentIds: notifyDeptIds }),
+        });
+      }
       onCreated(data.event);
     } finally {
       setSaving(false);
@@ -240,6 +249,33 @@ function CreateEventModal({
               placeholder="可选..."
             />
           </div>
+          {departments.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-zinc-500">通知部门（创建待确认需求）</label>
+                <button type="button"
+                  onClick={() => setNotifyDeptIds(
+                    notifyDeptIds.length === departments.length ? [] : departments.map(d => d.id)
+                  )}
+                  className="text-xs text-zinc-400 hover:text-zinc-600"
+                >{notifyDeptIds.length === departments.length ? "取消全选" : "全选"}</button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {departments.map(d => (
+                  <button key={d.id} type="button"
+                    onClick={() => setNotifyDeptIds(prev =>
+                      prev.includes(d.id) ? prev.filter(x => x !== d.id) : [...prev, d.id]
+                    )}
+                    className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                      notifyDeptIds.includes(d.id)
+                        ? "bg-zinc-800 text-white border-zinc-800"
+                        : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                    }`}
+                  >{d.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {error && <p className="text-xs text-red-500">{error}</p>}
           <div className="flex gap-2 justify-end pt-1">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-700">
@@ -267,11 +303,12 @@ type Props = {
   canViewFull: boolean;
   myParticipations: { eventId: string; role: "participant" | "follower" }[];
   currentUserOpenId: string;
+  departments: EventDepartment[];
 };
 
 export default function EventsClient({
   productionId, productionName, initialEvents, canCreate, canViewFull,
-  myParticipations,
+  myParticipations, departments,
 }: Props) {
   const [events, setEvents] = useState(initialEvents);
   const [showCreate, setShowCreate] = useState(false);
@@ -359,6 +396,7 @@ export default function EventsClient({
       {showCreate && (
         <CreateEventModal
           productionId={productionId}
+          departments={departments}
           onClose={() => setShowCreate(false)}
           onCreated={handleCreated}
         />

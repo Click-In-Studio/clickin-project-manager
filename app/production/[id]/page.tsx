@@ -8,7 +8,7 @@ import {
   countWarningCues,
 } from "@/lib/db";
 import { canEditCueList } from "@/lib/cue-list-types";
-import { listMyUpcomingCallTimes, listMyPendingTechReqs, listUnreadFollowedReports } from "@/lib/event-db";
+import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listUnreadFollowedReports } from "@/lib/event-db";
 import { fmtCallAt, fmtDate } from "@/lib/tz";
 
 const REQ_STATUS_LABEL: Record<string, string> = {
@@ -30,12 +30,13 @@ export default async function ProductionDashboard({
     if (!ok) redirect("/");
   }
 
-  const [name, cueLists, { memberRoles }, callTimes, pendingReqs, unreadReports] = await Promise.all([
+  const [name, cueLists, { memberRoles }, callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
     getProductionName(id),
     listCueLists(id),
     getProductionMemberContext(session.openId, session.isAdmin, id),
     listMyUpcomingCallTimes(session.openId, id),
     listMyPendingTechReqs(session.openId, id),
+    listMyPocAwaitingReqs(session.openId, id),
     listUnreadFollowedReports(session.openId, id),
   ]);
   if (!name) redirect("/");
@@ -139,6 +140,30 @@ export default async function ProductionDashboard({
           </section>
         )}
 
+        {/* Awaiting tech reqs (POC needs to confirm) */}
+        {awaitingReqs.length > 0 && (
+          <section className="mb-5">
+            <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-2">待确认需求</h2>
+            <div className="rounded-2xl bg-white shadow-sm overflow-hidden divide-y divide-zinc-50">
+              {awaitingReqs.map(req => (
+                <Link key={req.id}
+                  href={`/production/${id}/events/${req.eventId}/reqs/${req.id}`}
+                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-zinc-50 transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-zinc-800 truncate">
+                      {req.departmentName ?? "（无部门）"}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-zinc-400 truncate">{req.eventTitle}</p>
+                  </div>
+                  <span className="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium bg-purple-50 text-purple-500">
+                    待确认
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Pending tech reqs */}
         {pendingReqs.length > 0 && (
           <section className="mb-5">
@@ -146,7 +171,7 @@ export default async function ProductionDashboard({
             <div className="rounded-2xl bg-white shadow-sm overflow-hidden divide-y divide-zinc-50">
               {pendingReqs.map(req => (
                 <Link key={req.id}
-                  href={`/production/${id}/events/${req.eventId}/reqs`}
+                  href={`/production/${id}/events/${req.eventId}/reqs/${req.id}`}
                   className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-zinc-50 transition-colors">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-zinc-800 truncate">{req.title}</p>

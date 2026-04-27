@@ -356,11 +356,11 @@ function DepartmentPanel({
     if (editingId === id) setEditingId(null);
   };
 
-  const saveDeptMembers = async (dept: EventDepartment, newMembers: { openId: string; isPoc: boolean }[]) => {
+  const saveDeptMembers = async (dept: EventDepartment, newEntries: { openId: string; isMember: boolean; isPoc: boolean }[]) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/departments/${dept.id}/members`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ members: newMembers }),
+      body: JSON.stringify({ members: newEntries }),
     });
     const data = await res.json();
     if (data.department) {
@@ -368,29 +368,39 @@ function DepartmentPanel({
     }
   };
 
+  // Build a unified map of everyone who is either a member or a POC
+  function buildEntries(dept: EventDepartment) {
+    const allIds = new Set([...dept.memberOpenIds, ...dept.pocOpenIds]);
+    return new Map([...allIds].map(id => [id, {
+      openId: id,
+      isMember: dept.memberOpenIds.includes(id),
+      isPoc: dept.pocOpenIds.includes(id),
+    }]));
+  }
+
   const handleToggleMember = (dept: EventDepartment, openId: string) => {
+    const entries = buildEntries(dept);
     const isMember = dept.memberOpenIds.includes(openId);
-    const newMembers = isMember
-      // Removing: drop the member (and their POC status implicitly)
-      ? dept.memberOpenIds
-          .filter((id) => id !== openId)
-          .map((id) => ({ openId: id, isPoc: dept.pocOpenIds.includes(id) }))
-      // Adding: append as plain member (not POC)
-      : [
-          ...dept.memberOpenIds.map((id) => ({ openId: id, isPoc: dept.pocOpenIds.includes(id) })),
-          { openId, isPoc: false },
-        ];
-    saveDeptMembers(dept, newMembers);
+    if (isMember) {
+      // Remove as member; also clear POC (full removal)
+      entries.delete(openId);
+    } else {
+      entries.set(openId, { openId, isMember: true, isPoc: false });
+    }
+    saveDeptMembers(dept, [...entries.values()]);
   };
 
   const handleTogglePoc = (dept: EventDepartment, openId: string) => {
-    if (!dept.memberOpenIds.includes(openId)) return;
+    const entries = buildEntries(dept);
     const isPoc = dept.pocOpenIds.includes(openId);
-    const newMembers = dept.memberOpenIds.map((id) => ({
-      openId: id,
-      isPoc: id === openId ? !isPoc : dept.pocOpenIds.includes(id),
-    }));
-    saveDeptMembers(dept, newMembers);
+    const current = entries.get(openId) ?? { openId, isMember: false, isPoc: false };
+    const newIsPoc = !isPoc;
+    if (!newIsPoc && !current.isMember) {
+      entries.delete(openId); // neither member nor POC — remove entirely
+    } else {
+      entries.set(openId, { ...current, isPoc: newIsPoc });
+    }
+    saveDeptMembers(dept, [...entries.values()]);
   };
 
   const renderRow = (dept: EventDepartment) => {
@@ -500,12 +510,11 @@ function DepartmentPanel({
                         isMember ? "translate-x-1.5" : "-translate-x-1.5"
                       }`} />
                     </button>
-                    {/* POC toggle — only enabled if member */}
+                    {/* POC toggle */}
                     <button
                       onClick={() => handleTogglePoc(dept, m.openId)}
-                      disabled={!isMember}
                       className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
-                        isPoc ? "bg-amber-500" : isMember ? "bg-zinc-200 hover:bg-zinc-300" : "bg-zinc-100 cursor-not-allowed"
+                        isPoc ? "bg-amber-500" : "bg-zinc-200 hover:bg-zinc-300"
                       }`}
                       aria-label={isPoc ? "取消 POC" : "设为 POC"}
                     >

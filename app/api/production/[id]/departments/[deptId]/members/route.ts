@@ -18,9 +18,9 @@ async function requireManage(req: NextRequest, productionId: string) {
 }
 
 /**
- * PUT — replace the full member list for a department.
- * Body: { members: { openId: string; isPoc: boolean }[] }
- * POC must be a member (isPoc: true implies membership).
+ * PUT — replace the full member/POC list for a department.
+ * Body: { members: { openId: string; isMember: boolean; isPoc: boolean }[] }
+ * POC and membership are independent — a person can be POC without being a member.
  */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id: productionId, deptId } = await ctx.params;
@@ -36,13 +36,14 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     body.members.some(
       (x) => typeof x !== "object" || x === null ||
               typeof (x as Record<string, unknown>).openId !== "string" ||
+              typeof (x as Record<string, unknown>).isMember !== "boolean" ||
               typeof (x as Record<string, unknown>).isPoc !== "boolean"
     )
   ) {
-    return Response.json({ error: "members 必须是 { openId: string; isPoc: boolean }[] " }, { status: 400 });
+    return Response.json({ error: "members 必须是 { openId: string; isMember: boolean; isPoc: boolean }[]" }, { status: 400 });
   }
 
-  const members = (body.members as { openId: string; isPoc: boolean }[]);
+  const members = (body.members as { openId: string; isMember: boolean; isPoc: boolean }[]);
   await setDepartmentMembers(deptId, members);
 
   const updated = await getEventDepartment(deptId, productionId);
