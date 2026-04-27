@@ -39,10 +39,10 @@ export default async function WeeklyCallPage() {
 
   const pool = getPool();
 
-  // Coming week: tomorrow 00:00 CST → +7 days (in UTC)
+  // This week: today 00:00 CST → +7 days
   const now = cstNow();
-  const todayUTCMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const weekStart = new Date(todayUTCMidnight.getTime() + 16 * 3_600_000); // tomorrow 00:00 CST = today 16:00 UTC
+  // today 00:00 CST = Date.UTC(cst_year, cst_month, cst_date) - 8h
+  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 8 * 3_600_000);
   const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 3_600_000);
 
   const [callsRes, schedRes, reqsRes] = await Promise.all([
