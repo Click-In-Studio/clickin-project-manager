@@ -182,9 +182,17 @@ export function buildReportCard(
     `📋 **${eventTitle}** — ${reportTitle}`,
     ...(preview ? ["", `> ${preview.replace(/\n/g, "\n> ")}`] : []),
   ];
+  // Group notes by department, preserving order of first appearance
+  const deptOrder: string[] = [];
+  const byDept = new Map<string, string[]>();
   for (const note of notes) {
+    if (!byDept.has(note.deptName)) { byDept.set(note.deptName, []); deptOrder.push(note.deptName); }
     const snippet = note.content.length > 100 ? note.content.slice(0, 100).trimEnd() + "…" : note.content;
-    lines.push("", `**${note.deptName}**`, snippet);
+    byDept.get(note.deptName)!.push(snippet);
+  }
+  for (const dept of deptOrder) {
+    lines.push("", `**${dept}**`);
+    byDept.get(dept)!.forEach((snippet, i) => lines.push(`${i + 1}. ${snippet}`));
   }
   lines.push("", `_发布于 ${fmtDate(publishedAt)} ${fmtTime(publishedAt)}_`);
   return makeCard(`新报告 — ${reportTitle}`, "green", lines.join("\n"), url, "查看报告");
