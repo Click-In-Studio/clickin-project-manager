@@ -11,8 +11,11 @@ import {
 } from "./feishu-bot";
 import { createCardToken } from "./card-token";
 
-function appBaseUrl(): string {
-  return (process.env.APP_BASE_URL ?? "http://localhost:3000") + BASE_PATH;
+/** Builds a Feishu H5 web-app deep link for in-app rendering. */
+function feishuCardUrl(pathAndQuery: string): string {
+  const appId = process.env.FEISHU_APP_ID;
+  if (!appId) throw new Error("FEISHU_APP_ID is not set");
+  return `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(pathAndQuery)}`;
 }
 
 // ─── Job table helpers ────────────────────────────────────────────────────────
@@ -94,7 +97,6 @@ export type DispatchResult = {
 
 export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult> {
   const pool = getPool();
-  const base = appBaseUrl();
 
   // Coming week: tomorrow 00:00 UTC → +7 days (approximates Mon–Sun CST)
   const now = new Date();
@@ -109,8 +111,6 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
      WHERE call_at >= $1 AND call_at < $2`,
     [weekStart.toISOString(), weekEnd.toISOString()],
   );
-
-  const weeklyBaseUrl = `${base}/my/weekly-call`;
   // Token valid for 8 days — covers the full week shown in the card
   const weeklyTokenExp = new Date(Date.now() + 8 * 24 * 3_600_000);
 
@@ -123,7 +123,7 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
       const entries = await getWeeklyCallDataForUser(open_id, weekStart, weekEnd);
       if (!entries.length) continue;
       const token = createCardToken(open_id, "weekly-call", weeklyTokenExp);
-      const weeklyUrl = `${weeklyBaseUrl}?t=${token}`;
+      const weeklyUrl = feishuCardUrl(`${BASE_PATH}/my/weekly-call?t=${token}`);
       const card = buildWeeklyCallCard(entries, weeklyUrl);
       if (dryRun) {
         dryCards.push({ openId: open_id, card });
@@ -215,7 +215,6 @@ async function getWeeklyCallDataForUser(
  */
 export async function dispatchDailyCallForEvent(eventId: string, dryRun = false): Promise<DispatchResult> {
   const pool = getPool();
-  const base = appBaseUrl();
 
   // Get event info
   const eventRes = await pool.query<{
@@ -261,7 +260,7 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
   // CST date string "YYYY-MM-DD" for the event's start day
   const cstDate = new Date(new Date(event.start_time).getTime() + 8 * 3_600_000);
   const dateStr = `${cstDate.getUTCFullYear()}-${String(cstDate.getUTCMonth() + 1).padStart(2, "0")}-${String(cstDate.getUTCDate()).padStart(2, "0")}`;
-  const callsheetBaseUrl = `${base}/my/daily-call?date=${dateStr}`;
+  const callsheetBasePath = `${BASE_PATH}/my/daily-call?date=${dateStr}`;
   // Token valid until the day after the event at 12:00 CST (= 04:00 UTC)
   const dailyTokenExp = new Date(Date.UTC(
     cstDate.getUTCFullYear(), cstDate.getUTCMonth(), cstDate.getUTCDate() + 1, 4, 0, 0, 0,
@@ -277,7 +276,7 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
     seen.add(row.open_id);
     try {
       const token = createCardToken(row.open_id, "daily-call", dailyTokenExp);
-      const callsheetUrl = `${callsheetBaseUrl}&t=${token}`;
+      const callsheetUrl = feishuCardUrl(`${callsheetBasePath}&t=${token}`);
       const card = buildDailyCallCard(
         event.title, event.location, event.start_time,
         row.call_at, row.notes,
@@ -312,7 +311,6 @@ export async function dispatchReportNotification(
   dryRun = false,
 ): Promise<DispatchResult> {
   const pool = getPool();
-  const base = appBaseUrl();
 
   // Report content
   const rptRes = await pool.query<{ title: string; body: string; published_at: string; event_id: string }>(
@@ -351,7 +349,7 @@ export async function dispatchReportNotification(
   );
   if (!recipRes.rows.length) return { sent: 0, errors: [] };
 
-  const reportBaseUrl = `${base}/production/${productionId}/events/${eventId}/reports/${reportId}`;
+  const reportBasePath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}`;
   const reportTokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
   let sent = 0;
@@ -361,7 +359,7 @@ export async function dispatchReportNotification(
   for (const { open_id } of recipRes.rows) {
     try {
       const token = createCardToken(open_id, `report:${reportId}`, reportTokenExp);
-      const url = `${reportBaseUrl}?t=${token}`;
+      const url = feishuCardUrl(`${reportBasePath}?t=${token}`);
       const card = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, url);
       if (dryRun) {
         dryCards.push({ openId: open_id, card });
