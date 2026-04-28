@@ -349,17 +349,32 @@ function MemberCard({
 
 function ParticipantPicker({
   members, selected, onChange,
+  departments = [], selectedDeptIds = [], onDeptIdsChange,
 }: {
   members: MemberWithRoles[];
   selected: ScheduleItemParticipant[];
   onChange: (next: ScheduleItemParticipant[]) => void;
+  departments?: EventDepartment[];
+  selectedDeptIds?: string[];
+  onDeptIdsChange?: (ids: string[]) => void;
 }) {
   const [search, setSearch] = useState("");
   const selectedSet = new Set(selected.map(p => p.openId));
+  const memberMap = new Map(members.map(m => [m.openId, m]));
 
-  const filtered = members.filter(m =>
-    !search || m.name.includes(search) || m.roles.some(r => r.includes(search))
-  );
+  // Build dept groups (each member shown in every dept they belong to)
+  const deptGroups = departments
+    .map(dept => ({
+      dept,
+      members: dept.memberOpenIds
+        .map(oid => memberMap.get(oid))
+        .filter((m): m is MemberWithRoles => !!m),
+    }))
+    .filter(g => g.members.length > 0);
+
+  // Role groups: members not in any dept
+  const inAnyDept = new Set(departments.flatMap(d => d.memberOpenIds));
+  const nonDeptMembers = members.filter(m => !inAnyDept.has(m.openId));
 
   function toggle(m: MemberWithRoles) {
     if (selectedSet.has(m.openId)) {
@@ -369,15 +384,69 @@ function ParticipantPicker({
     }
   }
 
-  const groups = groupByRole(filtered);
+  function toggleDept(dept: EventDepartment, deptMembers: MemberWithRoles[]) {
+    if (selectedDeptIds.includes(dept.id)) {
+      // Detach dept but keep any members already in the participant list
+      onDeptIdsChange?.(selectedDeptIds.filter(id => id !== dept.id));
+    } else {
+      // Attach dept and bulk-add all its members not yet selected
+      onDeptIdsChange?.([...selectedDeptIds, dept.id]);
+      const toAdd = deptMembers
+        .filter(m => !selectedSet.has(m.openId))
+        .map(m => ({ openId: m.openId, name: m.name }));
+      if (toAdd.length > 0) onChange([...selected, ...toAdd]);
+    }
+  }
+
+  // Apply search
+  const filteredDeptGroups = deptGroups
+    .map(g => ({
+      ...g,
+      members: search
+        ? g.members.filter(m => m.name.includes(search) || m.roles.some(r => r.includes(search)))
+        : g.members,
+    }))
+    .filter(g => !search || g.members.length > 0);
+
+  const filteredNonDept = search
+    ? nonDeptMembers.filter(m => m.name.includes(search) || m.roles.some(r => r.includes(search)))
+    : nonDeptMembers;
+  const roleGroups = groupByRole(filteredNonDept);
+
+  const empty = filteredDeptGroups.every(g => g.members.length === 0) && filteredNonDept.length === 0;
 
   return (
     <div className="flex flex-col gap-2">
       <input placeholder="搜索姓名或职位…" value={search} onChange={e => setSearch(e.target.value)}
         className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-      {filtered.length === 0 && <p className="text-xs text-zinc-400">无匹配成员</p>}
+      {empty && <p className="text-xs text-zinc-400">无匹配成员</p>}
       <div className="max-h-64 overflow-y-auto flex flex-col gap-3">
-        {groups.map(({ role, members: gm }) => (
+        {filteredDeptGroups.map(({ dept, members: gm }) => {
+          const attached = selectedDeptIds.includes(dept.id);
+          return (
+            <div key={dept.id}>
+              <button
+                type="button"
+                onClick={() => toggleDept(dept, gm)}
+                className={`flex items-center gap-1.5 mb-1.5 hover:opacity-75 transition-opacity ${
+                  attached ? "text-zinc-700" : "text-zinc-400"
+                }`}
+              >
+                <span className="text-[11px] font-semibold tracking-widest uppercase">{dept.name}</span>
+                {attached
+                  ? <span className="text-[10px] rounded bg-zinc-700 text-white px-1 py-0.5 leading-none">已关联 ×</span>
+                  : <span className="text-[10px] rounded border border-zinc-300 text-zinc-400 px-1 py-0.5 leading-none">+ 关联</span>
+                }
+              </button>
+              <div className="grid grid-cols-2 gap-1.5">
+                {gm.map(m => (
+                  <MemberCard key={m.openId} m={m} isSelected={selectedSet.has(m.openId)} onToggle={() => toggle(m)} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {roleGroups.map(({ role, members: gm }) => (
           <div key={role}>
             <p className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-1.5">{role}</p>
             <div className="grid grid-cols-2 gap-1.5">
@@ -416,6 +485,7 @@ function ScheduleTab({
   const [newEnd, setNewEnd] = useState("");
   const [newLoc, setNewLoc] = useState("");
   const [newParticipants, setNewParticipants] = useState<ScheduleItemParticipant[]>([]);
+  const [newDeptIds, setNewDeptIds] = useState<string[]>([]);
   const [newNotifyDepts, setNewNotifyDepts] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -435,6 +505,7 @@ function ScheduleTab({
         title: newTitle.trim(), itemType: newType,
         startTime: resolveItemTime(newStart), endTime: resolveItemTime(newEnd),
         location: newLoc.trim(), orderIndex: items.length,
+        departmentIds: newDeptIds,
       }),
     });
     const data = await res.json();
@@ -463,9 +534,10 @@ function ScheduleTab({
         onTechReqsCreated(awData.techReqs);
       }
     }
-    onItemsChange([...items, { ...data.item, participants }]);
+    onItemsChange([...items, { ...data.item, participants, departmentIds: newDeptIds }]);
     setNewTitle(""); setNewType("custom"); setNewStart(""); setNewEnd(""); setNewLoc("");
     setNewParticipants([]);
+    setNewDeptIds([]);
     setNewNotifyDepts([]);
     setAdding(false);
   }
@@ -537,7 +609,10 @@ function ScheduleTab({
             {canAssignPeople && members.length > 0 && (
               <div className="pt-2 border-t border-zinc-100">
                 <p className="text-xs text-zinc-400 mb-2">参与人员</p>
-                <ParticipantPicker members={members} selected={newParticipants} onChange={setNewParticipants} />
+                <ParticipantPicker
+                  members={members} selected={newParticipants} onChange={setNewParticipants}
+                  departments={departments} selectedDeptIds={newDeptIds} onDeptIdsChange={setNewDeptIds}
+                />
               </div>
             )}
             {canEdit && departments.length > 0 && (
@@ -572,7 +647,7 @@ function ScheduleTab({
                 className="px-4 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium hover:bg-zinc-700">
                 添加
               </button>
-              <button onClick={() => { setAdding(false); setNewParticipants([]); }}
+              <button onClick={() => { setAdding(false); setNewParticipants([]); setNewDeptIds([]); }}
                 className="text-sm text-zinc-500 hover:text-zinc-700">取消</button>
             </div>
           </div>
@@ -615,6 +690,7 @@ function ScheduleItemRow({
   const [location, setLocation] = useState(item.location);
   const [notes, setNotes] = useState(item.notes);
   const [localParticipants, setLocalParticipants] = useState<ScheduleItemParticipant[]>(item.participants);
+  const [localDeptIds, setLocalDeptIds] = useState<string[]>(item.departmentIds ?? []);
   const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -633,6 +709,7 @@ function ScheduleItemRow({
           title: title.trim(), itemType,
           startTime: resolveTime(startTime), endTime: resolveTime(endTime),
           location: location.trim(), notes: notes.trim(),
+          departmentIds: localDeptIds,
         }),
       }),
       fetch(`${base}/${item.id}/participants`, {
@@ -658,7 +735,7 @@ function ScheduleItemRow({
         }
       }
       setNotifyDeptIds([]);
-      onSaved({ ...data.item, participants: localParticipants });
+      onSaved({ ...data.item, participants: localParticipants, departmentIds: localDeptIds });
       onEdit();
     }
     setSaving(false);
@@ -669,6 +746,7 @@ function ScheduleItemRow({
     setStartTime(singleDay ? toLocalTimeInput(item.startTime) : toLocalInput(item.startTime));
     setEndTime(singleDay ? toLocalTimeInput(item.endTime) : toLocalInput(item.endTime));
     setLocation(item.location); setNotes(item.notes);
+    setLocalDeptIds(item.departmentIds ?? []);
     setLocalParticipants(item.participants);
     setNotifyDeptIds([]);
     onEdit();
@@ -708,7 +786,10 @@ function ScheduleItemRow({
         {canAssignPeople && members.length > 0 && (
           <div className="pt-2 border-t border-zinc-100">
             <p className="text-xs text-zinc-400 mb-2">参与人员</p>
-            <ParticipantPicker members={members} selected={localParticipants} onChange={setLocalParticipants} />
+            <ParticipantPicker
+              members={members} selected={localParticipants} onChange={setLocalParticipants}
+              departments={departments} selectedDeptIds={localDeptIds} onDeptIdsChange={setLocalDeptIds}
+            />
           </div>
         )}
 
@@ -752,14 +833,24 @@ function ScheduleItemRow({
     );
   }
 
+  const deptMap = new Map((departments ?? []).map(d => [d.id, d]));
+
   return (
     <div className="rounded-xl bg-white shadow-sm px-4 py-3 flex items-center gap-3">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-zinc-800 truncate">{item.title}</span>
           <span className="shrink-0 text-[11px] rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">
             {SCHEDULE_ITEM_TYPE_LABELS[item.itemType] ?? item.itemType}
           </span>
+          {(item.departmentIds ?? []).map(id => {
+            const d = deptMap.get(id);
+            return d ? (
+              <span key={id} className="shrink-0 text-[11px] rounded bg-blue-50 px-1.5 py-0.5 text-blue-500">
+                {d.name}
+              </span>
+            ) : null;
+          })}
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-xs text-zinc-400">
           {item.startTime && <span>{fmtTime(item.startTime)}{item.endTime ? ` — ${fmtTime(item.endTime)}` : ""}</span>}

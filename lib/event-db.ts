@@ -50,6 +50,7 @@ export type ScheduleItemParticipant = { openId: string; name: string };
 
 export type EventScheduleItemWithParticipants = EventScheduleItem & {
   participants: ScheduleItemParticipant[];
+  departmentIds: string[];
 };
 
 export type EventParticipant = {
@@ -658,12 +659,12 @@ export async function setScheduleItemParticipants(
   }
 }
 
-/** Load all schedule items for an event with their participant lists (single round-trip). */
+/** Load all schedule items for an event with their participant lists and department associations. */
 export async function listScheduleItemsWithParticipants(
   eventId: string,
 ): Promise<EventScheduleItemWithParticipants[]> {
   const pool = getPool();
-  const [itemRes, partRes] = await Promise.all([
+  const [itemRes, partRes, deptRes] = await Promise.all([
     pool.query<ScheduleItemRow>(
       `SELECT id, event_id, title, item_type, start_time, end_time, location,
               order_index, target_scene_id, target_block_id, notes
@@ -677,13 +678,53 @@ export async function listScheduleItemsWithParticipants(
        WHERE esi.event_id = $1`,
       [eventId]
     ),
+    pool.query<{ item_id: string; dept_id: string }>(
+      `SELECT sid.item_id, sid.dept_id
+       FROM schedule_item_department sid
+       JOIN event_schedule_item esi ON esi.id = sid.item_id
+       WHERE esi.event_id = $1`,
+      [eventId]
+    ),
   ]);
   const partMap = new Map<string, ScheduleItemParticipant[]>();
   for (const r of partRes.rows) {
     if (!partMap.has(r.item_id)) partMap.set(r.item_id, []);
     partMap.get(r.item_id)!.push({ openId: r.open_id, name: r.name });
   }
-  return itemRes.rows.map(r => ({ ...rowToScheduleItem(r), participants: partMap.get(r.id) ?? [] }));
+  const deptMap = new Map<string, string[]>();
+  for (const r of deptRes.rows) {
+    if (!deptMap.has(r.item_id)) deptMap.set(r.item_id, []);
+    deptMap.get(r.item_id)!.push(r.dept_id);
+  }
+  return itemRes.rows.map(r => ({
+    ...rowToScheduleItem(r),
+    participants: partMap.get(r.id) ?? [],
+    departmentIds: deptMap.get(r.id) ?? [],
+  }));
+}
+
+export async function setScheduleItemDepartments(
+  itemId: string,
+  deptIds: string[],
+): Promise<void> {
+  const unique = [...new Set(deptIds)];
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM schedule_item_department WHERE item_id = $1", [itemId]);
+    for (const deptId of unique) {
+      await client.query(
+        "INSERT INTO schedule_item_department (item_id, dept_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        [itemId, deptId],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Distinct people across all schedule items + tech req assignees for an event. */
