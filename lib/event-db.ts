@@ -407,6 +407,18 @@ export async function setEventParticipants(
 
 // ─── Production Events ────────────────────────────────────────────────────────
 
+async function maybeAutoComplete(event: ProductionEvent): Promise<ProductionEvent> {
+  if (event.status === "published" && event.endTime && new Date(event.endTime) < new Date()) {
+    await getPool().query(
+      `UPDATE production_event SET status = 'completed', updated_at = now() WHERE id = $1`,
+      [event.id],
+    );
+    await completeAllEventTechReqs(event.id);
+    return { ...event, status: "completed" };
+  }
+  return event;
+}
+
 export async function listProductionEvents(productionId: string): Promise<ProductionEvent[]> {
   const pool = getPool();
   const [eventsRes, smRes] = await Promise.all([
@@ -430,7 +442,8 @@ export async function listProductionEvents(productionId: string): Promise<Produc
     if (!smMap.has(r.event_id)) smMap.set(r.event_id, []);
     smMap.get(r.event_id)!.push({ openId: r.open_id, name: r.name });
   }
-  return eventsRes.rows.map(r => rowToEvent(r, smMap.get(r.id) ?? []));
+  const events = eventsRes.rows.map(r => rowToEvent(r, smMap.get(r.id) ?? []));
+  return Promise.all(events.map(maybeAutoComplete));
 }
 
 export async function getProductionEvent(id: string, productionId: string): Promise<ProductionEvent | null> {
@@ -449,7 +462,8 @@ export async function getProductionEvent(id: string, productionId: string): Prom
     ),
   ]);
   if (!eventsRes.rows[0]) return null;
-  return rowToEvent(eventsRes.rows[0], smRes.rows.map(r => ({ openId: r.open_id, name: r.name })));
+  const event = rowToEvent(eventsRes.rows[0], smRes.rows.map(r => ({ openId: r.open_id, name: r.name })));
+  return maybeAutoComplete(event);
 }
 
 export async function setEventStageManagers(
