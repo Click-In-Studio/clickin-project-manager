@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS bot_testers (
+  open_id  TEXT PRIMARY KEY,
+  name     TEXT NOT NULL DEFAULT '',
+  added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
