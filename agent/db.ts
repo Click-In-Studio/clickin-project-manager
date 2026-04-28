@@ -18,7 +18,6 @@ export function getPool(): Pool {
 
 // ─── Session management ───────────────────────────────────────────────────────
 
-// Minimal BotContext fields needed to resume a session from a button click.
 export type CtxSnapshot = {
   chatId:     string;
   chatType:   "p2p" | "group";
@@ -75,4 +74,17 @@ export async function loadSession(key: string): Promise<PendingSession | null> {
 export async function deleteSession(key: string): Promise<void> {
   const pool = getPool();
   await pool.query(`DELETE FROM agent_sessions WHERE session_key = $1`, [key]);
+}
+
+// Atomically deletes the session and returns whether it existed.
+// Used by async skills to race against user input: if this returns true,
+// the session was still pending and we can auto-resume; if false, a user
+// message already consumed it and we should discard the skill result.
+export async function tryConsumeSession(key: string): Promise<boolean> {
+  const pool = getPool();
+  const res = await pool.query(
+    `DELETE FROM agent_sessions WHERE session_key = $1 RETURNING session_key`,
+    [key],
+  );
+  return (res.rowCount ?? 0) > 0;
 }

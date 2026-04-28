@@ -32,3 +32,27 @@ export async function sendMessage(
   const data = await res.json() as { code: number; msg: string };
   if (data.code !== 0) throw new Error(`Feishu sendMessage error ${data.code}: ${data.msg}`);
 }
+
+export type FetchedMessage = {
+  messageId: string;
+  msgType:   string;
+  content:   string; // raw JSON string from Feishu
+};
+
+export async function getMessage(messageId: string): Promise<FetchedMessage> {
+  const token = await getTenantAccessToken();
+  const res = await fetch(`${FEISHU_BASE}/im/v1/messages/${messageId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json() as {
+    code: number;
+    msg:  string;
+    data?: {
+      items?: { message_id: string; msg_type: string; body: { content: string } }[];
+    };
+  };
+  if (data.code !== 0) throw new Error(`Feishu getMessage error ${data.code}: ${data.msg}`);
+  const item = data.data?.items?.[0];
+  if (!item) throw new Error(`getMessage: no item returned for ${messageId}`);
+  return { messageId: item.message_id, msgType: item.msg_type, content: item.body.content };
+}

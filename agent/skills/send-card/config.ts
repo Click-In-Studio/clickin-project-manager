@@ -4,6 +4,7 @@ export const config: SkillConfig = {
   name: "send_card",
   description: "向当前聊天发送一张飞书互动卡片，适合展示结构化信息、列表或带标题的内容。当需要向用户提问且答案是有限选项时（如是/否、多选一），应优先使用此技能附带按钮让用户点选，而非用 reply 直接问文字——按钮交互比等待用户自行输入更可靠、更清晰。有按钮时通常配合 wait_reply:true。",
   enabled: true,
+  mode: "sync" as const,
   params: [
     { name: "title",   type: "string", description: "卡片标题栏文字", required: true },
     { name: "content", type: "string", description: "卡片正文，支持飞书 Markdown 语法", required: true },

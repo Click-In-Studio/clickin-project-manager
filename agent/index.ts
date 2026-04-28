@@ -1,11 +1,11 @@
 import type { BotContext } from "./types";
-import { replySkill, buildSkillsPrompt, dispatchSkill } from "./skills/_registry";
+import { replySkill, buildSkillsPrompt, dispatchSkill, skillRegistry } from "./skills/_registry";
 import { chat } from "./llm";
 import type { Message } from "./llm";
 import { buildMessages } from "./prompt";
 import type { PromptVars } from "./prompt";
 import { BASE_PROMPT } from "./prompts/_base";
-import { saveSession, loadSession, deleteSession } from "./db";
+import { saveSession, loadSession, deleteSession, tryConsumeSession } from "./db";
 import type { CtxSnapshot } from "./db";
 
 const MAX_LOOPS        = parseInt(process.env.AGENT_MAX_LOOPS ?? "10", 10);
@@ -80,11 +80,82 @@ function formatHistory(ctx: BotContext): string {
       const who  = m.senderType === "app" ? "助手" : m.senderName;
       const body =
         m.type === "text" ? (m.text ?? "") :
-        m.type === "card" ? `[系统卡片: ${m.cardTitle}]` :
-        "[其他消息]";
+        m.type === "card" ? `[系统卡片: ${m.cardTitle} | message_id: ${m.messageId}]` :
+        `[其他消息 | message_id: ${m.messageId}]`;
       return `[${hhmm}] ${who}: ${body}`;
     })
     .join("\n");
+}
+
+// Backend enforcement: fix up LLM response before acting on it.
+function enforceConstraints(response: AgentResponse): AgentResponse {
+  if (response.skill === "send_card") {
+    const args = response.args as { buttons?: unknown[] } | null | undefined;
+    const hasButtons = Array.isArray(args?.buttons) && args.buttons.length > 0;
+    if (hasButtons && !response.wait_reply) {
+      console.warn("[agent] enforcing wait_reply=true for send_card with buttons");
+      return { ...response, wait_reply: true };
+    }
+    if (!hasButtons && response.wait_reply) {
+      console.warn("[agent] enforcing wait_reply=false for send_card without buttons");
+      return { ...response, wait_reply: false };
+    }
+  }
+  return response;
+}
+
+// Handles an async skill with wait_reply:true.
+// Sends a pending-message to the user, saves the session, then executes.
+// On completion, atomically tries to consume the session:
+//   - success → auto-resume loop with result
+//   - failure → user already consumed session; discard result
+async function runAsyncSkill(
+  ctx:      BotContext,
+  response: AgentResponse,
+  messages: Message[],
+  raw:      string,
+): Promise<void> {
+  const key        = sessionKey(ctx);
+  const checkpoint = [...messages, { role: "assistant" as const, content: raw }];
+
+  // Notify user that we are processing, before we go off to do the query.
+  const pendingMsg =
+    skillRegistry[response.skill]?.config.pendingMessage ?? "收到，正在处理，请稍候…";
+  await replySkill.run(ctx, { text: pendingMsg });
+
+  await saveSession(key, checkpoint, ctxSnapshot(ctx), REPLY_TIMEOUT_MS);
+  console.log(`[agent] async skill: session saved key=${key}, executing ${response.skill}`);
+
+  let skillResult: string | undefined;
+  try {
+    skillResult = await dispatchSkill(ctx, response.skill, response.args);
+  } catch (e) {
+    console.error(`[agent] async skill ${response.skill} error:`, e);
+    const consumed = await tryConsumeSession(key);
+    if (consumed) {
+      await replySkill.run(ctx, { text: "抱歉，查询失败，请重试。" });
+    }
+    return;
+  }
+
+  // Race: try to atomically consume the session
+  const consumed = await tryConsumeSession(key);
+  if (!consumed) {
+    // User sent a message first and consumed the session — they win
+    console.log(`[agent] async skill ${response.skill}: result discarded, user interrupted`);
+    return;
+  }
+
+  // We got the session — auto-resume with skill result injected
+  console.log(`[agent] async skill ${response.skill}: auto-resuming with result`);
+  const resultContent = skillResult
+    ? `技能 "${response.skill}" 已执行完毕，结果如下：\n${skillResult}\n\n请根据以上结果继续。`
+    : `技能 "${response.skill}" 已执行完毕，请继续。`;
+  const resumeMessages: Message[] = [
+    ...checkpoint,
+    { role: "user", content: resultContent },
+  ];
+  await runLoop(ctx, resumeMessages);
 }
 
 async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<void> {
@@ -108,10 +179,21 @@ async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<voi
       return;
     }
 
+    response = enforceConstraints(response);
     console.log(`[agent] loop ${loops}: skill=${response.skill} done=${response.done} wait_reply=${response.wait_reply} reason=${response.reason}`);
 
+    const isAsync = skillRegistry[response.skill]?.config.mode === "async";
+
+    // Async skill + wait_reply: save session first, execute, then race
+    if (response.wait_reply && isAsync) {
+      await runAsyncSkill(ctx, response, messages, raw);
+      return;
+    }
+
+    // Sync execution path
+    let skillResult: string | undefined;
     try {
-      await dispatchSkill(ctx, response.skill, response.args);
+      skillResult = await dispatchSkill(ctx, response.skill, response.args);
     } catch (e) {
       console.error("[agent] skill dispatch error:", e);
       await replySkill.run(ctx, { text: "抱歉，执行操作时出现了错误。" });
@@ -119,8 +201,16 @@ async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<voi
     }
 
     if (response.wait_reply) {
-      const key        = sessionKey(ctx);
-      const checkpoint = [...messages, { role: "assistant" as const, content: raw }];
+      // Sync wait_reply: include skill result (if any) in checkpoint
+      const assistantMsg = { role: "assistant" as const, content: raw };
+      const checkpoint: Message[] = skillResult
+        ? [
+            ...messages,
+            assistantMsg,
+            { role: "user", content: `技能 "${response.skill}" 已执行完毕，结果如下：\n${skillResult}` },
+          ]
+        : [...messages, assistantMsg];
+      const key = sessionKey(ctx);
       await saveSession(key, checkpoint, ctxSnapshot(ctx), REPLY_TIMEOUT_MS);
       console.log(`[agent] session suspended key=${key} timeout=${REPLY_TIMEOUT_MS}ms`);
       return;
@@ -129,10 +219,13 @@ async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<voi
     if (response.done) {
       done = true;
     } else {
+      const continuationContent = skillResult
+        ? `技能 "${response.skill}" 已执行完毕，结果如下：\n${skillResult}\n\n请根据以上结果继续。`
+        : `技能 "${response.skill}" 已执行完毕，请继续。`;
       messages = [
         ...messages,
         { role: "assistant", content: raw },
-        { role: "user", content: `技能 "${response.skill}" 已执行完毕，请继续。` },
+        { role: "user", content: continuationContent },
       ];
     }
   }
@@ -184,8 +277,6 @@ export async function processMessage(ctx: BotContext): Promise<void> {
   await runLoop(ctx, initialMessages);
 }
 
-// Called by the card-action webhook when a user clicks a button.
-// Returns the outcome so the webhook can send an appropriate toast response.
 export async function processButtonClick(
   key:         string,
   buttonValue: string,
