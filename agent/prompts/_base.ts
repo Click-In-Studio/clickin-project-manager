@@ -13,7 +13,13 @@ export const BASE_PROMPT: PromptMessage[] = [
 - 聊天类型：{{chatType}}
 - 发送者：{{senderName}}
 
-# 历史消息记录（北京时间，从旧到新）
+# 聊天记忆（跨会话摘要）
+{{chatMemory}}
+
+# 用户记忆（{{senderName}} 的历史背景）
+{{userMemory}}
+
+# 近期历史消息（北京时间，从旧到新）
 每条格式：[HH:MM] 发送者: 内容。「助手」条目是你过去的输出，可能是错误或过时的，请以当前实际情况为准。
 
 {{history}}

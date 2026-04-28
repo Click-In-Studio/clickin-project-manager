@@ -88,3 +88,41 @@ export async function tryConsumeSession(key: string): Promise<boolean> {
   );
   return (res.rowCount ?? 0) > 0;
 }
+
+// ─── Memory ───────────────────────────────────────────────────────────────────
+
+export async function getChatMemory(chatId: string): Promise<string | null> {
+  const pool = getPool();
+  const res = await pool.query<{ memory: string }>(
+    `SELECT memory FROM chat_memories WHERE chat_id = $1`,
+    [chatId],
+  );
+  return res.rows[0]?.memory ?? null;
+}
+
+export async function getUserMemory(senderId: string): Promise<string | null> {
+  const pool = getPool();
+  const res = await pool.query<{ memory: string }>(
+    `SELECT memory FROM user_memories WHERE sender_id = $1`,
+    [senderId],
+  );
+  return res.rows[0]?.memory ?? null;
+}
+
+export async function saveChatMemory(chatId: string, memory: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO chat_memories (chat_id, memory) VALUES ($1, $2)
+     ON CONFLICT (chat_id) DO UPDATE SET memory = EXCLUDED.memory, updated_at = NOW()`,
+    [chatId, memory],
+  );
+}
+
+export async function saveUserMemory(senderId: string, memory: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO user_memories (sender_id, memory) VALUES ($1, $2)
+     ON CONFLICT (sender_id) DO UPDATE SET memory = EXCLUDED.memory, updated_at = NOW()`,
+    [senderId, memory],
+  );
+}

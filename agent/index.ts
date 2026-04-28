@@ -7,6 +7,7 @@ import type { PromptVars } from "./prompt";
 import { BASE_PROMPT } from "./prompts/_base";
 import { saveSession, loadSession, deleteSession, tryConsumeSession } from "./db";
 import type { CtxSnapshot } from "./db";
+import { loadMemory, compactAndSave } from "./memory";
 
 const MAX_LOOPS        = parseInt(process.env.AGENT_MAX_LOOPS ?? "10", 10);
 const REPLY_TIMEOUT_MS = parseInt(process.env.AGENT_REPLY_TIMEOUT_MS ?? String(5 * 60 * 1000), 10);
@@ -153,7 +154,7 @@ async function runAsyncSkill(
     : `技能 "${response.skill}" 已执行完毕，请继续。`;
   const resumeMessages: Message[] = [
     ...checkpoint,
-    { role: "user", content: resultContent },
+    { role: "system", content: resultContent },
   ];
   await runLoop(ctx, resumeMessages);
 }
@@ -207,7 +208,7 @@ async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<voi
         ? [
             ...messages,
             assistantMsg,
-            { role: "user", content: `技能 "${response.skill}" 已执行完毕，结果如下：\n${skillResult}` },
+            { role: "system", content: `技能 "${response.skill}" 已执行完毕，结果如下：\n${skillResult}` },
           ]
         : [...messages, assistantMsg];
       const key = sessionKey(ctx);
@@ -218,6 +219,12 @@ async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<voi
 
     if (response.done) {
       done = true;
+      compactAndSave(
+        ctx.trigger.chatId,
+        ctx.trigger.senderId,
+        ctx.trigger.senderName,
+        messages,
+      ).catch(e => console.error("[agent] compactAndSave error:", e));
     } else {
       const continuationContent = skillResult
         ? `技能 "${response.skill}" 已执行完毕，结果如下：\n${skillResult}\n\n请根据以上结果继续。`
@@ -225,7 +232,7 @@ async function runLoop(ctx: BotContext, initialMessages: Message[]): Promise<voi
       messages = [
         ...messages,
         { role: "assistant", content: raw },
-        { role: "user", content: continuationContent },
+        { role: "system", content: continuationContent },
       ];
     }
   }
@@ -261,12 +268,15 @@ export async function processMessage(ctx: BotContext): Promise<void> {
       initialMessages = [...pending.messages, { role: "user", content: ctx.trigger.text }];
     }
   } else {
+    const mem = await loadMemory(ctx.trigger.chatId, ctx.trigger.senderId);
     const vars: PromptVars = {
       chatName:   ctx.chat.name,
       chatType:   ctx.trigger.chatType === "p2p" ? "单聊" : "群聊",
       senderName: ctx.trigger.senderName,
       history:    formatHistory(ctx),
       skills:     buildSkillsPrompt(),
+      chatMemory: mem.chatMemory || "（无）",
+      userMemory: mem.userMemory || "（无）",
     };
     initialMessages = [
       ...buildMessages(BASE_PROMPT, vars),
