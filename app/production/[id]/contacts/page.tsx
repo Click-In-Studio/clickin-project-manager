@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-export const metadata: Metadata = { title: "通讯录" };
+export const metadata: Metadata = { title: "人员" };
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";

@@ -1,4 +1,6 @@
 import WeeklyCallPage from "../page";
+import type { Metadata } from "next";
+export const metadata: Metadata = { title: "本周 Call 安排" };
 
 type Ctx = { params: Promise<{ token: string }> };
 

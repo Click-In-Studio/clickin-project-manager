@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-export const metadata: Metadata = { title: "走位表" };
+export const metadata: Metadata = { title: "CUE表" };
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";

@@ -10,7 +10,7 @@ import {
 export async function generateMetadata({ params }: { params: Promise<{ id: string; cueListId: string }> }): Promise<Metadata> {
   const { id, cueListId } = await params;
   const cueList = await getCueList(cueListId, id);
-  return { title: cueList?.name ?? "走位表" };
+  return { title: cueList?.name ?? "CUE表" };
 }
 import { hasPermission } from "@/lib/roles";
 import { canEditCueList, canManageCueListPermissions } from "@/lib/cue-list-types";

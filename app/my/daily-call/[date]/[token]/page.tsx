@@ -1,4 +1,6 @@
 import DailyCallPage from "../../page";
+import type { Metadata } from "next";
+export const metadata: Metadata = { title: "当日 Call Sheet" };
 
 type Ctx = { params: Promise<{ date: string; token: string }> };
 

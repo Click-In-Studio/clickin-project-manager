@@ -23,7 +23,7 @@ import ReportViewClient from "@/components/ReportViewClient";
 export async function generateMetadata({ params }: { params: Promise<{ eventId: string; reportId: string }> }): Promise<Metadata> {
   const { eventId, reportId } = await params;
   const report = await getEventReport(reportId, eventId);
-  return { title: report?.title ?? "演出报告" };
+  return { title: report?.title ?? "报告" };
 }
 
 type Ctx = {
