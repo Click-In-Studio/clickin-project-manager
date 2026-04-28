@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getCharacterById, getProductionName, listProductionCharacters } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import CharacterDetailView from "@/components/CharacterDetail";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string; charId: string }> }): Promise<Metadata> {
+  const { id, charId } = await params;
+  const character = await getCharacterById(charId, id);
+  return { title: character?.name ?? "角色" };
+}
 
 export default async function CharacterDetailPage({
   params,

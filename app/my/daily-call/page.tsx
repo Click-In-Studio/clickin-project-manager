@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+export const metadata: Metadata = { title: "当日 Call Sheet" };
+
 /**
  * Daily call summary page — shows all events the current user has a call for
  * on a given CST date. Linked from the Feishu daily call notification card.

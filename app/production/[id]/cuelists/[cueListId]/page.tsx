@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -5,6 +6,12 @@ import {
   getProductionMemberContext, getProductionName,
   getCueList, listCueListPermissions, listProductionMembersWithRoles,
 } from "@/lib/db";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string; cueListId: string }> }): Promise<Metadata> {
+  const { id, cueListId } = await params;
+  const cueList = await getCueList(cueListId, id);
+  return { title: cueList?.name ?? "走位表" };
+}
 import { hasPermission } from "@/lib/roles";
 import { canEditCueList, canManageCueListPermissions } from "@/lib/cue-list-types";
 import CueListDetail from "@/components/CueListDetail";

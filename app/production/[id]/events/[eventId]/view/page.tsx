@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -13,6 +14,12 @@ import {
 } from "@/lib/event-db";
 import { REPORT_VIEWER_ROLES } from "@/lib/event-permissions";
 import EventFollowerClient from "@/components/EventFollowerClient";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
+  const { id, eventId } = await params;
+  const event = await getProductionEvent(eventId, id);
+  return { title: event?.title ?? "事件" };
+}
 
 const VISIBLE_STATUSES = new Set(["published", "completed"]);
 

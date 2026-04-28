@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+export const metadata: Metadata = { title: "本周 Call 安排" };
+
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";

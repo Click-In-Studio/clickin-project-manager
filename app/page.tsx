@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
+
+export const metadata: Metadata = { title: "首页" };
 import { listProductions } from "@/lib/db";
 import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/event-db";
 import HomeClient from "@/components/HomeClient";

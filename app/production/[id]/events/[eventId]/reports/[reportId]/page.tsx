@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -18,6 +19,12 @@ import {
   canReplyToReport,
 } from "@/lib/event-permissions";
 import ReportViewClient from "@/components/ReportViewClient";
+
+export async function generateMetadata({ params }: { params: Promise<{ eventId: string; reportId: string }> }): Promise<Metadata> {
+  const { eventId, reportId } = await params;
+  const report = await getEventReport(reportId, eventId);
+  return { title: report?.title ?? "演出报告" };
+}
 
 type Ctx = {
   params: Promise<{ id: string; eventId: string; reportId: string }>;

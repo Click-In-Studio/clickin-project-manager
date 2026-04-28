@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -10,6 +11,12 @@ import {
   listEventDepartments,
 } from "@/lib/event-db";
 import ReqDetailClient from "@/components/ReqDetailClient";
+
+export async function generateMetadata({ params }: { params: Promise<{ eventId: string; reqId: string }> }): Promise<Metadata> {
+  const { eventId, reqId } = await params;
+  const req = await getEventTechReq(reqId, eventId);
+  return { title: req?.title ?? "技术需求" };
+}
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 

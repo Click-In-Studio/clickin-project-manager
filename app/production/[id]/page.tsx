@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -7,6 +8,12 @@ import {
   getProductionMemberContext, listCueLists, listCueListPermissions,
   countWarningCues,
 } from "@/lib/db";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const name = await getProductionName(id);
+  return { title: name ?? "项目" };
+}
 import { canEditCueList } from "@/lib/cue-list-types";
 import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listUnreadFollowedReports } from "@/lib/event-db";
 import { fmtCallAt, fmtDate } from "@/lib/tz";

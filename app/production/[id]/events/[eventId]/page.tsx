@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -16,6 +17,12 @@ import {
 } from "@/lib/event-db";
 import { loadEventPermContext, canWriteReport, canEditTechReq } from "@/lib/event-permissions";
 import EventDetailClient from "@/components/EventDetailClient";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
+  const { id, eventId } = await params;
+  const event = await getProductionEvent(eventId, id);
+  return { title: event?.title ?? "事件" };
+}
 
 export default async function EventDetailPage({
   params,

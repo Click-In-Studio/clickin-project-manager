@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getSceneById, getProductionName, type SceneDetail } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import SceneDetailView from "@/components/SceneDetail";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string; sceneId: string }> }): Promise<Metadata> {
+  const { id, sceneId } = await params;
+  const scene = await getSceneById(sceneId, id);
+  return { title: scene?.name ?? "场景" };
+}
 
 export default async function SceneDetailPage({
   params,
