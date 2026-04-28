@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import { getProductionEvent, listScheduleItems, createScheduleItem } from "@/lib/event-db";
+import { getProductionEvent, listScheduleItems, createScheduleItem, setScheduleItemDepartments } from "@/lib/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     title?: string; itemType?: string; startTime?: string | null;
     endTime?: string | null; location?: string; orderIndex?: number;
     targetSceneId?: string | null; targetBlockId?: string | null; notes?: string;
+    departmentIds?: string[];
   };
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
@@ -56,5 +57,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     targetBlockId: body.targetBlockId ?? null,
     notes: body.notes ?? "",
   });
+  if (body.departmentIds?.length) {
+    await setScheduleItemDepartments(item.id, body.departmentIds);
+  }
   return Response.json({ item }, { status: 201 });
 }
