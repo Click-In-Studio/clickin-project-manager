@@ -1165,19 +1165,22 @@ function ScheduleTableView({
     };
   }, [timedItems, blockMinutes]);
 
-  // columns: departments + "其他"
+  // columns: only departments actually used + "其他" for no-dept / unknown-dept non-break items
   const cols = useMemo(() => {
-    const hasOther = timedItems.some(i =>
-      i.departmentIds.length === 0 || i.itemType === "break"
-        ? false
-        : i.departmentIds.some(id => !departments.find(d => d.id === id))
-    );
-    const deptCols = departments.map(d => ({ id: d.id, name: d.name, isOther: false }));
-    const otherItems = timedItems.filter(i =>
+    const usedDeptIds = new Set<string>();
+    let hasNoDeptNonBreak = false;
+    for (const item of timedItems) {
+      item.departmentIds.forEach(id => usedDeptIds.add(id));
+      if (item.itemType !== "break" && item.departmentIds.length === 0) hasNoDeptNonBreak = true;
+    }
+    const hasExternalDepts = timedItems.some(i =>
       i.itemType !== "break" && i.departmentIds.length > 0 &&
       i.departmentIds.some(id => !departments.find(d => d.id === id))
     );
-    return otherItems.length > 0
+    const deptCols = departments
+      .filter(d => usedDeptIds.has(d.id))
+      .map(d => ({ id: d.id, name: d.name, isOther: false }));
+    return (hasNoDeptNonBreak || hasExternalDepts)
       ? [...deptCols, { id: "__other__", name: "其他", isOther: true }]
       : deptCols;
   }, [timedItems, departments]);
@@ -1267,7 +1270,10 @@ function ScheduleTableView({
     const rowStart = timeToRow(new Date(item.startTime!).getTime());
     const rowSpan = Math.max(1, timeToRow(new Date(item.endTime!).getTime()) - rowStart);
     if (item.departmentIds.length === 0) {
-      nonBreakCells.push({ item, rowStart, rowSpan, colStart: 2, colSpan: numDataCols, isBreak: false });
+      const otherIdx = cols.findIndex(c => c.isOther);
+      nonBreakCells.push(otherIdx >= 0
+        ? { item, rowStart, rowSpan, colStart: otherIdx + 2, colSpan: 1, isBreak: false }
+        : { item, rowStart, rowSpan, colStart: 2, colSpan: numDataCols, isBreak: false });
     } else {
       const contiguous = itemSpansContiguousCols(item);
       if (contiguous) {
