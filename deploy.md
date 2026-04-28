@@ -26,10 +26,7 @@ ssh click-in "cd /var/www/production-manager && npm install && npm run build && 
 ssh click-in "sudo -u postgres psql -d script_editor -f /var/www/production-manager/db/migrate-XXX.sql"
 ```
 
-待执行的迁移（按顺序）：
-- `db/migrate-report-read.sql`
-- `db/migrate-replies.sql`
-- `db/migrate-notifications.sql`
+所有迁移文件均已在服务器执行完毕。`notification_job` 表已废弃并已 DROP。
 
 ## 时区约定
 
@@ -45,15 +42,15 @@ ssh click-in "sudo -u postgres psql -d script_editor -f /var/www/production-mana
 
 ```cron
 # 每周日 12:00 CST（= 04:00 UTC）— 发送 weekly call 通知
-0 4 * * 0  curl -sX POST https://<APP_BASE_URL>/api/internal/notify/weekly-call \
+0 4 * * 0  curl -sX POST https://www.clickinmusical.com/app/api/internal/notify/weekly-call \
              -H "Authorization: Bearer $INTERNAL_NOTIFY_SECRET" >> /var/log/notify-weekly.log 2>&1
 
-# 每 15 分钟 — 处理 daily call 定时任务队列
-*/15 * * * *  curl -sX POST https://<APP_BASE_URL>/api/internal/notify/process-jobs \
-               -H "Authorization: Bearer $INTERNAL_NOTIFY_SECRET" >> /var/log/notify-jobs.log 2>&1
+# 每天 12:00 CST（= 04:00 UTC）— 发送 D+1 的 daily call 通知
+0 4 * * *  curl -sX POST https://www.clickinmusical.com/app/api/internal/notify/daily-call \
+             -H "Authorization: Bearer $INTERNAL_NOTIFY_SECRET" >> /var/log/notify-daily.log 2>&1
 ```
 
-将 `<APP_BASE_URL>` 替换为实际域名，`$INTERNAL_NOTIFY_SECRET` 与 `.env.local` 中的值一致。
+`$INTERNAL_NOTIFY_SECRET` 与 `.env.local` 中的值一致。
 
 ## 必须配置的环境变量（.env.local）
 

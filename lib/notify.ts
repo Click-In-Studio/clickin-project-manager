@@ -1,6 +1,5 @@
 /**
  * Notification dispatch: weekly call, daily call, report.
- * Also manages the notification_job table for scheduled daily-call sends.
  */
 
 import { getPool } from "./pg";
@@ -16,70 +15,6 @@ function feishuCardUrl(pathAndQuery: string): string {
   const appId = process.env.FEISHU_APP_ID;
   if (!appId) throw new Error("FEISHU_APP_ID is not set");
   return `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(pathAndQuery)}`;
-}
-
-// ─── Job table helpers ────────────────────────────────────────────────────────
-
-/** Schedules or re-schedules the daily-call job for an event. */
-export async function upsertDailyCallJob(eventId: string, scheduledAt: Date): Promise<void> {
-  const id = `dcall_${eventId}`;
-  await getPool().query(
-    `INSERT INTO notification_job (id, type, event_id, scheduled_at)
-     VALUES ($1, 'daily_call', $2, $3)
-     ON CONFLICT (id) DO UPDATE
-       SET scheduled_at = EXCLUDED.scheduled_at,
-           processed_at = NULL,
-           error        = NULL`,
-    [id, eventId, scheduledAt.toISOString()],
-  );
-}
-
-export async function listDueNotificationJobs(): Promise<{ id: string; eventId: string }[]> {
-  const res = await getPool().query<{ id: string; event_id: string }>(
-    `SELECT id, event_id FROM notification_job
-     WHERE scheduled_at <= now() AND processed_at IS NULL
-     ORDER BY scheduled_at`,
-  );
-  return res.rows.map(r => ({ id: r.id, eventId: r.event_id }));
-}
-
-export async function markJobProcessed(id: string, error?: string): Promise<void> {
-  await getPool().query(
-    `UPDATE notification_job SET processed_at = now(), error = $2 WHERE id = $1`,
-    [id, error ?? null],
-  );
-}
-
-// ─── Trigger helpers (called from event/report API routes) ───────────────────
-
-/**
- * When an event's startTime is set or changed, compute the daily-call trigger
- * time (D-1 at 12:00 CST = D-1 at 04:00 UTC). If already past, dispatch
- * immediately; otherwise store as a scheduled job.
- */
-export async function scheduleOrDispatchDailyCall(eventId: string, startTime: string | null): Promise<void> {
-  if (!startTime) return;
-  const notifyAt = computeDailyCallTime(startTime);
-  if (notifyAt <= new Date()) {
-    // Past trigger time — fire immediately (non-blocking)
-    dispatchDailyCallForEvent(eventId).catch(e =>
-      console.error("[notify] immediate daily call failed:", e),
-    );
-  } else {
-    await upsertDailyCallJob(eventId, notifyAt);
-  }
-}
-
-/** Computes D-1 at 12:00 CST (= 04:00 UTC) for a given startTime ISO string. */
-function computeDailyCallTime(startTime: string): Date {
-  // Convert to CST date first — startTime may be e.g. "2026-04-28T16:00Z" (= 04/29 00:00 CST),
-  // so using UTC date directly would give D-1 off by one day.
-  const cst = new Date(new Date(startTime).getTime() + 8 * 3_600_000);
-  const y = cst.getUTCFullYear();
-  const m = cst.getUTCMonth();
-  const d = cst.getUTCDate();
-  // D-1 at 12:00 CST = D-1 at 04:00 UTC
-  return new Date(Date.UTC(y, m, d - 1, 4, 0, 0, 0));
 }
 
 // ─── Weekly call dispatch ─────────────────────────────────────────────────────
