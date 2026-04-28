@@ -209,6 +209,51 @@ async function getWeeklyCallDataForUser(
   }));
 }
 
+// ─── Daily call sweep (called by cron at 12:00 CST) ─────────────────────────
+
+/**
+ * At 12:00 CST on day D: find all published events that have at least one
+ * call_at on day D+1 (CST 00:00–23:59), then dispatch a daily call card for
+ * each such event.
+ */
+export async function dispatchDailyCallsForToday(dryRun = false): Promise<{
+  total: number;
+  events: { eventId: string; sent: number; errors: string[] }[];
+  dryCards?: { openId: string; card: object }[];
+}> {
+  const pool = getPool();
+
+  // D+1 window in CST expressed as UTC timestamps
+  // CST = UTC+8, so 00:00 CST = UTC-8h from that calendar day
+  const nowCst = new Date(Date.now() + 8 * 3_600_000);
+  const y = nowCst.getUTCFullYear(), mo = nowCst.getUTCMonth(), d = nowCst.getUTCDate();
+  const windowStart = new Date(Date.UTC(y, mo, d + 1, -8, 0, 0)); // D+1 00:00 CST
+  const windowEnd   = new Date(Date.UTC(y, mo, d + 2, -8, 0, 0)); // D+2 00:00 CST
+
+  // Published events with at least one call time falling on D+1 (CST)
+  const evRes = await pool.query<{ event_id: string }>(
+    `SELECT DISTINCT ect.event_id
+     FROM event_call_time ect
+     JOIN production_event pe ON pe.id = ect.event_id
+     WHERE pe.status = 'published'
+       AND ect.call_at >= $1 AND ect.call_at < $2`,
+    [windowStart.toISOString(), windowEnd.toISOString()],
+  );
+
+  let total = 0;
+  const events: { eventId: string; sent: number; errors: string[] }[] = [];
+  const allDryCards: { openId: string; card: object }[] = [];
+
+  for (const { event_id } of evRes.rows) {
+    const result = await dispatchDailyCallForEvent(event_id, dryRun);
+    total += result.sent;
+    events.push({ eventId: event_id, sent: result.sent, errors: result.errors });
+    if (dryRun && result.dryCards) allDryCards.push(...result.dryCards);
+  }
+
+  return { total, events, ...(dryRun ? { dryCards: allDryCards } : {}) };
+}
+
 // ─── Daily call dispatch ──────────────────────────────────────────────────────
 
 /**

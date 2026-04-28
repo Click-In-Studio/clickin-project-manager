@@ -3,7 +3,6 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
-import { scheduleOrDispatchDailyCall } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -58,14 +57,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     await setEventStageManagers(eventId, body.stageManagers);
   }
   const updated = await getProductionEvent(eventId, productionId);
-
-  // Schedule or immediately dispatch daily call when event is published
-  if (body.status === "published" && existing.status !== "published") {
-    const startTime = body.startTime !== undefined ? body.startTime : existing.startTime;
-    scheduleOrDispatchDailyCall(eventId, startTime).catch(e =>
-      console.error("[notify] scheduleOrDispatchDailyCall failed:", e),
-    );
-  }
 
   return Response.json({ event: updated });
 }
