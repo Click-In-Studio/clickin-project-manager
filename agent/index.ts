@@ -1,12 +1,13 @@
 import type { BotContext } from "./types";
-import { replySkill, buildSkillsPrompt, dispatchSkill, skillRegistry } from "./skills/_registry";
+import { replySkill, buildSkillsPrompt, dispatchSkill, skillRegistry, ANCHOR_EXEMPT_SKILLS } from "./skills/_registry";
 import { chat } from "./llm";
 import type { Message } from "./llm";
 import { buildMessages } from "./prompt";
 import type { PromptVars } from "./prompt";
 import { BASE_PROMPT } from "./prompts/_base";
-import { saveSession, loadSession, deleteSession, tryConsumeSession, consumeExpiredSession, getChatProductionContext, setChatProductionContext } from "./db";
+import { saveSession, loadSession, deleteSession, tryConsumeSession, consumeExpiredSession, getChatProductionContext, setChatProductionContext, getTaskAnchor, clearTaskAnchor } from "./db";
 import type { CtxSnapshot } from "./db";
+import type { TaskAnchor } from "./types";
 import { loadMemory, compactAndSave, digestHistory } from "./memory";
 import { FOCUS_PRODUCTION_MARKER } from "./skills/focus-production/index";
 import { triageGroupMessage, appendGroupContext, getGroupContext } from "./triage";
@@ -51,6 +52,10 @@ async function onSessionTimeout(key: string): Promise<void> {
   if (!session) return; // user message already consumed the session
   console.log(`[agent] session timeout fired: key=${key}`);
   const ctx = snapshotToCtx(session.ctxSnapshot);
+  // Hard-discard task anchor on session timeout (passive discard)
+  await clearTaskAnchor(session.ctxSnapshot.chatId).catch(e =>
+    console.error("[agent] clearTaskAnchor error:", e),
+  );
   await attachProductionContext(ctx);
   const messages: Message[] = [
     ...session.messages,
@@ -145,11 +150,67 @@ function snapshotToCtx(snap: CtxSnapshot): BotContext {
   };
 }
 
+function formatTaskAnchorPrompt(anchor: TaskAnchor | undefined): string {
+  if (!anchor) {
+    return `# 当前任务锚点
+（未设置）
+
+你目前没有活跃的任务锚点。请先通过对话明确用户意图，再调用 set_task_anchor 建立锚点。
+在锚点建立之前，你只能使用 reply、send_card 和 set_task_anchor 技能。`;
+  }
+
+  const typeLabel: Record<string, string> = {
+    creative_discussion: "创意/规划讨论",
+    event_query:         "事件数据查询",
+    data_update:         "数据修改/录入",
+    unknown:             "未知",
+  };
+  const statusLabel: Record<string, string> = {
+    active:    "进行中",
+    paused:    "暂停中",
+    completed: "已完成",
+  };
+  const typeRules: Record<string, string[]> = {
+    creative_discussion: [
+      "优先延续该任务，不主动发起 production 数据查询",
+      "禁止调用 query_events / get_event_detail 等查询类技能，除非用户明确要求",
+    ],
+    event_query: [
+      "优先使用 query_events / get_event_detail 技能完成查询",
+      "如未设置 production，请先通过 focus_production 确认",
+    ],
+    data_update: [
+      "执行数据修改前必须向用户确认，严禁根据推测自动填写字段",
+    ],
+    unknown: [
+      "先通过 reply 澄清用户意图，确认后及时更新任务锚点的 type",
+    ],
+  };
+
+  const rules = typeRules[anchor.type] ?? [];
+  const rulesStr = rules.map(r => `- ${r}`).join("\n");
+
+  return `# 当前任务（最高优先级，不可忽略）
+
+类型：${typeLabel[anchor.type] ?? anchor.type}
+主题：${anchor.subject}
+目标：${anchor.goal}
+状态：${statusLabel[anchor.status] ?? anchor.status}
+置信度：${anchor.confidence}
+
+规则：
+${rulesStr}`;
+}
+
 async function attachProductionContext(ctx: BotContext): Promise<void> {
-  const prodCtx = await getChatProductionContext(ctx.trigger.chatId);
+  const [prodCtx, anchor] = await Promise.all([
+    getChatProductionContext(ctx.trigger.chatId),
+    getTaskAnchor(ctx.trigger.chatId),
+  ]);
   if (prodCtx) {
     ctx.productionContext = { productionId: prodCtx.id, productionName: prodCtx.name };
   }
+  ctx.taskAnchor = anchor ?? undefined;
 }
 
 
@@ -279,6 +340,20 @@ async function runLoop(ctx: BotContext, initialMessages: Message[], cancelToken?
     }
 
     response = enforceConstraints(response);
+
+    // Gate: no task anchor → only exempt skills allowed
+    if (!ctx.taskAnchor && !ANCHOR_EXEMPT_SKILLS.has(response.skill)) {
+      console.warn(`[agent] anchor gate blocked skill=${response.skill}`);
+      messages = [
+        ...messages,
+        { role: "assistant" as const, content: raw },
+        {
+          role: "system" as const,
+          content: `你当前没有活跃的任务锚点，不允许调用技能 "${response.skill}"。\n请先通过 reply 向用户确认意图，再调用 set_task_anchor 建立锚点后才可使用其他技能。\n${JSON_REMINDER}`,
+        },
+      ];
+      continue;
+    }
 
     if (cancelToken?.cancelled) {
       console.log(`[agent] loop ${loops} cancelled after LLM response, skill discarded`);
@@ -447,15 +522,17 @@ export async function processMessage(ctx: BotContext): Promise<void> {
     activeLoops.set(key, { token, pendingContents: allContents });
     loopToken = token;
 
-    const [mem, prodCtx, historyDigest] = await Promise.all([
+    const [mem, prodCtx, historyDigest, anchor] = await Promise.all([
       loadMemory(ctx.trigger.chatId, ctx.trigger.senderId),
       getChatProductionContext(ctx.trigger.chatId),
       digestHistory(ctx.history),
+      getTaskAnchor(ctx.trigger.chatId),
     ]);
     const groupCtxEntries = isGroup ? getGroupContext(ctx.trigger.chatId) : [];
     if (prodCtx) {
       ctx.productionContext = { productionId: prodCtx.id, productionName: prodCtx.name };
     }
+    ctx.taskAnchor = anchor ?? undefined;
     const productionContext = prodCtx
       ? `《${prodCtx.name}》（ID: ${prodCtx.id}）。如上下文暗示切换到其他 production，可重新调用 focus_production 更新。`
       : `（未设置）。若任务需要针对特定 production 操作，请先调用 focus_production 让用户确认。`;
@@ -469,10 +546,11 @@ export async function processMessage(ctx: BotContext): Promise<void> {
       chatType:          isGroup ? "群聊" : "单聊",
       senderName:        ctx.trigger.senderName,
       history:           historyDigest,
-      skills:            buildSkillsPrompt(),
+      skills:            buildSkillsPrompt(!!ctx.taskAnchor),
       chatMemory:        mem.chatMemory || "（无）",
       userMemory:        mem.userMemory || "（无）",
       productionContext,
+      taskAnchor:        formatTaskAnchorPrompt(ctx.taskAnchor),
       now,
     };
     const groupCtxMsg = groupCtxEntries.length > 0 ? [{
