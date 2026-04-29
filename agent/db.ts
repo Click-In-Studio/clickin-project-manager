@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import type { Message } from "./llm";
+import type { TaskAnchor } from "./types";
 
 const g = global as typeof globalThis & { __agentPool?: Pool };
 
@@ -255,3 +256,36 @@ export async function saveUserMemory(senderId: string, memory: string): Promise<
     [senderId, memory],
   );
 }
+
+// ─── Task anchor ──────────────────────────────────────────────────────────────
+
+export async function getTaskAnchor(chatId: string): Promise<TaskAnchor | null> {
+  const pool = getPool();
+  const res = await pool.query<{ task_anchor: TaskAnchor | null }>(
+    `SELECT task_anchor FROM agent_chat_context WHERE chat_id = $1`,
+    [chatId],
+  );
+  return res.rows[0]?.task_anchor ?? null;
+}
+
+export async function setTaskAnchor(chatId: string, anchor: TaskAnchor): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO agent_chat_context (chat_id, task_anchor)
+     VALUES ($1, $2)
+     ON CONFLICT (chat_id) DO UPDATE
+       SET task_anchor = EXCLUDED.task_anchor,
+           updated_at  = NOW()`,
+    [chatId, JSON.stringify(anchor)],
+  );
+}
+
+export async function clearTaskAnchor(chatId: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `UPDATE agent_chat_context SET task_anchor = NULL, updated_at = NOW()
+     WHERE chat_id = $1`,
+    [chatId],
+  );
+}
+

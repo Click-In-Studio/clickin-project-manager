@@ -1,7 +1,7 @@
 import type { PromptMessage } from "../prompt";
 
 // Base system prompt — injected first in every LLM call.
-// Available variables: {{chatName}}, {{chatType}}, {{senderName}}, {{history}}, {{skills}}, {{productionContext}}, {{now}}
+// Available variables: {{chatName}}, {{chatType}}, {{senderName}}, {{history}}, {{skills}}, {{productionContext}}, {{taskAnchor}}, {{now}}
 export const BASE_PROMPT: PromptMessage[] = [
   {
     role: "system",
@@ -32,6 +32,8 @@ export const BASE_PROMPT: PromptMessage[] = [
 
 # 当前聚焦的 Production
 {{productionContext}}
+
+{{taskAnchor}}
 
 # 记忆
 规则

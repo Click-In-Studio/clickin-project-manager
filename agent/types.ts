@@ -1,3 +1,11 @@
+export type TaskAnchor = {
+  type: "creative_discussion" | "event_query" | "data_update" | "unknown";
+  subject: string;
+  goal: string;
+  status: "active" | "paused" | "completed";
+  confidence: number;
+};
+
 export type HistoryMessage = {
   messageId: string;
   senderId: string;
@@ -30,4 +38,5 @@ export type BotContext = {
     productionId: string;
     productionName: string;
   };
+  taskAnchor?: TaskAnchor;
 };

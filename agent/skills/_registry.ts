@@ -8,6 +8,7 @@ import { focusProductionSkill } from "./focus-production/index";
 import { queryEventsSkill } from "./query-events/index";
 import { getEventDetailSkill } from "./get-event-detail/index";
 import { listSkillsSkill, setSecondaryPrompt } from "./list-skills/index";
+import { setTaskAnchorSkill } from "./set-task-anchor/index";
 import type { BotContext } from "../types";
 import type { SkillConfig, SkillParamDef } from "./_types";
 
@@ -18,13 +19,24 @@ type AnySkill = {
   run: (ctx: BotContext, args: unknown) => Promise<string | void>;
 };
 
-// Primary: always listed in the base prompt
+// Skills always available even when no task anchor is set
+const anchorRestrictedSkills: AnySkill[] = [
+  replySkill          as unknown as AnySkill,
+  sendCardSkill       as unknown as AnySkill,
+  setTaskAnchorSkill  as unknown as AnySkill,
+];
+
+// Primary: listed in the base prompt when a task anchor is active
 const primarySkills: AnySkill[] = [
   replySkill            as unknown as AnySkill,
   sendCardSkill         as unknown as AnySkill,
   focusProductionSkill  as unknown as AnySkill,
   listSkillsSkill       as unknown as AnySkill,
+  setTaskAnchorSkill    as unknown as AnySkill,
 ];
+
+// Skill names always callable regardless of anchor state
+export const ANCHOR_EXEMPT_SKILLS = new Set(["reply", "send_card", "set_task_anchor"]);
 
 // Secondary: hidden by default, returned by list_skills on demand
 const secondarySkills: AnySkill[] = [
@@ -37,16 +49,17 @@ const secondarySkills: AnySkill[] = [
 ];
 
 export const skillRegistry: Record<string, AnySkill> = {
-  reply:          replySkill       as unknown as AnySkill,
-  send_card:      sendCardSkill    as unknown as AnySkill,
-  view_card:      viewCardSkill    as unknown as AnySkill,
-  get_history:    getHistorySkill  as unknown as AnySkill,
-  get_chat_info:     getChatInfoSkill    as unknown as AnySkill,
-  get_productions:   getProductionsSkill as unknown as AnySkill,
+  reply:             replySkill            as unknown as AnySkill,
+  send_card:         sendCardSkill         as unknown as AnySkill,
+  view_card:         viewCardSkill         as unknown as AnySkill,
+  get_history:       getHistorySkill       as unknown as AnySkill,
+  get_chat_info:     getChatInfoSkill      as unknown as AnySkill,
+  get_productions:   getProductionsSkill   as unknown as AnySkill,
   focus_production:  focusProductionSkill  as unknown as AnySkill,
   list_skills:       listSkillsSkill       as unknown as AnySkill,
   query_events:      queryEventsSkill      as unknown as AnySkill,
   get_event_detail:  getEventDetailSkill   as unknown as AnySkill,
+  set_task_anchor:   setTaskAnchorSkill    as unknown as AnySkill,
 };
 
 function formatSkill(s: AnySkill): string {
@@ -59,8 +72,9 @@ function formatSkill(s: AnySkill): string {
   return `### ${s.config.name}${modeTag}\n${s.config.description}\n参数：\n${paramLines}`;
 }
 
-export function buildSkillsPrompt(): string {
-  return primarySkills
+export function buildSkillsPrompt(hasTaskAnchor: boolean): string {
+  const skills = hasTaskAnchor ? primarySkills : anchorRestrictedSkills;
+  return skills
     .filter(s => s.config.enabled !== false)
     .map(formatSkill)
     .join("\n\n");
