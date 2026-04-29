@@ -69,15 +69,42 @@ const RE_FW_COLON     = /：/g;
 // LLMs sometimes write "key=value" instead of "key":value.
 const RE_KV_EQ = /"(\w+)=(true|false|null|-?\d+(?:\.\d+)?)/g;
 
+// Escape literal newlines/carriage-returns that appear inside JSON string values.
+// Actual \n inside a string is invalid JSON; LLMs emit it when generating multi-line text.
+function escapeNewlinesInStrings(s: string): string {
+  let inString = false;
+  let escaped  = false;
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      out += ch; escaped = false;
+    } else if (ch === "\\") {
+      out += ch; escaped = true;
+    } else if (ch === '"') {
+      out += ch; inString = !inString;
+    } else if (inString && ch === "\n") {
+      out += "\\n";
+    } else if (inString && ch === "\r") {
+      out += "\\r";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 function parseAgentResponse(raw: string): AgentResponse {
-  const cleaned = raw
-    .replace(/^```(?:json)?\s*/m, "")
-    .replace(/\s*```$/m, "")
-    .trim()
-    .replace(RE_CURLY_QUOTES, '"')
-    .replace(RE_FW_COMMA, ",")
-    .replace(RE_FW_COLON, ":")
-    .replace(RE_KV_EQ, '"$1":$2');
+  const cleaned = escapeNewlinesInStrings(
+    raw
+      .replace(/^```(?:json)?\s*/m, "")
+      .replace(/\s*```$/m, "")
+      .trim()
+      .replace(RE_CURLY_QUOTES, '"')
+      .replace(RE_FW_COMMA, ",")
+      .replace(RE_FW_COLON, ":")
+      .replace(RE_KV_EQ, '"$1":$2'),
+  );
   return JSON.parse(cleaned) as AgentResponse;
 }
 
@@ -240,8 +267,15 @@ async function runLoop(ctx: BotContext, initialMessages: Message[], cancelToken?
       response = parseAgentResponse(raw);
     } catch (e) {
       console.error("[agent] failed to parse LLM response:", raw, e);
-      await replySkill.run(ctx, { text: "抱歉，处理你的请求时出现了内部错误。" });
-      return;
+      messages = [
+        ...messages,
+        { role: "assistant" as const, content: raw },
+        {
+          role: "system" as const,
+          content: `你的输出无法解析为合法 JSON。\n必须严格只输出以下格式，不得包含任何其他文字、解释或 markdown：\n{"skill":"<技能名>","args":{<参数>},"reason":"<原因>","done":true或false,"wait_reply":true或false}\n${JSON_REMINDER}`,
+        },
+      ];
+      continue;
     }
 
     response = enforceConstraints(response);

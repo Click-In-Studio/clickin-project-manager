@@ -1,5 +1,6 @@
-// LLM interface — currently OpenAI-compatible.
-// To swap providers: add a new driver function and update `chat()`.
+// LLM interface — OpenAI-compatible.
+// Switch provider via LLM_PROVIDER env var: "openai" (default) | "deepseek"
+// Each provider reads its own key and model env vars.
 
 export type Message = {
   role: "system" | "user" | "assistant";
@@ -7,24 +8,51 @@ export type Message = {
 };
 
 export type ChatOptions = {
-  model?: string;       // overrides OPENAI_MODEL env var
+  model?: string;
   maxTokens?: number;
   temperature?: number;
 };
+
+type ProviderConfig = {
+  baseUrl: string;
+  apiKey: string;
+  defaultModel: string;
+};
+
+function getProviderConfig(): ProviderConfig {
+  const provider = process.env.LLM_PROVIDER ?? "openai";
+
+  if (provider === "deepseek") {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) throw new Error("DEEPSEEK_API_KEY not set");
+    return {
+      baseUrl:      "https://api.deepseek.com/v1",
+      apiKey,
+      defaultModel: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+    };
+  }
+
+  // Default: openai
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY not set");
+  return {
+    baseUrl:      "https://api.openai.com/v1",
+    apiKey,
+    defaultModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+  };
+}
 
 export async function chat(
   messages: Message[],
   options: ChatOptions = {},
 ): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY not set");
+  const { baseUrl, apiKey, defaultModel } = getProviderConfig();
+  const model = options.model ?? defaultModel;
 
-  const model = options.model ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization:  `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -40,7 +68,7 @@ export async function chat(
     error?:   { message: string };
   };
 
-  if (data.error) throw new Error(`LLM error: ${data.error.message}`);
+  if (data.error) throw new Error(`LLM error (${model}): ${data.error.message}`);
   const content = data.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error("LLM returned empty response");
   return content;
