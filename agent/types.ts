@@ -19,10 +19,15 @@ export type BotContext = {
     text: string;    // @bot mention stripped
     rawText: string;
     timestamp: number;
+    mentionedBot?: boolean;
   };
   chat: {
     name: string;
     memberCount?: number;
   };
   history: HistoryMessage[];
+  productionContext?: {
+    productionId: string;
+    productionName: string;
+  };
 };

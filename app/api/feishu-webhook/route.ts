@@ -7,6 +7,24 @@ import type { BotContext, HistoryMessage } from "@/agent/types";
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 const HISTORY_SIZE = parseInt(process.env.FEISHU_HISTORY_SIZE ?? "20", 10);
 
+// ─── Group active window ──────────────────────────────────────────────────────
+// After a bot @mention, all messages in the group are forwarded for this TTL.
+// Lost on restart — the group just needs to @mention again.
+
+const GROUP_ACTIVE_TTL_MS = parseInt(process.env.GROUP_ACTIVE_TTL_MS ?? String(5 * 60 * 1000), 10);
+const groupActiveWindows = new Map<string, number>(); // chatId → expiresAt
+
+function isGroupActive(chatId: string): boolean {
+  const exp = groupActiveWindows.get(chatId);
+  if (exp && Date.now() <= exp) return true;
+  groupActiveWindows.delete(chatId);
+  return false;
+}
+
+function activateGroup(chatId: string): void {
+  groupActiveWindows.set(chatId, Date.now() + GROUP_ACTIVE_TTL_MS);
+}
+
 // ─── Feishu API helpers ───────────────────────────────────────────────────────
 
 async function getChatInfo(chatId: string, token: string): Promise<{ name: string; memberCount?: number }> {
@@ -164,15 +182,7 @@ async function processMessage(body: Record<string, unknown>) {
 
   const { message, sender } = event;
   const senderId = sender.sender_id.open_id;
-
-  // Tester gate: drop if test mode is on and sender is not whitelisted
-  const allowed = await isBotTester(senderId);
-  if (!allowed) {
-    console.log(`[feishu-webhook] dropped message from non-tester ${senderId}`);
-    return;
-  }
-
-  const chatId = message.chat_id;
+  const chatId   = message.chat_id;
   const chatType = message.chat_type;
 
   const [token, botOpenId] = await Promise.all([
@@ -180,13 +190,33 @@ async function processMessage(body: Record<string, unknown>) {
     getBotOpenId(),
   ]);
 
-  // In group chats, only respond when the bot is explicitly @mentioned
+  let botMentioned = false;
   if (chatType === "group") {
     const mentioned = botOpenId
       ? (message.mentions ?? []).some(m => m.id.open_id === botOpenId)
       : false;
-    if (!mentioned) {
-      console.log("[feishu-webhook] group message without bot mention — ignored");
+
+    if (mentioned) {
+      // Tester gate applies only to the @mention trigger
+      const allowed = await isBotTester(senderId);
+      if (!allowed) {
+        console.log(`[feishu-webhook] @mention dropped: non-tester ${senderId}`);
+        return;
+      }
+      activateGroup(chatId);
+      botMentioned = true;
+      console.log(`[feishu-webhook] group activated by ${senderId}, TTL=${GROUP_ACTIVE_TTL_MS}ms`);
+    } else if (isGroupActive(chatId)) {
+      activateGroup(chatId); // refresh TTL on each message
+    } else {
+      console.log("[feishu-webhook] group message: no mention and no active window — ignored");
+      return;
+    }
+  } else {
+    // P2P: tester gate always applies
+    const allowed = await isBotTester(senderId);
+    if (!allowed) {
+      console.log(`[feishu-webhook] dropped p2p message from non-tester ${senderId}`);
       return;
     }
   }
@@ -239,14 +269,15 @@ async function processMessage(body: Record<string, unknown>) {
 
   const ctx: BotContext = {
     trigger: {
-      messageId: message.message_id,
+      messageId:    message.message_id,
       chatId,
       chatType,
       senderId,
       senderName,
-      text: cleanText,
+      text:         cleanText,
       rawText,
-      timestamp: parseInt(message.create_time),
+      timestamp:    parseInt(message.create_time),
+      mentionedBot: botMentioned,
     },
     chat: chatInfo,
     history,

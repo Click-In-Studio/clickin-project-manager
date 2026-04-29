@@ -29,7 +29,9 @@ export const sendCardSkill: SkillModule<SendCardArgs> = {
 
     // Session key is deterministic — same formula as agent/index.ts sessionKey().
     // Embedded in button values so the card-action webhook can resume the session.
-    const sessionKey = `${ctx.trigger.chatId}:${ctx.trigger.senderId}`;
+    const sessionKey = ctx.trigger.chatType === "group"
+      ? `group:${ctx.trigger.chatId}`
+      : `${ctx.trigger.chatId}:${ctx.trigger.senderId}`;
 
     const elements: object[] = [{ tag: "markdown", content }];
 
