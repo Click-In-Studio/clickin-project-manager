@@ -7,6 +7,7 @@ export const config: SkillConfig = {
 event_id 可通过 query_events 获取。`,
   enabled: true,
   mode: "sync" as const,
+  pendingMessage: "正在查询事件详情…",
   params: [
     {
       name: "event_id",

@@ -15,6 +15,9 @@ import { triageGroupMessage, appendGroupContext, getGroupContext } from "./triag
 const MAX_LOOPS        = parseInt(process.env.AGENT_MAX_LOOPS ?? "10", 10);
 const REPLY_TIMEOUT_MS = parseInt(process.env.AGENT_REPLY_TIMEOUT_MS ?? String(5 * 60 * 1000), 10);
 
+// Skills that produce user-visible output themselves or are silent state ops — no pre-notification needed.
+const SILENT_SKILLS = new Set(["reply", "send_card", "set_task_anchor"]);
+
 type CancelToken = { cancelled: boolean };
 type ActiveLoop  = { token: CancelToken; pendingContents: string[] };
 // Tracks in-progress agent loops per session key for supersede/merge logic
@@ -169,8 +172,7 @@ ${anchor.description}
 
 规则：
 - 优先延续该任务
-- 禁止调用查询类技能，除非用户明确要求
-- 若与 memory 冲突，以当前任务为准`;
+- 当用户请求背离该任务时修改征求用户确认并任务锚点`;
 }
 
 async function attachProductionContext(ctx: BotContext): Promise<void> {
@@ -319,6 +321,11 @@ async function runLoop(ctx: BotContext, initialMessages: Message[], cancelToken?
     }
 
     // Sync execution path
+    if (!SILENT_SKILLS.has(response.skill)) {
+      const pendingMsg = skillRegistry[response.skill]?.config.pendingMessage ?? "正在处理，请稍候…";
+      await replySkill.run(ctx, { text: pendingMsg });
+    }
+
     let skillResult: string | undefined;
     let skillError: string | undefined;
     try {

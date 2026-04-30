@@ -7,6 +7,7 @@ export const config: SkillConfig = {
 不需要 production context，直接查询当前用户名下所有 production。`,
   enabled: true,
   mode: "sync" as const,
+  pendingMessage: "正在查询 Call 时间…",
   params: [
     {
       name: "date",

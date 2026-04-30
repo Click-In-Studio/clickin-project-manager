@@ -2,7 +2,6 @@ import type { SkillModule } from "../_types";
 import type { BotContext } from "../../types";
 import { config } from "./config";
 import { getEventDetail } from "../../db-events";
-import { sendMessage } from "../../feishu";
 
 type GetEventDetailArgs = {
   event_id: string;
@@ -46,10 +45,6 @@ export const getEventDetailSkill: SkillModule<GetEventDetailArgs> = {
     if (!/^[0-9a-z_-]{8,}$/i.test(eventId)) {
       return `❌ event_id "${eventId}" 格式无效。请通过 query_events 获取真实的事件 ID 后再调用本技能。`;
     }
-
-    const receiveId     = ctx.trigger.chatType === "p2p" ? ctx.trigger.senderId : ctx.trigger.chatId;
-    const receiveIdType = ctx.trigger.chatType === "p2p" ? "open_id" : "chat_id";
-    await sendMessage(receiveId, receiveIdType, "text", JSON.stringify({ text: "🔍 正在查询事件详情..." }));
 
     const ev = await getEventDetail(eventId, productionId);
     if (!ev) return "❌ 未找到该事件，或该事件不属于当前 production。";

@@ -10,6 +10,7 @@ candidates 由你根据上下文推断，若不确定可先调用 get_production
 必须配合 wait_reply:true 使用（系统会强制执行）。`,
   enabled: true,
   mode: "sync" as const,
+  pendingMessage: "正在搜索相关项目…",
   params: [
     {
       name: "candidates",

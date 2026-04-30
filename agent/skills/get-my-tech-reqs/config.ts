@@ -8,6 +8,7 @@ export const config: SkillConfig = {
 不需要 production context，覆盖所有 production。`,
   enabled: true,
   mode: "sync" as const,
+  pendingMessage: "正在查询技术需求…",
   params: [],
   constrain: (response) => response.wait_reply ? { ...response, wait_reply: false } : response,
 };

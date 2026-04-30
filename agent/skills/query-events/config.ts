@@ -7,6 +7,7 @@ export const config: SkillConfig = {
 返回符合条件的事件摘要（最多 50 条），包含基本信息和舞台监督。`,
   enabled: true,
   mode: "sync" as const,
+  pendingMessage: "正在查询事件列表…",
   params: [
     {
       name: "filters",

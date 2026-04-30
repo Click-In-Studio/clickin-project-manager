@@ -6,6 +6,7 @@ export const config: SkillConfig = {
 不需要 production context，直接查询当前用户名下所有 production。`,
   enabled: true,
   mode: "sync" as const,
+  pendingMessage: "正在查询本周 Call…",
   params: [],
   constrain: (response) => response.wait_reply ? { ...response, wait_reply: false } : response,
 };
