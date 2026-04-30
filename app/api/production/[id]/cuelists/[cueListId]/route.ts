@@ -9,9 +9,9 @@ import { canEditCueList, canManageCueListPermissions } from "@/lib/cue-list-type
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map() };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides };
+  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  return { session, memberRoles, overrides, isArchived };
 }
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
@@ -34,8 +34,9 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles } = await getCtx(req, id);
+  const { session, memberRoles, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const [cueList, permissions] = await Promise.all([
     getCueList(cueListId, id),
@@ -55,8 +56,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
 export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles } = await getCtx(req, id);
+  const { session, memberRoles, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });

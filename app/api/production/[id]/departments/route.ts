@@ -17,11 +17,11 @@ const uid = () => `dept${Date.now().toString(36)}${(++_seq).toString(36)}`;
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map() };
-  const { memberRoles, overrides } = await getProductionMemberContext(
+  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(
     session.openId, session.isAdmin, productionId
   );
-  return { session, memberRoles, overrides };
+  return { session, memberRoles, overrides, isArchived };
 }
 
 /** GET — list all departments and groups for a production. Requires any member. */
@@ -39,8 +39,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /** POST — create a department or group. Requires dept:manage. */
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("dept:manage", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
 

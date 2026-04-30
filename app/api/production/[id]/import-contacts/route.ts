@@ -23,7 +23,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("import_contacts", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }

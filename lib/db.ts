@@ -260,21 +260,26 @@ export async function deleteProduction(id: string): Promise<void> {
   await getPool().query("DELETE FROM production WHERE id = $1", [id]);
 }
 
-export async function listProductions(opts: { openId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string }[]> {
+export async function listProductions(opts: { openId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string; archivedAt: string | null }[]> {
   let res;
   if (opts.isAdmin) {
-    res = await getPool().query<{ id: string; name: string; created_at: Date }>(
-      "SELECT id, name, created_at FROM production ORDER BY created_at DESC"
+    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null }>(
+      "SELECT id, name, created_at, archived_at FROM production ORDER BY created_at DESC"
     );
   } else {
-    res = await getPool().query<{ id: string; name: string; created_at: Date }>(
-      `SELECT p.id, p.name, p.created_at FROM production p
+    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null }>(
+      `SELECT p.id, p.name, p.created_at, p.archived_at FROM production p
        JOIN production_member pm ON pm.production_id = p.id
        WHERE pm.open_id = $1 ORDER BY p.created_at DESC`,
       [opts.openId]
     );
   }
-  return res.rows.map(r => ({ id: r.id, name: r.name, createdAt: r.created_at.toISOString() }));
+  return res.rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    createdAt: r.created_at.toISOString(),
+    archivedAt: r.archived_at?.toISOString() ?? null,
+  }));
 }
 
 // ─── Auth / users ─────────────────────────────────────────────────────────────
@@ -378,20 +383,44 @@ export async function getAllPermissionOverrides(
   return result;
 }
 
-/** Fetch roles + overrides for a single user in one round-trip each (parallel). */
+/** Fetch roles + overrides + archived status for a single user in parallel. */
 export async function getProductionMemberContext(
   openId: string,
   isAdmin: boolean,
   productionId: string,
-): Promise<{ memberRoles: string[] | null; overrides: PermissionOverrides }> {
-  const [memberRoles, overrides] = await Promise.all([
+): Promise<{ memberRoles: string[] | null; overrides: PermissionOverrides; isArchived: boolean }> {
+  const [memberRoles, overrides, archivedRow] = await Promise.all([
     getProductionMemberRoles(openId, productionId),
     getPermissionOverrides(productionId, openId),
+    getPool().query<{ archived_at: Date | null }>(
+      "SELECT archived_at FROM production WHERE id = $1",
+      [productionId],
+    ),
   ]);
-  // Admins with adminBypass perms don't need DB overrides to pass, but we still
-  // fetch them so explicit denies on non-bypass perms are respected.
-  void isAdmin; // kept in signature for symmetry with call sites
-  return { memberRoles, overrides };
+  void isAdmin;
+  return { memberRoles, overrides, isArchived: archivedRow.rows[0]?.archived_at != null };
+}
+
+export async function isProductionArchived(productionId: string): Promise<boolean> {
+  const res = await getPool().query<{ archived_at: Date | null }>(
+    "SELECT archived_at FROM production WHERE id = $1",
+    [productionId],
+  );
+  return res.rows[0]?.archived_at != null;
+}
+
+export async function archiveProduction(id: string): Promise<void> {
+  await getPool().query(
+    "UPDATE production SET archived_at = NOW() WHERE id = $1",
+    [id],
+  );
+}
+
+export async function unarchiveProduction(id: string): Promise<void> {
+  await getPool().query(
+    "UPDATE production SET archived_at = NULL WHERE id = $1",
+    [id],
+  );
 }
 
 export async function listProductionMembers(productionId: string): Promise<UserInfo[]> {

@@ -8,6 +8,8 @@ import {
   getProductionMemberContext, listCueLists, listCueListPermissions,
   countWarningCues,
 } from "@/lib/db";
+import { hasPermission } from "@/lib/roles";
+import ArchiveButton from "@/components/ArchiveButton";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -37,7 +39,7 @@ export default async function ProductionDashboard({
     if (!ok) redirect("/");
   }
 
-  const [name, cueLists, { memberRoles }, callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
+  const [name, cueLists, { memberRoles, overrides, isArchived }, callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
     getProductionName(id),
     listCueLists(id),
     getProductionMemberContext(session.openId, session.isAdmin, id),
@@ -46,6 +48,7 @@ export default async function ProductionDashboard({
     listMyPocAwaitingReqs(session.openId, id),
     listUnreadFollowedReports(session.openId, id),
   ]);
+  const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
   if (!name) redirect("/");
 
   const editableListIds: string[] = [];
@@ -65,8 +68,24 @@ export default async function ProductionDashboard({
           <Link href="/" className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
             ← 返回
           </Link>
-          <h1 className="text-sm font-bold tracking-[0.2em] text-zinc-400 uppercase">{name}</h1>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              {isArchived && (
+                <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-zinc-100 text-zinc-400">
+                  已归档
+                </span>
+              )}
+              <h1 className="text-sm font-bold tracking-[0.2em] text-zinc-400 uppercase">{name}</h1>
+            </div>
+            {canManage && <ArchiveButton productionId={id} isArchived={isArchived} />}
+          </div>
         </div>
+
+        {isArchived && (
+          <div className="mb-6 rounded-xl bg-zinc-50 border border-zinc-200 px-4 py-3 text-xs text-zinc-400 text-center">
+            该项目已归档，仅可查看，不可修改内容。
+          </div>
+        )}
 
         {/* Nav grid */}
         <div className="grid grid-cols-2 gap-3 mb-8">

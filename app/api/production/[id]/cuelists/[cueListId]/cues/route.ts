@@ -10,9 +10,9 @@ const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null };
-  const { memberRoles } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles };
+  if (!session) return { session: null, memberRoles: null, isArchived: false };
+  const { memberRoles, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  return { session, memberRoles, isArchived };
 }
 
 export async function GET(
@@ -31,8 +31,9 @@ export async function POST(
   ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]/cues">
 ) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles } = await getCtx(req, id);
+  const { session, memberRoles, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const [cueList, permissions] = await Promise.all([
     getCueList(cueListId, id),

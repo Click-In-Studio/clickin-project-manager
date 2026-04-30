@@ -6,17 +6,18 @@ import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map() };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides };
+  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  return { session, memberRoles, overrides, isArchived };
 }
 
 const METADATA_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const;
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes/[sceneId]">) {
   const { id, sceneId } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
@@ -51,8 +52,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
 export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes/[sceneId]">) {
   const { id, sceneId } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(_req, id);
+  const { session, memberRoles, overrides, isArchived } = await getCtx(_req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }

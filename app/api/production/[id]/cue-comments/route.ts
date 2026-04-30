@@ -7,11 +7,11 @@ import { sendBotDm } from "@/lib/feishu-bot";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides))
-    return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
-  return { session, deny: null };
+    return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }), isArchived };
+  return { session, deny: null, isArchived };
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -25,8 +25,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
-  const { session, deny } = await guard(req, productionId);
+  const { session, deny, isArchived } = await guard(req, productionId);
   if (!session || deny) return deny!;
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const body = (await req.json()) as {
     cueId?: string;

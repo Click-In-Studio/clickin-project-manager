@@ -12,20 +12,21 @@ type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
 async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(
+  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(
     session.openId, session.isAdmin, productionId
   );
   if (!hasPermission("dept:manage", session.isAdmin, memberRoles, overrides))
-    return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }) };
-  return { session, deny: null };
+    return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };
+  return { session, deny: null, isArchived };
 }
 
 /** PATCH — update name, kind, or displayOrder. */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId, deptId } = await ctx.params;
-  const { deny } = await requireManage(req, productionId);
+  const { deny, isArchived } = await requireManage(req, productionId);
   if (deny) return deny;
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const body = (await req.json()) as {
     name?: string;
@@ -52,8 +53,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 /** DELETE — remove a department or group. */
 export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, deptId } = await ctx.params;
-  const { deny } = await requireManage(req, productionId);
+  const { deny, isArchived } = await requireManage(req, productionId);
   if (deny) return deny;
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const dept = await getEventDepartment(deptId, productionId);
   if (!dept) return Response.json({ error: "部门不存在" }, { status: 404 });

@@ -4,6 +4,7 @@ import {
   listProductionMembers,
   addProductionMember,
   removeProductionMember,
+  isProductionArchived,
 } from "@/lib/db";
 
 function requireAdmin(req: NextRequest) {
@@ -25,6 +26,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const auth = requireAdmin(req);
   if (auth instanceof Response) return auth;
   const { id } = await ctx.params;
+  if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const { openId } = (await req.json()) as { openId?: string };
   if (!openId) return Response.json({ error: "缺少 openId" }, { status: 400 });
   await addProductionMember(id, openId);
@@ -35,6 +37,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const auth = requireAdmin(req);
   if (auth instanceof Response) return auth;
   const { id } = await ctx.params;
+  if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const { openId } = (await req.json()) as { openId?: string };
   if (!openId) return Response.json({ error: "缺少 openId" }, { status: 400 });
   await removeProductionMember(id, openId);
