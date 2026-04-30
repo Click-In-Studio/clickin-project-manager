@@ -193,6 +193,31 @@ export async function dispatchDailyCallsForToday(dryRun = false): Promise<{
 // ─── Daily call dispatch ──────────────────────────────────────────────────────
 
 /**
+ * Called when an event is published after the daily cron has already run (≥12:00 CST).
+ * If the event has call times on D+1 (CST), dispatches the daily call immediately.
+ * Safe to call fire-and-forget; errors are swallowed and re-thrown for the caller to log.
+ */
+export async function maybeSendLatePublishDailyCall(eventId: string): Promise<void> {
+  const nowCst = new Date(Date.now() + 8 * 3_600_000);
+  if (nowCst.getUTCHours() < 12) return; // cron hasn't fired yet today — it will cover this event
+
+  const y = nowCst.getUTCFullYear(), mo = nowCst.getUTCMonth(), d = nowCst.getUTCDate();
+  const windowStart = new Date(Date.UTC(y, mo, d + 1, -8, 0, 0)); // D+1 00:00 CST
+  const windowEnd   = new Date(Date.UTC(y, mo, d + 2, -8, 0, 0)); // D+2 00:00 CST
+
+  const pool = getPool();
+  const res = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM event_call_time WHERE event_id = $1 AND call_at >= $2 AND call_at < $3
+     ) AS exists`,
+    [eventId, windowStart.toISOString(), windowEnd.toISOString()],
+  );
+  if (!res.rows[0].exists) return;
+
+  await dispatchDailyCallForEvent(eventId);
+}
+
+/**
  * Sends a daily call card to every person who has a call time in this event.
  * Skips if no one has a call time.
  */

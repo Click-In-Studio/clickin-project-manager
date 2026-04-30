@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
+import { maybeSendLatePublishDailyCall } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -53,6 +54,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   });
   if (body.status === "completed") {
     await completeAllEventTechReqs(eventId);
+  }
+  if (body.status === "published" && existing.status !== "published") {
+    void maybeSendLatePublishDailyCall(eventId).catch((e: unknown) =>
+      console.error("[notify] late-publish daily call error:", e),
+    );
   }
   if (body.stageManagers !== undefined) {
     await setEventStageManagers(eventId, body.stageManagers);
