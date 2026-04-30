@@ -9,4 +9,5 @@ export const config: SkillConfig = {
   enabled: true,
   mode: "sync" as const,
   params: [],
+  constrain: (response) => response.wait_reply ? { ...response, wait_reply: false } : response,
 };

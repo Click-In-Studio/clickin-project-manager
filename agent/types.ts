@@ -1,3 +1,11 @@
+export type AgentResponse = {
+  skill: string;
+  args: unknown;
+  reason: string;
+  done: boolean;
+  wait_reply?: boolean;
+};
+
 export type TaskAnchor = {
   type: "creative_discussion" | "event_query" | "data_update" | "unknown";
   subject: string;

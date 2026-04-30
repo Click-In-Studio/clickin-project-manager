@@ -15,4 +15,5 @@ export const config: SkillConfig = {
       required: false,
     },
   ],
+  constrain: (response) => response.wait_reply ? { ...response, wait_reply: false } : response,
 };

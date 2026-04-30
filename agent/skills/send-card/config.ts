@@ -21,4 +21,11 @@ export const config: SkillConfig = {
       required: false,
     },
   ],
+  constrain: (response) => {
+    const args = response.args as { buttons?: unknown[] } | null | undefined;
+    const hasButtons = Array.isArray(args?.buttons) && args.buttons.length > 0;
+    if (hasButtons && !response.wait_reply) return { ...response, wait_reply: true };
+    if (!hasButtons && response.wait_reply) return { ...response, wait_reply: false };
+    return response;
+  },
 };

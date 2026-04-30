@@ -1,4 +1,4 @@
-import type { BotContext } from "./types";
+import type { BotContext, AgentResponse } from "./types";
 import { replySkill, buildSkillsPrompt, dispatchSkill, skillRegistry, ANCHOR_EXEMPT_SKILLS } from "./skills/_registry";
 import { chat } from "./llm";
 import type { Message } from "./llm";
@@ -14,14 +14,6 @@ import { triageGroupMessage, appendGroupContext, getGroupContext } from "./triag
 
 const MAX_LOOPS        = parseInt(process.env.AGENT_MAX_LOOPS ?? "10", 10);
 const REPLY_TIMEOUT_MS = parseInt(process.env.AGENT_REPLY_TIMEOUT_MS ?? String(5 * 60 * 1000), 10);
-
-type AgentResponse = {
-  skill: string;
-  args: unknown;
-  reason: string;
-  done: boolean;
-  wait_reply?: boolean;
-};
 
 type CancelToken = { cancelled: boolean };
 type ActiveLoop  = { token: CancelToken; pendingContents: string[] };
@@ -214,34 +206,10 @@ async function attachProductionContext(ctx: BotContext): Promise<void> {
 }
 
 
-// Backend enforcement: fix up LLM response before acting on it.
+// Backend enforcement: delegate to each skill's constrain() if defined.
 function enforceConstraints(response: AgentResponse): AgentResponse {
-  if (response.skill === "send_card") {
-    const args = response.args as { buttons?: unknown[] } | null | undefined;
-    const hasButtons = Array.isArray(args?.buttons) && args.buttons.length > 0;
-    if (hasButtons && !response.wait_reply) {
-      console.warn("[agent] enforcing wait_reply=true for send_card with buttons");
-      return { ...response, wait_reply: true };
-    }
-    if (!hasButtons && response.wait_reply) {
-      console.warn("[agent] enforcing wait_reply=false for send_card without buttons");
-      return { ...response, wait_reply: false };
-    }
-  }
-  if (response.skill === "list_skills" && response.wait_reply) {
-    console.warn("[agent] enforcing wait_reply=false for list_skills");
-    return { ...response, wait_reply: false };
-  }
-  if (response.skill === "focus_production" && !response.wait_reply) {
-    console.warn("[agent] enforcing wait_reply=true for focus_production");
-    return { ...response, wait_reply: true };
-  }
-  const queryOnlySkills = new Set(["query_events", "get_event_detail", "get_daily_call", "get_weekly_call", "get_my_tech_reqs"]);
-  if (queryOnlySkills.has(response.skill) && response.wait_reply) {
-    console.warn(`[agent] enforcing wait_reply=false for ${response.skill}`);
-    return { ...response, wait_reply: false };
-  }
-  return response;
+  const constrain = skillRegistry[response.skill]?.config.constrain;
+  return constrain ? constrain(response) : response;
 }
 
 // Handles an async skill with wait_reply:true.
