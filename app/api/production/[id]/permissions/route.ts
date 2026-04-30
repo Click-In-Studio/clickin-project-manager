@@ -12,12 +12,12 @@ type Ctx = { params: Promise<{ id: string }> };
 
 async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
-    return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }) };
+    return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };
   }
-  return { session, deny: null };
+  return { session, deny: null, isArchived };
 }
 
 /** GET — returns all members + all their overrides for the management UI. */
@@ -37,8 +37,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /** PATCH — set or clear a single override for one member. */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
-  const { deny } = await requireManage(req, productionId);
+  const { deny, isArchived } = await requireManage(req, productionId);
   if (deny) return deny;
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const { openId, permission, granted } = (await req.json()) as {
     openId?: string;

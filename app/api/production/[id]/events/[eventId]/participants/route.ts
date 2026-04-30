@@ -29,7 +29,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("event:assign_people", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
 

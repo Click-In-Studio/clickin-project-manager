@@ -10,7 +10,7 @@ import type { MyCallTimeEntry, MyPendingTechReqEntry, MyFollowedEventEntry, Unre
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
 function todayCSTStr(): string { return tzTodayCSTStr(); }
 
-type Production = { id: string; name: string; createdAt: string };
+type Production = { id: string; name: string; createdAt: string; archivedAt: string | null };
 
 type Props = {
   productions: Production[];
@@ -104,9 +104,14 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
                 <li key={p.id} className="group flex items-center gap-1 rounded-lg hover:bg-zinc-50">
                   <button
                     onClick={() => router.push(`/production/${p.id}`)}
-                    className="flex-1 px-3 py-2.5 text-left text-sm text-zinc-700"
+                    className="flex-1 px-3 py-2.5 text-left text-sm flex items-center gap-2"
                   >
-                    {p.name}
+                    <span className={p.archivedAt ? "text-zinc-400" : "text-zinc-700"}>{p.name}</span>
+                    {p.archivedAt && (
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-zinc-100 text-zinc-400">
+                        已归档
+                      </span>
+                    )}
                   </button>
                   {isAdmin && (
                     <button

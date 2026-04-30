@@ -7,22 +7,23 @@ import { broadcastCueUpdate } from "@/lib/server-cache";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null };
-  const { memberRoles } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles };
+  if (!session) return { session: null, memberRoles: null, isArchived: false };
+  const { memberRoles, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  return { session, memberRoles, isArchived };
 }
 
 async function checkEdit(req: NextRequest, id: string, cueListId: string) {
-  const { session, memberRoles } = await getCtx(req, id);
-  if (!session) return { ok: false, session: null, memberRoles: null, status: 401 as const };
+  const { session, memberRoles, isArchived } = await getCtx(req, id);
+  if (!session) return { ok: false, session: null, memberRoles: null, isArchived: false, status: 401 as const };
+  if (isArchived) return { ok: false, session, memberRoles, isArchived, status: 403 as const };
   const [cueList, permissions] = await Promise.all([
     getCueList(cueListId, id),
     listCueListPermissions(cueListId),
   ]);
-  if (!cueList) return { ok: false, session, memberRoles, status: 404 as const };
+  if (!cueList) return { ok: false, session, memberRoles, isArchived, status: 404 as const };
   if (!canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions))
-    return { ok: false, session, memberRoles, status: 403 as const };
-  return { ok: true, session, memberRoles, status: 200 as const };
+    return { ok: false, session, memberRoles, isArchived, status: 403 as const };
+  return { ok: true, session, memberRoles, isArchived, status: 200 as const };
 }
 
 export async function PATCH(
