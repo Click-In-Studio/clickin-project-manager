@@ -15,4 +15,5 @@ event_id 可通过 query_events 获取。`,
       required: true,
     },
   ],
+  constrain: (response) => response.wait_reply ? { ...response, wait_reply: false } : response,
 };

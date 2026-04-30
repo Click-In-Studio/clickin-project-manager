@@ -25,4 +25,5 @@ eventType 枚举：rehearsal（排练）| performance（演出）| meeting（会
       required: true,
     },
   ],
+  constrain: (response) => response.wait_reply ? { ...response, wait_reply: false } : response,
 };

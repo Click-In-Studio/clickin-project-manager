@@ -18,4 +18,5 @@ candidates 由你根据上下文推断，若不确定可先调用 get_production
       required: true,
     },
   ],
+  constrain: (response) => response.wait_reply ? response : { ...response, wait_reply: true },
 };

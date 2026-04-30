@@ -1,4 +1,4 @@
-import type { BotContext } from "../types";
+import type { BotContext, AgentResponse } from "../types";
 
 export type SkillParamDef = {
   name: string;
@@ -20,6 +20,9 @@ export type SkillConfig = {
   // Message sent to the user automatically while an async skill is executing.
   // The backend sends this before saving the session; the LLM should NOT reply itself.
   pendingMessage?: string;
+  // Override / coerce fields in the LLM's JSON output before acting on it.
+  // Return the response unchanged if no coercion is needed.
+  constrain?: (response: AgentResponse) => AgentResponse;
 };
 
 // run() may return a string result that gets injected back into the LLM context.
