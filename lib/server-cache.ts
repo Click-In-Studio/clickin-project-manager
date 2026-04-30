@@ -1,4 +1,5 @@
-import type { Block, Character, Scene, ScriptState } from "./script-types";
+import type { Block, Character, Scene, ScriptState, ScriptConfig } from "./script-types";
+import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { BlockOp, CharOp, SceneOp, ScriptPatch } from "./script-ops";
 import { flushToDB } from "./db";
 import type { DbBlock } from "./db";
@@ -46,6 +47,7 @@ type FeishuSync = {
 
 type CacheEntry = {
   scriptId: string;
+  config: ScriptConfig;
   blocks: ServerBlock[];       // sorted by orderKey
   characters: Character[];
   scenes: Scene[];
@@ -236,6 +238,7 @@ export function getOrCreate(scriptId: string): CacheEntry {
   if (!c.has(scriptId)) {
     c.set(scriptId, {
       scriptId,
+      config: { ...DEFAULT_SCRIPT_CONFIG },
       blocks: [],
       characters: [],
       scenes: [],
@@ -288,6 +291,7 @@ export function loadFromFeishu(
 
   const entry: CacheEntry = {
     scriptId,
+    config: { ...(state.config ?? DEFAULT_SCRIPT_CONFIG) },
     blocks,
     characters: [...state.characters],
     scenes: [...state.scenes],
@@ -339,6 +343,7 @@ export function loadFromDB(
 
   c.set(productionId, {
     scriptId: productionId,
+    config: { ...state.config },
     blocks,
     characters: [...state.characters],
     scenes: [...state.scenes],
@@ -353,10 +358,18 @@ export function loadFromDB(
 export function getState(scriptId: string): ScriptState {
   const entry = getOrCreate(scriptId);
   return {
+    config: { ...entry.config },
     blocks: entry.blocks.map(({ orderKey: _ok, lexKey: _lk, ...b }) => b),
     characters: [...entry.characters],
     scenes: [...entry.scenes],
   };
+}
+
+/** Update config in cache and broadcast to all connected clients. */
+export function applyConfig(scriptId: string, config: ScriptConfig): void {
+  const entry = getOrCreate(scriptId);
+  entry.config = { ...config };
+  broadcast(scriptId, `event: config\ndata: ${JSON.stringify(config)}\n\n`);
 }
 
 /**

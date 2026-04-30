@@ -268,7 +268,7 @@ export function toScriptState(
     };
   });
 
-  return { blocks, characters, scenes };
+  return { blocks, characters, scenes, config: { stageDelimOpen: "（", stageDelimClose: "）", pageLayout: "a4" } };
 }
 
 /**

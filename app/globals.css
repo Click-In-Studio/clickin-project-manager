@@ -1,9 +1,28 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* ── Script fonts: self-hosted Source Han Serif CN ───────────────────────── */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/SourceHanSerifCN-Medium.woff2') format('woff2'),
+       url('/fonts/SourceHanSerifCN-Medium.otf')  format('opentype');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/SourceHanSerifCN-Bold.woff2') format('woff2'),
+       url('/fonts/SourceHanSerifCN-Bold.otf')  format('opentype');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
 }
 
 @theme inline {
@@ -58,9 +77,14 @@ body {
   color: #a1a1aa;
 }
 
-/* 楷体 font stack — Windows: KaiTi, macOS: STKaiti / Kaiti SC */
+/* Script font utility — unified Source Han Serif for all script content */
+.font-script {
+  font-family: var(--font-script);
+}
+
+/* Legacy alias kept for existing usages */
 .font-kaiti {
-  font-family: 'KaiTi', 'STKaiti', 'Kaiti SC', 'AR PL UKai CN', serif;
+  font-family: var(--font-script);
 }
 
 @media print {

@@ -12,8 +12,23 @@ export type Block = {
   rehearsalMark: string | null;
 };
 
+export type PageLayout = "a4" | "letter" | "a3-2col" | "tablet-2col";
+
+export type ScriptConfig = {
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  pageLayout: PageLayout;
+};
+
+export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
+  stageDelimOpen: "（",
+  stageDelimClose: "）",
+  pageLayout: "a4",
+};
+
 export type ScriptState = {
   blocks: Block[];
   characters: Character[];
   scenes: Scene[];
+  config: ScriptConfig;
 };

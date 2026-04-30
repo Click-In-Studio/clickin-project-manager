@@ -4,7 +4,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import {
-  KeyboardEvent,
+  type KeyboardEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -14,11 +14,35 @@ import {
 } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Block, BlockType, Character, Scene, ScriptState } from "@/lib/script-types";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout } from "@/lib/script-types";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState } from "@/lib/script-ops";
+import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-page";
+import type { PageConfig } from "@/lib/script-page";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
+
+const Chevron = () => (
+  <svg className="h-3 w-3 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden>
+    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+// ── Display settings (cookie-persisted) ───────────────────────────────────────
+type DisplaySettings = { pageBreaks: boolean; lineNumbers: boolean; rehearsalMarks: boolean };
+const DEFAULT_DISPLAY: DisplaySettings = { pageBreaks: true, lineNumbers: true, rehearsalMarks: true };
+const DISPLAY_COOKIE = "script_display";
+function readDisplayCookie(): DisplaySettings {
+  try {
+    const m = document.cookie.match(/(?:^|;\s*)script_display=([^;]*)/);
+    if (m) return { ...DEFAULT_DISPLAY, ...JSON.parse(decodeURIComponent(m[1])) };
+  } catch { /* ignore */ }
+  return DEFAULT_DISPLAY;
+}
+function writeDisplayCookie(s: DisplaySettings) {
+  document.cookie = `${DISPLAY_COOKIE}=${encodeURIComponent(JSON.stringify(s))}; path=/; max-age=31536000; SameSite=Lax`;
+}
 
 const makeBlock = (content = "", characterIds: string[] = [], type: BlockType = "dialogue"): Block => ({
   id: uid(),
@@ -205,13 +229,66 @@ function mdToHtml(md: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+  // Collapse 3+ consecutive * or _ to exactly 2, so nested markers from old
+  // double-bold bugs render as a single level instead of mis-parsing.
+  s = s.replace(/\*{3,}/g, "**").replace(/_{3,}/g, "__");
   s = s.replace(/\*\*([\s\S]+?)\*\*/g, (_, inner) => `<b>${inner}</b>`);
   s = s.replace(/__([\s\S]+?)__/g, (_, inner) => `<u>${inner}</u>`);
   s = s.replace(/\n/g, "<br>");
   return s;
 }
 
-function applyInlineStageStyling(div: HTMLDivElement) {
+// Properly toggle a bold/underline tag on the given range:
+// - If the common ancestor of the range is inside ONE existing tag element → unwrap it.
+// - Otherwise → flatten any nested tags inside the range, wrap the whole range,
+//   and restore the selection over the new wrapper so the next toggle works immediately.
+function toggleInlineTag(range: Range, tag: "b" | "u"): void {
+  // commonAncestorContainer is inside the <b>/<u> whenever the selection is fully
+  // within it — even when start/end containers land at the element boundary in the parent.
+  const ancestor = range.commonAncestorContainer;
+  const ancestorEl = ancestor.nodeType === Node.TEXT_NODE
+    ? ancestor.parentElement
+    : (ancestor as HTMLElement);
+  const existingTag = ancestorEl?.closest(tag) ?? null;
+  const sel = window.getSelection();
+
+  // Helper: restore selection spanning first..last nodes.
+  // Anchors to child nodes (text nodes or elements), NOT to the wrapper element,
+  // so the range stays valid even if the wrapper is later removed by another toggle.
+  const restoreSelection = (first: ChildNode, last: ChildNode) => {
+    if (!sel) return;
+    try {
+      const r = document.createRange();
+      r.setStart(first, 0);
+      r.setEnd(
+        last,
+        last.nodeType === Node.TEXT_NODE
+          ? (last.textContent?.length ?? 0)
+          : (last as Element).childNodes.length
+      );
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch { /* ignore stale-range errors */ }
+  };
+
+  if (existingTag) {
+    const first = existingTag.firstChild;
+    const last  = existingTag.lastChild;
+    existingTag.replaceWith(...Array.from(existingTag.childNodes));
+    if (first && last) restoreSelection(first, last);
+    return;
+  }
+
+  const frag = range.extractContents();
+  frag.querySelectorAll(tag).forEach(el => el.replaceWith(...Array.from(el.childNodes)));
+  const wrapper = document.createElement(tag);
+  wrapper.appendChild(frag);
+  range.insertNode(wrapper);
+  if (wrapper.firstChild && wrapper.lastChild)
+    restoreSelection(wrapper.firstChild, wrapper.lastChild);
+}
+
+function applyInlineStageStyling(div: HTMLDivElement, delimOpen = "（", delimClose = "）") {
   const sel = window.getSelection();
   let savedOffset: number | null = null;
   if (sel && sel.rangeCount && sel.isCollapsed && div.contains(sel.anchorNode)) {
@@ -221,12 +298,13 @@ function applyInlineStageStyling(div: HTMLDivElement) {
   const isStageSpan = (el: Element) =>
     el.hasAttribute("data-stage-inline");
 
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const validStageText = (text: string) =>
     ((text.startsWith("(") && text.endsWith(")")) ||
-     (text.startsWith("（") && text.endsWith("）"))) &&
+     (text.startsWith(delimOpen) && text.endsWith(delimClose))) &&
     text.length >= 2;
 
-  // Remove spans whose content no longer forms a valid () or （） pair
+  // Remove spans whose content no longer forms a valid pair
   div.querySelectorAll("span[data-stage-inline]").forEach((span) => {
     if (!validStageText(span.textContent ?? "")) {
       const parent = span.parentNode!;
@@ -237,7 +315,7 @@ function applyInlineStageStyling(div: HTMLDivElement) {
 
   div.normalize();
 
-  // Wrap new (...) / （...） patterns in text nodes outside existing spans
+  // Wrap new delimiter patterns in text nodes outside existing spans
   const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
   const textNodes: Text[] = [];
   let node;
@@ -251,7 +329,12 @@ function applyInlineStageStyling(div: HTMLDivElement) {
     if (!inside) textNodes.push(node as Text);
   }
 
-  const pairRegex = /\([^()（）\n]*\)|（[^()（）\n]*）/g;
+  const escapedOpen = esc(delimOpen);
+  const escapedClose = esc(delimClose);
+  const innerExclude = delimOpen === "（" ? "[^()（）\n]" : `[^${esc("()")}${esc(delimOpen + delimClose)}\n]`;
+  const pairRegex = new RegExp(
+    `\\([^()（）\n]*\\)|${escapedOpen}${innerExclude}*${escapedClose}`, "g"
+  );
 
   for (const textNode of textNodes) {
     const text = textNode.textContent ?? "";
@@ -445,31 +528,35 @@ function ScenePanel({
   onAdd,
   onUpdate,
   onRemove,
+  open,
+  onOpenChange,
 }: {
   scenes: Scene[];
   productionId: string;
   onAdd: (parentId?: string) => void;
   onUpdate: (id: string, number: string, name: string) => void;
   onRemove: (id: string) => void;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onOpenChange(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [open, onOpenChange]);
 
   return (
     <div ref={wrapRef} className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+        onClick={() => onOpenChange(!open)}
+        className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
       >
-        章节 ▾
+        章节 <Chevron />
       </button>
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
@@ -739,25 +826,28 @@ function CharacterPanel({
   onAdd,
   onRemove,
   onRename,
+  open,
+  onOpenChange,
 }: {
   characters: Character[];
   productionId: string;
   onAdd: (name: string) => void;
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!panelRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!panelRef.current?.contains(e.target as Node)) onOpenChange(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  }, [open, onOpenChange]);
 
   const submit = () => {
     const name = draft.trim();
@@ -769,15 +859,14 @@ function CharacterPanel({
   return (
     <div ref={panelRef} className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-medium transition-colors ${
+        onClick={() => onOpenChange(!open)}
+        className={`flex items-center gap-0.5 rounded px-2 py-1 text-sm transition-colors ${
           open
             ? "bg-zinc-100 text-zinc-800"
-            : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
+            : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
         }`}
       >
-        角色
-        <span className="text-xs text-zinc-300">▾</span>
+        角色 <Chevron />
       </button>
 
       {open && (
@@ -1070,25 +1159,7 @@ function BlockCharacterSelector({
 
 // ─── Print ────────────────────────────────────────────────────────────────────
 
-type PageConfig = {
-  width: number;
-  height: number;
-  marginX: number;
-  marginTop: number;
-  marginBottom: number;
-  headerHeight: number;
-  footerHeight: number;
-};
-
-const DEFAULT_PAGE_CONFIG: PageConfig = {
-  width: 794,    // A4 at 96 dpi (210 mm)
-  height: 1123,  // A4 at 96 dpi (297 mm)
-  marginX: 75,
-  marginTop: 90,
-  marginBottom: 90,
-  headerHeight: 28,
-  footerHeight: 28,
-};
+// PageConfig and DEFAULT_PAGE_CONFIG imported from @/lib/script-page
 
 type PrintItem =
   | { kind: "sceneHeader"; scene: Scene }
@@ -1283,12 +1354,12 @@ function PrintPreview({
           </div>
         )}
         <div
-          className={`w-full break-words text-sm leading-7 ${
+          className={`w-full break-words text-sm leading-7 font-script ${
             isStage
               ? "text-center italic text-zinc-500"
               : block.lyric
               ? "text-center uppercase text-zinc-800"
-              : "text-left font-kaiti text-zinc-800"
+              : "text-left text-zinc-800"
           }`}
           dangerouslySetInnerHTML={{ __html: mdToHtml(block.content) || "　" }}
         />
@@ -1503,6 +1574,10 @@ function mergeServerBlocks(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function stripHtmlText(html: string): string {
+  return html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
 function _sameCharacters(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const s = new Set(a);
@@ -1537,6 +1612,11 @@ function ScriptBlock({
   commentCount,
   onCommentClick,
   index = 0,
+  lineNum,
+  isSearchHighlight,
+  showRehearsalMark = true,
+  stageDelimOpen = "（",
+  stageDelimClose = "）",
   canEditText = false,
   canEditMetadata = false,
   canEditRehearsalMark = false,
@@ -1566,6 +1646,11 @@ function ScriptBlock({
   commentCount: number;
   onCommentClick: () => void;
   index?: number;
+  lineNum?: number;
+  isSearchHighlight?: "match" | "focused";
+  showRehearsalMark?: boolean;
+  stageDelimOpen?: string;
+  stageDelimClose?: string;
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
@@ -1590,7 +1675,7 @@ function ScriptBlock({
     if (block.content !== localContentRef.current) {
       localContentRef.current = block.content;
       div.innerHTML = mdToHtml(block.content);
-      if (block.type !== "stage") applyInlineStageStyling(div);
+      if (block.type !== "stage") applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
     }
   }, [block.content, block.type]);
 
@@ -1605,17 +1690,7 @@ function ScriptBlock({
   const applyInlineFormat = (tag: "b" | "u") => {
     const sel = window.getSelection();
     if (!sel?.rangeCount || sel.isCollapsed) return;
-    const range = sel.getRangeAt(0);
-    const anchor = range.commonAncestorContainer;
-    const el = anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : (anchor as HTMLElement);
-    const existing = el?.closest(tag);
-    if (existing) {
-      existing.replaceWith(...Array.from(existing.childNodes));
-    } else {
-      const wrapper = document.createElement(tag);
-      try { range.surroundContents(wrapper); }
-      catch { wrapper.appendChild(range.extractContents()); range.insertNode(wrapper); }
-    }
+    toggleInlineTag(sel.getRangeAt(0), tag);
     syncContent();
   };
 
@@ -1623,7 +1698,7 @@ function ScriptBlock({
     if (composingRef.current) return;
     const div = divRef.current;
     if (!div) return;
-    if (block.type !== "stage") applyInlineStageStyling(div);
+    if (block.type !== "stage") applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
     syncContent();
   };
 
@@ -1701,12 +1776,23 @@ function ScriptBlock({
 
   const firstEditor = presenceEditors[0];
 
+  const searchRingClass =
+    isSearchHighlight === "focused" ? "ring-2 ring-inset ring-amber-400" :
+    isSearchHighlight === "match"   ? "ring-1 ring-inset ring-amber-200" : "";
+
   return (
     <div
-      className={`group relative px-6 py-0 text-center transition-colors ${
+      className={`group relative px-6 py-0 text-center transition-colors ${searchRingClass} ${
         isFocused ? "bg-zinc-100/70" : (index ?? 0) % 2 === 1 ? "bg-zinc-50/60" : ""
       }`}
     >
+      {/* Line number — shown in left padding, subtle */}
+      {lineNum !== undefined && (
+        <span className="pointer-events-none absolute left-1 top-[3px] select-none tabular-nums text-[9px] leading-none text-zinc-400 group-hover:text-zinc-600 transition-colors">
+          {lineNum}
+        </span>
+      )}
+
       {/* Colored left bar showing a remote editor is active in this block */}
       {firstEditor && (
         <div
@@ -1729,7 +1815,7 @@ function ScriptBlock({
 
       {/* Rehearsal mark — top left, visible at the start of a new mark section; hover to edit */}
       {canEditRehearsalMark && (
-        <div className={`absolute left-2 top-1 transition-opacity ${isMarkStart && block.rehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+        <div className={`absolute left-2 top-1 transition-opacity ${isMarkStart && block.rehearsalMark && showRehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
           <RehearsalMarkInput
             mark={block.rehearsalMark}
             onChange={onMarkChange}
@@ -1829,14 +1915,14 @@ function ScriptBlock({
             range.insertNode(node);
             sel.collapseToEnd();
           }
-          if (block.type !== "stage") applyInlineStageStyling(divRef.current!);
+          if (block.type !== "stage") applyInlineStageStyling(divRef.current!, stageDelimOpen, stageDelimClose);
           syncContent();
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
-        className={`w-full min-h-[1.75rem] outline-none text-base leading-7 break-words ${
+        className={`w-full min-h-[1.75rem] outline-none text-base leading-7 break-words font-script ${
           isStage ? "italic text-zinc-400 text-center" :
           block.lyric ? "text-zinc-700 text-center uppercase" :
-          "text-zinc-700 text-left font-kaiti"
+          "text-zinc-700 text-left"
         }`}
       />
     </div>
@@ -2213,6 +2299,51 @@ export default function ScriptEditor({
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
 
+  // ── Script config (page layout, stage delimiters) ─────────────────────────
+  const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
+  const [aboutOpen, setAboutOpen] = useState(false);
+
+  const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
+    const next = { ...scriptConfig, ...patch };
+    setScriptConfig(next);
+    await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    });
+  }, [scriptConfig, effectiveScriptId]);
+
+  // ── Page map (computed client-side, deterministic) ──────────────────────────
+  const pageMap = useMemo(() => computePageMap(blocks, scriptConfig.pageLayout), [blocks, scriptConfig.pageLayout]);
+
+  // ── Search ──────────────────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchExact, setSearchExact] = useState(false);
+  const [searchCurrentPage, setSearchCurrentPage] = useState(false);
+  const [searchIdx, setSearchIdx] = useState(0);
+
+  // ── Jump (line / page) ──────────────────────────────────────────────────────
+  const [jumpTarget, setJumpTarget] = useState<"line" | "page" | null>(null);
+  const [jumpValue, setJumpValue] = useState("");
+
+  // ── Toolbar dropdowns — single state enforces mutual exclusion ───────────────
+  type OpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | null;
+  const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const toggleMenu = useCallback((name: Exclude<OpenMenu, null>) =>
+    setOpenMenu(prev => prev === name ? null : name), []);
+
+  // ── Display settings (cookie-persisted) ──────────────────────────────────────
+  const [display, setDisplay] = useState<DisplaySettings>(DEFAULT_DISPLAY);
+  useEffect(() => { setDisplay(readDisplayCookie()); }, []);
+  const toggleDisplay = useCallback((key: keyof DisplaySettings) => {
+    setDisplay(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      writeDisplayCookie(next);
+      return next;
+    });
+  }, []);
+
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
   const pendingCharOpen = useRef<string | null>(null);
@@ -2288,6 +2419,7 @@ export default function ScriptEditor({
           setScenes(state.scenes);
           syncedStateRef.current = state;
         }
+        if (state.config) setScriptConfig({ ...DEFAULT_SCRIPT_CONFIG, ...state.config });
         setLoadState("ready");
       })
       .catch(() => { setLoadError("网络错误，请稍后重试"); setLoadState("error"); });
@@ -2343,6 +2475,11 @@ export default function ScriptEditor({
       setPresenceMap(new Map(list.map(p => [p.clientId, p])));
     });
 
+    es.addEventListener("config", (e: MessageEvent) => {
+      const cfg = JSON.parse(e.data as string) as ScriptConfig;
+      setScriptConfig(prev => ({ ...DEFAULT_SCRIPT_CONFIG, ...prev, ...cfg }));
+    });
+
     return () => {
       es.close();
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -2396,13 +2533,16 @@ export default function ScriptEditor({
   // Debounced sync: fires 1500 ms after the last state change.
   const charactersRef = useRef(characters);
   const scenesRef = useRef(scenes);
+  const scriptConfigRef = useRef(scriptConfig);
   useEffect(() => { charactersRef.current = characters; }, [characters]);
   useEffect(() => { scenesRef.current = scenes; }, [scenes]);
+  useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
 
   useEffect(() => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
       const curr: ScriptState = {
+        config: scriptConfigRef.current,
         blocks: blocksRef.current,
         characters: charactersRef.current,
         scenes: scenesRef.current,
@@ -2480,6 +2620,33 @@ export default function ScriptEditor({
     setCanRedo(false);
   }, []);
 
+  // Apply inline format (bold/underline) to the current window selection.
+  // Called from toolbar buttons via onMouseDown+preventDefault, which keeps
+  // the selection alive even after the contenteditable loses focus.
+  const applyFormatToFocused = useCallback((tag: "b" | "u") => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    // Walk up to the contenteditable container
+    let node: Node | null = range.commonAncestorContainer;
+    let editableEl: HTMLElement | null = null;
+    while (node) {
+      if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).isContentEditable) {
+        editableEl = node as HTMLElement;
+        break;
+      }
+      node = node.parentNode;
+    }
+    if (!editableEl) return;
+    // End typing session so startTypingSession (called by updateBlock via input event)
+    // saves a fresh pre-format snapshot rather than lumping with active typing.
+    isTypingSession.current = false;
+    toggleInlineTag(range, tag);
+    // Re-focus then fire input so ScriptBlock's handleInput → syncContent runs
+    editableEl.focus();
+    editableEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }, []);
+
   const startTypingSession = useCallback(() => {
     if (!isTypingSession.current) {
       saveSnapshot();
@@ -2519,10 +2686,53 @@ export default function ScriptEditor({
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (e.key === "z" && e.shiftKey) { e.preventDefault(); redo(); }
+      else if (e.key === "f" && !e.shiftKey) { e.preventDefault(); setSearchOpen(true); }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [undo, redo]);
+
+  // ── Search matches (computed from blocks + pageMap) ─────────────────────────
+  const currentPageNum = focusedId ? pageMap[focusedId] : undefined;
+
+  const searchMatches = useMemo<number[]>(() => {
+    if (!searchOpen || !searchQuery.trim()) return [];
+    const q = searchExact ? searchQuery : searchQuery.toLowerCase();
+    return blocks.reduce<number[]>((acc, block, idx) => {
+      const text = stripHtmlText(block.content);
+      const haystack = searchExact ? text : text.toLowerCase();
+      if (!haystack.includes(q)) return acc;
+      if (searchCurrentPage && currentPageNum !== undefined && pageMap[block.id] !== currentPageNum) return acc;
+      acc.push(idx);
+      return acc;
+    }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen, searchQuery, searchExact, searchCurrentPage, blocks, pageMap, currentPageNum]);
+
+  // Reset idx when matches change
+  useEffect(() => { setSearchIdx(0); }, [searchMatches.length, searchQuery]);
+
+  // Scroll to focused search result
+  useEffect(() => {
+    const matchIdx = searchMatches[searchIdx];
+    if (matchIdx === undefined) return;
+    const blockId = blocks[matchIdx]?.id;
+    if (blockId) document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [searchIdx, searchMatches, blocks]);
+
+  // Jump helpers
+  const jumpToLine = useCallback((n: number) => {
+    const idx = Math.max(0, Math.min(n - 1, blocks.length - 1));
+    const blockId = blocks[idx]?.id;
+    if (blockId) document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [blocks]);
+
+  const jumpToPage = useCallback((n: number) => {
+    const idx = blocks.findIndex(b => pageMap[b.id] === n);
+    if (idx < 0) return;
+    const blockId = blocks[idx].id;
+    document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [blocks, pageMap]);
 
   const toggleBlockType = useCallback((id: string) => {
     saveSnapshot();
@@ -2635,7 +2845,14 @@ export default function ScriptEditor({
     saveSnapshot();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
-      if (idx === 0) return prev;
+      if (idx === 0) {
+        // Delete empty first block if there are more blocks after it
+        if (prev.length > 1 && !prev[0].content.trim()) {
+          pendingFocus.current = { id: prev[1].id, atEnd: false };
+          return prev.slice(1);
+        }
+        return prev;
+      }
       const p = prev[idx - 1];
       const c = prev[idx];
       const merged = { ...p, content: p.content + c.content };
@@ -2772,34 +2989,69 @@ export default function ScriptEditor({
             ← 返回
           </Link>
           <div className="h-4 w-px shrink-0 bg-zinc-100" />
-          <span className="shrink-0 text-xs font-bold tracking-widest text-zinc-300 uppercase">
-            剧本
-          </span>
+
+          {/* 剧本▼ — 关于 + 元数据设置 */}
+          <div className="relative">
+            <button
+              onClick={() => toggleMenu("script")}
+              className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+            >
+              剧本 <Chevron />
+            </button>
+            {openMenu === "script" && (
+              <div
+                className="absolute left-0 top-full z-30 mt-1 w-52 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                onMouseLeave={() => setOpenMenu(null)}
+              >
+                <button
+                  onClick={() => { setAboutOpen(true); setOpenMenu(null); }}
+                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  关于
+                </button>
+                <div className="my-1 border-t border-zinc-50" />
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">段内舞台提示</p>
+                {(
+                  [
+                    ["（", "）", "（台词内）"],
+                    ["【", "】", "【台词内】"],
+                  ] as [string, string, string][]
+                ).map(([open, close, label]) => (
+                  <button
+                    key={open}
+                    onClick={() => { saveScriptConfig({ stageDelimOpen: open, stageDelimClose: close }); setOpenMenu(null); }}
+                    className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${scriptConfig.stageDelimOpen === open ? "font-medium text-zinc-800" : "text-zinc-500"}`}
+                  >
+                    <span>{label}</span>
+                    {scriptConfig.stageDelimOpen === open && <span className="text-[10px] text-zinc-400">✓</span>}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-zinc-50" />
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">页面类型</p>
+                {(
+                  [
+                    ["a4",         "A4"],
+                    ["letter",     "Letter"],
+                    ["a3-2col",    "A3 横排双排"],
+                    ["tablet-2col","Tablet 横排双排"],
+                  ] as [import("@/lib/script-types").PageLayout, string][]
+                ).map(([layout, label]) => (
+                  <button
+                    key={layout}
+                    onClick={() => { saveScriptConfig({ pageLayout: layout }); setOpenMenu(null); }}
+                    className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${scriptConfig.pageLayout === layout ? "font-medium text-zinc-800" : "text-zinc-500"}`}
+                  >
+                    <span>{label}</span>
+                    {scriptConfig.pageLayout === layout && <span className="text-[10px] text-zinc-400">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {!canEdit && (
             <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
               只读
             </span>
-          )}
-          {canEdit && (
-            <>
-              <div className="h-4 w-px shrink-0 bg-zinc-100" />
-              <button
-                onClick={undo}
-                disabled={!canUndo}
-                title="撤销 ⌘Z"
-                className={`rounded px-2 py-1 text-sm transition-colors ${canUndo ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800" : "cursor-not-allowed text-zinc-300"}`}
-              >
-                撤销
-              </button>
-              <button
-                onClick={redo}
-                disabled={!canRedo}
-                title="重做 ⌘⇧Z"
-                className={`rounded px-2 py-1 text-sm transition-colors ${canRedo ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800" : "cursor-not-allowed text-zinc-300"}`}
-              >
-                重做
-              </button>
-            </>
           )}
           {canEditMetadata && (
             <>
@@ -2810,6 +3062,8 @@ export default function ScriptEditor({
                 onAdd={(parentId) => addScene(parentId)}
                 onUpdate={updateScene}
                 onRemove={removeScene}
+                open={openMenu === "scene"}
+                onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
               />
               <div className="h-4 w-px shrink-0 bg-zinc-100" />
               <CharacterPanel
@@ -2818,9 +3072,128 @@ export default function ScriptEditor({
                 onAdd={addChar}
                 onRemove={removeChar}
                 onRename={renameChar}
+                open={openMenu === "char"}
+                onOpenChange={(v) => setOpenMenu(v ? "char" : null)}
               />
             </>
           )}
+          <div className="h-4 w-px shrink-0 bg-zinc-100" />
+
+          {/* 编辑▼ — undo/redo + 格式 + 搜索/跳转 */}
+          <div className="relative">
+            <button
+              onClick={() => toggleMenu("edit")}
+              className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+            >
+              编辑 <Chevron />
+            </button>
+            {openMenu === "edit" && (
+              <div
+                className="absolute left-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                onMouseLeave={() => setOpenMenu(null)}
+              >
+                {canEdit && (
+                  <>
+                    <button
+                      onClick={() => { undo(); setOpenMenu(null); }}
+                      disabled={!canUndo}
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canUndo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
+                    >
+                      <span>撤销</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘Z</kbd>
+                    </button>
+                    <button
+                      onClick={() => { redo(); setOpenMenu(null); }}
+                      disabled={!canRedo}
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canRedo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
+                    >
+                      <span>重做</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘⇧Z</kbd>
+                    </button>
+                    <div className="my-1 border-t border-zinc-50" />
+                    <button
+                      onMouseDown={e => { e.preventDefault(); applyFormatToFocused("b"); }}
+                      onClick={() => setOpenMenu(null)}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span className="font-bold">粗体</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘B</kbd>
+                    </button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); applyFormatToFocused("u"); }}
+                      onClick={() => setOpenMenu(null)}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span className="underline">下划线</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘U</kbd>
+                    </button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); if (focusedId) toggleBlockType(focusedId); }}
+                      onClick={() => setOpenMenu(null)}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span className="italic text-zinc-400">切换舞台提示</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘I</kbd>
+                    </button>
+                    <div className="my-1 border-t border-zinc-50" />
+                  </>
+                )}
+                <button
+                  onClick={() => { setSearchOpen(true); setOpenMenu(null); }}
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  <span>搜索</span>
+                  <kbd className="text-[10px] text-zinc-300">⌘F</kbd>
+                </button>
+                <button
+                  onClick={() => { setJumpTarget("line"); setJumpValue(""); setOpenMenu(null); }}
+                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  跳转到行…
+                </button>
+                <button
+                  onClick={() => { setJumpTarget("page"); setJumpValue(""); setOpenMenu(null); }}
+                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  跳转到页…
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 显示▼ */}
+          <div className="relative">
+            <button
+              onClick={() => toggleMenu("display")}
+              className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+            >
+              显示 <Chevron />
+            </button>
+            {openMenu === "display" && (
+              <div
+                className="absolute left-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                onMouseLeave={() => setOpenMenu(null)}
+              >
+                {(
+                  [
+                    ["pageBreaks",     "分页线"],
+                    ["lineNumbers",    "行号"],
+                    ["rehearsalMarks", "排练记号"],
+                  ] as [keyof DisplaySettings, string][]
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => toggleDisplay(key)}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                  >
+                    <span>{label}</span>
+                    <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${display[key] ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"}`}>✓</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="ml-auto flex items-center gap-2">
             {/* Online users: self (dimmed) + others */}
             <div className="flex items-center">
@@ -2833,7 +3206,6 @@ export default function ScriptEditor({
                         <PresenceAvatar name={p.userName} color={p.color} title={p.userName} />
                       </div>
                     ))}
-                    {/* Self — always shown, slightly dimmed */}
                     {clientId && (
                       <div className="-ml-1 first:ml-0 opacity-40" title={`${userName}（你）`}>
                         <PresenceAvatar name={userName || "?"} color={presenceColor(clientId)} />
@@ -2843,14 +3215,118 @@ export default function ScriptEditor({
                 );
               })()}
             </div>
-            <button
-              onClick={() => setPrintPreview(true)}
-              className="rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
-            >
-              打印预览
-            </button>
+
+            {/* 导出▼ */}
+            <div className="relative">
+              <button
+                onClick={() => toggleMenu("export")}
+                className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+              >
+                导出 <Chevron />
+              </button>
+              {openMenu === "export" && (
+                <div
+                  className="absolute right-0 top-full z-30 mt-1 w-36 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                  onMouseLeave={() => setOpenMenu(null)}
+                >
+                  <button
+                    onClick={() => { setPrintPreview(true); setOpenMenu(null); }}
+                    className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                  >
+                    打印预览
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* 搜索栏 */}
+        {searchOpen && (
+          <div className="border-t border-zinc-100 bg-white px-6 py-2 flex items-center gap-3">
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+                if (e.key === "Enter") {
+                  if (searchMatches.length === 0) return;
+                  setSearchIdx(i => (i + 1) % searchMatches.length);
+                }
+              }}
+              placeholder="搜索…"
+              className="h-7 w-48 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+            />
+            <span className="shrink-0 text-xs text-zinc-400">
+              {searchMatches.length > 0 ? `${searchIdx + 1} / ${searchMatches.length}` : searchQuery.trim() ? "无结果" : ""}
+            </span>
+            <button
+              onClick={() => setSearchIdx(i => i <= 0 ? searchMatches.length - 1 : i - 1)}
+              disabled={searchMatches.length === 0}
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
+            >▲</button>
+            <button
+              onClick={() => setSearchIdx(i => (i + 1) % searchMatches.length)}
+              disabled={searchMatches.length === 0}
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
+            >▼</button>
+            <div className="h-4 w-px bg-zinc-100" />
+            <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
+              <input type="checkbox" checked={searchExact} onChange={e => setSearchExact(e.target.checked)} className="h-3 w-3" />
+              精确
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
+              <input type="checkbox" checked={searchCurrentPage} onChange={e => setSearchCurrentPage(e.target.checked)} className="h-3 w-3" />
+              当页
+            </label>
+            <button
+              onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+              className="ml-auto text-xs text-zinc-300 hover:text-zinc-500"
+            >✕</button>
+          </div>
+        )}
+
+        {/* 跳转弹窗 */}
+        {jumpTarget && (
+          <div className="border-t border-zinc-100 bg-white px-6 py-2 flex items-center gap-3">
+            <span className="shrink-0 text-xs text-zinc-400">
+              {jumpTarget === "line" ? "跳转到行" : "跳转到页"}
+            </span>
+            <input
+              autoFocus
+              type="number"
+              min={1}
+              max={jumpTarget === "line" ? blocks.length : Math.max(...Object.values(pageMap), 1)}
+              value={jumpValue}
+              onChange={e => setJumpValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Escape") setJumpTarget(null);
+                if (e.key === "Enter") {
+                  const n = parseInt(jumpValue, 10);
+                  if (!isNaN(n)) {
+                    if (jumpTarget === "line") jumpToLine(n);
+                    else jumpToPage(n);
+                  }
+                  setJumpTarget(null);
+                }
+              }}
+              placeholder={jumpTarget === "line" ? `1–${blocks.length}` : `1–${Math.max(...Object.values(pageMap), 1)}`}
+              className="h-7 w-28 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+            />
+            <button
+              onClick={() => {
+                const n = parseInt(jumpValue, 10);
+                if (!isNaN(n)) { if (jumpTarget === "line") jumpToLine(n); else jumpToPage(n); }
+                setJumpTarget(null);
+              }}
+              className="rounded bg-zinc-800 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
+            >
+              跳转
+            </button>
+            <button onClick={() => setJumpTarget(null)} className="text-xs text-zinc-300 hover:text-zinc-500">取消</button>
+          </div>
+        )}
       </header>
 
       {/* Document */}
@@ -2886,12 +3362,29 @@ export default function ScriptEditor({
             );
             const sceneStart = block.sceneId !== null && block.sceneId !== prev?.sceneId;
             const isMarkStart = block.rehearsalMark !== (prev?.rehearsalMark ?? null);
+            const pageBreak = bIdx > 0 && pageMap[block.id] !== pageMap[prev!.id];
+            const matchOrder = searchMatches.indexOf(bIdx);
+            const searchHighlight: "focused" | "match" | undefined =
+              matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
+
             const blockEl = (
               <div
                 key={block.id}
-                id={sceneStart ? `scene-block-${block.sceneId}` : undefined}
-                className={`min-w-0${sceneStart ? " scroll-mt-20" : ""}`}
+                id={`block-${block.id}`}
+                data-scene-anchor={sceneStart ? block.sceneId : undefined}
+                className={`min-w-0 scroll-mt-20`}
               >
+                {/* Scene anchor for TableOfContents links */}
+                {sceneStart && <span id={`scene-block-${block.sceneId}`} className="pointer-events-none absolute" />}
+                {pageBreak && display.pageBreaks && (
+                  <div className="relative my-2 flex items-center gap-2 px-6 select-none">
+                    <div className="flex-1 border-t border-dashed border-zinc-200" />
+                    <span className="shrink-0 rounded bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300">
+                      第 {pageMap[block.id]} 页
+                    </span>
+                    <div className="flex-1 border-t border-dashed border-zinc-200" />
+                  </div>
+                )}
                 {sceneStart && (() => {
                   const scene = scenes.find((s) => s.id === block.sceneId);
                   const currentIdx = scene ? scenes.findIndex((s) => s.id === block.sceneId) : -1;
@@ -2936,6 +3429,11 @@ export default function ScriptEditor({
                 <ScriptBlock
                   block={block}
                   index={bIdx}
+                  lineNum={display.lineNumbers ? bIdx + 1 : undefined}
+                  isSearchHighlight={searchHighlight}
+                  showRehearsalMark={display.rehearsalMarks}
+                  stageDelimOpen={scriptConfig.stageDelimOpen}
+                  stageDelimClose={scriptConfig.stageDelimClose}
                   characters={characters}
                   scenes={scenes}
                   availableScenes={availableScenes}
@@ -2993,6 +3491,46 @@ export default function ScriptEditor({
           onDelete={id => setComments(prev => prev.filter(x => x.id !== id))}
           onClose={() => setActiveCommentBlockId(null)}
         />
+      )}
+
+      {/* 关于 modal */}
+      {aboutOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setAboutOpen(false)}
+        >
+          <div
+            className="w-[420px] rounded-2xl bg-white p-6 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-zinc-800">关于 · 快捷键</h2>
+              <button onClick={() => setAboutOpen(false)} className="text-zinc-300 hover:text-zinc-500 text-lg leading-none">✕</button>
+            </div>
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-zinc-50">
+                {[
+                  ["⌘Z", "撤销"],
+                  ["⌘⇧Z", "重做"],
+                  ["⌘F", "搜索"],
+                  ["⌘B", "粗体（选中文字）"],
+                  ["⌘U", "下划线（选中文字）"],
+                  ["⌘I", "切换舞台提示 / 段内括注"],
+                  ["Enter", "新建块（行尾）"],
+                  ["⇧Enter", "块内换行"],
+                  ["Backspace", "合并到上一块（行首）"],
+                  ["Tab", "切换台词 / 舞台提示"],
+                  ["⌘⌥L", "切换歌词模式"],
+                ].map(([key, desc]) => (
+                  <tr key={key}>
+                    <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{key}</td>
+                    <td className="py-1.5 text-zinc-600">{desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );

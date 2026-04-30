@@ -1,5 +1,6 @@
 import { getPool } from "./pg";
-import type { Block, Character, Scene, ScriptState } from "./script-types";
+import type { Block, Character, Scene, ScriptState, ScriptConfig } from "./script-types";
+import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { Permission, PermissionOverrides } from "./roles";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -60,7 +61,7 @@ export type ProductionState = {
 export async function loadProduction(productionId: string): Promise<ProductionState | null> {
   const pool = getPool();
 
-  const [[blocksRes, scenesRes, charsRes], existsRes] = await Promise.all([
+  const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
     Promise.all([
       pool.query<BlockRow>(
         "SELECT id, sort_key, scene_id, rehearsal_mark, type, content FROM script WHERE production_id = $1 ORDER BY sort_key",
@@ -75,11 +76,14 @@ export async function loadProduction(productionId: string): Promise<ProductionSt
         [productionId]
       ),
     ]),
-    pool.query<{ exists: boolean }>(
-      "SELECT EXISTS(SELECT 1 FROM production WHERE id = $1) AS exists",
+    pool.query<{ exists: boolean; script_config: ScriptConfig | null }>(
+      "SELECT EXISTS(SELECT 1 FROM production WHERE id = $1) AS exists, (SELECT script_config FROM production WHERE id = $1) AS script_config",
       [productionId]
     ),
   ]);
+
+  const existsRes = prodRes;
+  const rawConfig = prodRes.rows[0]?.script_config;
 
   if (!existsRes.rows[0].exists) return null;
 
@@ -118,14 +122,24 @@ export async function loadProduction(productionId: string): Promise<ProductionSt
     };
   });
 
+  const config: ScriptConfig = { ...DEFAULT_SCRIPT_CONFIG, ...(rawConfig ?? {}) };
+
   return {
     state: {
       blocks,
       scenes: scenesRes.rows.map(r => ({ id: r.id, number: r.num, name: r.name, parentId: r.parent_id })),
       characters: charsRes.rows.map(r => ({ id: r.id, name: r.name, isAggregate: r.is_aggregate })),
+      config,
     },
     sortKeys,
   };
+}
+
+export async function saveScriptConfig(productionId: string, config: ScriptConfig): Promise<void> {
+  await getPool().query(
+    "UPDATE production SET script_config = $1 WHERE id = $2",
+    [JSON.stringify(config), productionId]
+  );
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
