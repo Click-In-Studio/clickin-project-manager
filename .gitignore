@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# self-hosted fonts (large binaries, deployed via rsync)
+/public/fonts/
