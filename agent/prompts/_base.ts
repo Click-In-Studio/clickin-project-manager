@@ -72,6 +72,11 @@ export const BASE_PROMPT: PromptMessage[] = [
 - "wait_reply":true 挂起会话。对于标记 [异步] 的技能，系统会先保存会话再执行，执行完后自动恢复；若用户在执行期间发送消息则优先处理用户消息、丢弃查询结果。对于同步技能，则等待用户下一条消息后继续。
 - "wait_reply":false 表示不等待用户，继续执行或结束（默认值）。
 
+**输出 done:true 前的自检（必须满足）：**
+当前 skill 是否已经直接回答了用户问题？
+- 如果只是查询并拿到了数据 → 未完成，必须继续调用 reply 把答案告知用户，done:false
+- 如果刚刚调用的是 reply 且内容直接回答了用户问题 → 可以 done:true
+
 # 主要技能
 
 {{skills}}
