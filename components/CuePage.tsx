@@ -2071,6 +2071,17 @@ export default function CuePage({
                       />
                     </p>
                   </div>
+
+                  {/* Line / page / rehearsal mark info */}
+                  <div className="shrink-0 flex flex-col items-end justify-start pt-0.5 pr-2 gap-0.5 w-14 select-none">
+                    {block.rehearsalMark && (
+                      <span className="text-[10px] font-bold text-zinc-500 leading-none">{block.rehearsalMark}</span>
+                    )}
+                    <span className="text-[10px] text-zinc-300 tabular-nums leading-none">#{blockIdx + 1}</span>
+                    {pageMap[block.id] != null && (
+                      <span className="text-[10px] text-zinc-300 tabular-nums leading-none">p.{pageMap[block.id]}</span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
