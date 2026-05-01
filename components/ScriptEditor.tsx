@@ -15,6 +15,8 @@ import {
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout } from "@/lib/script-types";
+import type { TagGroup, BlockTagValue } from "@/lib/db";
+import TagGroupEditor from "@/components/TagGroupEditor";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState } from "@/lib/script-ops";
 import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-page";
@@ -30,8 +32,8 @@ const Chevron = () => (
 );
 
 // ── Display settings (cookie-persisted) ───────────────────────────────────────
-type DisplaySettings = { pageBreaks: boolean; lineNumbers: boolean; rehearsalMarks: boolean };
-const DEFAULT_DISPLAY: DisplaySettings = { pageBreaks: true, lineNumbers: true, rehearsalMarks: true };
+type DisplaySettings = { pageBreaks: boolean; lineNumbers: boolean; rehearsalMarks: boolean; blockTags: boolean };
+const DEFAULT_DISPLAY: DisplaySettings = { pageBreaks: true, lineNumbers: true, rehearsalMarks: true, blockTags: true };
 const DISPLAY_COOKIE = "script_display";
 function readDisplayCookie(): DisplaySettings {
   try {
@@ -1584,6 +1586,92 @@ function _sameCharacters(a: string[], b: string[]): boolean {
   return b.every((id) => s.has(id));
 }
 
+// ─── TagPicker ────────────────────────────────────────────────────────────────
+
+function TagPicker({
+  tagGroups,
+  blockTagValues,
+  onTagChange,
+  onCopy,
+  onPaste,
+  onClose,
+}: {
+  tagGroups: TagGroup[];
+  blockTagValues: BlockTagValue[];
+  onTagChange: (groupId: string, optionId: string | null, value: number | null, del: boolean) => void;
+  onCopy: () => void;
+  onPaste: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute left-0 bottom-full z-50 mb-1 w-52 rounded-xl border border-zinc-200 bg-white p-2.5 shadow-lg"
+      onMouseDown={e => e.stopPropagation()}
+    >
+      {tagGroups.map(group => {
+        const tagVal = blockTagValues.find(t => t.groupId === group.id);
+        return (
+          <div key={group.id} className="mb-2.5 last:mb-0">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{group.name}</p>
+            {group.type === "exclusive" ? (
+              <div className="flex flex-wrap gap-1">
+                {group.options.map(opt => {
+                  const selected = tagVal?.optionId === opt.id;
+                  const isDefault = !tagVal?.optionId && opt.id === group.defaultOptionId;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => selected
+                        ? onTagChange(group.id, null, null, true)
+                        : onTagChange(group.id, opt.id, null, false)
+                      }
+                      className="rounded-full px-2 py-0.5 text-[10px] font-medium transition-all"
+                      style={{
+                        backgroundColor: (selected || isDefault) ? opt.color + "22" : "#f4f4f5",
+                        color: (selected || isDefault) ? opt.color : "#a1a1aa",
+                        outline: selected ? `1.5px solid ${opt.color}` : "none",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={group.rangeMin ?? 0}
+                  max={group.rangeMax ?? 10}
+                  step={group.rangeStep ?? 1}
+                  value={tagVal?.value ?? group.rangeDefault ?? group.rangeMin ?? 0}
+                  onChange={e => onTagChange(group.id, null, Number(e.target.value), false)}
+                  className="flex-1 h-1 accent-zinc-600"
+                />
+                <span className="w-6 text-right text-[10px] text-zinc-500">
+                  {tagVal?.value ?? group.rangeDefault ?? group.rangeMin ?? 0}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="mt-2 flex items-center justify-end gap-3 border-t border-zinc-100 pt-2">
+        <button onClick={() => { onCopy(); onClose(); }} className="text-[10px] text-zinc-400 hover:text-zinc-600">复制标签</button>
+        <button onClick={() => { onPaste(); onClose(); }} className="text-[10px] text-zinc-400 hover:text-zinc-600">粘贴标签</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── ScriptBlock ──────────────────────────────────────────────────────────────
 
 function ScriptBlock({
@@ -1620,6 +1708,12 @@ function ScriptBlock({
   canEditText = false,
   canEditMetadata = false,
   canEditRehearsalMark = false,
+  tagGroups,
+  blockTagValues,
+  showBlockTags = false,
+  onTagChange,
+  onTagCopyClick,
+  onTagPasteClick,
 }: {
   block: Block;
   characters: Character[];
@@ -1654,11 +1748,18 @@ function ScriptBlock({
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
+  tagGroups?: TagGroup[];
+  blockTagValues?: BlockTagValue[];
+  showBlockTags?: boolean;
+  onTagChange?: (groupId: string, optionId: string | null, value: number | null, del: boolean) => void;
+  onTagCopyClick?: () => void;
+  onTagPasteClick?: () => void;
 }) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
 
   const refCallback = useCallback(
     (el: HTMLDivElement | null) => {
@@ -1925,6 +2026,47 @@ function ScriptBlock({
           "text-zinc-700 text-left"
         }`}
       />
+
+      {showBlockTags && !isStage && !!tagGroups?.length && (
+        <div className="relative mt-0.5 pb-1">
+          <div className="flex flex-wrap items-center gap-1">
+            {tagGroups.map(group => {
+              const tagVal = (blockTagValues ?? []).find(t => t.groupId === group.id);
+              const selectedOpt = group.type === "exclusive"
+                ? group.options.find(o => o.id === (tagVal?.optionId ?? group.defaultOptionId))
+                : null;
+              const isDefault = group.type === "exclusive" && !tagVal?.optionId;
+              const rangeVal = group.type === "range" ? (tagVal?.value ?? group.rangeDefault) : null;
+              return (
+                <span
+                  key={group.id}
+                  onClick={() => setTagPickerOpen(v => !v)}
+                  className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-medium transition-opacity select-none ${isDefault ? "opacity-35" : ""}`}
+                  style={selectedOpt
+                    ? { backgroundColor: selectedOpt.color + "20", color: selectedOpt.color }
+                    : { backgroundColor: "#f4f4f5", color: "#71717a" }
+                  }
+                >
+                  {group.type === "exclusive"
+                    ? (selectedOpt?.label ?? group.name)
+                    : `${group.name}${rangeVal !== null && rangeVal !== undefined ? `: ${rangeVal}` : ""}`
+                  }
+                </span>
+              );
+            })}
+          </div>
+          {tagPickerOpen && (
+            <TagPicker
+              tagGroups={tagGroups}
+              blockTagValues={blockTagValues ?? []}
+              onTagChange={(groupId, optionId, value, del) => { onTagChange?.(groupId, optionId, value, del); }}
+              onCopy={() => onTagCopyClick?.()}
+              onPaste={() => onTagPasteClick?.()}
+              onClose={() => setTagPickerOpen(false)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2297,7 +2439,14 @@ export default function ScriptEditor({
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const focusedIdRef = useRef<string | null>(null);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
+
+  // ── Block tags ───────────────────────────────────────────────────────────────
+  const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
+  const [blockTagMap, setBlockTagMap] = useState<Map<string, BlockTagValue[]>>(new Map());
+  const blockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
+  const tagClipboardRef = useRef<BlockTagValue[] | null>(null);
 
   // ── Script config (page layout, stage delimiters) ─────────────────────────
   const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
@@ -2349,6 +2498,8 @@ export default function ScriptEditor({
   const pendingCharOpen = useRef<string | null>(null);
   const blocksRef = useRef(blocks);
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
+  useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
+  useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
   // ── Server sync ─────────────────────────────────────────────────────────────
 
@@ -2421,6 +2572,24 @@ export default function ScriptEditor({
         }
         if (state.config) setScriptConfig({ ...DEFAULT_SCRIPT_CONFIG, ...state.config });
         setLoadState("ready");
+
+        // Load tag groups and block tags in parallel (non-blocking)
+        if (productionId) {
+          Promise.all([
+            fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`).then(r => r.ok ? r.json() : null),
+            fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/block-tags`).then(r => r.ok ? r.json() : null),
+          ]).then(([tgData, btData]) => {
+            if (tgData?.groups) setTagGroups(tgData.groups as TagGroup[]);
+            if (btData?.tags) {
+              const map = new Map<string, BlockTagValue[]>();
+              for (const tag of btData.tags as BlockTagValue[]) {
+                if (!map.has(tag.blockId)) map.set(tag.blockId, []);
+                map.get(tag.blockId)!.push(tag);
+              }
+              setBlockTagMap(map);
+            }
+          }).catch(() => {});
+        }
       })
       .catch(() => { setLoadError("网络错误，请稍后重试"); setLoadState("error"); });
   }, [effectiveScriptId, productionId]);
@@ -2488,6 +2657,7 @@ export default function ScriptEditor({
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [meOpenId, setMeOpenId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
 
@@ -2681,16 +2851,69 @@ export default function ScriptEditor({
     setCanRedo(redoStack.current.length > 0);
   }, []);
 
+  // ── Tag handlers ─────────────────────────────────────────────────────────────
+
+  const upsertBlockTagApi = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
+    fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/block-tags`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(del ? { blockId, groupId, delete: true } : { blockId, groupId, optionId, value }),
+    }).catch(() => {});
+  }, [effectiveScriptId]);
+
+  const handleTagChange = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
+    setBlockTagMap(prev => {
+      const map = new Map(prev);
+      const existing = map.get(blockId) ?? [];
+      if (del) {
+        map.set(blockId, existing.filter(t => t.groupId !== groupId));
+      } else {
+        map.set(blockId, [...existing.filter(t => t.groupId !== groupId), { blockId, groupId, optionId, value }]);
+      }
+      return map;
+    });
+    upsertBlockTagApi(blockId, groupId, optionId, value, del);
+  }, [upsertBlockTagApi]);
+
+  const handleTagCopy = useCallback((blockId: string) => {
+    tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
+  }, []);
+
+  const handleTagPaste = useCallback((blockId: string) => {
+    const clipboard = tagClipboardRef.current;
+    if (!clipboard?.length) return;
+    const inherited = clipboard.map(t => ({ ...t, blockId }));
+    setBlockTagMap(prev => { const m = new Map(prev); m.set(blockId, inherited); return m; });
+    inherited.forEach(t => upsertBlockTagApi(blockId, t.groupId, t.optionId, t.value, false));
+  }, [upsertBlockTagApi]);
+
+  const inheritTags = useCallback((fromId: string, toId: string) => {
+    const sourceTags = blockTagMapRef.current.get(fromId) ?? [];
+    if (!sourceTags.length) return;
+    const inherited = sourceTags.map(t => ({ ...t, blockId: toId }));
+    setBlockTagMap(prev => { const m = new Map(prev); m.set(toId, inherited); return m; });
+    inherited.forEach(t => upsertBlockTagApi(toId, t.groupId, t.optionId, t.value, false));
+  }, [upsertBlockTagApi]);
+
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (e.key === "z" && e.shiftKey) { e.preventDefault(); redo(); }
       else if (e.key === "f" && !e.shiftKey) { e.preventDefault(); setSearchOpen(true); }
+      // Tag clipboard: ⌘/Ctrl+Shift+C copies tags from focused block, ⌘/Ctrl+Shift+V pastes
+      else if (e.key === "c" && e.shiftKey) {
+        const id = focusedIdRef.current;
+        if (id) { e.preventDefault(); tagClipboardRef.current = blockTagMapRef.current.get(id) ?? []; }
+      }
+      else if (e.key === "v" && e.shiftKey) {
+        const id = focusedIdRef.current;
+        if (id && tagClipboardRef.current?.length) { e.preventDefault(); handleTagPaste(id); }
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [undo, redo]);
+  }, [undo, redo, handleTagPaste]);
 
   // ── Search matches (computed from blocks + pageMap) ─────────────────────────
   const currentPageNum = focusedId ? pageMap[focusedId] : undefined;
@@ -2823,6 +3046,7 @@ export default function ScriptEditor({
 
   const splitBlock = useCallback((id: string, before: string, after: string) => {
     saveSnapshot();
+    let nextId: string | null = null;
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx === -1) return prev;
@@ -2833,13 +3057,15 @@ export default function ScriptEditor({
         sceneId: cur.sceneId,
         rehearsalMark: cur.rehearsalMark,
       };
+      nextId = next.id;
       const updated = [...prev];
       updated[idx] = { ...cur, content: before };
       updated.splice(idx + 1, 0, next);
       pendingCharOpen.current = next.id;
       return updated;
     });
-  }, [saveSnapshot]);
+    if (nextId) inheritTags(id, nextId);
+  }, [saveSnapshot, inheritTags]);
 
   const mergeBlock = useCallback((id: string) => {
     saveSnapshot();
@@ -2866,6 +3092,8 @@ export default function ScriptEditor({
 
   const insertBlockAt = useCallback((index: number) => {
     saveSnapshot();
+    let newId: string | null = null;
+    let refId: string | null = null;
     setBlocks((prev) => {
       // Inherit scene and rehearsal mark from the block immediately before the insertion point
       const ref = index > 0 ? prev[index - 1] : null;
@@ -2874,12 +3102,15 @@ export default function ScriptEditor({
         sceneId: ref?.sceneId ?? null,
         rehearsalMark: ref?.rehearsalMark ?? null,
       };
+      newId = newBlock.id;
+      refId = ref?.id ?? null;
       const updated = [...prev];
       updated.splice(index, 0, newBlock);
       pendingCharOpen.current = newBlock.id;
       return updated;
     });
-  }, [saveSnapshot]);
+    if (newId && refId) inheritTags(refId, newId);
+  }, [saveSnapshot, inheritTags]);
 
   const addChar = (name: string) => {
     setCharacters((prev) => [...prev, { id: uid(), name, isAggregate: false }]);
@@ -3045,6 +3276,17 @@ export default function ScriptEditor({
                     {scriptConfig.pageLayout === layout && <span className="text-[10px] text-zinc-400">✓</span>}
                   </button>
                 ))}
+                {productionId && (
+                  <>
+                    <div className="my-1 border-t border-zinc-50" />
+                    <button
+                      onClick={() => { setTagEditorOpen(true); setOpenMenu(null); }}
+                      className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      标签设置…
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -3179,6 +3421,7 @@ export default function ScriptEditor({
                     ["pageBreaks",     "分页线"],
                     ["lineNumbers",    "行号"],
                     ["rehearsalMarks", "排练记号"],
+                    ["blockTags",      "Block 标签"],
                   ] as [keyof DisplaySettings, string][]
                 ).map(([key, label]) => (
                   <button
@@ -3462,6 +3705,12 @@ export default function ScriptEditor({
                   canEditText={canEditText}
                   canEditMetadata={canEditMetadata}
                   canEditRehearsalMark={canEditRehearsalMark}
+                  tagGroups={tagGroups}
+                  blockTagValues={blockTagMap.get(block.id) ?? []}
+                  showBlockTags={display.blockTags && tagGroups.length > 0}
+                  onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
+                  onTagCopyClick={() => handleTagCopy(block.id)}
+                  onTagPasteClick={() => handleTagPaste(block.id)}
                 />
               </div>
             );
@@ -3478,6 +3727,23 @@ export default function ScriptEditor({
           </p>
         )}
       </main>
+
+      {tagEditorOpen && productionId && (
+        <div className="fixed right-0 top-14 bottom-0 z-30 flex w-80 flex-col border-l border-zinc-200 bg-white shadow-xl">
+          <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
+            <span className="text-sm font-semibold text-zinc-700">标签设置</span>
+            <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3">
+            <TagGroupEditor
+              productionId={productionId}
+              initialGroups={tagGroups}
+              canEdit={canEditMetadata}
+              onGroupsChange={setTagGroups}
+            />
+          </div>
+        </div>
+      )}
 
       {activeCommentBlockId && productionId && (
         <CommentsPanel
@@ -3521,6 +3787,8 @@ export default function ScriptEditor({
                   ["Backspace", "合并到上一块（行首）"],
                   ["Tab", "切换台词 / 舞台提示"],
                   ["⌘⌥L", "切换歌词模式"],
+                  ["⌘⇧C", "复制当前块标签"],
+                  ["⌘⇧V", "粘贴标签到当前块"],
                 ].map(([key, desc]) => (
                   <tr key={key}>
                     <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{key}</td>
