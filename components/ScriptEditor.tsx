@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import {
   type KeyboardEvent,
@@ -2618,36 +2618,48 @@ export default function ScriptEditor({
     setPendingScrollTo(null);
   }, [pendingScrollTo, windowRange]);
 
-  // Scroll to a block by index, expanding window if needed
+  // Teleport to a block: synchronously load its window, then instant-jump. No scroll animation.
   const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = 'center') => {
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
-    if (idx < windowRange.start || idx >= windowRange.end) {
-      // Approximate position scroll, then let the pending effect finish
+    const newStart = Math.max(0, idx - VSCROLL_BUFFER);
+    const newEnd = Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1);
+    // flushSync forces React to render the new window before we scroll
+    flushSync(() => setWindowRange({ start: newStart, end: newEnd }));
+    const el = document.getElementById(`block-${block.id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'instant', block: align });
+    } else {
+      // Fallback: jump to estimated position and let pending effect refine
       rebuildCumulative();
       const container = blocksContainerRef.current;
       if (container) {
-        const containerTop = container.getBoundingClientRect().top + window.scrollY;
-        const approxY = containerTop + cumulativeHRef.current[idx] - (align === 'center' ? window.innerHeight / 2 : 80);
-        window.scrollTo({ top: Math.max(0, approxY), behavior: 'smooth' });
+        const top = container.getBoundingClientRect().top + window.scrollY + cumulativeHRef.current[idx];
+        window.scrollTo({ top: Math.max(0, top - (align === 'center' ? window.innerHeight / 2 : 80)), behavior: 'instant' });
       }
+      setPendingScrollTo({ kind: 'block', id: block.id, align });
     }
-    setPendingScrollTo({ kind: 'block', id: block.id, align });
-  }, [windowRange, rebuildCumulative]);
+  }, [rebuildCumulative]);
 
   const scrollToScene = useCallback((sceneId: string) => {
-    const el = document.getElementById(`scene-block-${sceneId}`);
-    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const existing = document.getElementById(`scene-block-${sceneId}`);
+    if (existing) { existing.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     const idx = blocksRef.current.findIndex(b => b.sceneId === sceneId);
     if (idx < 0) return;
-    rebuildCumulative();
-    const container = blocksContainerRef.current;
-    if (container) {
-      const containerTop = container.getBoundingClientRect().top + window.scrollY;
-      const approxY = containerTop + cumulativeHRef.current[idx] - 80;
-      window.scrollTo({ top: Math.max(0, approxY), behavior: 'smooth' });
+    const newStart = Math.max(0, idx - VSCROLL_BUFFER);
+    const newEnd = Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1);
+    flushSync(() => setWindowRange({ start: newStart, end: newEnd }));
+    const el = document.getElementById(`scene-block-${sceneId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'instant', block: 'start' });
+    } else {
+      rebuildCumulative();
+      const container = blocksContainerRef.current;
+      if (container) {
+        const top = container.getBoundingClientRect().top + window.scrollY + cumulativeHRef.current[idx] - 80;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'instant' });
+      }
     }
-    setPendingScrollTo({ kind: 'scene', id: sceneId });
   }, [rebuildCumulative]);
   useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
@@ -3109,9 +3121,8 @@ export default function ScriptEditor({
   useEffect(() => {
     const matchIdx = searchMatches[searchIdx];
     if (matchIdx === undefined) return;
-    const blockId = blocks[matchIdx]?.id;
-    if (blockId) document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [searchIdx, searchMatches, blocks]);
+    scrollToBlockIdx(matchIdx, 'center');
+  }, [searchIdx, searchMatches]);
 
   // Jump helpers
   const jumpToLine = useCallback((n: number) => {
