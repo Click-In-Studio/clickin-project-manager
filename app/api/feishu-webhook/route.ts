@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantAccessToken, getBotOpenId } from "@/lib/feishu-auth";
-import { getUserName, isBotTester } from "@/lib/feishu-webhook";
+import { getUserName } from "@/lib/feishu-webhook";
 import { upsertContactUser } from "@/lib/db";
 import { processMessage as agentProcessMessage, processButtonClick } from "@/agent/index";
 import type { BotContext, HistoryMessage } from "@/agent/types";
@@ -176,13 +176,6 @@ async function handleCardAction(body: Record<string, unknown>): Promise<NextResp
     return NextResponse.json({ toast: { type: "error", content: "无效的按钮" } });
   }
 
-  // Tester gate
-  const allowed = await isBotTester(operatorOpenId);
-  if (!allowed) {
-    console.log(`[feishu-webhook] card action dropped: non-tester ${operatorOpenId}`);
-    return NextResponse.json({});
-  }
-
   const result = await processButtonClick(session_key, button_value, button_label);
 
   if (result === "not_found" || result === "expired") {
@@ -226,12 +219,6 @@ async function processMessage(body: Record<string, unknown>) {
       : false;
 
     if (mentioned) {
-      // Tester gate applies only to the @mention trigger
-      const allowed = await isBotTester(senderId);
-      if (!allowed) {
-        console.log(`[feishu-webhook] @mention dropped: non-tester ${senderId}`);
-        return;
-      }
       activateGroup(chatId);
       botMentioned = true;
       console.log(`[feishu-webhook] group activated by ${senderId}, TTL=${GROUP_ACTIVE_TTL_MS}ms`);
@@ -239,13 +226,6 @@ async function processMessage(body: Record<string, unknown>) {
       activateGroup(chatId); // refresh TTL on each message
     } else {
       console.log("[feishu-webhook] group message: no mention and no active window — ignored");
-      return;
-    }
-  } else {
-    // P2P: tester gate always applies
-    const allowed = await isBotTester(senderId);
-    if (!allowed) {
-      console.log(`[feishu-webhook] dropped p2p message from non-tester ${senderId}`);
       return;
     }
   }

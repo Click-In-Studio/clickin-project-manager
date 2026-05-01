@@ -2830,19 +2830,43 @@ export default function ScriptEditor({
   const lastSentPresenceRef = useRef<string | null | undefined>(undefined);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Hash-based deep link (e.g. #block-<id>?open_comment=true from notifications) ──
+  // ── Hash-based deep link + position restore ──────────────────────────────────
   useEffect(() => {
     if (loadState !== "ready") return;
     const hash = window.location.hash;
-    if (!hash.startsWith("#block-")) return;
-    const [fragment, query] = hash.slice(1).split("?");
-    const blockId = fragment.slice("block-".length);
-    const idx = blocksRef.current.findIndex(b => b.id === blockId);
-    if (idx >= 0) scrollToBlockIdx(idx, "center");
-    if (new URLSearchParams(query).get("open_comment") === "true") {
-      setActiveCommentBlockId(blockId);
+    if (hash.startsWith("#block-")) {
+      const [fragment, query] = hash.slice(1).split("?");
+      const blockId = fragment.slice("block-".length);
+      const idx = blocksRef.current.findIndex(b => b.id === blockId);
+      if (idx >= 0) scrollToBlockIdx(idx, "center");
+      if (new URLSearchParams(query).get("open_comment") === "true") {
+        setActiveCommentBlockId(blockId);
+      }
+      return;
     }
-  }, [loadState, scrollToBlockIdx]);
+    // Restore last scroll position from cookie
+    if (productionId) {
+      try {
+        const m = document.cookie.match(new RegExp(`(?:^|;\\s*)script_pos_${productionId}=([^;]*)`));
+        if (m) {
+          const idx = blocksRef.current.findIndex(b => b.id === decodeURIComponent(m[1]));
+          if (idx >= 0) scrollToBlockIdx(idx, "start");
+        }
+      } catch { /* ignore */ }
+    }
+  }, [loadState, productionId, scrollToBlockIdx]);
+
+  // ── Save scroll position to cookie (debounced) ───────────────────────────────
+  const posSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (loadState !== "ready" || !productionId) return;
+    const blockId = blocksRef.current[windowRange.start]?.id;
+    if (!blockId) return;
+    if (posSaveTimerRef.current) clearTimeout(posSaveTimerRef.current);
+    posSaveTimerRef.current = setTimeout(() => {
+      document.cookie = `script_pos_${productionId}=${encodeURIComponent(blockId)}; path=/; max-age=31536000; SameSite=Lax`;
+    }, 800);
+  }, [windowRange.start, productionId, loadState]);
 
   // SSE: receive seq pushes (state sync) and presence pushes from other clients
   useEffect(() => {
