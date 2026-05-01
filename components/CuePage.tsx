@@ -11,6 +11,20 @@ import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
 
+// ─── Per-production cookies ───────────────────────────────────────────────────
+
+function readCookie(key: string): string | null {
+  try {
+    const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${key}=([^;]*)`));
+    return m ? decodeURIComponent(m[1]) : null;
+  } catch { return null; }
+}
+function writeCookie(key: string, value: string) {
+  document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
+}
+
+type CueViewState = { visibleIds: string[]; activeId: string | null };
+
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
 const LIST_COLORS = [
@@ -902,6 +916,29 @@ export default function CuePage({
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
   const [savingCueId, setSavingCueId] = useState<string | null>(null);
 
+  // ── Cookie: restore cue view state once on mount ──────────────────────────
+  const cueStateRestoredRef = useRef(false);
+  useEffect(() => {
+    if (cueStateRestoredRef.current) return;
+    cueStateRestoredRef.current = true;
+    const raw = readCookie(`cue_view_${productionId}`);
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as CueViewState;
+      const validIds = (saved.visibleIds ?? []).filter(id => cueLists.some(cl => cl.id === id));
+      if (validIds.length > 0) setVisibleListIds(new Set(validIds));
+      if (saved.activeId && cueLists.some(cl => cl.id === saved.activeId))
+        setActiveListId(saved.activeId);
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Cookie: save cue view state on change ────────────────────────────────
+  useEffect(() => {
+    if (!cueStateRestoredRef.current) return;
+    writeCookie(`cue_view_${productionId}`, JSON.stringify({ visibleIds: [...visibleListIds], activeId: activeListId } satisfies CueViewState));
+  }, [visibleListIds, activeListId, productionId]);
+
   // ── Jump bar ──────────────────────────────────────────────────────────────
   const [jumpTarget, setJumpTarget] = useState<"line" | "page" | "scene" | null>(null);
   const [jumpValue, setJumpValue] = useState("");
@@ -1517,6 +1554,29 @@ export default function CuePage({
       end: Math.min(blocks.length, idx + VSCROLL_BUFFER + 1),
     });
   }, [blocks]);
+
+  // ── Cookie: restore scroll position once on mount ────────────────────────
+  const scrollRestoredRef = useRef(false);
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    scrollRestoredRef.current = true;
+    const savedId = readCookie(`cue_pos_${productionId}`);
+    if (!savedId) return;
+    const idx = blocks.findIndex(b => b.id === savedId);
+    if (idx >= 0) scrollToBlockIdx(idx, "start");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToBlockIdx]);
+
+  // ── Cookie: save scroll position (debounced) ─────────────────────────────
+  const posSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const blockId = blocks[windowRange.start]?.id;
+    if (!blockId) return;
+    if (posSaveTimerRef.current) clearTimeout(posSaveTimerRef.current);
+    posSaveTimerRef.current = setTimeout(() => {
+      writeCookie(`cue_pos_${productionId}`, blockId);
+    }, 800);
+  }, [windowRange.start, productionId, blocks]);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const el = document.getElementById(`cue-scene-${sceneId}`);
