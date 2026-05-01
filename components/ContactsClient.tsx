@@ -1,13 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
 import type { EventDepartment } from "@/lib/event-db";
 import { ROLE_GROUPS, PERMISSION_GROUPS, PERMISSION_LABELS, roleBasedPermission, type Permission } from "@/lib/roles";
+// Search result returned by feishu-user-search API (local DB, includes raw contact info)
+type SearchResult = {
+  openId: string;
+  name: string;
+  avatarUrl: string | null;
+  enName?: string;
+  hint?: string | null;
+  email?: string | null;
+  phone?: string | null;
+};
 
 const ROLE_ORDER = ROLE_GROUPS.flatMap((g) => g.roles);
+const ALL_ROLE_GROUPS = ROLE_GROUPS;
 
 function sortByFirstRole(members: MemberWithRoles[]): MemberWithRoles[] {
   return [...members].sort((a, b) => {
@@ -29,11 +40,15 @@ function resolvePhoto(raw: string | null): string | null {
 function MemberCard({
   member,
   canManage,
+  isSelf,
   onManage,
+  onEdit,
 }: {
   member: MemberWithRoles;
   canManage: boolean;
+  isSelf: boolean;
   onManage: () => void;
+  onEdit: () => void;
 }) {
   const photo = resolvePhoto(member.photoUrl) ?? member.avatarUrl;
 
@@ -51,14 +66,24 @@ function MemberCard({
       <div className="px-3 py-3 flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-1">
           <p className="text-sm font-semibold text-zinc-800 truncate">{member.name}</p>
-          {canManage && (
-            <button
-              onClick={onManage}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:text-zinc-500 hover:bg-zinc-50 transition-colors"
-            >
-              权限
-            </button>
-          )}
+          <div className="shrink-0 flex gap-0.5">
+            {(canManage || isSelf) && (
+              <button
+                onClick={onEdit}
+                className="rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:text-zinc-500 hover:bg-zinc-50 transition-colors"
+              >
+                编辑
+              </button>
+            )}
+            {canManage && (
+              <button
+                onClick={onManage}
+                className="rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:text-zinc-500 hover:bg-zinc-50 transition-colors"
+              >
+                权限
+              </button>
+            )}
+          </div>
         </div>
 
         {member.roles.length > 0 && (
@@ -123,7 +148,6 @@ function PermissionsPanel({
         className="relative h-full w-full max-w-sm bg-white shadow-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
           <div>
             <p className="text-sm font-semibold text-zinc-800">{member.name}</p>
@@ -134,7 +158,6 @@ function PermissionsPanel({
           <button onClick={onClose} className="text-zinc-300 hover:text-zinc-500 text-lg leading-none">×</button>
         </div>
 
-        {/* Permission rows */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {PERMISSION_GROUPS.map((group) => (
             <div key={group.label}>
@@ -191,6 +214,443 @@ function PermissionsPanel({
   );
 }
 
+// ─── EditInfoPanel ────────────────────────────────────────────────────────────
+
+function EditInfoPanel({
+  productionId,
+  member,
+  canManage,
+  onClose,
+  onSaved,
+  onDeleted,
+}: {
+  productionId: string;
+  member: MemberWithRoles;
+  canManage: boolean;
+  onClose: () => void;
+  onSaved: (updated: Partial<MemberWithRoles>) => void;
+  onDeleted: () => void;
+}) {
+  const [email, setEmail] = useState(member.email ?? "");
+  const [phone, setPhone] = useState(member.phone ?? "");
+  const [photoUrl, setPhotoUrl] = useState(member.photoUrl ?? "");
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(member.roles);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const toggleRole = (role: string) => {
+    setSelectedRoles((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+    );
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { openId: member.openId };
+      if (canManage) body.roles = selectedRoles;
+      body.email = email.trim() || null;
+      body.phone = phone.trim() || null;
+      body.photoUrl = photoUrl.trim() || null;
+
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/members`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        onSaved({
+          roles: canManage ? selectedRoles : member.roles,
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+          photoUrl: photoUrl.trim() || null,
+        });
+        onClose();
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`确定移除「${member.name}」吗？此操作不可撤销。`)) return;
+    setDeleting(true);
+    try {
+      await fetch(`${BASE_PATH}/api/production/${productionId}/members`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ openId: member.openId }),
+      });
+      onDeleted();
+      onClose();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
+      <div
+        className="relative h-full w-full max-w-sm bg-white shadow-2xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
+          <div>
+            <p className="text-sm font-semibold text-zinc-800">{member.name}</p>
+            <p className="text-xs text-zinc-400 mt-0.5">编辑信息</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-300 hover:text-zinc-500 text-lg leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {/* Contact info */}
+          <div className="space-y-3">
+            <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">联系方式</p>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">邮箱</label>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="email@example.com"
+                type="email"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">手机</label>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+86 138..."
+                type="tel"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">照片链接</label>
+              <input
+                value={photoUrl}
+                onChange={(e) => setPhotoUrl(e.target.value)}
+                placeholder="https://..."
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
+              />
+            </div>
+          </div>
+
+          {/* Roles — admin only */}
+          {canManage && (
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">职位</p>
+              {ALL_ROLE_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <p className="text-[11px] text-zinc-400 mb-1.5">{group.label}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.roles.map((role) => {
+                      const active = selectedRoles.includes(role);
+                      return (
+                        <button
+                          key={role}
+                          onClick={() => toggleRole(role)}
+                          className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+                            active
+                              ? "bg-zinc-800 text-white"
+                              : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+                          }`}
+                        >
+                          {role}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-zinc-100 px-5 py-4 flex items-center gap-3">
+          {canManage && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors"
+            >
+              {deleting ? "移除中…" : "移除"}
+            </button>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="ml-auto rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-30 transition-colors"
+          >
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AddMemberPanel ───────────────────────────────────────────────────────────
+
+function AddMemberPanel({
+  productionId,
+  existingOpenIds,
+  onClose,
+  onAdded,
+}: {
+  productionId: string;
+  existingOpenIds: Set<string>;
+  onClose: () => void;
+  onAdded: (member: MemberWithRoles) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [selected, setSelected] = useState<SearchResult | null>(null);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runSearch = async (q: string) => {
+    if (!q.trim()) { setResults([]); setSearched(false); return; }
+    setSearching(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/feishu-user-search?q=${encodeURIComponent(q.trim())}`
+      );
+      const data = await res.json();
+      if (data.error) setError(data.error);
+      else setResults(data.users ?? []);
+      setSearched(true);
+    } catch {
+      setError("搜索失败");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const search = (q: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => runSearch(q), 400);
+  };
+
+  const syncAndSearch = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/admin/sync-feishu-users`, { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) { setError(data.error ?? "同步失败"); return; }
+      // Re-run search with current query after sync
+      await runSearch(query);
+    } catch {
+      setError("同步失败，请重试");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const toggleRole = (role: string) => {
+    setSelectedRoles((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+    );
+  };
+
+  const handleAdd = async () => {
+    if (!selected) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openId: selected.openId,
+          name: selected.name,
+          avatarUrl: selected.avatarUrl,
+          email: selected.email ?? null,
+          phone: selected.phone ?? null,
+          roles: selectedRoles,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) { setError(data.error ?? "添加失败"); return; }
+      onAdded({
+        openId: selected.openId,
+        name: selected.name,
+        avatarUrl: selected.avatarUrl,
+        isAdmin: false,
+        email: null,
+        phone: null,
+        roles: selectedRoles,
+        photoUrl: null,
+      });
+      onClose();
+    } catch {
+      setError("网络错误，请重试");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
+      <div
+        className="relative h-full w-full max-w-sm bg-white shadow-2xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
+          <p className="text-sm font-semibold text-zinc-800">添加人员</p>
+          <button onClick={onClose} className="text-zinc-300 hover:text-zinc-500 text-lg leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Search input + always-visible sync button */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1.5">按姓名搜索</label>
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); search(e.target.value); setSelected(null); setSearched(false); }}
+              placeholder="输入姓名…"
+              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
+            />
+            <div className="flex items-center justify-between mt-1.5">
+              <p className="text-[11px] text-zinc-300">搜索本地通讯录</p>
+              <button
+                onClick={syncAndSearch}
+                disabled={syncing}
+                className="text-[11px] text-zinc-400 hover:text-zinc-700 disabled:opacity-40 underline underline-offset-2 transition-colors"
+              >
+                {syncing ? "同步中…" : "同步飞书通讯录"}
+              </button>
+            </div>
+          </div>
+
+          {/* Search results */}
+          {!selected && (
+            <div className="space-y-1">
+              {(searching || syncing) && (
+                <p className="text-xs text-zinc-300 text-center py-3">
+                  {syncing ? "正在同步飞书通讯录…" : "搜索中…"}
+                </p>
+              )}
+              {!searching && !syncing && error && <p className="text-xs text-red-500">{error}</p>}
+              {!searching && !syncing && results.map((u) => {
+                const alreadyAdded = existingOpenIds.has(u.openId);
+                return (
+                  <button
+                    key={u.openId}
+                    disabled={alreadyAdded}
+                    onClick={() => { setSelected(u); setError(null); }}
+                    className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                      alreadyAdded
+                        ? "opacity-40 cursor-not-allowed"
+                        : "hover:bg-zinc-50"
+                    }`}
+                  >
+                    {u.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={u.avatarUrl} alt={u.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <span className="w-9 h-9 rounded-full bg-zinc-100 flex items-center justify-center text-sm text-zinc-400 shrink-0">
+                        {u.name[0]}
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-zinc-800">
+                        {u.name}
+                        {u.enName && <span className="ml-1.5 text-zinc-400 text-xs">{u.enName}</span>}
+                      </p>
+                      {u.hint && <p className="text-xs text-zinc-400 truncate">{u.hint}</p>}
+                      {alreadyAdded && <p className="text-xs text-zinc-300">已在人员列表中</p>}
+                    </div>
+                  </button>
+                );
+              })}
+              {!searching && !syncing && !error && searched && results.length === 0 && (
+                <p className="text-xs text-zinc-300 text-center py-3">未找到「{query}」，试试同步通讯录</p>
+              )}
+            </div>
+          )}
+
+          {/* Selected user + role assignment */}
+          {selected && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-3">
+                {selected.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={selected.avatarUrl} alt={selected.name} className="w-10 h-10 rounded-full object-cover shrink-0" />
+                ) : (
+                  <span className="w-10 h-10 rounded-full bg-zinc-200 flex items-center justify-center text-sm text-zinc-500 shrink-0">
+                    {selected.name[0]}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-zinc-800">{selected.name}</p>
+                  {selected.hint && <p className="text-xs text-zinc-400">{selected.hint}</p>}
+                </div>
+                <button
+                  onClick={() => { setSelected(null); setSelectedRoles([]); }}
+                  className="text-xs text-zinc-300 hover:text-zinc-500"
+                >
+                  重选
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">职位（可选）</p>
+                {ALL_ROLE_GROUPS.map((group) => (
+                  <div key={group.label}>
+                    <p className="text-[11px] text-zinc-400 mb-1.5">{group.label}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {group.roles.map((role) => {
+                        const active = selectedRoles.includes(role);
+                        return (
+                          <button
+                            key={role}
+                            onClick={() => toggleRole(role)}
+                            className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+                              active
+                                ? "bg-zinc-800 text-white"
+                                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+                            }`}
+                          >
+                            {role}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {error && <p className="text-xs text-red-500">{error}</p>}
+            </div>
+          )}
+        </div>
+
+        {selected && (
+          <div className="border-t border-zinc-100 px-5 py-4">
+            <button
+              onClick={handleAdd}
+              disabled={adding}
+              className="w-full rounded-lg bg-zinc-800 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-30 transition-colors"
+            >
+              {adding ? "添加中…" : `添加「${selected.name}」`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ImportPanel ──────────────────────────────────────────────────────────────
 
 function ImportPanel({
@@ -228,7 +688,7 @@ function ImportPanel({
         if (r2.ok) onImported(await r2.json());
       }
     } catch {
-      setResult({ error: "网络错误，请��试" });
+      setResult({ error: "网络错误，请重试" });
     } finally {
       setLoading(false);
     }
@@ -381,7 +841,6 @@ function DepartmentPanel({
     }
   };
 
-  // Build a unified map of everyone who is either a member or a POC
   function buildEntries(dept: EventDepartment) {
     const allIds = new Set([...dept.memberOpenIds, ...dept.pocOpenIds]);
     return new Map([...allIds].map(id => [id, {
@@ -395,7 +854,6 @@ function DepartmentPanel({
     const entries = buildEntries(dept);
     const isMember = dept.memberOpenIds.includes(openId);
     if (isMember) {
-      // Remove as member; also clear POC (full removal)
       entries.delete(openId);
     } else {
       entries.set(openId, { openId, isMember: true, isPoc: false });
@@ -409,7 +867,7 @@ function DepartmentPanel({
     const current = entries.get(openId) ?? { openId, isMember: false, isPoc: false };
     const newIsPoc = !isPoc;
     if (!newIsPoc && !current.isMember) {
-      entries.delete(openId); // neither member nor POC — remove entirely
+      entries.delete(openId);
     } else {
       entries.set(openId, { ...current, isPoc: newIsPoc });
     }
@@ -495,7 +953,6 @@ function DepartmentPanel({
 
         {isExpanded && (
           <div className="px-3 pb-3 border-t border-zinc-50">
-            {/* Column headers */}
             <div className="flex items-center pt-2.5 pb-1.5 pr-1">
               <input
                 value={search}
@@ -524,7 +981,6 @@ function DepartmentPanel({
                     {m.roles.length > 0 && (
                       <span className="text-[11px] text-zinc-400 shrink-0 mr-1">{m.roles[0]}</span>
                     )}
-                    {/* 成员 toggle */}
                     <button
                       onClick={() => handleToggleMember(dept, m.openId)}
                       className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
@@ -536,7 +992,6 @@ function DepartmentPanel({
                         isMember ? "translate-x-1.5" : "-translate-x-1.5"
                       }`} />
                     </button>
-                    {/* POC toggle */}
                     <button
                       onClick={() => handleTogglePoc(dept, m.openId)}
                       className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
@@ -638,6 +1093,7 @@ type Props = {
   initialMembers: MemberWithRoles[];
   canImport: boolean;
   canManage: boolean;
+  myOpenId: string;
   initialOverrides: Record<string, Record<string, boolean>>;
   canManageDepts: boolean;
   initialDepartments: EventDepartment[];
@@ -649,6 +1105,7 @@ export default function ContactsClient({
   initialMembers,
   canImport,
   canManage,
+  myOpenId,
   initialOverrides,
   canManageDepts,
   initialDepartments,
@@ -656,9 +1113,30 @@ export default function ContactsClient({
   const [members, setMembers] = useState<MemberWithRoles[]>(initialMembers);
   const [overrides, setOverrides] = useState<Record<string, Record<string, boolean>>>(initialOverrides);
   const [managingOpenId, setManagingOpenId] = useState<string | null>(null);
+  const [editingOpenId, setEditingOpenId] = useState<string | null>(null);
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  const handleSyncAll = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/admin/sync-feishu-users`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok) setSyncResult(`已同步 ${data.total} 位用户`);
+      else setSyncResult(data.error ?? "同步失败");
+    } catch {
+      setSyncResult("同步失败");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const sorted = sortByFirstRole(members);
   const managingMember = managingOpenId ? members.find((m) => m.openId === managingOpenId) ?? null : null;
+  const editingMember = editingOpenId ? members.find((m) => m.openId === editingOpenId) ?? null : null;
+  const existingOpenIds = new Set(members.map((m) => m.openId));
 
   const handleOverrideChange = (openId: string, perm: Permission, granted: boolean | null) => {
     setOverrides((prev) => {
@@ -672,6 +1150,18 @@ export default function ContactsClient({
     });
   };
 
+  const handleMemberSaved = (openId: string, updated: Partial<MemberWithRoles>) => {
+    setMembers((prev) => prev.map((m) => (m.openId === openId ? { ...m, ...updated } : m)));
+  };
+
+  const handleMemberDeleted = (openId: string) => {
+    setMembers((prev) => prev.filter((m) => m.openId !== openId));
+  };
+
+  const handleMemberAdded = (member: MemberWithRoles) => {
+    setMembers((prev) => [...prev, member]);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-100 px-4 py-8">
       <div className="mx-auto max-w-3xl">
@@ -680,9 +1170,29 @@ export default function ContactsClient({
           <Link href={`/production/${productionId}`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
             ← 返回
           </Link>
-          <div className="text-right">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">People</p>
-            <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <>
+                <button
+                  onClick={handleSyncAll}
+                  disabled={syncing}
+                  title={syncResult ?? "同步飞书全员到本地通讯录"}
+                  className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-500 hover:bg-zinc-200 disabled:opacity-40 transition-colors"
+                >
+                  {syncing ? "同步中…" : "同步通讯录"}
+                </button>
+                <button
+                  onClick={() => setShowAddPanel(true)}
+                  className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
+                >
+                  + 添加人员
+                </button>
+              </>
+            )}
+            <div className="text-right ml-2">
+              <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">People</p>
+              <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+            </div>
           </div>
         </div>
 
@@ -707,7 +1217,9 @@ export default function ContactsClient({
                 key={m.openId}
                 member={m}
                 canManage={canManage}
+                isSelf={m.openId === myOpenId}
                 onManage={() => setManagingOpenId(m.openId)}
+                onEdit={() => setEditingOpenId(m.openId)}
               />
             ))}
           </div>
@@ -721,6 +1233,26 @@ export default function ContactsClient({
           overrides={overrides[managingMember.openId] ?? {}}
           onClose={() => setManagingOpenId(null)}
           onOverrideChange={(perm, granted) => handleOverrideChange(managingMember.openId, perm, granted)}
+        />
+      )}
+
+      {editingMember && (
+        <EditInfoPanel
+          productionId={productionId}
+          member={editingMember}
+          canManage={canManage}
+          onClose={() => setEditingOpenId(null)}
+          onSaved={(updated) => handleMemberSaved(editingMember.openId, updated)}
+          onDeleted={() => handleMemberDeleted(editingMember.openId)}
+        />
+      )}
+
+      {showAddPanel && (
+        <AddMemberPanel
+          productionId={productionId}
+          existingOpenIds={existingOpenIds}
+          onClose={() => setShowAddPanel(false)}
+          onAdded={handleMemberAdded}
         />
       )}
     </div>

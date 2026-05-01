@@ -169,38 +169,113 @@ export type FeishuSearchedUser = {
   openId: string;
   name: string;
   avatarUrl: string | null;
+  enName?: string;
+  hint?: string; // masked contact for disambiguation
 };
 
-// Requires app to have contact:user.base:readonly (same permission as checkIsTenantManager).
-export async function searchUsersByName(query: string): Promise<FeishuSearchedUser[]> {
-  const appToken = await getAppAccessToken();
-  const url = new URL(`${BASE}/contact/v3/users/search`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("user_id_type", "open_id");
-  url.searchParams.set("page_size", "20");
+// Full raw data returned by the user list API — used for sync to DB.
+export type FeishuRawUser = {
+  openId: string;
+  name: string;
+  avatarUrl: string | null;
+  email: string | null;
+  phone: string | null;
+};
 
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${appToken}` },
-  });
-  const data = (await res.json()) as {
-    code: number;
-    msg: string;
-    data?: {
-      users?: {
-        open_id: string;
-        name: string;
-        avatar?: { avatar_240?: string; avatar_72?: string };
-      }[];
+type UserListItem = {
+  open_id: string;
+  name: string;
+  en_name?: string;
+  email?: string;
+  mobile?: string;
+  avatar?: { avatar_240?: string; avatar_72?: string };
+};
+
+async function fetchDeptUsers(
+  token: string,
+  deptId: string,
+  out: FeishuRawUser[],
+  seen: Set<string>,
+): Promise<void> {
+  let pageToken = "";
+  do {
+    const url = new URL(`${BASE}/contact/v3/users`);
+    url.searchParams.set("department_id", deptId);
+    url.searchParams.set("department_id_type", "department_id");
+    url.searchParams.set("user_id_type", "open_id");
+    url.searchParams.set("page_size", "50");
+    if (pageToken) url.searchParams.set("page_token", pageToken);
+
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = (await res.json()) as {
+      code: number; msg: string;
+      data?: { has_more?: boolean; page_token?: string; items?: UserListItem[] };
     };
-  };
+    if (data.code !== 0) return; // skip dept on permission/error
 
-  if (data.code !== 0) throw new Error(`searchUsers: ${data.msg}`);
+    for (const u of (data.data?.items ?? [])) {
+      if (!seen.has(u.open_id)) {
+        seen.add(u.open_id);
+        out.push({
+          openId: u.open_id,
+          name: u.name,
+          avatarUrl: u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null,
+          email: u.email ?? null,
+          phone: u.mobile ?? null,
+        });
+      }
+    }
+    pageToken = data.data?.has_more ? (data.data.page_token ?? "") : "";
+  } while (pageToken);
+}
 
-  return (data.data?.users ?? []).map((u) => ({
-    openId: u.open_id,
-    name: u.name,
-    avatarUrl: u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null,
-  }));
+async function fetchChildDeptIds(token: string, parentDeptId: string): Promise<string[]> {
+  const ids: string[] = [];
+  let pageToken = "";
+  do {
+    const url = new URL(`${BASE}/contact/v3/departments`);
+    url.searchParams.set("parent_department_id", parentDeptId);
+    url.searchParams.set("department_id_type", "department_id");
+    url.searchParams.set("user_id_type", "open_id");
+    url.searchParams.set("page_size", "50");
+    if (pageToken) url.searchParams.set("page_token", pageToken);
+
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = (await res.json()) as {
+      code: number; msg: string;
+      data?: { has_more?: boolean; page_token?: string; items?: { department_id: string }[] };
+    };
+    if (data.code !== 0) return ids;
+
+    for (const d of (data.data?.items ?? [])) {
+      if (d.department_id) ids.push(d.department_id);
+    }
+    pageToken = data.data?.has_more ? (data.data.page_token ?? "") : "";
+  } while (pageToken);
+  return ids;
+}
+
+// BFS over the department tree to fetch all tenant users.
+// Used for the sync-all-users admin operation and as a fallback.
+export async function fetchAllTenantUsersRaw(): Promise<FeishuRawUser[]> {
+  const token = await getAppAccessToken();
+  const users: FeishuRawUser[] = [];
+  const seen = new Set<string>();
+  const queue: string[] = ["0"]; // start from root department
+  while (queue.length > 0) {
+    const deptId = queue.shift()!;
+    await fetchDeptUsers(token, deptId, users, seen);
+    const children = await fetchChildDeptIds(token, deptId);
+    queue.push(...children);
+  }
+  return users;
+}
+
+// Used by import-contacts to look up a user in the Feishu tenant directory by name.
+// BFS fetches all users; caller should prefer findUserByName (local DB) first.
+export async function searchUsersByName(query: string): Promise<FeishuRawUser[]> {
+  const all = await fetchAllTenantUsersRaw();
+  return all.filter((u) => u.name.includes(query));
 }
 
 export async function exchangeCode(code: string): Promise<TokenData> {

@@ -46,6 +46,7 @@ export default async function ContactsPage({
       initialMembers={members}
       canImport={canImport}
       canManage={canManage}
+      myOpenId={session.openId}
       initialOverrides={allOverrides}
       canManageDepts={canManageDepts}
       initialDepartments={departments}

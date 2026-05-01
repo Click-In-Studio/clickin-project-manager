@@ -481,6 +481,67 @@ export async function removeProductionMember(productionId: string, openId: strin
   );
 }
 
+export async function searchFeishuUsers(query: string): Promise<{
+  openId: string; name: string; avatarUrl: string | null;
+  email: string | null; phone: string | null; hint: string | null;
+}[]> {
+  const res = await getPool().query<{
+    open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
+  }>(
+    `SELECT open_id, name, avatar_url, email, phone FROM feishu_user
+     WHERE name ILIKE $1
+     ORDER BY name LIMIT 20`,
+    [`%${query}%`]
+  );
+  return res.rows.map((r) => ({
+    openId: r.open_id,
+    name: r.name,
+    avatarUrl: r.avatar_url,
+    email: r.email,
+    phone: r.phone,
+    hint: r.email ?? (r.phone && r.phone.length >= 4
+      ? r.phone.replace(/(\d{3})\d+(\d{4})/, "$1****$2")
+      : r.phone),
+  }));
+}
+
+export async function setMemberRoles(
+  productionId: string,
+  openId: string,
+  roles: string[]
+): Promise<void> {
+  await getPool().query(
+    "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND open_id = $2",
+    [productionId, openId, roles]
+  );
+}
+
+export async function updateUserContact(
+  openId: string,
+  email: string | null,
+  phone: string | null
+): Promise<void> {
+  await getPool().query(
+    `UPDATE feishu_user
+     SET email = COALESCE($2, email),
+         phone = COALESCE($3, phone),
+         updated_at = now()
+     WHERE open_id = $1`,
+    [openId, email, phone]
+  );
+}
+
+export async function setMemberPhoto(
+  productionId: string,
+  openId: string,
+  photoUrl: string | null
+): Promise<void> {
+  await getPool().query(
+    "UPDATE production_member SET photo_url = $3 WHERE production_id = $1 AND open_id = $2",
+    [productionId, openId, photoUrl]
+  );
+}
+
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
 export type Mention = { openId: string; name: string };

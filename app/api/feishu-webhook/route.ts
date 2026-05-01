@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantAccessToken, getBotOpenId } from "@/lib/feishu-auth";
 import { getUserName, isBotTester } from "@/lib/feishu-webhook";
+import { upsertContactUser } from "@/lib/db";
 import { processMessage as agentProcessMessage, processButtonClick } from "@/agent/index";
 import type { BotContext, HistoryMessage } from "@/agent/types";
 
@@ -118,6 +119,17 @@ export async function POST(req: NextRequest) {
     return handleCardAction(body);
   }
 
+  // Sync Feishu user info on create / update events
+  if (
+    header?.event_type === "contact.user.created_v3" ||
+    header?.event_type === "contact.user.updated_v3"
+  ) {
+    void handleContactUserEvent(body).catch((err) =>
+      console.error("[feishu-webhook] contact user event error:", err),
+    );
+    return NextResponse.json({ ok: true });
+  }
+
   if (header?.event_type !== "im.message.receive_v1") {
     return NextResponse.json({ ok: true });
   }
@@ -127,6 +139,23 @@ export async function POST(req: NextRequest) {
   );
 
   return NextResponse.json({ ok: true });
+}
+
+async function handleContactUserEvent(body: Record<string, unknown>): Promise<void> {
+  const event = body.event as {
+    object?: {
+      open_id?: string;
+      name?: string;
+      email?: string;
+      mobile?: string;
+      avatar?: { avatar_240?: string; avatar_72?: string };
+    };
+  } | undefined;
+  const u = event?.object;
+  if (!u?.open_id || !u?.name) return;
+  const avatarUrl = u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null;
+  await upsertContactUser(u.open_id, u.name, avatarUrl, u.email ?? null, u.mobile ?? null);
+  console.log(`[feishu-webhook] contact user synced: ${u.name} (${u.open_id})`);
 }
 
 async function handleCardAction(body: Record<string, unknown>): Promise<NextResponse> {
