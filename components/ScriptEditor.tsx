@@ -395,9 +395,11 @@ function applyInlineStageStyling(div: HTMLDivElement, delimOpen = "（", delimCl
 function TableOfContents({
   scenes,
   blocks,
+  onScrollToScene,
 }: {
   scenes: Scene[];
   blocks: Block[];
+  onScrollToScene?: (sceneId: string) => void;
 }) {
   // Build ordered scene list matching the render: used scenes in block order,
   // with unused scenes inserted at their correct position between used ones.
@@ -434,6 +436,7 @@ function TableOfContents({
   if (orderedScenes.length === 0) return null;
 
   const scrollTo = (sceneId: string) => {
+    if (onScrollToScene) { onScrollToScene(sceneId); return; }
     document.getElementById(`scene-block-${sceneId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -2512,6 +2515,140 @@ export default function ScriptEditor({
   const blocksRef = useRef(blocks);
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
+
+  // ── Virtual scroll ────────────────────────────────────────────────────────────
+  const VSCROLL_BUFFER = 80;
+  const DEFAULT_BLOCK_H = 80;
+  const blocksContainerRef = useRef<HTMLDivElement>(null);
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
+  const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(200, blocks.length) }));
+  const [pendingScrollTo, setPendingScrollTo] = useState<
+    { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
+  >(null);
+
+  // Rebuild cumulative heights from cache
+  const rebuildCumulative = useCallback(() => {
+    const bl = blocksRef.current;
+    const arr = new Array(bl.length + 1);
+    arr[0] = 0;
+    for (let i = 0; i < bl.length; i++) {
+      arr[i + 1] = arr[i] + (measuredHeightsRef.current.get(bl[i].id) ?? DEFAULT_BLOCK_H);
+    }
+    cumulativeHRef.current = arr;
+  }, []);
+
+  // Binary search: first block index whose top >= offset
+  const blockAtOffset = (offset: number) => {
+    const cum = cumulativeHRef.current;
+    const n = cum.length - 1;
+    if (n <= 0) return 0;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid + 1] <= offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  const recomputeWindow = useCallback(() => {
+    const container = blocksContainerRef.current;
+    const bl = blocksRef.current;
+    if (!container || bl.length === 0) return;
+    const containerTop = container.getBoundingClientRect().top + window.scrollY;
+    const sy = window.scrollY;
+    const viewStart = Math.max(0, sy - containerTop);
+    const viewEnd = viewStart + window.innerHeight;
+
+    let newStart = Math.max(0, blockAtOffset(viewStart) - VSCROLL_BUFFER);
+    let newEnd = Math.min(bl.length, blockAtOffset(viewEnd) + VSCROLL_BUFFER + 1);
+
+    // Always keep the focused block rendered
+    const fi = focusedIdRef.current ? bl.findIndex(b => b.id === focusedIdRef.current) : -1;
+    if (fi >= 0) { newStart = Math.min(newStart, fi); newEnd = Math.max(newEnd, fi + 1); }
+
+    setWindowRange(prev =>
+      prev.start === newStart && prev.end === newEnd ? prev : { start: newStart, end: newEnd }
+    );
+  }, []);
+
+  // Scroll listener
+  useEffect(() => {
+    let rafId = 0;
+    const onScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(recomputeWindow); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    recomputeWindow();
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId); };
+  }, [recomputeWindow]);
+
+  // Clamp window when blocks list length changes (insert/delete)
+  useEffect(() => {
+    setWindowRange(prev => ({
+      start: Math.min(prev.start, Math.max(0, blocks.length - 1)),
+      end: Math.min(prev.end, blocks.length),
+    }));
+  }, [blocks.length]);
+
+  // Measure rendered block heights after each render pass
+  useEffect(() => {
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    let changed = false;
+    container.querySelectorAll<HTMLElement>('[data-bwrap]').forEach(el => {
+      const id = el.dataset.bwrap;
+      if (!id) return;
+      const h = el.offsetHeight;
+      if (h > 0 && measuredHeightsRef.current.get(id) !== h) {
+        measuredHeightsRef.current.set(id, h);
+        changed = true;
+      }
+    });
+    if (changed) { rebuildCumulative(); recomputeWindow(); }
+  });
+
+  // Execute pending scroll once the target block is rendered
+  useEffect(() => {
+    if (!pendingScrollTo) return;
+    const el = pendingScrollTo.kind === 'block'
+      ? document.getElementById(`block-${pendingScrollTo.id}`)
+      : document.getElementById(`scene-block-${pendingScrollTo.id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: pendingScrollTo.kind === 'block' ? pendingScrollTo.align : 'start' });
+    setPendingScrollTo(null);
+  }, [pendingScrollTo, windowRange]);
+
+  // Scroll to a block by index, expanding window if needed
+  const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = 'center') => {
+    if (idx < 0 || idx >= blocksRef.current.length) return;
+    const block = blocksRef.current[idx];
+    if (idx < windowRange.start || idx >= windowRange.end) {
+      // Approximate position scroll, then let the pending effect finish
+      rebuildCumulative();
+      const container = blocksContainerRef.current;
+      if (container) {
+        const containerTop = container.getBoundingClientRect().top + window.scrollY;
+        const approxY = containerTop + cumulativeHRef.current[idx] - (align === 'center' ? window.innerHeight / 2 : 80);
+        window.scrollTo({ top: Math.max(0, approxY), behavior: 'smooth' });
+      }
+    }
+    setPendingScrollTo({ kind: 'block', id: block.id, align });
+  }, [windowRange, rebuildCumulative]);
+
+  const scrollToScene = useCallback((sceneId: string) => {
+    const el = document.getElementById(`scene-block-${sceneId}`);
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const idx = blocksRef.current.findIndex(b => b.sceneId === sceneId);
+    if (idx < 0) return;
+    rebuildCumulative();
+    const container = blocksContainerRef.current;
+    if (container) {
+      const containerTop = container.getBoundingClientRect().top + window.scrollY;
+      const approxY = containerTop + cumulativeHRef.current[idx] - 80;
+      window.scrollTo({ top: Math.max(0, approxY), behavior: 'smooth' });
+    }
+    setPendingScrollTo({ kind: 'scene', id: sceneId });
+  }, [rebuildCumulative]);
   useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
   // ── Server sync ─────────────────────────────────────────────────────────────
@@ -2978,17 +3115,13 @@ export default function ScriptEditor({
 
   // Jump helpers
   const jumpToLine = useCallback((n: number) => {
-    const idx = Math.max(0, Math.min(n - 1, blocks.length - 1));
-    const blockId = blocks[idx]?.id;
-    if (blockId) document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [blocks]);
+    scrollToBlockIdx(Math.max(0, Math.min(n - 1, blocks.length - 1)), 'center');
+  }, [blocks.length, scrollToBlockIdx]);
 
   const jumpToPage = useCallback((n: number) => {
     const idx = blocks.findIndex(b => pageMap[b.id] === n);
-    if (idx < 0) return;
-    const blockId = blocks[idx].id;
-    document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [blocks, pageMap]);
+    if (idx >= 0) scrollToBlockIdx(idx, 'start');
+  }, [blocks, pageMap, scrollToBlockIdx]);
 
   const toggleBlockType = useCallback((id: string) => {
     saveSnapshot();
@@ -3620,11 +3753,44 @@ export default function ScriptEditor({
       {/* Document */}
       <main className="mx-auto max-w-3xl px-4 py-8">
         <div className="min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
-          <TableOfContents scenes={scenes} blocks={blocks} />
+          <TableOfContents scenes={scenes} blocks={blocks} onScrollToScene={scrollToScene} />
+          <div ref={blocksContainerRef}>
           {(() => {
             const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter(Boolean));
+
+            // Pre-compute scene-header state for blocks before the visible window
             let lastRenderedActId: string | undefined = undefined;
-            return blocks.flatMap((block, bIdx) => {
+            for (let pi = 0; pi < windowRange.start; pi++) {
+              const pb = blocks[pi];
+              const pp = pi > 0 ? blocks[pi - 1] : null;
+              if (pb.sceneId === null || pb.sceneId === pp?.sceneId) continue;
+              const pscene = scenes.find(s => s.id === pb.sceneId);
+              if (!pscene) continue;
+              const pci = scenes.findIndex(s => s.id === pb.sceneId);
+              const ppi = pp?.sceneId != null ? scenes.findIndex(s => s.id === pp.sceneId) : -1;
+              const pskipped = pci > ppi + 1 ? scenes.slice(ppi + 1, pci).filter(s => !usedSceneIds.has(s.id)) : [];
+              const sim = (s: Scene) => {
+                if (s.parentId !== null) {
+                  if (s.parentId !== lastRenderedActId) {
+                    const a = scenes.find(a => a.id === s.parentId);
+                    if (a) lastRenderedActId = a.id;
+                  }
+                } else { lastRenderedActId = s.id; }
+              };
+              for (const s of pskipped) sim(s);
+              sim(pscene);
+            }
+
+            // Compute spacer heights
+            const cum = cumulativeHRef.current;
+            const topH = cum.length > windowRange.start ? cum[windowRange.start] : windowRange.start * DEFAULT_BLOCK_H;
+            const totalH = cum.length > blocks.length ? cum[blocks.length] : blocks.length * DEFAULT_BLOCK_H;
+            const botH = Math.max(0, totalH - (cum.length > windowRange.end ? cum[windowRange.end] : windowRange.end * DEFAULT_BLOCK_H));
+
+            return [
+              <div key="__vtop" style={{ height: topH }} aria-hidden="true" />,
+              ...blocks.slice(windowRange.start, windowRange.end).flatMap((block, wIdx) => {
+            const bIdx = windowRange.start + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
 
             // Monotonicity-safe scene picker: only show scenes within the window
@@ -3659,6 +3825,7 @@ export default function ScriptEditor({
               <div
                 key={block.id}
                 id={`block-${block.id}`}
+                data-bwrap={block.id}
                 data-scene-anchor={sceneStart ? block.sceneId : undefined}
                 className={`min-w-0 scroll-mt-20`}
               >
@@ -3763,9 +3930,12 @@ export default function ScriptEditor({
             return bIdx > 0
               ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
               : [blockEl];
-          });
+              }),
+              <div key="__vbot" style={{ height: botH }} aria-hidden="true" />,
+            ];
           })()}
           {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
+          </div>
         </div>
         {canEditText && (
           <p className="mt-4 text-center text-xs text-zinc-300">
