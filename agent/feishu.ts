@@ -33,6 +33,19 @@ export async function sendMessage(
   if (data.code !== 0) throw new Error(`Feishu sendMessage error ${data.code}: ${data.msg}`);
 }
 
+/** Returns true when text contains markdown that lark_md can render. */
+export function hasMarkdown(text: string): boolean {
+  return /(\*\*|^#{1,3} |^- |^\* |^\d+\. |`)/m.test(text);
+}
+
+/** Wraps text in a minimal lark_md card (no header, no button). */
+export function buildMarkdownCard(text: string): string {
+  return JSON.stringify({
+    config: { wide_screen_mode: true },
+    elements: [{ tag: "div", text: { tag: "lark_md", content: text } }],
+  });
+}
+
 export async function getUserDisplayName(openId: string): Promise<string> {
   try {
     const token = await getTenantAccessToken();
