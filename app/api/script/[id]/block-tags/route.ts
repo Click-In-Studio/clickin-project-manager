@@ -5,12 +5,12 @@ import { hasPermission } from "@/lib/roles";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
+  if (!session) return { session: null, memberRoles: null, overrides: new Map(), deny: Response.json({ error: "未登录" }, { status: 401 }) };
   const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
-    return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+    return { session, memberRoles, overrides, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
-  return { session, deny: null };
+  return { session, memberRoles, overrides, deny: null };
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -23,8 +23,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
-  const { session, deny } = await guard(req, productionId);
+  const { session, memberRoles, overrides, deny } = await guard(req, productionId);
   if (!session || deny) return deny!;
+  if (!hasPermission("script:edit", session.isAdmin, memberRoles!, overrides)) {
+    return Response.json({ error: "权限不足" }, { status: 403 });
+  }
 
   const body = (await req.json()) as {
     blockId?: string;
