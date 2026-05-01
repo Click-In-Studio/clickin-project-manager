@@ -942,7 +942,6 @@ export default function CuePage({
         if (d.name) { setUserName(d.name); localStorage.setItem("presence_name", d.name); }
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load cue comments for this production
@@ -956,11 +955,12 @@ export default function CuePage({
   // Comment panel follows cue selection: auto-open on select, close on deselect
   useEffect(() => {
     if (selection.kind === "cue") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveCommentCueId(selection.cueId);
     } else if (selection.kind === "none") {
       setActiveCommentCueId(null);
     }
-  }, [selection]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selection]);
 
   const sendCuePresence = useCallback((listId: string | null, cueId: string | null) => {
     if (!clientId || !userName) return;
@@ -1188,6 +1188,15 @@ export default function CuePage({
   }, [blocks]);
   useEffect(() => { blockIndexMapRef.current = blockIndexMap; }, [blockIndexMap]);
 
+  // ── Orphaned cues: either anchor references a block that no longer exists ──
+  const orphanedCues = useMemo(() => {
+    return cues.filter(cue => {
+      const startId = cue.start.kind === "block" ? cue.start.blockId : cue.start.afterBlockId;
+      const endId   = cue.end.kind   === "block" ? cue.end.blockId   : cue.end.afterBlockId;
+      return !blockIndexMap.has(startId) || !blockIndexMap.has(endId);
+    });
+  }, [cues, blockIndexMap]);
+
   // ── effectiveCues: apply live drag override for preview ───────────────────
   const effectiveCues = useMemo(() => {
     if (!dragLive) return cues;
@@ -1324,6 +1333,18 @@ export default function CuePage({
   const dismissWarning = useCallback(async (cue: Cue) => {
     await updateCueField(cue, { warning: false });
   }, [updateCueField]);
+
+  // Re-anchor an orphaned cue to the current pending selection
+  const reassignOrphanedCue = useCallback(async (cue: Cue) => {
+    if (selection.kind !== "pending" || !canEditCue(cue)) return;
+    await updateCueField(cue, { start: selection.start, end: selection.end, warning: false });
+  }, [selection, canEditCue, updateCueField]);
+
+  // Start dragging an orphaned cue into the script; ensure the list is visible so preview renders
+  const startOrphanDrag = useCallback((e: React.MouseEvent, cue: Cue) => {
+    setVisibleListIds(prev => prev.has(cue.cueListId) ? prev : new Set([...prev, cue.cueListId]));
+    startCueDrag(e, cue.id, "move");
+  }, [startCueDrag]);
 
   const selectedCue = selection.kind === "cue"
     ? effectiveCues.find(c => c.id === selection.cueId) ?? null
@@ -1826,6 +1847,62 @@ export default function CuePage({
           )}
         </div>
       </div>
+
+      {/* ── Orphaned cues panel (hidden when empty) ── */}
+      {orphanedCues.length > 0 && (
+        <div
+          className="shrink-0 bg-amber-50 border-t border-amber-200 px-4 py-2.5"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[11px] font-semibold text-amber-700">⚠ 失效的 Cue</span>
+            <span className="text-[10px] text-amber-500">块引用已失效 · 从此处拖拽或选中脚本范围后点击「定位到选区」</span>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {orphanedCues.map(cue => {
+              const listIdx = listColorIndex.get(cue.cueListId) ?? 0;
+              const isDragging = dragLive?.cueId === cue.id;
+              const canEdit = canEditCue(cue);
+              const canReassign = selection.kind === "pending" && canEdit;
+              return (
+                <div
+                  key={cue.id}
+                  className={`flex items-center gap-1.5 transition-opacity ${isDragging ? "opacity-25" : ""}`}
+                >
+                  <CueChip
+                    cue={cue}
+                    colorIdx={listIdx}
+                    selected={selection.kind === "cue" && selection.cueId === cue.id}
+                    warning={true}
+                    editable={false}
+                    presenceUsers={presenceForCue.get(cue.id) ?? []}
+                    onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
+                    onCommitNumber={() => {}}
+                    onCommitName={() => {}}
+                    onDragStart={canEdit ? (e) => startOrphanDrag(e, cue) : undefined}
+                  />
+                  {canReassign && (
+                    <button
+                      onClick={e => { e.stopPropagation(); void reassignOrphanedCue(cue); }}
+                      className="text-[10px] text-blue-600 hover:text-blue-800 underline shrink-0"
+                    >
+                      定位到选区
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button
+                      onClick={e => { e.stopPropagation(); void deleteCue(cue); }}
+                      className="text-[10px] text-red-400 hover:text-red-600 shrink-0"
+                    >
+                      删除
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom bar: selected cue inspector ── */}
       {selectedCue && (() => {
