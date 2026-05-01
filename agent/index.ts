@@ -188,9 +188,14 @@ async function attachProductionContext(ctx: BotContext): Promise<void> {
 
 
 // Backend enforcement: delegate to each skill's constrain() if defined.
+// Async skills always use wait_reply:true unless constrain() explicitly overrides it.
 function enforceConstraints(response: AgentResponse): AgentResponse {
-  const constrain = skillRegistry[response.skill]?.config.constrain;
-  return constrain ? constrain(response) : response;
+  const cfg = skillRegistry[response.skill]?.config;
+  let r = cfg?.constrain ? cfg.constrain(response) : response;
+  if (cfg?.mode === "async" && r.wait_reply !== false) {
+    r = { ...r, wait_reply: true };
+  }
+  return r;
 }
 
 // Handles an async skill with wait_reply:true.
