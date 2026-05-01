@@ -316,7 +316,7 @@ function AddSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded }: Props) {
+export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded, canImport }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
 
   const update = async (id: string, number: string, name: string) => {
@@ -467,9 +467,14 @@ export default function ScenesManager({ productionId, productionName, initialSce
           <Link href={`/production/${productionId}/script`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
             ← 返回剧本
           </Link>
-          <div className="text-right">
+          <div className="text-right flex flex-col items-end gap-1">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Scenes</p>
             <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+            {canImport && (
+              <Link href={`/production/${productionId}/import-scenes`} className="text-xs text-blue-500 hover:underline">
+                导入章节信息
+              </Link>
+            )}
           </div>
         </div>
         {card}

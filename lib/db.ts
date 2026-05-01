@@ -727,6 +727,18 @@ export async function setCharacterMembers(aggregateId: string, memberIds: string
   }
 }
 
+export async function bulkUpsertBlockTags(
+  tags: Array<{ blockId: string; groupId: string; optionId: string }>
+): Promise<void> {
+  if (!tags.length) return;
+  await getPool().query(
+    `INSERT INTO block_tag (block_id, group_id, option_id, updated_at)
+     SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), now()
+     ON CONFLICT (block_id, group_id) DO UPDATE SET option_id = EXCLUDED.option_id, updated_at = now()`,
+    [tags.map(t => t.blockId), tags.map(t => t.groupId), tags.map(t => t.optionId)]
+  );
+}
+
 export async function patchCharacterMeta(
   id: string,
   fields: { gender?: string; biography?: string; roleType?: string }

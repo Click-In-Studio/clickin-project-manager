@@ -532,6 +532,7 @@ function ScenePanel({
   onRemove,
   open,
   onOpenChange,
+  canImport,
 }: {
   scenes: Scene[];
   productionId: string;
@@ -540,6 +541,7 @@ function ScenePanel({
   onRemove: (id: string) => void;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  canImport?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -564,9 +566,16 @@ function ScenePanel({
         <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
-            <Link href={`/production/${productionId}/scenes`} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
-              管理页 →
-            </Link>
+            <div className="flex items-center gap-2">
+              {canImport && productionId && (
+                <Link href={`/production/${productionId}/import-scenes`} className="text-[11px] text-blue-400 hover:text-blue-600 transition-colors">
+                  导入
+                </Link>
+              )}
+              <Link href={`/production/${productionId}/scenes`} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
+                管理页 →
+              </Link>
+            </div>
           </div>
           <div className="overflow-y-auto p-3">
             {scenes.length === 0 ? (
@@ -2428,12 +2437,14 @@ export default function ScriptEditor({
   canEditText = true,
   canEditMetadata = true,
   canEditRehearsalMark = true,
+  canImport = false,
 }: {
   scriptId?: string;
   productionId?: string;
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
+  canImport?: boolean;
 }) {
   const canEdit = canEditText || canEditMetadata || canEditRehearsalMark;
   const effectiveScriptId = productionId ?? scriptId;
@@ -3307,6 +3318,17 @@ export default function ScriptEditor({
                     >
                       标签设置…
                     </button>
+                    {canImport && (
+                      <>
+                        <div className="my-1 border-t border-zinc-50" />
+                        <Link
+                          href={`/production/${productionId}/import-script`}
+                          className="block w-full px-3 py-1.5 text-left text-sm text-blue-600 hover:bg-zinc-50"
+                        >
+                          导入剧本内容…
+                        </Link>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -3328,6 +3350,7 @@ export default function ScriptEditor({
                 onRemove={removeScene}
                 open={openMenu === "scene"}
                 onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
+                canImport={canImport}
               />
               <div className="h-4 w-px shrink-0 bg-zinc-100" />
               <CharacterPanel

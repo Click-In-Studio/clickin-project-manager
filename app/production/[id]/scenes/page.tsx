@@ -22,6 +22,7 @@ export default async function ScenesPage({
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
+  const canImport = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
 
   const [name, scenes, rehearsalMarks] = await Promise.all([
     getProductionName(id),
@@ -37,6 +38,7 @@ export default async function ScenesPage({
       initialScenes={scenes}
       rehearsalMarks={rehearsalMarks}
       canEdit={canEdit}
+      canImport={canImport}
     />
   );
 }
