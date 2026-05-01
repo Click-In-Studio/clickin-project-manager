@@ -28,6 +28,7 @@ export default async function DramaturgyPage({
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
+  const canImport = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
 
   const [name, scenes, rehearsalMarks, characters] = await Promise.all([
     getProductionName(id),
@@ -45,6 +46,7 @@ export default async function DramaturgyPage({
       rehearsalMarks={rehearsalMarks}
       initialCharacters={characters}
       canEdit={canEdit}
+      canImport={canImport}
     />
   );
 }

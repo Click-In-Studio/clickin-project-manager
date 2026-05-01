@@ -156,7 +156,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
 
-  return Response.json({ preview: { scenesToAdd, scenesToUpdate, conflicts } as ImportScenePreview });
+  // Count existing scenes that will receive metadata updates
+  const metaToUpdate = sceneRows.filter(row => {
+    if (!row.intro && !row.actionLine && !row.music && !row.stagePres && !row.duration) return false;
+    const num = row.parsed.childNum ?? row.parsed.parentNum;
+    return num != null && existingByNum.has(num);
+  }).length;
+
+  return Response.json({ preview: { scenesToAdd, scenesToUpdate, metaToUpdate, conflicts } as ImportScenePreview });
 }
 
 /** PUT: commit */

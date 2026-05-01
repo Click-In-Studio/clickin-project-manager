@@ -15,6 +15,7 @@ type Props = {
   rehearsalMarks: Record<string, string[]>;
   initialCharacters: CharacterDetail[];
   canEdit: boolean;
+  canImport?: boolean;
 };
 
 export default function Dramaturgy({
@@ -24,6 +25,7 @@ export default function Dramaturgy({
   rehearsalMarks,
   initialCharacters,
   canEdit,
+  canImport,
 }: Props) {
   const [tab, setTab] = useState<Tab>("scenes");
 
@@ -34,9 +36,14 @@ export default function Dramaturgy({
           <Link href={`/production/${productionId}`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
             ← 返回
           </Link>
-          <div className="text-right">
+          <div className="text-right flex flex-col items-end gap-1">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Dramaturgy</p>
             <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+            {canImport && tab === "scenes" && (
+              <Link href={`/production/${productionId}/import-scenes`} className="text-xs text-blue-500 hover:underline">
+                导入章节信息
+              </Link>
+            )}
           </div>
         </div>
 

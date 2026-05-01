@@ -74,7 +74,7 @@ export async function getSheetValues(
     }>(
       `/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}`,
       userToken,
-      { valueRenderOption: "ToString" },
+      { valueRenderOption: "FormattedValue" },
     );
 
     const rows = data.data.valueRange.values ?? [];

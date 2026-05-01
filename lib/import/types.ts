@@ -87,6 +87,7 @@ export type SceneConflict =
 export type ImportScenePreview = {
   scenesToAdd: { num: string; name: string; parentNum: string | null }[];
   scenesToUpdate: { num: string; oldName: string; newName: string }[];
+  metaToUpdate: number; // existing scenes that will have detail fields written
   conflicts: SceneConflict[];
 };
 

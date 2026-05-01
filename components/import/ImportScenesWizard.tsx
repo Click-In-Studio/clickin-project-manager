@@ -250,8 +250,13 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
                 </ul>
               </div>
             )}
-            {preview.scenesToAdd.length === 0 && preview.scenesToUpdate.length === 0 && (
-              <div className="p-3 text-gray-500">没有需要导入的新内容</div>
+            {preview.metaToUpdate > 0 && (
+              <div className="p-3">
+                <p className="font-medium text-blue-700">更新详情 ({preview.metaToUpdate} 个已有段落将写入简介/行动线等字段)</p>
+              </div>
+            )}
+            {preview.scenesToAdd.length === 0 && preview.scenesToUpdate.length === 0 && preview.metaToUpdate === 0 && (
+              <div className="p-3 text-gray-500">没有需要导入的内容</div>
             )}
           </div>
 
@@ -259,7 +264,7 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
 
           <div className="flex gap-3">
             <button onClick={() => setStep("columns")} className="px-4 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50">返回</button>
-            {(preview.scenesToAdd.length > 0 || preview.scenesToUpdate.length > 0) && (
+            {(preview.scenesToAdd.length > 0 || preview.scenesToUpdate.length > 0 || preview.metaToUpdate > 0) && (
               <button
                 onClick={handleCommit}
                 disabled={commitLoading}
