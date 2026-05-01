@@ -2519,6 +2519,8 @@ export default function ScriptEditor({
   const VSCROLL_BUFFER = 80;
   const DEFAULT_BLOCK_H = 80;
   const blocksContainerRef = useRef<HTMLDivElement>(null);
+  const topSpacerRef = useRef<HTMLDivElement>(null);
+  const botSpacerRef = useRef<HTMLDivElement>(null);
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
   const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(200, blocks.length) }));
@@ -2527,14 +2529,28 @@ export default function ScriptEditor({
   const pendingNavigateRef = useRef<
     { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
   >(null);
+  // After the initial estimated scroll, store the target for a precise correction after measurement
+  const postNavCorrectionRef = useRef<
+    { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
+  >(null);
+  // Incremented by the measurement effect to trigger the correction layout effect
+  const [correctionTick, setCorrectionTick] = useState(0);
 
   // Rebuild cumulative heights from cache
   const rebuildCumulative = useCallback(() => {
     const bl = blocksRef.current;
+    const measured = measuredHeightsRef.current;
+    // Use measured average for unmeasured blocks — much more accurate than a fixed default
+    let avgH = DEFAULT_BLOCK_H;
+    if (measured.size > 0) {
+      let sum = 0;
+      measured.forEach(h => { sum += h; });
+      avgH = sum / measured.size;
+    }
     const arr = new Array(bl.length + 1);
     arr[0] = 0;
     for (let i = 0; i < bl.length; i++) {
-      arr[i + 1] = arr[i] + (measuredHeightsRef.current.get(bl[i].id) ?? DEFAULT_BLOCK_H);
+      arr[i + 1] = arr[i] + (measured.get(bl[i].id) ?? avgH);
     }
     cumulativeHRef.current = arr;
   }, []);
@@ -2606,8 +2622,40 @@ export default function ScriptEditor({
         changed = true;
       }
     });
-    if (changed) { rebuildCumulative(); recomputeWindow(); }
+    if (changed) {
+      rebuildCumulative();
+      recomputeWindow();
+      // If there's a pending navigation correction, trigger the layout effect that will re-scroll
+      if (postNavCorrectionRef.current) {
+        setCorrectionTick(t => t + 1);
+      }
+    }
   });
+
+  // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
+  useLayoutEffect(() => {
+    if (correctionTick === 0) return;
+    const nav = postNavCorrectionRef.current;
+    if (!nav) return;
+    postNavCorrectionRef.current = null;
+    const el = nav.kind === 'block'
+      ? document.getElementById(`block-${nav.id}`)
+      : document.getElementById(`scene-block-${nav.id}`);
+    if (!el) return;
+    // Measurements are now fresh — rebuild and re-correct spacers before scrollIntoView
+    rebuildCumulative();
+    const cum = cumulativeHRef.current;
+    const n = blocksRef.current.length;
+    const newTop = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const total  = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const newBot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
+    if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
+    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'start' });
+  // windowRange is intentionally in deps — ensures this captures the post-recomputeWindow value;
+  // postNavCorrectionRef going null after the first correction prevents repeated firing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctionTick, windowRange]);
 
   // After each window-changing render, execute any pending navigation (fires before paint)
   useLayoutEffect(() => {
@@ -2618,8 +2666,24 @@ export default function ScriptEditor({
       : document.getElementById(`scene-block-${nav.id}`);
     if (!el) return;
     pendingNavigateRef.current = null;
+
+    // The spacerH state hasn't re-rendered yet — the spacer divs still hold the old window's
+    // heights. Correct them synchronously in the DOM so scrollIntoView lands at the right place.
+    rebuildCumulative();
+    const cum = cumulativeHRef.current;
+    const n = blocksRef.current.length;
+    const newTop = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const total  = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const newBot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
+    if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
+
     el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'start' });
-  }, [windowRange]);
+
+    // Newly-rendered blocks haven't been measured yet so the cumulative heights are estimated.
+    // Store the target so the measurement effect can trigger a precise correction pass.
+    postNavCorrectionRef.current = nav;
+  }, [windowRange, rebuildCumulative]);
 
   // Update spacer heights from cumulative cache after each render (safe: layoutEffect, not render)
   useLayoutEffect(() => {
@@ -2648,7 +2712,7 @@ export default function ScriptEditor({
 
   const scrollToScene = useCallback((sceneId: string) => {
     const existing = document.getElementById(`scene-block-${sceneId}`);
-    if (existing) { existing.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    if (existing) { existing.scrollIntoView({ behavior: 'instant', block: 'start' }); return; }
     const idx = blocksRef.current.findIndex(b => b.sceneId === sceneId);
     if (idx < 0) return;
     pendingNavigateRef.current = { kind: 'scene', id: sceneId };
@@ -3786,7 +3850,7 @@ export default function ScriptEditor({
             }
 
             return [
-              <div key="__vtop" style={{ height: spacerH.top }} aria-hidden="true" />,
+              <div key="__vtop" ref={topSpacerRef} style={{ height: spacerH.top }} aria-hidden="true" />,
               ...blocks.slice(windowRange.start, windowRange.end).flatMap((block, wIdx) => {
             const bIdx = windowRange.start + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
@@ -3929,7 +3993,7 @@ export default function ScriptEditor({
               ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
               : [blockEl];
               }),
-              <div key="__vbot" style={{ height: spacerH.bot }} aria-hidden="true" />,
+              <div key="__vbot" ref={botSpacerRef} style={{ height: spacerH.bot }} aria-hidden="true" />,
             ];
           })()}
           {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
