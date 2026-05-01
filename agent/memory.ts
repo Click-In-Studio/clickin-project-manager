@@ -68,9 +68,19 @@ function formatForPrompt(d: MemoryData): string {
 
 const HISTORY_DIGEST_SIZE = 6;
 
-// Returns a sanitised summary of recent chat history for injection into the base prompt.
-// Strips specific data values so the agent cannot treat past replies as ground truth.
-// The raw history remains accessible via the get_history skill.
+// Skills whose results are real DB/system data — should be preserved rather than stripped.
+const DATA_SKILLS = new Set([
+  "query_events", "get_event_detail", "get_daily_call", "get_weekly_call",
+  "get_my_tech_reqs",
+  "get_block_by_id", "get_block_by_line", "search_blocks", "query_blocks", "get_script_meta",
+  "get_scenes", "get_characters", "get_productions",
+  "get_history",
+]);
+
+// Returns a summary of recent Feishu chat history for injection into the base prompt.
+// User messages are anonymised; bot messages are split into two categories:
+//   - Messages that clearly relay system-queried data → preserved as-is
+//   - Messages that are AI reasoning/inference → anonymised
 export async function digestHistory(history: HistoryMessage[]): Promise<string> {
   if (history.length === 0) return "（无）";
 
@@ -87,27 +97,36 @@ export async function digestHistory(history: HistoryMessage[]): Promise<string> 
     [
       {
         role: "system",
-        content: `将飞书聊天记录转写为抽象意图描述。规则：
-1. 每条消息只描述"做了什么类型的操作"，不包含任何具体值
-2. 所有人名（无论用户还是助手）→ [某用户] / [助手]
-3. 所有时间（几点、几分、日期）→ [某时间]
-4. 所有地点 → [某地点]
-5. 所有数字、ID → [某数值]
-6. 所有事件/演出/剧目名称 → [某事件] / [某演出]
-7. 所有具体内容（技术需求、报告正文等）→ [具体内容]
+        content: `将飞书聊天记录转写为上下文摘要，区分两类助手消息：
+
+【助手消息分类规则】
+- 如果助手在转述系统查询数据（包含具体时间、地点、人员列表、数字等可验证信息），视为"数据回复"，保留核心内容，标记为 [助手(数据)]: <保留内容>
+- 如果助手在分析、推断或给出建议（无法从系统直接验证的内容），视为"推理回复"，抽象描述，标记为 [助手]: <意图描述>
+
+【用户消息规则】（一律脱敏）
+- 所有人名 → [某用户]
+- 所有时间 → [某时间]
+- 所有地点 → [某地点]
+- 所有数字/ID → [某数值]
+- 所有事件/演出名 → [某事件]
+- 所有具体内容 → [具体内容]
 
 示例：
-输入：王恺镔: 排练几点开始？
-输出：[某用户] 询问了某事件的开始时间
+输入：
+王恺镔: 这周三排练几点开始？
+助手: 根据系统数据，本周三排练为14:00，在第一排练厅，请11:45到场
+王恺镔: 好的
 
-输入：助手: 排练是10点，请11:15到场
-输出：[助手] 确认了开始时间并告知了集合时间
+输出：
+[某用户] 询问了某活动的时间地点
+[助手(数据)]: 本周三排练为14:00，在第一排练厅，请11:45到场
+[某用户] 表示收到
 
 如果没有实质内容，输出"（无实质历史记录）"。只输出转写结果，不加任何说明。`,
       },
       { role: "user", content: raw },
     ],
-    { temperature: 0, maxTokens: 200 },
+    { temperature: 0, maxTokens: 300 },
   ).catch(() => "（历史记录摘要失败）");
 }
 
@@ -122,20 +141,48 @@ export async function loadMemory(chatId: string, senderId: string): Promise<Memo
   };
 }
 
+// Regex to extract skill name from a successful result message.
+// Format: 以下是 "skillName" 的返回数据，仅供你决策下一步 action 使用。\n\n<result>\n\n<reminder>
+const RE_SKILL_RESULT = /^以下是 "([^"]+)" 的返回数据/;
+// Regex to extract skill name from a failure/no-result message.
+const RE_SKILL_STATUS = /^技能 "([^"]+)"/;
+
+function extractSkillResult(content: string): { skillName: string; result: string } | null {
+  const m = content.match(RE_SKILL_RESULT);
+  if (!m) return null;
+  // Content is: header \n\n <result> \n\n <JSON_REMINDER>
+  // Strip the first paragraph (header) and last paragraph (reminder)
+  const parts = content.split("\n\n");
+  const result = parts.slice(1, -1).join("\n\n").trim();
+  return { skillName: m[1], result };
+}
+
 function formatSessionTranscript(messages: Message[]): string {
   const lines: string[] = [];
   for (const m of messages) {
     if (m.role === "system") {
       if (m.content.startsWith("系统通知")) {
         lines.push(`[系统通知]: ${m.content}`);
-      } else if (m.content.startsWith("技能")) {
-        // Strip actual result content — only record which skill ran and whether it failed
-        const nameMatch = m.content.match(/^技能 "([^"]+)"/);
-        const skillName = nameMatch ? nameMatch[1] : "未知";
-        const failed = m.content.includes("执行失败");
-        lines.push(`[系统]: 技能 "${skillName}" ${failed ? "执行失败" : "执行完毕"}（结果内容已脱敏）`);
+      } else {
+        const extracted = extractSkillResult(m.content);
+        if (extracted) {
+          const { skillName, result } = extracted;
+          if (DATA_SKILLS.has(skillName)) {
+            // Preserve data-skill results verbatim so compact LLM can store facts
+            lines.push(`[查询结果(${skillName})]: ${result}`);
+          } else {
+            lines.push(`[系统]: 技能 "${skillName}" 执行完毕`);
+          }
+        } else {
+          // Failure / no-result messages: "技能 "X" 执行失败/已执行完毕…"
+          const sm = m.content.match(RE_SKILL_STATUS);
+          if (sm) {
+            const failed = m.content.includes("执行失败");
+            lines.push(`[系统]: 技能 "${sm[1]}" ${failed ? "执行失败" : "执行完毕"}`);
+          }
+          // All other system messages (base prompt boilerplate) are silently skipped
+        }
       }
-      // skip all other system messages (base prompt boilerplate etc.)
     } else if (m.role === "assistant") {
       try {
         const p = JSON.parse(m.content) as { skill: string; reason: string };
