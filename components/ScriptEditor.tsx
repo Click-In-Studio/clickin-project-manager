@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import {
   type KeyboardEvent,
@@ -2499,8 +2499,7 @@ export default function ScriptEditor({
     setOpenMenu(prev => prev === name ? null : name), []);
 
   // ── Display settings (cookie-persisted) ──────────────────────────────────────
-  const [display, setDisplay] = useState<DisplaySettings>(DEFAULT_DISPLAY);
-  useEffect(() => { setDisplay(readDisplayCookie()); }, []);
+  const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
   const toggleDisplay = useCallback((key: keyof DisplaySettings) => {
     setDisplay(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -2523,7 +2522,9 @@ export default function ScriptEditor({
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
   const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(200, blocks.length) }));
-  const [pendingScrollTo, setPendingScrollTo] = useState<
+  const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
+  // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
+  const pendingNavigateRef = useRef<
     { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
   >(null);
 
@@ -2583,7 +2584,8 @@ export default function ScriptEditor({
   }, [recomputeWindow]);
 
   // Clamp window when blocks list length changes (insert/delete)
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setWindowRange(prev => ({
       start: Math.min(prev.start, Math.max(0, blocks.length - 1)),
       end: Math.min(prev.end, blocks.length),
@@ -2607,60 +2609,54 @@ export default function ScriptEditor({
     if (changed) { rebuildCumulative(); recomputeWindow(); }
   });
 
-  // Execute pending scroll once the target block is rendered
-  useEffect(() => {
-    if (!pendingScrollTo) return;
-    const el = pendingScrollTo.kind === 'block'
-      ? document.getElementById(`block-${pendingScrollTo.id}`)
-      : document.getElementById(`scene-block-${pendingScrollTo.id}`);
+  // After each window-changing render, execute any pending navigation (fires before paint)
+  useLayoutEffect(() => {
+    const nav = pendingNavigateRef.current;
+    if (!nav) return;
+    const el = nav.kind === 'block'
+      ? document.getElementById(`block-${nav.id}`)
+      : document.getElementById(`scene-block-${nav.id}`);
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: pendingScrollTo.kind === 'block' ? pendingScrollTo.align : 'start' });
-    setPendingScrollTo(null);
-  }, [pendingScrollTo, windowRange]);
+    pendingNavigateRef.current = null;
+    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'start' });
+  }, [windowRange]);
 
-  // Teleport to a block: synchronously load its window, then instant-jump. No scroll animation.
+  // Update spacer heights from cumulative cache after each render (safe: layoutEffect, not render)
+  useLayoutEffect(() => {
+    const cum = cumulativeHRef.current;
+    const n = blocks.length;
+    const top = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const total = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const bot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    setSpacerH(prev => prev.top === top && prev.bot === bot ? prev : { top, bot });
+  }, [windowRange, blocks.length]);
+
+  // Teleport to a block: load target window, then instant-jump in the layout effect.
   const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = 'center') => {
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
-    const newStart = Math.max(0, idx - VSCROLL_BUFFER);
-    const newEnd = Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1);
-    // flushSync forces React to render the new window before we scroll
-    flushSync(() => setWindowRange({ start: newStart, end: newEnd }));
+    // If already rendered, jump immediately
     const el = document.getElementById(`block-${block.id}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'instant', block: align });
-    } else {
-      // Fallback: jump to estimated position and let pending effect refine
-      rebuildCumulative();
-      const container = blocksContainerRef.current;
-      if (container) {
-        const top = container.getBoundingClientRect().top + window.scrollY + cumulativeHRef.current[idx];
-        window.scrollTo({ top: Math.max(0, top - (align === 'center' ? window.innerHeight / 2 : 80)), behavior: 'instant' });
-      }
-      setPendingScrollTo({ kind: 'block', id: block.id, align });
-    }
-  }, [rebuildCumulative]);
+    if (el) { el.scrollIntoView({ behavior: 'instant', block: align }); return; }
+    // Otherwise shift the window and let useLayoutEffect land us there
+    pendingNavigateRef.current = { kind: 'block', id: block.id, align };
+    setWindowRange({
+      start: Math.max(0, idx - VSCROLL_BUFFER),
+      end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
+    });
+  }, []);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const existing = document.getElementById(`scene-block-${sceneId}`);
     if (existing) { existing.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     const idx = blocksRef.current.findIndex(b => b.sceneId === sceneId);
     if (idx < 0) return;
-    const newStart = Math.max(0, idx - VSCROLL_BUFFER);
-    const newEnd = Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1);
-    flushSync(() => setWindowRange({ start: newStart, end: newEnd }));
-    const el = document.getElementById(`scene-block-${sceneId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'instant', block: 'start' });
-    } else {
-      rebuildCumulative();
-      const container = blocksContainerRef.current;
-      if (container) {
-        const top = container.getBoundingClientRect().top + window.scrollY + cumulativeHRef.current[idx] - 80;
-        window.scrollTo({ top: Math.max(0, top), behavior: 'instant' });
-      }
-    }
-  }, [rebuildCumulative]);
+    pendingNavigateRef.current = { kind: 'scene', id: sceneId };
+    setWindowRange({
+      start: Math.max(0, idx - VSCROLL_BUFFER),
+      end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
+    });
+  }, []);
   useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
   // ── Server sync ─────────────────────────────────────────────────────────────
@@ -2836,7 +2832,6 @@ export default function ScriptEditor({
         setMeIsAdmin(data.isAdmin ?? false);
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load comments for this production
@@ -3111,17 +3106,15 @@ export default function ScriptEditor({
       acc.push(idx);
       return acc;
     }, []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchOpen, searchQuery, searchExact, searchCurrentPage, blocks, pageMap, currentPageNum]);
 
-  // Reset idx when matches change
-  useEffect(() => { setSearchIdx(0); }, [searchMatches.length, searchQuery]);
 
   // Scroll to focused search result
   useEffect(() => {
     const matchIdx = searchMatches[searchIdx];
     if (matchIdx === undefined) return;
     scrollToBlockIdx(matchIdx, 'center');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchIdx, searchMatches]);
 
   // Jump helpers
@@ -3679,9 +3672,9 @@ export default function ScriptEditor({
             <input
               autoFocus
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => { setSearchQuery(e.target.value); setSearchIdx(0); }}
               onKeyDown={e => {
-                if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+                if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); setSearchIdx(0); }
                 if (e.key === "Enter") {
                   if (searchMatches.length === 0) return;
                   setSearchIdx(i => (i + 1) % searchMatches.length);
@@ -3705,11 +3698,11 @@ export default function ScriptEditor({
             >▼</button>
             <div className="h-4 w-px bg-zinc-100" />
             <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
-              <input type="checkbox" checked={searchExact} onChange={e => setSearchExact(e.target.checked)} className="h-3 w-3" />
+              <input type="checkbox" checked={searchExact} onChange={e => { setSearchExact(e.target.checked); setSearchIdx(0); }} className="h-3 w-3" />
               精确
             </label>
             <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
-              <input type="checkbox" checked={searchCurrentPage} onChange={e => setSearchCurrentPage(e.target.checked)} className="h-3 w-3" />
+              <input type="checkbox" checked={searchCurrentPage} onChange={e => { setSearchCurrentPage(e.target.checked); setSearchIdx(0); }} className="h-3 w-3" />
               当页
             </label>
             <button
@@ -3792,14 +3785,8 @@ export default function ScriptEditor({
               sim(pscene);
             }
 
-            // Compute spacer heights
-            const cum = cumulativeHRef.current;
-            const topH = cum.length > windowRange.start ? cum[windowRange.start] : windowRange.start * DEFAULT_BLOCK_H;
-            const totalH = cum.length > blocks.length ? cum[blocks.length] : blocks.length * DEFAULT_BLOCK_H;
-            const botH = Math.max(0, totalH - (cum.length > windowRange.end ? cum[windowRange.end] : windowRange.end * DEFAULT_BLOCK_H));
-
             return [
-              <div key="__vtop" style={{ height: topH }} aria-hidden="true" />,
+              <div key="__vtop" style={{ height: spacerH.top }} aria-hidden="true" />,
               ...blocks.slice(windowRange.start, windowRange.end).flatMap((block, wIdx) => {
             const bIdx = windowRange.start + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
@@ -3942,7 +3929,7 @@ export default function ScriptEditor({
               ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
               : [blockEl];
               }),
-              <div key="__vbot" style={{ height: botH }} aria-hidden="true" />,
+              <div key="__vbot" style={{ height: spacerH.bot }} aria-hidden="true" />,
             ];
           })()}
           {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
