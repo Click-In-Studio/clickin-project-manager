@@ -1,0 +1,1 @@
+ALTER TABLE event_report_reply ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]';

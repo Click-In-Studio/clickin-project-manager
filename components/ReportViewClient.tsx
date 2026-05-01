@@ -124,32 +124,39 @@ function collectThread(
 }
 
 function ReplyThread({
-  parentType, parentId, parentLabel,
-  allReplies, canAdd, canModerate, currentUserOpenId, replyBase, onRepliesChange,
+  parentType, parentId, parentLabel, parentAuthor,
+  allReplies, canAdd, canModerate, currentUserOpenId, replyBase, onRepliesChange, members,
 }: {
   parentType: "report" | "note" | "reply";
   parentId: string;
   parentLabel?: string;
+  parentAuthor?: MentionMember;
   allReplies: ReportReply[];
   canAdd: boolean;
   canModerate: boolean;
   currentUserOpenId: string;
   replyBase: string;
   onRepliesChange: (updater: (prev: ReportReply[]) => ReportReply[]) => void;
+  members: MentionMember[];
 }) {
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [addingTop, setAddingTop] = useState(false);
 
   const thread = collectThread(parentType, parentId, allReplies);
 
-  const authorMap = new Map<string, string>();
-  for (const r of allReplies) authorMap.set(r.id, r.authorName);
+  const authorMap = new Map<string, { name: string; openId: string }>();
+  for (const r of allReplies) authorMap.set(r.id, { name: r.authorName, openId: r.openId });
 
-  async function sendReply(replyParentType: "report" | "note" | "reply", replyParentId: string, content: string) {
+  async function sendReply(
+    replyParentType: "report" | "note" | "reply",
+    replyParentId: string,
+    content: string,
+    mentions: MentionMember[],
+  ) {
     const res = await fetch(replyBase, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentType: replyParentType, parentId: replyParentId, content }),
+      body: JSON.stringify({ parentType: replyParentType, parentId: replyParentId, content, mentions }),
     });
     const data = await res.json();
     if (data.reply) {
@@ -180,7 +187,7 @@ function ReplyThread({
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-xs font-medium text-zinc-700">{reply.authorName}</span>
                   {replyingTo && (
-                    <span className="text-[10px] text-zinc-400">→ {replyingTo}</span>
+                    <span className="text-[10px] text-zinc-400">→ {replyingTo.name}</span>
                   )}
                   <span className="text-[10px] text-zinc-300">{fmtDate(reply.createdAt)}</span>
                 </div>
@@ -204,8 +211,10 @@ function ReplyThread({
             {isReplying && (
               <ReplyForm
                 placeholder={`回复 ${reply.authorName}…`}
-                onSend={content => sendReply("reply", reply.id, content)}
+                initialMentions={reply.openId !== currentUserOpenId ? [{ openId: reply.openId, name: reply.authorName }] : []}
+                onSend={(content, mentions) => sendReply("reply", reply.id, content, mentions)}
                 onCancel={() => setReplyingToId(null)}
+                members={members}
               />
             )}
           </div>
@@ -216,8 +225,10 @@ function ReplyThread({
         addingTop ? (
           <ReplyForm
             placeholder={parentLabel ? `回复 ${parentLabel}…` : "写回复…"}
-            onSend={content => sendReply(parentType, parentId, content)}
+            initialMentions={parentAuthor && parentAuthor.openId !== currentUserOpenId ? [parentAuthor] : []}
+            onSend={(content, mentions) => sendReply(parentType, parentId, content, mentions)}
             onCancel={() => setAddingTop(false)}
+            members={members}
           />
         ) : (
           <button onClick={() => setAddingTop(true)}
@@ -231,28 +242,40 @@ function ReplyThread({
 }
 
 function ReplyForm({
-  placeholder, onSend, onCancel,
+  placeholder, initialMentions = [], onSend, onCancel, members,
 }: {
   placeholder: string;
-  onSend: (content: string) => Promise<void>;
+  initialMentions?: MentionMember[];
+  onSend: (content: string, mentions: MentionMember[]) => Promise<void>;
   onCancel: () => void;
+  members: MentionMember[];
 }) {
-  const [content, setContent] = useState("");
+  const initText = initialMentions.length > 0
+    ? initialMentions.map(m => `@${m.name} `).join("") : "";
+  const [content, setContent] = useState(initText);
+  const [mentions, setMentions] = useState<MentionMember[]>(initialMentions);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
     if (!content.trim()) return;
     setSubmitting(true);
-    try { await onSend(content.trim()); setContent(""); }
+    try { await onSend(content.trim(), mentions); setContent(""); setMentions([]); }
     finally { setSubmitting(false); }
   }
 
   return (
     <div className="flex flex-col gap-2 pt-1">
-      <textarea value={content} onChange={e => setContent(e.target.value)} rows={2}
-        placeholder={placeholder} autoFocus
+      <MentionTextarea
+        value={content}
+        onChange={setContent}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        members={members}
+        rows={2}
+        placeholder={placeholder}
+        autoFocus
         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
+      />
       <div className="flex gap-2">
         <button onClick={submit} disabled={submitting || !content.trim()}
           className="px-3 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium disabled:opacity-50">
@@ -329,7 +352,7 @@ export default function ReportViewClient({
     return canReply && memberDeptIds.includes(note.departmentId);
   }
 
-  const commonThreadProps = { canModerate: canModerateNotes, currentUserOpenId, replyBase, onRepliesChange: setReplies };
+  const commonThreadProps = { canModerate: canModerateNotes, currentUserOpenId, replyBase, onRepliesChange: setReplies, members };
 
   return (
     <div className="min-h-screen bg-zinc-100">
@@ -368,6 +391,7 @@ export default function ReportViewClient({
           )}
           <ReplyThread
             parentType="report" parentId={report.id}
+            parentAuthor={members.find(m => m.openId === report.createdBy)}
             allReplies={replies} canAdd={canReply}
             {...commonThreadProps}
           />
@@ -396,6 +420,7 @@ export default function ReportViewClient({
                     />
                     <ReplyThread
                       parentType="note" parentId={note.id} parentLabel={note.authorName}
+                      parentAuthor={{ openId: note.authorOpenId, name: note.authorName }}
                       allReplies={replies} canAdd={canReplyToNote(note)}
                       {...commonThreadProps}
                     />
@@ -416,6 +441,7 @@ export default function ReportViewClient({
               />
               <ReplyThread
                 parentType="note" parentId={note.id} parentLabel={note.authorName}
+                parentAuthor={{ openId: note.authorOpenId, name: note.authorName }}
                 allReplies={replies} canAdd={canReplyToNote(note)}
                 {...commonThreadProps}
               />
