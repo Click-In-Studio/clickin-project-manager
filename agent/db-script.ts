@@ -465,6 +465,66 @@ export async function getScenesForProduction(productionId: string): Promise<Scen
   }));
 }
 
+// ── Comments ──────────────────────────────────────────────────────────────────
+
+export type AgentComment = {
+  id:         string;
+  contextId:  string;
+  parentId:   string | null;
+  openId:     string;
+  authorName: string;
+  body:       string;
+  mentions:   Array<{ openId: string; name: string }>;
+  createdAt:  string;
+};
+
+type CommentRow = {
+  id: string; context_id: string; parent_id: string | null;
+  open_id: string; author_name: string; body: string;
+  mentions: Array<{ openId: string; name: string }>; created_at: Date;
+};
+
+function rowToAgentComment(r: CommentRow): AgentComment {
+  return {
+    id:         r.id,
+    contextId:  r.context_id,
+    parentId:   r.parent_id,
+    openId:     r.open_id,
+    authorName: r.author_name,
+    body:       r.body,
+    mentions:   r.mentions ?? [],
+    createdAt:  r.created_at.toISOString(),
+  };
+}
+
+export async function getBlockComments(productionId: string, blockId: string): Promise<AgentComment[]> {
+  const pool = getScriptEditorPool();
+  const res = await pool.query<CommentRow>(
+    `SELECT id, context_id, parent_id, open_id, author_name, body, mentions, created_at
+     FROM comment
+     WHERE production_id = $1 AND context_type = 'block' AND context_id = $2
+     ORDER BY created_at ASC`,
+    [productionId, blockId],
+  );
+  return res.rows.map(rowToAgentComment);
+}
+
+export async function getMentionsToday(productionId: string, openId: string): Promise<AgentComment[]> {
+  const pool = getScriptEditorPool();
+  // "Today" is defined as on or after midnight Beijing time (UTC+8)
+  const res = await pool.query<CommentRow>(
+    `SELECT id, context_id, parent_id, open_id, author_name, body, mentions, created_at
+     FROM comment
+     WHERE production_id = $1
+       AND context_type = 'block'
+       AND mentions @> jsonb_build_array(jsonb_build_object('openId', $2::text))
+       AND created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')
+     ORDER BY created_at DESC`,
+    [productionId, openId],
+  );
+  return res.rows.map(rowToAgentComment);
+}
+
 // ── Characters ────────────────────────────────────────────────────────────────
 
 export type CharacterRow = {

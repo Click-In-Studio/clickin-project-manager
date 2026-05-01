@@ -73,6 +73,7 @@ const DATA_SKILLS = new Set([
   "query_events", "get_event_detail", "get_daily_call", "get_weekly_call",
   "get_my_tech_reqs",
   "get_block_by_id", "get_block_by_line", "search_blocks", "query_blocks", "get_script_meta",
+  "get_block_comments", "get_my_mentions",
   "get_scenes", "get_characters", "get_productions",
   "get_history",
 ]);

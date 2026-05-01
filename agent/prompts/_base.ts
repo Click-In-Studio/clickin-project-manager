@@ -94,6 +94,6 @@ export const BASE_PROMPT: PromptMessage[] = [
 
 禁止行为：
 - 在未调用 list_skills 的情况下直接拒绝任务
-- 在未确认无可用技能前输出“无法做到”`,
+- 在未确认无可用技能前输出”无法做到”`,
   },
 ];
