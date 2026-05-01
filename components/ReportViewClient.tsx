@@ -181,7 +181,7 @@ function ReplyThread({
         const isReplying = replyingToId === reply.id;
 
         return (
-          <div key={reply.id}>
+          <div key={reply.id} id={`reply-${reply.id}`}>
             <div className="rounded-xl bg-zinc-50 px-4 py-2.5">
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex items-center gap-1.5 flex-wrap">

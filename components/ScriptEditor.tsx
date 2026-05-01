@@ -2830,6 +2830,20 @@ export default function ScriptEditor({
   const lastSentPresenceRef = useRef<string | null | undefined>(undefined);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Hash-based deep link (e.g. #block-<id>?open_comment=true from notifications) ──
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#block-")) return;
+    const [fragment, query] = hash.slice(1).split("?");
+    const blockId = fragment.slice("block-".length);
+    const idx = blocksRef.current.findIndex(b => b.id === blockId);
+    if (idx >= 0) scrollToBlockIdx(idx, "center");
+    if (new URLSearchParams(query).get("open_comment") === "true") {
+      setActiveCommentBlockId(blockId);
+    }
+  }, [loadState, scrollToBlockIdx]);
+
   // SSE: receive seq pushes (state sync) and presence pushes from other clients
   useEffect(() => {
     if (loadState !== "ready") return;

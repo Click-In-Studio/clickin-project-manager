@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName } from "@/lib/db";
+import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import {
-  getEventReport, getReportNote,
+  getEventReport, getReportNote, getProductionEvent,
   listReportReplies, createReportReply,
   type Mention,
 } from "@/lib/event-db";
@@ -11,8 +11,9 @@ import {
   loadEventPermContext,
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
-import { sendBotDm } from "@/lib/feishu-bot";
+import { sendCard, buildReplyMentionCard } from "@/lib/feishu-bot";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
+import { BASE_PATH } from "@/lib/base-path";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 
@@ -78,19 +79,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     mentions,
   });
 
-  // Fire-and-forget: notify @mentioned users
+  // Fire-and-forget: notify @mentioned users via card
   if (mentions.length > 0) {
-    const productionName = await getProductionName(productionId).catch(() => null);
-    const prefix = productionName ? `《${productionName}》` : "制作";
-    const notifyText = `${session.name} 在${prefix}的报告评论中提到了你：\n${body.content.trim()}`;
-    getOptedOutUsers("report_mention").then((optedOut) => {
-      for (const m of mentions) {
-        if (optedOut.has(m.openId)) continue;
-        sendBotDm(m.openId, notifyText).catch(e =>
-          console.error(`[reply-mention] notify failed for ${m.openId}:`, (e as Error).message)
-        );
-      }
-    }).catch(() => {});
+    const appId = process.env.FEISHU_APP_ID ?? "";
+    const replyPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}#reply-${id}`;
+    const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(replyPath)}`;
+    const [optedOut, eventRow] = await Promise.all([
+      getOptedOutUsers("report_mention").catch(() => new Set<string>()),
+      getProductionEvent(eventId, productionId).catch(() => null),
+    ]);
+    const eventTitle = eventRow?.title ?? "";
+    const card = buildReplyMentionCard(session.name, report.title, eventTitle, body.content.trim(), url);
+    for (const m of mentions) {
+      if (optedOut.has(m.openId)) continue;
+      sendCard(m.openId, card).catch(e =>
+        console.error(`[reply-mention] notify failed for ${m.openId}:`, (e as Error).message)
+      );
+    }
   }
 
   return Response.json({ reply }, { status: 201 });

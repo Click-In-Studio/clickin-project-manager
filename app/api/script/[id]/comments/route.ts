@@ -3,7 +3,8 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import { sendBotDm } from "@/lib/feishu-bot";
+import { sendCard, buildScriptCommentMentionCard } from "@/lib/feishu-bot";
+import { BASE_PATH } from "@/lib/base-path";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
 
 async function guard(req: NextRequest, productionId: string) {
@@ -54,19 +55,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     session.openId, session.name, text, mentions,
   );
 
-  // Fire-and-forget: notify mentioned users via Feishu bot
+  // Fire-and-forget: notify mentioned users via card
   if (mentions.length > 0) {
-    const productionName = await getProductionName(productionId).catch(() => null);
-    const prefix = productionName ? `《${productionName}》` : "制作";
-    const notifyText = `${session.name} 在${prefix}的评论中提到了你：\n${text}`;
-    getOptedOutUsers("comment_mention").then((optedOut) => {
-      for (const m of mentions) {
-        if (optedOut.has(m.openId)) continue;
-        sendBotDm(m.openId, notifyText).catch(e =>
-          console.error(`[mention] notify failed for ${m.openId}:`, (e as Error).message)
-        );
-      }
-    }).catch(() => {});
+    const appId = process.env.FEISHU_APP_ID ?? "";
+    const blockPath = `${BASE_PATH}/production/${productionId}/script#block-${blockId}?open_comment=true`;
+    const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(blockPath)}`;
+    const [optedOut, productionName] = await Promise.all([
+      getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
+      getProductionName(productionId).catch(() => null),
+    ]);
+    const card = buildScriptCommentMentionCard(session.name, productionName ?? "制作", text, url);
+    for (const m of mentions) {
+      if (optedOut.has(m.openId)) continue;
+      sendCard(m.openId, card).catch(e =>
+        console.error(`[mention] notify failed for ${m.openId}:`, (e as Error).message)
+      );
+    }
   }
 
   return Response.json({ comment }, { status: 201 });

@@ -210,6 +210,29 @@ export function buildMentionCard(
   return makeCard("报告提及", "blue", body, url, "查看报告");
 }
 
+export function buildReplyMentionCard(
+  mentionerName: string,
+  reportTitle: string,
+  eventTitle: string,
+  snippet: string,
+  url: string,
+): object {
+  const trimmed = snippet.length > 80 ? snippet.slice(0, 80) + "…" : snippet;
+  const body = `**${mentionerName}** 在 **${eventTitle}** 的报告「${reportTitle}」中提到了你：\n\n> ${trimmed}`;
+  return makeCard("评论提及", "blue", body, url, "查看评论");
+}
+
+export function buildScriptCommentMentionCard(
+  mentionerName: string,
+  productionName: string,
+  snippet: string,
+  url: string,
+): object {
+  const trimmed = snippet.length > 80 ? snippet.slice(0, 80) + "…" : snippet;
+  const body = `**${mentionerName}** 在《${productionName}》的剧本评论中提到了你：\n\n> ${trimmed}`;
+  return makeCard("评论提及", "blue", body, url, "查看评论");
+}
+
 // ─── Group chat messaging ─────────────────────────────────────────────────────
 
 /** Send an interactive card to a Feishu group chat (chat_id). */
