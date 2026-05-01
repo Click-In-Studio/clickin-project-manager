@@ -17,7 +17,8 @@ import {
   toScriptState,
   extractSortKeys,
 } from "@/lib/feishu-bitable";
-import { createProduction, flushToDB } from "@/lib/db";
+import { createProduction, flushToDB, savePageMap } from "@/lib/db";
+import { computePageMap, PAGE_CONFIGS } from "@/lib/script-page";
 import { initialKeys } from "@/lib/lex-order";
 
 let _seq = 0;
@@ -120,6 +121,18 @@ export async function POST(req: NextRequest) {
     upsertScenes: dbScenes,
     deleteSceneIds: [],
   });
+
+  // Save page map for all layouts so the cue page has accurate data immediately after import
+  const importedBlocks = dbBlocks.map(({ orderKey: _ok, lexKey: _lk, ...b }) => b);
+  await savePageMap(
+    productionId,
+    Object.fromEntries(
+      (Object.keys(PAGE_CONFIGS) as (keyof typeof PAGE_CONFIGS)[]).map(layout => [
+        layout,
+        computePageMap(importedBlocks, layout),
+      ])
+    ),
+  );
 
   return Response.json({
     ok: true,
