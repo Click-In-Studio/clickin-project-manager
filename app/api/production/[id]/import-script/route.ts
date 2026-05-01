@@ -1,5 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
+import { TOKEN_COOKIE } from "@/lib/feishu-auth";
+import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { getProductionMemberContext, listProductionScenes, listProductionCharacters, flushToDB, loadProduction, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
@@ -20,7 +22,9 @@ async function guard(req: NextRequest, productionId: string) {
 }
 
 type ImportScriptBody = {
-  rows: (string | null)[][];
+  spreadsheetToken: string;
+  sheetId: string;
+  rowCount?: number;
   colMap: ScriptColMap;
   typeTagMapping?: TypeTagMapping;
   /** name → "normal" | "aggregate", after user override (uses the PARSED name, not raw) */
@@ -39,8 +43,8 @@ function getCell(row: (string | null)[], col: number | undefined): string | null
 }
 
 /** Parse rows into intermediate import records */
-function parseRows(body: ImportScriptBody) {
-  const { rows, colMap, typeTagMapping, characterKinds, headerRowIncluded } = body;
+function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spreadsheetToken" | "sheetId" | "rowCount">) {
+  const { colMap, typeTagMapping, characterKinds, headerRowIncluded } = body;
   const dataRows = headerRowIncluded ? rows.slice(1) : rows;
 
   type ParsedRow = {
@@ -104,7 +108,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (deny) return deny;
 
   const body = (await req.json()) as ImportScriptBody;
-  const { rows: parsed, warningMarks } = parseRows(body);
+  const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
+  if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
+  const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
+  const { rows: parsed, warningMarks } = parseRows(rawRows, body);
 
   const [existingChars, existingScenes] = await Promise.all([
     listProductionCharacters(productionId),
@@ -153,7 +160,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (deny) return deny;
 
   const body = (await req.json()) as ImportScriptBody;
-  const { rows: parsed } = parseRows(body);
+  const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
+  if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
+  const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
+  const { rows: parsed } = parseRows(rawRows, body);
 
   const [existingChars, existingScenes, production, tagGroups] = await Promise.all([
     listProductionCharacters(productionId),

@@ -62,13 +62,18 @@ export async function getSheetValues(
   spreadsheetToken: string,
   sheetId: string,
   userToken: string,
+  maxRow?: number,
 ): Promise<string[][]> {
   const allRows: string[][] = [];
   let start = 1;
+  const t0 = Date.now();
 
   for (let page = 0; page < 50; page++) {
-    const end = start + PAGE_SIZE - 1;
+    const end = maxRow ? Math.min(start + PAGE_SIZE - 1, maxRow) : start + PAGE_SIZE - 1;
     const range = `${sheetId}!A${start}:ZZ${end}`;
+    console.log(`[feishu-sheet] page ${page + 1}: fetching range ${range}`);
+    const pt = Date.now();
+
     const data = await feishuGet<{
       data: { valueRange: { values?: (string | number | boolean | null)[][] } };
     }>(
@@ -78,12 +83,14 @@ export async function getSheetValues(
     );
 
     const rows = data.data.valueRange.values ?? [];
+    console.log(`[feishu-sheet] page ${page + 1}: got ${rows.length} rows in ${Date.now() - pt}ms`);
     allRows.push(...rows.map(row => row.map(cell => (cell == null ? "" : String(cell)))));
 
-    if (rows.length < PAGE_SIZE) break;
+    if (rows.length < PAGE_SIZE || (maxRow && end >= maxRow)) break;
     start += PAGE_SIZE;
   }
 
+  console.log(`[feishu-sheet] total: ${allRows.length} rows in ${Date.now() - t0}ms`);
   return allRows;
 }
 

@@ -37,7 +37,7 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
     setLoadingData(true);
     setDataError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}`);
+      const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}?rowCount=${sheet.rowCount}`);
       const data = await res.json() as { data?: SheetData; error?: string };
       if (!res.ok || data.error) { setDataError(data.error ?? "加载失败"); return; }
       setSheetData(data.data!);
@@ -95,7 +95,7 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-scenes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: sheetData.rows, colMap, headerRowIncluded: false }),
+        body: JSON.stringify({ spreadsheetToken, sheetId: selectedSheet!.sheetId, rowCount: selectedSheet!.rowCount, colMap, headerRowIncluded: false }),
       });
       const data = await res.json() as { preview?: ImportScenePreview; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? "预览失败"); return; }
@@ -117,7 +117,7 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-scenes`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: sheetData.rows, colMap, headerRowIncluded: false }),
+        body: JSON.stringify({ spreadsheetToken, sheetId: selectedSheet!.sheetId, rowCount: selectedSheet!.rowCount, colMap, headerRowIncluded: false }),
       });
       const data = await res.json() as { imported?: number; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? "导入失败"); return; }

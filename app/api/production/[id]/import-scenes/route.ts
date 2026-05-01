@@ -5,6 +5,8 @@ import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import type { SceneColMap, ParsedSceneNum, SceneConflict, ImportScenePreview } from "@/lib/import/types";
 import { randomUUID } from "node:crypto";
+import { TOKEN_COOKIE } from "@/lib/feishu-auth";
+import { getSheetValues } from "@/lib/import/feishu-sheet";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -18,7 +20,9 @@ async function guard(req: NextRequest, productionId: string) {
 }
 
 type ImportScenesBody = {
-  rows: (string | null)[][];
+  spreadsheetToken: string;
+  sheetId: string;
+  rowCount?: number;
   colMap: SceneColMap;
   headerRowIncluded?: boolean;
 };
@@ -37,8 +41,7 @@ type SceneRow = {
   duration: string | null;
 };
 
-function buildSceneRows(body: ImportScenesBody): SceneRow[] {
-  const { rows, colMap, headerRowIncluded } = body;
+function buildSceneRows(rows: (string | null)[][], colMap: SceneColMap, headerRowIncluded?: boolean): SceneRow[] {
   const dataRows = headerRowIncluded ? rows.slice(1) : rows;
   const results: SceneRow[] = [];
 
@@ -132,13 +135,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { deny } = await guard(req, productionId);
   if (deny) return deny;
 
+  const t0 = Date.now();
   const body = (await req.json()) as ImportScenesBody;
-  const sceneRows = buildSceneRows(body);
+  const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
+  if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
+  const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
+  console.log(`[import-scenes POST] fetched ${rawRows.length} rows in ${Date.now() - t0}ms`);
+
+  const sceneRows = buildSceneRows(rawRows, body.colMap, body.headerRowIncluded);
+  console.log(`[import-scenes POST] sceneRows built: ${sceneRows.length} in ${Date.now() - t0}ms`);
 
   const existing = await listProductionScenes(productionId);
+  console.log(`[import-scenes POST] listProductionScenes: ${existing.length} existing in ${Date.now() - t0}ms`);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
 
   const sceneMap = buildSceneMap(sceneRows, existingByNum, existing.length + 1);
+  console.log(`[import-scenes POST] sceneMap built: ${sceneMap.size} scenes in ${Date.now() - t0}ms`);
 
   const conflicts: SceneConflict[] = [];
   const scenesToAdd: ImportScenePreview["scenesToAdd"] = [];
@@ -163,6 +175,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return num != null && existingByNum.has(num);
   }).length;
 
+  console.log(`[import-scenes POST] preview done in ${Date.now() - t0}ms`);
   return Response.json({ preview: { scenesToAdd, scenesToUpdate, metaToUpdate, conflicts } as ImportScenePreview });
 }
 
@@ -172,10 +185,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { deny } = await guard(req, productionId);
   if (deny) return deny;
 
+  const t0 = Date.now();
   const body = (await req.json()) as ImportScenesBody;
-  const sceneRows = buildSceneRows(body);
+  const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
+  if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
+  const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
+  const sceneRows = buildSceneRows(rawRows, body.colMap, body.headerRowIncluded);
+  console.log(`[import-scenes PUT] sceneRows: ${sceneRows.length} in ${Date.now() - t0}ms`);
 
   const existing = await listProductionScenes(productionId);
+  console.log(`[import-scenes PUT] listProductionScenes: ${existing.length} in ${Date.now() - t0}ms`);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
 
   const sceneMap = buildSceneMap(sceneRows, existingByNum, existing.length + 1);
@@ -211,6 +230,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (entry) metadataUpdates.push({ id: entry.id, row });
   }
 
+  console.log(`[import-scenes PUT] flushing ${upsertScenes.length} scenes, ${metadataUpdates.length} meta updates at ${Date.now() - t0}ms`);
   await flushToDB(productionId, {
     upsertScenes,
     deleteSceneIds: [],
@@ -219,6 +239,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     upsertChars: [],
     deleteCharIds: [],
   });
+  console.log(`[import-scenes PUT] flushToDB done at ${Date.now() - t0}ms`);
 
   await Promise.all(metadataUpdates.map(({ id, row }) =>
     updateSceneMetadata(id, productionId, {
@@ -229,6 +250,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       expectedDuration: row.duration ?? undefined,
     })
   ));
+  console.log(`[import-scenes PUT] metadata done at ${Date.now() - t0}ms`);
 
   return Response.json({ ok: true, imported: upsertScenes.length });
 }

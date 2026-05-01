@@ -19,8 +19,11 @@ export async function GET(
 
   const { token: spreadsheetToken, sheetId } = await ctx.params;
 
+  const rowCountParam = req.nextUrl.searchParams.get("rowCount");
+  const maxRow = rowCountParam ? parseInt(rowCountParam, 10) : undefined;
+
   try {
-    const rawRows = await getSheetValues(spreadsheetToken, sheetId, userToken);
+    const rawRows = await getSheetValues(spreadsheetToken, sheetId, userToken, maxRow || undefined);
     const data = parseSheetData(rawRows);
     return Response.json({ data });
   } catch (err: unknown) {

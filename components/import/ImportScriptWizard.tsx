@@ -83,7 +83,7 @@ export default function ImportScriptWizard({ productionId, onDone }: Props) {
     setLoadingData(true);
     setDataError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}`);
+      const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}?rowCount=${sheet.rowCount}`);
       const data = await res.json() as { data?: SheetData; error?: string };
       if (!res.ok || data.error) { setDataError(data.error ?? "加载失败"); return; }
       setSheetData(data.data!);
@@ -248,7 +248,7 @@ export default function ImportScriptWizard({ productionId, onDone }: Props) {
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-script`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: sheetData.rows, colMap, typeTagMapping, characterKinds, headerRowIncluded: false }),
+        body: JSON.stringify({ spreadsheetToken, sheetId: selectedSheet!.sheetId, rowCount: selectedSheet!.rowCount, colMap, typeTagMapping, characterKinds, headerRowIncluded: false }),
       });
       const data = await res.json() as { preview?: ImportScriptPreview; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? "预览失败"); setPreviewLoading(false); return; }
@@ -276,12 +276,8 @@ export default function ImportScriptWizard({ productionId, onDone }: Props) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rows: sheetData.rows,
-          colMap,
-          typeTagMapping,
-          characterKinds,
-          aggregateMembers,
-          headerRowIncluded: false,
+          spreadsheetToken, sheetId: selectedSheet!.sheetId, rowCount: selectedSheet!.rowCount,
+          colMap, typeTagMapping, characterKinds, aggregateMembers, headerRowIncluded: false,
         }),
       });
       const data = await res.json() as { blocksImported?: number; charsAdded?: number; sceneSummary?: SceneSummaryItem[]; error?: string };
