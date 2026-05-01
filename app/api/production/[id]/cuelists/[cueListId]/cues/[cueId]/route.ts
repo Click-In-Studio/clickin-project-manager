@@ -7,6 +7,7 @@ import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { sendCard, buildCueWarningCard } from "@/lib/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
+import { getOptedOutUsers } from "@/lib/notification-prefs";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -103,12 +104,13 @@ async function notifyCueWarning(
 
   if (recipients.size === 0) return;
 
-  const appId = process.env.FEISHU_APP_ID ?? "";
+  const [optedOut, appId] = [await getOptedOutUsers("cue_warning"), process.env.FEISHU_APP_ID ?? ""];
   const cuePath = `${BASE_PATH}/production/${productionId}/cuelists/${cueListId}`;
   const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(cuePath)}`;
   const card = buildCueWarningCard(productionName ?? "制作", cueList.name, cueNumber, cueName, url);
 
   for (const openId of recipients) {
+    if (optedOut.has(openId)) continue;
     sendCard(openId, card).catch(e =>
       console.error(`[cue-warning] dm failed for ${openId}:`, (e as Error).message)
     );

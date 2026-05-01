@@ -12,6 +12,7 @@ export const NOTIFICATION_CONFIG = {
   report_broadcast: { label: "报告发布通知",   description: "报告发布时推送给所有关注者和参与者",          channel: "dm"    as const, defaultEnabled: true  },
   report_mention:   { label: "报告 @ 提及",    description: "报告或部门备注中被 @ 时收到通知",           channel: "dm"    as const, defaultEnabled: true  },
   comment_mention:  { label: "评论 @ 提及",    description: "剧本或 cue 评论中被 @ 时收到通知",         channel: "dm"    as const, defaultEnabled: true  },
+  cue_warning:      { label: "Cue 报警通知",   description: "你负责的 Cue 表中有 Cue 被标记为报警时通知", channel: "dm"    as const, defaultEnabled: true  },
   tech_req_poc:     { label: "技术需求私信",   description: "作为 POC 被 @ 时，额外收到机器人私信副本",   channel: "group" as const, defaultEnabled: false },
 } as const;
 
