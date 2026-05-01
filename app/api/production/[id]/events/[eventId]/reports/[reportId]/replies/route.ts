@@ -1,15 +1,18 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
+import { getProductionMemberContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import {
   getEventReport, getReportNote,
   listReportReplies, createReportReply,
+  type Mention,
 } from "@/lib/event-db";
 import {
   loadEventPermContext,
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
+import { sendBotDm } from "@/lib/feishu-bot";
+import { getOptedOutUsers } from "@/lib/notification-prefs";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 
@@ -41,6 +44,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     parentType: "report" | "note" | "reply";
     parentId: string;
     content: string;
+    mentions?: Mention[];
   };
 
   if (!body.content?.trim()) return Response.json({ error: "内容不能为空" }, { status: 400 });
@@ -62,6 +66,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (!allowed) return Response.json({ error: "权限不足" }, { status: 403 });
 
+  const mentions: Mention[] = body.mentions ?? [];
   const id = `rpl${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
   const reply = await createReportReply({
     id, reportId,
@@ -70,7 +75,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     openId: session.openId,
     authorName: session.name,
     content: body.content.trim(),
+    mentions,
   });
+
+  // Fire-and-forget: notify @mentioned users
+  if (mentions.length > 0) {
+    const productionName = await getProductionName(productionId).catch(() => null);
+    const prefix = productionName ? `《${productionName}》` : "制作";
+    const notifyText = `${session.name} 在${prefix}的报告评论中提到了你：\n${body.content.trim()}`;
+    getOptedOutUsers("report_mention").then((optedOut) => {
+      for (const m of mentions) {
+        if (optedOut.has(m.openId)) continue;
+        sendBotDm(m.openId, notifyText).catch(e =>
+          console.error(`[reply-mention] notify failed for ${m.openId}:`, (e as Error).message)
+        );
+      }
+    }).catch(() => {});
+  }
 
   return Response.json({ reply }, { status: 201 });
 }

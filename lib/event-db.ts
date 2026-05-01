@@ -1681,12 +1681,13 @@ export type ReportReply = {
   openId: string;
   authorName: string;
   content: string;
+  mentions: Mention[];
   createdAt: string;
 };
 
 type ReplyRow = {
   id: string; report_id: string; parent_type: string; parent_id: string;
-  open_id: string; author_name: string; content: string; created_at: Date;
+  open_id: string; author_name: string; content: string; mentions: Mention[]; created_at: Date;
 };
 
 function rowToReply(r: ReplyRow): ReportReply {
@@ -1694,13 +1695,14 @@ function rowToReply(r: ReplyRow): ReportReply {
     id: r.id, reportId: r.report_id,
     parentType: r.parent_type as ReportReply["parentType"],
     parentId: r.parent_id, openId: r.open_id, authorName: r.author_name,
-    content: r.content, createdAt: r.created_at.toISOString(),
+    content: r.content, mentions: r.mentions ?? [],
+    createdAt: r.created_at.toISOString(),
   };
 }
 
 export async function listReportReplies(reportId: string): Promise<ReportReply[]> {
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, open_id, author_name, content, created_at
+    `SELECT id, report_id, parent_type, parent_id, open_id, author_name, content, mentions, created_at
      FROM event_report_reply WHERE report_id = $1 ORDER BY created_at ASC`,
     [reportId]
   );
@@ -1709,22 +1711,22 @@ export async function listReportReplies(reportId: string): Promise<ReportReply[]
 
 export async function createReportReply(params: {
   id: string; reportId: string; parentType: ReportReply["parentType"];
-  parentId: string; openId: string; authorName: string; content: string;
+  parentId: string; openId: string; authorName: string; content: string; mentions?: Mention[];
 }): Promise<ReportReply> {
   const res = await getPool().query<ReplyRow>(
     `INSERT INTO event_report_reply
-       (id, report_id, parent_type, parent_id, open_id, author_name, content)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, report_id, parent_type, parent_id, open_id, author_name, content, created_at`,
+       (id, report_id, parent_type, parent_id, open_id, author_name, content, mentions)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id, report_id, parent_type, parent_id, open_id, author_name, content, mentions, created_at`,
     [params.id, params.reportId, params.parentType, params.parentId,
-     params.openId, params.authorName, params.content]
+     params.openId, params.authorName, params.content, JSON.stringify(params.mentions ?? [])]
   );
   return rowToReply(res.rows[0]);
 }
 
 export async function getReportReply(id: string, reportId: string): Promise<ReportReply | null> {
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, open_id, author_name, content, created_at
+    `SELECT id, report_id, parent_type, parent_id, open_id, author_name, content, mentions, created_at
      FROM event_report_reply WHERE id = $1 AND report_id = $2`,
     [id, reportId]
   );
