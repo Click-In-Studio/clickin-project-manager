@@ -27,6 +27,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string;
     rangeStep?: number | null;
     rangeDefault?: number | null;
     defaultOptionId?: string | null;
+    lyricSplitAfterOptionId?: string | null;
     sortOrder?: number;
   } = {};
   if (typeof body.name         === "string") params.name         = body.name.trim();
@@ -34,7 +35,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string;
   if ("rangeMax"     in body)                params.rangeMax     = body.rangeMax     ?? null;
   if ("rangeStep"    in body)                params.rangeStep    = body.rangeStep    ?? null;
   if ("rangeDefault" in body)                params.rangeDefault = body.rangeDefault ?? null;
-  if ("defaultOptionId" in body)             params.defaultOptionId = body.defaultOptionId ?? null;
+  if ("defaultOptionId"           in body)   params.defaultOptionId           = body.defaultOptionId           ?? null;
+  if ("lyricSplitAfterOptionId"   in body)   params.lyricSplitAfterOptionId   = body.lyricSplitAfterOptionId   ?? null;
   if (typeof body.sortOrder    === "number") params.sortOrder    = body.sortOrder;
 
   const group = await updateTagGroup(groupId, params);

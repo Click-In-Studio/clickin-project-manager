@@ -334,6 +334,36 @@ function GroupCard({
     }, 800);
   };
 
+  const handleMoveOption = async (optId: string, direction: -1 | 1) => {
+    const sorted = [...group.options].sort((a, b) => a.sortOrder - b.sortOrder);
+    const idx = sorted.findIndex((o) => o.id === optId);
+    const swapIdx = idx + direction;
+    if (swapIdx < 0 || swapIdx >= sorted.length) return;
+    const a = sorted[idx];
+    const b = sorted[swapIdx];
+    await Promise.all([
+      apiFetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${group.id}/options/${a.id}`, "PUT", { sortOrder: b.sortOrder }),
+      apiFetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${group.id}/options/${b.id}`, "PUT", { sortOrder: a.sortOrder }),
+    ]);
+    onUpdate({
+      ...group,
+      options: group.options.map((o) =>
+        o.id === a.id ? { ...o, sortOrder: b.sortOrder } :
+        o.id === b.id ? { ...o, sortOrder: a.sortOrder } : o
+      ),
+    });
+  };
+
+  const handleSetLyricSplit = async (afterOptId: string) => {
+    const newId = group.lyricSplitAfterOptionId === afterOptId ? null : afterOptId;
+    const data = await apiFetch(
+      `${BASE_PATH}/api/production/${productionId}/tag-groups/${group.id}`,
+      "PUT",
+      { lyricSplitAfterOptionId: newId }
+    );
+    onUpdate(data.group as TagGroup);
+  };
+
   const handleDelete = async () => {
     if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
@@ -394,58 +424,106 @@ function GroupCard({
 
       {group.type === "exclusive" ? (
         <div className="space-y-1">
-          {group.options.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {group.options.map((opt) => {
-                const displayColor = pendingColors[opt.id] ?? opt.color;
-                return (
-                  <div key={opt.id} className="flex items-center gap-1 group/opt">
-                    <span
-                      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
-                      style={{ backgroundColor: displayColor }}
-                    >
-                      {opt.label}
-                    </span>
-                    {canEdit && (
-                      <div className={`${editingColorId === opt.id ? "flex" : "hidden group-hover/opt:flex"} items-center gap-0.5`}>
-                        <label
-                          title="更改颜色"
-                          className="relative cursor-pointer w-3.5 h-3.5 rounded-full border border-zinc-300 inline-block shrink-0"
+          {group.options.length > 0 ? (() => {
+            const sorted = [...group.options].sort((a, b) => a.sortOrder - b.sortOrder);
+            const splitIdx = group.lyricSplitAfterOptionId
+              ? sorted.findIndex((o) => o.id === group.lyricSplitAfterOptionId)
+              : -1;
+            return (
+              <div>
+                {sorted.map((opt, idx) => {
+                  const displayColor = pendingColors[opt.id] ?? opt.color;
+                  const isActive = group.lyricSplitAfterOptionId === opt.id;
+                  const isLyricSide = splitIdx >= 0 && idx <= splitIdx;
+                  return (
+                    <div key={opt.id}>
+                      {/* Option row */}
+                      <div className="flex items-center gap-1.5 py-0.5 group/opt">
+                        {canEdit && (
+                          <div className="flex flex-col shrink-0">
+                            <button
+                              onClick={() => handleMoveOption(opt.id, -1)}
+                              disabled={idx === 0}
+                              className="text-zinc-300 hover:text-zinc-500 disabled:opacity-20 leading-none px-0.5 text-[10px]"
+                            >▲</button>
+                            <button
+                              onClick={() => handleMoveOption(opt.id, 1)}
+                              disabled={idx === sorted.length - 1}
+                              className="text-zinc-300 hover:text-zinc-500 disabled:opacity-20 leading-none px-0.5 text-[10px]"
+                            >▼</button>
+                          </div>
+                        )}
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium text-white ${isLyricSide ? "ring-1 ring-violet-300 ring-offset-1" : ""}`}
                           style={{ backgroundColor: displayColor }}
-                          onMouseDown={() => setEditingColorId(opt.id)}
                         >
-                          <input
-                            type="color"
-                            value={displayColor}
-                            onChange={(e) => handleColorInput(opt.id, e.target.value)}
-                            onBlur={() => setEditingColorId(null)}
-                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer rounded-full"
-                          />
-                        </label>
-                        <button
-                          onClick={() => handleSetDefault(opt.id)}
-                          title={group.defaultOptionId === opt.id ? "取消默认" : "设为默认"}
-                          className={`rounded px-1 py-0.5 text-[10px] transition-colors ${
-                            group.defaultOptionId === opt.id
-                              ? "bg-zinc-700 text-white"
-                              : "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
-                          }`}
-                        >
-                          {group.defaultOptionId === opt.id ? "默认" : "设默认"}
-                        </button>
-                        <button
-                          onClick={() => handleDeleteOption(opt.id)}
-                          className="text-zinc-300 hover:text-red-400 transition-colors px-0.5"
-                        >
-                          ×
-                        </button>
+                          {opt.label}
+                        </span>
+                        {canEdit && (
+                          <div className={`${editingColorId === opt.id ? "flex" : "hidden group-hover/opt:flex"} items-center gap-0.5 ml-0.5`}>
+                            <label
+                              title="更改颜色"
+                              className="relative cursor-pointer w-3.5 h-3.5 rounded-full border border-zinc-300 inline-block shrink-0"
+                              style={{ backgroundColor: displayColor }}
+                              onMouseDown={() => setEditingColorId(opt.id)}
+                            >
+                              <input
+                                type="color"
+                                value={displayColor}
+                                onChange={(e) => handleColorInput(opt.id, e.target.value)}
+                                onBlur={() => setEditingColorId(null)}
+                                className="absolute inset-0 opacity-0 w-full h-full cursor-pointer rounded-full"
+                              />
+                            </label>
+                            <button
+                              onClick={() => handleSetDefault(opt.id)}
+                              title={group.defaultOptionId === opt.id ? "取消默认" : "设为默认"}
+                              className={`rounded px-1 py-0.5 text-[10px] transition-colors ${
+                                group.defaultOptionId === opt.id
+                                  ? "bg-zinc-700 text-white"
+                                  : "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
+                              }`}
+                            >
+                              {group.defaultOptionId === opt.id ? "默认" : "设默认"}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteOption(opt.id)}
+                              className="text-zinc-300 hover:text-red-400 transition-colors px-0.5"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
+                      {/* Divider slot after each option */}
+                      {(canEdit || isActive) && (
+                        <div
+                          onClick={canEdit ? () => handleSetLyricSplit(opt.id) : undefined}
+                          className={`flex items-center gap-1.5 my-0.5 ${canEdit ? "cursor-pointer group/slot" : ""}`}
+                        >
+                          {isActive ? (
+                            <>
+                              <div className="flex-1 border-t border-violet-300" />
+                              <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-medium text-violet-500 select-none">
+                                ♩ 歌词 ↑ &nbsp; 台词 ↓
+                              </span>
+                              <div className="flex-1 border-t border-violet-300" />
+                            </>
+                          ) : (
+                            <div className="flex w-full items-center gap-1.5 opacity-0 group-hover/slot:opacity-100 transition-opacity">
+                              <div className="flex-1 border-t border-dashed border-zinc-200" />
+                              <span className="shrink-0 text-[9px] text-zinc-300 select-none">歌/台分界</span>
+                              <div className="flex-1 border-t border-dashed border-zinc-200" />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })() : (
             <p className="text-xs text-zinc-400">暂无选项</p>
           )}
           {canEdit && (
