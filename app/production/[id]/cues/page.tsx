@@ -10,6 +10,7 @@ import {
 } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { canEditCueList } from "@/lib/cue-list-types";
+import { computePageMap } from "@/lib/script-page";
 import CuePage from "@/components/CuePage";
 
 export default async function CuesPage({
@@ -43,6 +44,11 @@ export default async function CuesPage({
     })
   );
 
+  // Always compute fresh from current blocks — the DB-stored map can have stale block IDs
+  // if the script was replaced or blocks were re-imported since the last server-cache flush.
+  const pageLayout = production.state.config.pageLayout;
+  const pageMap: Record<string, number> = computePageMap(production.state.blocks, pageLayout);
+
   return (
     <CuePage
       productionId={id}
@@ -55,6 +61,7 @@ export default async function CuesPage({
       editableListIds={[...editableListIds]}
       myOpenId={session.openId}
       isAdmin={session.isAdmin}
+      pageMap={pageMap}
     />
   );
 }

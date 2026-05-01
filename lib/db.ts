@@ -142,6 +142,15 @@ export async function saveScriptConfig(productionId: string, config: ScriptConfi
   );
 }
 
+/** Load the pre-computed page map for a production (keyed by layout → blockId → page). */
+export async function loadPageMap(productionId: string): Promise<Record<string, Record<string, number>> | null> {
+  const res = await getPool().query<{ page_map: Record<string, Record<string, number>> | null }>(
+    "SELECT page_map FROM production WHERE id = $1",
+    [productionId]
+  );
+  return res.rows[0]?.page_map ?? null;
+}
+
 /** Stores a pre-computed page map keyed by layout name for agent queries. */
 export async function savePageMap(
   productionId: string,

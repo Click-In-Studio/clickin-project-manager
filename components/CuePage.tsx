@@ -1,7 +1,7 @@
 "use client";
 
 import React, {
-  useState, useRef, useCallback, useMemo, useEffect,
+  useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect,
 } from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
@@ -81,6 +81,7 @@ type Props = {
   editableListIds: string[];
   myOpenId: string;
   isAdmin: boolean;
+  pageMap: Record<string, number>;
 };
 
 type Selection =
@@ -885,7 +886,7 @@ function ExportModal({
 
 export default function CuePage({
   productionId, productionName, blocks, characters, scenes,
-  cueLists, initialCues, editableListIds, myOpenId, isAdmin,
+  cueLists, initialCues, editableListIds, myOpenId, isAdmin, pageMap,
 }: Props) {
   const [cues, setCues] = useState<Cue[]>(initialCues);
   const [copiedCue, setCopiedCue] = useState<Cue | null>(null);
@@ -900,6 +901,28 @@ export default function CuePage({
   );
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
   const [savingCueId, setSavingCueId] = useState<string | null>(null);
+
+  // ── Jump bar ──────────────────────────────────────────────────────────────
+  const [jumpTarget, setJumpTarget] = useState<"line" | "page" | "scene" | null>(null);
+  const [jumpValue, setJumpValue] = useState("");
+
+  // ── Virtual scroll ────────────────────────────────────────────────────────
+  const VSCROLL_BUFFER = 80;
+  const DEFAULT_BLOCK_H = 80;
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const topSpacerRef = useRef<HTMLDivElement>(null);
+  const botSpacerRef = useRef<HTMLDivElement>(null);
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const cumulativeHRef = useRef<number[]>([0]);
+  const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(160, blocks.length) }));
+  const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
+  const pendingNavigateRef = useRef<
+    { kind: "block"; id: string; align: ScrollLogicalPosition } | { kind: "scene"; id: string } | null
+  >(null);
+  const postNavCorrectionRef = useRef<
+    { kind: "block"; id: string; align: ScrollLogicalPosition } | { kind: "scene"; id: string } | null
+  >(null);
+  const [correctionTick, setCorrectionTick] = useState(0);
 
   // ── Drag state ────────────────────────────────────────────────────────────
   const dragStateRef = useRef<DragStateRef>({
@@ -1190,12 +1213,14 @@ export default function CuePage({
 
   // ── Orphaned cues: either anchor references a block that no longer exists ──
   const orphanedCues = useMemo(() => {
+    if (!activeListId) return [];
     return cues.filter(cue => {
+      if (cue.cueListId !== activeListId) return false;
       const startId = cue.start.kind === "block" ? cue.start.blockId : cue.start.afterBlockId;
       const endId   = cue.end.kind   === "block" ? cue.end.blockId   : cue.end.afterBlockId;
       return !blockIndexMap.has(startId) || !blockIndexMap.has(endId);
     });
-  }, [cues, blockIndexMap]);
+  }, [cues, blockIndexMap, activeListId]);
 
   // ── effectiveCues: apply live drag override for preview ───────────────────
   const effectiveCues = useMemo(() => {
@@ -1345,6 +1370,174 @@ export default function CuePage({
     setVisibleListIds(prev => prev.has(cue.cueListId) ? prev : new Set([...prev, cue.cueListId]));
     startCueDrag(e, cue.id, "move");
   }, [startCueDrag]);
+
+  // ── Virtual scroll hooks ──────────────────────────────────────────────────
+
+  const rebuildCumulative = useCallback(() => {
+    const measured = measuredHeightsRef.current;
+    let avgH = DEFAULT_BLOCK_H;
+    if (measured.size > 0) {
+      let sum = 0;
+      measured.forEach(h => { sum += h; });
+      avgH = sum / measured.size;
+    }
+    const arr = new Array(blocks.length + 1);
+    arr[0] = 0;
+    for (let i = 0; i < blocks.length; i++) {
+      arr[i + 1] = arr[i] + (measured.get(blocks[i].id) ?? avgH);
+    }
+    cumulativeHRef.current = arr;
+  }, [blocks]);
+
+  const blockAtOffset = (offset: number) => {
+    const cum = cumulativeHRef.current;
+    const n = cum.length - 1;
+    if (n <= 0) return 0;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid + 1] <= offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  const recomputeWindow = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container || blocks.length === 0) return;
+    const sy = container.scrollTop;
+    const viewStart = sy;
+    const viewEnd = viewStart + container.clientHeight;
+    const newStart = Math.max(0, blockAtOffset(viewStart) - VSCROLL_BUFFER);
+    const newEnd = Math.min(blocks.length, blockAtOffset(viewEnd) + VSCROLL_BUFFER + 1);
+    setWindowRange(prev =>
+      prev.start === newStart && prev.end === newEnd ? prev : { start: newStart, end: newEnd }
+    );
+  }, [blocks.length]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    let rafId = 0;
+    const onScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(recomputeWindow); };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    recomputeWindow();
+    return () => { container.removeEventListener("scroll", onScroll); cancelAnimationFrame(rafId); };
+  }, [recomputeWindow]);
+
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWindowRange(prev => ({
+      start: Math.min(prev.start, Math.max(0, blocks.length - 1)),
+      end: Math.min(prev.end, blocks.length),
+    }));
+  }, [blocks.length]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    let changed = false;
+    container.querySelectorAll<HTMLElement>("[data-cue-bwrap]").forEach(el => {
+      const id = el.dataset.cueBwrap;
+      if (!id) return;
+      const h = el.offsetHeight;
+      if (h > 0 && measuredHeightsRef.current.get(id) !== h) {
+        measuredHeightsRef.current.set(id, h);
+        changed = true;
+      }
+    });
+    if (changed) {
+      rebuildCumulative();
+      recomputeWindow();
+      if (postNavCorrectionRef.current) setCorrectionTick(t => t + 1);
+    }
+  });
+
+  useLayoutEffect(() => {
+    if (correctionTick === 0) return;
+    const nav = postNavCorrectionRef.current;
+    if (!nav) return;
+    postNavCorrectionRef.current = null;
+    const el = nav.kind === "block"
+      ? document.getElementById(`cue-block-${nav.id}`)
+      : document.getElementById(`cue-scene-${nav.id}`);
+    if (!el) return;
+    rebuildCumulative();
+    const cum = cumulativeHRef.current;
+    const n = blocks.length;
+    const newTop = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const total  = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const newBot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
+    if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
+    el.scrollIntoView({ behavior: "instant", block: nav.kind === "block" ? nav.align : "start" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctionTick, windowRange]);
+
+  useLayoutEffect(() => {
+    const nav = pendingNavigateRef.current;
+    if (!nav) return;
+    const el = nav.kind === "block"
+      ? document.getElementById(`cue-block-${nav.id}`)
+      : document.getElementById(`cue-scene-${nav.id}`);
+    if (!el) return;
+    pendingNavigateRef.current = null;
+    rebuildCumulative();
+    const cum = cumulativeHRef.current;
+    const n = blocks.length;
+    const newTop = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const total  = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const newBot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
+    if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
+    el.scrollIntoView({ behavior: "instant", block: nav.kind === "block" ? nav.align : "start" });
+    postNavCorrectionRef.current = nav;
+  }, [windowRange, rebuildCumulative, blocks.length]);
+
+  useLayoutEffect(() => {
+    const cum = cumulativeHRef.current;
+    const n = blocks.length;
+    const top = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const total = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const bot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    setSpacerH(prev => prev.top === top && prev.bot === bot ? prev : { top, bot });
+  }, [windowRange, blocks.length]);
+
+  // ── Navigation functions ──────────────────────────────────────────────────
+
+  const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = "center") => {
+    if (idx < 0 || idx >= blocks.length) return;
+    const block = blocks[idx];
+    const el = document.getElementById(`cue-block-${block.id}`);
+    if (el) { el.scrollIntoView({ behavior: "instant", block: align }); return; }
+    pendingNavigateRef.current = { kind: "block", id: block.id, align };
+    setWindowRange({
+      start: Math.max(0, idx - VSCROLL_BUFFER),
+      end: Math.min(blocks.length, idx + VSCROLL_BUFFER + 1),
+    });
+  }, [blocks]);
+
+  const scrollToScene = useCallback((sceneId: string) => {
+    const el = document.getElementById(`cue-scene-${sceneId}`);
+    if (el) { el.scrollIntoView({ behavior: "instant", block: "start" }); return; }
+    const idx = blocks.findIndex(b => b.sceneId === sceneId);
+    if (idx < 0) return;
+    pendingNavigateRef.current = { kind: "scene", id: sceneId };
+    setWindowRange({
+      start: Math.max(0, idx - VSCROLL_BUFFER),
+      end: Math.min(blocks.length, idx + VSCROLL_BUFFER + 1),
+    });
+  }, [blocks]);
+
+  const jumpToLine = useCallback((n: number) => {
+    scrollToBlockIdx(Math.max(0, Math.min(n - 1, blocks.length - 1)), "center");
+  }, [blocks.length, scrollToBlockIdx]);
+
+  const jumpToPage = useCallback((n: number) => {
+    const idx = blocks.findIndex(b => pageMap[b.id] === n);
+    if (idx >= 0) scrollToBlockIdx(idx, "start");
+  }, [blocks, pageMap, scrollToBlockIdx]);
 
   const selectedCue = selection.kind === "cue"
     ? effectiveCues.find(c => c.id === selection.cueId) ?? null
@@ -1643,12 +1836,25 @@ export default function CuePage({
             ))}
           </select>
         </div>
-        <button
-          onClick={() => setShowExport(true)}
-          className="ml-auto text-xs text-zinc-400 hover:text-zinc-600 shrink-0 transition-colors"
-        >
-          导出
-        </button>
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          {(["line", "page", "scene"] as const).map(t => (
+            <button key={t}
+              onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); }}
+              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${
+                jumpTarget === t ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-zinc-600"
+              }`}
+            >
+              {t === "line" ? "行" : t === "page" ? "页" : "段落"}
+            </button>
+          ))}
+          <span className="text-zinc-200 mx-0.5">|</span>
+          <button
+            onClick={() => setShowExport(true)}
+            className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+          >
+            导出
+          </button>
+        </div>
         {selection.kind === "pending" && activeListId && canEditActive && (
           <button
             onClick={e => { e.stopPropagation(); insertCue(); }}
@@ -1659,10 +1865,71 @@ export default function CuePage({
         )}
       </div>
 
+      {/* ── Jump bar panel ── */}
+      {jumpTarget && (
+        <div className="shrink-0 border-t border-zinc-100 bg-white px-4 py-2 flex items-center gap-3" onClick={e => e.stopPropagation()}>
+          {jumpTarget === "scene" ? (
+            <>
+              <span className="shrink-0 text-xs text-zinc-400">段落跳转</span>
+              <select
+                autoFocus
+                value={jumpValue}
+                onChange={e => {
+                  setJumpValue(e.target.value);
+                  if (e.target.value) { scrollToScene(e.target.value); setJumpTarget(null); }
+                }}
+                className="flex-1 h-7 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none focus:border-zinc-400 bg-white"
+              >
+                <option value="">选择段落…</option>
+                {scenes.map(s => (
+                  <option key={s.id} value={s.id}>{s.number} {s.name}</option>
+                ))}
+              </select>
+              <button onClick={() => setJumpTarget(null)} className="text-xs text-zinc-300 hover:text-zinc-500">取消</button>
+            </>
+          ) : (
+            <>
+              <span className="shrink-0 text-xs text-zinc-400">
+                {jumpTarget === "line" ? "行跳转" : "页跳转"}
+              </span>
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                max={jumpTarget === "line" ? blocks.length : (Object.values(pageMap).length ? Math.max(...Object.values(pageMap)) : 1)}
+                value={jumpValue}
+                onChange={e => setJumpValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Escape") setJumpTarget(null);
+                  if (e.key === "Enter") {
+                    const n = parseInt(jumpValue, 10);
+                    if (!isNaN(n)) { if (jumpTarget === "line") jumpToLine(n); else jumpToPage(n); }
+                    setJumpTarget(null);
+                  }
+                }}
+                placeholder={jumpTarget === "line" ? `1–${blocks.length}` : `1–${Object.values(pageMap).length ? Math.max(...Object.values(pageMap)) : "?"}`}
+                className="h-7 w-28 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+              />
+              <button
+                onClick={() => {
+                  const n = parseInt(jumpValue, 10);
+                  if (!isNaN(n)) { if (jumpTarget === "line") jumpToLine(n); else jumpToPage(n); }
+                  setJumpTarget(null);
+                }}
+                className="rounded bg-zinc-800 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
+              >跳转</button>
+              <button onClick={() => setJumpTarget(null)} className="text-xs text-zinc-300 hover:text-zinc-500">取消</button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Script + Cue lanes ── */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto py-6 px-2">
-          {blocks.map((block, blockIdx) => {
+          <div ref={topSpacerRef} style={{ height: spacerH.top }} aria-hidden="true" />
+          {blocks.slice(windowRange.start, windowRange.end).map((block, wIdx) => {
+            const blockIdx = windowRange.start + wIdx;
             const chipsHere = cuesForBlock.get(block.id) ?? [];
             const rangeHL = rangeHighlightsForBlock.get(block.id) ?? [];
             const pendingHL = pendingHighlightForBlock.get(block.id) ?? null;
@@ -1679,7 +1946,7 @@ export default function CuePage({
             const gapPending = pendingGapBlockId === gapBlockId;
 
             return (
-              <React.Fragment key={block.id}>
+              <div key={block.id} data-cue-bwrap={block.id}>
                 {/* Gap zone */}
                 {blockIdx > 0 && (
                   <div
@@ -1720,7 +1987,7 @@ export default function CuePage({
 
                 {/* Scene heading */}
                 {showSceneHeading && (
-                  <div className="px-2 pt-3 pb-1">
+                  <div id={`cue-scene-${scene!.id}`} className="px-2 pt-3 pb-1 scroll-mt-4">
                     <p className="text-[10px] font-bold tracking-[0.2em] text-zinc-400 uppercase">
                       {scene!.number} {scene!.name}
                     </p>
@@ -1729,8 +1996,9 @@ export default function CuePage({
 
                 {/* Block row */}
                 <div
+                  id={`cue-block-${block.id}`}
                   ref={el => { if (el) blockRowRefs.current.set(block.id, el); else blockRowRefs.current.delete(block.id); }}
-                  className="flex gap-0 rounded-lg py-1.5 hover:bg-white/60 transition-colors relative"
+                  className="flex gap-0 rounded-lg py-1.5 hover:bg-white/60 transition-colors relative scroll-mt-4"
                   onClick={e => e.stopPropagation()}
                 >
                   {/* SVG guide lines: Bezier curves from chip right edge to inline mark */}
@@ -1804,7 +2072,7 @@ export default function CuePage({
                     </p>
                   </div>
                 </div>
-              </React.Fragment>
+              </div>
             );
           })}
 
@@ -1845,6 +2113,7 @@ export default function CuePage({
               </div>
             </div>
           )}
+          <div ref={botSpacerRef} style={{ height: spacerH.bot }} aria-hidden="true" />
         </div>
       </div>
 
