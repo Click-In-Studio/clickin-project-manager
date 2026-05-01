@@ -1225,6 +1225,7 @@ export type TagGroup = {
   rangeStep: number | null;
   rangeDefault: number | null;
   defaultOptionId: string | null;
+  lyricSplitAfterOptionId: string | null;
   sortOrder: number;
   options: TagOption[];
 };
@@ -1246,6 +1247,7 @@ type TagGroupRow = {
   range_step: string | null;
   range_default: string | null;
   default_option_id: string | null;
+  lyric_split_after_option_id: string | null;
   sort_order: number;
   option_id: string | null;
   option_label: string | null;
@@ -1282,7 +1284,7 @@ export async function listTagGroups(productionId: string): Promise<TagGroup[]> {
   const res = await getPool().query<TagGroupRow>(
     `SELECT tg.id, tg.production_id, tg.name, tg.type,
             tg.range_min, tg.range_max, tg.range_step, tg.range_default,
-            tg.default_option_id, tg.sort_order,
+            tg.default_option_id, tg.lyric_split_after_option_id, tg.sort_order,
             topt.id AS option_id, topt.label AS option_label,
             topt.color AS option_color, topt.sort_order AS option_sort_order
      FROM tag_group tg
@@ -1304,6 +1306,7 @@ export async function listTagGroups(productionId: string): Promise<TagGroup[]> {
         rangeStep: r.range_step != null ? Number(r.range_step) : null,
         rangeDefault: r.range_default != null ? Number(r.range_default) : null,
         defaultOptionId: r.default_option_id,
+        lyricSplitAfterOptionId: r.lyric_split_after_option_id,
         sortOrder: r.sort_order,
         options: [],
       });
@@ -1337,12 +1340,12 @@ export async function createTagGroup(
     id: string; production_id: string; name: string; type: string;
     range_min: string | null; range_max: string | null;
     range_step: string | null; range_default: string | null;
-    default_option_id: string | null; sort_order: number;
+    default_option_id: string | null; lyric_split_after_option_id: string | null; sort_order: number;
   }>(
     `INSERT INTO tag_group (id, production_id, name, type, range_min, range_max, range_step, range_default)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, production_id, name, type, range_min, range_max, range_step, range_default,
-               default_option_id, sort_order`,
+               default_option_id, lyric_split_after_option_id, sort_order`,
     [
       id, productionId, params.name, params.type,
       params.rangeMin ?? null, params.rangeMax ?? null,
@@ -1360,6 +1363,7 @@ export async function createTagGroup(
     rangeStep: r.range_step != null ? Number(r.range_step) : null,
     rangeDefault: r.range_default != null ? Number(r.range_default) : null,
     defaultOptionId: r.default_option_id,
+    lyricSplitAfterOptionId: r.lyric_split_after_option_id,
     sortOrder: r.sort_order,
     options: [],
   };
@@ -1374,30 +1378,32 @@ export async function updateTagGroup(
     rangeStep?: number | null;
     rangeDefault?: number | null;
     defaultOptionId?: string | null;
+    lyricSplitAfterOptionId?: string | null;
     sortOrder?: number;
   }
 ): Promise<TagGroup | null> {
   const sets: string[] = [];
   const values: unknown[] = [];
   let idx = 1;
-  if (params.name !== undefined)            { sets.push(`name = $${idx++}`);              values.push(params.name); }
-  if (params.rangeMin !== undefined)        { sets.push(`range_min = $${idx++}`);         values.push(params.rangeMin); }
-  if (params.rangeMax !== undefined)        { sets.push(`range_max = $${idx++}`);         values.push(params.rangeMax); }
-  if (params.rangeStep !== undefined)       { sets.push(`range_step = $${idx++}`);        values.push(params.rangeStep); }
-  if (params.rangeDefault !== undefined)    { sets.push(`range_default = $${idx++}`);     values.push(params.rangeDefault); }
-  if (params.defaultOptionId !== undefined) { sets.push(`default_option_id = $${idx++}`); values.push(params.defaultOptionId); }
-  if (params.sortOrder !== undefined)       { sets.push(`sort_order = $${idx++}`);        values.push(params.sortOrder); }
+  if (params.name !== undefined)                    { sets.push(`name = $${idx++}`);                          values.push(params.name); }
+  if (params.rangeMin !== undefined)                { sets.push(`range_min = $${idx++}`);                     values.push(params.rangeMin); }
+  if (params.rangeMax !== undefined)                { sets.push(`range_max = $${idx++}`);                     values.push(params.rangeMax); }
+  if (params.rangeStep !== undefined)               { sets.push(`range_step = $${idx++}`);                    values.push(params.rangeStep); }
+  if (params.rangeDefault !== undefined)            { sets.push(`range_default = $${idx++}`);                 values.push(params.rangeDefault); }
+  if (params.defaultOptionId !== undefined)         { sets.push(`default_option_id = $${idx++}`);             values.push(params.defaultOptionId); }
+  if (params.lyricSplitAfterOptionId !== undefined) { sets.push(`lyric_split_after_option_id = $${idx++}`);   values.push(params.lyricSplitAfterOptionId); }
+  if (params.sortOrder !== undefined)               { sets.push(`sort_order = $${idx++}`);                    values.push(params.sortOrder); }
   if (sets.length === 0) return null;
   values.push(id);
   const res = await getPool().query<{
     id: string; production_id: string; name: string; type: string;
     range_min: string | null; range_max: string | null;
     range_step: string | null; range_default: string | null;
-    default_option_id: string | null; sort_order: number;
+    default_option_id: string | null; lyric_split_after_option_id: string | null; sort_order: number;
   }>(
     `UPDATE tag_group SET ${sets.join(', ')} WHERE id = $${idx}
      RETURNING id, production_id, name, type, range_min, range_max, range_step, range_default,
-               default_option_id, sort_order`,
+               default_option_id, lyric_split_after_option_id, sort_order`,
     values
   );
   if (!res.rows.length) return null;
@@ -1416,6 +1422,7 @@ export async function updateTagGroup(
     rangeStep: r.range_step != null ? Number(r.range_step) : null,
     rangeDefault: r.range_default != null ? Number(r.range_default) : null,
     defaultOptionId: r.default_option_id,
+    lyricSplitAfterOptionId: r.lyric_split_after_option_id,
     sortOrder: r.sort_order,
     options: optRes.rows.map(rowToTagOption),
   };

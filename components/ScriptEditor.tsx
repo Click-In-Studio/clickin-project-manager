@@ -1711,6 +1711,7 @@ function ScriptBlock({
   tagGroups,
   blockTagValues,
   showBlockTags = false,
+  hasLyricConfig = false,
   onTagChange,
   onTagCopyClick,
   onTagPasteClick,
@@ -1751,6 +1752,7 @@ function ScriptBlock({
   tagGroups?: TagGroup[];
   blockTagValues?: BlockTagValue[];
   showBlockTags?: boolean;
+  hasLyricConfig?: boolean;
   onTagChange?: (groupId: string, optionId: string | null, value: number | null, del: boolean) => void;
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
@@ -1926,7 +1928,7 @@ function ScriptBlock({
 
       {/* Right-side action buttons — flex row, no overlap */}
       <div className={`absolute right-2 top-1 flex items-center transition-opacity ${charSelectorOpen ? "opacity-0 pointer-events-none" : ""}`}>
-        {canEditText && !isStage && (
+        {canEditText && !isStage && !hasLyricConfig && (
           <button
             onClick={onToggleLyric}
             className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
@@ -2873,7 +2875,27 @@ export default function ScriptEditor({
       return map;
     });
     upsertBlockTagApi(blockId, groupId, optionId, value, del);
-  }, [upsertBlockTagApi]);
+    // Auto-sync block.lyric when any group has a lyric split configured (OR logic)
+    const changedGroup = tagGroups.find(g => g.id === groupId);
+    if (changedGroup?.lyricSplitAfterOptionId) {
+      const splitOpt = changedGroup.options.find(o => o.id === changedGroup.lyricSplitAfterOptionId);
+      if (splitOpt) {
+        const groupIsLyric = !del && !!optionId &&
+          (changedGroup.options.find(o => o.id === optionId)?.sortOrder ?? Infinity) <= splitOpt.sortOrder;
+        const currentTags = blockTagMapRef.current.get(blockId) ?? [];
+        const otherGroupsLyric = tagGroups.some(g => {
+          if (g.id === groupId || !g.lyricSplitAfterOptionId) return false;
+          const sp = g.options.find(o => o.id === g.lyricSplitAfterOptionId);
+          if (!sp) return false;
+          const tag = currentTags.find(t => t.groupId === g.id);
+          return !!tag?.optionId &&
+            (g.options.find(o => o.id === tag.optionId)?.sortOrder ?? Infinity) <= sp.sortOrder;
+        });
+        const newLyric = groupIsLyric || otherGroupsLyric;
+        setBlocks(bs => bs.map(b => b.id === blockId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
+      }
+    }
+  }, [upsertBlockTagApi, blockTagMapRef, tagGroups]);
 
   const handleTagCopy = useCallback((blockId: string) => {
     tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
@@ -3708,6 +3730,7 @@ export default function ScriptEditor({
                   tagGroups={tagGroups}
                   blockTagValues={blockTagMap.get(block.id) ?? []}
                   showBlockTags={display.blockTags && tagGroups.length > 0}
+                  hasLyricConfig={tagGroups.some(g => !!g.lyricSplitAfterOptionId)}
                   onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
                   onTagCopyClick={() => handleTagCopy(block.id)}
                   onTagPasteClick={() => handleTagPaste(block.id)}
