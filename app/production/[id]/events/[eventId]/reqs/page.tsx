@@ -68,6 +68,7 @@ export default async function ReqsPage({
       departments={departments}
       currentUserOpenId={session.openId}
       productionMembers={productionMembers.map(m => ({ openId: m.openId, name: m.name }))}
+      canViewFull={canViewFull}
     />
   );
 }

@@ -14,6 +14,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
 import { getPool } from "@/lib/pg";
+import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 
 function fmtTime(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 8 * 3_600_000);
@@ -189,7 +190,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
                     {myCalls.map((c, i) => (
                       <div key={i} className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5">
                         <span className="text-sm font-mono font-semibold text-amber-600">{fmtTime(c.call_at)}</span>
-                        {c.notes && <span className="text-[11px] text-amber-400">{c.notes}</span>}
+                        {c.notes && <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-amber-400" />}
                       </div>
                     ))}
                   </div>
@@ -234,7 +235,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
                           <span className={`text-sm ${c.open_id === openId ? "font-semibold text-zinc-800" : "text-zinc-600"}`}>
                             {c.name}
                           </span>
-                          {c.notes && <span className="text-[11px] text-zinc-300">{c.notes}</span>}
+                          {c.notes && <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-300" />}
                         </div>
                       ))}
                     </div>
