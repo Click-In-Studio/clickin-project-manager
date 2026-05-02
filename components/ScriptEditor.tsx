@@ -2457,6 +2457,8 @@ export default function ScriptEditor({
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
+  const [scrollLocked, setScrollLocked] = useState(true);
+  const scrollLockedRef = useRef(true);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
 
   // ── Block tags ───────────────────────────────────────────────────────────────
@@ -2591,13 +2593,61 @@ export default function ScriptEditor({
     );
   }, []);
 
-  // Scroll listener
+  // Always-fresh scroll-position saver (reads DOM directly; avoids stale cumulative-height estimates)
+  const saveScrollPosRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    saveScrollPosRef.current = () => {
+      if (loadState !== "ready" || !productionId) return;
+      const container = blocksContainerRef.current;
+      if (!container) return;
+      // Find the last rendered block whose top edge is at or above the viewport top (y=0).
+      // This is DOM-accurate and does not depend on cumulativeHRef estimates.
+      let savedId: string | null = null;
+      for (const el of container.querySelectorAll<HTMLElement>("[data-bwrap]")) {
+        if (el.getBoundingClientRect().top <= 0) savedId = el.dataset.bwrap ?? null;
+        else break;
+      }
+      if (savedId) document.cookie = `script_pos_${productionId}=${encodeURIComponent(savedId)}; path=/; max-age=31536000; SameSite=Lax`;
+    };
+  });
+
+  // Keep scrollLockedRef in sync
+  useEffect(() => { scrollLockedRef.current = scrollLocked; }, [scrollLocked]);
+
+  // Block user scroll (wheel, touch, arrow keys) while scroll is locked
+  useEffect(() => {
+    if (!scrollLocked) return;
+    const prevent = (e: Event) => e.preventDefault();
+    const preventKeys = (e: Event) => {
+      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' '].includes((e as globalThis.KeyboardEvent).key)) e.preventDefault();
+    };
+    window.addEventListener('wheel', prevent, { passive: false });
+    window.addEventListener('touchmove', prevent, { passive: false });
+    window.addEventListener('keydown', preventKeys);
+    return () => {
+      window.removeEventListener('wheel', prevent);
+      window.removeEventListener('touchmove', prevent);
+      window.removeEventListener('keydown', preventKeys);
+    };
+  }, [scrollLocked]);
+
+  // Scroll listener + debounced position save
   useEffect(() => {
     let rafId = 0;
-    const onScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(recomputeWindow); };
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(recomputeWindow);
+      if (!scrollLockedRef.current) {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
+        // User took control of scroll — abandon any pending post-navigation correction
+        postNavCorrectionRef.current = null;
+      }
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
     recomputeWindow();
-    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId); };
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId); clearTimeout(saveTimer); };
   }, [recomputeWindow]);
 
   // Clamp window when blocks list length changes (insert/delete)
@@ -2653,6 +2703,7 @@ export default function ScriptEditor({
     if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
     if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
     el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'start' });
+    setScrollLocked(false);
   // windowRange is intentionally in deps — ensures this captures the post-recomputeWindow value;
   // postNavCorrectionRef going null after the first correction prevents repeated firing.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2834,6 +2885,9 @@ export default function ScriptEditor({
   // ── Hash-based deep link + position restore ──────────────────────────────────
   useEffect(() => {
     if (loadState !== "ready") return;
+    // Fallback: unlock scroll 300ms after ready (covers immediate restore and no-save cases;
+    // the correction useLayoutEffect unlocks earlier for the off-screen path)
+    const unlockTimer = setTimeout(() => setScrollLocked(false), 300);
     const hash = window.location.hash;
     if (hash.startsWith("#block-")) {
       const [fragment, query] = hash.slice(1).split("?");
@@ -2843,7 +2897,7 @@ export default function ScriptEditor({
       if (new URLSearchParams(query).get("open_comment") === "true") {
         setActiveCommentBlockId(blockId);
       }
-      return;
+      return () => clearTimeout(unlockTimer);
     }
     // Restore last scroll position from cookie
     if (productionId) {
@@ -2855,6 +2909,7 @@ export default function ScriptEditor({
         }
       } catch { /* ignore */ }
     }
+    return () => clearTimeout(unlockTimer);
   }, [loadState, productionId, scrollToBlockIdx]);
 
   // ── Clear block highlight on scroll or click ─────────────────────────────────
@@ -2872,17 +2927,6 @@ export default function ScriptEditor({
     };
   }, [highlightedBlockId]);
 
-  // ── Save scroll position to cookie (debounced) ───────────────────────────────
-  const posSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (loadState !== "ready" || !productionId) return;
-    const blockId = blocksRef.current[windowRange.start]?.id;
-    if (!blockId) return;
-    if (posSaveTimerRef.current) clearTimeout(posSaveTimerRef.current);
-    posSaveTimerRef.current = setTimeout(() => {
-      document.cookie = `script_pos_${productionId}=${encodeURIComponent(blockId)}; path=/; max-age=31536000; SameSite=Lax`;
-    }, 800);
-  }, [windowRange.start, productionId, loadState]);
 
   // SSE: receive seq pushes (state sync) and presence pushes from other clients
   useEffect(() => {

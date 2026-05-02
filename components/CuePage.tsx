@@ -919,6 +919,8 @@ export default function CuePage({
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
   const [savingCueId, setSavingCueId] = useState<string | null>(null);
   const [highlightedCueId, setHighlightedCueId] = useState<string | null>(null);
+  const [scrollLocked, setScrollLocked] = useState(true);
+  const scrollLockedRef = useRef(true);
 
   // ── Cookie: restore cue view state once on mount ──────────────────────────
   const cueStateRestoredRef = useRef(false);
@@ -1456,14 +1458,63 @@ export default function CuePage({
     );
   }, [blocks.length]);
 
+  // Always-fresh scroll-position saver (reads DOM directly; avoids stale cumulative-height estimates)
+  const saveScrollPosRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    saveScrollPosRef.current = () => {
+      const c = scrollContainerRef.current;
+      if (!c || !productionId) return;
+      const containerTop = c.getBoundingClientRect().top;
+      // Find the last rendered block whose top edge is at or above the container's viewport top.
+      let savedId: string | null = null;
+      for (const el of c.querySelectorAll<HTMLElement>("[data-cue-bwrap]")) {
+        if (el.getBoundingClientRect().top <= containerTop) savedId = el.dataset.cueBwrap ?? null;
+        else break;
+      }
+      if (savedId) writeCookie(`cue_pos_${productionId}`, savedId);
+    };
+  });
+
+  // Keep scrollLockedRef in sync
+  useEffect(() => { scrollLockedRef.current = scrollLocked; }, [scrollLocked]);
+
+  // Block user scroll while locked
+  useEffect(() => {
+    if (!scrollLocked) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const prevent = (e: Event) => e.preventDefault();
+    const preventKeys = (e: Event) => {
+      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' '].includes((e as globalThis.KeyboardEvent).key)) e.preventDefault();
+    };
+    container.addEventListener('wheel', prevent, { passive: false });
+    container.addEventListener('touchmove', prevent, { passive: false });
+    container.addEventListener('keydown', preventKeys);
+    return () => {
+      container.removeEventListener('wheel', prevent);
+      container.removeEventListener('touchmove', prevent);
+      container.removeEventListener('keydown', preventKeys);
+    };
+  }, [scrollLocked]);
+
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
     let rafId = 0;
-    const onScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(recomputeWindow); };
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(recomputeWindow);
+      if (!scrollLockedRef.current) {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
+        // User took control of scroll — abandon any pending post-navigation correction
+        postNavCorrectionRef.current = null;
+      }
+    };
     container.addEventListener("scroll", onScroll, { passive: true });
     recomputeWindow();
-    return () => { container.removeEventListener("scroll", onScroll); cancelAnimationFrame(rafId); };
+    return () => { container.removeEventListener("scroll", onScroll); cancelAnimationFrame(rafId); clearTimeout(saveTimer); };
   }, [recomputeWindow]);
 
   useLayoutEffect(() => {
@@ -1513,6 +1564,7 @@ export default function CuePage({
     if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
     if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
     el.scrollIntoView({ behavior: "instant", block: nav.kind === "block" ? nav.align : "start" });
+    setScrollLocked(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [correctionTick, windowRange]);
 
@@ -1562,12 +1614,15 @@ export default function CuePage({
   // ── Cookie: restore scroll position once on mount ────────────────────────
   const scrollRestoredRef = useRef(false);
   useEffect(() => {
-    if (scrollRestoredRef.current) return;
+    // Fallback: unlock 300ms after mount (covers immediate restore and no-save cases)
+    const unlockTimer = setTimeout(() => setScrollLocked(false), 300);
+    if (scrollRestoredRef.current) return () => clearTimeout(unlockTimer);
     scrollRestoredRef.current = true;
     const savedId = readCookie(`cue_pos_${productionId}`);
-    if (!savedId) return;
+    if (!savedId) return () => clearTimeout(unlockTimer);
     const idx = blocks.findIndex(b => b.id === savedId);
     if (idx >= 0) scrollToBlockIdx(idx, "start");
+    return () => clearTimeout(unlockTimer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToBlockIdx]);
 
@@ -1608,16 +1663,6 @@ export default function CuePage({
     };
   }, [highlightedCueId]);
 
-  // ── Cookie: save scroll position (debounced) ─────────────────────────────
-  const posSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const blockId = blocks[windowRange.start]?.id;
-    if (!blockId) return;
-    if (posSaveTimerRef.current) clearTimeout(posSaveTimerRef.current);
-    posSaveTimerRef.current = setTimeout(() => {
-      writeCookie(`cue_pos_${productionId}`, blockId);
-    }, 800);
-  }, [windowRange.start, productionId, blocks]);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const el = document.getElementById(`cue-scene-${sceneId}`);
