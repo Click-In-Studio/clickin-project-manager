@@ -60,6 +60,8 @@ export default async function ReqDetailPage({ params }: Ctx) {
         .map(m => ({ openId: m.openId, name: m.name }))
     : [];
 
+  const allPeople = productionMembers.map(m => ({ openId: m.openId, name: m.name }));
+
   return (
     <ReqDetailClient
       req={req}
@@ -67,6 +69,7 @@ export default async function ReqDetailPage({ params }: Ctx) {
       scheduleItems={scheduleItems}
       deptName={dept?.name ?? null}
       deptPeople={deptPeople}
+      allPeople={allPeople}
       isPocOfDept={isPocOfDept}
       isAssignee={isAssignee}
       canViewFull={canViewFull}

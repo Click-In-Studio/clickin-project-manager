@@ -47,6 +47,7 @@ type Props = {
   scheduleItems: EventScheduleItem[];
   deptName: string | null;
   deptPeople: { openId: string; name: string }[];
+  allPeople?: { openId: string; name: string }[];
   isPocOfDept: boolean;
   isAssignee: boolean;
   canViewFull: boolean;
@@ -162,7 +163,7 @@ function ReqChatSection({
 
 export default function ReqDetailClient({
   req: initialReq, event, scheduleItems,
-  deptName, deptPeople,
+  deptName, deptPeople, allPeople,
   isPocOfDept, isAssignee, canViewFull,
   productionId,
 }: Props) {
@@ -170,6 +171,7 @@ export default function ReqDetailClient({
   const [title, setTitle] = useState(initialReq.title);
   const [description, setDescription] = useState(initialReq.description);
   const [assignees, setAssignees] = useState(initialReq.assignees);
+  const [showAllAssignees, setShowAllAssignees] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -351,26 +353,36 @@ export default function ReqDetailClient({
                   placeholder="需求详情（可选）"
                 />
               </div>
-              {deptPeople.length > 0 && (
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-2">负责人</label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {deptPeople.map(p => {
-                      const selected = assignees.some(a => a.openId === p.openId);
-                      return (
-                        <button key={p.openId} type="button"
-                          onClick={() => toggleAssignee(p)}
-                          className={`rounded-full px-3 py-1 text-xs border transition-colors ${
-                            selected
-                              ? "bg-zinc-800 text-white border-zinc-800"
-                              : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
-                          }`}
-                        >{p.name}</button>
-                      );
-                    })}
+              {(deptPeople.length > 0 || (allPeople && allPeople.length > 0)) && (() => {
+                const hasOutside = !!allPeople && allPeople.length > deptPeople.length;
+                const pool = showAllAssignees && hasOutside ? allPeople! : deptPeople;
+                return (
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-2">负责人</label>
+                    {hasOutside && (
+                      <label className="flex items-center gap-1.5 mb-2 cursor-pointer select-none">
+                        <input type="checkbox" checked={showAllAssignees} onChange={e => setShowAllAssignees(e.target.checked)} className="rounded" />
+                        <span className="text-xs text-zinc-500">显示全部成员</span>
+                      </label>
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {pool.map(p => {
+                        const selected = assignees.some(a => a.openId === p.openId);
+                        return (
+                          <button key={p.openId} type="button"
+                            onClick={() => toggleAssignee(p)}
+                            className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                              selected
+                                ? "bg-zinc-800 text-white border-zinc-800"
+                                : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                            }`}
+                          >{p.name}</button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
               {error && <p className="text-xs text-red-500">{error}</p>}
               <div className="flex flex-wrap gap-2 pt-1 border-t border-zinc-50">
                 <span className="text-xs text-zinc-400 self-center mr-1">确认并标为：</span>

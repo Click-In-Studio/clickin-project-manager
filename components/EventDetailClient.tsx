@@ -196,7 +196,7 @@ function InfoTab({
               <p className="text-xs text-zinc-400">无舞台监督 / 助理舞台监督成员</p>
             ) : (
               <AssigneeEditorInline
-                members={smMembers}
+                members={smMembers.map(m => ({ ...m, roles: m.roles.filter(r => r === "舞台监督" || r === "助理舞台监督") }))}
                 assignees={stageManagers}
                 onChange={setStageManagers}
               />
@@ -1731,7 +1731,7 @@ function ScheduleItemPicker({
 function TechReqCard({
   req, expanded, onToggleExpand,
   canEditThisReq, isEventClosed,
-  scheduleItems, deptMembers, base,
+  scheduleItems, deptMembers, allMembers, base,
   onUpdate, onDelete, canDelete,
 }: {
   req: EventTechReq;
@@ -1741,6 +1741,7 @@ function TechReqCard({
   isEventClosed: boolean;
   scheduleItems: EventScheduleItemWithParticipants[];
   deptMembers: MemberWithRoles[];
+  allMembers?: MemberWithRoles[];
   base: string;
   onUpdate: (req: EventTechReq) => void;
   onDelete: (id: string) => void;
@@ -1870,6 +1871,7 @@ function TechReqCard({
           <AssigneeEditor
             req={req}
             members={deptMembers}
+            allMembers={allMembers}
             canEdit={editable}
             onSave={handleAssigneesChange}
           />
@@ -1974,6 +1976,7 @@ function TechReqTab({
         isEventClosed={isEventClosed}
         scheduleItems={scheduleItems}
         deptMembers={deptMembers(req.departmentId)}
+        allMembers={req.departmentId ? members : undefined}
         base={base}
         onUpdate={handleUpdate}
         onDelete={deleteReq}
@@ -2044,6 +2047,7 @@ function TechReqTab({
                 <p className="text-xs text-zinc-400 mb-2">负责人</p>
                 <AssigneeEditorInline
                   members={deptMembers(newDeptId || null)}
+                  allMembers={newDeptId ? members : undefined}
                   assignees={newAssignees}
                   onChange={setNewAssignees}
                 />
@@ -2069,15 +2073,21 @@ function TechReqTab({
 }
 
 function AssigneeEditorInline({
-  members, assignees, onChange,
+  members, allMembers, assignees, onChange,
 }: {
   members: MemberWithRoles[];
+  allMembers?: MemberWithRoles[];
   assignees: { openId: string; name: string }[];
   onChange: (next: { openId: string; name: string }[]) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const selected = new Set(assignees.map(a => a.openId));
-  const filtered = members.filter(m =>
+
+  const hasOutside = !!allMembers && allMembers.length > members.length;
+  const pool = showAll && hasOutside ? allMembers! : members;
+
+  const filtered = pool.filter(m =>
     !search || m.name.includes(search) || m.roles.some(r => r.includes(search))
   );
   function toggle(m: MemberWithRoles) {
@@ -2090,6 +2100,12 @@ function AssigneeEditorInline({
     <div className="flex flex-col gap-2">
       <input placeholder="搜索姓名或职位…" value={search} onChange={e => setSearch(e.target.value)}
         className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
+      {hasOutside && (
+        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+          <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="rounded" />
+          <span className="text-xs text-zinc-500">显示全部成员</span>
+        </label>
+      )}
       {filtered.length === 0 && <p className="text-xs text-zinc-400">无匹配成员</p>}
       <div className="max-h-64 overflow-y-auto flex flex-col gap-3">
         {groups.map(({ role, members: gm }) => (
@@ -2108,14 +2124,19 @@ function AssigneeEditorInline({
 }
 
 function AssigneeEditor({
-  req, members, canEdit, onSave,
+  req, members, allMembers, canEdit, onSave,
 }: {
   req: EventTechReq; members: MemberWithRoles[];
+  allMembers?: MemberWithRoles[];
   canEdit: boolean; onSave: (assignees: { openId: string; name: string }[]) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const assigneeSet = new Set(req.assignees.map(a => a.openId));
+
+  const hasOutside = !!allMembers && allMembers.length > members.length;
+  const pool = showAll && hasOutside ? allMembers! : members;
 
   function toggle(m: MemberWithRoles) {
     const next = assigneeSet.has(m.openId)
@@ -2130,7 +2151,7 @@ function AssigneeEditor({
     ) : null;
   }
 
-  const filtered = members.filter(m =>
+  const filtered = pool.filter(m =>
     !search || m.name.includes(search) || m.roles.some(r => r.includes(search))
   );
   const groups = groupByRole(filtered);
@@ -2144,6 +2165,12 @@ function AssigneeEditor({
         <div className="flex flex-col gap-2">
           <input placeholder="搜索姓名或职位…" value={search} onChange={e => setSearch(e.target.value)}
             className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
+          {hasOutside && (
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="rounded" />
+              <span className="text-xs text-zinc-500">显示全部成员</span>
+            </label>
+          )}
           {filtered.length === 0 && <p className="text-xs text-zinc-400">无匹配成员</p>}
           <div className="max-h-64 overflow-y-auto flex flex-col gap-3">
             {groups.map(({ role, members: gm }) => (
@@ -2180,8 +2207,30 @@ function ReportsTab({
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newType, setNewType] = useState("rehearsal");
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/reports`;
+
+  async function saveRename(id: string) {
+    if (!renameTitle.trim()) return;
+    setRenaming(true);
+    try {
+      const res = await fetch(`${base}/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: renameTitle.trim() }),
+      });
+      const data = await res.json();
+      if (data.report) {
+        onReportsChange(reports.map(r => r.id === id ? data.report : r));
+        setRenameId(null);
+      }
+    } finally {
+      setRenaming(false);
+    }
+  }
 
   async function createReport() {
     if (!newTitle.trim()) return;
@@ -2212,16 +2261,46 @@ function ReportsTab({
       {reports.map(report => (
         <div key={report.id} className="rounded-xl bg-white shadow-sm overflow-hidden">
           <div className="px-4 py-3 flex items-center gap-3 cursor-pointer"
-            onClick={() => setExpandedId(expandedId === report.id ? null : report.id)}>
+            onClick={() => { if (renameId !== report.id) setExpandedId(expandedId === report.id ? null : report.id); }}>
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-medium text-zinc-800 truncate block">{report.title}</span>
-              <span className="text-xs text-zinc-400">
-                {fmt(report.createdAt)} · {report.publishedAt ? "已发布" : "草稿"}
-              </span>
+              {renameId === report.id ? (
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <input
+                    value={renameTitle}
+                    onChange={e => setRenameTitle(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") saveRename(report.id); if (e.key === "Escape") setRenameId(null); }}
+                    autoFocus
+                    className="flex-1 min-w-0 rounded border border-zinc-200 px-2 py-1 text-sm focus:outline-none focus:border-zinc-400"
+                  />
+                  <button onClick={() => saveRename(report.id)} disabled={renaming}
+                    className="shrink-0 text-[11px] text-blue-500 hover:text-blue-700 disabled:opacity-50">
+                    {renaming ? "…" : "保存"}
+                  </button>
+                  <button onClick={() => setRenameId(null)}
+                    className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-600">
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <span className="text-sm font-medium text-zinc-800 truncate block">{report.title}</span>
+                  <span className="text-xs text-zinc-400">
+                    {fmt(report.createdAt)} · {report.publishedAt ? "已发布" : "草稿"}
+                  </span>
+                </>
+              )}
             </div>
             <span className={`shrink-0 text-[11px] rounded-full px-2 py-0.5 font-medium ${report.publishedAt ? "bg-green-50 text-green-600" : "bg-zinc-100 text-zinc-500"}`}>
               {report.publishedAt ? "已发布" : "草稿"}
             </span>
+            {canWrite && renameId !== report.id && (
+              <button
+                onClick={e => { e.stopPropagation(); setRenameId(report.id); setRenameTitle(report.title); }}
+                className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-600 px-1"
+              >
+                改名
+              </button>
+            )}
             <Link
               href={`/production/${productionId}/events/${eventId}/reports/${report.id}`}
               onClick={e => e.stopPropagation()}
