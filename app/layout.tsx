@@ -42,6 +42,8 @@ export default function RootLayout({
           type="font/woff2"
           crossOrigin="anonymous"
         />
+        {/* Feishu DevTools */}
+        <script src="https://lf-package-cn.feishucdn.com/obj/feishu-static/op/fe/devtools_frontend/remote-debug-0.0.1-alpha.6.js" />
       </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
