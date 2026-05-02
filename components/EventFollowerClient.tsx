@@ -42,12 +42,13 @@ type Props = {
   isAssignee: boolean;
   selfParticipantRole: "participant" | "follower" | null;
   canViewFull?: boolean;
+  canViewReqs?: boolean;
 };
 
 export default function EventFollowerClient({
   productionId, eventId, event,
   scheduleItems, departments = [], reports,
-  isAssignee, selfParticipantRole, canViewFull,
+  isAssignee, selfParticipantRole, canViewFull, canViewReqs,
 }: Props) {
   const [followBusy, setFollowBusy] = useState(false);
   const [selfRole, setSelfRole] = useState(selfParticipantRole);
@@ -82,12 +83,20 @@ export default function EventFollowerClient({
           <Link href={`/production/${productionId}/events`} className="text-xs text-zinc-400 hover:text-zinc-600">
             ← Events
           </Link>
-          {canViewFull && (
-            <Link href={`/production/${productionId}/events/${eventId}`}
-              className="text-xs text-zinc-400 hover:text-zinc-600">
-              编辑视角 →
-            </Link>
-          )}
+          <div className="flex items-center gap-3">
+            {canViewReqs && (
+              <Link href={`/production/${productionId}/events/${eventId}/reqs`}
+                className="text-xs text-zinc-400 hover:text-zinc-600">
+                技术需求 →
+              </Link>
+            )}
+            {canViewFull && (
+              <Link href={`/production/${productionId}/events/${eventId}`}
+                className="text-xs text-zinc-400 hover:text-zinc-600">
+                编辑视角 →
+              </Link>
+            )}
+          </div>
         </div>
 
         {/* Header */}

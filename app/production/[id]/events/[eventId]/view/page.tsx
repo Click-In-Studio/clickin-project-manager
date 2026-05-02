@@ -53,6 +53,9 @@ export default async function EventViewPage({
     listEventDepartments(productionId),
   ]);
 
+  const pocDeptIds = departments.filter(d => d.pocOpenIds.includes(session.openId));
+  const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0;
+
   const isReportViewer = session.isAdmin || memberRoles?.some(r => REPORT_VIEWER_ROLES.has(r)) || false;
   const visibleReports = isReportViewer ? reports : reports.filter(r => r.publishedAt !== null);
 
@@ -67,6 +70,7 @@ export default async function EventViewPage({
       isAssignee={isAssignee}
       selfParticipantRole={selfRole}
       canViewFull={canViewFull}
+      canViewReqs={canViewReqs}
     />
   );
 }

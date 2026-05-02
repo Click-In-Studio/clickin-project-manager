@@ -7,6 +7,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
 import { getPool } from "@/lib/pg";
+import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 
 function cstNow(): Date {
   return new Date(Date.now() + 8 * 3_600_000);
@@ -171,7 +172,7 @@ export default async function WeeklyCallPage({ searchParams }: Ctx) {
                       <div key={i} className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5">
                         <span className="text-sm font-mono font-semibold text-amber-600">{fmtTime(c.callAt)}</span>
                         <span className="text-[11px] text-amber-500">{fmtDow(c.callAt)} {fmtDate(c.callAt)}</span>
-                        {c.notes && <span className="text-[11px] text-amber-400">· {c.notes}</span>}
+                        {c.notes && <><span className="text-[11px] text-amber-400">· </span><SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-amber-400" /></>}
                       </div>
                     ))}
                   </div>

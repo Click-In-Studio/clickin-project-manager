@@ -33,6 +33,7 @@ type Props = {
   departments: EventDepartment[];
   currentUserOpenId: string;
   productionMembers: { openId: string; name: string }[];
+  canViewFull?: boolean;
 };
 
 // ─── Awaiting card for POC — links to detail page ────────────────────────────
@@ -68,11 +69,13 @@ function AwaitingReqCard({
 // ─── Regular req card ─────────────────────────────────────────────────────────
 
 function ReqCard({
-  req, deptName, isMyReq, productionId, eventId, onStatusChange,
+  req, deptName, isMyReq, isPocOfDept, canViewFull, productionId, eventId, onStatusChange,
 }: {
   req: EventTechReq;
   deptName: string | undefined;
   isMyReq: boolean;
+  isPocOfDept: boolean;
+  canViewFull?: boolean;
   productionId: string;
   eventId: string;
   onStatusChange: (reqId: string, newStatus: string) => void;
@@ -147,6 +150,15 @@ function ReqCard({
           ))}
         </div>
       )}
+      {(canViewFull || isPocOfDept || isMyReq) && (
+        <div className="mt-3 flex justify-end">
+          <Link
+            href={`/production/${productionId}/events/${eventId}/reqs/${req.id}`}
+            className="text-[11px] text-zinc-400 hover:text-zinc-600">
+            详情 →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
@@ -155,7 +167,7 @@ function ReqCard({
 
 export default function ReqsClient({
   productionId, eventId, event,
-  techReqs, departments, currentUserOpenId, productionMembers,
+  techReqs, departments, currentUserOpenId, productionMembers, canViewFull,
 }: Props) {
   const [reqs, setReqs] = useState(techReqs);
 
@@ -230,6 +242,8 @@ export default function ReqsClient({
                   req={req}
                   deptName={deptName}
                   isMyReq={req.assignees.some(a => a.openId === currentUserOpenId)}
+                  isPocOfDept={isPocOfDept}
+                  canViewFull={canViewFull}
                   productionId={productionId}
                   eventId={eventId}
                   onStatusChange={handleStatusChange}
