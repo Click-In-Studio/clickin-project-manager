@@ -829,6 +829,126 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
   }
 }
 
+/**
+ * Brute-force import: clears ALL blocks from a specific version and replaces them.
+ * No copy-on-write, no cue drift — caller is responsible for choosing an editing version.
+ * Scenes and characters are upserted at both the production level and the version level.
+ */
+export async function importScriptToVersion(
+  productionId: string,
+  versionId: string,
+  payload: {
+    upsertBlocks: Array<{
+      id: string;
+      type: "dialogue" | "stage";
+      content: string;
+      lyric: boolean;
+      characterIds: string[];
+      characterAnnotations: Record<string, string>;
+      sceneId: string | null;
+      rehearsalMark: string | null;
+      lexKey: string;
+    }>;
+    upsertChars: Array<{ id: string; name: string; isAggregate: boolean; sortOrder: number }>;
+    upsertScenes: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }>;
+  },
+): Promise<void> {
+  const { upsertBlocks, upsertChars, upsertScenes } = payload;
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    // Clear all blocks from this version; GC snapshots no longer referenced by any version
+    await client.query(
+      `WITH removed AS (
+         DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id
+       )
+       DELETE FROM script s
+       WHERE s.id IN (SELECT snapshot_id FROM removed)
+         AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+      [versionId]
+    );
+
+    if (upsertScenes.length > 0) {
+      await client.query(
+        `INSERT INTO scene (id, production_id, num, name, sort_order, parent_id)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+         ON CONFLICT (id) DO NOTHING`,
+        [upsertScenes.map(s => s.id), productionId,
+         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name),
+         upsertScenes.map(s => s.sortOrder), upsertScenes.map(s => s.parentId ?? null)]
+      );
+      await client.query(
+        `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+         ON CONFLICT (scene_id, version_id) DO UPDATE
+           SET num = EXCLUDED.num, name = EXCLUDED.name,
+               sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
+        [upsertScenes.map(s => s.id), versionId,
+         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name),
+         upsertScenes.map(s => s.sortOrder), upsertScenes.map(s => s.parentId ?? null)]
+      );
+    }
+
+    if (upsertChars.length > 0) {
+      await client.query(
+        `INSERT INTO character (id, production_id, name, sort_order, is_aggregate)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+         ON CONFLICT (id) DO NOTHING`,
+        [upsertChars.map(c => c.id), productionId,
+         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
+         upsertChars.map(c => c.isAggregate)]
+      );
+      await client.query(
+        `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+         ON CONFLICT (character_id, version_id) DO UPDATE
+           SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
+        [upsertChars.map(c => c.id), versionId,
+         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
+         upsertChars.map(c => c.isAggregate)]
+      );
+    }
+
+    if (upsertBlocks.length > 0) {
+      await client.query(
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+         SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]),
+                unnest($4::text[]), unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[])`,
+        [
+          upsertBlocks.map(b => b.id), productionId,
+          upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
+          upsertBlocks.map(b => b.rehearsalMark ?? null),
+          upsertBlocks.map(b => toDbType(b as Block)),
+          upsertBlocks.map(b => b.content),
+        ]
+      );
+      await client.query(
+        `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
+         SELECT unnest($1::text[]), $2::text, unnest($1::text[]), unnest($3::text[])`,
+        [upsertBlocks.map(b => b.id), versionId, upsertBlocks.map(b => b.lexKey)]
+      );
+      const scRows = upsertBlocks.flatMap(b =>
+        b.characterIds.map((cid, pos) => ({ sid: b.id, cid, pos, ann: b.characterAnnotations[cid] ?? null }))
+      );
+      if (scRows.length > 0) {
+        await client.query(
+          `INSERT INTO script_character (script_id, character_id, position, annotation)
+           SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
+          [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // ─── Production management ────────────────────────────────────────────────────
 
 export async function createProduction(id: string, name: string): Promise<void> {

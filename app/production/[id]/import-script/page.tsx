@@ -17,5 +17,7 @@ export default async function ImportScriptPage({ params }: { params: Promise<{ i
   const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) redirect(`/production/${id}`);
 
-  return <ImportScriptWizardPage productionId={id} />;
+  const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
+
+  return <ImportScriptWizardPage productionId={id} versionId={versionId} />;
 }

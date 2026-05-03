@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listProductionScenes, listProductionCharacters, flushToDB, loadProduction, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
+import { getProductionMemberContext, listProductionScenes, listProductionCharacters, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
@@ -153,7 +153,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   return Response.json({ preview });
 }
 
-/** PUT: commit the import — clears existing script blocks, imports fresh */
+/** PUT: commit the import — clears all blocks in target version, imports fresh */
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
   const { deny } = await guard(req, productionId);
@@ -162,14 +162,28 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const body = (await req.json()) as ImportScriptBody;
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
+
+  // Resolve target version: ?v= param → fallback to newest editing version
+  const versionIdParam = req.nextUrl.searchParams.get("v");
+  let versionId: string | null = null;
+  if (versionIdParam) {
+    const ver = await getVersion(versionIdParam);
+    if (!ver || ver.productionId !== productionId)
+      return Response.json({ error: "版本不存在" }, { status: 404 });
+    if (ver.status !== "editing")
+      return Response.json({ error: "只能向编辑中的版本导入剧本" }, { status: 400 });
+    versionId = versionIdParam;
+  } else {
+    versionId = await getActiveVersionId(productionId);
+  }
+  if (!versionId) return Response.json({ error: "没有可编辑的版本，请先创建一个版本" }, { status: 400 });
+
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed } = parseRows(rawRows, body);
 
-  const versionId = await getActiveVersionId(productionId);
-  const [existingChars, existingScenes, production, tagGroups] = await Promise.all([
+  const [existingChars, existingScenes, tagGroups] = await Promise.all([
     listProductionCharacters(productionId),
     listProductionScenes(productionId),
-    versionId ? loadProduction(productionId, versionId) : Promise.resolve(null),
     listTagGroups(productionId),
   ]);
 
@@ -189,7 +203,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   // Build a combined scene lookup that auto-creates any scenes referenced by script rows
   // but not yet in the DB. This way scene import is not required before script import.
   const sceneByNum = new Map(existingScenes.map(s => [s.number, { id: s.id, number: s.number, name: s.name }]));
-  const upsertScenesFromScript: Parameters<typeof flushToDB>[1]["upsertScenes"] = [];
+  const upsertScenesFromScript: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }> = [];
   let autoSceneSortOrder = existingScenes.length + 1;
 
   function ensureScene(num: string, name: string | null, parentNum: string | null) {
@@ -217,7 +231,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   // Merge characters (upsert)
   const allRawChars = parsed.flatMap(r => r.rawChars);
   const parsedChars = collectCharacters(allRawChars);
-  const upsertChars: Parameters<typeof flushToDB>[1]["upsertChars"] = [];
+  const upsertChars: Array<{ id: string; name: string; isAggregate: boolean; sortOrder: number }> = [];
   const charIdByName = new Map<string, string>();
 
   // Build raw→name and raw→note maps covering ALL raw variants (not just the deduplicated set).
@@ -249,9 +263,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       charIdByName.set(pc.name, ex.id);
     }
   }
-
-  // Delete all existing blocks for this production
-  const existingBlockIds = production?.state.blocks.map((b: { id: string }) => b.id) ?? [];
 
   type BlockSpec = {
     sceneId: string | null;
@@ -322,7 +333,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
 
   const lexKeys = initialKeys(blockSpecs.length);
-  const upsertBlocks: Parameters<typeof flushToDB>[1]["upsertBlocks"] = [];
+  const upsertBlocks: Array<{ id: string; type: "dialogue" | "stage"; content: string; lyric: boolean; characterIds: string[]; characterAnnotations: Record<string, string>; sceneId: string | null; rehearsalMark: string | null; lexKey: string }> = [];
   const blockTagAssignments: Array<{ blockId: string; groupId: string; optionId: string }> = [];
 
   for (let i = 0; i < blockSpecs.length; i++) {
@@ -337,7 +348,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       characterAnnotations: spec.characterAnnotations,
       sceneId: spec.sceneId,
       rehearsalMark: spec.rehearsalMark,
-      orderKey: i,
       lexKey: lexKeys[i],
     });
     for (const ta of spec.tagActions) {
@@ -345,13 +355,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
 
-  await flushToDB(productionId, {
+  await importScriptToVersion(productionId, versionId, {
     upsertBlocks,
-    deleteBlockIds: existingBlockIds,
     upsertChars,
-    deleteCharIds: [],
     upsertScenes: upsertScenesFromScript,
-    deleteSceneIds: [],
   });
 
   // Set aggregate member associations

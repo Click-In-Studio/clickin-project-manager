@@ -10,6 +10,7 @@ type Step = "sheet" | "columns" | "types" | "characters" | "aggregates" | "previ
 
 type Props = {
   productionId: string;
+  versionId?: string | null;
   onDone?: () => void;
 };
 
@@ -41,7 +42,7 @@ function effectiveName(e: CharEntry): string {
   return e.parsedSuffix !== null && e.mergeAsNote ? e.parsedBase : e.raw;
 }
 
-export default function ImportScriptWizard({ productionId, onDone }: Props) {
+export default function ImportScriptWizard({ productionId, versionId, onDone }: Props) {
   const [step, setStep] = useState<Step>("sheet");
   const [spreadsheetToken, setSpreadsheetToken] = useState<string | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<SheetMeta | null>(null);
@@ -272,7 +273,10 @@ export default function ImportScriptWizard({ productionId, onDone }: Props) {
     for (const e of charEntries) characterKinds[effectiveName(e)] = e.kind;
 
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-script`, {
+      const importUrl = versionId
+        ? `${BASE_PATH}/api/production/${productionId}/import-script?v=${encodeURIComponent(versionId)}`
+        : `${BASE_PATH}/api/production/${productionId}/import-script`;
+      const res = await fetch(importUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
