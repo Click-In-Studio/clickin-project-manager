@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getState, applyPatch } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, updateSceneMetadata } from "@/lib/db";
+import { getProductionMemberContext, updateSceneMetadata, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -27,7 +27,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   // Handle number/name through the cache system
   const hasStructural = "number" in body || "name" in body;
   if (hasStructural) {
-    const state = getState(id);
+    const versionId = await getActiveVersionId(id) ?? '';
+    const state = getState(id, versionId);
     const scene = state.scenes.find((s) => s.id === sceneId);
     if (!scene) return Response.json({ error: "未找到章节" }, { status: 404 });
     const updated = {
@@ -35,7 +36,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
       number: typeof body.number === "string" ? body.number.trim() : scene.number,
       name:   typeof body.name   === "string" ? body.name.trim()   : scene.name,
     };
-    await applyPatch(id, { clientSeq: 0, blockOps: [], charOps: [], sceneOps: [{ op: "upsert", scene: updated }] });
+    await applyPatch(id, versionId, { clientSeq: 0, blockOps: [], charOps: [], sceneOps: [{ op: "upsert", scene: updated }] });
   }
 
   // Handle metadata fields directly in DB
@@ -59,6 +60,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/producti
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
-  await applyPatch(id, { clientSeq: 0, blockOps: [], charOps: [], sceneOps: [{ op: "delete", id: sceneId }] });
+  const delVersionId = await getActiveVersionId(id) ?? '';
+  await applyPatch(id, delVersionId, { clientSeq: 0, blockOps: [], charOps: [], sceneOps: [{ op: "delete", id: sceneId }] });
   return Response.json({ ok: true });
 }

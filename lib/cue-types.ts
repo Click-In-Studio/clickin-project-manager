@@ -3,10 +3,11 @@
 //           offset 0 = before first char, content.length = after last char
 //   gap   — the visual whitespace rendered between two consecutive blocks
 //           afterBlockId = the block that immediately precedes the gap
+//           afterBlockId null = gap before the very first block
 
 export type CueAnchor =
   | { kind: "block"; blockId: string; offset: number }
-  | { kind: "gap"; afterBlockId: string };
+  | { kind: "gap"; afterBlockId: string | null };
 
 // Point cue: start and end are identical.
 export type Cue = {

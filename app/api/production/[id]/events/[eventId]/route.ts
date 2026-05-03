@@ -37,6 +37,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     startTime?: string | null; endTime?: string | null;
     status?: string; description?: string;
     stageManagers?: { openId: string; name: string }[];
+    versionId?: string | null;
   };
 
   const validStatuses = new Set(["draft", "published", "completed", "cancelled"]);
@@ -51,6 +52,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     endTime: body.endTime,
     status: body.status as Parameters<typeof updateProductionEvent>[2]["status"],
     description: body.description,
+    ...("versionId" in body ? { versionId: body.versionId } : {}),
   });
   if (body.status === "completed") {
     await completeAllEventTechReqs(eventId);

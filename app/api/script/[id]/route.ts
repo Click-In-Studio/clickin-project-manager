@@ -3,7 +3,7 @@ import { getState, applyPatch } from "@/lib/server-cache";
 import { type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
+import { getProductionMemberContext, getActiveVersionId, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -13,6 +13,12 @@ async function getCtx(req: NextRequest, productionId: string) {
   return { session, memberRoles, overrides, isArchived };
 }
 
+async function resolveVersion(req: NextRequest, productionId: string): Promise<string | null> {
+  const versionId = req.nextUrl.searchParams.get("v");
+  if (versionId) return versionId;
+  return getActiveVersionId(productionId);
+}
+
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]">) {
   const { id } = await ctx.params;
   const { session, memberRoles, overrides } = await getCtx(req, id);
@@ -20,7 +26,9 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]"
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
-  return Response.json(getState(id));
+  const versionId = await resolveVersion(req, id);
+  if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
+  return Response.json(getState(id, versionId));
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id]">) {
@@ -32,8 +40,17 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
 
+  const versionId = await resolveVersion(req, id);
+  if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
+
+  // Verify the version is editable
+  const ver = await getVersion(versionId);
+  if (!ver || ver.status !== 'editing') {
+    return Response.json({ error: "该版本不可编辑" }, { status: 403 });
+  }
+
   const patch = (await req.json()) as ScriptPatch;
-  const needed = requiredPermissions(patch, getState(id));
+  const needed = requiredPermissions(patch, getState(id, versionId));
   for (const perm of needed) {
     if (!hasPermission(perm, session.isAdmin, memberRoles, overrides)) {
       return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
@@ -41,6 +58,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   }
 
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
-  const serverSeq = await applyPatch(id, patch, userToken);
+  const serverSeq = await applyPatch(id, versionId, patch, userToken);
   return Response.json({ ok: true, serverSeq });
 }

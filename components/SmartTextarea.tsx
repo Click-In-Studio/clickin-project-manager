@@ -56,15 +56,18 @@ export function memberDropPlugin(
 
 // ── Factory: #script ref ──────────────────────────────────────────────────────
 
-export function scriptRefDropPlugin(productionId: string): DropPlugin {
+export function scriptRefDropPlugin(productionId: string, versionId?: string | null): DropPlugin {
   return {
     trigger: "#",
-    emptyLabel: "无匹配内容",
+    emptyLabel: versionId === null ? "请先为活动选择版本" : "无匹配内容",
     search: async (query) => {
       if (!query) return [];
+      if (versionId === null) return [];
       try {
+        const params = new URLSearchParams({ q: query });
+        if (versionId) params.set("v", versionId);
         const res = await fetch(
-          `${BASE_PATH}/api/production/${productionId}/script/block-search?q=${encodeURIComponent(query)}`
+          `${BASE_PATH}/api/production/${productionId}/script/block-search?${params.toString()}`
         );
         const data = await res.json() as { results?: ScriptBlockSearchResult[] };
         return (data.results ?? []).map(r => ({

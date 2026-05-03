@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getState, applyPatch } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, patchCharacterMeta, setCharacterMembers } from "@/lib/db";
+import { getProductionMemberContext, patchCharacterMeta, setCharacterMembers, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -43,7 +43,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   }
 
   // Structural fields (name, isAggregate) go through the cache
-  const state = getState(id);
+  const versionId = await getActiveVersionId(id) ?? '';
+  const state = getState(id, versionId);
   const char = state.characters.find((c) => c.id === charId);
   if (!char) return Response.json({ error: "未找到角色" }, { status: 404 });
 
@@ -56,7 +57,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     name: nameVal,
     isAggregate: typeof body.isAggregate === "boolean" ? body.isAggregate : char.isAggregate,
   };
-  await applyPatch(id, { clientSeq: 0, blockOps: [], charOps: [{ op: "upsert", char: updated }], sceneOps: [] });
+  await applyPatch(id, versionId, { clientSeq: 0, blockOps: [], charOps: [{ op: "upsert", char: updated }], sceneOps: [] });
 
   // When converting to/from aggregate, clear member associations
   if (typeof body.isAggregate === "boolean" && body.isAggregate !== char.isAggregate) {
@@ -76,6 +77,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/producti
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
-  await applyPatch(id, { clientSeq: 0, blockOps: [], charOps: [{ op: "delete", id: charId }], sceneOps: [] });
+  const delVersionId = await getActiveVersionId(id) ?? '';
+  await applyPatch(id, delVersionId, { clientSeq: 0, blockOps: [], charOps: [{ op: "delete", id: charId }], sceneOps: [] });
   return Response.json({ ok: true });
 }

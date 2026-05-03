@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getState, applyPatch } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionScenes } from "@/lib/db";
+import { getProductionMemberContext, listProductionScenes, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -36,7 +36,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const name     = typeof body.name     === "string" ? body.name.trim()     : "";
   const parentId = typeof body.parentId === "string" ? body.parentId        : null;
 
-  const state = getState(id);
+  const versionId = await getActiveVersionId(id) ?? '';
+  const state = getState(id, versionId);
   const newScene = { id: `s${Date.now().toString(36)}`, number, name, parentId };
 
   // Build a reordered list: insert sub-scene after its parent's last child, or at end for acts
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
     scenes.push(newScene);
   }
 
-  await applyPatch(id, {
+  await applyPatch(id, versionId, {
     clientSeq: 0,
     blockOps: [],
     charOps: [],

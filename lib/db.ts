@@ -1,13 +1,31 @@
 import { getPool } from "./pg";
+import type { PoolClient } from "pg";
 import type { Block, Character, Scene, ScriptState, ScriptConfig } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { Permission, PermissionOverrides } from "./roles";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 
+// ─── Version types ────────────────────────────────────────────────────────────
+
+export type VersionStatus = 'editing' | 'committed' | 'frozen' | 'archived';
+
+export type Version = {
+  id: string;
+  productionId: string;
+  name: string;
+  description: string;
+  tags: string[];
+  parentVersionId: string | null;
+  status: VersionStatus;
+  createdAt: string;
+};
+
 // ─── Exported types ───────────────────────────────────────────────────────────
 
 export type DbBlock = Block & { orderKey: number; lexKey: string };
+// For versioned flush: block + its current snapshot_id (for CoW detection)
+export type VersionedDbBlock = DbBlock & { snapshotId: string };
 export type DbScene = Scene & { sortOrder: number };
 export type DbChar = Character & { sortOrder: number };
 
@@ -18,6 +36,20 @@ export type FlushPayload = {
   deleteCharIds: string[];
   upsertScenes: DbScene[];
   deleteSceneIds: string[];
+};
+
+export type VersionedFlushPayload = {
+  upsertBlocks: VersionedDbBlock[];
+  deleteSnapshotIds: string[];  // snapshot_ids to remove from this version
+  upsertChars: DbChar[];
+  deleteCharIds: string[];
+  upsertScenes: DbScene[];
+  deleteSceneIds: string[];
+};
+
+// block_id → new snapshot_id for any block whose snapshot was CoW'd
+export type VersionedFlushResult = {
+  newSnapshotIds: Map<string, string>;
 };
 
 // ─── Type conversions ─────────────────────────────────────────────────────────
@@ -38,8 +70,10 @@ function fromDbType(t: DbBlockType): { type: Block["type"]; lyric: boolean } {
 
 // ─── Row types (internal) ─────────────────────────────────────────────────────
 
+// Versioned block row: comes from JOIN of script_version + script
 type BlockRow = {
-  id: string;
+  snapshot_id: string;
+  block_id: string;
   sort_key: string;
   scene_id: string | null;
   rehearsal_mark: string | null;
@@ -48,32 +82,275 @@ type BlockRow = {
 };
 type SceneRow = { id: string; num: string; name: string; sort_order: number; parent_id: string | null };
 type CharRow  = { id: string; name: string; sort_order: number; is_aggregate: boolean };
+// script_character uses snapshot_id as the script_id FK
 type ScCharRow = { script_id: string; character_id: string; annotation: string | null };
+
+// ─── Version CRUD ─────────────────────────────────────────────────────────────
+
+type VersionRow = {
+  id: string;
+  production_id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  parent_version_id: string | null;
+  status: VersionStatus;
+  created_at: Date;
+};
+
+function rowToVersion(r: VersionRow): Version {
+  return {
+    id: r.id,
+    productionId: r.production_id,
+    name: r.name,
+    description: r.description,
+    tags: r.tags,
+    parentVersionId: r.parent_version_id,
+    status: r.status,
+    createdAt: r.created_at.toISOString(),
+  };
+}
+
+export async function listVersions(productionId: string): Promise<Version[]> {
+  const res = await getPool().query<VersionRow>(
+    "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE production_id = $1 ORDER BY created_at",
+    [productionId]
+  );
+  return res.rows.map(rowToVersion);
+}
+
+export async function getVersion(versionId: string): Promise<Version | null> {
+  const res = await getPool().query<VersionRow>(
+    "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE id = $1",
+    [versionId]
+  );
+  return res.rows.length ? rowToVersion(res.rows[0]) : null;
+}
+
+/** Returns the most recently created editing version, or null if none. */
+export async function getActiveVersionId(productionId: string): Promise<string | null> {
+  const res = await getPool().query<{ id: string }>(
+    "SELECT id FROM version WHERE production_id = $1 AND status = 'editing' ORDER BY created_at DESC LIMIT 1",
+    [productionId]
+  );
+  return res.rows[0]?.id ?? null;
+}
+
+function genVersionId(): string {
+  return `ver_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * Creates a new Editing version branched from fromVersionId.
+ * If fromVersionId is currently Editing, it is auto-committed first.
+ * Content (blocks, scenes, characters, cues) is copied from fromVersionId.
+ */
+export async function createVersion(
+  productionId: string,
+  fromVersionId: string,
+  name: string,
+): Promise<Version> {
+  const newVersionId = genVersionId();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const parentRes = await client.query<{ status: string }>(
+      "SELECT status FROM version WHERE id = $1",
+      [fromVersionId]
+    );
+    const parentStatus = parentRes.rows[0]?.status;
+
+    if (parentStatus === 'editing') {
+      await client.query(
+        "UPDATE version SET status = 'committed' WHERE id = $1",
+        [fromVersionId]
+      );
+    }
+
+    const nowRes = await client.query<{ now: Date }>("SELECT now() AS now");
+    const now = nowRes.rows[0].now;
+
+    await client.query(
+      "INSERT INTO version (id, production_id, name, parent_version_id, status, created_at) VALUES ($1, $2, $3, $4, 'editing', $5)",
+      [newVersionId, productionId, name, fromVersionId, now]
+    );
+
+    // Copy script blocks (same snapshots, new version entry)
+    await client.query(
+      "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
+      [newVersionId, fromVersionId]
+    );
+
+    // Copy cue revisions
+    await client.query(
+      "INSERT INTO cue_version (revision_id, version_id, cue_id) SELECT revision_id, $1, cue_id FROM cue_version WHERE version_id = $2",
+      [newVersionId, fromVersionId]
+    );
+
+    // Copy scene and character snapshots
+    await client.query(
+      `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
+       SELECT scene_id, $1, num, name, sort_order, parent_id FROM scene_version WHERE version_id = $2`,
+      [newVersionId, fromVersionId]
+    );
+    await client.query(
+      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
+       SELECT character_id, $1, name, sort_order, is_aggregate FROM character_version WHERE version_id = $2`,
+      [newVersionId, fromVersionId]
+    );
+
+    await client.query("COMMIT");
+    return {
+      id: newVersionId,
+      productionId,
+      name,
+      description: '',
+      tags: [],
+      parentVersionId: fromVersionId,
+      status: 'editing',
+      createdAt: now.toISOString(),
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Rollback: commits the current editing version, then creates a new editing
+ * version with the content of targetVersionId. Parent of the new version is
+ * the current version (not the target).
+ */
+export async function rollbackToVersion(
+  currentVersionId: string,
+  targetVersionId: string,
+  productionId: string,
+  name: string,
+): Promise<Version> {
+  const newVersionId = genVersionId();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      "UPDATE version SET status = 'committed' WHERE id = $1",
+      [currentVersionId]
+    );
+
+    const nowRes = await client.query<{ now: Date }>("SELECT now() AS now");
+    const now = nowRes.rows[0].now;
+
+    await client.query(
+      "INSERT INTO version (id, production_id, name, parent_version_id, status, created_at) VALUES ($1, $2, $3, $4, 'editing', $5)",
+      [newVersionId, productionId, name, currentVersionId, now]
+    );
+
+    // Copy content from targetVersionId (not currentVersionId)
+    await client.query(
+      "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
+      [newVersionId, targetVersionId]
+    );
+
+    await client.query(
+      "INSERT INTO cue_version (revision_id, version_id, cue_id) SELECT revision_id, $1, cue_id FROM cue_version WHERE version_id = $2",
+      [newVersionId, targetVersionId]
+    );
+
+    // Copy scene and character snapshots from the target (rollback source) version
+    await client.query(
+      `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
+       SELECT scene_id, $1, num, name, sort_order, parent_id FROM scene_version WHERE version_id = $2`,
+      [newVersionId, targetVersionId]
+    );
+    await client.query(
+      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
+       SELECT character_id, $1, name, sort_order, is_aggregate FROM character_version WHERE version_id = $2`,
+      [newVersionId, targetVersionId]
+    );
+
+    await client.query("COMMIT");
+    return {
+      id: newVersionId,
+      productionId,
+      name,
+      description: '',
+      tags: [],
+      parentVersionId: currentVersionId,
+      status: 'editing',
+      createdAt: now.toISOString(),
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateVersionMeta(
+  versionId: string,
+  fields: { name?: string; description?: string; tags?: string[] },
+): Promise<void> {
+  const sets: string[] = [];
+  const vals: unknown[] = [versionId];
+  if (fields.name        !== undefined) sets.push(`name        = $${vals.push(fields.name)}`);
+  if (fields.description !== undefined) sets.push(`description = $${vals.push(fields.description)}`);
+  if (fields.tags        !== undefined) sets.push(`tags        = $${vals.push(fields.tags)}`);
+  if (!sets.length) return;
+  await getPool().query(
+    `UPDATE version SET ${sets.join(', ')} WHERE id = $1`,
+    vals
+  );
+}
+
+export async function updateVersionStatus(
+  versionId: string,
+  status: 'committed' | 'frozen' | 'archived',
+): Promise<void> {
+  await getPool().query(
+    "UPDATE version SET status = $1 WHERE id = $2",
+    [status, versionId]
+  );
+}
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 export type ProductionState = {
   state: ScriptState;
-  sortKeys: Map<string, string>; // block_id → sort_key from DB
+  sortKeys: Map<string, string>;    // block_id → sort_key
+  snapshotIds: Map<string, string>; // block_id → snapshot_id
 };
 
-/** Load all data for a production. Returns null if the production doesn't exist. */
-export async function loadProduction(productionId: string): Promise<ProductionState | null> {
+/**
+ * Load all data for a specific version of a production.
+ * Returns null if the production doesn't exist.
+ */
+export async function loadProduction(productionId: string, versionId: string): Promise<ProductionState | null> {
   const pool = getPool();
 
   const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
     Promise.all([
       pool.query<BlockRow>(
-        "SELECT id, sort_key, scene_id, rehearsal_mark, type, content FROM script WHERE production_id = $1 ORDER BY sort_key",
-        [productionId]
+        `SELECT s.id AS snapshot_id, sv.block_id, sv.sort_key,
+                s.scene_id, s.rehearsal_mark, s.type, s.content
+         FROM script_version sv
+         JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1
+         ORDER BY sv.sort_key`,
+        [versionId]
       ),
       pool.query<SceneRow>(
-        "SELECT id, num, name, sort_order, parent_id FROM scene WHERE production_id = $1 ORDER BY sort_order",
-        [productionId]
+        `SELECT sv.scene_id AS id, sv.num, sv.name, sv.sort_order, sv.parent_id
+         FROM scene_version sv WHERE sv.version_id = $1 ORDER BY sv.sort_order`,
+        [versionId]
       ),
       pool.query<CharRow>(
-        "SELECT id, name, sort_order, is_aggregate FROM character WHERE production_id = $1 ORDER BY sort_order",
-        [productionId]
+        `SELECT cv.character_id AS id, cv.name, cv.sort_order, cv.is_aggregate
+         FROM character_version cv WHERE cv.version_id = $1 ORDER BY cv.sort_order`,
+        [versionId]
       ),
     ]),
     pool.query<{ exists: boolean; script_config: ScriptConfig | null }>(
@@ -82,43 +359,45 @@ export async function loadProduction(productionId: string): Promise<ProductionSt
     ),
   ]);
 
-  const existsRes = prodRes;
+  if (!prodRes.rows[0].exists) return null;
   const rawConfig = prodRes.rows[0]?.script_config;
 
-  if (!existsRes.rows[0].exists) return null;
-
-  const blockIds = blocksRes.rows.map(r => r.id);
-  const scCharRes = blockIds.length > 0
+  // script_character joins on snapshot_id (script.id)
+  const snapshotIds_arr = blocksRes.rows.map(r => r.snapshot_id);
+  const scCharRes = snapshotIds_arr.length > 0
     ? await pool.query<ScCharRow>(
         "SELECT script_id, character_id, annotation FROM script_character WHERE script_id = ANY($1::text[]) ORDER BY script_id, position",
-        [blockIds]
+        [snapshotIds_arr]
       )
     : { rows: [] as ScCharRow[] };
 
-  const charsByBlock = new Map<string, string[]>();
-  const annotationsByBlock = new Map<string, Record<string, string>>();
+  const charsBySnapshot = new Map<string, string[]>();
+  const annotationsBySnapshot = new Map<string, Record<string, string>>();
   for (const row of scCharRes.rows) {
-    if (!charsByBlock.has(row.script_id)) charsByBlock.set(row.script_id, []);
-    charsByBlock.get(row.script_id)!.push(row.character_id);
+    if (!charsBySnapshot.has(row.script_id)) charsBySnapshot.set(row.script_id, []);
+    charsBySnapshot.get(row.script_id)!.push(row.character_id);
     if (row.annotation) {
-      if (!annotationsByBlock.has(row.script_id)) annotationsByBlock.set(row.script_id, {});
-      annotationsByBlock.get(row.script_id)![row.character_id] = row.annotation;
+      if (!annotationsBySnapshot.has(row.script_id)) annotationsBySnapshot.set(row.script_id, {});
+      annotationsBySnapshot.get(row.script_id)![row.character_id] = row.annotation;
     }
   }
 
-  const sortKeys = new Map<string, string>();
+  const sortKeys   = new Map<string, string>();
+  const snapshotIds = new Map<string, string>();
+
   const blocks: Block[] = blocksRes.rows.map(row => {
-    sortKeys.set(row.id, row.sort_key);
+    sortKeys.set(row.block_id, row.sort_key);
+    snapshotIds.set(row.block_id, row.snapshot_id);
     const { type, lyric } = fromDbType(row.type);
     return {
-      id: row.id,
+      id: row.block_id,
       type,
       lyric,
       content: row.content,
       sceneId: row.scene_id,
       rehearsalMark: row.rehearsal_mark,
-      characterIds: charsByBlock.get(row.id) ?? [],
-      characterAnnotations: annotationsByBlock.get(row.id) ?? {},
+      characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
+      characterAnnotations: annotationsBySnapshot.get(row.snapshot_id) ?? {},
     };
   });
 
@@ -132,6 +411,7 @@ export async function loadProduction(productionId: string): Promise<ProductionSt
       config,
     },
     sortKeys,
+    snapshotIds,
   };
 }
 
@@ -164,10 +444,251 @@ export async function savePageMap(
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
+function genSnapshotId(): string {
+  return `sn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * Versioned flush with copy-on-write semantics for blocks.
+ * Scenes and characters are version-unaware (production-scoped) for now.
+ * Returns a map of block_id → new snapshot_id for any CoW'd blocks.
+ */
+export async function flushToDBVersioned(
+  productionId: string,
+  versionId: string,
+  payload: VersionedFlushPayload,
+): Promise<VersionedFlushResult> {
+  const { upsertBlocks, deleteSnapshotIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
+  const newSnapshotIds = new Map<string, string>();
+
+  if (!upsertBlocks.length && !deleteSnapshotIds.length && !upsertChars.length &&
+      !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) {
+    return { newSnapshotIds };
+  }
+
+  // ── Phase 1: snapshot pre-flush for cue drift ─────────────────────────────
+  const oldContents  = new Map<string, string>(); // snapshot_id → old content
+  const snapshotAdj  = new Map<string, { prevId: string | null; nextId: string | null }>();
+
+  if (upsertBlocks.length > 0) {
+    const snIds = upsertBlocks.map(b => b.snapshotId);
+    const res = await getPool().query<{ id: string; content: string }>(
+      "SELECT id, content FROM script WHERE id = ANY($1::text[])", [snIds]
+    );
+    for (const r of res.rows) oldContents.set(r.id, r.content);
+  }
+
+  if (deleteSnapshotIds.length > 0) {
+    const res = await getPool().query<{ id: string; prev_id: string | null; next_id: string | null }>(
+      `WITH ordered AS (
+         SELECT sv.snapshot_id AS id,
+           LAG(sv.snapshot_id)  OVER (ORDER BY sv.sort_key) AS prev_id,
+           LEAD(sv.snapshot_id) OVER (ORDER BY sv.sort_key) AS next_id
+         FROM script_version sv WHERE sv.version_id = $1
+       )
+       SELECT id, prev_id, next_id FROM ordered WHERE id = ANY($2::text[])`,
+      [versionId, deleteSnapshotIds]
+    );
+    for (const r of res.rows) snapshotAdj.set(r.id, { prevId: r.prev_id, nextId: r.next_id });
+  }
+
+  // ── Phase 2: main transaction ─────────────────────────────────────────────
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    // Scenes: ensure identity row exists in scene (for FK), then upsert per-version data
+    if (upsertScenes.length > 0) {
+      await client.query(
+        `INSERT INTO scene (id, production_id, num, name, sort_order, parent_id)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+         ON CONFLICT (id) DO NOTHING`,
+        [upsertScenes.map(s => s.id), productionId,
+         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
+         upsertScenes.map(s => s.parentId ?? null)]
+      );
+      await client.query(
+        `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+         ON CONFLICT (scene_id, version_id) DO UPDATE
+           SET num = EXCLUDED.num, name = EXCLUDED.name,
+               sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
+        [upsertScenes.map(s => s.id), versionId,
+         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
+         upsertScenes.map(s => s.parentId ?? null)]
+      );
+    }
+
+    // Characters: ensure identity row exists in character (for FK), then upsert per-version data
+    if (upsertChars.length > 0) {
+      await client.query(
+        `INSERT INTO character (id, production_id, name, sort_order, is_aggregate)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+         ON CONFLICT (id) DO NOTHING`,
+        [upsertChars.map(c => c.id), productionId,
+         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
+         upsertChars.map(c => c.isAggregate)]
+      );
+      await client.query(
+        `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+         ON CONFLICT (character_id, version_id) DO UPDATE
+           SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
+        [upsertChars.map(c => c.id), versionId,
+         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
+         upsertChars.map(c => c.isAggregate)]
+      );
+    }
+
+    // Blocks: copy-on-write for multi-referenced snapshots
+    for (const block of upsertBlocks) {
+      const isNew = block.snapshotId.startsWith('sn_new_');
+
+      if (isNew) {
+        // Brand new block: insert snapshot + relation
+        const snapshotId = genSnapshotId();
+        await client.query(
+          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8)`,
+          [snapshotId, block.id, productionId, block.lexKey,
+           block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content]
+        );
+        await client.query(
+          "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
+          [snapshotId, versionId, block.id, block.lexKey]
+        );
+        if (block.characterIds.length > 0) {
+          const scRows = block.characterIds.map((cid, pos) => ({
+            sid: snapshotId, cid, pos, ann: block.characterAnnotations[cid] ?? null,
+          }));
+          await client.query(
+            `INSERT INTO script_character (script_id, character_id, position, annotation)
+             SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
+            [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
+          );
+        }
+        newSnapshotIds.set(block.id, snapshotId);
+      } else {
+        // Existing block: check reference count for CoW
+        const refRes = await client.query<{ cnt: string }>(
+          "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
+          [block.snapshotId]
+        );
+        const refCount = parseInt(refRes.rows[0].cnt, 10);
+
+        if (refCount <= 1) {
+          // Sole reference: update in-place
+          await client.query(
+            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type, content = $4 WHERE id = $5`,
+            [block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content, block.snapshotId]
+          );
+          // Update sort_key in relation table
+          await client.query(
+            "UPDATE script_version SET sort_key = $1 WHERE snapshot_id = $2 AND version_id = $3",
+            [block.lexKey, block.snapshotId, versionId]
+          );
+          // Replace character associations
+          await client.query(
+            "DELETE FROM script_character WHERE script_id = $1", [block.snapshotId]
+          );
+          if (block.characterIds.length > 0) {
+            const scRows = block.characterIds.map((cid, pos) => ({
+              sid: block.snapshotId, cid, pos, ann: block.characterAnnotations[cid] ?? null,
+            }));
+            await client.query(
+              `INSERT INTO script_character (script_id, character_id, position, annotation)
+               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
+              [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
+            );
+          }
+        } else {
+          // Multi-referenced: copy-on-write
+          const newSnapshotId = genSnapshotId();
+          await client.query(
+            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8)`,
+            [newSnapshotId, block.id, productionId, block.lexKey,
+             block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content]
+          );
+          // Remap relation for this version to the new snapshot
+          await client.query(
+            "UPDATE script_version SET snapshot_id = $1, sort_key = $2 WHERE snapshot_id = $3 AND version_id = $4",
+            [newSnapshotId, block.lexKey, block.snapshotId, versionId]
+          );
+          if (block.characterIds.length > 0) {
+            const scRows = block.characterIds.map((cid, pos) => ({
+              sid: newSnapshotId, cid, pos, ann: block.characterAnnotations[cid] ?? null,
+            }));
+            await client.query(
+              `INSERT INTO script_character (script_id, character_id, position, annotation)
+               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
+              [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
+            );
+          }
+          newSnapshotIds.set(block.id, newSnapshotId);
+        }
+      }
+    }
+
+    // Deletes: remove from version relation; garbage-collect orphan snapshots
+    if (deleteSnapshotIds.length > 0) {
+      await client.query(
+        `WITH removed AS (
+           DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2 RETURNING snapshot_id
+         )
+         DELETE FROM script s
+         WHERE s.id IN (SELECT snapshot_id FROM removed)
+           AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+        [deleteSnapshotIds, versionId]
+      );
+    }
+
+    // Version-scoped deletes: remove from versioned tables only; keep scene/character
+    // rows as FK anchors for script.scene_id and event_schedule_item.target_scene_id.
+    if (deleteCharIds.length > 0)
+      await client.query(
+        "DELETE FROM character_version WHERE character_id = ANY($1::text[]) AND version_id = $2",
+        [deleteCharIds, versionId]
+      );
+    if (deleteSceneIds.length > 0)
+      await client.query(
+        "DELETE FROM scene_version WHERE scene_id = ANY($1::text[]) AND version_id = $2",
+        [deleteSceneIds, versionId]
+      );
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  // ── Phase 3: version-aware cue drift (best-effort) ────────────────────────
+  const driftJobs: Promise<void>[] = [];
+  for (const snapshotId of deleteSnapshotIds) {
+    const adj = snapshotAdj.get(snapshotId);
+    if (adj) driftJobs.push(handleBlockDeleted(snapshotId, adj.prevId, adj.nextId, versionId));
+  }
+  for (const block of upsertBlocks) {
+    const effectiveSnapshotId = newSnapshotIds.get(block.id) ?? block.snapshotId;
+    const old = oldContents.get(block.snapshotId);
+    if (old !== undefined && old !== block.content)
+      driftJobs.push(handleBlockContentChanged(block.snapshotId, effectiveSnapshotId, old, block.content, versionId));
+  }
+  if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
+
+  return { newSnapshotIds };
+}
+
+/** Legacy flush used by management pages (import-script, import-scenes).
+ *  Operates on the active editing version; no CoW for blocks. */
 export async function flushToDB(productionId: string, payload: FlushPayload): Promise<void> {
   const { upsertBlocks, deleteBlockIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
   if (!upsertBlocks.length && !deleteBlockIds.length && !upsertChars.length &&
       !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) return;
+
+  const versionId = await getActiveVersionId(productionId);
 
   // ── Phase 1: snapshot pre-flush state needed for cue drift ────────────────
   const oldContents = new Map<string, string>();
@@ -181,16 +702,16 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
     for (const r of res.rows) oldContents.set(r.id, r.content);
   }
 
-  if (deleteBlockIds.length > 0) {
+  if (deleteBlockIds.length > 0 && versionId) {
     const res = await getPool().query<{ id: string; prev_id: string | null; next_id: string | null }>(
       `WITH ordered AS (
-         SELECT id,
-           LAG(id)  OVER (ORDER BY sort_key) AS prev_id,
-           LEAD(id) OVER (ORDER BY sort_key) AS next_id
-         FROM script WHERE production_id = $1
+         SELECT sv.snapshot_id AS id,
+           LAG(sv.snapshot_id)  OVER (ORDER BY sv.sort_key) AS prev_id,
+           LEAD(sv.snapshot_id) OVER (ORDER BY sv.sort_key) AS next_id
+         FROM script_version sv WHERE sv.version_id = $1
        )
        SELECT id, prev_id, next_id FROM ordered WHERE id = ANY($2::text[])`,
-      [productionId, deleteBlockIds]
+      [versionId, deleteBlockIds]
     );
     for (const r of res.rows) blockAdj.set(r.id, { prevId: r.prev_id, nextId: r.next_id });
   }
@@ -223,12 +744,13 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
     }
 
     if (upsertBlocks.length > 0) {
+      // Full upsert into script (using block id as snapshot id — legacy mode)
       await client.query(
-        `INSERT INTO script (id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]),
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+         SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]),
                 unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[])
          ON CONFLICT (id) DO UPDATE SET
-           sort_key = EXCLUDED.sort_key, scene_id = EXCLUDED.scene_id,
+           block_id = EXCLUDED.block_id, sort_key = EXCLUDED.sort_key, scene_id = EXCLUDED.scene_id,
            rehearsal_mark = EXCLUDED.rehearsal_mark, type = EXCLUDED.type, content = EXCLUDED.content`,
         [
           upsertBlocks.map(b => b.id), productionId,
@@ -238,7 +760,16 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
         ]
       );
 
-      // Replace character associations for all upserted blocks
+      // Upsert version relation if we have a versionId
+      if (versionId) {
+        await client.query(
+          `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
+           SELECT unnest($1::text[]), $2::text, unnest($1::text[]), unnest($3::text[])
+           ON CONFLICT (snapshot_id, version_id) DO UPDATE SET sort_key = EXCLUDED.sort_key`,
+          [upsertBlocks.map(b => b.id), versionId, upsertBlocks.map(b => b.lexKey)]
+        );
+      }
+
       await client.query(
         "DELETE FROM script_character WHERE script_id = ANY($1::text[])",
         [upsertBlocks.map(b => b.id)]
@@ -255,8 +786,20 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
       }
     }
 
-    if (deleteBlockIds.length > 0)
-      await client.query("DELETE FROM script WHERE id = ANY($1::text[])", [deleteBlockIds]);
+    if (deleteBlockIds.length > 0) {
+      if (versionId) {
+        await client.query(
+          `WITH removed AS (
+             DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2 RETURNING snapshot_id
+           )
+           DELETE FROM script s WHERE s.id IN (SELECT snapshot_id FROM removed)
+             AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+          [deleteBlockIds, versionId]
+        );
+      } else {
+        await client.query("DELETE FROM script WHERE id = ANY($1::text[])", [deleteBlockIds]);
+      }
+    }
     if (deleteCharIds.length > 0)
       await client.query("DELETE FROM character WHERE id = ANY($1::text[])", [deleteCharIds]);
     if (deleteSceneIds.length > 0)
@@ -270,18 +813,20 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
     client.release();
   }
 
-  // ── Phase 3: cue drift adjustments (best-effort, after script committed) ──
-  const driftJobs: Promise<void>[] = [];
-  for (const blockId of deleteBlockIds) {
-    const adj = blockAdj.get(blockId);
-    if (adj) driftJobs.push(handleBlockDeleted(blockId, adj.prevId, adj.nextId));
+  // ── Phase 3: cue drift adjustments (best-effort) ──────────────────────────
+  if (versionId) {
+    const driftJobs: Promise<void>[] = [];
+    for (const blockId of deleteBlockIds) {
+      const adj = blockAdj.get(blockId);
+      if (adj) driftJobs.push(handleBlockDeleted(blockId, adj.prevId, adj.nextId, versionId));
+    }
+    for (const block of upsertBlocks) {
+      const old = oldContents.get(block.id);
+      if (old !== undefined && old !== block.content)
+        driftJobs.push(handleBlockContentChanged(block.id, block.id, old, block.content, versionId));
+    }
+    if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
   }
-  for (const block of upsertBlocks) {
-    const old = oldContents.get(block.id);
-    if (old !== undefined && old !== block.content)
-      driftJobs.push(handleBlockContentChanged(block.id, old, block.content));
-  }
-  if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
 }
 
 // ─── Production management ────────────────────────────────────────────────────
@@ -1042,56 +1587,103 @@ export async function setCueListPermission(
 
 // ─── Cues ─────────────────────────────────────────────────────────────────────
 
+// After migration: start_block_id/end_block_id are renamed to start_snapshot_id/end_snapshot_id.
+// The row also has start_block_id/end_block_id as computed aliases from the JOIN with script table.
 type CueRow = {
   id: string; cue_list_id: string; number: string; name: string; content: string;
-  start_kind: string; start_block_id: string; start_offset: number | null;
-  end_kind: string;   end_block_id: string;   end_offset: number | null;
+  start_kind: string; start_snapshot_id: string | null; start_offset: number | null;
+  end_kind: string;   end_snapshot_id: string | null;   end_offset: number | null;
+  // Logical block IDs resolved by joining script table (may be null if snapshot deleted)
+  start_block_id: string | null;
+  end_block_id: string | null;
   warning: boolean;
 };
 
 function rowToCue(r: CueRow): Cue {
   const start: CueAnchor = r.start_kind === "gap"
-    ? { kind: "gap", afterBlockId: r.start_block_id }
-    : { kind: "block", blockId: r.start_block_id, offset: r.start_offset! };
+    ? { kind: "gap", afterBlockId: r.start_block_id ?? null }
+    : { kind: "block", blockId: r.start_block_id ?? r.start_snapshot_id ?? '', offset: r.start_offset! };
   const end: CueAnchor = r.end_kind === "gap"
-    ? { kind: "gap", afterBlockId: r.end_block_id }
-    : { kind: "block", blockId: r.end_block_id, offset: r.end_offset! };
+    ? { kind: "gap", afterBlockId: r.end_block_id ?? null }
+    : { kind: "block", blockId: r.end_block_id ?? r.end_snapshot_id ?? '', offset: r.end_offset! };
   return { id: r.id, cueListId: r.cue_list_id, number: r.number, name: r.name, content: r.content, start, end, warning: r.warning };
 }
 
-function anchorToDb(a: CueAnchor) {
-  if (a.kind === "gap") return { kind: "gap", blockId: a.afterBlockId, offset: null };
-  return { kind: "block", blockId: a.blockId, offset: a.offset };
+// Resolve a CueAnchor to the snapshot_id stored in the DB.
+// For the initial migration: snapshot_id = block_id. After CoW, lookup is needed.
+async function anchorToDb(a: CueAnchor, versionId?: string): Promise<{ kind: string; snapshotId: string | null; offset: number | null }> {
+  if (a.kind === "gap") {
+    if (a.afterBlockId === null) return { kind: "gap", snapshotId: null, offset: null };
+    if (versionId) {
+      const res = await getPool().query<{ snapshot_id: string }>(
+        "SELECT snapshot_id FROM script_version WHERE block_id = $1 AND version_id = $2 LIMIT 1",
+        [a.afterBlockId, versionId]
+      );
+      return { kind: "gap", snapshotId: res.rows[0]?.snapshot_id ?? a.afterBlockId, offset: null };
+    }
+    return { kind: "gap", snapshotId: a.afterBlockId, offset: null };
+  }
+  if (versionId) {
+    const res = await getPool().query<{ snapshot_id: string }>(
+      "SELECT snapshot_id FROM script_version WHERE block_id = $1 AND version_id = $2 LIMIT 1",
+      [a.blockId, versionId]
+    );
+    return { kind: "block", snapshotId: res.rows[0]?.snapshot_id ?? a.blockId, offset: a.offset };
+  }
+  return { kind: "block", snapshotId: a.blockId, offset: a.offset };
 }
+
+const CUE_SELECT = `
+  SELECT c.id, c.cue_list_id, c.number, c.name, c.content,
+         c.start_kind, c.start_snapshot_id, c.start_offset,
+         c.end_kind,   c.end_snapshot_id,   c.end_offset, c.warning,
+         s_start.block_id AS start_block_id,
+         s_end.block_id   AS end_block_id
+  FROM cue c
+  LEFT JOIN script s_start ON s_start.id = c.start_snapshot_id
+  LEFT JOIN script s_end   ON s_end.id   = c.end_snapshot_id
+`;
 
 export async function getCue(id: string, cueListId: string): Promise<Cue | null> {
   const res = await getPool().query<CueRow>(
-    `SELECT id, cue_list_id, number, name, content,
-            start_kind, start_block_id, start_offset,
-            end_kind, end_block_id, end_offset, warning
-     FROM cue WHERE id = $1 AND cue_list_id = $2`,
+    `${CUE_SELECT} WHERE c.id = $1 AND c.cue_list_id = $2`,
     [id, cueListId]
   );
   return res.rows.length ? rowToCue(res.rows[0]) : null;
 }
 
-export async function listCues(cueListId: string): Promise<Cue[]> {
+export async function listCues(cueListId: string, versionId?: string): Promise<Cue[]> {
+  if (versionId) {
+    const res = await getPool().query<CueRow>(
+      `${CUE_SELECT}
+       WHERE c.cue_list_id = $1
+         AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $2)
+       ORDER BY c.number`,
+      [cueListId, versionId]
+    );
+    return res.rows.map(rowToCue);
+  }
   const res = await getPool().query<CueRow>(
-    `SELECT id, cue_list_id, number, name, content,
-            start_kind, start_block_id, start_offset,
-            end_kind, end_block_id, end_offset, warning
-     FROM cue WHERE cue_list_id = $1 ORDER BY number`,
+    `${CUE_SELECT} WHERE c.cue_list_id = $1 ORDER BY c.number`,
     [cueListId]
   );
   return res.rows.map(rowToCue);
 }
 
-export async function listCuesByProduction(productionId: string): Promise<Cue[]> {
+export async function listCuesByProduction(productionId: string, versionId?: string): Promise<Cue[]> {
+  if (versionId) {
+    const res = await getPool().query<CueRow>(
+      `${CUE_SELECT}
+       JOIN cue_list cl ON cl.id = c.cue_list_id
+       WHERE cl.production_id = $1
+         AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $2)
+       ORDER BY c.number`,
+      [productionId, versionId]
+    );
+    return res.rows.map(rowToCue);
+  }
   const res = await getPool().query<CueRow>(
-    `SELECT c.id, c.cue_list_id, c.number, c.name, c.content,
-            c.start_kind, c.start_block_id, c.start_offset,
-            c.end_kind, c.end_block_id, c.end_offset, c.warning
-     FROM cue c
+    `${CUE_SELECT}
      JOIN cue_list cl ON cl.id = c.cue_list_id
      WHERE cl.production_id = $1
      ORDER BY c.number`,
@@ -1111,98 +1703,357 @@ export async function countWarningCues(cueListIds: string[]): Promise<number> {
 
 export async function createCue(data: {
   id: string; cueListId: string; number: string; name: string; content: string;
-  start: CueAnchor; end: CueAnchor;
+  start: CueAnchor; end: CueAnchor; versionId?: string;
 }): Promise<void> {
-  const s = anchorToDb(data.start);
-  const e = anchorToDb(data.end);
+  const s = await anchorToDb(data.start, data.versionId);
+  const e = await anchorToDb(data.end, data.versionId);
   await getPool().query(
-    `INSERT INTO cue (id, cue_list_id, number, name, content,
-       start_kind, start_block_id, start_offset,
-       end_kind,   end_block_id,   end_offset)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
+       start_kind, start_snapshot_id, start_offset,
+       end_kind,   end_snapshot_id,   end_offset)
+     VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [data.id, data.cueListId, data.number, data.name, data.content,
-     s.kind, s.blockId, s.offset, e.kind, e.blockId, e.offset]
+     s.kind, s.snapshotId, s.offset, e.kind, e.snapshotId, e.offset]
   );
+  if (data.versionId) {
+    await getPool().query(
+      "INSERT INTO cue_version (revision_id, version_id, cue_id) VALUES ($1, $2, $1) ON CONFLICT DO NOTHING",
+      [data.id, data.versionId]
+    );
+  }
 }
+
+let _cueSeq = 0;
+const newCueId = () => `cue${Date.now().toString(36)}${(++_cueSeq).toString(36)}`;
 
 export async function updateCue(
   id: string, cueListId: string,
-  fields: { number?: string; name?: string; content?: string; start?: CueAnchor; end?: CueAnchor; warning?: boolean }
+  fields: { number?: string; name?: string; content?: string; start?: CueAnchor; end?: CueAnchor; warning?: boolean },
+  versionId?: string
 ): Promise<void> {
-  const sets: string[] = [];
-  const vals: unknown[] = [id, cueListId];
-  if (fields.number  !== undefined) sets.push(`number  = $${vals.push(fields.number)}`);
-  if (fields.name    !== undefined) sets.push(`name    = $${vals.push(fields.name)}`);
-  if (fields.content !== undefined) sets.push(`content = $${vals.push(fields.content)}`);
-  if (fields.warning !== undefined) sets.push(`warning = $${vals.push(fields.warning)}`);
-  if (fields.start !== undefined) {
-    const s = anchorToDb(fields.start);
-    sets.push(`start_kind=$${vals.push(s.kind)}, start_block_id=$${vals.push(s.blockId)}, start_offset=$${vals.push(s.offset)}`);
-  }
-  if (fields.end !== undefined) {
-    const e = anchorToDb(fields.end);
-    sets.push(`end_kind=$${vals.push(e.kind)}, end_block_id=$${vals.push(e.blockId)}, end_offset=$${vals.push(e.offset)}`);
-  }
-  if (!sets.length) return;
-  await getPool().query(
-    `UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`,
-    vals
-  );
-}
+  // Resolve anchors outside transaction (async DB lookups)
+  const resolvedStart = fields.start !== undefined ? await anchorToDb(fields.start, versionId) : undefined;
+  const resolvedEnd   = fields.end   !== undefined ? await anchorToDb(fields.end,   versionId) : undefined;
 
-export async function deleteCue(id: string, cueListId: string): Promise<void> {
-  await getPool().query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
-}
+  const buildInPlaceUpdate = () => {
+    const sets: string[] = [];
+    const vals: unknown[] = [id, cueListId];
+    if (fields.number  !== undefined) sets.push(`number  = $${vals.push(fields.number)}`);
+    if (fields.name    !== undefined) sets.push(`name    = $${vals.push(fields.name)}`);
+    if (fields.content !== undefined) sets.push(`content = $${vals.push(fields.content)}`);
+    if (fields.warning !== undefined) sets.push(`warning = $${vals.push(fields.warning)}`);
+    if (resolvedStart) {
+      const s = resolvedStart;
+      sets.push(`start_kind=$${vals.push(s.kind)}, start_snapshot_id=$${vals.push(s.snapshotId)}, start_offset=$${vals.push(s.offset)}`);
+    }
+    if (resolvedEnd) {
+      const e = resolvedEnd;
+      sets.push(`end_kind=$${vals.push(e.kind)}, end_snapshot_id=$${vals.push(e.snapshotId)}, end_offset=$${vals.push(e.offset)}`);
+    }
+    return { sets, vals };
+  };
 
-/**
- * Called when a block is deleted from the script.
- * Cues anchored to the deleted block are re-anchored:
- *   - If prevBlockId exists  → gap after prevBlockId
- *   - Else if nextBlockId exists → start of nextBlockId (offset 0)
- *   - Else → delete the cue (no script left)
- */
-export async function handleBlockDeleted(
-  deletedBlockId: string,
-  prevBlockId: string | null,
-  nextBlockId: string | null,
-): Promise<void> {
-  if (!prevBlockId && !nextBlockId) {
-    await getPool().query(
-      "DELETE FROM cue WHERE start_block_id = $1 OR end_block_id = $1",
-      [deletedBlockId]
+  if (!versionId) {
+    const { sets, vals } = buildInPlaceUpdate();
+    if (!sets.length) return;
+    await getPool().query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
+    return;
+  }
+
+  // Pre-check: if renaming, ensure the new number won't conflict in any descendant
+  // version that would be cascade-updated by CoW.
+  if (fields.number !== undefined) {
+    const conflictRes = await getPool().query<{ version_id: string }>(
+      `WITH RECURSIVE descendants AS (
+         SELECT id FROM version WHERE id = $1
+         UNION ALL
+         SELECT v.id FROM version v
+         INNER JOIN descendants d ON v.parent_version_id = d.id
+       ),
+       cascade_targets AS (
+         SELECT version_id FROM cue_version
+         WHERE revision_id = $2
+           AND version_id IN (SELECT id FROM descendants)
+       )
+       SELECT cv.version_id
+       FROM cue_version cv
+       JOIN cue c ON c.id = cv.revision_id
+       WHERE cv.version_id IN (SELECT version_id FROM cascade_targets)
+         AND c.cue_list_id = $3
+         AND c.number = $4
+         AND (c.cue_id IS DISTINCT FROM (SELECT cue_id FROM cue WHERE id = $2)
+              AND c.id != $2)
+       LIMIT 1`,
+      [versionId, id, cueListId, fields.number]
     );
+    if (conflictRes.rows.length > 0) {
+      throw new Error(`CUE_NUMBER_CONFLICT:${conflictRes.rows[0].version_id}`);
+    }
+  }
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const refRes = await client.query<{ count: string }>(
+      "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [id]
+    );
+    const refCount = parseInt(refRes.rows[0].count, 10);
+
+    if (refCount <= 1) {
+      const { sets, vals } = buildInPlaceUpdate();
+      if (sets.length) await client.query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
+    } else {
+      // CoW: fork a new physical row for versionId and its descendants
+      const curRes = await client.query<{
+        number: string; name: string; content: string; warning: boolean; cue_id: string | null;
+        start_kind: string; start_snapshot_id: string | null; start_offset: number | null;
+        end_kind: string; end_snapshot_id: string | null; end_offset: number | null;
+      }>(
+        `SELECT number, name, content, warning, cue_id,
+                start_kind, start_snapshot_id, start_offset,
+                end_kind, end_snapshot_id, end_offset
+         FROM cue WHERE id = $1 AND cue_list_id = $2`,
+        [id, cueListId]
+      );
+      if (!curRes.rows.length) { await client.query("ROLLBACK"); return; }
+      const cur = curRes.rows[0];
+
+      const newId = newCueId();
+      await client.query(
+        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
+           start_kind, start_snapshot_id, start_offset,
+           end_kind,   end_snapshot_id,   end_offset, warning)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [
+          newId, cur.cue_id ?? id, cueListId,
+          fields.number  !== undefined ? fields.number  : cur.number,
+          fields.name    !== undefined ? fields.name    : cur.name,
+          fields.content !== undefined ? fields.content : cur.content,
+          resolvedStart ? resolvedStart.kind       : cur.start_kind,
+          resolvedStart ? resolvedStart.snapshotId : cur.start_snapshot_id,
+          resolvedStart ? resolvedStart.offset     : cur.start_offset,
+          resolvedEnd   ? resolvedEnd.kind         : cur.end_kind,
+          resolvedEnd   ? resolvedEnd.snapshotId   : cur.end_snapshot_id,
+          resolvedEnd   ? resolvedEnd.offset       : cur.end_offset,
+          fields.warning !== undefined ? fields.warning : cur.warning,
+        ]
+      );
+
+      // Remap cue_version for versionId + all descendants still pointing to old revision
+      await client.query(
+        `WITH RECURSIVE descendants AS (
+           SELECT id FROM version WHERE id = $1
+           UNION ALL
+           SELECT v.id FROM version v
+           INNER JOIN descendants d ON v.parent_version_id = d.id
+         )
+         UPDATE cue_version SET revision_id = $2
+         WHERE revision_id = $3
+           AND version_id IN (SELECT id FROM descendants)`,
+        [versionId, newId, id]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteCue(id: string, cueListId: string, versionId?: string): Promise<void> {
+  if (!versionId) {
+    await getPool().query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
     return;
   }
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // Replace start anchors; mark warning because position has shifted
-    if (prevBlockId) {
-      await client.query(
-        `UPDATE cue SET start_kind='gap', start_block_id=$1, start_offset=NULL, warning=TRUE
-         WHERE start_block_id = $2`,
-        [prevBlockId, deletedBlockId]
-      );
-    } else {
-      await client.query(
-        `UPDATE cue SET start_kind='block', start_block_id=$1, start_offset=0, warning=TRUE
-         WHERE start_block_id = $2`,
-        [nextBlockId, deletedBlockId]
-      );
+    // Remove cue_version for versionId and all its descendants
+    await client.query(
+      `WITH RECURSIVE descendants AS (
+         SELECT id FROM version WHERE id = $1
+         UNION ALL
+         SELECT v.id FROM version v
+         INNER JOIN descendants d ON v.parent_version_id = d.id
+       )
+       DELETE FROM cue_version
+       WHERE revision_id = $2
+         AND version_id IN (SELECT id FROM descendants)`,
+      [versionId, id]
+    );
+    // Delete the physical row only if no version references it anymore
+    const refRes = await client.query<{ count: string }>(
+      "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [id]
+    );
+    if (parseInt(refRes.rows[0].count, 10) === 0) {
+      await client.query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
     }
-    // Replace end anchors; mark warning because position has shifted
-    if (prevBlockId) {
-      await client.query(
-        `UPDATE cue SET end_kind='gap', end_block_id=$1, end_offset=NULL, warning=TRUE
-         WHERE end_block_id = $2`,
-        [prevBlockId, deletedBlockId]
-      );
-    } else {
-      await client.query(
-        `UPDATE cue SET end_kind='block', end_block_id=$1, end_offset=0, warning=TRUE
-         WHERE end_block_id = $2`,
-        [nextBlockId, deletedBlockId]
-      );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ── CoW helper: fork a cue revision for a version and remap cue_version ──────
+
+type CueFullRow = {
+  id: string; cue_id: string | null; cue_list_id: string;
+  number: string; name: string; content: string; warning: boolean;
+  start_kind: string; start_snapshot_id: string | null; start_offset: number | null;
+  end_kind: string; end_snapshot_id: string | null; end_offset: number | null;
+};
+
+/** Insert a new physical cue row that is a copy of `cur` with `patch` applied,
+ *  then remap cue_version for `versionId` and its descendants from old to new id.
+ *  Must be called inside an open transaction on `client`. Returns the new revision id. */
+async function cowCue(
+  client: PoolClient,
+  versionId: string,
+  cur: CueFullRow,
+  patch: Partial<Pick<CueFullRow, "start_kind"|"start_snapshot_id"|"start_offset"|
+                                  "end_kind"|"end_snapshot_id"|"end_offset"|"warning">>
+): Promise<string> {
+  const newId = newCueId();
+  await client.query(
+    `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
+       start_kind, start_snapshot_id, start_offset,
+       end_kind,   end_snapshot_id,   end_offset, warning)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [
+      newId, cur.cue_id ?? cur.id, cur.cue_list_id, cur.number, cur.name, cur.content,
+      patch.start_kind        ?? cur.start_kind,
+      patch.start_snapshot_id ?? cur.start_snapshot_id,
+      patch.start_offset      !== undefined ? patch.start_offset : cur.start_offset,
+      patch.end_kind          ?? cur.end_kind,
+      patch.end_snapshot_id   ?? cur.end_snapshot_id,
+      patch.end_offset        !== undefined ? patch.end_offset : cur.end_offset,
+      patch.warning           !== undefined ? patch.warning : cur.warning,
+    ]
+  );
+  await client.query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id FROM version WHERE id = $1
+       UNION ALL
+       SELECT v.id FROM version v
+       INNER JOIN descendants d ON v.parent_version_id = d.id
+     )
+     UPDATE cue_version SET revision_id = $2
+     WHERE revision_id = $3
+       AND version_id IN (SELECT id FROM descendants)`,
+    [versionId, newId, cur.id]
+  );
+  return newId;
+}
+
+/** Apply `patch` to a cue revision with CoW if the revision is shared.
+ *  Returns the (possibly new) revision id. */
+async function applyPatchWithCow(
+  client: PoolClient,
+  versionId: string,
+  cur: CueFullRow,
+  patch: Parameters<typeof cowCue>[3]
+): Promise<string> {
+  const refRes = await client.query<{ count: string }>(
+    "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [cur.id]
+  );
+  if (parseInt(refRes.rows[0].count, 10) <= 1) {
+    // Single reference — update in place
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (patch.start_kind        !== undefined) { sets.push(`start_kind=$${vals.push(patch.start_kind)}`); }
+    if (patch.start_snapshot_id !== undefined) { sets.push(`start_snapshot_id=$${vals.push(patch.start_snapshot_id)}`); }
+    if ("start_offset" in patch) { sets.push(`start_offset=$${vals.push(patch.start_offset ?? null)}`); }
+    if (patch.end_kind          !== undefined) { sets.push(`end_kind=$${vals.push(patch.end_kind)}`); }
+    if (patch.end_snapshot_id   !== undefined) { sets.push(`end_snapshot_id=$${vals.push(patch.end_snapshot_id)}`); }
+    if ("end_offset" in patch) { sets.push(`end_offset=$${vals.push(patch.end_offset ?? null)}`); }
+    if (patch.warning !== undefined) { sets.push(`warning=$${vals.push(patch.warning)}`); }
+    if (sets.length) {
+      vals.push(cur.id);
+      await client.query(`UPDATE cue SET ${sets.join(",")} WHERE id=$${vals.length}`, vals);
+    }
+    return cur.id;
+  }
+  return cowCue(client, versionId, cur, patch);
+}
+
+/** Remove a cue revision from a version with CoW semantics.
+ *  Must be called inside an open transaction. */
+async function removeCueFromVersion(
+  client: PoolClient,
+  versionId: string,
+  revisionId: string
+): Promise<void> {
+  const refRes = await client.query<{ count: string }>(
+    "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [revisionId]
+  );
+  if (parseInt(refRes.rows[0].count, 10) <= 1) {
+    await client.query("DELETE FROM cue WHERE id = $1", [revisionId]);
+  } else {
+    await client.query(
+      `WITH RECURSIVE descendants AS (
+         SELECT id FROM version WHERE id = $1
+         UNION ALL
+         SELECT v.id FROM version v
+         INNER JOIN descendants d ON v.parent_version_id = d.id
+       )
+       DELETE FROM cue_version
+       WHERE revision_id = $2
+         AND version_id IN (SELECT id FROM descendants)`,
+      [versionId, revisionId]
+    );
+  }
+}
+
+/**
+ * Called when a snapshot is deleted from a version.
+ * Re-anchors (or removes) cue revisions in the affected version with CoW semantics.
+ */
+export async function handleBlockDeleted(
+  deletedSnapshotId: string,
+  prevSnapshotId: string | null,
+  nextSnapshotId: string | null,
+  versionId: string,
+): Promise<void> {
+  // Find cues in this version anchoring to the deleted snapshot
+  const affected = await getPool().query<CueFullRow>(
+    `SELECT cue.id, cue.cue_id, cue.cue_list_id, cue.number, cue.name, cue.content, cue.warning,
+            cue.start_kind, cue.start_snapshot_id, cue.start_offset,
+            cue.end_kind,   cue.end_snapshot_id,   cue.end_offset
+     FROM cue
+     WHERE (start_snapshot_id = $1 OR end_snapshot_id = $1)
+       AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = cue.id AND cv.version_id = $2)`,
+    [deletedSnapshotId, versionId]
+  );
+  if (!affected.rows.length) return;
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    for (const cur of affected.rows) {
+      const startHit = cur.start_snapshot_id === deletedSnapshotId;
+      const endHit   = cur.end_snapshot_id   === deletedSnapshotId;
+
+      if (!prevSnapshotId && !nextSnapshotId) {
+        // Deleted block was the only one — remove the cue from this version
+        await removeCueFromVersion(client, versionId, cur.id);
+        continue;
+      }
+
+      const patch: Parameters<typeof cowCue>[3] = { warning: true };
+      if (startHit) {
+        if (prevSnapshotId) { patch.start_kind = "gap";   patch.start_snapshot_id = prevSnapshotId; patch.start_offset = null; }
+        else                { patch.start_kind = "block"; patch.start_snapshot_id = nextSnapshotId!; patch.start_offset = 0; }
+      }
+      if (endHit) {
+        if (prevSnapshotId) { patch.end_kind = "gap";   patch.end_snapshot_id = prevSnapshotId; patch.end_offset = null; }
+        else                { patch.end_kind = "block"; patch.end_snapshot_id = nextSnapshotId!; patch.end_offset = 0; }
+      }
+      await applyPatchWithCow(client, versionId, cur, patch);
     }
     await client.query("COMMIT");
   } catch (err) {
@@ -1214,24 +2065,28 @@ export async function handleBlockDeleted(
 }
 
 /**
- * Called when a block's text content changes.
- * Adjusts cue offsets that reference this block using the three-tier algorithm.
+ * Called when a snapshot's text content changes (and optionally gets a new snapshot id via CoW).
+ * Adjusts cue offsets that reference oldSnapshotId, re-pointing to newSnapshotId.
+ * Performs CoW on shared cue revisions.
  */
 export async function handleBlockContentChanged(
-  blockId: string,
+  oldSnapshotId: string,
+  newSnapshotId: string,  // equals oldSnapshotId when no block CoW occurred
   oldContent: string,
   newContent: string,
+  versionId: string,
 ): Promise<void> {
   if (oldContent === newContent) return;
 
-  const res = await getPool().query<CueRow>(
-    `SELECT id, cue_list_id, number, name, content,
-            start_kind, start_block_id, start_offset,
-            end_kind, end_block_id, end_offset, warning
+  const res = await getPool().query<CueFullRow>(
+    `SELECT cue.id, cue.cue_id, cue.cue_list_id, cue.number, cue.name, cue.content, cue.warning,
+            cue.start_kind, cue.start_snapshot_id, cue.start_offset,
+            cue.end_kind,   cue.end_snapshot_id,   cue.end_offset
      FROM cue
-     WHERE (start_kind='block' AND start_block_id=$1)
-        OR (end_kind='block' AND end_block_id=$1)`,
-    [blockId]
+     WHERE ((start_kind='block' AND start_snapshot_id=$1)
+        OR  (end_kind='block'   AND end_snapshot_id=$1))
+       AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = cue.id AND cv.version_id = $2)`,
+    [oldSnapshotId, versionId]
   );
   if (!res.rows.length) return;
 
@@ -1239,38 +2094,39 @@ export async function handleBlockContentChanged(
   try {
     await client.query("BEGIN");
     for (const row of res.rows) {
-      const startInBlock = row.start_kind === "block" && row.start_block_id === blockId;
-      const endInBlock   = row.end_kind   === "block" && row.end_block_id   === blockId;
+      const startInBlock = row.start_kind === "block" && row.start_snapshot_id === oldSnapshotId;
+      const endInBlock   = row.end_kind   === "block" && row.end_snapshot_id   === oldSnapshotId;
 
       let newStartOffset = row.start_offset;
       let newEndOffset   = row.end_offset;
       let warn = row.warning;
 
       if (startInBlock && endInBlock) {
-        // Same-block range or point cue — use full algorithm
-        const result = adjustBlockAnchor(
-          oldContent, newContent,
-          row.start_offset!, row.end_offset!
-        );
+        const result = adjustBlockAnchor(oldContent, newContent, row.start_offset!, row.end_offset!);
         newStartOffset = result.startOffset;
         newEndOffset   = result.endOffset;
-        if (result.warning) warn = true;
       } else {
-        // Cross-block cue: adjust just the endpoint that lives in this block
-        if (startInBlock) {
-          newStartOffset = lcsAdjust(oldContent, newContent, row.start_offset!);
-        }
-        if (endInBlock) {
-          newEndOffset = lcsAdjust(oldContent, newContent, row.end_offset!);
-        }
+        if (startInBlock) newStartOffset = lcsAdjust(oldContent, newContent, row.start_offset!);
+        if (endInBlock)   newEndOffset   = lcsAdjust(oldContent, newContent, row.end_offset!);
+      }
+      warn = true; // any automatic position adjustment warrants review
+
+      const snapshotChanged = oldSnapshotId !== newSnapshotId;
+      const offsetChanged   = newStartOffset !== row.start_offset || newEndOffset !== row.end_offset;
+      const warnChanged     = warn !== row.warning;
+      if (!snapshotChanged && !offsetChanged && !warnChanged) continue;
+
+      const patch: Parameters<typeof cowCue>[3] = { warning: warn };
+      if (startInBlock) {
+        patch.start_snapshot_id = newSnapshotId;
+        patch.start_offset = newStartOffset ?? undefined;
+      }
+      if (endInBlock) {
+        patch.end_snapshot_id = newSnapshotId;
+        patch.end_offset = newEndOffset ?? undefined;
       }
 
-      if (newStartOffset !== row.start_offset || newEndOffset !== row.end_offset || warn !== row.warning) {
-        await client.query(
-          `UPDATE cue SET start_offset=$1, end_offset=$2, warning=$3 WHERE id=$4`,
-          [newStartOffset, newEndOffset, warn, row.id]
-        );
-      }
+      await applyPatchWithCow(client, versionId, row, patch);
     }
     await client.query("COMMIT");
   } catch (err) {

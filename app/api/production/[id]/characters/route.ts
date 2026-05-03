@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getState, applyPatch } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionCharacters, setCharacterMembers } from "@/lib/db";
+import { getProductionMemberContext, listProductionCharacters, setCharacterMembers, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -39,14 +39,15 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
     ? body.memberIds.filter((m: unknown) => typeof m === "string")
     : [];
 
-  const state = getState(id);
+  const versionId = await getActiveVersionId(id) ?? '';
+  const state = getState(id, versionId);
   const newChar = { id: `c${Date.now().toString(36)}`, name: trimmed, isAggregate };
   // check duplicate
   if (state.characters.some((c) => c.name === trimmed)) {
     return Response.json({ error: "角色名已存在" }, { status: 409 });
   }
 
-  await applyPatch(id, { clientSeq: 0, blockOps: [], charOps: [{ op: "upsert", char: newChar }], sceneOps: [] });
+  await applyPatch(id, versionId, { clientSeq: 0, blockOps: [], charOps: [{ op: "upsert", char: newChar }], sceneOps: [] });
   if (isAggregate && memberIds.length > 0) {
     await setCharacterMembers(newChar.id, memberIds);
   }

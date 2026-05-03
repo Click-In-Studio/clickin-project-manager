@@ -50,6 +50,7 @@ import MarkdownView from "@/components/MarkdownView";
 import MentionTextarea, { type MentionMember } from "@/components/MentionTextarea";
 import SmartTextarea, { scriptRefDropPlugin, memberDropPlugin } from "@/components/SmartTextarea";
 import SmartText, { scriptRefTextPlugin, memberTextPlugin } from "@/components/SmartText";
+import type { Version } from "@/lib/db";
 
 function toLocalInput(iso: string | null)     { return isoToDatetimeLocal(iso); }
 function toLocalDate(iso: string | null)       { return isoToDateInput(iso); }
@@ -66,13 +67,14 @@ function isSingleDayEvent(event: ProductionEvent): boolean {
 const SM_EVENT_TYPES = new Set(["rehearsal", "meeting"]);
 
 function InfoTab({
-  event, productionId, members, canEdit, departments,
+  event, productionId, members, canEdit, departments, versions,
   onUpdated, onDeleted, onTechReqsCreated,
 }: {
   event: ProductionEvent; productionId: string;
   members: MemberWithRoles[];
   canEdit: boolean;
   departments: EventDepartment[];
+  versions?: Version[];
   onUpdated: (ev: ProductionEvent) => void;
   onDeleted: () => void;
   onTechReqsCreated?: (reqs: EventTechReq[]) => void;
@@ -87,6 +89,7 @@ function InfoTab({
   const [endTime, setEndTime] = useState(toLocalInput(event.endTime));
   const [description, setDescription] = useState(event.description);
   const [stageManagers, setStageManagers] = useState<{ openId: string; name: string }[]>(event.stageManagers);
+  const [versionId, setVersionId] = useState<string | null>(event.versionId ?? null);
   const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -108,6 +111,7 @@ function InfoTab({
         startTime: resolvedStart, endTime: resolvedEnd,
         description: description.trim(),
         stageManagers: showSM ? stageManagers : [],
+        versionId,
       }),
     });
     const data = await res.json();
@@ -187,10 +191,25 @@ function InfoTab({
             </div>
           </div>
         )}
+        {versions && versions.length > 0 && (
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">版本</label>
+            <select
+              value={versionId ?? ""}
+              onChange={e => setVersionId(e.target.value || null)}
+              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400"
+            >
+              <option value="">不限定版本</option>
+              {versions.map(v => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-xs text-zinc-500 mb-1">备注</label>
           <SmartTextarea value={description} onChange={setDescription} rows={3}
-            plugins={[scriptRefDropPlugin(productionId)]}
+            plugins={[scriptRefDropPlugin(productionId, versionId)]}
             className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
         </div>
         {showSM && (
@@ -472,7 +491,7 @@ function ParticipantPicker({
 function ScheduleTab({
   eventId, productionId, items, onItemsChange, canEdit, canAssignPeople, members,
   eventStart, eventEnd, singleDay, eventDate,
-  departments = [], onTechReqsCreated,
+  departments = [], onTechReqsCreated, versionId,
 }: {
   eventId: string; productionId: string;
   items: EventScheduleItemWithParticipants[];
@@ -483,6 +502,7 @@ function ScheduleTab({
   singleDay: boolean; eventDate: string;
   departments?: EventDepartment[];
   onTechReqsCreated?: (reqs: EventTechReq[]) => void;
+  versionId: string | null;
 }) {
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -587,6 +607,7 @@ function ScheduleTab({
           singleDay={singleDay} eventDate={eventDate}
           eventStart={eventStart} eventEnd={eventEnd}
           onTechReqsCreated={onTechReqsCreated}
+          versionId={versionId}
         />
       ) : (
         <>
@@ -606,6 +627,7 @@ function ScheduleTab({
               departments={departments}
               productionId={productionId} eventId={eventId}
               onTechReqsCreated={onTechReqsCreated}
+              versionId={versionId}
             />
           ))}
 
@@ -698,7 +720,7 @@ function ScheduleTab({
 function ScheduleItemRow({
   item, canEdit, canAssignPeople, members,
   editing, onEdit, onSaved, onDelete, base, minTime, maxTime,
-  singleDay, eventDate, departments, productionId, eventId, onTechReqsCreated,
+  singleDay, eventDate, departments, productionId, eventId, onTechReqsCreated, versionId,
 }: {
   item: EventScheduleItemWithParticipants;
   canEdit: boolean; canAssignPeople: boolean; members: MemberWithRoles[];
@@ -711,6 +733,7 @@ function ScheduleItemRow({
   departments?: EventDepartment[];
   productionId: string; eventId: string;
   onTechReqsCreated?: (reqs: EventTechReq[]) => void;
+  versionId: string | null;
 }) {
   const [title, setTitle] = useState(item.title);
   const [itemType, setItemType] = useState(item.itemType);
@@ -813,7 +836,7 @@ function ScheduleItemRow({
             </>
           )}
           <SmartTextarea placeholder="备注" value={notes} onChange={setNotes} rows={2}
-            plugins={[scriptRefDropPlugin(productionId)]}
+            plugins={[scriptRefDropPlugin(productionId, versionId)]}
             className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
         </div>
 
@@ -926,7 +949,7 @@ type ModalState =
 function ScheduleItemModal({
   state, eventId, productionId, items, onItemsChange, canAssignPeople,
   members, departments, singleDay, eventDate, eventStart, eventEnd,
-  onTechReqsCreated, onClose,
+  onTechReqsCreated, versionId, onClose,
 }: {
   state: ModalState;
   eventId: string; productionId: string;
@@ -938,6 +961,7 @@ function ScheduleItemModal({
   singleDay: boolean; eventDate: string;
   eventStart: string | null; eventEnd: string | null;
   onTechReqsCreated?: (reqs: EventTechReq[]) => void;
+  versionId: string | null;
   onClose: () => void;
 }) {
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule`;
@@ -1083,7 +1107,7 @@ function ScheduleItemModal({
             </>
           )}
           <SmartTextarea placeholder="备注" value={notes} onChange={setNotes} rows={2}
-            plugins={[scriptRefDropPlugin(productionId)]}
+            plugins={[scriptRefDropPlugin(productionId, versionId)]}
             className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
         </div>
 
@@ -1136,7 +1160,7 @@ function ScheduleItemModal({
 
 function ScheduleTableView({
   eventId, productionId, items, onItemsChange, canEdit, canAssignPeople,
-  members, departments, singleDay, eventDate, eventStart, eventEnd, onTechReqsCreated,
+  members, departments, singleDay, eventDate, eventStart, eventEnd, onTechReqsCreated, versionId,
 }: {
   eventId: string; productionId: string;
   items: EventScheduleItemWithParticipants[];
@@ -1147,6 +1171,7 @@ function ScheduleTableView({
   singleDay: boolean; eventDate: string;
   eventStart: string | null; eventEnd: string | null;
   onTechReqsCreated?: (reqs: EventTechReq[]) => void;
+  versionId: string | null;
 }) {
   const [modal, setModal] = useState<ModalState | null>(null);
 
@@ -1464,6 +1489,7 @@ function ScheduleTableView({
           singleDay={singleDay} eventDate={eventDate}
           eventStart={eventStart} eventEnd={eventEnd}
           onTechReqsCreated={onTechReqsCreated}
+          versionId={versionId}
           onClose={() => setModal(null)}
         />
       )}
@@ -1508,7 +1534,7 @@ function computeSuggestedCallAt(
 function CallTimeTab({
   eventId, productionId, callTimes, eventPeople, scheduleItems, techReqs, members,
   stageManagerOpenIds, canEdit, singleDay, eventDate,
-  onCallTimesChange,
+  onCallTimesChange, versionId,
 }: {
   eventId: string; productionId: string;
   callTimes: EventCallTime[];
@@ -1520,6 +1546,7 @@ function CallTimeTab({
   canEdit: boolean;
   singleDay: boolean; eventDate: string;
   onCallTimesChange: (cts: EventCallTime[]) => void;
+  versionId: string | null;
 }) {
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/call-times`;
   const callTimeMap = new Map(callTimes.map(ct => [ct.openId, ct]));
@@ -1582,6 +1609,7 @@ function CallTimeTab({
                   canEdit={canEdit}
                   singleDay={singleDay} eventDate={eventDate}
                   productionId={productionId}
+                  versionId={versionId}
                   onSave={(callAt, notes) => saveCallTime(person.openId, person.name, callAt, notes)}
                   onDelete={() => deleteCallTime(person.openId)}
                 />
@@ -1595,7 +1623,7 @@ function CallTimeTab({
 }
 
 function PersonCallTimeRow({
-  person, callTime, suggestedCallAt, canEdit, singleDay, eventDate, productionId, onSave, onDelete,
+  person, callTime, suggestedCallAt, canEdit, singleDay, eventDate, productionId, versionId, onSave, onDelete,
 }: {
   person: { openId: string; name: string };
   callTime: EventCallTime | null;
@@ -1603,6 +1631,7 @@ function PersonCallTimeRow({
   canEdit: boolean;
   singleDay: boolean; eventDate: string;
   productionId: string;
+  versionId: string | null;
   onSave: (callAt: string, notes: string) => void;
   onDelete: () => void;
 }) {
@@ -1657,7 +1686,7 @@ function PersonCallTimeRow({
           placeholder="备注（可选）"
           value={notes} onChange={setNotes}
           rows={2}
-          plugins={[scriptRefDropPlugin(productionId)]}
+          plugins={[scriptRefDropPlugin(productionId, versionId)]}
           className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none w-full"
         />
         {editIsLate && suggestedLocal && (
@@ -1741,7 +1770,7 @@ function TechReqCard({
   req, expanded, onToggleExpand,
   canEditThisReq, isEventClosed,
   scheduleItems, deptMembers, allMembers, base,
-  productionId,
+  productionId, versionId,
   onUpdate, onDelete, canDelete,
 }: {
   req: EventTechReq;
@@ -1754,6 +1783,7 @@ function TechReqCard({
   allMembers?: MemberWithRoles[];
   base: string;
   productionId: string;
+  versionId: string | null;
   onUpdate: (req: EventTechReq) => void;
   onDelete: (id: string) => void;
   canDelete: boolean;
@@ -1834,7 +1864,7 @@ function TechReqCard({
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 mt-2" />
               <SmartTextarea value={editDesc} onChange={setEditDesc} rows={2}
                 placeholder="描述（可选）"
-                plugins={[scriptRefDropPlugin(productionId)]}
+                plugins={[scriptRefDropPlugin(productionId, versionId)]}
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-400 shrink-0">提前分钟</span>
@@ -1899,7 +1929,7 @@ function TechReqCard({
 
 function TechReqTab({
   eventId, productionId, techReqs, departments, members, scheduleItems, canEdit, canDelete,
-  pocDeptIds, eventStatus, onTechReqsChange,
+  pocDeptIds, eventStatus, onTechReqsChange, versionId,
 }: {
   eventId: string; productionId: string;
   techReqs: EventTechReq[]; departments: EventDepartment[]; members: MemberWithRoles[];
@@ -1908,6 +1938,7 @@ function TechReqTab({
   pocDeptIds: string[];
   eventStatus: string;
   onTechReqsChange: (reqs: EventTechReq[]) => void;
+  versionId: string | null;
 }) {
   const [adding, setAdding] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -1991,6 +2022,7 @@ function TechReqTab({
         allMembers={req.departmentId ? members : undefined}
         base={base}
         productionId={productionId}
+        versionId={versionId}
         onUpdate={handleUpdate}
         onDelete={deleteReq}
         canDelete={canDelete}
@@ -2029,7 +2061,7 @@ function TechReqTab({
             <div className="grid grid-cols-2 gap-2">
               <input placeholder="需求标题 *" value={newTitle} onChange={e => setNewTitle(e.target.value)}
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-              <SmartTextarea value={newDesc} onChange={setNewDesc} plugins={[scriptRefDropPlugin(productionId)]} rows={2} placeholder="描述"
+              <SmartTextarea value={newDesc} onChange={setNewDesc} plugins={[scriptRefDropPlugin(productionId, versionId)]} rows={2} placeholder="描述"
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
               <select value={newDeptId} onChange={e => {
                   const next = e.target.value;
@@ -2207,7 +2239,7 @@ function AssigneeEditor({
 
 function ReportsTab({
   eventId, productionId, reports, departments, members, canWrite,
-  currentUserOpenId, onReportsChange,
+  currentUserOpenId, onReportsChange, versionId,
 }: {
   eventId: string; productionId: string;
   reports: EventReport[]; departments: EventDepartment[];
@@ -2215,6 +2247,7 @@ function ReportsTab({
   canWrite: boolean;
   currentUserOpenId: string;
   onReportsChange: (rs: EventReport[]) => void;
+  versionId: string | null;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -2331,6 +2364,7 @@ function ReportsTab({
               members={members}
               canWrite={canWrite}
               currentUserOpenId={currentUserOpenId}
+              versionId={versionId}
               onUpdated={updated => onReportsChange(reports.map(r => r.id === updated.id ? updated : r))}
               onDelete={() => deleteReport(report.id)}
             />
@@ -2371,7 +2405,7 @@ function ReportsTab({
 
 function ReportEditor({
   report, departments, eventId, productionId, members, canWrite,
-  currentUserOpenId,
+  currentUserOpenId, versionId,
   onUpdated, onDelete,
 }: {
   report: EventReport; departments: EventDepartment[];
@@ -2379,6 +2413,7 @@ function ReportEditor({
   members: MentionMember[];
   canWrite: boolean;
   currentUserOpenId: string;
+  versionId: string | null;
   onUpdated: (r: EventReport) => void; onDelete: () => void;
 }) {
   const [body, setBody] = useState(report.body);
@@ -2464,6 +2499,7 @@ function ReportEditor({
         members={members}
         currentUserOpenId={currentUserOpenId}
         isPublished={isPublished}
+        versionId={versionId}
       />
     </div>
   );
@@ -2471,13 +2507,14 @@ function ReportEditor({
 
 function DeptNotesList({
   reportId, eventId, productionId, departments, members,
-  currentUserOpenId, isPublished,
+  currentUserOpenId, isPublished, versionId,
 }: {
   reportId: string; eventId: string; productionId: string;
   departments: EventDepartment[];
   members: MentionMember[];
   currentUserOpenId: string;
   isPublished: boolean;
+  versionId: string | null;
 }) {
   const [notes, setNotes] = useState<EventReportNote[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -2565,7 +2602,7 @@ function DeptNotesList({
                 <SmartTextarea
                   value={editDraft}
                   onChange={setEditDraft}
-                  plugins={[memberDropPlugin(members, { onPick: m => setEditMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }), scriptRefDropPlugin(productionId)]}
+                  plugins={[memberDropPlugin(members, { onPick: m => setEditMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }), scriptRefDropPlugin(productionId, versionId)]}
                   rows={2}
                   placeholder="写 note…"
                   className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm focus:outline-none resize-none"
@@ -2592,7 +2629,7 @@ function DeptNotesList({
           <SmartTextarea
             value={newContent}
             onChange={setNewContent}
-            plugins={[memberDropPlugin(members, { onPick: m => setNewMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }), scriptRefDropPlugin(productionId)]}
+            plugins={[memberDropPlugin(members, { onPick: m => setNewMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }), scriptRefDropPlugin(productionId, versionId)]}
             rows={2}
             placeholder="写 note… 输入 @ 可提及成员"
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addNote(); } }}
@@ -2896,6 +2933,7 @@ type Props = {
   initialReports: EventReport[];
   departments: EventDepartment[];
   members: MemberWithRoles[];
+  versions?: Version[];
   canEdit: boolean;
   canScheduleEdit: boolean;
   canAssignPeople: boolean;
@@ -2911,7 +2949,7 @@ type Props = {
 export default function EventDetailClient({
   productionId, event: initialEvent,
   initialScheduleItems, initialTechReqs, initialCallTimes,
-  initialReports, departments, members,
+  initialReports, departments, members, versions,
   canEdit, canScheduleEdit, canAssignPeople, canCallEdit,
   canTechReqDelete, canWriteReport, canEditAnyTechReq, pocDeptIds,
   currentUserOpenId,
@@ -3067,7 +3105,7 @@ export default function EventDetailClient({
           {tab === "info" && (
             <InfoTab
               event={event} productionId={productionId} members={members} canEdit={canEdit}
-              departments={departments}
+              departments={departments} versions={versions}
               onUpdated={setEvent} onDeleted={handleDeleted}
               onTechReqsCreated={handleTechReqsCreated}
             />
@@ -3083,6 +3121,7 @@ export default function EventDetailClient({
               eventDate={toLocalDate(event.startTime)}
               departments={departments}
               onTechReqsCreated={handleTechReqsCreated}
+              versionId={event.versionId ?? null}
             />
           )}
           {tab === "call" && (
@@ -3096,6 +3135,7 @@ export default function EventDetailClient({
               singleDay={isSingleDayEvent(event)}
               eventDate={toLocalDate(event.startTime)}
               onCallTimesChange={setCallTimes}
+              versionId={event.versionId ?? null}
             />
           )}
           {tab === "tech" && (
@@ -3107,6 +3147,7 @@ export default function EventDetailClient({
               pocDeptIds={pocDeptIds}
               eventStatus={event.status}
               onTechReqsChange={setTechReqs}
+              versionId={event.versionId ?? null}
             />
           )}
           {tab === "publish" && (
@@ -3165,6 +3206,7 @@ export default function EventDetailClient({
               members={members.map(m => ({ openId: m.openId, name: m.name }))}
               canWrite={canWriteReport}
               currentUserOpenId={currentUserOpenId}
+              versionId={event.versionId ?? null}
               onReportsChange={setReports}
             />
           )}

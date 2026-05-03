@@ -10,10 +10,13 @@ import ScriptEditor from "@/components/ScriptEditor";
 
 export default async function ProductionScriptPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ v?: string }>;
 }) {
   const { id } = await params;
+  const { v } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -24,6 +27,9 @@ export default async function ProductionScriptPage({
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
     hasPermission(perm, session.isAdmin, memberRoles, overrides);
 
+  // Resolve initial version: URL param > cookie
+  const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;
+
   return (
     <ScriptEditor
       productionId={id}
@@ -31,6 +37,8 @@ export default async function ProductionScriptPage({
       canEditMetadata={p("script:metadata")}
       canEditRehearsalMark={p("script:rehearsal_mark")}
       canImport={p("manage_permissions")}
+      versionId={versionId}
+      canManageVersions={p("script:metadata")}
     />
   );
 }

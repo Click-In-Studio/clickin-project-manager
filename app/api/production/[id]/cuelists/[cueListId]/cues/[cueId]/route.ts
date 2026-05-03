@@ -38,6 +38,7 @@ export async function PATCH(
   const check = await checkEdit(req, id, cueListId);
   if (!check.ok) return Response.json({ error: "权限不足或不存在" }, { status: check.status });
 
+  const versionId = req.nextUrl.searchParams.get("v") ?? undefined;
   const body = await req.json() as {
     number?: string; name?: string; content?: string;
     start?: CueAnchor; end?: CueAnchor; warning?: boolean;
@@ -47,14 +48,25 @@ export async function PATCH(
   const prevCue = body.warning === true ? await getCue(cueId, cueListId) : null;
   const warningNewlySet = body.warning === true && prevCue !== null && !prevCue.warning;
 
-  await updateCue(cueId, cueListId, {
-    number:  body.number  !== undefined ? body.number.trim()  : undefined,
-    name:    body.name    !== undefined ? body.name.trim()    : undefined,
-    content: body.content !== undefined ? body.content.trim() : undefined,
-    start:   body.start,
-    end:     body.end,
-    warning: body.warning,
-  });
+  try {
+    await updateCue(cueId, cueListId, {
+      number:  body.number  !== undefined ? body.number.trim()  : undefined,
+      name:    body.name    !== undefined ? body.name.trim()    : undefined,
+      content: body.content !== undefined ? body.content.trim() : undefined,
+      start:   body.start,
+      end:     body.end,
+      warning: body.warning,
+    }, versionId);
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("CUE_NUMBER_CONFLICT:")) {
+      const conflictVersionId = e.message.slice("CUE_NUMBER_CONFLICT:".length);
+      return Response.json(
+        { error: "cue_number_conflict", conflictVersionId },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
   broadcastCueUpdate(id);
 
   // Fire-and-forget: notify cue list editors when a warning is newly set
@@ -125,7 +137,8 @@ export async function DELETE(
   const check = await checkEdit(req, id, cueListId);
   if (!check.ok) return Response.json({ error: "权限不足或不存在" }, { status: check.status });
 
-  await deleteCue(cueId, cueListId);
+  const versionId = req.nextUrl.searchParams.get("v") ?? undefined;
+  await deleteCue(cueId, cueListId, versionId);
   broadcastCueUpdate(id);
   return Response.json({ ok: true });
 }

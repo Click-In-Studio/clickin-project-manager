@@ -22,7 +22,8 @@ export async function GET(
   const { id, cueListId } = await ctx.params;
   const { session } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const cues = await listCues(cueListId);
+  const versionId = req.nextUrl.searchParams.get("v") ?? undefined;
+  const cues = await listCues(cueListId, versionId);
   return Response.json(cues);
 }
 
@@ -43,6 +44,7 @@ export async function POST(
   if (!canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
+  const versionId = req.nextUrl.searchParams.get("v") ?? undefined;
   const body = await req.json() as { number: string; name?: string; content?: string; start: CueAnchor; end: CueAnchor };
   if (!body.number?.trim()) return Response.json({ error: "编号不能为空" }, { status: 400 });
   if (!body.start || !body.end) return Response.json({ error: "缺少位置信息" }, { status: 400 });
@@ -55,9 +57,10 @@ export async function POST(
     content: body.content?.trim() ?? "",
     start: body.start,
     end: body.end,
+    versionId,
   });
 
-  const cues = await listCues(cueListId);
+  const cues = await listCues(cueListId, versionId);
   broadcastCueUpdate(id);
   return Response.json(cues, { status: 201 });
 }

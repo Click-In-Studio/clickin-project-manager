@@ -33,6 +33,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     title?: string; eventType?: string; location?: string;
     startTime?: string | null; endTime?: string | null; description?: string;
+    versionId?: string | null;
   };
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     endTime: body.endTime ?? null,
     description: body.description ?? "",
     createdBy: session.openId,
+    versionId: body.versionId ?? null,
   });
   return Response.json({ event }, { status: 201 });
 }

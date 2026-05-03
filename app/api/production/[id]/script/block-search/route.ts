@@ -7,18 +7,24 @@ import { computePageMap } from "@/lib/script-page";
 
 export type ScriptBlockSearchResult = {
   blockId: string;
-  label: string;       // e.g. "p.2", "1-1", "1-1A", "SQ.5"
-  description?: string; // scene name, cue name, or content preview
-  url?: string;         // if set, overrides the default /script#block-{blockId} link
+  label: string;
+  description?: string;
+  url?: string;
 };
 
 type Ctx = { params: Promise<{ id: string }> };
+type BlockRow = { id: string; type: string; content: string; char_names: string };
 
-// Content preview for a block row
 function blockDesc(r: { type: string; content: string; char_names: string }): string {
   const preview = r.content.slice(0, 40);
   return r.type === "dialogue" && r.char_names ? `${r.char_names}: ${preview}` : preview;
 }
+
+const CHAR_NAMES_SUBQ = `COALESCE((
+  SELECT string_agg(ch.name, ', ' ORDER BY sc.position)
+  FROM script_character sc JOIN character ch ON ch.id = sc.character_id
+  WHERE sc.script_id = s.id
+), '')`;
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
@@ -34,6 +40,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const q = req.nextUrl.searchParams.get("q") ?? "";
   if (!q) return Response.json({ results: [] });
 
+  const versionId = req.nextUrl.searchParams.get("v") || null;
   const pool = getPool();
   const results: ScriptBlockSearchResult[] = [];
   const dedup = (r: ScriptBlockSearchResult[]) => {
@@ -41,6 +48,115 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return r.filter(x => seen.has(x.blockId) ? false : (seen.add(x.blockId), true));
   };
 
+  // ─── Version-aware query helpers ──────────────────────────────────────────────
+
+  async function firstBlockInScene(sceneId: string): Promise<{ id: string } | null> {
+    if (versionId) {
+      const r = await pool.query<{ id: string }>(
+        `SELECT sv.block_id AS id FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1 AND s.scene_id = $2 ORDER BY sv.sort_key LIMIT 1`,
+        [versionId, sceneId]
+      );
+      return r.rows[0] ?? null;
+    }
+    const r = await pool.query<{ id: string }>(
+      "SELECT id FROM script WHERE production_id = $1 AND scene_id = $2 ORDER BY sort_key LIMIT 1",
+      [productionId, sceneId]
+    );
+    return r.rows[0] ?? null;
+  }
+
+  async function markFirstBlock(sceneId: string, mark: string): Promise<{ id: string; sortKey: string } | null> {
+    if (versionId) {
+      const r = await pool.query<{ id: string; sort_key: string }>(
+        `SELECT sv.block_id AS id, sv.sort_key FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1 AND s.scene_id = $2 AND s.rehearsal_mark ILIKE $3
+         ORDER BY sv.sort_key LIMIT 1`,
+        [versionId, sceneId, mark]
+      );
+      return r.rows[0] ? { id: r.rows[0].id, sortKey: r.rows[0].sort_key } : null;
+    }
+    const r = await pool.query<{ id: string; sort_key: string }>(
+      `SELECT id, sort_key FROM script WHERE production_id = $1 AND scene_id = $2 AND rehearsal_mark ILIKE $3 ORDER BY sort_key LIMIT 1`,
+      [productionId, sceneId, mark]
+    );
+    return r.rows[0] ? { id: r.rows[0].id, sortKey: r.rows[0].sort_key } : null;
+  }
+
+  async function nextMarkSortKey(sceneId: string, mark: string, afterKey: string): Promise<string | null> {
+    if (versionId) {
+      const r = await pool.query<{ sort_key: string }>(
+        `SELECT sv.sort_key FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1 AND s.scene_id = $2 AND s.rehearsal_mark IS NOT NULL
+           AND s.rehearsal_mark NOT ILIKE $3 AND sv.sort_key > $4
+         ORDER BY sv.sort_key LIMIT 1`,
+        [versionId, sceneId, mark, afterKey]
+      );
+      return r.rows[0]?.sort_key ?? null;
+    }
+    const r = await pool.query<{ sort_key: string }>(
+      `SELECT sort_key FROM script WHERE production_id = $1 AND scene_id = $2
+         AND rehearsal_mark IS NOT NULL AND rehearsal_mark NOT ILIKE $3 AND sort_key > $4
+       ORDER BY sort_key LIMIT 1`,
+      [productionId, sceneId, mark, afterKey]
+    );
+    return r.rows[0]?.sort_key ?? null;
+  }
+
+  async function blocksInScene(sceneId: string): Promise<BlockRow[]> {
+    if (versionId) {
+      const r = await pool.query<BlockRow>(
+        `SELECT sv.block_id AS id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+         FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1 AND s.scene_id = $2 ORDER BY sv.sort_key LIMIT 15`,
+        [versionId, sceneId]
+      );
+      return r.rows;
+    }
+    const r = await pool.query<BlockRow>(
+      `SELECT s.id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+       FROM script s WHERE s.production_id = $1 AND s.scene_id = $2 ORDER BY s.sort_key LIMIT 15`,
+      [productionId, sceneId]
+    );
+    return r.rows;
+  }
+
+  async function blocksInSceneRange(sceneId: string, fromKey: string, toKey: string | null): Promise<BlockRow[]> {
+    if (versionId) {
+      const r = toKey
+        ? await pool.query<BlockRow>(
+            `SELECT sv.block_id AS id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+             FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+             WHERE sv.version_id = $1 AND s.scene_id = $2 AND sv.sort_key >= $3 AND sv.sort_key < $4
+             ORDER BY sv.sort_key LIMIT 15`,
+            [versionId, sceneId, fromKey, toKey]
+          )
+        : await pool.query<BlockRow>(
+            `SELECT sv.block_id AS id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+             FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+             WHERE sv.version_id = $1 AND s.scene_id = $2 AND sv.sort_key >= $3
+             ORDER BY sv.sort_key LIMIT 15`,
+            [versionId, sceneId, fromKey]
+          );
+      return r.rows;
+    }
+    const r = toKey
+      ? await pool.query<BlockRow>(
+          `SELECT s.id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+           FROM script s WHERE s.production_id = $1 AND s.scene_id = $2 AND s.sort_key >= $3 AND s.sort_key < $4
+           ORDER BY s.sort_key LIMIT 15`,
+          [productionId, sceneId, fromKey, toKey]
+        )
+      : await pool.query<BlockRow>(
+          `SELECT s.id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+           FROM script s WHERE s.production_id = $1 AND s.scene_id = $2 AND s.sort_key >= $3
+           ORDER BY s.sort_key LIMIT 15`,
+          [productionId, sceneId, fromKey]
+        );
+    return r.rows;
+  }
+
+  // Page map is production-level (not version-specific). Block IDs in the map are logical.
   async function getPageMap(): Promise<Record<string, number>> {
     const pmRes = await pool.query<{ page_map: Record<string, Record<string, number>> | null }>(
       "SELECT page_map FROM production WHERE id = $1", [productionId]
@@ -48,7 +164,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const stored = pmRes.rows[0]?.page_map?.["a4"];
     if (stored && Object.keys(stored).length > 0) return stored;
 
-    // page_map missing — compute on-demand and persist non-blocking
     const blocksRes = await pool.query<{ id: string; type: string; content: string; scene_id: string | null }>(
       "SELECT id, type, content, scene_id FROM script WHERE production_id = $1 ORDER BY sort_key",
       [productionId]
@@ -66,64 +181,51 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       charMap.get(r.script_id)!.push(r.character_id);
     }
     const blocks = blocksRes.rows.map(r => ({
-      id: r.id,
-      type: r.type === "stage" ? "stage" as const : "dialogue" as const,
-      content: r.content,
-      sceneId: r.scene_id,
-      characterIds: charMap.get(r.id) ?? [],
-      characterAnnotations: {} as Record<string, string>,
-      lyric: false,
-      rehearsalMark: null,
+      id: r.id, type: r.type === "stage" ? "stage" as const : "dialogue" as const,
+      content: r.content, sceneId: r.scene_id,
+      characterIds: charMap.get(r.id) ?? [], characterAnnotations: {} as Record<string, string>,
+      lyric: false, rehearsalMark: null,
     }));
     const computed = computePageMap(blocks);
     savePageMap(productionId, { a4: computed }).catch(() => {});
     return computed;
   }
 
-  // Fetch block rows with character names for block-level drill results
-  async function fetchBlocks(
-    where: string, params: unknown[]
-  ): Promise<{ id: string; type: string; content: string; char_names: string }[]> {
-    const res = await pool.query<{ id: string; type: string; content: string; char_names: string }>(
-      `SELECT s.id, s.type, s.content,
-         COALESCE((
-           SELECT string_agg(ch.name, ', ' ORDER BY sc.position)
-           FROM script_character sc JOIN character ch ON ch.id = sc.character_id
-           WHERE sc.script_id = s.id
-         ), '') AS char_names
-       FROM script s
-       WHERE ${where}
-       ORDER BY s.sort_key LIMIT 15`,
-      params
-    );
-    return res.rows;
-  }
-
   // ─── Drill-down mode: query ends with '-' ─────────────────────────────────────
   if (q.endsWith("-")) {
-    const base = q.slice(0, -1); // strip trailing dash
+    const base = q.slice(0, -1);
 
-    // p.N- → list blocks on page N
     const pageDrill = base.match(/^p\.(\d+)$/i);
     if (pageDrill) {
       const pageNum = parseInt(pageDrill[1]);
       const pageMap = await getPageMap();
       const blockIds = Object.entries(pageMap).filter(([, p]) => p === pageNum).map(([id]) => id);
       if (blockIds.length > 0) {
-        const rows = await fetchBlocks(
-          "s.id = ANY($1) AND s.production_id = $2",
-          [blockIds, productionId]
-        );
+        // Page map IDs are logical block_ids; fetch the blocks directly
+        let rows: BlockRow[];
+        if (versionId) {
+          const r = await pool.query<BlockRow>(
+            `SELECT sv.block_id AS id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+             FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+             WHERE sv.version_id = $1 AND sv.block_id = ANY($2::text[]) ORDER BY sv.sort_key LIMIT 15`,
+            [versionId, blockIds]
+          );
+          rows = r.rows;
+        } else {
+          const r = await pool.query<BlockRow>(
+            `SELECT s.id, s.type, s.content, ${CHAR_NAMES_SUBQ} AS char_names
+             FROM script s WHERE s.id = ANY($1::text[]) AND s.production_id = $2 ORDER BY s.sort_key LIMIT 15`,
+            [blockIds, productionId]
+          );
+          rows = r.rows;
+        }
         return Response.json({ results: rows.map((r, i) => ({
-          blockId: r.id,
-          label: `p.${pageNum}-${i + 1}`,
-          description: blockDesc(r),
+          blockId: r.id, label: `p.${pageNum}-${i + 1}`, description: blockDesc(r),
         })) });
       }
       return Response.json({ results: [] });
     }
 
-    // S+M- → list blocks in scene+mark section
     const spmDrill = base.match(/^(\d[\d.\-]*)([A-Za-z]+)$/);
     if (spmDrill) {
       const [, sceneQuery, mark] = spmDrill;
@@ -133,77 +235,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       );
       if (sceneRes.rows[0]) {
         const scene = sceneRes.rows[0];
-        const markStartRes = await pool.query<{ sort_key: string }>(
-          `SELECT sort_key FROM script WHERE production_id = $1 AND scene_id = $2 AND rehearsal_mark ILIKE $3 ORDER BY sort_key LIMIT 1`,
-          [productionId, scene.id, mark]
-        );
-        if (markStartRes.rows[0]) {
-          const markSortKey = markStartRes.rows[0].sort_key;
-          const nextMarkRes = await pool.query<{ sort_key: string }>(
-            `SELECT sort_key FROM script
-             WHERE production_id = $1 AND scene_id = $2
-               AND rehearsal_mark IS NOT NULL AND rehearsal_mark NOT ILIKE $3
-               AND sort_key > $4
-             ORDER BY sort_key LIMIT 1`,
-            [productionId, scene.id, mark, markSortKey]
-          );
-          const nextSortKey = nextMarkRes.rows[0]?.sort_key ?? null;
-          const rows = nextSortKey
-            ? await fetchBlocks(
-                "s.production_id = $1 AND s.scene_id = $2 AND s.sort_key >= $3 AND s.sort_key < $4",
-                [productionId, scene.id, markSortKey, nextSortKey]
-              )
-            : await fetchBlocks(
-                "s.production_id = $1 AND s.scene_id = $2 AND s.sort_key >= $3",
-                [productionId, scene.id, markSortKey]
-              );
+        const mfb = await markFirstBlock(scene.id, mark);
+        if (mfb) {
+          const endKey = await nextMarkSortKey(scene.id, mark, mfb.sortKey);
+          const rows = await blocksInSceneRange(scene.id, mfb.sortKey, endKey);
           const prefix = `${scene.num}${mark.toUpperCase()}`;
           return Response.json({ results: rows.map((r, i) => ({
-            blockId: r.id,
-            label: `${prefix}-${i + 1}`,
-            description: blockDesc(r),
+            blockId: r.id, label: `${prefix}-${i + 1}`, description: blockDesc(r),
           })) });
         }
       }
       return Response.json({ results: [] });
     }
 
-    // S- → child scenes if they exist; otherwise blocks in scene
     const sceneDrill = base.match(/^[\d.\-]+$/);
     if (sceneDrill) {
       const childRes = await pool.query<{ id: string; num: string; name: string }>(
-        `SELECT id, num, name FROM scene
-         WHERE production_id = $1 AND num ILIKE $2
-         ORDER BY sort_order LIMIT 8`,
+        `SELECT id, num, name FROM scene WHERE production_id = $1 AND num ILIKE $2 ORDER BY sort_order LIMIT 8`,
         [productionId, `${base}-%`]
       );
       if (childRes.rows.length > 0) {
         for (const scene of childRes.rows) {
-          const fb = await pool.query<{ id: string }>(
-            "SELECT id FROM script WHERE production_id = $1 AND scene_id = $2 ORDER BY sort_key LIMIT 1",
-            [productionId, scene.id]
-          );
-          if (fb.rows[0]) {
-            results.push({ blockId: fb.rows[0].id, label: scene.num, description: scene.name || undefined });
-          }
+          const fb = await firstBlockInScene(scene.id);
+          if (fb) results.push({ blockId: fb.id, label: scene.num, description: scene.name || undefined });
         }
         return Response.json({ results: dedup(results) });
       }
 
-      // No child scenes → show blocks in the exact scene
       const exactSceneRes = await pool.query<{ id: string }>(
         "SELECT id FROM scene WHERE production_id = $1 AND num = $2 LIMIT 1",
         [productionId, base]
       );
       if (exactSceneRes.rows[0]) {
-        const rows = await fetchBlocks(
-          "s.production_id = $1 AND s.scene_id = $2",
-          [productionId, exactSceneRes.rows[0].id]
-        );
+        const rows = await blocksInScene(exactSceneRes.rows[0].id);
         return Response.json({ results: rows.map((r, i) => ({
-          blockId: r.id,
-          label: `${base}-${i + 1}`,
-          description: blockDesc(r),
+          blockId: r.id, label: `${base}-${i + 1}`, description: blockDesc(r),
         })) });
       }
       return Response.json({ results: [] });
@@ -215,17 +281,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (pageMatch) {
     const pageNum = parseInt(pageMatch[1]);
     const pageMap = await getPageMap();
-    const blockIds = Object.entries(pageMap)
-      .filter(([, p]) => p === pageNum)
-      .map(([id]) => id);
+    const blockIds = Object.entries(pageMap).filter(([, p]) => p === pageNum).map(([id]) => id);
     if (blockIds.length > 0) {
-      const blockRes = await pool.query<{ id: string }>(
-        "SELECT id FROM script WHERE id = ANY($1) AND production_id = $2 ORDER BY sort_key LIMIT 1",
-        [blockIds, productionId]
-      );
-      if (blockRes.rows[0]) {
-        results.push({ blockId: blockRes.rows[0].id, label: `p.${pageNum}`, description: `第${pageNum}页` });
-      }
+      const fb = versionId
+        ? (await pool.query<{ id: string }>(
+            `SELECT sv.block_id AS id FROM script_version sv WHERE sv.version_id = $1 AND sv.block_id = ANY($2::text[]) ORDER BY sv.sort_key LIMIT 1`,
+            [versionId, blockIds]
+          )).rows[0]
+        : (await pool.query<{ id: string }>(
+            "SELECT id FROM script WHERE id = ANY($1) AND production_id = $2 ORDER BY sort_key LIMIT 1",
+            [blockIds, productionId]
+          )).rows[0];
+      if (fb) results.push({ blockId: fb.id, label: `p.${pageNum}`, description: `第${pageNum}页` });
     }
     return Response.json({ results });
   }
@@ -235,21 +302,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (scenePlusMark) {
     const [, sceneQuery, mark] = scenePlusMark;
     const sceneRes = await pool.query<{ id: string; num: string; name: string }>(
-      `SELECT id, num, name FROM scene
-       WHERE production_id = $1 AND num ILIKE $2
-       ORDER BY sort_order LIMIT 4`,
+      `SELECT id, num, name FROM scene WHERE production_id = $1 AND num ILIKE $2 ORDER BY sort_order LIMIT 4`,
       [productionId, `${sceneQuery}%`]
     );
     for (const scene of sceneRes.rows) {
-      const blockRes = await pool.query<{ id: string }>(
-        `SELECT id FROM script
-         WHERE production_id = $1 AND scene_id = $2 AND rehearsal_mark ILIKE $3
-         ORDER BY sort_key LIMIT 1`,
-        [productionId, scene.id, mark]
-      );
-      if (blockRes.rows[0]) {
+      const mfb = await markFirstBlock(scene.id, mark);
+      if (mfb) {
         results.push({
-          blockId: blockRes.rows[0].id,
+          blockId: mfb.id,
           label: `${scene.num}${mark.toUpperCase()}`,
           description: scene.name || undefined,
         });
@@ -262,35 +322,29 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const sceneOnly = q.match(/^[\d.\-]+$/);
   if (sceneOnly) {
     const sceneRes = await pool.query<{ id: string; num: string; name: string }>(
-      `SELECT id, num, name FROM scene
-       WHERE production_id = $1 AND (num ILIKE $2 OR name ILIKE $2)
-       ORDER BY sort_order LIMIT 5`,
+      `SELECT id, num, name FROM scene WHERE production_id = $1 AND (num ILIKE $2 OR name ILIKE $2) ORDER BY sort_order LIMIT 5`,
       [productionId, `${q}%`]
     );
     for (const scene of sceneRes.rows) {
-      const firstBlock = await pool.query<{ id: string }>(
-        "SELECT id FROM script WHERE production_id = $1 AND scene_id = $2 ORDER BY sort_key LIMIT 1",
-        [productionId, scene.id]
-      );
-      if (firstBlock.rows[0]) {
-        results.push({
-          blockId: firstBlock.rows[0].id,
-          label: scene.num,
-          description: scene.name || undefined,
-        });
-      }
-      const marksRes = await pool.query<{ id: string; rehearsal_mark: string }>(
-        `SELECT DISTINCT ON (rehearsal_mark) id, rehearsal_mark FROM script
-         WHERE production_id = $1 AND scene_id = $2 AND rehearsal_mark IS NOT NULL
-         ORDER BY rehearsal_mark, sort_key LIMIT 5`,
-        [productionId, scene.id]
-      );
+      const fb = await firstBlockInScene(scene.id);
+      if (fb) results.push({ blockId: fb.id, label: scene.num, description: scene.name || undefined });
+
+      const marksRes = versionId
+        ? await pool.query<{ id: string; rehearsal_mark: string }>(
+            `SELECT DISTINCT ON (s.rehearsal_mark) sv.block_id AS id, s.rehearsal_mark
+             FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+             WHERE sv.version_id = $1 AND s.scene_id = $2 AND s.rehearsal_mark IS NOT NULL
+             ORDER BY s.rehearsal_mark, sv.sort_key LIMIT 5`,
+            [versionId, scene.id]
+          )
+        : await pool.query<{ id: string; rehearsal_mark: string }>(
+            `SELECT DISTINCT ON (rehearsal_mark) id, rehearsal_mark FROM script
+             WHERE production_id = $1 AND scene_id = $2 AND rehearsal_mark IS NOT NULL
+             ORDER BY rehearsal_mark, sort_key LIMIT 5`,
+            [productionId, scene.id]
+          );
       for (const m of marksRes.rows) {
-        results.push({
-          blockId: m.id,
-          label: `${scene.num}${m.rehearsal_mark}`,
-          description: scene.name || undefined,
-        });
+        results.push({ blockId: m.id, label: `${scene.num}${m.rehearsal_mark}`, description: scene.name || undefined });
       }
     }
     return Response.json({ results: dedup(results).slice(0, 8) });
@@ -300,23 +354,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const cueNumMatch = q.match(/^([A-Za-z]+)\.(.*)$/);
   if (cueNumMatch) {
     const [, abbr, numPrefix] = cueNumMatch;
-    const cueRes = await pool.query<{
-      id: string; number: string; name: string; cue_list_id: string; abbr: string;
-    }>(
+    const cueRes = await pool.query<{ id: string; number: string; name: string; cue_list_id: string; abbr: string }>(
       `SELECT c.id, c.number, c.name, cl.id AS cue_list_id, cl.abbr
-       FROM cue c
-       JOIN cue_list cl ON cl.id = c.cue_list_id
-       WHERE cl.production_id = $1 AND cl.abbr ILIKE $2
-         AND ($3 = '' OR c.number ILIKE $4)
-       ORDER BY length(c.number), c.number
-       LIMIT 8`,
-      [productionId, abbr, numPrefix, `${numPrefix}%`]
+       FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
+       WHERE cl.production_id = $1 AND cl.abbr ILIKE $2 AND ($3 = '' OR c.number ILIKE $4)
+       ${versionId ? "AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $5)" : ""}
+       ORDER BY length(c.number), c.number LIMIT 8`,
+      versionId
+        ? [productionId, abbr, numPrefix, `${numPrefix}%`, versionId]
+        : [productionId, abbr, numPrefix, `${numPrefix}%`]
     );
     for (const r of cueRes.rows) {
       results.push({
-        blockId: r.id,
-        label: `${r.abbr}.${r.number}`,
-        description: r.name || undefined,
+        blockId: r.id, label: `${r.abbr}.${r.number}`, description: r.name || undefined,
         url: `/production/${productionId}/cues?cueList=${r.cue_list_id}&cueId=${r.id}`,
       });
     }
@@ -327,16 +377,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const abbrMatch = q.match(/^[A-Za-z]+$/);
   if (abbrMatch) {
     const clRes = await pool.query<{ id: string; name: string; abbr: string }>(
-      `SELECT id, name, abbr FROM cue_list
-       WHERE production_id = $1 AND abbr ILIKE $2
-       ORDER BY abbr LIMIT 5`,
+      `SELECT id, name, abbr FROM cue_list WHERE production_id = $1 AND abbr ILIKE $2 ORDER BY abbr LIMIT 5`,
       [productionId, `${q}%`]
     );
     for (const r of clRes.rows) {
       results.push({
-        blockId: r.id,
-        label: r.abbr!,
-        description: r.name || undefined,
+        blockId: r.id, label: r.abbr!, description: r.name || undefined,
         url: `/production/${productionId}/cues?cueList=${r.id}`,
       });
     }
@@ -345,23 +391,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   // ─── Text search: scene name ──────────────────────────────────────────────────
   const sceneTextRes = await pool.query<{ id: string; num: string; name: string }>(
-    `SELECT id, num, name FROM scene
-     WHERE production_id = $1 AND (name ILIKE $2 OR num ILIKE $2)
-     ORDER BY sort_order LIMIT 6`,
+    `SELECT id, num, name FROM scene WHERE production_id = $1 AND (name ILIKE $2 OR num ILIKE $2) ORDER BY sort_order LIMIT 6`,
     [productionId, `%${q}%`]
   );
   for (const scene of sceneTextRes.rows) {
-    const firstBlock = await pool.query<{ id: string }>(
-      "SELECT id FROM script WHERE production_id = $1 AND scene_id = $2 ORDER BY sort_key LIMIT 1",
-      [productionId, scene.id]
-    );
-    if (firstBlock.rows[0]) {
-      results.push({
-        blockId: firstBlock.rows[0].id,
-        label: scene.num,
-        description: scene.name || undefined,
-      });
-    }
+    const fb = await firstBlockInScene(scene.id);
+    if (fb) results.push({ blockId: fb.id, label: scene.num, description: scene.name || undefined });
   }
   return Response.json({ results: dedup(results).slice(0, 8) });
 }

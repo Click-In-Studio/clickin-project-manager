@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
+import { getProductionMemberContext, getProductionName, listProductionMembersWithRoles, listVersions } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import {
   getProductionEvent,
@@ -50,7 +50,7 @@ export default async function EventDetailPage({
 
   const permCtx = await loadEventPermContext(session.openId, eventId);
 
-  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole] =
+  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions] =
     await Promise.all([
       listScheduleItemsWithParticipants(eventId),
       listEventPeople(eventId),
@@ -60,6 +60,7 @@ export default async function EventDetailPage({
       listEventDepartments(productionId),
       listProductionMembersWithRoles(productionId),
       getSelfParticipantRole(eventId, session.openId),
+      listVersions(productionId),
     ]);
 
   let reports = rawReports;
@@ -93,6 +94,7 @@ export default async function EventDetailPage({
       initialReports={reports}
       departments={departments}
       members={members}
+      versions={versions}
       canEdit={canEdit}
       canScheduleEdit={canScheduleEdit}
       canAssignPeople={canAssignPeople}

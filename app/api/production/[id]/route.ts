@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { loadProduction, canUserAccessProduction } from "@/lib/db";
+import { loadProduction, canUserAccessProduction, getActiveVersionId, listVersions } from "@/lib/db";
 import { loadFromDB } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
 
@@ -15,12 +15,22 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   }
 
   try {
-    const result = await loadProduction(id);
+    const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id);
+    if (!versionId) {
+      return Response.json({ error: "剧本不存在或无版本" }, { status: 404 });
+    }
+
+    const [result, versions] = await Promise.all([
+      loadProduction(id, versionId),
+      listVersions(id),
+    ]);
+
     if (!result) {
       return Response.json({ error: "剧本不存在" }, { status: 404 });
     }
-    loadFromDB(id, result.state, result.sortKeys);
-    return Response.json(result.state);
+
+    loadFromDB(id, versionId, result.state, result.sortKeys, result.snapshotIds);
+    return Response.json({ state: result.state, versionId, versions });
   } catch (err) {
     console.error("[production] load error:", err);
     return Response.json({ error: "加载失败" }, { status: 500 });

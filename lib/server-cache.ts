@@ -1,8 +1,8 @@
 import type { Block, Character, Scene, ScriptState, ScriptConfig } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { BlockOp, CharOp, SceneOp, ScriptPatch } from "./script-ops";
-import { flushToDB, savePageMap } from "./db";
-import type { DbBlock } from "./db";
+import { flushToDBVersioned, savePageMap } from "./db";
+import type { VersionedDbBlock } from "./db";
 import { computePageMap } from "./script-page";
 import type { PageLayout } from "./script-types";
 import {
@@ -21,13 +21,14 @@ const RETRY_DELAY_MS = 5_000; // retry delay after a failed flush
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 type ServerBlock = Block & {
-  orderKey: number; // internal sort (integer, used for fast reorder)
-  lexKey: string;   // Feishu-persisted sort key (base-36, 10 chars)
+  snapshotId: string; // physical DB snapshot ID (may differ from block.id after CoW)
+  orderKey: number;   // internal sort (integer, used for fast reorder)
+  lexKey: string;     // Feishu-persisted sort key (base-36, 10 chars)
 };
 
 type Dirty = {
   blocks: Map<string, ServerBlock>;
-  deletedBlockIds: Set<string>;
+  deletedSnapshotIds: Set<string>;  // snapshot_ids of deleted blocks (for versioned flush)
   chars: Map<string, Character>;
   deletedCharIds: Set<string>;
   scenes: Map<string, Scene>;
@@ -48,7 +49,8 @@ type FeishuSync = {
 };
 
 type CacheEntry = {
-  scriptId: string;
+  scriptId: string;   // productionId
+  versionId: string;
   config: ScriptConfig;
   blocks: ServerBlock[];       // sorted by orderKey
   characters: Character[];
@@ -108,14 +110,16 @@ function presenceRegistry(): Map<string, Map<string, PresenceClient>> {
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
 export function registerSSE(
-  scriptId: string,
+  productionId: string,
+  versionId: string,
   clientId: string,
   push: SSEPush
 ): () => void {
+  const key = cacheKey(productionId, versionId);
   const reg = sseRegistry();
-  if (!reg.has(scriptId)) reg.set(scriptId, new Map());
-  reg.get(scriptId)!.set(clientId, push);
-  return () => reg.get(scriptId)?.delete(clientId);
+  if (!reg.has(key)) reg.set(key, new Map());
+  reg.get(key)!.set(clientId, push);
+  return () => reg.get(key)?.delete(clientId);
 }
 
 function broadcast(scriptId: string, frame: string): void {
@@ -130,57 +134,64 @@ function broadcastSeq(scriptId: string, seq: number): void {
   broadcast(scriptId, `data: ${JSON.stringify({ seq })}\n\n`);
 }
 
-function presenceFrame(scriptId: string): string {
-  const list = getPresence(scriptId);
+// key is productionId:versionId
+function presenceFrame(key: string): string {
+  const [productionId, versionId] = key.split(':');
+  const list = getPresence(productionId, versionId);
   return `event: presence\ndata: ${JSON.stringify(list)}\n\n`;
 }
 
-function broadcastPresence(scriptId: string): void {
-  broadcast(scriptId, presenceFrame(scriptId));
+function broadcastPresence(key: string): void {
+  broadcast(key, presenceFrame(key));
 }
 
 // ─── Presence helpers ─────────────────────────────────────────────────────────
 
-export function getPresence(scriptId: string): PresenceClient[] {
+export function getPresence(productionId: string, versionId: string): PresenceClient[] {
+  const key = cacheKey(productionId, versionId);
   const reg = presenceRegistry();
-  const clients = reg.get(scriptId);
+  const clients = reg.get(key);
   if (!clients) return [];
-  // Filter out entries that haven't been updated in 90 s (stale tabs that didn't disconnect cleanly)
   const cutoff = Date.now() - 90_000;
   return Array.from(clients.values()).filter(p => p.updatedAt >= cutoff);
 }
 
 export function updatePresence(
-  scriptId: string,
+  productionId: string,
+  versionId: string,
   clientId: string,
   userName: string,
   blockId: string | null
 ): void {
+  const key = cacheKey(productionId, versionId);
   const reg = presenceRegistry();
-  if (!reg.has(scriptId)) reg.set(scriptId, new Map());
-  reg.get(scriptId)!.set(clientId, {
+  if (!reg.has(key)) reg.set(key, new Map());
+  reg.get(key)!.set(clientId, {
     clientId,
     userName,
     color: assignColor(clientId),
     blockId,
     updatedAt: Date.now(),
   });
-  broadcastPresence(scriptId);
+  broadcastPresence(key);
 }
 
-export function removePresence(scriptId: string, clientId: string): void {
-  presenceRegistry().get(scriptId)?.delete(clientId);
-  broadcastPresence(scriptId);
+export function removePresence(productionId: string, versionId: string, clientId: string): void {
+  const key = cacheKey(productionId, versionId);
+  presenceRegistry().get(key)?.delete(clientId);
+  broadcastPresence(key);
 }
 
-export { presenceFrame };
+export function presenceFrameFor(productionId: string, versionId: string): string {
+  return presenceFrame(cacheKey(productionId, versionId));
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeDirty(): Dirty {
   return {
     blocks: new Map(),
-    deletedBlockIds: new Set(),
+    deletedSnapshotIds: new Set(),
     chars: new Map(),
     deletedCharIds: new Set(),
     scenes: new Map(),
@@ -235,11 +246,17 @@ function assignLexKeys(blocks: Block[], sortKeys: Map<string, string>): string[]
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function getOrCreate(scriptId: string): CacheEntry {
+function cacheKey(productionId: string, versionId: string): string {
+  return `${productionId}:${versionId}`;
+}
+
+export function getOrCreate(productionId: string, versionId: string): CacheEntry {
+  const key = cacheKey(productionId, versionId);
   const c = cache();
-  if (!c.has(scriptId)) {
-    c.set(scriptId, {
-      scriptId,
+  if (!c.has(key)) {
+    c.set(key, {
+      scriptId: productionId,
+      versionId,
       config: { ...DEFAULT_SCRIPT_CONFIG },
       blocks: [],
       characters: [],
@@ -250,7 +267,7 @@ export function getOrCreate(scriptId: string): CacheEntry {
       feishu: null,
     });
   }
-  return c.get(scriptId)!;
+  return c.get(key)!;
 }
 
 /**
@@ -277,6 +294,7 @@ export function loadFromFeishu(
   const lexKeyArr = assignLexKeys(state.blocks, opts.sortKeys);
   const blocks: ServerBlock[] = state.blocks.map((b, i) => ({
     ...b,
+    snapshotId: b.id, // Feishu blocks use block.id as snapshot_id (legacy)
     orderKey: (i + 1) * INITIAL_KEY_GAP,
     lexKey: lexKeyArr[i],
   }));
@@ -293,6 +311,7 @@ export function loadFromFeishu(
 
   const entry: CacheEntry = {
     scriptId,
+    versionId: '', // Feishu-synced scripts don't use the versioned DB path
     config: { ...(state.config ?? DEFAULT_SCRIPT_CONFIG) },
     blocks,
     characters: [...state.characters],
@@ -325,26 +344,32 @@ export function loadFromFeishu(
 
 /**
  * Populate the cache from data loaded out of PostgreSQL.
- * sortKeys maps block_id → the sort_key stored in the DB.
+ * sortKeys maps block_id → sort_key.
+ * snapshotIds maps block_id → snapshot_id (physical DB row).
  */
 export function loadFromDB(
   productionId: string,
+  versionId: string,
   state: ScriptState,
-  sortKeys: Map<string, string>
+  sortKeys: Map<string, string>,
+  snapshotIds: Map<string, string>,
 ): void {
+  const key = cacheKey(productionId, versionId);
   const c = cache();
-  const existing = c.get(productionId);
+  const existing = c.get(key);
   if (existing?.flushTimer) clearTimeout(existing.flushTimer);
 
   const lexKeyArr = assignLexKeys(state.blocks, sortKeys);
   const blocks: ServerBlock[] = state.blocks.map((b, i) => ({
     ...b,
+    snapshotId: snapshotIds.get(b.id) ?? b.id,
     orderKey: (i + 1) * INITIAL_KEY_GAP,
     lexKey: lexKeyArr[i],
   }));
 
-  c.set(productionId, {
+  c.set(key, {
     scriptId: productionId,
+    versionId,
     config: { ...state.config },
     blocks,
     characters: [...state.characters],
@@ -356,30 +381,36 @@ export function loadFromDB(
   });
 }
 
-/** Returns the current state as seen by the client (strips orderKey and lexKey). */
-export function getState(scriptId: string): ScriptState {
-  const entry = getOrCreate(scriptId);
+/** Returns the current state as seen by the client (strips internal fields). */
+export function getState(productionId: string, versionId: string): ScriptState {
+  const entry = getOrCreate(productionId, versionId);
   return {
     config: { ...entry.config },
-    blocks: entry.blocks.map(({ orderKey: _ok, lexKey: _lk, ...b }) => b),
+    blocks: entry.blocks.map(({ snapshotId: _sn, orderKey: _ok, lexKey: _lk, ...b }) => b),
     characters: [...entry.characters],
     scenes: [...entry.scenes],
   };
 }
 
 /** Update config in cache and broadcast to all connected clients. */
-export function applyConfig(scriptId: string, config: ScriptConfig): void {
-  const entry = getOrCreate(scriptId);
+export function applyConfig(productionId: string, versionId: string, config: ScriptConfig): void {
+  const entry = getOrCreate(productionId, versionId);
   entry.config = { ...config };
-  broadcast(scriptId, `event: config\ndata: ${JSON.stringify(config)}\n\n`);
+  const key = cacheKey(productionId, versionId);
+  broadcast(key, `event: config\ndata: ${JSON.stringify(config)}\n\n`);
 }
 
 /**
- * Applies a client patch, flushes to DB immediately, and returns the new serverSeq.
+ * Applies a client patch, flushes to DB, and returns the new serverSeq.
  * If the flush fails it is retried after RETRY_DELAY_MS.
  */
-export async function applyPatch(scriptId: string, patch: ScriptPatch, userToken?: string): Promise<number> {
-  const entry = getOrCreate(scriptId);
+export async function applyPatch(
+  productionId: string,
+  versionId: string,
+  patch: ScriptPatch,
+  userToken?: string,
+): Promise<number> {
+  const entry = getOrCreate(productionId, versionId);
 
   if (userToken && entry.feishu) {
     entry.feishu.userToken = userToken;
@@ -392,9 +423,10 @@ export async function applyPatch(scriptId: string, patch: ScriptPatch, userToken
 
   entry.serverSeq += 1;
   const seq = entry.serverSeq;
+  const key = cacheKey(productionId, versionId);
 
   flush(entry)
-    .then(() => broadcastSeq(scriptId, seq))
+    .then(() => broadcastSeq(key, seq))
     .catch(err => {
       console.error("[db] flush error, scheduling retry:", err);
       scheduleRetry(entry);
@@ -425,7 +457,6 @@ function sanitizeBlockRefs(entry: CacheEntry): void {
     const updated: ServerBlock = { ...b, sceneId, characterIds };
     entry.blocks[i] = updated;
     entry.dirty.blocks.set(updated.id, updated);
-    entry.dirty.deletedBlockIds.delete(updated.id);
   }
 }
 
@@ -488,10 +519,11 @@ function applyBlockOps(entry: CacheEntry, ops: BlockOp[]) {
 
         const lexKey = keyBetween(prevBlock?.lexKey ?? null, nextBlock?.lexKey ?? null);
 
-        const sb: ServerBlock = { ...op.block, orderKey, lexKey };
+        // Sentinel prefix tells flushToDBVersioned this is a new block needing a fresh snapshot
+        const snapshotId = `sn_new_${op.block.id}`;
+        const sb: ServerBlock = { ...op.block, snapshotId, orderKey, lexKey };
         entry.blocks.splice(afterIdx + 1, 0, sb);
         entry.dirty.blocks.set(sb.id, sb);
-        entry.dirty.deletedBlockIds.delete(sb.id);
         break;
       }
 
@@ -500,6 +532,7 @@ function applyBlockOps(entry: CacheEntry, ops: BlockOp[]) {
         if (idx >= 0) {
           const sb: ServerBlock = {
             ...op.block,
+            snapshotId: entry.blocks[idx].snapshotId, // preserve existing snapshot (CoW happens in flush)
             orderKey: entry.blocks[idx].orderKey,
             lexKey: entry.blocks[idx].lexKey,
           };
@@ -510,8 +543,10 @@ function applyBlockOps(entry: CacheEntry, ops: BlockOp[]) {
       }
 
       case "delete": {
+        const delBlock = entry.blocks.find((b) => b.id === op.id);
         entry.blocks = entry.blocks.filter((b) => b.id !== op.id);
-        entry.dirty.deletedBlockIds.add(op.id);
+        // Track the snapshot_id so versioned flush can remove it from script_version
+        if (delBlock) entry.dirty.deletedSnapshotIds.add(delBlock.snapshotId);
         entry.dirty.blocks.delete(op.id);
         break;
       }
@@ -655,17 +690,23 @@ async function flush(entry: CacheEntry) {
   const sceneOrder = new Map(entry.scenes.map((s, i) => [s.id, i]));
   const charOrder = new Map(entry.characters.map((c, i) => [c.id, i]));
 
-  await flushToDB(entry.scriptId, {
-    upsertBlocks: Array.from(d.blocks.values()) as DbBlock[],
-    deleteBlockIds: Array.from(d.deletedBlockIds),
+  const result = await flushToDBVersioned(entry.scriptId, entry.versionId, {
+    upsertBlocks: Array.from(d.blocks.values()) as VersionedDbBlock[],
+    deleteSnapshotIds: Array.from(d.deletedSnapshotIds),
     upsertChars: Array.from(d.chars.values()).map(c => ({ ...c, sortOrder: charOrder.get(c.id) ?? 0 })),
     deleteCharIds: Array.from(d.deletedCharIds),
     upsertScenes: Array.from(d.scenes.values()).map(s => ({ ...s, sortOrder: sceneOrder.get(s.id) ?? 0 })),
     deleteSceneIds: Array.from(d.deletedSceneIds),
   });
 
+  // Update snapshotIds in cache for any CoW'd blocks
+  for (const [blockId, newSnapshotId] of result.newSnapshotIds) {
+    const block = entry.blocks.find(b => b.id === blockId);
+    if (block) block.snapshotId = newSnapshotId;
+  }
+
   // Non-blocking: compute and persist page map for all layouts after blocks are saved
-  const blocks: Block[] = entry.blocks.map(({ orderKey: _ok, lexKey: _lk, ...b }) => b);
+  const blocks: Block[] = entry.blocks.map(({ snapshotId: _sn, orderKey: _ok, lexKey: _lk, ...b }) => b);
   savePageMap(
     entry.scriptId,
     Object.fromEntries(ALL_LAYOUTS.map(layout => [layout, computePageMap(blocks, layout)])),

@@ -15,8 +15,9 @@ import {
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout } from "@/lib/script-types";
-import type { TagGroup, BlockTagValue } from "@/lib/db";
+import type { TagGroup, BlockTagValue, Version, VersionStatus } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
+import VersionSelector from "@/components/VersionSelector";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState } from "@/lib/script-ops";
 import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-page";
@@ -2437,10 +2438,12 @@ function CommentsPanel({
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
-  canEditText = true,
-  canEditMetadata = true,
+  canEditText: canEditTextProp = true,
+  canEditMetadata: canEditMetadataProp = true,
   canEditRehearsalMark = true,
   canImport = false,
+  versionId: initialVersionId,
+  canManageVersions = false,
 }: {
   scriptId?: string;
   productionId?: string;
@@ -2448,9 +2451,21 @@ export default function ScriptEditor({
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
+  versionId?: string | null;
+  canManageVersions?: boolean;
 }) {
-  const canEdit = canEditText || canEditMetadata || canEditRehearsalMark;
   const effectiveScriptId = productionId ?? scriptId;
+
+  // ── Version state ─────────────────────────────────────────────────────────────
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(initialVersionId ?? null);
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null);
+
+  // Gate edit permissions by version status
+  const canEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
+  const canEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
+
+  const canEdit = canEditText || canEditMetadata || canEditRehearsalMark;
   const [characters, setCharacters] = useState<Character[]>([]);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
@@ -2795,7 +2810,8 @@ export default function ScriptEditor({
         const seq = ++clientSeqRef.current;
         const patch = diffState(syncedStateRef.current, curr, seq);
         if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
-        const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}`, {
+        const vPatch = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+        const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vPatch}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
@@ -2811,7 +2827,7 @@ export default function ScriptEditor({
         isSyncingRef.current = false;
       }
     };
-  }, [effectiveScriptId]);
+  }, [effectiveScriptId, activeVersionId, canEdit]);
 
   type LoadState = "loading" | "ready" | "not-found" | "error";
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -2827,17 +2843,25 @@ export default function ScriptEditor({
     /* eslint-enable react-hooks/set-state-in-effect */
     syncedStateRef.current = null;
 
+    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const loadUrl = productionId
-      ? `${BASE_PATH}/api/production/${productionId}`
-      : `${BASE_PATH}/api/script/${effectiveScriptId}`;
+      ? `${BASE_PATH}/api/production/${productionId}${vParam}`
+      : `${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`;
 
     fetch(loadUrl)
       .then(async (r) => {
-        const body = await r.json();
+        // Production route returns { state, versionId, versions }; script route returns ScriptState directly.
+        type ProdResponse = { state: ScriptState; versionId: string; versions: Version[] };
+        type ErrResponse = { error?: string };
+        const body = await r.json() as ProdResponse | ScriptState | ErrResponse;
         if (r.status === 404) { setLoadState("not-found"); return; }
-        if (!r.ok) { setLoadError(body.error ?? "加载失败"); setLoadState("error"); return; }
+        if (!r.ok) { setLoadError((body as ErrResponse).error ?? "加载失败"); setLoadState("error"); return; }
 
-        const state = body as ScriptState;
+        const isProdResponse = productionId && "state" in body;
+        const state: ScriptState = isProdResponse
+          ? (body as ProdResponse).state
+          : (body as ScriptState);
+
         if (state.blocks.length > 0) {
           setBlocks(state.blocks);
           setCharacters(state.characters);
@@ -2845,6 +2869,19 @@ export default function ScriptEditor({
           syncedStateRef.current = state;
         }
         if (state.config) setScriptConfig({ ...DEFAULT_SCRIPT_CONFIG, ...state.config });
+
+        // Capture version info from production route response
+        if (isProdResponse) {
+          const { versions: respVersions, versionId: respVid } = body as ProdResponse;
+          setVersions(respVersions);
+          const resolvedVid = respVid ?? activeVersionId;
+          if (resolvedVid) {
+            setActiveVersionId(resolvedVid);
+            const ver = respVersions.find((v: Version) => v.id === resolvedVid);
+            setVersionStatus(ver?.status ?? null);
+          }
+        }
+
         setLoadState("ready");
 
         // Load tag groups and block tags in parallel (non-blocking)
@@ -2866,7 +2903,7 @@ export default function ScriptEditor({
         }
       })
       .catch(() => { setLoadError("网络错误，请稍后重试"); setLoadState("error"); });
-  }, [effectiveScriptId, productionId]);
+  }, [effectiveScriptId, productionId, activeVersionId]);
 
   // ── Presence — must be declared before the SSE effect that closes over setPresenceMap ──
 
@@ -2932,8 +2969,12 @@ export default function ScriptEditor({
   useEffect(() => {
     if (loadState !== "ready") return;
 
+    const streamParams = new URLSearchParams();
+    if (clientId) streamParams.set("cid", clientId);
+    if (activeVersionId) streamParams.set("v", activeVersionId);
+    const streamQuery = streamParams.toString() ? `?${streamParams.toString()}` : "";
     const es = new EventSource(
-      `${BASE_PATH}/api/script/${effectiveScriptId}/stream${clientId ? `?cid=${encodeURIComponent(clientId)}` : ""}`
+      `${BASE_PATH}/api/script/${effectiveScriptId}/stream${streamQuery}`
     );
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -2944,7 +2985,8 @@ export default function ScriptEditor({
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         try {
-          const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}`);
+          const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+          const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
           if (!r.ok) return;
           const serverState = await r.json() as ScriptState;
 
@@ -2973,7 +3015,7 @@ export default function ScriptEditor({
       es.close();
       if (debounceTimer) clearTimeout(debounceTimer);
     };
-  }, [effectiveScriptId, loadState, clientId]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId]);
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
@@ -3633,6 +3675,22 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
+          {versions.length > 0 && productionId && (
+            <>
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              <VersionSelector
+                productionId={productionId}
+                versions={versions}
+                currentVersionId={activeVersionId}
+                canManage={canManageVersions}
+                onChange={(vid) => {
+                  setActiveVersionId(vid);
+                  const ver = versions.find(v => v.id === vid);
+                  setVersionStatus(ver?.status ?? null);
+                }}
+              />
+            </>
+          )}
           {!canEdit && (
             <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
               只读

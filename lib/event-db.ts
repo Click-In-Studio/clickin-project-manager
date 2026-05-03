@@ -27,6 +27,7 @@ export type ProductionEvent = {
   description: string;
   stageManagers: { openId: string; name: string }[];
   chatId: string | null;
+  versionId: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -137,6 +138,7 @@ type EventRow = {
   id: string; production_id: string; title: string; event_type: string;
   location: string; start_time: Date | null; end_time: Date | null;
   status: string; description: string; chat_id: string | null;
+  version_id: string | null;
   created_by: string; created_at: Date; updated_at: Date;
 };
 
@@ -199,6 +201,7 @@ function rowToEvent(r: EventRow, stageManagers: { openId: string; name: string }
     description: r.description,
     stageManagers,
     chatId: r.chat_id ?? null,
+    versionId: r.version_id ?? null,
     createdBy: r.created_by,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
   };
@@ -430,7 +433,7 @@ export async function listProductionEvents(productionId: string): Promise<Produc
   const [eventsRes, smRes] = await Promise.all([
     pool.query<EventRow>(
       `SELECT id, production_id, title, event_type, location,
-              start_time, end_time, status, description, chat_id,
+              start_time, end_time, status, description, chat_id, version_id,
               created_by, created_at, updated_at
        FROM production_event WHERE production_id = $1 ORDER BY start_time NULLS LAST, created_at`,
       [productionId]
@@ -457,7 +460,7 @@ export async function getProductionEvent(id: string, productionId: string): Prom
   const [eventsRes, smRes] = await Promise.all([
     pool.query<EventRow>(
       `SELECT id, production_id, title, event_type, location,
-              start_time, end_time, status, description, chat_id,
+              start_time, end_time, status, description, chat_id, version_id,
               created_by, created_at, updated_at
        FROM production_event WHERE id = $1 AND production_id = $2`,
       [id, productionId]
@@ -500,17 +503,17 @@ export async function setEventStageManagers(
 export async function createProductionEvent(data: {
   id: string; productionId: string; title: string; eventType: string;
   location: string; startTime: string | null; endTime: string | null;
-  description: string; createdBy: string;
+  description: string; createdBy: string; versionId?: string | null;
 }): Promise<ProductionEvent> {
   const res = await getPool().query<EventRow>(
     `INSERT INTO production_event
-       (id, production_id, title, event_type, location, start_time, end_time, description, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (id, production_id, title, event_type, location, start_time, end_time, description, created_by, version_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id, production_id, title, event_type, location,
-               start_time, end_time, status, description, chat_id,
+               start_time, end_time, status, description, chat_id, version_id,
                created_by, created_at, updated_at`,
     [data.id, data.productionId, data.title, data.eventType, data.location,
-     data.startTime, data.endTime, data.description, data.createdBy]
+     data.startTime, data.endTime, data.description, data.createdBy, data.versionId ?? null]
   );
   return rowToEvent(res.rows[0]);
 }
@@ -521,6 +524,7 @@ export async function updateProductionEvent(
     title?: string; eventType?: string; location?: string;
     startTime?: string | null; endTime?: string | null;
     status?: ProductionEvent["status"]; description?: string;
+    versionId?: string | null;
   }
 ): Promise<ProductionEvent | null> {
   const sets: string[] = [];
@@ -532,12 +536,13 @@ export async function updateProductionEvent(
   if (fields.endTime     !== undefined) sets.push(`end_time    = $${vals.push(fields.endTime)}`);
   if (fields.status      !== undefined) sets.push(`status      = $${vals.push(fields.status)}`);
   if (fields.description !== undefined) sets.push(`description = $${vals.push(fields.description)}`);
+  if ("versionId" in fields)            sets.push(`version_id  = $${vals.push(fields.versionId ?? null)}`);
   if (!sets.length) return getProductionEvent(id, productionId);
   sets.push(`updated_at = now()`);
   const res = await getPool().query<EventRow>(
     `UPDATE production_event SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2
      RETURNING id, production_id, title, event_type, location,
-               start_time, end_time, status, description, chat_id,
+               start_time, end_time, status, description, chat_id, version_id,
                created_by, created_at, updated_at`,
     vals
   );

@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
-import { canUserAccessProduction, listCues, loadProduction } from "@/lib/db";
+import { canUserAccessProduction, listCues, loadProduction, getActiveVersionId } from "@/lib/db";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/feishu-sheet";
 import { formatCuePosition } from "@/lib/cue-export";
 import type { CueAnchor } from "@/lib/cue-types";
@@ -12,7 +12,7 @@ function sseFrame(event: string, data: string): string {
 
 function anchorSortKey(anchor: CueAnchor, blockIndexMap: Map<string, number>): number {
   if (anchor.kind === "gap") {
-    const i = blockIndexMap.get(anchor.afterBlockId) ?? -1;
+    const i = anchor.afterBlockId !== null ? (blockIndexMap.get(anchor.afterBlockId) ?? -1) : -1;
     return (i + 1) * 1_000_000;
   }
   const i = blockIndexMap.get(anchor.blockId) ?? -1;
@@ -54,7 +54,9 @@ export async function POST(
 
       try {
         push("log", "正在加载剧本数据…");
-        const prod = await loadProduction(productionId);
+        const versionId = await getActiveVersionId(productionId);
+        if (!versionId) { push("error", "制作无可用版本"); controller.close(); return; }
+        const prod = await loadProduction(productionId, versionId);
         if (!prod) { push("error", "制作不存在"); controller.close(); return; }
         const { blocks, characters } = prod.state;
 

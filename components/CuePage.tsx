@@ -6,10 +6,13 @@ import React, {
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
+import type { Version, VersionStatus } from "@/lib/db";
+import VersionSelector from "@/components/VersionSelector";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
 
@@ -59,7 +62,7 @@ function anchorEq(a: CueAnchor, b: CueAnchor): boolean {
 // Linear sort key: gap after block i sits between block i and block i+1.
 function anchorSortKey(anchor: CueAnchor, blockIndexMap: Map<string, number>): number {
   if (anchor.kind === "gap") {
-    const i = blockIndexMap.get(anchor.afterBlockId) ?? -1;
+    const i = anchor.afterBlockId !== null ? (blockIndexMap.get(anchor.afterBlockId) ?? -1) : -1;
     return (i + 1) * 1_000_000;
   }
   const i = blockIndexMap.get(anchor.blockId) ?? -1;
@@ -96,6 +99,10 @@ type Props = {
   myOpenId: string;
   isAdmin: boolean;
   pageMap: Record<string, number>;
+  versions?: Version[];
+  versionId?: string;
+  versionStatus?: VersionStatus;
+  canManageVersions?: boolean;
 };
 
 type Selection =
@@ -904,7 +911,15 @@ function ExportModal({
 export default function CuePage({
   productionId, productionName, blocks, characters, scenes,
   cueLists, initialCues, editableListIds, myOpenId, isAdmin, pageMap,
+  versions = [], versionId, versionStatus, canManageVersions = false,
 }: Props) {
+  const router = useRouter();
+  const versionIdRef = useRef(versionId);
+  useEffect(() => {
+    versionIdRef.current = versionId;
+    setCues(initialCues);
+    setSelection({ kind: "none" });
+  }, [versionId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [cues, setCues] = useState<Cue[]>(initialCues);
   const [copiedCue, setCopiedCue] = useState<Cue | null>(null);
   const [showExport, setShowExport] = useState(false);
@@ -1082,11 +1097,13 @@ export default function CuePage({
     return m;
   }, [cueLists]);
 
-  const canEditActive = editableListIds.includes(activeListId ?? "");
+  // Frozen/archived versions make cues read-only; editing/committed allow cue edits
+  const cueEditAllowed = !versionStatus || versionStatus === "editing" || versionStatus === "committed";
+  const canEditActive = cueEditAllowed && editableListIds.includes(activeListId ?? "");
   // Editing any cue requires an active list — prevents accidental edits with no context
   const canEditCue = useCallback((cue: Cue) =>
-    cue.cueListId === activeListId && editableListIds.includes(cue.cueListId),
-  [activeListId, editableListIds]);
+    cueEditAllowed && cue.cueListId === activeListId && editableListIds.includes(cue.cueListId),
+  [activeListId, editableListIds, cueEditAllowed]);
 
   // ── updateCueField ────────────────────────────────────────────────────────
   const updateCueField = useCallback(async (
@@ -1095,8 +1112,10 @@ export default function CuePage({
   ) => {
     setSavingCueId(cue.id);
     try {
+      const vid = versionIdRef.current;
+      const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
       const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${cue.cueListId}/cues/${cue.id}`,
+        `${BASE_PATH}/api/production/${productionId}/cuelists/${cue.cueListId}/cues/${cue.id}${vParam}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1105,6 +1124,11 @@ export default function CuePage({
       );
       if (res.ok) {
         setCues(prev => prev.map(c => c.id === cue.id ? { ...c, ...fields } : c));
+      } else if (res.status === 409) {
+        const body = await res.json() as { error: string };
+        if (body.error === "cue_number_conflict") {
+          alert(`编号 "${fields.number}" 与其他版本中的 Cue 冲突，无法修改。`);
+        }
       }
     } finally {
       setSavingCueId(null);
@@ -1232,9 +1256,11 @@ export default function CuePage({
         const ids = new Set(visibleListIdsRef.current);
         if (activeListIdRef.current) ids.add(activeListIdRef.current);
         const listIds = [...ids];
+        const vid = versionIdRef.current;
+        const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
         const results = await Promise.all(
           listIds.map(listId =>
-            fetch(`${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues`)
+            fetch(`${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues${vParam}`)
               .then(r => r.ok ? (r.json() as Promise<Cue[]>) : [])
               .catch(() => [] as Cue[])
           )
@@ -1261,7 +1287,7 @@ export default function CuePage({
       if (cue.cueListId !== activeListId) return false;
       const startId = cue.start.kind === "block" ? cue.start.blockId : cue.start.afterBlockId;
       const endId   = cue.end.kind   === "block" ? cue.end.blockId   : cue.end.afterBlockId;
-      return !blockIndexMap.has(startId) || !blockIndexMap.has(endId);
+      return (startId !== null && !blockIndexMap.has(startId)) || (endId !== null && !blockIndexMap.has(endId));
     });
   }, [cues, blockIndexMap, activeListId]);
 
@@ -1367,8 +1393,10 @@ export default function CuePage({
     const nums = existing.map(n => parseInt(n.replace(/\D/g, ""))).filter(n => !isNaN(n));
     const next = nums.length ? Math.max(...nums) + 1 : 1;
 
+    const vid = versionIdRef.current;
+    const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
     const res = await fetch(
-      `${BASE_PATH}/api/production/${productionId}/cuelists/${activeListId}/cues`,
+      `${BASE_PATH}/api/production/${productionId}/cuelists/${activeListId}/cues${vParam}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1388,8 +1416,10 @@ export default function CuePage({
 
   // ── Delete cue ────────────────────────────────────────────────────────────
   const deleteCue = useCallback(async (cue: Cue) => {
+    const vid = versionIdRef.current;
+    const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
     const res = await fetch(
-      `${BASE_PATH}/api/production/${productionId}/cuelists/${cue.cueListId}/cues/${cue.id}`,
+      `${BASE_PATH}/api/production/${productionId}/cuelists/${cue.cueListId}/cues/${cue.id}${vParam}`,
       { method: "DELETE" }
     );
     if (res.ok) {
@@ -1702,6 +1732,7 @@ export default function CuePage({
       const idx = listColorIndex.get(cl.id) ?? 0;
       for (const cue of listCues) {
         const blockId = cue.start.kind === "block" ? cue.start.blockId : cue.start.afterBlockId;
+        if (blockId === null) continue;
         if (!map.has(blockId)) map.set(blockId, []);
         map.get(blockId)!.push({ cue, listIdx: idx });
       }
@@ -1867,8 +1898,10 @@ export default function CuePage({
       const existing = (cuesByList.get(activeListId) ?? []).map(c => c.number);
       const nums = existing.map(n => parseInt(n.replace(/\D/g, ""))).filter(n => !isNaN(n));
       const next = nums.length ? Math.max(...nums) + 1 : 1;
+      const vid = versionIdRef.current;
+      const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
       const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${activeListId}/cues`,
+        `${BASE_PATH}/api/production/${productionId}/cuelists/${activeListId}/cues${vParam}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1983,6 +2016,20 @@ export default function CuePage({
           </select>
         </div>
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          {versions.length > 0 && (
+            <>
+              <VersionSelector
+                productionId={productionId}
+                versions={versions}
+                currentVersionId={versionId ?? null}
+                canManage={canManageVersions}
+                onChange={(vid) => {
+                  router.push(`/production/${productionId}/cues?v=${encodeURIComponent(vid)}`);
+                }}
+              />
+              <span className="text-zinc-200 mx-0.5">|</span>
+            </>
+          )}
           {(["line", "page", "scene"] as const).map(t => (
             <button key={t}
               onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); }}

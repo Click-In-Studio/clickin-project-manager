@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
+import { getProductionMemberContext, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { saveScriptConfig } from "@/lib/db";
 import { applyConfig } from "@/lib/server-cache";
@@ -18,11 +18,12 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
     return Response.json({ error: "无权修改剧本设置" }, { status: 403 });
   }
 
+  const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id) ?? '';
   const body = (await req.json()) as Partial<ScriptConfig>;
   const config: ScriptConfig = { ...DEFAULT_SCRIPT_CONFIG, ...body };
 
   await saveScriptConfig(id, config);
-  applyConfig(id, config);
+  applyConfig(id, versionId, config);
 
   return Response.json({ ok: true });
 }

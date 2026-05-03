@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listProductionScenes, listProductionCharacters, flushToDB, loadProduction, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
+import { getProductionMemberContext, listProductionScenes, listProductionCharacters, flushToDB, loadProduction, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
@@ -165,10 +165,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed } = parseRows(rawRows, body);
 
+  const versionId = await getActiveVersionId(productionId);
   const [existingChars, existingScenes, production, tagGroups] = await Promise.all([
     listProductionCharacters(productionId),
     listProductionScenes(productionId),
-    loadProduction(productionId),
+    versionId ? loadProduction(productionId, versionId) : Promise.resolve(null),
     listTagGroups(productionId),
   ]);
 
