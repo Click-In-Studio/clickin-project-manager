@@ -140,6 +140,16 @@ function genVersionId(): string {
   return `ver_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/** Creates the very first empty version for a brand-new production. */
+export async function createInitialVersion(productionId: string): Promise<string> {
+  const versionId = genVersionId();
+  await getPool().query(
+    "INSERT INTO version (id, production_id, name, status) VALUES ($1, $2, '初稿', 'editing')",
+    [versionId, productionId]
+  );
+  return versionId;
+}
+
 /**
  * Creates a new Editing version branched from fromVersionId.
  * If fromVersionId is currently Editing, it is auto-committed first.
@@ -953,6 +963,7 @@ export async function importScriptToVersion(
 
 export async function createProduction(id: string, name: string): Promise<void> {
   await getPool().query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
+  await createInitialVersion(id);
 }
 
 export async function deleteProduction(id: string): Promise<void> {
