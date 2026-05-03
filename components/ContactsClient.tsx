@@ -485,8 +485,8 @@ function AddMemberPanel({
         name: selected.name,
         avatarUrl: selected.avatarUrl,
         isAdmin: false,
-        email: null,
-        phone: null,
+        email: selected.email ?? null,
+        phone: selected.phone ?? null,
         roles: selectedRoles,
         photoUrl: null,
       });
