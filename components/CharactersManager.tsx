@@ -14,6 +14,7 @@ type Props = {
   canEdit: boolean;
   embedded?: boolean;
   versionId?: string | null;
+  initialExpandedId?: string;
 };
 
 function MetaField({
@@ -446,9 +447,9 @@ function AddCharacterForm({
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded, versionId }: Props) {
+export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded, versionId, initialExpandedId }: Props) {
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
 
   const rename = async (id: string, name: string) => {
     await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {

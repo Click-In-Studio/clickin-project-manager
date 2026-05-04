@@ -109,7 +109,7 @@ export default function EventFollowerClient({
               {event.location && <span>· {event.location}</span>}
             </div>
             {event.description && (
-              <SmartText content={event.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500 mt-2" />
+              <SmartText content={event.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500 mt-2" productionId={productionId} />
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -174,7 +174,7 @@ export default function EventFollowerClient({
                         <p className="text-[11px] text-zinc-400 mt-0.5">{item.location}</p>
                       )}
                       {item.notes && (
-                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" />
+                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
                       )}
                     </div>
                     {(item.startTime || item.endTime) && (

@@ -20,6 +20,8 @@ type Props = {
   initialCharacters: CharacterDetail[];
   canEdit: boolean;
   canImport?: boolean;
+  initialSceneId?: string;
+  initialCharacterId?: string;
 };
 
 export default function Dramaturgy({
@@ -32,8 +34,13 @@ export default function Dramaturgy({
   initialCharacters,
   canEdit,
   canImport,
+  initialSceneId,
+  initialCharacterId,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("scenes");
+  // sceneId takes precedence over characterId
+  const [tab, setTab] = useState<Tab>(
+    initialCharacterId && !initialSceneId ? "characters" : "scenes"
+  );
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(initialVersionId);
   const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
   const [rehearsalMarks, setRehearsalMarks] = useState<Record<string, string[]>>(initialRehearsalMarks);
@@ -106,6 +113,7 @@ export default function Dramaturgy({
             rehearsalMarks={rehearsalMarks}
             canEdit={effectiveCanEdit}
             versionId={currentVersionId}
+            initialExpandedId={initialSceneId}
             embedded
           />
         ) : (
@@ -115,6 +123,7 @@ export default function Dramaturgy({
             productionName={productionName}
             initialCharacters={characters}
             canEdit={effectiveCanEdit}
+            initialExpandedId={initialCharacterId}
             embedded
           />
         )}

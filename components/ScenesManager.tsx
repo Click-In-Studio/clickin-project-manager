@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import VersionSelector from "./VersionSelector";
@@ -18,6 +18,7 @@ type Props = {
   embedded?: boolean;
   versions?: Version[];
   versionId?: string | null;
+  initialExpandedId?: string;
 };
 
 function MetaField({
@@ -86,6 +87,7 @@ function SceneEditRow({
   canEdit,
   productionId,
   versionId,
+  initialExpanded,
   onUpdate,
   onDelete,
   onPatchMeta,
@@ -96,6 +98,7 @@ function SceneEditRow({
   canEdit: boolean;
   productionId: string;
   versionId: string | null;
+  initialExpanded?: boolean;
   onUpdate: (number: string, name: string) => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<MetaFields>) => Promise<void>;
@@ -107,7 +110,15 @@ function SceneEditRow({
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initialExpanded ?? false);
+  const rowRef = useRef<HTMLTableRowElement>(null);
+
+  useEffect(() => {
+    if (initialExpanded && rowRef.current) {
+      rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (draftNumber !== scene.number && !editingNumber) setDraftNumber(scene.number);
   if (draftName !== scene.name && !editingName) setDraftName(scene.name);
@@ -127,7 +138,7 @@ function SceneEditRow({
 
   return (
     <>
-      <tr className={`group border-b ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}`}>
+      <tr ref={rowRef} className={`group border-b ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}`}>
         <td className={`py-3 w-24${indent ? " pl-8 pr-4" : " px-4"}`}>
           {editingNumber ? (
             <input
@@ -335,7 +346,7 @@ function AddSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded, canImport, versions, versionId }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded, canImport, versions, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
   const [marksMap, setMarksMap] = useState<Record<string, string[]>>(rehearsalMarks);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(versionId ?? null);
@@ -431,6 +442,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         canEdit={effectiveCanEdit}
                         productionId={productionId}
                         versionId={currentVersionId}
+                        initialExpanded={act.id === initialExpandedId}
                         onUpdate={(number, name) => update(act.id, number, name)}
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
@@ -444,6 +456,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                           canEdit={effectiveCanEdit}
                           productionId={productionId}
                           versionId={currentVersionId}
+                          initialExpanded={sub.id === initialExpandedId}
                           onUpdate={(number, name) => update(sub.id, number, name)}
                           onDelete={() => del(sub.id)}
                           onPatchMeta={(fields) => patchMeta(sub.id, fields)}
@@ -469,6 +482,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                     canEdit={effectiveCanEdit}
                     productionId={productionId}
                     versionId={currentVersionId}
+                    initialExpanded={s.id === initialExpandedId}
                     onUpdate={(number, name) => update(s.id, number, name)}
                     onDelete={() => del(s.id)}
                     onPatchMeta={(fields) => patchMeta(s.id, fields)}

@@ -106,7 +106,7 @@ function NoteCard({
           </button>
         </div>
       ) : (
-        <SmartText content={note.content} plugins={[memberTextPlugin(note.mentions), scriptRefTextPlugin]} />
+        <SmartText content={note.content} plugins={[memberTextPlugin(note.mentions), scriptRefTextPlugin]} productionId={productionId} />
       )}
     </div>
   );
@@ -211,7 +211,7 @@ function ReplyThread({
                   )}
                 </div>
               </div>
-              <SmartText content={reply.content} plugins={[memberTextPlugin(reply.mentions ?? []), scriptRefTextPlugin]} />
+              <SmartText content={reply.content} plugins={[memberTextPlugin(reply.mentions ?? []), scriptRefTextPlugin]} productionId={productionId} />
             </div>
 
             {isReplying && (

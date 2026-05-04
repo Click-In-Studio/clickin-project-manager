@@ -10,7 +10,11 @@ import { createPortal } from "react-dom";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import type { MentionMember } from "./MentionTextarea";
 import { BASE_PATH } from "@/lib/base-path";
-import type { ScriptBlockSearchResult } from "@/app/api/production/[id]/script/block-search/route";
+import type { MentionSearchResult } from "@/lib/mention-types";
+import {
+  encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
+  type ContentMentionAttrs,
+} from "@/lib/mention-types";
 
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
 
@@ -100,13 +104,13 @@ type SuggestionState = {
   command: (m: MentionMember) => void;
 } | null;
 
-// ─── Script-ref dropdown (#) ──────────────────────────────────────────────────
+// ─── Content-ref dropdown (#) ─────────────────────────────────────────────────
 
-type ScriptSuggState = {
-  items: ScriptBlockSearchResult[];
+type ContentSuggState = {
+  items: MentionSearchResult[];
   idx: number;
   rect: DOMRect;
-  command: (r: ScriptBlockSearchResult) => void;
+  command: (r: MentionSearchResult) => void;
 } | null;
 
 // ─── Editor ──────────────────────────────────────────────────────────────────
@@ -117,6 +121,7 @@ export default function MarkdownEditor({
   onMentionsChange = () => {},
   members = [],
   productionId,
+  versionId,
   placeholder = "写内容…",
   minHeight = 200,
   readOnly = false,
@@ -126,31 +131,31 @@ export default function MarkdownEditor({
   onMentionsChange?: (m: MentionMember[]) => void;
   members?: MentionMember[];
   productionId?: string;
+  versionId?: string | null;
   placeholder?: string;
   minHeight?: number;
   readOnly?: boolean;
 }) {
   const [sugg, setSugg] = useState<SuggestionState>(null);
-  const [scriptSugg, setScriptSugg] = useState<ScriptSuggState>(null);
-  const [scriptTooltip, setScriptTooltip] = useState<{ text: string; rect: DOMRect } | null>(null);
+  const [contentSugg, setContentSugg] = useState<ContentSuggState>(null);
 
-  // Keep mutable refs to avoid stale closures in Tiptap callbacks
   const membersRef = useRef(members);
   membersRef.current = members;
   const productionIdRef = useRef(productionId);
   productionIdRef.current = productionId;
+  const versionIdRef = useRef(versionId);
+  versionIdRef.current = versionId;
   const suggRef = useRef<SuggestionState>(null);
   suggRef.current = sugg;
   const setSuggRef = useRef(setSugg);
   setSuggRef.current = setSugg;
-  const scriptSuggRef = useRef<ScriptSuggState>(null);
-  scriptSuggRef.current = scriptSugg;
-  const setScriptSuggRef = useRef(setScriptSugg);
-  setScriptSuggRef.current = setScriptSugg;
+  const contentSuggRef = useRef<ContentSuggState>(null);
+  contentSuggRef.current = contentSugg;
+  const setContentSuggRef = useRef(setContentSugg);
+  setContentSuggRef.current = setContentSugg;
 
-  // Keyboard handler forwarded from Tiptap's onKeyDown suggestion callback
   const keyHandlerRef = useRef<((e: KeyboardEvent) => boolean) | null>(null);
-  const scriptKeyHandlerRef = useRef<((e: KeyboardEvent) => boolean) | null>(null);
+  const contentKeyHandlerRef = useRef<((e: KeyboardEvent) => boolean) | null>(null);
 
   const extensions = useMemo(() => {
     const exts = [
@@ -197,39 +202,34 @@ export default function MarkdownEditor({
       }),
     ];
 
-    // Only add script-ref suggestion when productionId is provided
     if (productionIdRef.current) {
-      const ScriptMention = Mention.extend({
-        name: "scriptMention",
+      const ContentMention = Mention.extend({
+        name: "contentMention",
         addAttributes() {
           return {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ...(this.parent as any)?.(),
-            title: {
-              default: null,
-              parseHTML: (el: Element) => el.getAttribute("data-title"),
-              renderHTML: (attrs: { title?: string }) =>
-                attrs.title ? { "data-title": attrs.title } : {},
-            },
+            kind: { default: "scene" },
+            displayMode: { default: null },
+            aux: { default: null },
+            versionId: { default: null },
+            label: { default: null },
           };
         },
-        // Match both our rendered span AND markdown-it rendered <a> links
         parseHTML() {
           return [
-            { tag: "span[data-script-mention]" },
+            { tag: "span[data-content-mention]" },
             {
               tag: "a",
-              priority: 1001, // above Link mark's default priority
+              priority: 1001,
               getAttrs(el) {
                 if (typeof el === "string") return false;
-                const text = el.textContent ?? "";
                 const href = el.getAttribute("href") ?? "";
-                if (!text.startsWith("#") || !href || href.startsWith("http")) return false;
-                return {
-                  id: href,
-                  label: text.slice(1),
-                  title: el.getAttribute("title") ?? null,
-                };
+                if (!href.startsWith(CM_HREF_PREFIX)) return false;
+                const attrs = decodeMentionHref(href);
+                if (!attrs) return false;
+                const label = (el.textContent ?? "").replace(/^#/, "");
+                return { ...attrs, label };
               },
             },
           ];
@@ -237,10 +237,11 @@ export default function MarkdownEditor({
         addStorage() {
           return {
             markdown: {
-              serialize(state: { write: (s: string) => void }, node: { attrs: { id: string; label: string; title?: string } }) {
-                const t = node.attrs.title;
-                const titlePart = t ? ` "${t.replace(/"/g, "'")}"` : "";
-                state.write(`[#${node.attrs.label}](${node.attrs.id}${titlePart})`);
+              serialize(state: { write: (s: string) => void }, node: { attrs: ContentMentionAttrs & { label?: string } }) {
+                const { kind, displayMode, id, aux, versionId, label } = node.attrs;
+                const href = encodeMentionHref({ kind, displayMode, id, aux, versionId });
+                const displayLabel = label ?? kind;
+                state.write(`[#${displayLabel}](${href})`);
               },
             },
           };
@@ -248,21 +249,23 @@ export default function MarkdownEditor({
       });
 
       exts.push(
-        ScriptMention.configure({
+        ContentMention.configure({
           HTMLAttributes: {
             class: "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-default",
           },
           renderHTML({ options, node }) {
+            const label = node.attrs.label ?? node.attrs.kind;
             return [
               "span",
               {
                 ...options.HTMLAttributes,
-                "data-script-mention": node.attrs.id,
+                "data-content-mention": node.attrs.id,
                 "data-id": node.attrs.id,
-                "data-label": node.attrs.label,
-                ...(node.attrs.title ? { "data-title": node.attrs.title, "data-tooltip": node.attrs.title } : {}),
+                "data-kind": node.attrs.kind,
+                "data-display-mode": node.attrs.displayMode ?? "",
+                "data-aux": node.attrs.aux ?? "",
               },
-              `#${node.attrs.label}`,
+              `#${label}`,
             ];
           },
           suggestion: {
@@ -270,49 +273,60 @@ export default function MarkdownEditor({
             allowSpaces: false,
             items: async ({ query }: { query: string }) => {
               const pid = productionIdRef.current;
+              const vid = versionIdRef.current;
               if (!pid || !query) return [];
               try {
+                const params = new URLSearchParams({ q: query });
+                if (vid) params.set("v", vid);
                 const res = await fetch(
-                  `${BASE_PATH}/api/production/${pid}/script/block-search?q=${encodeURIComponent(query)}`
+                  `${BASE_PATH}/api/production/${pid}/script/block-search?${params.toString()}`
                 );
-                const data = await res.json() as { results?: ScriptBlockSearchResult[] };
+                const data = await res.json() as { results?: MentionSearchResult[] };
                 return data.results ?? [];
               } catch {
                 return [];
               }
             },
             render: () => ({
-              onStart: (props: { items: ScriptBlockSearchResult[]; clientRect?: (() => DOMRect | null) | null; command: (attrs: { id: string; label: string }) => void }) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onStart: (props: any) => {
                 const rect = props.clientRect?.();
                 if (!rect) return;
-                setScriptSuggRef.current({
-                  items: props.items,
+                setContentSuggRef.current({
+                  items: props.items as MentionSearchResult[],
                   idx: 0,
                   rect,
-                  command: (r) => (props.command as (attrs: { id: string; label: string; title?: string }) => void)({
-                    id: `${BASE_PATH}/production/${productionIdRef.current}/script#block-${r.blockId}`,
-                    label: r.label,
-                    title: r.description,
+                  command: (r) => props.command({
+                    kind: r.kind,
+                    displayMode: r.displayMode ?? null,
+                    id: r.id,
+                    aux: r.aux ?? null,
+                    versionId: null,
+                    label: r.displayLabel.replace(/^#/, ""),
                   }),
                 });
               },
-              onUpdate: (props: { items: ScriptBlockSearchResult[]; clientRect?: (() => DOMRect | null) | null; command: (attrs: { id: string; label: string }) => void }) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onUpdate: (props: any) => {
                 const rect = props.clientRect?.();
-                setScriptSuggRef.current(prev => prev && rect ? {
+                setContentSuggRef.current(prev => prev && rect ? {
                   ...prev,
-                  items: props.items,
+                  items: props.items as MentionSearchResult[],
                   rect,
-                  command: (r) => (props.command as (attrs: { id: string; label: string; title?: string }) => void)({
-                    id: `${BASE_PATH}/production/${productionIdRef.current}/script#block-${r.blockId}`,
-                    label: r.label,
-                    title: r.description,
+                  command: (r) => props.command({
+                    kind: r.kind,
+                    displayMode: r.displayMode ?? null,
+                    id: r.id,
+                    aux: r.aux ?? null,
+                    versionId: null,
+                    label: r.displayLabel.replace(/^#/, ""),
                   }),
                 } : null);
               },
               onKeyDown: ({ event }: { event: KeyboardEvent }) => {
-                return scriptKeyHandlerRef.current?.(event) ?? false;
+                return contentKeyHandlerRef.current?.(event) ?? false;
               },
-              onExit: () => setScriptSuggRef.current(null),
+              onExit: () => setContentSuggRef.current(null),
             }),
           },
         })
@@ -321,7 +335,7 @@ export default function MarkdownEditor({
 
     return exts;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // created once; members/productionId accessed via ref
+  }, []);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -340,7 +354,6 @@ export default function MarkdownEditor({
       const md = (editor.storage as unknown as { markdown: { getMarkdown: () => string } }).markdown.getMarkdown();
       onChange(md);
 
-      // Extract mention nodes from the document
       const mentioned: MentionMember[] = [];
       const seen = new Set<string>();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -356,7 +369,6 @@ export default function MarkdownEditor({
     },
   });
 
-  // Wire up keyboard handlers
   const handleSuggKey = useCallback((event: KeyboardEvent): boolean => {
     const s = suggRef.current;
     if (!s || s.items.length === 0) return false;
@@ -373,84 +385,46 @@ export default function MarkdownEditor({
       if (item) { s.command(item); setSuggRef.current(null); }
       return true;
     }
-    if (event.key === "Escape") {
-      setSuggRef.current(null);
-      return true;
-    }
+    if (event.key === "Escape") { setSuggRef.current(null); return true; }
     return false;
   }, []);
 
-  const handleScriptSuggKey = useCallback((event: KeyboardEvent): boolean => {
-    const s = scriptSuggRef.current;
+  const handleContentSuggKey = useCallback((event: KeyboardEvent): boolean => {
+    const s = contentSuggRef.current;
     if (!s || s.items.length === 0) return false;
     if (event.key === "ArrowDown") {
-      setScriptSuggRef.current(prev => prev ? { ...prev, idx: Math.min(prev.idx + 1, prev.items.length - 1) } : null);
+      setContentSuggRef.current(prev => prev ? { ...prev, idx: Math.min(prev.idx + 1, prev.items.length - 1) } : null);
       return true;
     }
     if (event.key === "ArrowUp") {
-      setScriptSuggRef.current(prev => prev ? { ...prev, idx: Math.max(prev.idx - 1, 0) } : null);
+      setContentSuggRef.current(prev => prev ? { ...prev, idx: Math.max(prev.idx - 1, 0) } : null);
       return true;
     }
     if (event.key === "Enter" || event.key === "Tab") {
       const item = s.items[s.idx];
-      if (item) { s.command(item); setScriptSuggRef.current(null); }
+      if (item) { s.command(item); setContentSuggRef.current(null); }
       return true;
     }
-    if (event.key === "Escape") {
-      setScriptSuggRef.current(null);
-      return true;
-    }
+    if (event.key === "Escape") { setContentSuggRef.current(null); return true; }
     return false;
   }, []);
 
   useEffect(() => { keyHandlerRef.current = handleSuggKey; }, [handleSuggKey]);
-  useEffect(() => { scriptKeyHandlerRef.current = handleScriptSuggKey; }, [handleScriptSuggKey]);
+  useEffect(() => { contentKeyHandlerRef.current = handleContentSuggKey; }, [handleContentSuggKey]);
 
   return (
     <div
       className={readOnly
         ? "overflow-hidden"
         : "rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white"}
-      onMouseOver={e => {
-        const el = (e.target as HTMLElement).closest("[data-tooltip]");
-        const text = el?.getAttribute("data-tooltip") ?? null;
-        if (text) {
-          setScriptTooltip({ text, rect: el!.getBoundingClientRect() });
-        } else {
-          setScriptTooltip(null);
-        }
-      }}
-      onMouseLeave={() => setScriptTooltip(null)}
     >
       {!readOnly && <Toolbar editor={editor} />}
       <EditorContent editor={editor} />
 
-      {/* Script mention tooltip */}
-      {scriptTooltip && typeof document !== "undefined" && createPortal(
-        <div
-          style={{
-            position: "fixed",
-            left: scriptTooltip.rect.left,
-            top: scriptTooltip.rect.top - 8,
-            transform: "translateY(-100%)",
-            zIndex: 10000,
-          }}
-          className="bg-zinc-900 text-white text-xs px-2 py-1.5 rounded-lg pointer-events-none whitespace-pre leading-relaxed"
-        >
-          {scriptTooltip.text}
-        </div>,
-        document.body,
-      )}
-
       {/* People mention dropdown */}
       {sugg && typeof document !== "undefined" && createPortal(
         <div
-          style={{
-            position: "fixed",
-            left: sugg.rect.left,
-            top: sugg.rect.bottom + 4,
-            zIndex: 9999,
-          }}
+          style={{ position: "fixed", left: sugg.rect.left, top: sugg.rect.bottom + 4, zIndex: 9999 }}
           className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1 min-w-[140px] max-h-48 overflow-y-auto"
         >
           {sugg.items.length === 0 ? (
@@ -470,28 +444,23 @@ export default function MarkdownEditor({
         document.body,
       )}
 
-      {/* Script mention dropdown */}
-      {scriptSugg && typeof document !== "undefined" && createPortal(
+      {/* Content mention dropdown */}
+      {contentSugg && typeof document !== "undefined" && createPortal(
         <div
-          style={{
-            position: "fixed",
-            left: scriptSugg.rect.left,
-            top: scriptSugg.rect.bottom + 4,
-            zIndex: 9999,
-          }}
+          style={{ position: "fixed", left: contentSugg.rect.left, top: contentSugg.rect.bottom + 4, zIndex: 9999 }}
           className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1 min-w-[220px] max-w-[360px] max-h-64 overflow-y-auto"
         >
-          {scriptSugg.items.length === 0 ? (
+          {contentSugg.items.length === 0 ? (
             <p className="px-3 py-2 text-sm text-zinc-400">无匹配内容</p>
-          ) : scriptSugg.items.map((r, i) => (
+          ) : contentSugg.items.map((r, i) => (
             <button
-              key={`${r.blockId}-${i}`}
-              onMouseDown={e => { e.preventDefault(); scriptSugg.command(r); setScriptSugg(null); }}
+              key={`${r.kind}:${r.id}:${i}`}
+              onMouseDown={e => { e.preventDefault(); contentSugg.command(r); setContentSugg(null); }}
               className={`w-full text-left px-3 py-2 ${
-                i === scriptSugg.idx ? "bg-amber-50" : "hover:bg-zinc-50"
+                i === contentSugg.idx ? "bg-amber-50" : "hover:bg-zinc-50"
               }`}
             >
-              <span className="font-mono text-sm font-semibold text-amber-700">#{r.label}</span>
+              <span className="font-mono text-sm font-semibold text-amber-700">{r.displayLabel}</span>
               {r.description && (
                 <span className="ml-2 text-xs text-zinc-400 truncate max-w-[200px] inline-block align-bottom overflow-hidden">{r.description}</span>
               )}

@@ -11,12 +11,16 @@ import { match as pinyinMatch } from "pinyin-pro";
 import { BASE_PATH } from "@/lib/base-path";
 import type { JSONContent } from "@tiptap/react";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
-import type { ScriptBlockSearchResult } from "@/app/api/production/[id]/script/block-search/route";
+import type { MentionSearchResult } from "@/lib/mention-types";
+import {
+  serializeMention, deserializeMention,
+  type ContentMentionAttrs,
+} from "@/lib/mention-types";
 import type { MentionMember } from "./MentionTextarea";
 
 // ── Plugin types ──────────────────────────────────────────────────────────────
 
-export type DropItem = { id: string; label: string; secondary?: string };
+export type DropItem = { id: string; label: string; secondary?: string; data?: unknown };
 
 export type DropPlugin = {
   trigger: string;
@@ -26,7 +30,6 @@ export type DropPlugin = {
   renderItem: (item: DropItem, active: boolean) => React.ReactNode;
   format: (item: DropItem) => string;
   onPick?: (item: DropItem) => void;
-  // Returns attrs for the TipTap mention node (used instead of format() in rich mode)
   toNode?: (item: DropItem) => Record<string, unknown>;
 };
 
@@ -54,9 +57,9 @@ export function memberDropPlugin(
   };
 }
 
-// ── Factory: #script ref ──────────────────────────────────────────────────────
+// ── Factory: #content ref ─────────────────────────────────────────────────────
 
-export function scriptRefDropPlugin(productionId: string, versionId?: string | null): DropPlugin {
+export function contentRefPlugin(productionId: string, versionId?: string | null): DropPlugin {
   return {
     trigger: "#",
     emptyLabel: versionId === null ? "请先为活动选择版本" : "无匹配内容",
@@ -69,12 +72,12 @@ export function scriptRefDropPlugin(productionId: string, versionId?: string | n
         const res = await fetch(
           `${BASE_PATH}/api/production/${productionId}/script/block-search?${params.toString()}`
         );
-        const data = await res.json() as { results?: ScriptBlockSearchResult[] };
+        const data = await res.json() as { results?: MentionSearchResult[] };
         return (data.results ?? []).map(r => ({
-          // url (cue results) stored in id slot with leading "/"; else blockId
-          id: r.url ?? r.blockId,
-          label: r.label,
+          id: `${r.kind}:${r.id}:${r.aux ?? ""}:${r.displayMode ?? ""}`,
+          label: r.displayLabel.startsWith("#") ? r.displayLabel.slice(1) : r.displayLabel,
           secondary: r.description,
+          data: r,
         }));
       } catch {
         return [];
@@ -91,25 +94,39 @@ export function scriptRefDropPlugin(productionId: string, versionId?: string | n
       </span>
     ),
     format: (item) => {
-      const href = item.id.startsWith("/")
-        ? `${BASE_PATH}${item.id}`
-        : `${BASE_PATH}/production/${productionId}/script#block-${item.id}`;
-      return `[#${item.label}](${href}${item.secondary ? ` "${item.secondary.replace(/"/g, "'")}"` : ""})`;
+      const r = item.data as MentionSearchResult | undefined;
+      if (!r) return `#${item.label}`;
+      return serializeMention({
+        kind: r.kind,
+        displayMode: r.displayMode ?? null,
+        id: r.id,
+        aux: r.aux ?? null,
+        versionId: null,
+      });
     },
     toNode: (item) => {
-      const href = item.id.startsWith("/")
-        ? `${BASE_PATH}${item.id}`
-        : `${BASE_PATH}/production/${productionId}/script#block-${item.id}`;
-      return { id: item.id, label: item.label, href, title: item.secondary ?? null };
+      const r = item.data as MentionSearchResult | undefined;
+      if (!r) return { kind: "page", displayMode: null, id: item.id, aux: null, versionId: null, label: item.label };
+      return {
+        kind: r.kind,
+        displayMode: r.displayMode ?? null,
+        id: r.id,
+        aux: r.aux ?? null,
+        versionId: r.versionId ?? null,
+        label: item.label,
+      } satisfies ContentMentionAttrs & { label: string };
     },
   };
 }
 
-// ── TipTap mention extensions ─────────────────────────────────────────────────
+// Keep the old name as an alias for backward compatibility with existing callers
+export { contentRefPlugin as scriptRefDropPlugin };
 
-// Script mention — adds href and title attrs on top of standard Mention attrs
-const ScriptMentionExt = Mention.extend({
-  name: "scriptMention",
+// ── TipTap extensions ─────────────────────────────────────────────────────────
+
+// contentMention — replaces scriptMention, stores stable IDs
+const ContentMentionExt = Mention.extend({
+  name: "contentMention",
   addKeyboardShortcuts() {
     return {
       Backspace: () =>
@@ -130,22 +147,17 @@ const ScriptMentionExt = Mention.extend({
   },
   addAttributes() {
     return {
-      ...this.parent?.(),
-      href: {
-        default: null,
-        parseHTML: (el) => el.getAttribute("data-href"),
-        renderHTML: (attrs) => (attrs.href ? { "data-href": attrs.href } : {}),
-      },
-      title: {
-        default: null,
-        parseHTML: (el) => el.getAttribute("data-title") || null,
-        renderHTML: (attrs) => (attrs.title ? { "data-title": attrs.title } : {}),
-      },
+      kind: { default: "scene" },
+      displayMode: { default: null },
+      id: { default: "" },
+      aux: { default: null },
+      versionId: { default: null },
+      label: { default: null }, // transient display label, not stored in DB
     };
   },
 });
 
-// At-mention — standard Mention attrs (id, label) are enough
+// atMention — unchanged
 const AtMentionExt = Mention.extend({ name: "atMention" });
 
 // ── Text serialisation ────────────────────────────────────────────────────────
@@ -156,9 +168,9 @@ function serializeDoc(editor: ReturnType<typeof useEditor>): string {
     blockSeparator: "\n",
     textSerializers: {
       hardBreak: () => "\n",
-      scriptMention: ({ node }) => {
-        const { label, href, title } = node.attrs;
-        return `[#${label}](${href}${title ? ` "${title}"` : ""})`;
+      contentMention: ({ node }) => {
+        const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
+        return serializeMention({ kind, displayMode, id, aux, versionId });
       },
       atMention: ({ node }) => `@${node.attrs.label}`,
     },
@@ -168,21 +180,40 @@ function serializeDoc(editor: ReturnType<typeof useEditor>): string {
 // ── Text → TipTap JSON ────────────────────────────────────────────────────────
 
 function parseLine(line: string): JSONContent[] {
-  const SCRIPT = String.raw`\[#[^\]\n]*\]\([^\s)"]+(?:\s+"[^"]*")?\)`;
+  // Match new format [#kind:id] OR legacy format [#label](href "title")
+  const CMENTION = String.raw`\[#[^\]\n]*\](?:\([^\s)"]+(?:\s+"[^"]*")?\))?`;
   const AT = String.raw`@[\w一-鿿]+`;
-  const parts = line.split(new RegExp(`(${SCRIPT}|${AT})`));
+  const parts = line.split(new RegExp(`(${CMENTION}|${AT})`));
   const nodes: JSONContent[] = [];
   for (const part of parts) {
     if (!part) continue;
-    const sm = part.match(/^\[#([^\]]*)\]\(([^\s)"]+)(?:\s+"([^"]*)")?\)$/);
-    if (sm) {
-      const [, label, href, title] = sm;
-      nodes.push({
-        type: "scriptMention",
-        attrs: { id: href.split("#block-").pop() ?? href, label, href, title: title ?? null },
-      });
+
+    // New format: [#kind:id] or [#kind:id:aux]
+    if (/^\[#[^\]]+\]$/.test(part)) {
+      const attrs = deserializeMention(part);
+      if (attrs) {
+        nodes.push({ type: "contentMention", attrs: { ...attrs, label: null } });
+        continue;
+      }
+    }
+
+    // Legacy format: [#label](href "title") — migrate to contentMention using extracted block ID
+    const legacyM = part.match(/^\[#([^\]]*)\]\(([^\s)"]+)(?:\s+"([^"]*)")?\)$/);
+    if (legacyM) {
+      const [, label, href] = legacyM;
+      const blockIdM = href.match(/#block-([^"?\s]+)/);
+      if (blockIdM) {
+        nodes.push({
+          type: "contentMention",
+          attrs: { kind: "block", displayMode: "scene", id: blockIdM[1], aux: null, versionId: null, label },
+        });
+        continue;
+      }
+      // Legacy cue/other URL — keep as text (label is the displayed text)
+      nodes.push({ type: "text", text: `#${label}` });
       continue;
     }
+
     const am = part.match(/^@([\w一-鿿]+)$/);
     if (am) {
       nodes.push({ type: "atMention", attrs: { id: am[1], label: am[1] } });
@@ -241,15 +272,12 @@ export default function SmartTextarea({
   const pluginsRef = useRef(plugins);
   const lastEmittedRef = useRef(value);
 
-  // Keep refs in sync after each render (never during render)
   useEffect(() => { dropRef.current = drop; });
   useEffect(() => { pluginsRef.current = plugins; });
 
-  // Computed once at mount — plugin set doesn't change at runtime for a given instance
   const hasHashPlugin = plugins.some((p) => p.trigger === "#");
   const hasAtPlugin = plugins.some((p) => p.trigger === "@");
 
-  // Stable suggestion handlers — created once, read from refs at call time
   const suggHandlers = useRef({
     onStart(props: SuggestionProps<DropItem>, trigger: string) {
       setDrop({
@@ -301,14 +329,12 @@ export default function SmartTextarea({
     },
   });
 
-  // makeSuggestion and the useMemo below capture refs in async TipTap callbacks —
-  // .current is never read during React render, only when TipTap fires the callbacks.
   /* eslint-disable react-hooks/refs */
 
   function makeSuggestion(trigger: string, enabled: boolean) {
     return {
       char: trigger,
-      pluginKey: new PluginKey(`${trigger === "#" ? "script" : "at"}Mention`),
+      pluginKey: new PluginKey(`${trigger === "#" ? "contentMention" : "atMention"}`),
       allow: () => enabled,
       items: ({ query }: { query: string }) =>
         pluginsRef.current.find((p) => p.trigger === trigger)?.search(query) ?? [],
@@ -331,26 +357,31 @@ export default function SmartTextarea({
       listItem: false, horizontalRule: false,
     }),
     Placeholder.configure({ placeholder }),
-    ScriptMentionExt.configure({
+    ContentMentionExt.configure({
       renderText: ({ node }) => {
-        const { label, href, title } = node.attrs;
-        return `[#${label}](${href}${title ? ` "${title}"` : ""})`;
+        const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
+        return serializeMention({ kind, displayMode, id, aux, versionId });
       },
-      renderHTML: ({ node }) => [
-        "span",
-        {
-          "data-type": "scriptMention",
-          "data-id": node.attrs.id,
-          "data-label": node.attrs.label,
-          "data-href": node.attrs.href ?? "",
-          "data-title": node.attrs.title ?? "",
-          style:
-            "display:inline-flex;align-items:center;padding:0 4px;border-radius:4px;" +
-            "font-family:monospace;font-size:11px;font-weight:600;" +
-            "background:#fffbeb;color:#b45309;border:1px solid #fde68a;cursor:default;",
-        },
-        `#${node.attrs.label}`,
-      ],
+      renderHTML: ({ node }) => {
+        const { kind, displayMode, id, aux, versionId, label } = node.attrs;
+        const displayLabel = label ?? kind;
+        return [
+          "span",
+          {
+            "data-type": "contentMention",
+            "data-kind": kind,
+            "data-display-mode": displayMode ?? "",
+            "data-id": id,
+            "data-aux": aux ?? "",
+            "data-version-id": versionId ?? "",
+            style:
+              "display:inline-flex;align-items:center;padding:0 4px;border-radius:4px;" +
+              "font-family:monospace;font-size:11px;font-weight:600;" +
+              "background:#fffbeb;color:#b45309;border:1px solid #fde68a;cursor:default;",
+          },
+          `#${displayLabel}`,
+        ];
+      },
       suggestion: makeSuggestion("#", hasHashPlugin),
     }),
     AtMentionExt.configure({
@@ -398,7 +429,6 @@ export default function SmartTextarea({
     },
   });
 
-  // Sync external value → editor (e.g. form reset, external state change)
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     if (value === lastEmittedRef.current) return;

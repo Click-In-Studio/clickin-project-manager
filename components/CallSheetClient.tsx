@@ -100,7 +100,7 @@ export default function CallSheetClient({
                         <p className="text-[11px] text-zinc-400 mt-0.5">{item.location}</p>
                       )}
                       {item.notes && (
-                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5 italic" />
+                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5 italic" productionId={productionId} />
                       )}
                     </div>
                     {(item.startTime || item.endTime) && (
@@ -145,7 +145,7 @@ export default function CallSheetClient({
                       <span className="ml-2 text-[11px] text-zinc-400">{deptMap.get(ct.departmentId)}</span>
                     )}
                     {ct.notes && (
-                      <SmartText content={ct.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" />
+                      <SmartText content={ct.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
                     )}
                   </div>
                 </div>

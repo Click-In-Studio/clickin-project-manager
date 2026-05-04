@@ -137,7 +137,7 @@ function ReqCard({
       </div>
 
       {req.description && (
-        <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500 mb-2" />
+        <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500 mb-2" productionId={productionId} />
       )}
 
       {req.assignees.length > 0 && (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Version, VersionStatus } from "@/lib/db";
 
@@ -31,10 +32,22 @@ export default function VersionSelector({
 }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const urlHandled = useRef(false);
+  const searchParams = useSearchParams();
 
   const current = versions.find(v => v.id === currentVersionId)
     ?? versions.find(v => v.status === "editing")
     ?? versions[0];
+
+  // On first mount, apply ?v= URL param if it names a valid version different from current
+  useEffect(() => {
+    if (urlHandled.current) return;
+    urlHandled.current = true;
+    const vParam = searchParams.get("v");
+    if (!vParam || vParam === currentVersionId) return;
+    if (versions.some(v => v.id === vParam)) select(vParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!open) return;

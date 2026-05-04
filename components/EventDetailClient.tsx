@@ -298,7 +298,7 @@ function InfoTab({
         {event.description && (
           <div className="col-span-2">
             <dt className="text-xs text-zinc-400 mb-0.5">备注</dt>
-            <dd className="text-zinc-700"><SmartText content={event.description} plugins={[scriptRefTextPlugin]} /></dd>
+            <dd className="text-zinc-700"><SmartText content={event.description} plugins={[scriptRefTextPlugin]} productionId={productionId} versionId={versionId} /></dd>
           </div>
         )}
         {SM_EVENT_TYPES.has(event.eventType) && (
@@ -1477,7 +1477,7 @@ function ScheduleTableView({
                 </span>
               )}
               {!cell.isBreak && cell.item.notes && (
-                <span className="opacity-60 w-full mt-0.5 italic"><SmartText content={cell.item.notes} plugins={[scriptRefTextPlugin]} /></span>
+                <span className="opacity-60 w-full mt-0.5 italic"><SmartText content={cell.item.notes} plugins={[scriptRefTextPlugin]} productionId={productionId} /></span>
               )}
             </div>
           );
@@ -1720,7 +1720,7 @@ function PersonCallTimeRow({
             {fmtTime(callTime.callAt)}
           </span>
           {isLate && <span className="text-xs text-amber-500">⚠ 偏晚</span>}
-          {callTime.notes && <span className="text-xs text-zinc-400"><SmartText content={callTime.notes} plugins={[scriptRefTextPlugin]} /></span>}
+          {callTime.notes && <span className="text-xs text-zinc-400"><SmartText content={callTime.notes} plugins={[scriptRefTextPlugin]} productionId={productionId} /></span>}
           {canEdit && <button onClick={startEdit} className="text-xs text-zinc-400 hover:text-zinc-600">编辑</button>}
         </>
       ) : (
@@ -1894,7 +1894,7 @@ function TechReqCard({
             </>
           ) : (
             <>
-              {req.description && <p className="text-sm text-zinc-600 pt-2"><SmartText content={req.description} plugins={[scriptRefTextPlugin]} /></p>}
+              {req.description && <p className="text-sm text-zinc-600 pt-2"><SmartText content={req.description} plugins={[scriptRefTextPlugin]} productionId={productionId} /></p>}
               {req.presetMinutes != null && (
                 <p className="text-xs text-zinc-400">提前 {req.presetMinutes} 分钟准备</p>
               )}
@@ -2643,7 +2643,7 @@ function DeptNotesList({
                   className="self-start px-2 py-1 text-xs rounded-lg bg-zinc-800 text-white">保存</button>
               </div>
             ) : (
-              <SmartText content={note.content} plugins={[memberTextPlugin(note.mentions ?? []), scriptRefTextPlugin]} />
+              <SmartText content={note.content} plugins={[memberTextPlugin(note.mentions ?? []), scriptRefTextPlugin]} productionId={productionId} />
             )}
           </div>
         );

@@ -307,7 +307,7 @@ export default function ReqDetailClient({
                         </p>
                       )}
                       {item.notes && (
-                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-400 mt-0.5 truncate" />
+                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-400 mt-0.5 truncate" productionId={productionId} />
                       )}
                     </div>
                   </div>
@@ -410,7 +410,7 @@ export default function ReqDetailClient({
               {req.description && (
                 <div>
                   <p className="text-xs text-zinc-400 mb-1">详情</p>
-                  <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-zinc-600" />
+                  <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-zinc-600" productionId={productionId} />
                 </div>
               )}
               {req.assignees.length > 0 && (
