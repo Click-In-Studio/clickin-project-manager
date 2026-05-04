@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { SceneDetail } from "@/lib/db";
+import MountPointAssets from "@/components/assets/MountPointAssets";
 
 type Props = {
   productionId: string;
   productionName: string;
   scene: SceneDetail;
   canEdit: boolean;
+  versionId?: string | null;
 };
 
 function Field({
@@ -70,7 +72,7 @@ function Field({
   );
 }
 
-export default function SceneDetailView({ productionId, productionName, scene, canEdit }: Props) {
+export default function SceneDetailView({ productionId, productionName, scene, canEdit, versionId }: Props) {
   const router = useRouter();
   const [number, setNumber] = useState(scene.number);
   const [name, setName] = useState(scene.name);
@@ -87,7 +89,7 @@ export default function SceneDetailView({ productionId, productionName, scene, c
     await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${scene.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(versionId ? { ...body, versionId } : body),
     });
   };
 
@@ -197,6 +199,19 @@ export default function SceneDetailView({ productionId, productionName, scene, c
             multiline
             canEdit={canEdit}
             onSave={(v) => patchScene({ stageNotes: v })}
+          />
+        </div>
+
+        {/* Scene assets */}
+        <div className="rounded-2xl bg-white shadow-sm px-6 py-4">
+          <MountPointAssets
+            productionId={productionId}
+            mountType="scene"
+            mountId={scene.id}
+            label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
+            canEdit={canEdit}
+            versionId={versionId}
+            display="panel"
           />
         </div>
 

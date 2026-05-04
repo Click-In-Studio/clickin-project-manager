@@ -129,11 +129,11 @@ export async function getVersion(versionId: string): Promise<Version | null> {
 
 /** Returns the most recently created editing version, or null if none. */
 export async function getActiveVersionId(productionId: string): Promise<string | null> {
-  const res = await getPool().query<{ id: string }>(
-    "SELECT id FROM version WHERE production_id = $1 AND status = 'editing' ORDER BY created_at DESC LIMIT 1",
+  const res = await getPool().query<{ active_version_id: string | null }>(
+    "SELECT active_version_id FROM production WHERE id = $1",
     [productionId]
   );
-  return res.rows[0]?.id ?? null;
+  return res.rows[0]?.active_version_id ?? null;
 }
 
 function genVersionId(): string {
@@ -143,10 +143,24 @@ function genVersionId(): string {
 /** Creates the very first empty version for a brand-new production. */
 export async function createInitialVersion(productionId: string): Promise<string> {
   const versionId = genVersionId();
-  await getPool().query(
-    "INSERT INTO version (id, production_id, name, status) VALUES ($1, $2, '初稿', 'editing')",
-    [versionId, productionId]
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "INSERT INTO version (id, production_id, name, status) VALUES ($1, $2, '初稿', 'editing')",
+      [versionId, productionId]
+    );
+    await client.query(
+      "UPDATE production SET active_version_id = $1 WHERE id = $2",
+      [versionId, productionId]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
   return versionId;
 }
 
@@ -200,13 +214,16 @@ export async function createVersion(
 
     // Copy scene and character snapshots
     await client.query(
-      `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
-       SELECT scene_id, $1, num, name, sort_order, parent_id FROM scene_version WHERE version_id = $2`,
+      `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id,
+                                  synopsis, action_line, music, stage_notes, expected_duration)
+       SELECT scene_id, $1, num, name, sort_order, parent_id,
+              synopsis, action_line, music, stage_notes, expected_duration
+       FROM scene_version WHERE version_id = $2`,
       [newVersionId, fromVersionId]
     );
     await client.query(
-      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
-       SELECT character_id, $1, name, sort_order, is_aggregate FROM character_version WHERE version_id = $2`,
+      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate, gender, biography, role_type)
+       SELECT character_id, $1, name, sort_order, is_aggregate, gender, biography, role_type FROM character_version WHERE version_id = $2`,
       [newVersionId, fromVersionId]
     );
 
@@ -216,6 +233,11 @@ export async function createVersion(
        SELECT asset_id, $1, asset_file_id FROM asset_version_rel WHERE version_id = $2
        ON CONFLICT (asset_id, version_id) DO NOTHING`,
       [newVersionId, fromVersionId]
+    );
+
+    await client.query(
+      "UPDATE production SET active_version_id = $1 WHERE id = $2",
+      [newVersionId, productionId]
     );
 
     await client.query("COMMIT");
@@ -279,14 +301,22 @@ export async function rollbackToVersion(
 
     // Copy scene and character snapshots from the target (rollback source) version
     await client.query(
-      `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
-       SELECT scene_id, $1, num, name, sort_order, parent_id FROM scene_version WHERE version_id = $2`,
+      `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id,
+                                  synopsis, action_line, music, stage_notes, expected_duration)
+       SELECT scene_id, $1, num, name, sort_order, parent_id,
+              synopsis, action_line, music, stage_notes, expected_duration
+       FROM scene_version WHERE version_id = $2`,
       [newVersionId, targetVersionId]
     );
     await client.query(
-      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
-       SELECT character_id, $1, name, sort_order, is_aggregate FROM character_version WHERE version_id = $2`,
+      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate, gender, biography, role_type)
+       SELECT character_id, $1, name, sort_order, is_aggregate, gender, biography, role_type FROM character_version WHERE version_id = $2`,
       [newVersionId, targetVersionId]
+    );
+
+    await client.query(
+      "UPDATE production SET active_version_id = $1 WHERE id = $2",
+      [newVersionId, productionId]
     );
 
     await client.query("COMMIT");
@@ -531,15 +561,13 @@ export async function flushToDBVersioned(
   try {
     await client.query("BEGIN");
 
-    // Scenes: ensure identity row exists in scene (for FK), then upsert per-version data
+    // Scenes: ensure identity row exists in scene (FK anchor), then upsert versioned data
     if (upsertScenes.length > 0) {
       await client.query(
-        `INSERT INTO scene (id, production_id, num, name, sort_order, parent_id)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+        `INSERT INTO scene (id, production_id)
+         SELECT unnest($1::text[]), $2::text
          ON CONFLICT (id) DO NOTHING`,
-        [upsertScenes.map(s => s.id), productionId,
-         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
-         upsertScenes.map(s => s.parentId ?? null)]
+        [upsertScenes.map(s => s.id), productionId]
       );
       await client.query(
         `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
@@ -553,15 +581,13 @@ export async function flushToDBVersioned(
       );
     }
 
-    // Characters: ensure identity row exists in character (for FK), then upsert per-version data
+    // Characters: ensure identity row exists in character (FK anchor), then upsert versioned data
     if (upsertChars.length > 0) {
       await client.query(
-        `INSERT INTO character (id, production_id, name, sort_order, is_aggregate)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+        `INSERT INTO character (id, production_id)
+         SELECT unnest($1::text[]), $2::text
          ON CONFLICT (id) DO NOTHING`,
-        [upsertChars.map(c => c.id), productionId,
-         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
-         upsertChars.map(c => c.isAggregate)]
+        [upsertChars.map(c => c.id), productionId]
       );
       await client.query(
         `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
@@ -776,24 +802,47 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
 
     if (upsertScenes.length > 0) {
       await client.query(
-        `INSERT INTO scene (id, production_id, num, name, sort_order, parent_id)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
-         ON CONFLICT (id) DO UPDATE SET num = EXCLUDED.num, name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
-        [upsertScenes.map(s => s.id), productionId,
-         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
-         upsertScenes.map(s => s.parentId ?? null)]
+        `INSERT INTO scene (id, production_id)
+         SELECT unnest($1::text[]), $2::text
+         ON CONFLICT (id) DO NOTHING`,
+        [upsertScenes.map(s => s.id), productionId]
       );
+      if (versionId) {
+        await client.query(
+          `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
+           SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+           ON CONFLICT (scene_id, version_id) DO UPDATE
+             SET num = EXCLUDED.num, name = EXCLUDED.name,
+                 sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
+          [upsertScenes.map(s => s.id), versionId,
+           upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
+           upsertScenes.map(s => s.parentId ?? null)]
+        );
+      } else {
+        console.error(`[fallback] flushToDB: no active version for production ${productionId} — scene data lost (identity rows created, scene_version not written)`);
+      }
     }
 
     if (upsertChars.length > 0) {
       await client.query(
-        `INSERT INTO character (id, production_id, name, sort_order, is_aggregate)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
-        [upsertChars.map(c => c.id), productionId,
-         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
-         upsertChars.map(c => c.isAggregate)]
+        `INSERT INTO character (id, production_id)
+         SELECT unnest($1::text[]), $2::text
+         ON CONFLICT (id) DO NOTHING`,
+        [upsertChars.map(c => c.id), productionId]
       );
+      if (versionId) {
+        await client.query(
+          `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
+           SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+           ON CONFLICT (character_id, version_id) DO UPDATE
+             SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
+          [upsertChars.map(c => c.id), versionId,
+           upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
+           upsertChars.map(c => c.isAggregate)]
+        );
+      } else {
+        console.error(`[fallback] flushToDB: no active version for production ${productionId} — character data lost (identity rows created, character_version not written)`);
+      }
     }
 
     if (upsertBlocks.length > 0) {
@@ -924,12 +973,10 @@ export async function importScriptToVersion(
 
     if (upsertScenes.length > 0) {
       await client.query(
-        `INSERT INTO scene (id, production_id, num, name, sort_order, parent_id)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
+        `INSERT INTO scene (id, production_id)
+         SELECT unnest($1::text[]), $2::text
          ON CONFLICT (id) DO NOTHING`,
-        [upsertScenes.map(s => s.id), productionId,
-         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name),
-         upsertScenes.map(s => s.sortOrder), upsertScenes.map(s => s.parentId ?? null)]
+        [upsertScenes.map(s => s.id), productionId]
       );
       await client.query(
         `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
@@ -945,12 +992,10 @@ export async function importScriptToVersion(
 
     if (upsertChars.length > 0) {
       await client.query(
-        `INSERT INTO character (id, production_id, name, sort_order, is_aggregate)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
+        `INSERT INTO character (id, production_id)
+         SELECT unnest($1::text[]), $2::text
          ON CONFLICT (id) DO NOTHING`,
-        [upsertChars.map(c => c.id), productionId,
-         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
-         upsertChars.map(c => c.isAggregate)]
+        [upsertChars.map(c => c.id), productionId]
       );
       await client.query(
         `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
@@ -1466,33 +1511,10 @@ export type CharacterDetail = Character & {
 // Upserts a production member with roles and an optional production-specific photo.
 // Photo only overwrites if a new value is provided.
 export async function listProductionCharacters(productionId: string): Promise<CharacterDetail[]> {
-  const pool = getPool();
-  const [charsRes, membersRes] = await Promise.all([
-    pool.query<{
-      id: string; name: string; is_aggregate: boolean;
-      gender: string | null; biography: string | null; role_type: string | null;
-    }>(
-      "SELECT id, name, is_aggregate, gender, biography, role_type FROM character WHERE production_id = $1 ORDER BY sort_order, name",
-      [productionId]
-    ),
-    pool.query<{ aggregate_id: string; member_id: string }>(
-      `SELECT ca.aggregate_id, ca.member_id FROM character_aggregate ca
-       JOIN character c ON c.id = ca.aggregate_id WHERE c.production_id = $1`,
-      [productionId]
-    ),
-  ]);
-  const memberMap = new Map<string, string[]>();
-  for (const row of membersRes.rows) {
-    if (!memberMap.has(row.aggregate_id)) memberMap.set(row.aggregate_id, []);
-    memberMap.get(row.aggregate_id)!.push(row.member_id);
-  }
-  return charsRes.rows.map((r) => ({
-    id: r.id, name: r.name, isAggregate: r.is_aggregate,
-    gender: r.gender ?? "",
-    biography: r.biography ?? "",
-    roleType: r.role_type ?? "",
-    memberIds: memberMap.get(r.id) ?? [],
-  }));
+  console.error(`[fallback] listProductionCharacters called without versionId for production ${productionId} — caller should use listCharactersByVersion directly`);
+  const versionId = await getActiveVersionId(productionId);
+  if (!versionId) return [];
+  return listCharactersByVersion(versionId);
 }
 
 export async function setCharacterMembers(aggregateId: string, memberIds: string[]): Promise<void> {
@@ -1530,16 +1552,19 @@ export async function bulkUpsertBlockTags(
 
 export async function patchCharacterMeta(
   id: string,
+  versionId: string,
   fields: { gender?: string; biography?: string; roleType?: string }
 ): Promise<void> {
   const sets: string[] = [];
-  const vals: unknown[] = [];
-  if (fields.gender   !== undefined) { sets.push(`gender = $${vals.push(fields.gender)}`); }
+  const vals: unknown[] = [id, versionId];
+  if (fields.gender    !== undefined) { sets.push(`gender    = $${vals.push(fields.gender)}`); }
   if (fields.biography !== undefined) { sets.push(`biography = $${vals.push(fields.biography)}`); }
   if (fields.roleType  !== undefined) { sets.push(`role_type = $${vals.push(fields.roleType)}`); }
   if (!sets.length) return;
-  vals.push(id);
-  await getPool().query(`UPDATE character SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
+  await getPool().query(
+    `UPDATE character_version SET ${sets.join(", ")} WHERE character_id = $1 AND version_id = $2`,
+    vals
+  );
 }
 
 /** Returns ordered rehearsal marks grouped by scene_id. */
@@ -1566,12 +1591,11 @@ export async function listScenesByVersion(versionId: string): Promise<SceneDetai
     synopsis: string | null; action_line: string | null; music: string | null;
     stage_notes: string | null; expected_duration: string | null;
   }>(
-    `SELECT sv.scene_id AS id, sv.num, sv.name, sv.parent_id,
-            s.synopsis, s.action_line, s.music, s.stage_notes, s.expected_duration
-     FROM scene_version sv
-     LEFT JOIN scene s ON s.id = sv.scene_id
-     WHERE sv.version_id = $1
-     ORDER BY sv.sort_order`,
+    `SELECT scene_id AS id, num, name, parent_id,
+            synopsis, action_line, music, stage_notes, expected_duration
+     FROM scene_version
+     WHERE version_id = $1
+     ORDER BY sort_order`,
     [versionId]
   );
   return res.rows.map((r) => ({
@@ -1591,12 +1615,10 @@ export async function listCharactersByVersion(versionId: string): Promise<Charac
       id: string; name: string; is_aggregate: boolean;
       gender: string | null; biography: string | null; role_type: string | null;
     }>(
-      `SELECT cv.character_id AS id, cv.name, cv.is_aggregate,
-              c.gender, c.biography, c.role_type
-       FROM character_version cv
-       LEFT JOIN character c ON c.id = cv.character_id
-       WHERE cv.version_id = $1
-       ORDER BY cv.sort_order`,
+      `SELECT character_id AS id, name, is_aggregate, gender, biography, role_type
+       FROM character_version
+       WHERE version_id = $1
+       ORDER BY sort_order`,
       [versionId]
     ),
     pool.query<{ aggregate_id: string; member_id: string }>(
@@ -1639,33 +1661,30 @@ export async function listRehearsalMarksByVersion(versionId: string): Promise<Re
 }
 
 export async function listProductionScenes(productionId: string): Promise<SceneDetail[]> {
-  const res = await getPool().query<{
-    id: string; num: string; name: string; parent_id: string | null;
-    synopsis: string | null; action_line: string | null; music: string | null;
-    stage_notes: string | null; expected_duration: string | null;
-  }>(
-    "SELECT id, num, name, parent_id, synopsis, action_line, music, stage_notes, expected_duration FROM scene WHERE production_id = $1 ORDER BY sort_order",
-    [productionId]
-  );
-  return res.rows.map((r) => ({
-    id: r.id, number: r.num, name: r.name, parentId: r.parent_id,
-    synopsis: r.synopsis ?? "",
-    actionLine: r.action_line ?? "",
-    music: r.music ?? "",
-    stageNotes: r.stage_notes ?? "",
-    expectedDuration: r.expected_duration ?? "",
-  }));
+  console.error(`[fallback] listProductionScenes called without versionId for production ${productionId} — caller should use listScenesByVersion directly`);
+  const versionId = await getActiveVersionId(productionId);
+  if (!versionId) return [];
+  return listScenesByVersion(versionId);
 }
 
-export async function getCharacterById(id: string, productionId: string): Promise<CharacterDetail | null> {
+export async function getCharacterById(id: string, productionId: string, versionId?: string | null): Promise<CharacterDetail | null> {
+  const resolvedVersionId = versionId ?? await (async () => {
+    console.error(`[fallback] getCharacterById called without versionId for char ${id} production ${productionId} — frontend bug`);
+    return getActiveVersionId(productionId);
+  })();
+  if (!resolvedVersionId) return null;
+
   const pool = getPool();
   const [charRes, membersRes] = await Promise.all([
     pool.query<{
       id: string; name: string; is_aggregate: boolean;
       gender: string | null; biography: string | null; role_type: string | null;
     }>(
-      "SELECT id, name, is_aggregate, gender, biography, role_type FROM character WHERE id = $1 AND production_id = $2",
-      [id, productionId]
+      `SELECT cv.character_id AS id, cv.name, cv.is_aggregate, cv.gender, cv.biography, cv.role_type
+       FROM character_version cv
+       JOIN character c ON c.id = cv.character_id
+       WHERE cv.character_id = $1 AND c.production_id = $2 AND cv.version_id = $3`,
+      [id, productionId, resolvedVersionId]
     ),
     pool.query<{ member_id: string }>(
       "SELECT member_id FROM character_aggregate WHERE aggregate_id = $1",
@@ -1688,47 +1707,57 @@ export type SceneDetail = Scene & {
   expectedDuration: string;
 };
 
-export async function getSceneById(id: string, productionId: string): Promise<SceneDetail | null> {
-  const res = await getPool().query<{
-    id: string; num: string; name: string; parent_id: string | null;
-    synopsis: string | null; action_line: string | null; music: string | null;
-    stage_notes: string | null; expected_duration: string | null;
-  }>(
-    "SELECT id, num, name, parent_id, synopsis, action_line, music, stage_notes, expected_duration FROM scene WHERE id = $1 AND production_id = $2",
-    [id, productionId]
-  );
-  if (!res.rows[0]) return null;
-  const r = res.rows[0];
-  return {
-    id: r.id, number: r.num, name: r.name, parentId: r.parent_id,
-    synopsis: r.synopsis ?? "",
-    actionLine: r.action_line ?? "",
-    music: r.music ?? "",
-    stageNotes: r.stage_notes ?? "",
-    expectedDuration: r.expected_duration ?? "",
-  };
+export async function getSceneById(
+  sceneId: string, productionId: string, versionId?: string | null
+): Promise<SceneDetail | null> {
+  if (versionId) {
+    const res = await getPool().query<{
+      id: string; num: string; name: string; parent_id: string | null;
+      synopsis: string | null; action_line: string | null; music: string | null;
+      stage_notes: string | null; expected_duration: string | null;
+    }>(
+      `SELECT sv.scene_id AS id, sv.num, sv.name, sv.parent_id,
+              sv.synopsis, sv.action_line, sv.music, sv.stage_notes, sv.expected_duration
+       FROM scene_version sv
+       JOIN scene s ON s.id = sv.scene_id
+       WHERE sv.scene_id = $1 AND s.production_id = $2 AND sv.version_id = $3`,
+      [sceneId, productionId, versionId]
+    );
+    if (!res.rows[0]) return null;
+    const r = res.rows[0];
+    return {
+      id: r.id, number: r.num, name: r.name, parentId: r.parent_id,
+      synopsis: r.synopsis ?? "", actionLine: r.action_line ?? "",
+      music: r.music ?? "", stageNotes: r.stage_notes ?? "", expectedDuration: r.expected_duration ?? "",
+    };
+  }
+  // No cookie version: fall back to production's active version
+  console.error(`[fallback] getSceneById called without versionId for scene ${sceneId} production ${productionId} — frontend bug`);
+  const activeVersionId = await getActiveVersionId(productionId);
+  if (!activeVersionId) return null;
+  return getSceneById(sceneId, productionId, activeVersionId);
 }
 
 export async function updateSceneMetadata(
-  id: string,
-  productionId: string,
+  sceneId: string,
+  versionId: string,
   fields: Partial<Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>
 ): Promise<void> {
   const sets: string[] = [];
-  const values: unknown[] = [id, productionId];
-  const map: Record<string, string> = {
+  const values: unknown[] = [sceneId, versionId];
+  const col: Record<string, string> = {
     synopsis: "synopsis", actionLine: "action_line", music: "music",
     stageNotes: "stage_notes", expectedDuration: "expected_duration",
   };
-  for (const [key, col] of Object.entries(map)) {
+  for (const [key, colName] of Object.entries(col)) {
     if (key in fields) {
       values.push(fields[key as keyof typeof fields] ?? "");
-      sets.push(`${col} = $${values.length}`);
+      sets.push(`${colName} = $${values.length}`);
     }
   }
   if (sets.length === 0) return;
   await getPool().query(
-    `UPDATE scene SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
+    `UPDATE scene_version SET ${sets.join(", ")} WHERE scene_id = $1 AND version_id = $2`,
     values
   );
 }

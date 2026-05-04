@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionScenes, flushToDB, updateSceneMetadata } from "@/lib/db";
+import { getProductionMemberContext, listScenesByVersion, listProductionScenes, flushToDB, updateSceneMetadata, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import type { SceneColMap, ParsedSceneNum, SceneConflict, ImportScenePreview } from "@/lib/import/types";
@@ -145,8 +145,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const sceneRows = buildSceneRows(rawRows, body.colMap, body.headerRowIncluded);
   console.log(`[import-scenes POST] sceneRows built: ${sceneRows.length} in ${Date.now() - t0}ms`);
 
-  const existing = await listProductionScenes(productionId);
-  console.log(`[import-scenes POST] listProductionScenes: ${existing.length} existing in ${Date.now() - t0}ms`);
+  const activeVersionId = await getActiveVersionId(productionId);
+  const existing = activeVersionId
+    ? await listScenesByVersion(activeVersionId)
+    : await listProductionScenes(productionId);
+  console.log(`[import-scenes POST] listScenes: ${existing.length} existing in ${Date.now() - t0}ms`);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
 
   const sceneMap = buildSceneMap(sceneRows, existingByNum, existing.length + 1);
@@ -193,8 +196,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const sceneRows = buildSceneRows(rawRows, body.colMap, body.headerRowIncluded);
   console.log(`[import-scenes PUT] sceneRows: ${sceneRows.length} in ${Date.now() - t0}ms`);
 
-  const existing = await listProductionScenes(productionId);
-  console.log(`[import-scenes PUT] listProductionScenes: ${existing.length} in ${Date.now() - t0}ms`);
+  const activeVersionId = await getActiveVersionId(productionId);
+  const existing = activeVersionId
+    ? await listScenesByVersion(activeVersionId)
+    : await listProductionScenes(productionId);
+  console.log(`[import-scenes PUT] listScenes: ${existing.length} in ${Date.now() - t0}ms`);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
 
   const sceneMap = buildSceneMap(sceneRows, existingByNum, existing.length + 1);
@@ -241,15 +247,17 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   });
   console.log(`[import-scenes PUT] flushToDB done at ${Date.now() - t0}ms`);
 
-  await Promise.all(metadataUpdates.map(({ id, row }) =>
-    updateSceneMetadata(id, productionId, {
-      synopsis: row.intro ?? undefined,
-      actionLine: row.actionLine ?? undefined,
-      music: row.music ?? undefined,
-      stageNotes: row.stagePres ?? undefined,
-      expectedDuration: row.duration ?? undefined,
-    })
-  ));
+  if (activeVersionId) {
+    await Promise.all(metadataUpdates.map(({ id, row }) =>
+      updateSceneMetadata(id, activeVersionId, {
+        synopsis: row.intro ?? undefined,
+        actionLine: row.actionLine ?? undefined,
+        music: row.music ?? undefined,
+        stageNotes: row.stagePres ?? undefined,
+        expectedDuration: row.duration ?? undefined,
+      })
+    ));
+  }
   console.log(`[import-scenes PUT] metadata done at ${Date.now() - t0}ms`);
 
   return Response.json({ ok: true, imported: upsertScenes.length });

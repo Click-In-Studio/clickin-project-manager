@@ -13,7 +13,6 @@ import {
   listRehearsalMarksByVersion,
   listProductionScenes,
   listRehearsalMarksByScene,
-  listProductionCharacters,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import Dramaturgy from "@/components/Dramaturgy";
@@ -56,7 +55,7 @@ export default async function DramaturgyPage({
     : await Promise.all([
         listProductionScenes(id),
         listRehearsalMarksByScene(id),
-        listProductionCharacters(id),
+        Promise.resolve([]),
       ]);
 
   return (
