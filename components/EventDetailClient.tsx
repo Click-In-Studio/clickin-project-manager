@@ -51,6 +51,7 @@ import MentionTextarea, { type MentionMember } from "@/components/MentionTextare
 import SmartTextarea, { scriptRefDropPlugin, memberDropPlugin } from "@/components/SmartTextarea";
 import SmartText, { scriptRefTextPlugin, memberTextPlugin } from "@/components/SmartText";
 import type { Version } from "@/lib/db";
+import MountPointAssets from "@/components/assets/MountPointAssets";
 
 function toLocalInput(iso: string | null)     { return isoToDatetimeLocal(iso); }
 function toLocalDate(iso: string | null)       { return isoToDateInput(iso); }
@@ -893,33 +894,44 @@ function ScheduleItemRow({
   const deptMap = new Map((departments ?? []).map(d => [d.id, d]));
 
   return (
-    <div className="rounded-xl bg-white shadow-sm px-4 py-3 flex items-center gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium text-zinc-800 truncate">{item.title}</span>
-          <span className="shrink-0 text-[11px] rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">
-            {SCHEDULE_ITEM_TYPE_LABELS[item.itemType] ?? item.itemType}
-          </span>
-          {(item.departmentIds ?? []).map(id => {
-            const d = deptMap.get(id);
-            return d ? (
-              <span key={id} className="shrink-0 text-[11px] rounded bg-blue-50 px-1.5 py-0.5 text-blue-500">
-                {d.name}
-              </span>
-            ) : null;
-          })}
+    <div className="rounded-xl bg-white shadow-sm px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-zinc-800 truncate">{item.title}</span>
+            <span className="shrink-0 text-[11px] rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">
+              {SCHEDULE_ITEM_TYPE_LABELS[item.itemType] ?? item.itemType}
+            </span>
+            {(item.departmentIds ?? []).map(id => {
+              const d = deptMap.get(id);
+              return d ? (
+                <span key={id} className="shrink-0 text-[11px] rounded bg-blue-50 px-1.5 py-0.5 text-blue-500">
+                  {d.name}
+                </span>
+              ) : null;
+            })}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-xs text-zinc-400">
+            {item.startTime && <span>{fmtTime(item.startTime)}{item.endTime ? ` — ${fmtTime(item.endTime)}` : ""}</span>}
+            {item.location && <span>{item.location}</span>}
+            {item.participants.length > 0 && (
+              <span>{item.participants.map(p => p.name).join("、")}</span>
+            )}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-xs text-zinc-400">
-          {item.startTime && <span>{fmtTime(item.startTime)}{item.endTime ? ` — ${fmtTime(item.endTime)}` : ""}</span>}
-          {item.location && <span>{item.location}</span>}
-          {item.participants.length > 0 && (
-            <span>{item.participants.map(p => p.name).join("、")}</span>
-          )}
-        </div>
+        {canEdit && (
+          <button onClick={onEdit} className="text-xs text-zinc-400 hover:text-zinc-600 shrink-0">编辑</button>
+        )}
       </div>
-      {canEdit && (
-        <button onClick={onEdit} className="text-xs text-zinc-400 hover:text-zinc-600 shrink-0">编辑</button>
-      )}
+      <MountPointAssets
+        productionId={productionId}
+        mountType="event_schedule"
+        mountId={item.id}
+        label={item.title}
+        canEdit={canEdit}
+        versionId={versionId}
+        display="compact"
+      />
     </div>
   );
 }
@@ -1153,6 +1165,7 @@ function ScheduleItemModal({
             <button onClick={remove} className="ml-auto text-sm text-red-400 hover:text-red-600">删除</button>
           )}
         </div>
+
       </div>
     </div>
   );
@@ -1917,6 +1930,15 @@ function TechReqCard({
             canEdit={editable}
             onSave={handleAssigneesChange}
           />
+          <MountPointAssets
+            productionId={productionId}
+            mountType="event_tech_req"
+            mountId={req.id}
+            label={req.title}
+            canEdit={canEditThisReq && !isEventClosed}
+            versionId={versionId}
+            display="panel"
+          />
           {canDelete && (
             <button onClick={() => onDelete(req.id)}
               className="self-start text-xs text-red-400 hover:text-red-600">删除需求</button>
@@ -2492,6 +2514,16 @@ function ReportEditor({
           )}
         </div>
       )}
+
+      <MountPointAssets
+        productionId={productionId}
+        mountType="event_report"
+        mountId={report.id}
+        label={report.title}
+        canEdit={canWrite && !isPublished}
+        versionId={versionId}
+        display="panel"
+      />
 
       <DeptNotesList
         reportId={report.id} eventId={eventId} productionId={productionId}
@@ -3210,6 +3242,19 @@ export default function EventDetailClient({
               onReportsChange={setReports}
             />
           )}
+        </div>
+
+        {/* Event-level assets */}
+        <div className="mt-4 rounded-2xl bg-white shadow-sm px-5 py-4">
+          <MountPointAssets
+            productionId={productionId}
+            mountType="event"
+            mountId={event.id}
+            label={event.title}
+            canEdit={canEdit}
+            versionId={event.versionId ?? null}
+            display="panel"
+          />
         </div>
       </div>
     </div>

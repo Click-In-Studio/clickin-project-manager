@@ -34,6 +34,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       storageType: "feishu_link";
       feishuUrl: string;
       assetType: AssetType;
+      name?: string | null;
       fileName: string;
       isUniversal?: boolean;
       versionId?: string | null;
@@ -43,8 +44,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     const { asset, file } = await createAsset({
       productionId: id, uploaderOpenId: session.openId,
-      assetType: body.assetType ?? "reference", fileName: body.fileName,
-      mimeType: null, isUniversal: body.isUniversal ?? true,
+      assetType: body.assetType ?? "reference", name: body.name ?? null,
+      fileName: body.fileName, mimeType: null, isUniversal: body.isUniversal ?? true,
       storageType: "feishu_link", feishuUrl: body.feishuUrl,
       versionId: body.versionId ?? null,
     });
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (!file) return Response.json({ error: "缺少 file 字段" }, { status: 400 });
 
     const assetType = (formData.get("assetType") as AssetType | null) ?? "reference";
+    const name = (formData.get("name") as string | null) || null;
     const isUniversal = formData.get("isUniversal") !== "false";
     const versionId = (formData.get("versionId") as string | null) ?? null;
     const mimeType = file.type || "application/octet-stream";
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     const { asset, file: assetFile } = await createAsset({
       productionId: id, uploaderOpenId: session.openId,
-      assetType, fileName, mimeType, isUniversal, storageType: "r2",
+      assetType, name, fileName, mimeType, isUniversal, storageType: "r2",
       r2Key, thumbnailR2Key: thumbKey, fileSize: buffer.length, versionId,
     });
     return Response.json({ asset, file: assetFile }, { status: 201 });

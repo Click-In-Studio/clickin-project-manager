@@ -13,6 +13,8 @@ import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
 import type { Version, VersionStatus } from "@/lib/db";
 import VersionSelector from "@/components/VersionSelector";
+import CueMountAssets from "@/components/assets/CueMountAssets";
+import MountPointAssets from "@/components/assets/MountPointAssets";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
 
@@ -292,10 +294,10 @@ function MentionTextarea({
 // ─── CueCommentsPanel ─────────────────────────────────────────────────────────
 
 function CueCommentsPanel({
-  cueId, productionId, comments, currentOpenId, isAdmin,
+  cueId, productionId, versionId, comments, currentOpenId, isAdmin,
   onAdd, onEdit, onDelete, onClose,
 }: {
-  cueId: string; productionId: string; comments: Comment[];
+  cueId: string; productionId: string; versionId?: string | null; comments: Comment[];
   currentOpenId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
@@ -434,6 +436,16 @@ function CueCommentsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        {/* Cue-level assets */}
+        <CueMountAssets
+          productionId={productionId}
+          cueId={cueId}
+          versionId={versionId ?? null}
+          label="Cue 附件"
+          canEdit={true}
+          display="panel"
+        />
+
         {topLevel.length === 0 && <p className="py-4 text-center text-xs text-zinc-300">暂无评论</p>}
         {topLevel.map(topC => (
           <div key={topC.id}>
@@ -443,6 +455,14 @@ function CueCommentsPanel({
                 label: replyingTo === topC.id ? "取消回复" : "回复",
                 onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.openId, topC.authorName),
               })}
+              <MountPointAssets
+                productionId={productionId}
+                mountType="comment"
+                mountId={topC.id}
+                label="评论附件"
+                canEdit={topC.openId === currentOpenId || isAdmin}
+                display="compact"
+              />
             </div>
 
             {repliesFor(topC.id).map(r => (
@@ -453,6 +473,14 @@ function CueCommentsPanel({
                   label: "回复",
                   onClick: () => startReply(topC.id, r.openId, r.authorName),
                 })}
+                <MountPointAssets
+                  productionId={productionId}
+                  mountType="comment"
+                  mountId={r.id}
+                  label="评论附件"
+                  canEdit={r.openId === currentOpenId || isAdmin}
+                  display="compact"
+                />
               </div>
             ))}
 
@@ -2450,6 +2478,7 @@ export default function CuePage({
         <CueCommentsPanel
           cueId={activeCommentCueId}
           productionId={productionId}
+          versionId={versionId}
           comments={comments}
           currentOpenId={myOpenId}
           isAdmin={isAdmin}

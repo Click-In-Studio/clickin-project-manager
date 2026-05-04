@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const isOwner = asset.uploaderOpenId === session.openId;
   if (!isOwner && !session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as { assetType?: AssetType; fileName?: string };
+  const body = (await req.json()) as { assetType?: AssetType; name?: string | null; fileName?: string };
   const updated = await updateAsset(assetId, body);
   return Response.json({ asset: updated });
 }
