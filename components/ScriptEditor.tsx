@@ -1,8 +1,6 @@
 "use client";
 
 import React from "react";
-import { createPortal } from "react-dom";
-import { match as pinyinMatch } from "pinyin-pro";
 import {
   type KeyboardEvent,
   useCallback,
@@ -24,6 +22,8 @@ import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState } from "@/lib/script-ops";
 import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-page";
 import type { PageConfig } from "@/lib/script-page";
+import SmartTextarea from "@/components/SmartTextarea";
+import SmartText from "@/components/SmartText";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -2125,119 +2125,6 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-CN");
 }
 
-function BodyWithMentions({ body, mentions }: { body: string; mentions: Mention[] }) {
-  if (!mentions.length)
-    return <p className="whitespace-pre-wrap break-words text-sm text-zinc-600">{body}</p>;
-  const escaped = mentions.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const regex = new RegExp(`@(${escaped.join("|")})`, "g");
-  const parts: React.ReactNode[] = [];
-  let last = 0; let key = 0; let m: RegExpExecArray | null;
-  while ((m = regex.exec(body)) !== null) {
-    if (m.index > last) parts.push(body.slice(last, m.index));
-    parts.push(<span key={key++} className="font-medium text-blue-500">@{m[1]}</span>);
-    last = m.index + m[0].length;
-  }
-  if (last < body.length) parts.push(body.slice(last));
-  return <p className="whitespace-pre-wrap break-words text-sm text-zinc-600">{parts}</p>;
-}
-
-function MentionTextarea({
-  value, onChange, mentions, onMentionsChange, members,
-  placeholder, rows, className, onKeyDown, autoFocus,
-}: {
-  value: string; onChange: (v: string) => void;
-  mentions: Mention[]; onMentionsChange: (m: Mention[]) => void;
-  members: Mention[]; placeholder?: string; rows?: number;
-  className?: string; onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  autoFocus?: boolean;
-}) {
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const [drop, setDrop] = useState<{ active: boolean; atPos: number; filter: string; idx: number }>(
-    { active: false, atPos: 0, filter: "", idx: 0 },
-  );
-  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({});
-
-  const filtered = useMemo<Mention[]>(() => {
-    if (!drop.active) return [];
-    const f = drop.filter;
-    if (!f) return members.slice(0, 6);
-    return members.filter(m =>
-      m.name.includes(f) || pinyinMatch(m.name, f.toLowerCase()) != null
-    ).slice(0, 6);
-  }, [drop.active, drop.filter, members]);
-
-  const computeDropStyle = useCallback((): React.CSSProperties => {
-    const ta = taRef.current;
-    if (!ta) return {};
-    const rect = ta.getBoundingClientRect();
-    return {
-      position: "fixed",
-      left: rect.left,
-      width: rect.width,
-      bottom: window.innerHeight - rect.top + 4,
-      maxHeight: Math.min(220, rect.top - 8),
-      overflowY: "auto",
-      zIndex: 9999,
-    };
-  }, []);
-
-  const pickMember = useCallback((m: Mention) => {
-    const ta = taRef.current; if (!ta) return;
-    const before = value.slice(0, drop.atPos);
-    const after = value.slice(drop.atPos + 1 + drop.filter.length);
-    const next = `${before}@${m.name} ${after}`;
-    onChange(next);
-    onMentionsChange([...mentions.filter(x => x.openId !== m.openId), m]);
-    setDrop(d => ({ ...d, active: false }));
-    requestAnimationFrame(() => {
-      ta.focus();
-      const pos = before.length + 1 + m.name.length + 1;
-      ta.setSelectionRange(pos, pos);
-    });
-  }, [value, drop, onChange, onMentionsChange, mentions]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    const cur = e.target.selectionStart ?? val.length;
-    onChange(val);
-    const match = val.slice(0, cur).match(/@([^\s@]*)$/);
-    if (match) {
-      setDropStyle(computeDropStyle());
-      setDrop({ active: true, atPos: cur - match[0].length, filter: match[1], idx: 0 });
-    } else {
-      setDrop(d => d.active ? { ...d, active: false } : d);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (drop.active && filtered.length > 0) {
-      if (e.key === "ArrowDown") { e.preventDefault(); setDrop(d => ({ ...d, idx: Math.min(d.idx + 1, filtered.length - 1) })); return; }
-      if (e.key === "ArrowUp")   { e.preventDefault(); setDrop(d => ({ ...d, idx: Math.max(d.idx - 1, 0) })); return; }
-      if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); pickMember(filtered[drop.idx]); return; }
-      if (e.key === "Escape") { setDrop(d => ({ ...d, active: false })); return; }
-    }
-    onKeyDown?.(e);
-  };
-
-  return (
-    <>
-      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={handleKeyDown}
-        placeholder={placeholder} rows={rows} autoFocus={autoFocus} className={className} />
-      {drop.active && filtered.length > 0 && createPortal(
-        <div style={dropStyle} className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg">
-          {filtered.map((m, i) => (
-            <button key={m.openId} type="button"
-              onMouseDown={e => { e.preventDefault(); pickMember(m); }}
-              className={`w-full px-3 py-1.5 text-left text-sm transition-colors ${i === drop.idx ? "bg-zinc-100 text-zinc-800" : "text-zinc-700 hover:bg-zinc-50"}`}
-            >{m.name}</button>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-}
-
 // ─── CommentsPanel ────────────────────────────────────────────────────────────
 
 function CommentsPanel({
@@ -2364,7 +2251,7 @@ function CommentsPanel({
       </div>
     ) : (
       <div className="mt-0.5">
-        <BodyWithMentions body={c.body} mentions={c.mentions} />
+        <SmartText content={c.body} memberMention={{ members: c.mentions }} className="whitespace-pre-wrap text-zinc-600" />
         {replyAction && (
           <button onClick={replyAction.onClick} className="mt-0.5 text-[11px] text-zinc-300 hover:text-zinc-500">
             {replyAction.label}
@@ -2425,9 +2312,9 @@ function CommentsPanel({
             {/* Reply compose */}
             {replyingTo === topC.id && (
               <div className="mt-2 ml-3 border-l-2 border-zinc-200 pl-3">
-                <MentionTextarea value={replyText} onChange={setReplyText}
-                  mentions={replyMentions} onMentionsChange={setReplyMentions}
-                  members={members} placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
+                <SmartTextarea value={replyText} onChange={setReplyText}
+                  memberMention={{ members, onMentionsChange: setReplyMentions }}
+                  placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
                   onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply(); }}
                   className={taClass} />
                 <div className="mt-1 flex justify-end gap-2">
@@ -2444,11 +2331,11 @@ function CommentsPanel({
       </div>
 
       <div className="shrink-0 border-t border-zinc-100 px-4 py-3">
-        <MentionTextarea value={newText} onChange={setNewText}
-          mentions={newMentions} onMentionsChange={setNewMentions}
-          members={members} placeholder="添加评论… (⌘↵ 发布)" rows={3}
+        <SmartTextarea value={newText} onChange={setNewText}
+          memberMention={{ members, onMentionsChange: setNewMentions }}
+          placeholder="添加评论… (⌘↵ 发布)" rows={3}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
-          className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400" />
+          className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
         <div className="mt-2 flex justify-end">
           <button onClick={submitNew} disabled={!newText.trim() || submitting}
             className="rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-40">

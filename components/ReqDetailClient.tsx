@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import SmartTextarea, { scriptRefDropPlugin } from "@/components/SmartTextarea";
+import SmartTextarea from "@/components/SmartTextarea";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 import type { EventTechReq, EventScheduleItem, ProductionEvent } from "@/lib/event-db";
 import { fmtTime, fmtDateTime } from "@/lib/tz";
@@ -350,7 +350,7 @@ export default function ReqDetailClient({
                 <SmartTextarea
                   value={description}
                   onChange={setDescription}
-                  plugins={[scriptRefDropPlugin(productionId)]}
+                  contentMention={{ productionId }}
                   rows={4}
                   className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-800 focus:outline-none focus:border-zinc-400 resize-none"
                   placeholder="需求详情（可选）"

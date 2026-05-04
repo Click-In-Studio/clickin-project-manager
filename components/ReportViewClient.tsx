@@ -4,10 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime as fmtDate } from "@/lib/tz";
-import { type MentionMember } from "./MentionTextarea";
-import MarkdownView from "./MarkdownView";
-import SmartTextarea, { memberDropPlugin, scriptRefDropPlugin } from "./SmartTextarea";
-import SmartText, { memberTextPlugin, scriptRefTextPlugin } from "./SmartText";
+import type { MentionMember } from "./SmartTextarea";
+import SmartTextarea from "./SmartTextarea";
+import SmartText from "./SmartText";
 import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/event-db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 
@@ -92,10 +91,8 @@ function NoteCard({
           <SmartTextarea
             value={draft}
             onChange={setDraft}
-            plugins={[
-              memberDropPlugin(members, { onPick: (m) => setDraftMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }),
-              scriptRefDropPlugin(productionId),
-            ]}
+            memberMention={{ members, onMentionsChange: setDraftMentions }}
+            contentMention={{ productionId }}
             rows={3}
             placeholder="写 note… 输入 @ 可提及成员，# 可引用剧本位置"
             className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none"
@@ -106,7 +103,7 @@ function NoteCard({
           </button>
         </div>
       ) : (
-        <SmartText content={note.content} plugins={[memberTextPlugin(note.mentions), scriptRefTextPlugin]} productionId={productionId} />
+        <SmartText content={note.content} memberMention={{ members }} contentMention={{ productionId }} />
       )}
     </div>
   );
@@ -211,7 +208,7 @@ function ReplyThread({
                   )}
                 </div>
               </div>
-              <SmartText content={reply.content} plugins={[memberTextPlugin(reply.mentions ?? []), scriptRefTextPlugin]} productionId={productionId} />
+              <SmartText content={reply.content} memberMention={{ members }} contentMention={{ productionId }} />
             </div>
 
             {isReplying && (
@@ -277,10 +274,8 @@ function ReplyForm({
       <SmartTextarea
         value={content}
         onChange={setContent}
-        plugins={[
-          memberDropPlugin(members, { onPick: (m) => setMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }),
-          scriptRefDropPlugin(productionId),
-        ]}
+        memberMention={{ members, onMentionsChange: setMentions }}
+        contentMention={{ productionId }}
         rows={2}
         placeholder={placeholder}
         autoFocus
@@ -394,7 +389,7 @@ export default function ReportViewClient({
         <section className="mb-6">
           {report.body ? (
             <div className="bg-white rounded-2xl shadow-sm px-5 py-4">
-              <MarkdownView content={report.body} />
+              <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
             </div>
           ) : (
             <p className="text-center text-sm text-zinc-300">暂无正文</p>
@@ -478,10 +473,8 @@ export default function ReportViewClient({
               <SmartTextarea
                 value={newContent}
                 onChange={setNewContent}
-                plugins={[
-                  memberDropPlugin(members, { onPick: (m) => setNewMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }),
-                  scriptRefDropPlugin(productionId),
-                ]}
+                memberMention={{ members, onMentionsChange: setNewMentions }}
+                contentMention={{ productionId }}
                 rows={3}
                 placeholder="写 note… 输入 @ 可提及成员，# 可引用剧本位置"
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none w-full"
