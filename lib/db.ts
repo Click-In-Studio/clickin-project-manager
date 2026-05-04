@@ -659,6 +659,17 @@ export async function flushToDBVersioned(
               [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
             );
           }
+          // Duplicate asset_mount entries pointing at the old snapshot
+          await client.query(
+            `INSERT INTO asset_mount
+               (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+                folder_path, mount_mode, version_resolved, created_by)
+             SELECT 'am_' || substr(md5(id || $1), 1, 16),
+               asset_id, production_id, 'block_snapshot', $1, mount_aux_id,
+               folder_path, mount_mode, version_resolved, created_by
+             FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
+            [newSnapshotId, block.snapshotId]
+          );
           newSnapshotIds.set(block.id, newSnapshotId);
         }
       }
@@ -2101,6 +2112,17 @@ async function cowCue(
      WHERE revision_id = $3
        AND version_id IN (SELECT id FROM descendants)`,
     [versionId, newId, cur.id]
+  );
+  // Duplicate asset_mount entries pointing at the old revision
+  await client.query(
+    `INSERT INTO asset_mount
+       (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+        folder_path, mount_mode, version_resolved, created_by)
+     SELECT 'am_' || substr(md5(id || $1), 1, 16),
+       asset_id, production_id, 'cue_revision', $1, mount_aux_id,
+       folder_path, mount_mode, version_resolved, created_by
+     FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
+    [newId, cur.id]
   );
   return newId;
 }
