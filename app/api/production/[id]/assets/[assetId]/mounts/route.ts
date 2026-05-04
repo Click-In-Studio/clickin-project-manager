@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { canUserAccessProduction, cowBlockSnapshotForMount, cowCueRevisionForMount } from "@/lib/db";
 import { getAsset, addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset-db";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -39,16 +39,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     folderPath?: string | null;
     mountMode?: MountMode | null;
     versionResolved?: boolean | null;
+    versionId?: string | null; // required for block_snapshot/cue_revision CoW
   };
 
   if (!body.mountType || !body.mountId)
     return Response.json({ error: "缺少 mountType 或 mountId" }, { status: 400 });
 
+  let mountId = body.mountId;
+  const mode = body.mountMode;
+
+  // Perform CoW split before inserting mount, when required by mount mode
+  if (mode === "tracking" || mode === "version_only") {
+    if (!body.versionId)
+      return Response.json({ error: "tracking/version_only 模式需要提供 versionId" }, { status: 400 });
+
+    if (body.mountType === "block_snapshot") {
+      mountId = await cowBlockSnapshotForMount(body.versionId, mountId, mode);
+    } else if (body.mountType === "cue_revision") {
+      mountId = await cowCueRevisionForMount(body.versionId, mountId, mode);
+    }
+  }
+
   const mount = await addAssetMount({
     assetId, productionId: id,
-    mountType: body.mountType, mountId: body.mountId,
+    mountType: body.mountType, mountId,
     mountAuxId: body.mountAuxId, folderPath: body.folderPath,
-    mountMode: body.mountMode, versionResolved: body.versionResolved,
+    mountMode: mode ?? null, versionResolved: body.versionResolved,
     createdBy: session.openId,
   });
   return Response.json({ mount }, { status: 201 });
