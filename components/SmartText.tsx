@@ -4,29 +4,60 @@ import { useState, useEffect, useRef } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import {
   MENTION_PATTERN, deserializeMention,
+  decodeMentionHref, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
 
-// ── Plugin type ───────────────────────────────────────────────────────────────
+// ── Public types ──────────────────────────────────────────────────────────────
 
+export type MentionMember = { openId: string; name: string };
+
+// Kept for backward compat — callers that already pass plugins=[...] still work.
 export type InlinePlugin = {
   pattern: string;
   render: (match: string, key: string) => React.ReactNode;
 };
 
+// ── Member chip (@ mention) ───────────────────────────────────────────────────
+
+function MemberChip({ name, members }: { name: string; members: MentionMember[] }) {
+  const [hovered, setHovered] = useState(false);
+  const member = members.find(m => m.name === name);
+  const initial = name.slice(-1);
+  return (
+    <span className="relative inline-block">
+      <span
+        className="font-medium text-blue-500 cursor-default"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        @{name}
+      </span>
+      {hovered && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+          <span className="flex items-center gap-2 bg-white border border-zinc-200 rounded-xl shadow-lg px-3 py-2 whitespace-nowrap">
+            <span className="w-7 h-7 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xs font-semibold shrink-0">
+              {initial}
+            </span>
+            <span className="text-sm font-medium text-zinc-800">{member?.name ?? name}</span>
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── Content mention chip ──────────────────────────────────────────────────────
 
-function ContentChip({ displayLabel, deleted, href }: { displayLabel: string; deleted?: boolean; href?: string | null }) {
+function ContentChip({ label, deleted, href }: { label: string; deleted?: boolean; href?: string | null }) {
   const cls = `inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 border border-amber-200 no-underline transition-colors ${
     deleted ? "text-zinc-400 line-through" : "text-amber-700 hover:bg-amber-100"
   }`;
-  if (href) {
-    return <a href={href} className={cls}>{displayLabel}</a>;
-  }
-  return <span className={cls}>{displayLabel}</span>;
+  if (href) return <a href={href} className={cls}>{label}</a>;
+  return <span className={cls}>{label}</span>;
 }
 
-// ── Legacy script-ref chip (kept for backward compat with old [#label](href) format) ──
+// ── Script chip (legacy [#label](href)) ──────────────────────────────────────
 
 function ScriptChip({ label, href, title }: { label: string; href: string; title?: string }) {
   const [hovered, setHovered] = useState(false);
@@ -49,7 +80,7 @@ function ScriptChip({ label, href, title }: { label: string; href: string; title
   );
 }
 
-// ── Built-in plugins ──────────────────────────────────────────────────────────
+// ── Backward-compat plugin factories ─────────────────────────────────────────
 
 export const scriptRefTextPlugin: InlinePlugin = {
   pattern: String.raw`\[#[^\]\n]*\]\([^\s)"]+(?:\s+"[^"]*")?\)`,
@@ -62,12 +93,8 @@ export const scriptRefTextPlugin: InlinePlugin = {
 };
 
 export function memberTextPlugin(mentions: { name: string }[]): InlinePlugin {
-  if (!mentions.length) {
-    return { pattern: "(?!x)x", render: (m) => m };
-  }
-  const escaped = mentions
-    .map((m) => m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|");
+  if (!mentions.length) return { pattern: "(?!x)x", render: m => m };
+  const escaped = mentions.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   return {
     pattern: `@(?:${escaped})`,
     render: (match, key) => (
@@ -76,20 +103,17 @@ export function memberTextPlugin(mentions: { name: string }[]): InlinePlugin {
   };
 }
 
-// ── Core renderer ─────────────────────────────────────────────────────────────
+// ── Plain-text segment renderer ───────────────────────────────────────────────
 
 function renderSegments(text: string, plugins: InlinePlugin[], keyBase: string): React.ReactNode[] {
   if (!plugins.length || !text) return text ? [text] : [];
-
   const n = plugins.length;
-  const combined = new RegExp(plugins.map((p) => `(${p.pattern})`).join("|"));
+  const combined = new RegExp(plugins.map(p => `(${p.pattern})`).join("|"));
   const parts = text.split(combined);
-
   const nodes: React.ReactNode[] = [];
   for (let i = 0; i < parts.length; i += n + 1) {
     const plain = parts[i];
     if (plain) nodes.push(plain);
-
     for (let pi = 0; pi < n; pi++) {
       const match = parts[i + 1 + pi];
       if (match != null && match !== "") {
@@ -101,102 +125,279 @@ function renderSegments(text: string, plugins: InlinePlugin[], keyBase: string):
   return nodes;
 }
 
-// ── Mention token parsing ─────────────────────────────────────────────────────
+// ── Mention token extraction ──────────────────────────────────────────────────
 
-type MentionToken = { token: string; attrs: ContentMentionAttrs };
+type ResolvedMap = Map<string, { label: string; url: string | null }>;
 
-function extractMentionTokens(text: string): MentionToken[] {
-  const out: MentionToken[] = [];
+function extractPlainTokens(text: string): { key: string; attrs: ContentMentionAttrs }[] {
+  const out: { key: string; attrs: ContentMentionAttrs }[] = [];
   MENTION_PATTERN.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = MENTION_PATTERN.exec(text)) !== null) {
     const attrs = deserializeMention(m[0]);
-    if (attrs) out.push({ token: m[0], attrs });
+    if (attrs) out.push({ key: m[0], attrs });
   }
   MENTION_PATTERN.lastIndex = 0;
   return out;
+}
+
+function extractCmLinks(text: string): { key: string; attrs: ContentMentionAttrs }[] {
+  const pattern = /\[#[^\]]*\]\((cm:\/\/[^\s)"]+)\)/g;
+  const out: { key: string; attrs: ContentMentionAttrs }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(text)) !== null) {
+    const attrs = decodeMentionHref(m[1]);
+    if (attrs) out.push({ key: m[1], attrs });
+  }
+  return out;
+}
+
+// ── Markdown inline renderer ──────────────────────────────────────────────────
+
+// Splits on structural markdown tokens and HTML spans (old @ mention format)
+const MD_INLINE_SPLIT = /(<span[^>]*>[\s\S]*?<\/span>|\*\*[^*]+\*\*|\*[^*\n]+\*|~~[^~\n]+~~|\[[^\]\n]*\]\([^\s)"]+(?:\s+"[^"]*")?\))/g;
+
+function renderMdInline(
+  text: string,
+  keyBase: string,
+  members: MentionMember[],
+  resolved: ResolvedMap,
+): React.ReactNode[] {
+  const segments = text.split(MD_INLINE_SPLIT);
+  const nodes: React.ReactNode[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (!seg) continue;
+    const key = `${keyBase}-${i}`;
+
+    // HTML span — old tiptap-markdown @mention: <span ...>@name</span>
+    if (seg.startsWith("<span")) {
+      const inner = seg.replace(/<[^>]+>/g, "");
+      const name = inner.startsWith("@") ? inner.slice(1) : inner;
+      nodes.push(<MemberChip key={key} name={name} members={members} />);
+      continue;
+    }
+    // Bold
+    if (seg.startsWith("**") && seg.endsWith("**")) {
+      nodes.push(<strong key={key}>{renderMdInline(seg.slice(2, -2), `${key}-b`, members, resolved)}</strong>);
+      continue;
+    }
+    // Italic
+    if (seg.startsWith("*") && seg.endsWith("*")) {
+      nodes.push(<em key={key}>{renderMdInline(seg.slice(1, -1), `${key}-i`, members, resolved)}</em>);
+      continue;
+    }
+    // Strikethrough
+    if (seg.startsWith("~~") && seg.endsWith("~~")) {
+      nodes.push(<s key={key}>{renderMdInline(seg.slice(2, -2), `${key}-s`, members, resolved)}</s>);
+      continue;
+    }
+    // Link: content mention, legacy script ref, or regular link
+    if (seg.startsWith("[")) {
+      const m = seg.match(/^\[([^\]]*)\]\(([^\s)"]+)(?:\s+"([^"]*)")?\)$/);
+      if (m) {
+        const [, linkText, href, title] = m;
+        if (href.startsWith(CM_HREF_PREFIX)) {
+          const r = resolved.get(href);
+          const label = r?.label ?? linkText;
+          const url = r?.url ? `${BASE_PATH}${r.url}` : null;
+          nodes.push(<ContentChip key={key} label={label} deleted={label === "#[已删除]"} href={url} />);
+          continue;
+        }
+        if (linkText.startsWith("#") && !href.startsWith("http")) {
+          nodes.push(<ScriptChip key={key} label={linkText.slice(1)} href={href} title={title} />);
+          continue;
+        }
+        nodes.push(
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+            {linkText}
+          </a>
+        );
+        continue;
+      }
+    }
+
+    // Plain text — scan for @member names
+    if (members.length > 0) {
+      const escaped = members.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      const atRe = new RegExp(`(@(?:${escaped}))`, "g");
+      const atParts = seg.split(atRe);
+      if (atParts.length > 1) {
+        atParts.forEach((part, pi) => {
+          if (!part) return;
+          if (members.some(m => part === `@${m.name}`)) {
+            nodes.push(<MemberChip key={`${key}-at-${pi}`} name={part.slice(1)} members={members} />);
+          } else {
+            nodes.push(part);
+          }
+        });
+        continue;
+      }
+    }
+
+    nodes.push(seg);
+  }
+
+  return nodes;
+}
+
+// ── Markdown block renderer ───────────────────────────────────────────────────
+
+function renderMdBlock(
+  block: string,
+  idx: number,
+  members: MentionMember[],
+  resolved: ResolvedMap,
+): React.ReactNode {
+  const lines = block.split("\n").filter(l => l.trim() !== "");
+  if (!lines.length) return null;
+
+  const headMatch = lines[0].match(/^(#{1,3}) (.+)$/);
+  if (headMatch) {
+    const level = headMatch[1].length;
+    const cls = level === 1 ? "text-xl font-bold mt-4 mb-1"
+      : level === 2 ? "text-lg font-semibold mt-3 mb-1"
+      : "text-base font-semibold mt-2 mb-0.5";
+    const Tag = `h${level}` as "h1" | "h2" | "h3";
+    return <Tag key={idx} className={cls}>{renderMdInline(headMatch[2], `${idx}-h`, members, resolved)}</Tag>;
+  }
+
+  if (lines.every(l => /^[*-] /.test(l))) {
+    return (
+      <ul key={idx} className="list-disc pl-5 my-1 space-y-0.5">
+        {lines.map((l, i) => (
+          <li key={i} className="text-sm">{renderMdInline(l.slice(2), `${idx}-ul-${i}`, members, resolved)}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (lines.every(l => /^\d+\. /.test(l))) {
+    return (
+      <ol key={idx} className="list-decimal pl-5 my-1 space-y-0.5">
+        {lines.map((l, i) => (
+          <li key={i} className="text-sm">{renderMdInline(l.replace(/^\d+\. /, ""), `${idx}-ol-${i}`, members, resolved)}</li>
+        ))}
+      </ol>
+    );
+  }
+
+  // Paragraph — split on TipTap hard breaks (\\\n)
+  const hardParts = block.split(/\\\n/);
+  const nodes: React.ReactNode[] = [];
+  hardParts.forEach((part, i) => {
+    nodes.push(...renderMdInline(part, `${idx}-p-${i}`, members, resolved));
+    if (i < hardParts.length - 1) nodes.push(<br key={`${idx}-br-${i}`} />);
+  });
+  return <p key={idx} className="text-sm my-1">{nodes}</p>;
 }
 
 // ── SmartText ─────────────────────────────────────────────────────────────────
 
 export default function SmartText({
   content,
-  plugins = [],
+  memberMention,
+  contentMention,
+  markdown = false,
+  // backward-compat props
+  plugins: extraPlugins = [],
   className,
-  productionId,
-  versionId,
+  productionId: legacyProductionId,
+  versionId: legacyVersionId,
 }: {
   content: string;
+  /** Enable @ member display with hover tooltip */
+  memberMention?: { members: MentionMember[] };
+  /** Enable # content mention resolution */
+  contentMention?: { productionId: string; versionId?: string | null };
+  /** Render as markdown */
+  markdown?: boolean;
   plugins?: InlinePlugin[];
   className?: string;
   productionId?: string;
   versionId?: string | null;
 }) {
-  // Map from mention token string → { label, url }
-  const [resolved, setResolved] = useState<Map<string, { label: string; url: string | null }>>(new Map());
+  const productionId = contentMention?.productionId ?? legacyProductionId;
+  const versionId = contentMention?.versionId ?? legacyVersionId;
+  const members = memberMention?.members ?? [];
+
+  const [resolved, setResolved] = useState<ResolvedMap>(new Map());
   const resolveAttempted = useRef(false);
 
   useEffect(() => {
     if (!productionId || resolveAttempted.current) return;
-    const tokens = extractMentionTokens(content);
-    if (tokens.length === 0) return;
+    const items = markdown ? extractCmLinks(content) : extractPlainTokens(content);
+    if (!items.length) return;
     resolveAttempted.current = true;
 
-    const mentions = tokens.map(t => t.attrs);
     fetch(`${BASE_PATH}/api/production/${productionId}/mention-resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mentions, versionId }),
+      body: JSON.stringify({ mentions: items.map(t => t.attrs), versionId }),
     })
       .then(r => r.json())
       .then((data: { labels?: (string | null)[]; urls?: (string | null)[] }) => {
         if (!data.labels) return;
-        const map = new Map<string, { label: string; url: string | null }>();
-        tokens.forEach((t, i) => {
+        const map: ResolvedMap = new Map();
+        items.forEach((t, i) => {
           const label = data.labels![i];
-          if (label) map.set(t.token, { label, url: data.urls?.[i] ?? null });
+          if (label) map.set(t.key, { label, url: data.urls?.[i] ?? null });
         });
         setResolved(map);
       })
       .catch(() => {});
-  }, [content, productionId, versionId]);
+  }, [content, productionId, versionId, markdown]);
 
   if (!content) return null;
 
-  // Build a content mention plugin that uses resolved labels and URLs
-  const cmPattern = String.raw`\[#[^\]\n]*\]`;
-  const contentMentionPlugin: InlinePlugin = {
-    pattern: cmPattern,
+  // ── Markdown mode ──────────────────────────────────────────────────────────
+  if (markdown) {
+    if (!content.trim()) return null;
+    const blocks = content.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+    return (
+      <div className={`text-zinc-800 ${className ?? ""}`}>
+        {blocks.map((block, i) => renderMdBlock(block, i, members, resolved))}
+      </div>
+    );
+  }
+
+  // ── Plain text mode ────────────────────────────────────────────────────────
+
+  // Member mention plugin (with hover tooltip)
+  const memberPlugin: InlinePlugin | null = members.length > 0 ? {
+    pattern: (() => {
+      const escaped = members.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      return `@(?:${escaped})`;
+    })(),
+    render: (match, key) => <MemberChip key={key} name={match.slice(1)} members={members} />,
+  } : null;
+
+  // Content mention plugin (resolved tokens)
+  const cmPlugin: InlinePlugin = {
+    pattern: String.raw`\[#[^\]\n]*\]`,
     render: (match, key) => {
       const r = resolved.get(match);
       if (r) {
         const href = r.url ? `${BASE_PATH}${r.url}` : null;
-        return (
-          <ContentChip
-            key={key}
-            displayLabel={r.label}
-            deleted={r.label === "#[已删除]"}
-            href={href}
-          />
-        );
+        return <ContentChip key={key} label={r.label} deleted={r.label === "#[已删除]"} href={href} />;
       }
-      // Fallback: parse attrs from token and show kind/id
       const attrs = deserializeMention(match);
       if (!attrs) return <span key={key} className="text-amber-600 font-mono text-[11px]">{match}</span>;
-      const fallbackLabel = attrs.kind === "page"
-        ? `#p.${attrs.id}`
-        : attrs.kind === "cue" ? "#cue"
-        : `#${attrs.kind}`;
-      return <ContentChip key={key} displayLabel={fallbackLabel} />;
+      const fallback = attrs.kind === "page" ? `#p.${attrs.id}` : attrs.kind === "cue" ? "#cue" : `#${attrs.kind}`;
+      return <ContentChip key={key} label={fallback} />;
     },
   };
 
-  // contentMentionPlugin must come LAST — the old [#label](href) format has [#label] as a prefix,
-  // so scriptRefTextPlugin (which matches the full link) must win first via alternation order.
-  const allPlugins = [...plugins, contentMentionPlugin];
+  // Order: member → extra (legacy) plugins → content mention (must come last — [#label] is a prefix of [#label](href))
+  const allPlugins: InlinePlugin[] = [
+    ...(memberPlugin ? [memberPlugin] : []),
+    ...extraPlugins,
+    cmPlugin,
+  ];
+
   const lines = content.split("\n");
   const nodes: React.ReactNode[] = [];
-
   lines.forEach((line, li) => {
     if (li > 0) nodes.push(<br key={`br-${li}`} />);
     nodes.push(...renderSegments(line, allPlugins, `${li}`));

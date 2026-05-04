@@ -46,10 +46,9 @@ const TECH_STATUS_COLORS: Record<string, string> = {
 
 import { isoToDatetimeLocal, isoToDateInput, isoToTimeInput, datetimeLocalToIso, dateTimeToIso, fmtDateTime as fmt, fmtTime, fmtDateLong } from "@/lib/tz";
 import MarkdownEditor from "@/components/MarkdownEditor";
-import MarkdownView from "@/components/MarkdownView";
-import MentionTextarea, { type MentionMember } from "@/components/MentionTextarea";
-import SmartTextarea, { scriptRefDropPlugin, memberDropPlugin } from "@/components/SmartTextarea";
-import SmartText, { scriptRefTextPlugin, memberTextPlugin } from "@/components/SmartText";
+import type { MentionMember } from "@/components/SmartTextarea";
+import SmartTextarea from "@/components/SmartTextarea";
+import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 import type { Version } from "@/lib/db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 
@@ -210,7 +209,7 @@ function InfoTab({
         <div>
           <label className="block text-xs text-zinc-500 mb-1">备注</label>
           <SmartTextarea value={description} onChange={setDescription} rows={3}
-            plugins={[scriptRefDropPlugin(productionId, versionId)]}
+            contentMention={{ productionId, versionId }}
             className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
         </div>
         {showSM && (
@@ -837,7 +836,7 @@ function ScheduleItemRow({
             </>
           )}
           <SmartTextarea placeholder="备注" value={notes} onChange={setNotes} rows={2}
-            plugins={[scriptRefDropPlugin(productionId, versionId)]}
+            contentMention={{ productionId, versionId }}
             className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
         </div>
 
@@ -1119,7 +1118,7 @@ function ScheduleItemModal({
             </>
           )}
           <SmartTextarea placeholder="备注" value={notes} onChange={setNotes} rows={2}
-            plugins={[scriptRefDropPlugin(productionId, versionId)]}
+            contentMention={{ productionId, versionId }}
             className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
         </div>
 
@@ -1699,7 +1698,7 @@ function PersonCallTimeRow({
           placeholder="备注（可选）"
           value={notes} onChange={setNotes}
           rows={2}
-          plugins={[scriptRefDropPlugin(productionId, versionId)]}
+          contentMention={{ productionId, versionId }}
           className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none w-full"
         />
         {editIsLate && suggestedLocal && (
@@ -1877,7 +1876,7 @@ function TechReqCard({
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 mt-2" />
               <SmartTextarea value={editDesc} onChange={setEditDesc} rows={2}
                 placeholder="描述（可选）"
-                plugins={[scriptRefDropPlugin(productionId, versionId)]}
+                contentMention={{ productionId, versionId }}
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-400 shrink-0">提前分钟</span>
@@ -2083,7 +2082,7 @@ function TechReqTab({
             <div className="grid grid-cols-2 gap-2">
               <input placeholder="需求标题 *" value={newTitle} onChange={e => setNewTitle(e.target.value)}
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-              <SmartTextarea value={newDesc} onChange={setNewDesc} plugins={[scriptRefDropPlugin(productionId, versionId)]} rows={2} placeholder="描述"
+              <SmartTextarea value={newDesc} onChange={setNewDesc} contentMention={{ productionId, versionId }} rows={2} placeholder="描述"
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
               <select value={newDeptId} onChange={e => {
                   const next = e.target.value;
@@ -2494,7 +2493,7 @@ function ReportEditor({
       ) : (
         <div className="flex flex-col gap-2">
           {report.body
-            ? <MarkdownView content={report.body} />
+            ? <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
             : <p className="text-xs text-zinc-300">暂无正文</p>
           }
           {canWrite && !isPublished && (
@@ -2634,7 +2633,8 @@ function DeptNotesList({
                 <SmartTextarea
                   value={editDraft}
                   onChange={setEditDraft}
-                  plugins={[memberDropPlugin(members, { onPick: m => setEditMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }), scriptRefDropPlugin(productionId, versionId)]}
+                  memberMention={{ members, onMentionsChange: setEditMentions }}
+                  contentMention={{ productionId, versionId }}
                   rows={2}
                   placeholder="写 note…"
                   className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm focus:outline-none resize-none"
@@ -2643,7 +2643,7 @@ function DeptNotesList({
                   className="self-start px-2 py-1 text-xs rounded-lg bg-zinc-800 text-white">保存</button>
               </div>
             ) : (
-              <SmartText content={note.content} plugins={[memberTextPlugin(note.mentions ?? []), scriptRefTextPlugin]} productionId={productionId} />
+              <SmartText content={note.content} memberMention={{ members: note.mentions ?? [] }} contentMention={{ productionId }} />
             )}
           </div>
         );
@@ -2661,7 +2661,8 @@ function DeptNotesList({
           <SmartTextarea
             value={newContent}
             onChange={setNewContent}
-            plugins={[memberDropPlugin(members, { onPick: m => setNewMentions(prev => [...prev.filter(x => x.openId !== m.openId), m]) }), scriptRefDropPlugin(productionId, versionId)]}
+            memberMention={{ members, onMentionsChange: setNewMentions }}
+            contentMention={{ productionId, versionId }}
             rows={2}
             placeholder="写 note… 输入 @ 可提及成员"
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addNote(); } }}
