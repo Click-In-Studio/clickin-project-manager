@@ -659,6 +659,14 @@ export async function flushToDBVersioned(
               [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
             );
           }
+          // Copy block tags to new snapshot
+          await client.query(
+            `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
+             SELECT $1, group_id, option_id, value, updated_at
+             FROM block_tag WHERE block_id = $2
+             ON CONFLICT (block_id, group_id) DO NOTHING`,
+            [newSnapshotId, block.snapshotId]
+          );
           // Duplicate asset_mount entries pointing at the old snapshot
           await client.query(
             `INSERT INTO asset_mount
@@ -2760,6 +2768,12 @@ export async function cowBlockSnapshotForMount(
     await client.query(
       `INSERT INTO script_character (script_id, character_id, position, annotation)
        SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
+      [newSnapshotId, snapshotId]
+    );
+    await client.query(
+      `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
+       SELECT $1, group_id, option_id, value, updated_at FROM block_tag WHERE block_id = $2
+       ON CONFLICT (block_id, group_id) DO NOTHING`,
       [newSnapshotId, snapshotId]
     );
 
