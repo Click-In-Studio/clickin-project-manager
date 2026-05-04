@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { createProduction, listProductions } from "@/lib/db";
+import { createProduction, listProductions, updateProductionSortOrders } from "@/lib/db";
 import { getSession } from "@/lib/session";
 
 let _seq = 0;
@@ -53,5 +53,22 @@ export async function DELETE(req: NextRequest) {
   } catch (err) {
     console.error("[productions] delete error:", err);
     return Response.json({ error: "删除失败" }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
+
+  const { orderedIds } = (await req.json()) as { orderedIds?: string[] };
+  if (!Array.isArray(orderedIds)) return Response.json({ error: "缺少 orderedIds" }, { status: 400 });
+
+  try {
+    await updateProductionSortOrders(orderedIds);
+    return Response.json({ ok: true });
+  } catch (err) {
+    console.error("[productions] sort error:", err);
+    return Response.json({ error: "排序失败" }, { status: 500 });
   }
 }

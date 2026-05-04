@@ -1058,17 +1058,18 @@ export async function deleteProduction(id: string): Promise<void> {
   await getPool().query("DELETE FROM production WHERE id = $1", [id]);
 }
 
-export async function listProductions(opts: { openId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string; archivedAt: string | null }[]> {
+export async function listProductions(opts: { openId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number }[]> {
+  const orderBy = "CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END, sort_order ASC, created_at ASC";
   let res;
   if (opts.isAdmin) {
-    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null }>(
-      "SELECT id, name, created_at, archived_at FROM production ORDER BY created_at DESC"
+    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null; sort_order: number }>(
+      `SELECT id, name, created_at, archived_at, sort_order FROM production ORDER BY ${orderBy}`
     );
   } else {
-    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null }>(
-      `SELECT p.id, p.name, p.created_at, p.archived_at FROM production p
+    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null; sort_order: number }>(
+      `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order FROM production p
        JOIN production_member pm ON pm.production_id = p.id
-       WHERE pm.open_id = $1 ORDER BY p.created_at DESC`,
+       WHERE pm.open_id = $1 ORDER BY ${orderBy}`,
       [opts.openId]
     );
   }
@@ -1077,7 +1078,29 @@ export async function listProductions(opts: { openId: string; isAdmin: boolean }
     name: r.name,
     createdAt: r.created_at.toISOString(),
     archivedAt: r.archived_at?.toISOString() ?? null,
+    sortOrder: r.sort_order,
   }));
+}
+
+export async function updateProductionSortOrders(orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE production SET sort_order = v.sort_order
+       FROM (SELECT UNNEST($1::text[]) AS id, UNNEST($2::int[]) AS sort_order) AS v
+       WHERE production.id = v.id`,
+      [orderedIds, orderedIds.map((_, i) => i + 1)]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Auth / users ─────────────────────────────────────────────────────────────

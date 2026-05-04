@@ -10,7 +10,7 @@ import type { MyCallTimeEntry, MyPendingTechReqEntry, MyFollowedEventEntry, Unre
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
 function todayCSTStr(): string { return tzTodayCSTStr(); }
 
-type Production = { id: string; name: string; createdAt: string; archivedAt: string | null };
+type Production = { id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number };
 
 type Props = {
   productions: Production[];
@@ -41,6 +41,9 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
   const [showInput, setShowInput] = useState(false);
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState(false);
+  const [sortedActive, setSortedActive] = useState<Production[]>([]);
+  const [sortSaving, setSortSaving] = useState(false);
 
   const create = async () => {
     if (!newName.trim()) return;
@@ -59,6 +62,40 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
       setError("网络错误，请重试");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const activeProductions = productions.filter(p => !p.archivedAt);
+  const archivedProductions = productions.filter(p => p.archivedAt);
+
+  const enterSortMode = () => {
+    setSortedActive([...activeProductions]);
+    setSortMode(true);
+  };
+
+  const moveItem = (idx: number, dir: -1 | 1) => {
+    setSortedActive(prev => {
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
+  const saveSort = async () => {
+    setSortSaving(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/productions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderedIds: sortedActive.map(p => p.id) }),
+      });
+      if (!res.ok) return;
+      setProductions([...sortedActive, ...archivedProductions]);
+      setSortMode(false);
+    } finally {
+      setSortSaving(false);
     }
   };
 
@@ -86,19 +123,50 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
           <div className="mb-6 flex items-center justify-between">
             <h1 className="text-sm font-bold tracking-[0.2em] text-zinc-400 uppercase">项目管理器</h1>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-zinc-400">{currentUser.name}</span>
-              <Link href="/my/notifications" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">通知</Link>
-              <form action={`${BASE_PATH}/api/auth/logout`} method="post">
-                <button type="submit" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">
-                  退出
-                </button>
-              </form>
+              {isAdmin && !sortMode && (
+                <button onClick={enterSortMode} className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">排序</button>
+              )}
+              {sortMode && (
+                <>
+                  <button onClick={() => setSortMode(false)} disabled={sortSaving} className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">取消</button>
+                  <button onClick={saveSort} disabled={sortSaving} className="text-xs font-medium text-zinc-600 hover:text-zinc-800 transition-colors">{sortSaving ? "保存中…" : "完成"}</button>
+                </>
+              )}
+              {!sortMode && (
+                <>
+                  <span className="text-xs text-zinc-400">{currentUser.name}</span>
+                  <Link href="/my/notifications" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">通知</Link>
+                  <form action={`${BASE_PATH}/api/auth/logout`} method="post">
+                    <button type="submit" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">退出</button>
+                  </form>
+                </>
+              )}
             </div>
           </div>
 
           {/* Productions list */}
           {productions.length === 0 && !showInput ? (
             <p className="mb-4 text-center text-xs text-zinc-300">暂无剧本</p>
+          ) : sortMode ? (
+            <ul className="mb-3 space-y-1">
+              {sortedActive.map((p, idx) => (
+                <li key={p.id} className="flex items-center gap-1 rounded-lg bg-zinc-50 px-2 py-2">
+                  <div className="flex flex-col">
+                    <button onClick={() => moveItem(idx, -1)} disabled={idx === 0}
+                      className="text-zinc-300 hover:text-zinc-600 disabled:opacity-20 leading-none text-xs px-1">▲</button>
+                    <button onClick={() => moveItem(idx, 1)} disabled={idx === sortedActive.length - 1}
+                      className="text-zinc-300 hover:text-zinc-600 disabled:opacity-20 leading-none text-xs px-1">▼</button>
+                  </div>
+                  <span className="flex-1 px-2 text-sm text-zinc-700">{p.name}</span>
+                </li>
+              ))}
+              {archivedProductions.map(p => (
+                <li key={p.id} className="flex items-center gap-2 rounded-lg px-3 py-2.5 opacity-40">
+                  <span className="flex-1 text-sm text-zinc-400">{p.name}</span>
+                  <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-zinc-100 text-zinc-400">已归档</span>
+                </li>
+              ))}
+            </ul>
           ) : (
             <ul className="mb-3 space-y-1">
               {productions.map((p) => (
