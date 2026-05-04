@@ -2714,3 +2714,170 @@ export async function deleteBlockTag(blockId: string, groupId: string): Promise<
     [blockId, groupId]
   );
 }
+
+// ─── Asset mount CoW helpers ──────────────────────────────────────────────────
+
+const DESCENDANTS_CTE = `
+  WITH RECURSIVE descendants AS (
+    SELECT id FROM version WHERE id = $1
+    UNION ALL
+    SELECT v.id FROM version v
+    JOIN descendants d ON v.parent_version_id = d.id
+  )`;
+
+/**
+ * Copy-on-write a block snapshot for an asset mount operation.
+ * tracking:     new snapshot covers current version + all descendants
+ * version_only: new snapshot covers current version only
+ * Returns the snapshot ID the mount should be created against.
+ */
+export async function cowBlockSnapshotForMount(
+  versionId: string,
+  snapshotId: string,
+  mode: 'tracking' | 'version_only',
+): Promise<string> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+
+    const refRes = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1',
+      [snapshotId]
+    );
+    if (parseInt(refRes.rows[0].cnt, 10) <= 1) {
+      await client.query('COMMIT');
+      return snapshotId;
+    }
+
+    const newSnapshotId = genSnapshotId();
+
+    await client.query(
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content
+       FROM script WHERE id = $2`,
+      [newSnapshotId, snapshotId]
+    );
+    await client.query(
+      `INSERT INTO script_character (script_id, character_id, position, annotation)
+       SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
+      [newSnapshotId, snapshotId]
+    );
+
+    if (mode === 'tracking') {
+      await client.query(
+        `${DESCENDANTS_CTE}
+         UPDATE script_version SET snapshot_id = $2
+         WHERE snapshot_id = $3 AND version_id IN (SELECT id FROM descendants)`,
+        [versionId, newSnapshotId, snapshotId]
+      );
+    } else {
+      await client.query(
+        'UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3',
+        [newSnapshotId, snapshotId, versionId]
+      );
+    }
+
+    // Carry existing asset_mount entries to the new snapshot
+    await client.query(
+      `INSERT INTO asset_mount
+         (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+          folder_path, mount_mode, version_resolved, created_by)
+       SELECT 'am_' || substr(md5(id || $1), 1, 16),
+         asset_id, production_id, 'block_snapshot', $1, mount_aux_id,
+         folder_path, mount_mode, version_resolved, created_by
+       FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
+      [newSnapshotId, snapshotId]
+    );
+
+    await client.query('COMMIT');
+    return newSnapshotId;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Copy-on-write a cue revision for an asset mount operation.
+ * tracking:     new revision covers current version + all descendants
+ * version_only: new revision covers current version only
+ * Returns the revision ID the mount should be created against.
+ */
+export async function cowCueRevisionForMount(
+  versionId: string,
+  revisionId: string,
+  mode: 'tracking' | 'version_only',
+): Promise<string> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+
+    const refRes = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM cue_version WHERE revision_id = $1',
+      [revisionId]
+    );
+    if (parseInt(refRes.rows[0].cnt, 10) <= 1) {
+      await client.query('COMMIT');
+      return revisionId;
+    }
+
+    const curRes = await client.query<CueFullRow>(
+      `SELECT id, cue_id, cue_list_id, number, name, content, warning,
+         start_kind, start_snapshot_id, start_offset,
+         end_kind,   end_snapshot_id,   end_offset
+       FROM cue WHERE id = $1`,
+      [revisionId]
+    );
+    const cur = curRes.rows[0];
+    if (!cur) { await client.query('COMMIT'); return revisionId; }
+
+    const newId = newCueId();
+
+    await client.query(
+      `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
+         start_kind, start_snapshot_id, start_offset,
+         end_kind,   end_snapshot_id,   end_offset, warning)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [newId, cur.cue_id ?? cur.id, cur.cue_list_id,
+       cur.number, cur.name, cur.content,
+       cur.start_kind, cur.start_snapshot_id, cur.start_offset,
+       cur.end_kind, cur.end_snapshot_id, cur.end_offset, cur.warning]
+    );
+
+    if (mode === 'tracking') {
+      await client.query(
+        `${DESCENDANTS_CTE}
+         UPDATE cue_version SET revision_id = $2
+         WHERE revision_id = $3 AND version_id IN (SELECT id FROM descendants)`,
+        [versionId, newId, revisionId]
+      );
+    } else {
+      await client.query(
+        'UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3',
+        [newId, revisionId, versionId]
+      );
+    }
+
+    // Carry existing asset_mount entries to the new revision
+    await client.query(
+      `INSERT INTO asset_mount
+         (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+          folder_path, mount_mode, version_resolved, created_by)
+       SELECT 'am_' || substr(md5(id || $1), 1, 16),
+         asset_id, production_id, 'cue_revision', $1, mount_aux_id,
+         folder_path, mount_mode, version_resolved, created_by
+       FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
+      [newId, revisionId]
+    );
+
+    await client.query('COMMIT');
+    return newId;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
