@@ -38,7 +38,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     if (typeof body.gender    === "string") meta.gender    = body.gender;
     if (typeof body.biography === "string") meta.biography = body.biography;
     if (typeof body.roleType  === "string") meta.roleType  = body.roleType;
-    await patchCharacterMeta(charId, meta);
+    const metaVersionId = (typeof body.versionId === "string" && body.versionId)
+      ? body.versionId
+      : (() => {
+          console.error(`[fallback] PATCH /characters/${charId}: no versionId in body — frontend bug`);
+          return getActiveVersionId(id);
+        })();
+    const resolvedMetaVersionId = typeof metaVersionId === "string" ? metaVersionId : await metaVersionId;
+    if (!resolvedMetaVersionId) return Response.json({ error: "无可用版本" }, { status: 400 });
+    await patchCharacterMeta(charId, resolvedMetaVersionId, meta);
     return Response.json({ ok: true });
   }
 

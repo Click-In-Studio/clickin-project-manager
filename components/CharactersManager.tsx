@@ -13,6 +13,7 @@ type Props = {
   initialCharacters: CharacterDetail[];
   canEdit: boolean;
   embedded?: boolean;
+  versionId?: string | null;
 };
 
 function MetaField({
@@ -445,7 +446,7 @@ function AddCharacterForm({
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded }: Props) {
+export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded, versionId }: Props) {
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -468,7 +469,7 @@ export default function CharactersManager({ productionId, productionName, initia
     await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
+      body: JSON.stringify(versionId ? { ...fields, versionId } : fields),
     });
     setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, ...fields } : c));
   };

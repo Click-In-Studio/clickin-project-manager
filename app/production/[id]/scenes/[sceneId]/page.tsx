@@ -8,7 +8,9 @@ import SceneDetailView from "@/components/SceneDetail";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; sceneId: string }> }): Promise<Metadata> {
   const { id, sceneId } = await params;
-  const scene = await getSceneById(sceneId, id);
+  const cookieStore = await cookies();
+  const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
+  const scene = await getSceneById(sceneId, id, versionId);
   return { title: scene?.name ?? "场景" };
 }
 
@@ -27,9 +29,11 @@ export default async function SceneDetailPage({
 
   const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
 
+  const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
+
   const [name, scene] = await Promise.all([
     getProductionName(id),
-    getSceneById(sceneId, id),
+    getSceneById(sceneId, id, versionId),
   ]);
   if (!name || !scene) redirect(`/production/${id}/script`);
 
@@ -39,6 +43,7 @@ export default async function SceneDetailPage({
       productionName={name}
       scene={scene as SceneDetail}
       canEdit={canEdit}
+      versionId={versionId}
     />
   );
 }

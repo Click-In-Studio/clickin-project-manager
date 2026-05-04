@@ -3,7 +3,9 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { SceneDetail } from "@/lib/db";
+import VersionSelector from "./VersionSelector";
+import MountPointAssets from "./assets/MountPointAssets";
+import type { SceneDetail, Version } from "@/lib/db";
 
 type MetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
 
@@ -14,6 +16,8 @@ type Props = {
   rehearsalMarks: Record<string, string[]>;
   canEdit: boolean;
   embedded?: boolean;
+  versions?: Version[];
+  versionId?: string | null;
 };
 
 function MetaField({
@@ -80,6 +84,8 @@ function SceneEditRow({
   indent,
   marks,
   canEdit,
+  productionId,
+  versionId,
   onUpdate,
   onDelete,
   onPatchMeta,
@@ -88,6 +94,8 @@ function SceneEditRow({
   indent: boolean;
   marks: string[];
   canEdit: boolean;
+  productionId: string;
+  versionId: string | null;
   onUpdate: (number: string, name: string) => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<MetaFields>) => Promise<void>;
@@ -240,6 +248,17 @@ function SceneEditRow({
                 onSave={(v) => onPatchMeta({ stageNotes: v })}
               />
             </div>
+            <div className="mt-3 pt-3 border-t border-zinc-100">
+              <MountPointAssets
+                productionId={productionId}
+                mountType="scene"
+                mountId={scene.id}
+                label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
+                canEdit={canEdit}
+                versionId={versionId}
+                display="compact"
+              />
+            </div>
           </td>
         </tr>
       )}
@@ -316,8 +335,20 @@ function AddSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded, canImport }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded, canImport, versions, versionId }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
+  const [marksMap, setMarksMap] = useState<Record<string, string[]>>(rehearsalMarks);
+  const [currentVersionId, setCurrentVersionId] = useState<string | null>(versionId ?? null);
+
+  const currentVersion = (versions ?? []).find(v => v.id === currentVersionId);
+  const effectiveCanEdit = canEdit && (!currentVersionId || !currentVersion || currentVersion.status === "editing" || currentVersion.status === "committed");
+
+  const handleVersionChange = async (vId: string) => {
+    const data: SceneDetail[] = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${vId}`).then(r => r.json());
+    setScenes(data);
+    setMarksMap({});
+    setCurrentVersionId(vId);
+  };
 
   const update = async (id: string, number: string, name: string) => {
     await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
@@ -332,7 +363,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
     await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
+      body: JSON.stringify(currentVersionId ? { ...fields, versionId: currentVersionId } : fields),
     });
     setScenes((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s));
   };
@@ -388,7 +419,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                 {acts.map((act) => {
                   const children = subScenes(act.id);
                   const actMarkList: string[] = [];
-                  for (const m of rehearsalMarks[act.id] ?? []) {
+                  for (const m of marksMap[act.id] ?? []) {
                     if (actMarkList[actMarkList.length - 1] !== m) actMarkList.push(m);
                   }
                   return (
@@ -397,7 +428,9 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         scene={act}
                         indent={false}
                         marks={actMarkList}
-                        canEdit={canEdit}
+                        canEdit={effectiveCanEdit}
+                        productionId={productionId}
+                        versionId={currentVersionId}
                         onUpdate={(number, name) => update(act.id, number, name)}
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
@@ -407,14 +440,16 @@ export default function ScenesManager({ productionId, productionName, initialSce
                           key={sub.id}
                           scene={sub}
                           indent={true}
-                          marks={rehearsalMarks[sub.id] ?? []}
-                          canEdit={canEdit}
+                          marks={marksMap[sub.id] ?? []}
+                          canEdit={effectiveCanEdit}
+                          productionId={productionId}
+                          versionId={currentVersionId}
                           onUpdate={(number, name) => update(sub.id, number, name)}
                           onDelete={() => del(sub.id)}
                           onPatchMeta={(fields) => patchMeta(sub.id, fields)}
                         />
                       ))}
-                      {canEdit && (
+                      {effectiveCanEdit && (
                         <AddSceneRow
                           indent={true}
                           placeholder={`在「${act.number || act.name}」下添加场景…`}
@@ -430,8 +465,10 @@ export default function ScenesManager({ productionId, productionName, initialSce
                     key={s.id}
                     scene={s}
                     indent={false}
-                    marks={rehearsalMarks[s.id] ?? []}
-                    canEdit={canEdit}
+                    marks={marksMap[s.id] ?? []}
+                    canEdit={effectiveCanEdit}
+                    productionId={productionId}
+                    versionId={currentVersionId}
                     onUpdate={(number, name) => update(s.id, number, name)}
                     onDelete={() => del(s.id)}
                     onPatchMeta={(fields) => patchMeta(s.id, fields)}
@@ -441,7 +478,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
             </table>
           )}
 
-          {canEdit && (
+          {effectiveCanEdit && (
             <div className="border-t border-zinc-100">
               <table className="w-full">
                 <tbody>
@@ -470,6 +507,15 @@ export default function ScenesManager({ productionId, productionName, initialSce
           <div className="text-right flex flex-col items-end gap-1">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Scenes</p>
             <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+            {versions && versions.length > 0 && (
+              <VersionSelector
+                productionId={productionId}
+                versions={versions}
+                currentVersionId={currentVersionId}
+                canManage={canEdit}
+                onChange={handleVersionChange}
+              />
+            )}
             {canImport && (
               <Link href={`/production/${productionId}/import-scenes`} className="text-xs text-blue-500 hover:underline">
                 导入章节信息

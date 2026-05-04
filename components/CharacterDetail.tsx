@@ -14,6 +14,7 @@ type Props = {
   character: CharacterDetail;
   allCharacters: CharacterDetail[];
   canEdit: boolean;
+  versionId?: string | null;
 };
 
 function Field({
@@ -156,6 +157,7 @@ export default function CharacterDetailView({
   character: initial,
   allCharacters: initialAll,
   canEdit,
+  versionId,
 }: Props) {
   const router = useRouter();
   const [character, setCharacter] = useState(initial);
@@ -182,7 +184,7 @@ export default function CharacterDetailView({
   };
 
   const saveMeta = async (fields: Partial<{ gender: string; biography: string; roleType: string }>) => {
-    await patch(fields);
+    await patch(versionId ? { ...fields, versionId } : fields);
     setCharacter((c) => ({ ...c, ...fields }));
   };
 

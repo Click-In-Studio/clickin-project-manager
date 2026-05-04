@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getState, applyPatch } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionCharacters, listCharactersByVersion, setCharacterMembers, getActiveVersionId } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, setCharacterMembers, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -18,8 +18,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
-  const versionId = req.nextUrl.searchParams.get("versionId");
-  const characters = versionId ? await listCharactersByVersion(versionId) : await listProductionCharacters(id);
+  const versionId = req.nextUrl.searchParams.get("versionId") ?? await getActiveVersionId(id);
+  const characters = versionId ? await listCharactersByVersion(versionId) : [];
   return Response.json(characters);
 }
 

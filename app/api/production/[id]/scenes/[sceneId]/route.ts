@@ -39,13 +39,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     await applyPatch(id, versionId, { clientSeq: 0, blockOps: [], charOps: [], sceneOps: [{ op: "upsert", scene: updated }] });
   }
 
-  // Handle metadata fields directly in DB
+  // Handle metadata fields — write to scene_version (requires version context)
   const metaFields: Record<string, string> = {};
   for (const key of METADATA_KEYS) {
     if (key in body && typeof body[key] === "string") metaFields[key] = body[key];
   }
   if (Object.keys(metaFields).length > 0) {
-    await updateSceneMetadata(sceneId, id, metaFields);
+    const metaVersionId = (typeof body.versionId === "string" && body.versionId)
+      ? body.versionId
+      : (await getActiveVersionId(id) ?? "");
+    if (metaVersionId) await updateSceneMetadata(sceneId, metaVersionId, metaFields);
   }
 
   return Response.json({ ok: true });

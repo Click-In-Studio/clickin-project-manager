@@ -105,6 +105,7 @@ export default function Dramaturgy({
             initialScenes={scenes}
             rehearsalMarks={rehearsalMarks}
             canEdit={effectiveCanEdit}
+            versionId={currentVersionId}
             embedded
           />
         ) : (

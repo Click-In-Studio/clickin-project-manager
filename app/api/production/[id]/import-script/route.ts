@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listProductionScenes, listProductionCharacters, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
+import { getProductionMemberContext, listProductionScenes, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
@@ -113,8 +113,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, warningMarks } = parseRows(rawRows, body);
 
+  const previewVersionId = await getActiveVersionId(productionId);
   const [existingChars, existingScenes] = await Promise.all([
-    listProductionCharacters(productionId),
+    previewVersionId ? listCharactersByVersion(previewVersionId) : Promise.resolve([]),
     listProductionScenes(productionId),
   ]);
   const existingCharByName = new Map(existingChars.map(c => [c.name, c]));
@@ -182,7 +183,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { rows: parsed } = parseRows(rawRows, body);
 
   const [existingChars, existingScenes, tagGroups] = await Promise.all([
-    listProductionCharacters(productionId),
+    listCharactersByVersion(versionId),
     listProductionScenes(productionId),
     listTagGroups(productionId),
   ]);
