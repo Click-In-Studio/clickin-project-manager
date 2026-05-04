@@ -9,6 +9,7 @@ import MarkdownView from "./MarkdownView";
 import SmartTextarea, { memberDropPlugin, scriptRefDropPlugin } from "./SmartTextarea";
 import SmartText, { memberTextPlugin, scriptRefTextPlugin } from "./SmartText";
 import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/event-db";
+import MountPointAssets from "@/components/assets/MountPointAssets";
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
   rehearsal: "排练记录", performance: "演出记录", meeting: "会议纪要", custom: "其他",
@@ -398,6 +399,16 @@ export default function ReportViewClient({
           ) : (
             <p className="text-center text-sm text-zinc-300">暂无正文</p>
           )}
+          <div className="bg-white rounded-2xl shadow-sm px-5 py-4 mt-3">
+            <MountPointAssets
+              productionId={productionId}
+              mountType="event_report"
+              mountId={report.id}
+              label={report.title}
+              canEdit={false}
+              display="panel"
+            />
+          </div>
           <ReplyThread
             parentType="report" parentId={report.id}
             parentAuthor={members.find(m => m.openId === report.createdBy)}

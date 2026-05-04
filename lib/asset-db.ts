@@ -25,6 +25,7 @@ export type Asset = {
   productionId: string;
   uploaderOpenId: string;
   assetType: AssetType;
+  name: string | null;
   fileName: string;
   mimeType: string | null;
   isUniversal: boolean;
@@ -60,14 +61,14 @@ export type AssetMount = {
 
 type AssetRow = {
   id: string; production_id: string; uploader_open_id: string;
-  asset_type: string; file_name: string; mime_type: string | null;
+  asset_type: string; name: string | null; file_name: string; mime_type: string | null;
   is_universal: boolean; storage_type: string; feishu_url: string | null;
   created_at: Date;
 };
 function rowToAsset(r: AssetRow): Asset {
   return {
     id: r.id, productionId: r.production_id, uploaderOpenId: r.uploader_open_id,
-    assetType: r.asset_type as AssetType, fileName: r.file_name, mimeType: r.mime_type,
+    assetType: r.asset_type as AssetType, name: r.name, fileName: r.file_name, mimeType: r.mime_type,
     isUniversal: r.is_universal, storageType: r.storage_type as StorageType,
     feishuUrl: r.feishu_url, createdAt: r.created_at.toISOString(),
   };
@@ -107,6 +108,7 @@ export async function createAsset(params: {
   productionId: string;
   uploaderOpenId: string;
   assetType: AssetType;
+  name?: string | null;
   fileName: string;
   mimeType: string | null;
   isUniversal: boolean;
@@ -123,11 +125,11 @@ export async function createAsset(params: {
   try {
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO asset (id, production_id, uploader_open_id, asset_type, file_name, mime_type,
+      `INSERT INTO asset (id, production_id, uploader_open_id, asset_type, name, file_name, mime_type,
          is_universal, storage_type, feishu_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [assetId, params.productionId, params.uploaderOpenId, params.assetType, params.fileName,
-       params.mimeType, params.isUniversal, params.storageType, params.feishuUrl ?? null]
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [assetId, params.productionId, params.uploaderOpenId, params.assetType, params.name ?? null,
+       params.fileName, params.mimeType, params.isUniversal, params.storageType, params.feishuUrl ?? null]
     );
     const fileRes = await client.query<AssetFileRow>(
       `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
@@ -171,12 +173,13 @@ export async function listAssets(productionId: string): Promise<Asset[]> {
 
 export async function updateAsset(
   assetId: string,
-  fields: { assetType?: AssetType; fileName?: string }
+  fields: { assetType?: AssetType; name?: string | null; fileName?: string }
 ): Promise<Asset | null> {
   const sets: string[] = [];
   const vals: unknown[] = [];
   let i = 1;
   if (fields.assetType !== undefined) { sets.push(`asset_type = $${i++}`); vals.push(fields.assetType); }
+  if (fields.name      !== undefined) { sets.push(`name = $${i++}`);       vals.push(fields.name); }
   if (fields.fileName  !== undefined) { sets.push(`file_name = $${i++}`);  vals.push(fields.fileName); }
   if (sets.length === 0) return getAsset(assetId);
   vals.push(assetId);
@@ -221,6 +224,22 @@ export async function resolveAssetFile(assetId: string, versionId?: string | nul
     [assetId, versionId]
   );
   return res.rows[0] ? rowToAssetFile(res.rows[0]) : null;
+}
+
+/** Add a new file row for a universal asset (latest-wins on read). */
+export async function addUniversalAssetFile(
+  assetId: string,
+  r2Key: string,
+  thumbnailR2Key: string | null,
+  fileSize: number | null,
+): Promise<AssetFile> {
+  const fileId = uid("af");
+  const res = await getPool().query<AssetFileRow>(
+    `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [fileId, assetId, r2Key, thumbnailR2Key, fileSize]
+  );
+  return rowToAssetFile(res.rows[0]);
 }
 
 /** Upload a new file version for a versioned asset, updating the relation. */

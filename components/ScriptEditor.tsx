@@ -18,6 +18,8 @@ import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, Pag
 import type { TagGroup, BlockTagValue, Version, VersionStatus } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
 import VersionSelector from "@/components/VersionSelector";
+import BlockMountAssets from "@/components/assets/BlockMountAssets";
+import MountPointAssets from "@/components/assets/MountPointAssets";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState } from "@/lib/script-ops";
 import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-page";
@@ -2230,10 +2232,10 @@ function MentionTextarea({
 // ─── CommentsPanel ────────────────────────────────────────────────────────────
 
 function CommentsPanel({
-  blockId, productionId, comments, currentOpenId, isAdmin,
+  blockId, productionId, versionId, comments, currentOpenId, isAdmin,
   onAdd, onEdit, onDelete, onClose,
 }: {
-  blockId: string; productionId: string; comments: Comment[];
+  blockId: string; productionId: string; versionId?: string | null; comments: Comment[];
   currentOpenId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
@@ -2371,6 +2373,16 @@ function CommentsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        {/* Block-level assets */}
+        <BlockMountAssets
+          productionId={productionId}
+          blockId={blockId}
+          versionId={versionId ?? null}
+          label="Block 附件"
+          canEdit={true}
+          display="panel"
+        />
+
         {topLevel.length === 0 && <p className="py-4 text-center text-xs text-zinc-300">暂无评论</p>}
         {topLevel.map(topC => (
           <div key={topC.id}>
@@ -2381,6 +2393,14 @@ function CommentsPanel({
                 label: replyingTo === topC.id ? "取消回复" : "回复",
                 onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.openId, topC.authorName),
               })}
+              <MountPointAssets
+                productionId={productionId}
+                mountType="comment"
+                mountId={topC.id}
+                label={`评论附件`}
+                canEdit={topC.openId === currentOpenId || isAdmin}
+                display="compact"
+              />
             </div>
 
             {/* Replies */}
@@ -2392,6 +2412,14 @@ function CommentsPanel({
                   label: "回复",
                   onClick: () => startReply(topC.id, r.openId, r.authorName),
                 })}
+                <MountPointAssets
+                  productionId={productionId}
+                  mountType="comment"
+                  mountId={r.id}
+                  label="评论附件"
+                  canEdit={r.openId === currentOpenId || isAdmin}
+                  display="compact"
+                />
               </div>
             ))}
 
@@ -4183,6 +4211,7 @@ export default function ScriptEditor({
         <CommentsPanel
           blockId={activeCommentBlockId}
           productionId={productionId}
+          versionId={activeVersionId}
           comments={comments}
           currentOpenId={meOpenId}
           isAdmin={meIsAdmin}

@@ -119,6 +119,11 @@ export default async function ProductionDashboard({
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Events</p>
             <p className="text-base font-medium text-zinc-700">排练 / 演出</p>
           </Link>
+          <Link href={`/production/${id}/assets`}
+            className="col-span-2 rounded-2xl bg-white px-4 py-8 shadow-sm text-center hover:shadow-md transition-shadow">
+            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Assets</p>
+            <p className="text-base font-medium text-zinc-700">附件</p>
+          </Link>
         </div>
 
         {/* Call times */}
