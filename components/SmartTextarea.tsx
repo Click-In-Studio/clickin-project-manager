@@ -21,7 +21,7 @@ import {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export type MentionMember = { openId: string; name: string };
+export type MentionMember = { openId: string; name: string; avatarUrl?: string | null };
 
 export type DropItem = { id: string; label: string; secondary?: string; data?: unknown };
 

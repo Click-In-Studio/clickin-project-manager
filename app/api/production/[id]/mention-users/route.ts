@@ -12,5 +12,5 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const members = await listProductionMembers(id);
-  return Response.json({ users: members.map(m => ({ openId: m.openId, name: m.name })) });
+  return Response.json({ users: members.map(m => ({ openId: m.openId, name: m.name, avatarUrl: m.avatarUrl ?? null })) });
 }

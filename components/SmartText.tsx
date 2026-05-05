@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import {
   MENTION_PATTERN, deserializeMention,
@@ -10,7 +10,7 @@ import {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export type MentionMember = { openId: string; name: string };
+export type MentionMember = { openId: string; name: string; avatarUrl?: string | null };
 
 // Kept for backward compat — callers that already pass plugins=[...] still work.
 export type InlinePlugin = {
@@ -22,23 +22,43 @@ export type InlinePlugin = {
 
 function MemberChip({ name, members }: { name: string; members: MentionMember[] }) {
   const [hovered, setHovered] = useState(false);
+  const [above, setAbove] = useState(true);
+  const triggerRef = useRef<HTMLSpanElement>(null);
   const member = members.find(m => m.name === name);
-  const initial = name.slice(-1);
+
+  const handleMouseEnter = useCallback(() => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setAbove(rect.top > window.innerHeight / 2);
+    }
+    setHovered(true);
+  }, []);
+
+  const avatar = member?.avatarUrl;
+  const initial = name.charAt(0);
+
   return (
     <span className="relative inline-block">
       <span
+        ref={triggerRef}
         className="font-medium text-blue-500 cursor-default"
-        onMouseEnter={() => setHovered(true)}
+        onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setHovered(false)}
       >
         @{name}
       </span>
       {hovered && (
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+        <span className={`absolute left-1/2 -translate-x-1/2 z-50 pointer-events-none ${
+          above ? "bottom-full mb-2" : "top-full mt-2"
+        }`}>
           <span className="flex items-center gap-2 bg-white border border-zinc-200 rounded-xl shadow-lg px-3 py-2 whitespace-nowrap">
-            <span className="w-7 h-7 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xs font-semibold shrink-0">
-              {initial}
-            </span>
+            {avatar ? (
+              <img src={avatar} alt={name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+            ) : (
+              <span className="w-7 h-7 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xs font-semibold shrink-0">
+                {initial}
+              </span>
+            )}
             <span className="text-sm font-medium text-zinc-800">{member?.name ?? name}</span>
           </span>
         </span>
