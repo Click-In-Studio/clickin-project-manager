@@ -31,11 +31,12 @@ interface Props {
   productionId: string;
   mountCtx: MountContext;
   preSelectedId?: string | null;
-  onMounted: (assetId: string) => void;
+  selectOnly?: boolean;
+  onMounted: (assetId: string, label: string) => void;
   onCancel?: () => void;
 }
 
-export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId, onMounted, onCancel }: Props) {
+export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId, selectOnly, onMounted, onCancel }: Props) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +68,14 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
 
   async function handleMount() {
     if (!selected) return;
+    const asset = assets.find(a => a.id === selected);
+    const label = asset ? (asset.name ?? asset.fileName) : selected;
+
+    if (selectOnly) {
+      onMounted(selected, label);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -96,7 +105,7 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
         setError((j as { error?: string }).error ?? `挂载失败 (${res.status})`);
         return;
       }
-      onMounted(selected);
+      onMounted(selected, label);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -145,7 +154,7 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
       )}
 
       {/* Mount mode selector */}
-      {selected && (
+      {selected && !selectOnly && (
         <div>
           <label className="block text-xs text-zinc-400 mb-1.5">挂载模式</label>
           <div className="flex rounded-lg overflow-hidden border border-zinc-200 text-xs">
@@ -183,7 +192,7 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
       )}
 
       {/* Folder path — only for production mount */}
-      {(mountCtx.mountType === "production" || mountCtx.mountType === "version") && (
+      {!selectOnly && (mountCtx.mountType === "production" || mountCtx.mountType === "version") && (
         <div>
           <label className="block text-xs text-zinc-400 mb-1.5">文件夹路径（可选）</label>
           <input
@@ -207,7 +216,7 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
         )}
         <button onClick={handleMount} disabled={!selected || submitting}
           className="flex-1 rounded-lg bg-zinc-800 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40 transition-colors">
-          {submitting ? "挂载中…" : "确认挂载"}
+          {selectOnly ? "选择" : submitting ? "挂载中…" : "确认挂载"}
         </button>
       </div>
     </div>

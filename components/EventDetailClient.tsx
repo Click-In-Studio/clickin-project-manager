@@ -51,6 +51,7 @@ import SmartTextarea from "@/components/SmartTextarea";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 import type { Version } from "@/lib/db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
+import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 
 function toLocalInput(iso: string | null)     { return isoToDatetimeLocal(iso); }
 function toLocalDate(iso: string | null)       { return isoToDateInput(iso); }
@@ -330,6 +331,18 @@ function InfoTab({
           )}
         </div>
       )}
+
+      <div className="pt-2 border-t border-zinc-100">
+        <MountPointAssets
+          productionId={productionId}
+          mountType="event"
+          mountId={event.id}
+          label={event.title}
+          canEdit={canEdit}
+          versionId={event.versionId ?? null}
+          display="panel"
+        />
+      </div>
     </div>
   );
 }
@@ -513,6 +526,7 @@ function ScheduleTab({
   const [newParticipants, setNewParticipants] = useState<ScheduleItemParticipant[]>([]);
   const [newDeptIds, setNewDeptIds] = useState<string[]>([]);
   const [newNotifyDepts, setNewNotifyDepts] = useState<string[]>([]);
+  const [newPendingAssets, setNewPendingAssets] = useState<PendingAsset[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "table">("list");
 
@@ -561,11 +575,20 @@ function ScheduleTab({
         onTechReqsCreated(awData.techReqs);
       }
     }
+    if (newPendingAssets.length > 0) {
+      await Promise.all(newPendingAssets.map(({ id: assetId }) =>
+        fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/mounts`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mountType: "event_schedule", mountId: newId }),
+        })
+      ));
+    }
     onItemsChange([...items, { ...data.item, participants, departmentIds: newDeptIds }]);
     setNewTitle(""); setNewType("custom"); setNewStart(""); setNewEnd(""); setNewLoc("");
     setNewParticipants([]);
     setNewDeptIds([]);
     setNewNotifyDepts([]);
+    setNewPendingAssets([]);
     setAdding(false);
   }
 
@@ -695,12 +718,19 @@ function ScheduleTab({
                 </div>
               </div>
             )}
+            <CommentAssetPicker
+              productionId={productionId}
+              selected={newPendingAssets}
+              onSelect={setNewPendingAssets}
+              label="流程附件"
+            />
+
             <div className="flex gap-2">
               <button onClick={addItem}
                 className="px-4 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium hover:bg-zinc-700">
                 添加
               </button>
-              <button onClick={() => { setAdding(false); setNewParticipants([]); setNewDeptIds([]); }}
+              <button onClick={() => { setAdding(false); setNewParticipants([]); setNewDeptIds([]); setNewPendingAssets([]); }}
                 className="text-sm text-zinc-500 hover:text-zinc-700">取消</button>
             </div>
           </div>
@@ -878,6 +908,18 @@ function ScheduleItemRow({
           </div>
         )}
 
+        <div className="pt-2 border-t border-zinc-100">
+          <MountPointAssets
+            productionId={productionId}
+            mountType="event_schedule"
+            mountId={item.id}
+            label={item.title}
+            canEdit={true}
+            versionId={versionId}
+            display="panel"
+          />
+        </div>
+
         <div className="flex gap-2">
           <button onClick={save} disabled={saving}
             className="px-3 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium disabled:opacity-50">
@@ -927,7 +969,6 @@ function ScheduleItemRow({
         mountType="event_schedule"
         mountId={item.id}
         label={item.title}
-        canEdit={canEdit}
         versionId={versionId}
         display="compact"
       />
@@ -3245,18 +3286,6 @@ export default function EventDetailClient({
           )}
         </div>
 
-        {/* Event-level assets */}
-        <div className="mt-4 rounded-2xl bg-white shadow-sm px-5 py-4">
-          <MountPointAssets
-            productionId={productionId}
-            mountType="event"
-            mountId={event.id}
-            label={event.title}
-            canEdit={canEdit}
-            versionId={event.versionId ?? null}
-            display="panel"
-          />
-        </div>
       </div>
     </div>
   );
