@@ -10,11 +10,12 @@ interface Props {
   productionId: string;
   mountCtx: MountContext;
   versionId?: string | null;
+  selectOnly?: boolean;
   onDone: (mount: { assetId: string; fileName: string }) => void;
   onClose: () => void;
 }
 
-export default function AssetMountModal({ productionId, mountCtx, versionId, onDone, onClose }: Props) {
+export default function AssetMountModal({ productionId, mountCtx, versionId, selectOnly, onDone, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("select");
   const [uploadedAssetId, setUploadedAssetId] = useState<string | null>(null);
 
@@ -59,7 +60,8 @@ export default function AssetMountModal({ productionId, mountCtx, versionId, onD
             productionId={productionId}
             mountCtx={mountCtx}
             preSelectedId={uploadedAssetId}
-            onMounted={assetId => onDone({ assetId, fileName: assetId })}
+            selectOnly={selectOnly}
+            onMounted={(assetId, label) => onDone({ assetId, fileName: label })}
             onCancel={onClose}
           />
         )}

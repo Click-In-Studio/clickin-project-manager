@@ -24,6 +24,7 @@ import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-
 import type { PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
+import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -2145,6 +2146,8 @@ function CommentsPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [pendingNewAssets, setPendingNewAssets] = useState<PendingAsset[]>([]);
+  const [pendingReplyAssets, setPendingReplyAssets] = useState<PendingAsset[]>([]);
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/production/${productionId}/mention-users`)
@@ -2177,16 +2180,30 @@ function CommentsPanel({
     return null;
   };
 
+  const mountAssets = (commentId: string, assetIds: PendingAsset[]) =>
+    Promise.all(assetIds.map(({ id: assetId }) =>
+      fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/mounts`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mountType: "comment", mountId: commentId }),
+      })
+    ));
+
   const submitNew = async () => {
     const text = newText.trim(); if (!text) return;
     const c = await postComment({ text, mentions: newMentions });
-    if (c) { onAdd(c); setNewText(""); setNewMentions([]); }
+    if (c) {
+      if (pendingNewAssets.length > 0) await mountAssets(c.id, pendingNewAssets);
+      onAdd(c); setNewText(""); setNewMentions([]); setPendingNewAssets([]);
+    }
   };
 
   const submitReply = async () => {
     const text = replyText.trim(); if (!text || !replyingTo) return;
     const c = await postComment({ parentId: replyingTo, text, mentions: replyMentions });
-    if (c) { onAdd(c); setReplyText(""); setReplyMentions([]); setReplyingTo(null); }
+    if (c) {
+      if (pendingReplyAssets.length > 0) await mountAssets(c.id, pendingReplyAssets);
+      onAdd(c); setReplyText(""); setReplyMentions([]); setReplyingTo(null); setPendingReplyAssets([]);
+    }
   };
 
   const saveEdit = async (id: string) => {
@@ -2283,8 +2300,7 @@ function CommentsPanel({
                 productionId={productionId}
                 mountType="comment"
                 mountId={topC.id}
-                label={`评论附件`}
-                canEdit={topC.openId === currentOpenId || isAdmin}
+                label="评论附件"
                 display="compact"
               />
             </div>
@@ -2303,7 +2319,6 @@ function CommentsPanel({
                   mountType="comment"
                   mountId={r.id}
                   label="评论附件"
-                  canEdit={r.openId === currentOpenId || isAdmin}
                   display="compact"
                 />
               </div>
@@ -2317,12 +2332,15 @@ function CommentsPanel({
                   placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
                   onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply(); }}
                   className={taClass} />
-                <div className="mt-1 flex justify-end gap-2">
-                  <button onClick={() => setReplyingTo(null)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-600">取消</button>
-                  <button onClick={submitReply} disabled={!replyText.trim() || submitting}
-                    className="rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-700 disabled:opacity-40">
-                    {submitting ? "…" : "回复"}
-                  </button>
+                <div className="mt-1 flex items-center justify-between">
+                  <CommentAssetPicker productionId={productionId} selected={pendingReplyAssets} onSelect={setPendingReplyAssets} />
+                  <div className="flex gap-2">
+                    <button onClick={() => setReplyingTo(null)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-600">取消</button>
+                    <button onClick={submitReply} disabled={!replyText.trim() || submitting}
+                      className="rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-700 disabled:opacity-40">
+                      {submitting ? "…" : "回复"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2336,7 +2354,8 @@ function CommentsPanel({
           placeholder="添加评论… (⌘↵ 发布)" rows={3}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
           className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
-        <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex items-center justify-between">
+          <CommentAssetPicker productionId={productionId} selected={pendingNewAssets} onSelect={setPendingNewAssets} />
           <button onClick={submitNew} disabled={!newText.trim() || submitting}
             className="rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-40">
             {submitting ? "发布中…" : "发布"}
