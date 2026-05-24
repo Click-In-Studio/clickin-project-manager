@@ -222,7 +222,12 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-zinc-800 truncate">{a.name ?? a.fileName}</p>
+                      <Link
+                        href={`/production/${productionId}/assets/${a.id}/preview${versionId ? `?v=${versionId}` : ""}`}
+                        className="block text-sm font-medium text-zinc-800 hover:text-zinc-600 truncate transition-colors"
+                      >
+                        {a.name ?? a.fileName}
+                      </Link>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                         {a.name && <span className="text-[10px] text-zinc-300 truncate max-w-[120px]">{a.fileName}</span>}
                         <span className="text-[10px] text-zinc-400">{ASSET_TYPE_LABELS[a.assetType]}</span>

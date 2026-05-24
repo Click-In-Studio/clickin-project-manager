@@ -42,3 +42,4 @@ next-env.d.ts
 
 # self-hosted fonts (large binaries, deployed via rsync)
 /public/fonts/
+.r2-config
