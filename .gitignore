@@ -43,3 +43,10 @@ next-env.d.ts
 # self-hosted fonts (large binaries, deployed via rsync)
 /public/fonts/
 .r2-config
+
+# AI agent instruction files (not intended for human readers)
+AGENTS.md
+agent_bot.md
+
+# Local deployment config (contains sensitive server/credential info)
+docs/DEPLOY_LOCAL.md

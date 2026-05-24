@@ -1,36 +1,27 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Click-In Production Manager
 
-## Getting Started
+演出制作管理平台——供剧组内部使用，涵盖剧本版本管理、排练日程、Cue List、资产文件等模块。
 
-First, run the development server:
+## 技术栈
+
+- **框架**：Next.js 16 App Router（TypeScript）
+- **数据库**：PostgreSQL
+- **文件存储**：Cloudflare R2
+- **身份验证**：飞书 OAuth
+- **Bot**：飞书群机器人（OpenAI-compatible LLM）
+
+## 文档
+
+- [使用指南](docs/USER_GUIDE.md) — 各功能的操作说明与注意事项
+- [开发指南](docs/DEV_GUIDE.md) — 项目结构、本地开发、新增功能流程
+- [部署流程](docs/DEPLOY.md) — 服务器部署与数据库迁移说明
+
+## 快速开始（本地开发）
 
 ```bash
+npm install
+cp .env.example .env.local   # 填写飞书、R2、DB 等环境变量
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+详细说明见 [开发指南](docs/DEV_GUIDE.md)。
