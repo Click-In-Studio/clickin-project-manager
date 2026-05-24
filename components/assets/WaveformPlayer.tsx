@@ -96,11 +96,15 @@ export default function WaveformPlayer({ url, fileName }: Props) {
   // Keyboard shortcuts: < slow down, > speed up
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.isComposing) return; // IME 输入中，忽略
       if (e.target instanceof HTMLElement) {
         const tag = e.target.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       }
-      if (e.key === ">") {
+      // 用 e.code 判断物理键位，避免中文输入法将 Shift+. / Shift+, 转为《》
+      const faster = e.shiftKey && e.code === "Period";   // Shift+.  → >
+      const slower = e.shiftKey && e.code === "Comma";    // Shift+,  → <
+      if (faster) {
         const idx = SPEEDS.indexOf(speedValRef.current);
         const next = idx < SPEEDS.length - 1 ? SPEEDS[idx + 1] : speedValRef.current;
         if (next !== speedValRef.current) {
@@ -108,7 +112,7 @@ export default function WaveformPlayer({ url, fileName }: Props) {
           setSpeed(next);
           wsRef.current?.setPlaybackRate(next, true);
         }
-      } else if (e.key === "<") {
+      } else if (slower) {
         const idx = SPEEDS.indexOf(speedValRef.current);
         const next = idx > 0 ? SPEEDS[idx - 1] : speedValRef.current;
         if (next !== speedValRef.current) {
