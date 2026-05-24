@@ -425,7 +425,8 @@ export async function applyPatch(
   const seq = entry.serverSeq;
   const key = cacheKey(productionId, versionId);
 
-  flush(entry)
+  // 等待 flush 完成，确保数据已经写入数据库
+  await flush(entry)
     .then(() => broadcastSeq(key, seq))
     .catch(err => {
       console.error("[db] flush error, scheduling retry:", err);
