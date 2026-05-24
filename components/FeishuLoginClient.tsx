@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 
+const AUTO_LOGIN_KEY = "feishu_auto_login_attempted";
+
 export default function FeishuLoginClient({ appId, basePath }: { appId: string; basePath: string }) {
   const [showButton, setShowButton] = useState(false);
 
@@ -9,33 +11,45 @@ export default function FeishuLoginClient({ appId, basePath }: { appId: string; 
     const isFeishu = /Feishu|Lark/i.test(navigator.userAgent);
     if (!isFeishu) { setShowButton(true); return; }
 
-    const timeout = setTimeout(() => setShowButton(true), 5000);
+    // If we've already tried auto-login this session and ended up back here,
+    // something went wrong (e.g. redirect loop) — go straight to the button.
+    if (sessionStorage.getItem(AUTO_LOGIN_KEY)) {
+      sessionStorage.removeItem(AUTO_LOGIN_KEY);
+      setShowButton(true);
+      return;
+    }
+
+    const fallback = setTimeout(() => setShowButton(true), 5000);
 
     const doRequest = () => {
       const tt = (window as { tt?: { requestAuthCode: (opts: { appId: string; success: (r: { code: string }) => void; fail: () => void }) => void } }).tt;
-      if (!tt) { clearTimeout(timeout); setShowButton(true); return; }
+      if (!tt) { setShowButton(true); return; }
 
       tt.requestAuthCode({
         appId,
         success: async ({ code }) => {
+          const controller = new AbortController();
+          const fetchTimeout = setTimeout(() => controller.abort(), 8000);
           try {
             const r = await fetch(`${basePath}/api/auth/feishu-code`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ code }),
+              signal: controller.signal,
             });
+            clearTimeout(fetchTimeout);
             if (r.ok) {
+              sessionStorage.setItem(AUTO_LOGIN_KEY, "1");
               window.location.href = basePath || "/";
             } else {
-              clearTimeout(timeout);
               setShowButton(true);
             }
           } catch {
-            clearTimeout(timeout);
+            clearTimeout(fetchTimeout);
             setShowButton(true);
           }
         },
-        fail: () => { clearTimeout(timeout); setShowButton(true); },
+        fail: () => setShowButton(true),
       });
     };
 
@@ -46,7 +60,7 @@ export default function FeishuLoginClient({ appId, basePath }: { appId: string; 
       doRequest();
     }
 
-    return () => clearTimeout(timeout);
+    return () => clearTimeout(fallback);
   }, [appId, basePath]);
 
   if (!showButton) {
