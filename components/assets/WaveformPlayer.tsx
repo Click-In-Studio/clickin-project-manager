@@ -101,6 +101,7 @@ export default function WaveformPlayer({ url, fileName }: Props) {
         const tag = e.target.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       }
+      if (e.code === "Space") { e.preventDefault(); wsRef.current?.playPause(); return; }
       // 用 e.code 判断物理键位，避免中文输入法将 Shift+. / Shift+, 转为《》
       const faster = e.shiftKey && e.code === "Period";   // Shift+.  → >
       const slower = e.shiftKey && e.code === "Comma";    // Shift+,  → <
