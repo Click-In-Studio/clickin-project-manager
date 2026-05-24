@@ -17,18 +17,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
 
   const versionId = req.nextUrl.searchParams.get("v") ?? undefined;
   const file = await resolveAssetFile(assetId, versionId);
-  if (!file) return new Response("文件不存在", { status: 404 });
+  if (!file?.thumbnailR2Key) return new Response("无缩略图", { status: 404 });
 
-  // Prefer thumbnail if available, else serve original
-  const key = file.thumbnailR2Key ?? file.r2Key;
-  if (!key) return new Response("文件不存在", { status: 404 });
-
-  const obj = await getR2Object(key);
+  const obj = await getR2Object(file.thumbnailR2Key);
   if (!obj) return new Response("文件不存在", { status: 404 });
 
   return new Response(new Uint8Array(obj.body), {
     headers: {
-      "Content-Type": file.thumbnailR2Key ? "image/webp" : (asset.mimeType ?? "application/octet-stream"),
+      "Content-Type": "image/webp",
       "Cache-Control": "public, max-age=3600",
     },
   });

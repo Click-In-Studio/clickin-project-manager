@@ -208,7 +208,7 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
                     <div className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center bg-zinc-100 text-xs font-bold text-zinc-400 uppercase overflow-hidden">
                       {a.storageType === "feishu_link" ? (
                         <span>飞</span>
-                      ) : (
+                      ) : a.mimeType?.startsWith("image/") ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={`${BASE_PATH}/api/production/${productionId}/assets/${a.id}/thumb${versionId ? `?v=${versionId}` : ""}`}
@@ -216,6 +216,8 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
                           className="w-full h-full object-cover"
                           onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
                         />
+                      ) : (
+                        <span>{a.fileName.split(".").pop()?.slice(0, 4) ?? "?"}</span>
                       )}
                     </div>
 
