@@ -99,9 +99,14 @@ jobs:
             FILENAME=$(basename "$FILEPATH")
             if grep -qxF "$FILENAME" /tmp/db-applied.txt 2>/dev/null; then
               echo "SKIP  $FILENAME (already applied)"
+            elif [ ! -f "$FILEPATH" ]; then
+              # File was deleted from the repo (e.g. consolidated into schema.sql).
+              # Mark as applied so future runs don't warn about it.
+              echo "SKIP  $FILENAME (deleted from repo, marking as applied)"
+              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt"
+              echo "$FILENAME" >> /tmp/db-applied.txt
             else
               echo "APPLY $FILENAME"
-              # Upload the file and execute it
               scp "$FILEPATH" prod:/tmp/migration.sql
               ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql"
               # Record in manifest
