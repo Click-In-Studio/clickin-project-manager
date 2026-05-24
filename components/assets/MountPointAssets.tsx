@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset, AssetMount, MountType } from "@/lib/asset-db";
 import AssetMountModal from "./AssetMountModal";
@@ -53,13 +54,11 @@ export default function MountPointAssets({
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleDownload(asset: Asset) {
-    const r = await fetch(
-      `${BASE_PATH}/api/production/${productionId}/assets/${asset.id}/download-url${versionId ? `?v=${versionId}` : ""}`
-    );
-    const j = await r.json() as { url?: string; feishuUrl?: string };
-    if (j.url) window.open(j.url, "_blank");
-    else if (j.feishuUrl) window.open(j.feishuUrl, "_blank");
+  function assetHref(asset: Asset): string {
+    if (asset.storageType === "feishu_link" && asset.feishuUrl) return asset.feishuUrl;
+    const qs = versionId ? `?v=${versionId}` : "";
+    // Link already prepends basePath — don't add BASE_PATH here
+    return `/production/${productionId}/assets/${asset.id}/preview${qs}`;
   }
 
   async function handleRemove(mount: AssetMount) {
@@ -77,9 +76,13 @@ export default function MountPointAssets({
         {results.map(({ mount, asset }) => (
           <span key={mount.id}
             className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
-            <button onClick={() => handleDownload(asset)} className="hover:text-zinc-900 truncate max-w-[120px]">
+            <Link
+              href={assetHref(asset)}
+              target={asset.storageType === "feishu_link" ? "_blank" : undefined}
+              className="hover:text-zinc-900 truncate max-w-[120px]"
+            >
               {asset.name ?? asset.fileName}
-            </button>
+            </Link>
             {canEdit && (
               <button onClick={() => handleRemove(mount)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
             )}
@@ -126,10 +129,13 @@ export default function MountPointAssets({
           {results.map(({ mount, asset }) => (
             <div key={mount.id} className="flex items-center gap-2 rounded-lg bg-zinc-50 px-2.5 py-1.5">
               <div className="min-w-0 flex-1">
-                <button onClick={() => handleDownload(asset)}
-                  className="block text-xs font-medium text-zinc-700 hover:text-zinc-900 truncate text-left w-full">
+                <Link
+                  href={assetHref(asset)}
+                  target={asset.storageType === "feishu_link" ? "_blank" : undefined}
+                  className="block text-xs font-medium text-zinc-700 hover:text-zinc-900 truncate"
+                >
                   {asset.name ?? asset.fileName}
-                </button>
+                </Link>
                 <p className="text-[10px] text-zinc-400">
                   {ASSET_TYPE_LABELS[asset.assetType] ?? asset.assetType}
                   {asset.storageType === "feishu_link" ? " · 飞书" : ""}

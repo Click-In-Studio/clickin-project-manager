@@ -28,8 +28,10 @@ function getSigningKey(dateStr: string): Buffer {
 }
 
 function sortedParams(entries: Record<string, string>): URLSearchParams {
+  // AWS Signature V4 requires byte-order (code point) sort, not locale-aware sort.
+  // localeCompare treats 'r' < 'X' (alphabetically x > r), but byte-order has X(0x58) < r(0x72).
   return new URLSearchParams(
-    Object.entries(entries).sort(([a], [b]) => a.localeCompare(b))
+    Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   );
 }
 
@@ -42,17 +44,28 @@ export function thumbnailR2Key(assetFileId: string): string {
   return `thumbnails/${assetFileId}.webp`;
 }
 
-/** Presigned GET URL. */
-export function presignedGet(key: string, expiresIn = 3600): string {
+/** Presigned GET URL.
+ *  opts.inline=true  → adds response-content-disposition=inline (browser displays, doesn't download)
+ *  opts.contentType  → overrides Content-Type in the response (useful for inline PDF/video preview)
+ */
+export function presignedGet(
+  key: string,
+  expiresIn = 3600,
+  opts?: { inline?: boolean; contentType?: string },
+): string {
   const { dateStr, amzDate } = dateParts();
   const scope = `${dateStr}/${region}/s3/aws4_request`;
-  const params = sortedParams({
+  const baseParams: Record<string, string> = {
     "X-Amz-Algorithm":    "AWS4-HMAC-SHA256",
     "X-Amz-Credential":   `${accessKeyId}/${scope}`,
     "X-Amz-Date":         amzDate,
     "X-Amz-Expires":      String(expiresIn),
     "X-Amz-SignedHeaders": "host",
-  });
+  };
+  if (opts?.inline)      baseParams["response-content-disposition"] = "inline";
+  if (opts?.contentType) baseParams["response-content-type"] = opts.contentType;
+
+  const params = sortedParams(baseParams);
   const canonical = [
     "GET",
     `/${r2Bucket}/${key}`,
