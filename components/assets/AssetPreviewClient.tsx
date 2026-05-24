@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+
+const WaveformPlayer = lazy(() => import("./WaveformPlayer"));
 
 type PreviewType = "image" | "video" | "audio" | "pdf";
 
@@ -157,11 +159,13 @@ export default function AssetPreviewClient({
         )}
 
         {!loading && url && previewType === "audio" && (
-          <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-8 py-12 shadow-2xl text-center">
-            <div className="mb-6 text-5xl">🎵</div>
-            <p className="text-sm text-white/50 mb-8 truncate">{fileName}</p>
-            <audio src={url} controls className="w-full" />
-          </div>
+          <Suspense fallback={
+            <div className="w-full max-w-2xl rounded-2xl bg-zinc-900 px-6 py-8 shadow-2xl flex items-center justify-center h-48">
+              <p className="text-sm text-white/30">加载中…</p>
+            </div>
+          }>
+            <WaveformPlayer url={url} fileName={fileName} />
+          </Suspense>
         )}
 
         {!loading && url && previewType === "pdf" && (
