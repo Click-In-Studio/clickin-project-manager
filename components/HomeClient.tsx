@@ -136,6 +136,7 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
                 <>
                   <span className="text-xs text-zinc-400">{currentUser.name}</span>
                   <Link href="/my/notifications" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">通知</Link>
+                  <Link href="/my/permissions" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">权限</Link>
                   <form action={`${BASE_PATH}/api/auth/logout`} method="post">
                     <button type="submit" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">退出</button>
                   </form>
