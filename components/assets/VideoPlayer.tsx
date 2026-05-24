@@ -99,6 +99,7 @@ export default function VideoPlayer({ url, fileName }: Props) {
       if (e.isComposing) return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.code === "Space") { e.preventDefault(); togglePlay(); return; }
       const faster = e.shiftKey && e.code === "Period"; // Shift+.
       const slower = e.shiftKey && e.code === "Comma";  // Shift+,
       if (!faster && !slower) return;
@@ -114,7 +115,7 @@ export default function VideoPlayer({ url, fileName }: Props) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [togglePlay]);
 
   // ── Close dropdown on outside click ──────────────────────────────────────
   useEffect(() => {
