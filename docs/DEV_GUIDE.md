@@ -211,13 +211,22 @@ ALTER TABLE production ADD COLUMN IF NOT EXISTS new_col TEXT;
 CREATE TABLE IF NOT EXISTS something ( ... );
 ```
 
-在服务器上手动执行，**不重复执行**：
-
-```bash
-ssh click-in "sudo -u postgres psql -d script_editor -f /var/www/production-manager/db/add-something.sql"
-```
+**CI 自动执行**：merge 到 main 后，CI 按文件的 **git commit 顺序**自动在服务器上执行尚未运行的文件（同一 commit 内的多个文件按字母序排列）。执行记录保存在服务器 `shared/db-applied.txt`。
 
 执行完毕后，同步更新 `db/schema.sql`，将该变更合并进去（保持 schema.sql 始终是当前生产状态的完整快照）。
+
+### Migration 文件的修改规则
+
+Migration 文件一经 commit，**只允许 chore 类修改**（注释、格式、typo），**不允许任何实质性的 SQL 修改**。
+
+原因：CI 以文件名为 key 记录是否已执行，修改文件内容不会触发重新执行，改动会静默丢失。
+
+如果需要修正已提交的 migration（如 ALTER TABLE 语句有误）：
+
+```
+❌ 错误：直接修改 db/add-something.sql
+✅ 正确：新建 db/fix-something.sql，写补丁 SQL
+```
 
 ### 时区约定
 
