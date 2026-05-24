@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { AssetType } from "@/lib/asset-db";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -56,7 +56,55 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0); // track nested dragenter/dragleave to avoid flicker
+
+  const pickFile = useCallback((incoming: FileList | null) => {
+    if (!incoming || incoming.length === 0) return;
+    if (incoming.length > 1) {
+      setError("单次只能上传单个文件");
+      return;
+    }
+    setError(null);
+    setFile(incoming[0]);
+  }, []);
+
+  // Global paste listener — active only in file mode and when not loading
+  useEffect(() => {
+    if (mode !== "file" || loading) return;
+    function onPaste(e: ClipboardEvent) {
+      // Ignore paste into text inputs / textareas
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const files = e.clipboardData?.files ?? null;
+      if (!files || files.length === 0) return;
+      e.preventDefault();
+      pickFile(files);
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [mode, loading, pickFile]);
+
+  function onDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (dragCounterRef.current === 1) setDragOver(true);
+  }
+  function onDragOver(e: React.DragEvent) {
+    e.preventDefault(); // required to allow drop
+  }
+  function onDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current === 0) setDragOver(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragOver(false);
+    pickFile(e.dataTransfer.files);
+  }
 
   async function handleSubmit() {
     setError(null);
@@ -255,21 +303,33 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         <div>
           <div
             onClick={() => fileRef.current?.click()}
-            className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-200 py-8 cursor-pointer hover:border-zinc-400 transition-colors">
+            onDragEnter={onDragEnter}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-8 cursor-pointer transition-colors ${
+              dragOver
+                ? "border-zinc-500 bg-zinc-50"
+                : "border-zinc-200 hover:border-zinc-400"
+            }`}>
             {file ? (
               <>
                 <p className="text-sm font-medium text-zinc-700">{file.name}</p>
                 <p className="text-xs text-zinc-400">{formatSize(file.size)}</p>
               </>
+            ) : dragOver ? (
+              <>
+                <p className="text-sm text-zinc-500">松开以选择文件</p>
+              </>
             ) : (
               <>
-                <p className="text-sm text-zinc-400">点击选择文件</p>
+                <p className="text-sm text-zinc-400">点击、拖拽或粘贴文件</p>
                 <p className="text-xs text-zinc-300">支持所有格式，图片自动生成缩略图</p>
               </>
             )}
           </div>
           <input ref={fileRef} type="file" className="hidden"
-            onChange={e => setFile(e.target.files?.[0] ?? null)} />
+            onChange={e => pickFile(e.target.files)} />
         </div>
       ) : (
         <div className="space-y-2">
