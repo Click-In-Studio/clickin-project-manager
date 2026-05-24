@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 
 const WaveformPlayer = lazy(() => import("./WaveformPlayer"));
+const VideoPlayer = lazy(() => import("./VideoPlayer"));
 
 type PreviewType = "image" | "video" | "audio" | "pdf";
 
@@ -150,12 +151,9 @@ export default function AssetPreviewClient({
         )}
 
         {!loading && url && previewType === "video" && (
-          <video
-            src={url}
-            controls
-            className="max-w-full rounded-lg shadow-2xl outline-none"
-            style={{ maxHeight: "calc(100vh - 80px)", maxWidth: "100%" }}
-          />
+          <Suspense fallback={<p className="text-sm text-white/30">加载中…</p>}>
+            <VideoPlayer url={url} fileName={fileName} />
+          </Suspense>
         )}
 
         {!loading && url && previewType === "audio" && (
