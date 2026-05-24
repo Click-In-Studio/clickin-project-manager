@@ -1,0 +1,128 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history required for migration ordering
+
+      # ── 2. Setup Node ────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # ── 3. Install & Build ───────────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (standalone)
+        run: npm run build
+        env:
+          # Suppress build-time DB connections; env vars come from .env.local at runtime
+          SKIP_ENV_VALIDATION: '1'
+
+      # ── 4. Bundle ────────────────────────────────────────────────────────────
+      - name: Bundle standalone output
+        run: |
+          # Next standalone needs static/ and public/ copied in manually
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public       .next/standalone/public
+          tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
+
+      # ── 5. Setup SSH ─────────────────────────────────────────────────────────
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Set SSH alias
+        run: |
+          cat >> ~/.ssh/config <<EOF
+          Host prod
+            HostName ${{ secrets.SERVER_HOST }}
+            User ${{ secrets.SERVER_USER }}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking yes
+          EOF
+
+      # ── 6. Upload & Extract ──────────────────────────────────────────────────
+      - name: Upload bundle
+        run: |
+          RELEASE="${{ github.run_number }}-${{ github.sha }}"
+          RELEASE="${RELEASE:0:30}"   # keep it short
+          RELEASE_DIR="/var/www/production-manager/releases/$RELEASE"
+          echo "RELEASE=$RELEASE" >> $GITHUB_ENV
+          echo "RELEASE_DIR=$RELEASE_DIR" >> $GITHUB_ENV
+
+          ssh prod "mkdir -p $RELEASE_DIR"
+          scp /tmp/deploy_bundle.tar.gz prod:/tmp/deploy_bundle.tar.gz
+          ssh prod "tar -xzf /tmp/deploy_bundle.tar.gz -C $RELEASE_DIR && rm /tmp/deploy_bundle.tar.gz"
+
+      # ── 7. Run DB migrations ─────────────────────────────────────────────────
+      - name: Run DB migrations
+        run: |
+          SHARED="/var/www/production-manager/shared"
+          DB="script_editor"
+
+          # Get all db/add-*.sql files ordered by first-commit date (oldest first),
+          # alphabetically within the same commit.
+          ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' \
+            | while read commit; do
+                git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' | sort
+              done)
+
+          if [ -z "$ORDERED" ]; then
+            echo "No migration files found."
+            exit 0
+          fi
+
+          # Fetch the applied manifest from server (empty if not yet created)
+          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" > /tmp/db-applied.txt
+
+          echo "Already applied:"
+          cat /tmp/db-applied.txt || echo "(none)"
+
+          while IFS= read -r FILEPATH; do
+            FILENAME=$(basename "$FILEPATH")
+            if grep -qxF "$FILENAME" /tmp/db-applied.txt 2>/dev/null; then
+              echo "SKIP  $FILENAME (already applied)"
+            else
+              echo "APPLY $FILENAME"
+              # Upload the file and execute it
+              scp "$FILEPATH" prod:/tmp/migration.sql
+              ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql"
+              # Record in manifest
+              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt"
+              echo "$FILENAME" >> /tmp/db-applied.txt
+            fi
+          done <<< "$ORDERED"
+
+      # ── 8. Swap symlink & reload PM2 ─────────────────────────────────────────
+      - name: Activate release
+        run: |
+          ssh prod "
+            ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current &&
+            pm2 reload /var/www/production-manager/shared/ecosystem.config.js --update-env
+          "
+
+      # ── 9. Clean up old releases (keep latest 5) ─────────────────────────────
+      - name: Clean old releases
+        run: |
+          ssh prod "
+            ls -1dt /var/www/production-manager/releases/*/ |
+            tail -n +6 |
+            xargs rm -rf --
+          "
