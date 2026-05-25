@@ -512,7 +512,7 @@ export default function ImportScriptWizard({ productionId, versionId, onDone }: 
       {step === "characters" && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            检测到后缀标注的角色（如"女VO"），请选择是作为新角色还是合并为已有角色的备注。
+            检测到后缀标注的角色（如&ldquo;女VO&rdquo;），请选择是作为新角色还是合并为已有角色的备注。
           </p>
           <div className="rounded border border-gray-200 overflow-hidden text-sm">
             <table className="w-full">

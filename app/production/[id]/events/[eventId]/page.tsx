@@ -65,6 +65,7 @@ export default async function EventDetailPage({
 
   let reports = rawReports;
   if (reports.length === 0) {
+    // eslint-disable-next-line react-hooks/purity -- Server Component, not subject to render purity rules
     const seq = `rpt${Date.now().toString(36)}`;
     const defaultReport = await createEventReport({
       id: seq, eventId, reportType: "rehearsal",

@@ -313,7 +313,7 @@ export default function CueListDetail({
               </div>
             )}
             <p className="text-[10px] text-zinc-300 mt-3">
-              "默认"按照角色的默认编辑权限；"允许"强制赋予；"禁止"强制剥夺。
+              &ldquo;默认&rdquo;按照角色的默认编辑权限；&ldquo;允许&rdquo;强制赋予；&ldquo;禁止&rdquo;强制剥夺。
             </p>
           </div>
         )}

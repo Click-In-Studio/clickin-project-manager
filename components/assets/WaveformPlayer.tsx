@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
+// Pre-computed at module load time so Math.random() is never called during render
+const SKELETON_HEIGHTS = Array.from({ length: 40 }, () => 20 + Math.random() * 60);
+
 interface Props {
   url: string;
   fileName: string;
@@ -30,7 +33,7 @@ export default function WaveformPlayer({ url, fileName }: Props) {
   const [speed, setSpeed] = useState(1);
   const [speedOpen, setSpeedOpen] = useState(false);
 
-  useEffect(() => {
+useEffect(() => {
     if (!containerRef.current) return;
 
     let ws: import("wavesurfer.js").default;
@@ -150,12 +153,12 @@ export default function WaveformPlayer({ url, fileName }: Props) {
         {!ready && !error && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="flex items-end gap-0.5 h-12">
-              {Array.from({ length: 40 }).map((_, i) => (
+              {SKELETON_HEIGHTS.map((h, i) => (
                 <div
                   key={i}
                   className="w-1 rounded-full bg-white/10 animate-pulse"
                   style={{
-                    height: `${20 + Math.random() * 60}%`,
+                    height: `${h}%`,
                     animationDelay: `${i * 30}ms`,
                   }}
                 />
