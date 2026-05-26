@@ -203,7 +203,7 @@ export default function DurationInput({
           type="button"
           onClick={(e) => { e.stopPropagation(); commit(); }}
           disabled={saving}
-          className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 whitespace-nowrap"
+          className="rounded bg-zinc-800 px-3 py-1.5 text-xs text-white hover:bg-zinc-700 disabled:opacity-50 whitespace-nowrap transition-colors"
         >
           保存
         </button>
@@ -211,7 +211,7 @@ export default function DurationInput({
           type="button"
           onClick={cancel}
           disabled={saving}
-          className="text-xs text-zinc-400 hover:text-zinc-600 disabled:opacity-50 whitespace-nowrap"
+          className="text-xs text-zinc-400 hover:text-zinc-600 disabled:opacity-50 whitespace-nowrap transition-colors"
         >
           取消
         </button>
