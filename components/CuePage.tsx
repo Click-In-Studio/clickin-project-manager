@@ -1109,8 +1109,11 @@ export default function CuePage({
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    // End handle marks use "${cueId}:end" to avoid guide-line querySelector collision;
+    // strip the suffix here to get the real cue id (same pattern as handleMarkClick).
+    const realCueId = cueId.endsWith(":end") ? cueId.slice(0, -4) : cueId;
     dragStateRef.current = {
-      active: true, dragType, cueId,
+      active: true, dragType, cueId: realCueId,
       startX: e.clientX, startY: e.clientY,
       thresholdMet: false, liveAnchor: null,
       originalAnchor: originalAnchor ?? null,
