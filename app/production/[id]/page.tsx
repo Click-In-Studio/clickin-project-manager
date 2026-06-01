@@ -51,7 +51,7 @@ export default async function ProductionDashboard({
     listUnreadFollowedReports(session.openId, id),
   ]);
   const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
-  const isProjectMember = memberRoles !== null;
+  const isProjectMember = session.isAdmin || memberRoles !== null;
   if (!name) redirect("/");
 
   const editableListIds: string[] = [];
