@@ -2,6 +2,7 @@
 
 import React from "react";
 import {
+  type DragEvent,
   type KeyboardEvent,
   useCallback,
   useEffect,
@@ -750,33 +751,49 @@ function RehearsalMarkInput({
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); commit(); }
-          if (e.key === "Escape") { setDraft(mark ?? ""); setEditing(false); }
-        }}
-        placeholder="A1"
-        className="w-10 rounded border border-zinc-300 px-1 py-0.5 text-center text-[11px] font-bold uppercase outline-none"
-      />
+      <span className="flex items-start gap-1">
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          title="设置排练记号"
+          className="rounded px-0.5 py-0 text-[8px] font-bold leading-none tracking-wide text-zinc-400"
+        >
+          ▶
+        </button>
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+            if (e.key === "Escape") { setDraft(mark ?? ""); setEditing(false); }
+          }}
+          placeholder="A1"
+          className="w-10 rounded border border-zinc-300 px-1 py-0.5 text-center text-[11px] font-bold uppercase outline-none"
+        />
+      </span>
     );
   }
 
   return (
-    <button
-      onClick={() => { setDraft(mark ?? ""); setEditing(true); }}
-      title="设置排练记号"
-      className={`rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide transition-colors ${
-        mark
-          ? "text-zinc-500 hover:text-zinc-700"
-          : "text-zinc-200 hover:text-zinc-400"
-      }`}
-    >
-      {mark ?? "▶"}
-    </button>
+    <span className="flex items-start gap-1">
+      <button
+        onClick={() => { setDraft(mark ?? ""); setEditing(true); }}
+        title="设置排练记号"
+        className={`rounded px-0.5 py-0 text-[8px] font-bold leading-none tracking-wide transition-colors ${
+          mark
+            ? "text-zinc-500 hover:text-zinc-700"
+            : "text-zinc-200 hover:text-zinc-400"
+        }`}
+      >
+        ▶
+      </button>
+      {mark && (
+        <span className="text-[9px] font-bold leading-none tracking-wide text-zinc-500">
+          {mark}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1608,6 +1625,8 @@ function _sameCharacters(a: string[], b: string[]): boolean {
   return b.every((id) => s.has(id));
 }
 
+type DragTarget = { id: string; position: "before" | "after" };
+
 // ─── TagPicker ────────────────────────────────────────────────────────────────
 
 function TagPicker({
@@ -1709,6 +1728,7 @@ function ScriptBlock({
   onUpdate,
   onSplit,
   onMerge,
+  onDelete,
   onFocus,
   onToggleType,
   onToggleLyric,
@@ -1718,10 +1738,15 @@ function ScriptBlock({
   onArrowDownFromTextarea,
   onSceneChange,
   onMarkChange,
+  onDragStartBlock,
+  onDragEndBlock,
+  onDragOverBlock,
+  onDropBlock,
   isMarkStart,
   commentCount,
   onCommentClick,
   onAssetClick,
+  dragTarget = null,
   index = 0,
   lineNum,
   isSearchHighlight,
@@ -1752,6 +1777,7 @@ function ScriptBlock({
   onUpdate: (changes: Partial<Block>) => void;
   onSplit: (before: string, after: string) => void;
   onMerge: () => void;
+  onDelete: () => void;
   onFocus: () => void;
   onToggleType: () => void;
   onToggleLyric: () => void;
@@ -1761,10 +1787,15 @@ function ScriptBlock({
   onArrowDownFromTextarea: () => void;
   onSceneChange: (sceneId: string | null) => void;
   onMarkChange: (mark: string | null) => void;
+  onDragStartBlock: (e: DragEvent<HTMLButtonElement>) => void;
+  onDragEndBlock: () => void;
+  onDragOverBlock: (e: DragEvent<HTMLDivElement>) => void;
+  onDropBlock: (e: DragEvent<HTMLDivElement>) => void;
   isMarkStart: boolean;
   commentCount: number;
   onCommentClick: () => void;
   onAssetClick: () => void;
+  dragTarget?: DragTarget | null;
   index?: number;
   lineNum?: number;
   isSearchHighlight?: "match" | "focused";
@@ -1788,6 +1819,7 @@ function ScriptBlock({
   const composingRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const refCallback = useCallback(
     (el: HTMLDivElement | null) => {
@@ -1902,6 +1934,10 @@ function ScriptBlock({
   };
 
   const isStage = block.type === "stage";
+  const isEmptyForDelete =
+    block.content.trim() === "" &&
+    block.characterIds.length === 0 &&
+    Object.values(block.characterAnnotations).every((ann) => ann.trim() === "");
 
   const firstEditor = presenceEditors[0];
 
@@ -1911,15 +1947,89 @@ function ScriptBlock({
 
   return (
     <div
+      onDragOver={onDragOverBlock}
+      onDrop={onDropBlock}
       className={`group relative px-6 py-0 text-center transition-colors ${searchRingClass} ${
         isFocused ? "bg-zinc-100/70" : (index ?? 0) % 2 === 1 ? "bg-zinc-50/60" : ""
       }`}
     >
-      {/* Line number — shown in left padding, subtle */}
-      {lineNum !== undefined && (
-        <span className="pointer-events-none absolute left-1 top-[3px] select-none tabular-nums text-[9px] leading-none text-zinc-400 group-hover:text-zinc-600 transition-colors">
-          {lineNum}
+      {dragTarget && (
+        <div
+          className={`pointer-events-none absolute left-4 right-4 z-10 border-t-2 ${
+            dragTarget.position === "before" ? "-top-2.5" : "-bottom-2.5"
+          }`}
+          style={{ borderColor: "#91a8ca" }}    /* my signature color (lighter version). ^v^ -- QPT */
+        />
+      )}
+
+      {(lineNum !== undefined || canEditRehearsalMark) && (
+        <span className="absolute left-1.5 top-[3px] flex items-start gap-1 leading-none">
+          {lineNum !== undefined && (
+            <span className="pointer-events-none select-none tabular-nums text-[9px] leading-none text-zinc-400 transition-colors group-hover:text-zinc-600">
+              {lineNum}
+            </span>
+          )}
+          {canEditRehearsalMark && (
+            <span className={`relative top-[1px] transition-opacity ${isMarkStart && block.rehearsalMark && showRehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+              <RehearsalMarkInput
+                mark={block.rehearsalMark}
+                onChange={onMarkChange}
+              />
+            </span>
+          )}
         </span>
+      )}
+
+      {canEditText && (
+        <div className="absolute left-0 top-1 bottom-0 flex w-4 flex-col items-center justify-between">
+          <span />
+
+          {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
+            confirmDelete ? (
+              <span className="absolute left-0 bottom-0 z-10 flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm">
+                <span className="whitespace-nowrap text-[10px] text-zinc-400">确认删除此行？</span>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setConfirmDelete(false); onDelete(); }}
+                  className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
+                >
+                  确认
+                </button>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setConfirmDelete(false)}
+                  className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { if (isEmptyForDelete) onDelete(); else setConfirmDelete(true); }}
+                className="flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
+                title="删除此行"
+                aria-label="删除此行"
+              >
+                ×
+              </button>
+            )
+          )}
+
+          {(
+            <button
+              draggable
+              onDragStart={onDragStartBlock}
+              onDragEnd={onDragEndBlock}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 cursor-grab rounded text-zinc-200 opacity-0 transition-all hover:bg-[#dbe5f3] hover:text-[#91a8ca] group-hover:opacity-100 active:cursor-grabbing"
+              title="拖动调整位置"
+              aria-label="拖动调整位置"
+            >
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current" />
+            </button>
+          )}
+        </div>
       )}
 
       {/* Colored left bar showing a remote editor is active in this block */}
@@ -1939,16 +2049,6 @@ function ScriptBlock({
           {presenceEditors.map(e => (
             <span key={e.clientId}>{e.userName}</span>
           ))}
-        </div>
-      )}
-
-      {/* Rehearsal mark — top left, visible at the start of a new mark section; hover to edit */}
-      {canEditRehearsalMark && (
-        <div className={`absolute left-2 top-1 transition-opacity ${isMarkStart && block.rehearsalMark && showRehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-          <RehearsalMarkInput
-            mark={block.rehearsalMark}
-            onChange={onMarkChange}
-          />
         </div>
       )}
 
@@ -2055,7 +2155,7 @@ function ScriptBlock({
           syncContent();
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
-        className={`w-full min-h-[1.75rem] outline-none text-base leading-7 break-words font-script ${
+        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words font-script ${
           isStage ? "italic text-zinc-400 text-center" :
           block.lyric ? "text-zinc-700 text-center uppercase" :
           "text-zinc-700 text-left"
@@ -2413,6 +2513,7 @@ export default function ScriptEditor({
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
+  const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
@@ -2470,6 +2571,7 @@ export default function ScriptEditor({
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
   const pendingCharOpen = useRef<string | null>(null);
+  const draggingBlockId = useRef<string | null>(null);
   const blocksRef = useRef(blocks);
   const prevBlocksLengthRef = useRef(blocks.length);
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
@@ -3424,6 +3526,42 @@ export default function ScriptEditor({
     });
   }, [saveSnapshot]);
 
+  const deleteBlock = useCallback((id: string) => {
+    saveSnapshot();
+    setBlocks((prev) => {
+      if (prev.length <= 1) return prev;
+      const idx = prev.findIndex((b) => b.id === id);
+      if (idx === -1) return prev;
+      const nextFocus = prev[idx + 1] ?? prev[idx - 1];
+      if (nextFocus) pendingFocus.current = { id: nextFocus.id, atEnd: false };
+      return prev.filter((b) => b.id !== id);
+    });
+  }, [saveSnapshot]);
+
+  const moveBlock = useCallback((fromId: string, target: DragTarget) => {
+    const { id: toId, position } = target;
+    if (fromId === toId) return;
+    saveSnapshot();
+    setBlocks((prev) => {
+      const fromIdx = prev.findIndex((b) => b.id === fromId);
+      const toIdx = prev.findIndex((b) => b.id === toId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      const rawInsertIdx = position === "before" ? toIdx : toIdx + 1;
+      const insertIdx = fromIdx < rawInsertIdx ? rawInsertIdx - 1 : rawInsertIdx;
+      const ref = insertIdx > 0 ? next[insertIdx - 1] : null;
+      next.splice(insertIdx, 0, {
+        ...moved,
+        sceneId: ref?.sceneId ?? null,
+        rehearsalMark: ref?.rehearsalMark ?? null,
+      });
+      pendingFocus.current = { id: moved.id, atEnd: false };
+      return next;
+    });
+  }, [saveSnapshot]);
+
   const insertBlockAt = useCallback((index: number) => {
     saveSnapshot();
     let newId: string | null = null;
@@ -4076,6 +4214,7 @@ export default function ScriptEditor({
                   availableScenes={availableScenes}
                   hideCharSelector={hideCharSelector}
                   isFocused={focusedId === block.id}
+                  dragTarget={dragTarget?.id === block.id ? dragTarget : null}
                   charEditToken={charEditTokens[block.id] ?? 0}
                   presenceEditors={Array.from(presenceMap.values()).filter(
                     p => p.blockId === block.id && p.clientId !== clientId
@@ -4084,6 +4223,7 @@ export default function ScriptEditor({
                   onUpdate={(changes) => updateBlock(block.id, changes)}
                   onSplit={(before, after) => splitBlock(block.id, before, after)}
                   onMerge={() => mergeBlock(block.id)}
+                  onDelete={() => deleteBlock(block.id)}
                   onFocus={() => { setFocusedId(block.id); sendPresence(block.id); }}
                   onToggleType={() => toggleBlockType(block.id)}
                   onToggleLyric={() => toggleBlockLyric(block.id)}
@@ -4093,6 +4233,50 @@ export default function ScriptEditor({
                   onArrowDownFromTextarea={() => handleArrowDownFromTextarea(block.id)}
                   onSceneChange={(id) => updateBlockScene(block.id, id)}
                   onMarkChange={(m) => updateBlockMark(block.id, m)}
+                  onDragStartBlock={(e) => {
+                    draggingBlockId.current = block.id;
+                    setDragTarget(null);
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", block.id);
+                  }}
+                  onDragEndBlock={() => {
+                    draggingBlockId.current = null;
+                    setDragTarget(null);
+                  }}
+                  onDragOverBlock={(e) => {
+                    if (!draggingBlockId.current) return;
+                    if (draggingBlockId.current === block.id) {
+                      setDragTarget(null);
+                      return;
+                    }
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const wantsAfter = e.clientY >= rect.top + rect.height / 2;
+                    const position = wantsAfter && bIdx === blocks.length - 1 ? "after" : "before";
+                    const targetId = wantsAfter && bIdx < blocks.length - 1 ? blocks[bIdx + 1].id : block.id;
+                    if (draggingBlockId.current === targetId) {
+                      setDragTarget(null);
+                      return;
+                    }
+                    setDragTarget((current) => (
+                      current?.id === targetId && current.position === position
+                        ? current
+                        : { id: targetId, position }
+                    ));
+                  }}
+                  onDropBlock={(e) => {
+                    e.preventDefault();
+                    const fromId = draggingBlockId.current ?? e.dataTransfer.getData("text/plain");
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const wantsAfter = e.clientY >= rect.top + rect.height / 2;
+                    const position = wantsAfter && bIdx === blocks.length - 1 ? "after" : "before";
+                    const targetId = wantsAfter && bIdx < blocks.length - 1 ? blocks[bIdx + 1].id : block.id;
+                    const target: DragTarget = { id: targetId, position };
+                    draggingBlockId.current = null;
+                    setDragTarget(null);
+                    if (fromId && fromId !== target.id) moveBlock(fromId, target);
+                  }}
                   isMarkStart={isMarkStart}
                   commentCount={comments.filter(c => c.contextId === block.id).length}
                   onCommentClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(block.id); }}
