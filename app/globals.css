@@ -23,6 +23,8 @@
   --background: #ffffff;
   --foreground: #171717;
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
+  --font-stage: 'KaiTi', 'STKaiti', 'Kaiti SC', 'SourceHanSerif', 'Source Han Serif CN', serif;
+  --font-lyric: 'STZhongsong', '华文中宋', 'SourceHanSerif', 'Source Han Serif CN', serif;
 }
 
 @theme inline {
@@ -87,9 +89,17 @@ body {
   font-family: var(--font-script);
 }
 
+.font-stage {
+  font-family: var(--font-stage);
+}
+
+.font-lyric {
+  font-family: var(--font-lyric);
+}
+
 /* Legacy alias kept for existing usages */
 .font-kaiti {
-  font-family: var(--font-script);
+  font-family: var(--font-stage);
 }
 
 @media print {

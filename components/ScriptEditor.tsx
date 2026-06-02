@@ -1400,12 +1400,12 @@ function PrintPreview({
           </div>
         )}
         <div
-          className={`w-full break-words text-sm leading-7 font-script ${
+          className={`w-full break-words text-sm leading-7 ${
             isStage
-              ? "text-center italic text-zinc-500"
+              ? "font-stage text-center italic text-zinc-500"
               : block.lyric
-              ? "text-center uppercase text-zinc-800"
-              : "text-left text-zinc-800"
+              ? "font-lyric text-center font-bold uppercase text-zinc-800"
+              : "font-script text-left text-zinc-800"
           }`}
           dangerouslySetInnerHTML={{ __html: mdToHtml(block.content) || "　" }}
         />
@@ -2220,10 +2220,10 @@ function ScriptBlock({
           syncContent();
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
-        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words font-script ${
-          isStage ? "italic text-zinc-400 text-center" :
-          block.lyric ? "text-zinc-700 text-center uppercase" :
-          "text-zinc-700 text-left"
+        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${
+          isStage ? "font-stage italic text-zinc-400 text-center" :
+          block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
+          "font-script text-zinc-700 text-left"
         }`}
       />
 
