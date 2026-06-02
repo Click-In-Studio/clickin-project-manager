@@ -77,15 +77,34 @@ export default function ProductionMemberGuardLink({
         {cardContent}
       </button>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="member-guard-title" className="w-full max-w-sm rounded-xl bg-white p-5 text-left shadow-xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="member-guard-title"
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl bg-white p-5 text-left shadow-xl"
+          >
             <p id="member-guard-title" className="text-sm font-semibold text-zinc-800">无法编辑项目内容</p>
             <p className="mt-3 text-sm leading-6 text-zinc-600">
               {isAdmin
                 ? <>当前超级管理员账号（{accountName}）还不是该项目的成员。请将自己加入项目人员以继续。</>
                 : <>当前账号（{accountName}）还不是该项目的成员。如需编辑，请联系管理员将当前账号加入该项目。</>}
             </p>
-            <div className="mt-5 flex justify-end">
+            <div className="mt-5 flex justify-end gap-2">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  disabled={joining}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 disabled:opacity-50"
+                >
+                  取消
+                </button>
+              )}
               <button
                 type="button"
                 onClick={isAdmin ? joinProject : () => setOpen(false)}
