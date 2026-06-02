@@ -3602,6 +3602,7 @@ export default function ScriptEditor({
         ? { ...b, type, characterIds: type === "stage" ? [] : b.characterIds }
         : b
     ));
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
   }, [saveSnapshot]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
@@ -3613,6 +3614,7 @@ export default function ScriptEditor({
         ? { ...b, lyric }
         : b
     ));
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
   }, [saveSnapshot]);
 
   // Apply pending focus on every render until resolved
@@ -3772,6 +3774,9 @@ export default function ScriptEditor({
       if (draggingBlockId.current || isReorderLockedRef.current) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      const docEl = document.documentElement;
+      const isViewportScrollbar = e.clientX >= docEl.clientWidth || e.clientY >= docEl.clientHeight;
+      if (isViewportScrollbar) return;
       if (target.closest("[data-script-confirmation='true']")) return;
       if (target.closest("[data-script-block-bar='true']")) return;
       if (target.closest("[data-script-selection-action='true']")) return;
@@ -3836,6 +3841,7 @@ export default function ScriptEditor({
 
     saveSnapshot();
     setBlocks(next);
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
     unlockReorderAfterCommit();
     return true;
   }, [saveSnapshot, showReorderNotice, unlockReorderAfterCommit]);
@@ -4017,6 +4023,13 @@ export default function ScriptEditor({
       </div>
     );
   }
+
+  const selectionNotice = selectedBlockIds.size > 1
+    ? `已选中 ${selectedBlockIds.size} 行`
+    : "";
+  const dragInstructionNotice = isScriptDragging || isReorderLocked
+    ? "拖拽当前剧本块至指定位置松开以调整位置"
+    : "";
 
   return (
     <div className="min-h-screen bg-zinc-100">
@@ -4408,15 +4421,19 @@ export default function ScriptEditor({
         )}
       </header>
 
-      {(isReorderLocked || reorderNotice) && (
+      {(dragInstructionNotice || reorderNotice || selectionNotice) && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2">
-          {isReorderLocked ? (
+          {dragInstructionNotice ? (
             <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
-              处理进行中...
+              {dragInstructionNotice}
             </div>
-          ) : (
+          ) : reorderNotice ? (
             <div className="rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-800 shadow-sm">
               {reorderNotice}
+            </div>
+          ) : (
+            <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+              {selectionNotice}
             </div>
           )}
         </div>
