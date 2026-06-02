@@ -2463,6 +2463,7 @@ export default function ScriptEditor({
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
   const pendingCharOpen = useRef<string | null>(null);
   const blocksRef = useRef(blocks);
+  const prevBlocksLengthRef = useRef(blocks.length);
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
 
@@ -2600,11 +2601,26 @@ export default function ScriptEditor({
 
   // Clamp window when blocks list length changes (insert/delete)
   useLayoutEffect(() => {
+    const prevLength = prevBlocksLengthRef.current;
+    prevBlocksLengthRef.current = blocks.length;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWindowRange(prev => ({
-      start: Math.min(prev.start, Math.max(0, blocks.length - 1)),
-      end: Math.min(prev.end, blocks.length),
-    }));
+    setWindowRange(prev => {
+      if (blocks.length === 0) return prev.start === 0 && prev.end === 0 ? prev : { start: 0, end: 0 };
+
+      const start = Math.min(prev.start, Math.max(0, blocks.length - 1));
+      let end = Math.min(prev.end, blocks.length);
+
+      // When a blank script grows from the one-block loading placeholder, all
+      // new blocks can have identical measured height. Expand the rendered
+      // window immediately instead of waiting for a later metadata edit to
+      // trigger measurement/recompute.
+      if (blocks.length > prevLength && prev.end >= prevLength) {
+        end = Math.min(blocks.length, end + (blocks.length - prevLength));
+      }
+      if (end <= start) end = Math.min(blocks.length, start + 1);
+
+      return prev.start === start && prev.end === end ? prev : { start, end };
+    });
   }, [blocks.length]);
 
   // Measure rendered block heights after each render pass
