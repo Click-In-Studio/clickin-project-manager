@@ -1731,6 +1731,7 @@ function ScriptBlock({
   canEditText = false,
   canEditMetadata = false,
   canEditRehearsalMark = false,
+  canMergeWithPrevious = false,
   tagGroups,
   blockTagValues,
   showBlockTags = false,
@@ -1773,6 +1774,7 @@ function ScriptBlock({
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
+  canMergeWithPrevious?: boolean;
   tagGroups?: TagGroup[];
   blockTagValues?: BlockTagValue[];
   showBlockTags?: boolean;
@@ -1895,7 +1897,7 @@ function ScriptBlock({
     }
     if (e.key === "Backspace" && isAtStart(div)) {
       e.preventDefault();
-      onMerge();
+      if (canMergeWithPrevious) onMerge();
     }
   };
 
@@ -3411,7 +3413,9 @@ export default function ScriptEditor({
       }
       const p = prev[idx - 1];
       const c = prev[idx];
-      const merged = { ...p, content: p.content + c.content };
+      const mergedContent =
+        p.content && c.content ? `${p.content}\n${c.content}` : p.content + c.content;
+      const merged = { ...p, content: mergedContent };
       const updated = [...prev];
       updated[idx - 1] = merged;
       updated.splice(idx, 1);
@@ -3992,6 +3996,12 @@ export default function ScriptEditor({
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
               matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
+            const canMergeWithPrevious = !!(
+              prev &&
+              prev.type === block.type &&
+              prev.lyric === block.lyric &&
+              _sameCharacters(prev.characterIds, block.characterIds)
+            );
 
             const blockEl = (
               <div
@@ -4090,6 +4100,7 @@ export default function ScriptEditor({
                   canEditText={canEditText}
                   canEditMetadata={canEditMetadata}
                   canEditRehearsalMark={canEditRehearsalMark}
+                  canMergeWithPrevious={canMergeWithPrevious}
                   tagGroups={tagGroups}
                   blockTagValues={blockTagMap.get(block.id) ?? []}
                   showBlockTags={display.blockTags && tagGroups.length > 0}
