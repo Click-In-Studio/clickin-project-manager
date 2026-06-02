@@ -11,6 +11,7 @@ import {
 import { hasPermission } from "@/lib/roles";
 import ArchiveButton from "@/components/ArchiveButton";
 import ProductionNameEditor from "@/components/ProductionNameEditor";
+import ProductionMemberGuardLink from "@/components/ProductionMemberGuardLink";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -50,6 +51,7 @@ export default async function ProductionDashboard({
     listUnreadFollowedReports(session.openId, id),
   ]);
   const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
+  const isProjectMember = memberRoles !== null;
   if (!name) redirect("/");
 
   const editableListIds: string[] = [];
@@ -95,17 +97,37 @@ export default async function ProductionDashboard({
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">People</p>
             <p className="text-base font-medium text-zinc-700">人员</p>
           </Link>
-          <Link href={`/production/${id}/dramaturgy`}
+          <ProductionMemberGuardLink
+            productionId={id}
+            currentOpenId={session.openId}
+            href={`/production/${id}/dramaturgy`}
+            title="戏剧构作"
+            subtitle="Dramaturgy"
+            accountName={session.name}
+            isProjectMember={isProjectMember}
+            isAdmin={session.isAdmin}
             className="rounded-2xl bg-white px-4 py-8 shadow-sm text-center hover:shadow-md transition-shadow">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Dramaturgy</p>
-            <p className="text-base font-medium text-zinc-700">戏剧构作</p>
-          </Link>
-          <Link href={`/production/${id}/script`}
+          </ProductionMemberGuardLink>
+          <ProductionMemberGuardLink
+            productionId={id}
+            currentOpenId={session.openId}
+            href={`/production/${id}/script`}
+            title="剧本"
+            subtitle="Script"
+            accountName={session.name}
+            isProjectMember={isProjectMember}
+            isAdmin={session.isAdmin}
             className="rounded-2xl bg-white px-4 py-8 shadow-sm text-center hover:shadow-md transition-shadow">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Script</p>
-            <p className="text-base font-medium text-zinc-700">剧本</p>
-          </Link>
-          <Link href={`/production/${id}/cues`}
+          </ProductionMemberGuardLink>
+          <ProductionMemberGuardLink
+            productionId={id}
+            currentOpenId={session.openId}
+            href={`/production/${id}/cues`}
+            title="Cue视图"
+            subtitle="Cue"
+            accountName={session.name}
+            isProjectMember={isProjectMember}
+            isAdmin={session.isAdmin}
             className="relative rounded-2xl bg-white px-4 py-8 shadow-sm text-center hover:shadow-md transition-shadow">
             {warningCount > 0 && (
               <span className="absolute top-2.5 right-2.5 flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
@@ -114,7 +136,7 @@ export default async function ProductionDashboard({
             )}
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Cue</p>
             <p className="text-base font-medium text-zinc-700">Cue视图</p>
-          </Link>
+          </ProductionMemberGuardLink>
           <Link href={`/production/${id}/events`}
             className="col-span-2 rounded-2xl bg-white px-4 py-8 shadow-sm text-center hover:shadow-md transition-shadow">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Events</p>
