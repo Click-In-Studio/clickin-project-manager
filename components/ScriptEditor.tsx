@@ -2642,7 +2642,7 @@ export default function ScriptEditor({
   const draggingBlockIds = useRef<string[]>([]);
   const blocksRef = useRef(blocks);
   const prevBlocksLengthRef = useRef(blocks.length);
-  useEffect(() => { blocksRef.current = blocks; }, [blocks]);
+  useLayoutEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
 
   // ── Virtual scroll ────────────────────────────────────────────────────────────
@@ -2714,6 +2714,8 @@ export default function ScriptEditor({
     // Always keep the focused block rendered
     const fi = focusedIdRef.current ? bl.findIndex(b => b.id === focusedIdRef.current) : -1;
     if (fi >= 0) { newStart = Math.min(newStart, fi); newEnd = Math.max(newEnd, fi + 1); }
+    const pfi = pendingFocus.current ? bl.findIndex(b => b.id === pendingFocus.current?.id) : -1;
+    if (pfi >= 0) { newStart = Math.min(newStart, pfi); newEnd = Math.max(newEnd, pfi + 1); }
 
     setWindowRange(prev =>
       prev.start === newStart && prev.end === newEnd ? prev : { start: newStart, end: newEnd }
@@ -2779,23 +2781,28 @@ export default function ScriptEditor({
 
   // Clamp window when blocks list length changes (insert/delete)
   useLayoutEffect(() => {
+    const bl = blocksRef.current;
     const prevLength = prevBlocksLengthRef.current;
-    prevBlocksLengthRef.current = blocks.length;
+    prevBlocksLengthRef.current = bl.length;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setWindowRange(prev => {
-      if (blocks.length === 0) return prev.start === 0 && prev.end === 0 ? prev : { start: 0, end: 0 };
+      if (bl.length === 0) return prev.start === 0 && prev.end === 0 ? prev : { start: 0, end: 0 };
 
-      const start = Math.min(prev.start, Math.max(0, blocks.length - 1));
-      let end = Math.min(prev.end, blocks.length);
+      let start = Math.min(prev.start, Math.max(0, bl.length - 1));
+      let end = Math.min(prev.end, bl.length);
 
-      // When a blank script grows from the one-block loading placeholder, all
-      // new blocks can have identical measured height. Expand the rendered
-      // window immediately instead of waiting for a later metadata edit to
-      // trigger measurement/recompute.
-      if (blocks.length > prevLength && prev.end >= prevLength) {
-        end = Math.min(blocks.length, end + (blocks.length - prevLength));
+      const addedCount = bl.length - prevLength;
+      if (addedCount > 0 && addedCount <= 5 && prev.end >= prevLength) {
+        end = Math.min(bl.length, end + addedCount);
       }
-      if (end <= start) end = Math.min(blocks.length, start + 1);
+
+      const pendingFocusId = pendingFocus.current?.id;
+      const pendingFocusIdx = pendingFocusId ? bl.findIndex((b) => b.id === pendingFocusId) : -1;
+      if (pendingFocusIdx >= 0) {
+        start = Math.min(start, pendingFocusIdx);
+        end = Math.max(end, pendingFocusIdx + 1);
+      }
+      if (end <= start) end = Math.min(bl.length, start + 1);
 
       return prev.start === start && prev.end === end ? prev : { start, end };
     });
@@ -2817,7 +2824,6 @@ export default function ScriptEditor({
     });
     if (changed) {
       rebuildCumulative();
-      recomputeWindow();
       // If there's a pending navigation correction, trigger the layout effect that will re-scroll
       if (postNavCorrectionRef.current) {
         setCorrectionTick(t => t + 1);
@@ -3585,6 +3591,7 @@ export default function ScriptEditor({
       const updated = [...prev];
       updated[idx] = { ...cur, content: before };
       updated.splice(idx + 1, 0, next);
+      pendingFocus.current = { id: next.id, atEnd: false };
       pendingCharOpen.current = next.id;
       return updated;
     });
