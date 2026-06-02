@@ -347,6 +347,9 @@ export default function EventsClient({
               ← {productionName}
             </Link>
             <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">Events</h1>
+            <span className="shrink-0 rounded bg-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500">
+              {canCreate ? "可创建" : "只读"}
+            </span>
           </div>
           {canCreate && (
             <button

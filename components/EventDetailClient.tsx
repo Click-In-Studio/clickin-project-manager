@@ -3122,7 +3122,12 @@ export default function EventDetailClient({
 
         <div className="flex items-start justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-lg font-bold text-zinc-800 leading-tight">{event.title}</h1>
+            <div className="flex items-start gap-2">
+              <h1 className="text-lg font-bold text-zinc-800 leading-tight">{event.title}</h1>
+              <span className="shrink-0 rounded bg-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500">
+                {canEdit ? "可编辑" : "只读"}
+              </span>
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-zinc-400">{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</span>
               {event.startTime && <span className="text-xs text-zinc-400">{fmt(event.startTime)}</span>}

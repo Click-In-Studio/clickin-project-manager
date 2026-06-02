@@ -1969,6 +1969,9 @@ export default function CuePage({
               <span className="text-zinc-200 mx-0.5">|</span>
             </>
           )}
+          <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+            {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
+          </span>
           {(["line", "page", "scene"] as const).map(t => (
             <button key={t}
               onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); }}

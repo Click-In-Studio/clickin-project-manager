@@ -3625,11 +3625,9 @@ export default function ScriptEditor({
               />
             </>
           )}
-          {!canEdit && (
-            <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
-              只读
-            </span>
-          )}
+          <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+            {canEdit ? "可编辑" : "只读"}
+          </span>
           {canEditMetadata && (
             <>
               <div className="h-4 w-px shrink-0 bg-zinc-100" />

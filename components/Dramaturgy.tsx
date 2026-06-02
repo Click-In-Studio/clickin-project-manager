@@ -70,15 +70,20 @@ export default function Dramaturgy({
           <div className="text-right flex flex-col items-end gap-1">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Dramaturgy</p>
             <p className="text-sm font-bold text-zinc-500">{productionName}</p>
-            {versions.length > 0 && (
-              <VersionSelector
-                productionId={productionId}
-                versions={versions}
-                currentVersionId={currentVersionId}
-                canManage={canEdit}
-                onChange={handleVersionChange}
-              />
-            )}
+            <div className="flex items-center justify-end gap-1.5">
+              {versions.length > 0 && (
+                <VersionSelector
+                  productionId={productionId}
+                  versions={versions}
+                  currentVersionId={currentVersionId}
+                  canManage={canEdit}
+                  onChange={handleVersionChange}
+                />
+              )}
+              <span className="shrink-0 rounded bg-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500">
+                {effectiveCanEdit ? "可编辑" : "只读"}
+              </span>
+            </div>
             {canImport && tab === "scenes" && (
               <Link href={`/production/${productionId}/import-scenes`} className="text-xs text-blue-500 hover:underline">
                 导入章节信息
