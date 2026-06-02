@@ -760,6 +760,7 @@ function RehearsalMarkInput({
         <button
           onMouseDown={(e) => e.preventDefault()}
           title="设置排练记号"
+          data-rehearsal-triangle="true"
           className="rounded px-0.5 py-0 text-[8px] font-bold leading-none tracking-wide text-zinc-400"
         >
           ▶
@@ -774,7 +775,7 @@ function RehearsalMarkInput({
             if (e.key === "Escape") { setDraft(mark ?? ""); setEditing(false); }
           }}
           placeholder="A1"
-          className="w-10 rounded border border-zinc-300 px-1 py-0.5 text-center text-[11px] font-bold uppercase outline-none"
+          className="w-10 rounded border border-zinc-300 bg-white/90 px-1 py-0.5 text-center text-[11px] font-bold uppercase outline-none"
         />
       </span>
     );
@@ -785,6 +786,7 @@ function RehearsalMarkInput({
       <button
         onClick={() => { setDraft(mark ?? ""); setEditing(true); }}
         title="设置排练记号"
+        data-rehearsal-triangle="true"
         className={`rounded px-0.5 py-0 text-[8px] font-bold leading-none tracking-wide transition-colors ${
           mark
             ? "text-zinc-500 hover:text-zinc-700"
@@ -1759,6 +1761,10 @@ function TagPicker({
 
 // ─── ScriptBlock ──────────────────────────────────────────────────────────────
 
+const COMPACT_STAGE_CONTROL_THRESHOLD = 56;
+const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
+const COMPACT_STAGE_CONTENT_GAP_PX = 4;
+
 function ScriptBlock({
   block,
   characters,
@@ -1876,13 +1882,17 @@ function ScriptBlock({
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
 }) {
+  const blockRootRef = useRef<HTMLDivElement | null>(null);
+  const leftControlsRef = useRef<HTMLDivElement | null>(null);
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
   const composingRef = useRef(false);
+  const compactStageLayoutActiveRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTypeAction, setConfirmTypeAction] = useState<"type" | "lyric" | null>(null);
+  const [compactStageLayout, setCompactStageLayout] = useState<{ deleteLeft: number | null; contentPaddingLeft: number } | null>(null);
 
   useEffect(() => {
     setConfirmDelete(false);
@@ -1901,6 +1911,58 @@ function ScriptBlock({
     },
     [block.id, onRegisterRef]
   );
+
+  const isStage = block.type === "stage";
+
+  useLayoutEffect(() => {
+    if (!isStage) {
+      compactStageLayoutActiveRef.current = false;
+      setCompactStageLayout(null);
+      return;
+    }
+
+    const blockEl = blockRootRef.current;
+    if (!blockEl) return;
+
+    const updateCompactControls = () => {
+      const isCompactStage = blockEl.getBoundingClientRect().height < COMPACT_STAGE_CONTROL_THRESHOLD;
+      const railEl = leftControlsRef.current;
+      const triangleEl = blockEl.querySelector<HTMLElement>("[data-rehearsal-triangle='true']");
+      const contentEl = divRef.current;
+
+      if (isCompactStage) compactStageLayoutActiveRef.current = true;
+
+      if (!compactStageLayoutActiveRef.current || !railEl || !triangleEl || !contentEl) {
+        setCompactStageLayout(null);
+        return;
+      }
+
+      const railRect = railEl.getBoundingClientRect();
+      const triangleRect = triangleEl.getBoundingClientRect();
+      const contentRect = contentEl.getBoundingClientRect();
+      const measuredDeleteLeft = triangleRect.left - railRect.left + COMPACT_STAGE_DELETE_SHIFT_PX;
+      const deleteLeft = isCompactStage ? measuredDeleteLeft : null;
+      const controlRight = Math.max(triangleRect.right, railRect.left + measuredDeleteLeft + 16);
+      const contentPaddingLeft = Math.max(4, Math.ceil(controlRight - contentRect.left + COMPACT_STAGE_CONTENT_GAP_PX));
+
+      setCompactStageLayout((prev) => {
+        if (
+          prev &&
+          (prev.deleteLeft === null && deleteLeft === null ||
+            prev.deleteLeft !== null && deleteLeft !== null && Math.abs(prev.deleteLeft - deleteLeft) < 0.5) &&
+          Math.abs(prev.contentPaddingLeft - contentPaddingLeft) < 0.5
+        ) {
+          return prev;
+        }
+        return { deleteLeft, contentPaddingLeft };
+      });
+    };
+
+    updateCompactControls();
+    const observer = new ResizeObserver(updateCompactControls);
+    observer.observe(blockEl);
+    return () => observer.disconnect();
+  }, [isStage, lineNum, canEditRehearsalMark]);
 
   // Sync state → DOM only for external changes (split, merge, type toggle, etc.)
   useLayoutEffect(() => {
@@ -2006,8 +2068,6 @@ function ScriptBlock({
     }
   };
 
-  const isStage = block.type === "stage";
-
   const firstEditor = presenceEditors[0];
 
   const searchRingClass =
@@ -2021,9 +2081,19 @@ function ScriptBlock({
         ? "bg-zinc-50/60"
         : "";
   const movedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
+  const compactStageDeleteStyle: React.CSSProperties | undefined = compactStageLayout?.deleteLeft !== null && compactStageLayout?.deleteLeft !== undefined
+    ? { left: compactStageLayout.deleteLeft }
+    : undefined;
+  const compactStageContentStyle: React.CSSProperties | undefined = compactStageLayout
+    ? { paddingLeft: compactStageLayout.contentPaddingLeft }
+    : undefined;
+  const rightActionRowClass = isStage
+    ? "absolute right-2 -top-5 z-20 flex items-center transition-opacity"
+    : "absolute right-2 top-1 flex items-center transition-opacity";
 
   return (
     <div
+      ref={blockRootRef}
       onDragOver={onDragOverBlock}
       onDrop={onDropBlock}
       className={`group relative px-6 py-0 text-center transition-colors ${searchRingClass} ${blockBgClass} ${movedGlowClass}`}
@@ -2038,7 +2108,7 @@ function ScriptBlock({
       )}
 
       {(lineNum !== undefined || canEditRehearsalMark) && (
-        <span className="absolute left-1.5 top-[3px] flex items-start gap-1 leading-none">
+        <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
             <span className="pointer-events-none select-none tabular-nums text-[9px] leading-none text-zinc-400 transition-colors group-hover:text-zinc-600">
               {lineNum}
@@ -2056,12 +2126,12 @@ function ScriptBlock({
       )}
 
       {canEditText && (
-        <div className="absolute left-0 top-1 bottom-0 flex w-4 flex-col items-center justify-between">
+        <div ref={leftControlsRef} className="absolute left-0 top-1 bottom-0 flex w-4 flex-col items-center justify-between">
           <span />
 
           {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
             confirmDelete ? (
-              <span className="absolute left-0 bottom-0 z-10 flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm" data-script-confirmation="true">
+              <span className="absolute left-0 bottom-0 z-10 flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm" style={compactStageDeleteStyle} data-script-confirmation="true">
                 <span className="whitespace-nowrap text-[10px] text-zinc-400">
                   {selectedCount > 1 ? `确认删除所选 ${selectedCount} 行？` : "确认删除此行？"}
                 </span>
@@ -2085,7 +2155,8 @@ function ScriptBlock({
                 data-script-selection-action={selectedCount > 1 ? "true" : undefined}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { if (canDeleteWithoutConfirmation) onDelete(); else setConfirmDelete(true); }}
-                className="flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
+                style={compactStageDeleteStyle}
+                className="relative flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
                 title="删除此行"
                 aria-label="删除此行"
               >
@@ -2140,7 +2211,7 @@ function ScriptBlock({
       )}
 
       {/* Right-side action buttons — flex row, no overlap */}
-      <div className={`absolute right-2 top-1 flex items-center transition-opacity ${charSelectorOpen ? "opacity-0 pointer-events-none" : ""}`}>
+      <div className={`${rightActionRowClass} ${charSelectorOpen ? "opacity-0 pointer-events-none" : ""}`}>
         {confirmTypeAction && (
           <span className="z-10 mr-1 flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm" data-script-confirmation="true">
             <span className="whitespace-nowrap text-[10px] text-zinc-400">
@@ -2278,6 +2349,7 @@ function ScriptBlock({
           syncContent();
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
+        style={compactStageContentStyle}
         className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-center" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
@@ -4248,7 +4320,7 @@ export default function ScriptEditor({
   return (
     <div className="min-h-screen bg-zinc-100">
       {/* Toolbar */}
-      <header className="sticky top-0 z-20 border-b border-zinc-100 bg-white shadow-sm">
+      <header className="sticky top-0 z-40 border-b border-zinc-100 bg-white shadow-sm">
         <div className="mx-auto flex h-14 max-w-3xl flex-wrap items-center gap-3 px-6">
           <Link
             href={productionId ? `/production/${productionId}` : "/"}
