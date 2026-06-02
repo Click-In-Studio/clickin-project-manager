@@ -1587,6 +1587,11 @@ function mergeServerBlocks(
 ): Block[] {
   const syncedMap = new Map((synced?.blocks ?? []).map(b => [b.id, b]));
   const localMap = new Map(local.map(b => [b.id, b]));
+  const syncedBlocks = synced?.blocks ?? [];
+  const localOrderDirty = !!synced && (
+    local.length !== syncedBlocks.length ||
+    local.some((b, i) => b.id !== syncedBlocks[i]?.id)
+  );
 
   const isDirty = (b: Block): boolean => {
     const s = syncedMap.get(b.id);
@@ -1603,7 +1608,19 @@ function mergeServerBlocks(
     );
   };
 
-  // Server ordering is authoritative; preserve locally-dirty blocks' content
+  if (localOrderDirty) {
+    const serverMap = new Map(serverBlocks.map(b => [b.id, b]));
+    const result = local.map(lb => {
+      const sb = serverMap.get(lb.id);
+      return isDirty(lb) ? lb : (sb ?? lb);
+    });
+    for (const sb of serverBlocks) {
+      if (!localMap.has(sb.id)) result.push(sb);
+    }
+    return result;
+  }
+
+  // Server ordering is authoritative when local ordering has no unsynced edits.
   const result: Block[] = serverBlocks.map(sb => {
     const loc = localMap.get(sb.id);
     return loc && isDirty(loc) ? loc : sb;
@@ -1757,6 +1774,8 @@ function ScriptBlock({
   selectedCount = 0,
   dismissToken = 0,
   canDeleteWithoutConfirmation = false,
+  isReorderLocked = false,
+  isScriptDragging = false,
   index = 0,
   lineNum,
   isSearchHighlight,
@@ -1811,6 +1830,8 @@ function ScriptBlock({
   selectedCount?: number;
   dismissToken?: number;
   canDeleteWithoutConfirmation?: boolean;
+  isReorderLocked?: boolean;
+  isScriptDragging?: boolean;
   index?: number;
   lineNum?: number;
   isSearchHighlight?: "match" | "focused";
@@ -2043,14 +2064,19 @@ function ScriptBlock({
 
           {(
             <button
-              draggable
+              draggable={!isReorderLocked}
+              disabled={isReorderLocked}
               data-script-block-bar="true"
               onDragStart={onDragStartBlock}
               onDragEnd={onDragEndBlock}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={onToggleSelected}
-              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 cursor-grab rounded opacity-0 transition-all hover:bg-[#dbe5f3] hover:text-[#91a8ca] group-hover:opacity-100 active:cursor-grabbing ${
-                isSelected ? "bg-[#dbe5f3] text-[#91a8ca] opacity-100" : "text-zinc-200"
+              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 rounded opacity-0 transition-all group-hover:opacity-100 ${
+                isReorderLocked
+                  ? "cursor-not-allowed text-zinc-200 opacity-40"
+                  : `cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
+                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] opacity-100" : "text-zinc-200"
+                    }`
               }`}
               title="拖动调整位置"
               aria-label="拖动调整位置"
@@ -2181,7 +2207,7 @@ function ScriptBlock({
 
       <div
         ref={refCallback}
-        contentEditable={canEditText}
+        contentEditable={canEditText && !isScriptDragging}
         suppressContentEditableWarning
         onInput={handleInput}
         onCompositionStart={handleCompositionStart}
@@ -2220,7 +2246,7 @@ function ScriptBlock({
           syncContent();
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
-        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${
+        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-center" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
           "font-script text-zinc-700 text-left"
@@ -2579,6 +2605,9 @@ export default function ScriptEditor({
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
+  const [isScriptDragging, setIsScriptDragging] = useState(false);
+  const [isReorderLocked, setIsReorderLocked] = useState(false);
+  const [reorderNotice, setReorderNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const [dismissActionToken, setDismissActionToken] = useState(0);
   const [scrollLocked, setScrollLocked] = useState(true);
@@ -2640,20 +2669,84 @@ export default function ScriptEditor({
   const pendingCharOpen = useRef<string | null>(null);
   const draggingBlockId = useRef<string | null>(null);
   const draggingBlockIds = useRef<string[]>([]);
+  const dragTargetRef = useRef<DragTarget | null>(null);
+  const dragInvalidReasonRef = useRef<string | null>(null);
+  const dropHandledRef = useRef(false);
+  const isReorderLockedRef = useRef(false);
+  const windowRangeFrameRef = useRef<number | null>(null);
+  const reorderUnlockFrame = useRef<number | null>(null);
+  const pendingReorderUnlockRef = useRef(false);
+  const reorderNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blocksRef = useRef(blocks);
   const prevBlocksLengthRef = useRef(blocks.length);
   useLayoutEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
+  useEffect(() => () => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
+    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
+  }, []);
+
+  const setScriptDragging = useCallback((dragging: boolean) => {
+    setIsScriptDragging((current) => current === dragging ? current : dragging);
+  }, []);
+
+  const unlockReorder = useCallback(() => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    reorderUnlockFrame.current = null;
+    pendingReorderUnlockRef.current = false;
+    isReorderLockedRef.current = false;
+    setIsReorderLocked(false);
+  }, []);
+
+  const lockReorder = useCallback(() => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    reorderUnlockFrame.current = null;
+    isReorderLockedRef.current = true;
+    setIsReorderLocked(true);
+  }, []);
+
+  const unlockReorderAfterCommit = useCallback(() => {
+    pendingReorderUnlockRef.current = true;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!pendingReorderUnlockRef.current) return;
+    reorderUnlockFrame.current = requestAnimationFrame(() => {
+      reorderUnlockFrame.current = null;
+      unlockReorder();
+    });
+  }, [blocks, unlockReorder]);
+
+  const showReorderNotice = useCallback((message: string) => {
+    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
+    setReorderNotice(message);
+    reorderNoticeTimer.current = setTimeout(() => {
+      reorderNoticeTimer.current = null;
+      setReorderNotice("");
+    }, 1800);
+  }, []);
+
+  const clearEditorFocusForDrag = useCallback(() => {
+    focusedIdRef.current = null;
+    setFocusedId(null);
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest("[data-bwrap]")) active.blur();
+    window.getSelection()?.removeAllRanges();
+  }, []);
 
   // ── Virtual scroll ────────────────────────────────────────────────────────────
   const VSCROLL_BUFFER = 80;
   const DEFAULT_BLOCK_H = 80;
+  const INITIAL_WINDOW_SIZE = 200;
   const blocksContainerRef = useRef<HTMLDivElement>(null);
   const topSpacerRef = useRef<HTMLDivElement>(null);
   const botSpacerRef = useRef<HTMLDivElement>(null);
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
-  const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(200, blocks.length) }));
+  const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, blocks.length) }));
+  const windowRangeRef = useRef(windowRange);
+  useLayoutEffect(() => { windowRangeRef.current = windowRange; }, [windowRange]);
   const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
   const pendingNavigateRef = useRef<
@@ -2665,6 +2758,23 @@ export default function ScriptEditor({
   >(null);
   // Incremented by the measurement effect to trigger the correction layout effect
   const [correctionTick, setCorrectionTick] = useState(0);
+
+  const applyWindowRange = useCallback((next: { start: number; end: number }, sync = false) => {
+    const current = windowRangeRef.current;
+    if (current.start === next.start && current.end === next.end) return;
+    windowRangeRef.current = next;
+    if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
+    const commit = () => {
+      windowRangeFrameRef.current = null;
+      setWindowRange((currentRange) => (
+        currentRange.start === next.start && currentRange.end === next.end
+          ? currentRange
+          : next
+      ));
+    };
+    if (sync) commit();
+    else windowRangeFrameRef.current = requestAnimationFrame(commit);
+  }, []);
 
   // Rebuild cumulative heights from cache
   const rebuildCumulative = useCallback(() => {
@@ -2700,6 +2810,7 @@ export default function ScriptEditor({
   };
 
   const recomputeWindow = useCallback(() => {
+    if (draggingBlockId.current || isReorderLockedRef.current) return;
     const container = blocksContainerRef.current;
     const bl = blocksRef.current;
     if (!container || bl.length === 0) return;
@@ -2717,10 +2828,8 @@ export default function ScriptEditor({
     const pfi = pendingFocus.current ? bl.findIndex(b => b.id === pendingFocus.current?.id) : -1;
     if (pfi >= 0) { newStart = Math.min(newStart, pfi); newEnd = Math.max(newEnd, pfi + 1); }
 
-    setWindowRange(prev =>
-      prev.start === newStart && prev.end === newEnd ? prev : { start: newStart, end: newEnd }
-    );
-  }, []);
+    applyWindowRange({ start: newStart, end: newEnd });
+  }, [applyWindowRange]);
 
   // Always-fresh scroll-position saver (reads DOM directly; avoids stale cumulative-height estimates)
   const saveScrollPosRef = useRef<() => void>(() => {});
@@ -2784,29 +2893,30 @@ export default function ScriptEditor({
     const bl = blocksRef.current;
     const prevLength = prevBlocksLengthRef.current;
     prevBlocksLengthRef.current = bl.length;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWindowRange(prev => {
-      if (bl.length === 0) return prev.start === 0 && prev.end === 0 ? prev : { start: 0, end: 0 };
+    const prev = windowRangeRef.current;
+    if (bl.length === 0) {
+      applyWindowRange({ start: 0, end: 0 }, true);
+      return;
+    }
 
-      let start = Math.min(prev.start, Math.max(0, bl.length - 1));
-      let end = Math.min(prev.end, bl.length);
+    let start = Math.min(prev.start, Math.max(0, bl.length - 1));
+    let end = Math.min(prev.end, bl.length);
 
-      const addedCount = bl.length - prevLength;
-      if (addedCount > 0 && addedCount <= 5 && prev.end >= prevLength) {
-        end = Math.min(bl.length, end + addedCount);
-      }
+    const addedCount = bl.length - prevLength;
+    if (addedCount > 0 && addedCount <= 5 && prev.end >= prevLength) {
+      end = Math.min(bl.length, end + addedCount);
+    }
 
-      const pendingFocusId = pendingFocus.current?.id;
-      const pendingFocusIdx = pendingFocusId ? bl.findIndex((b) => b.id === pendingFocusId) : -1;
-      if (pendingFocusIdx >= 0) {
-        start = Math.min(start, pendingFocusIdx);
-        end = Math.max(end, pendingFocusIdx + 1);
-      }
-      if (end <= start) end = Math.min(bl.length, start + 1);
+    const pendingFocusId = pendingFocus.current?.id;
+    const pendingFocusIdx = pendingFocusId ? bl.findIndex((b) => b.id === pendingFocusId) : -1;
+    if (pendingFocusIdx >= 0) {
+      start = Math.min(start, pendingFocusIdx);
+      end = Math.max(end, pendingFocusIdx + 1);
+    }
+    if (end <= start) end = Math.min(bl.length, start + 1);
 
-      return prev.start === start && prev.end === end ? prev : { start, end };
-    });
-  }, [blocks.length]);
+    applyWindowRange({ start, end }, true);
+  }, [blocks.length, applyWindowRange]);
 
   // Measure rendered block heights after each render pass
   useEffect(() => {
@@ -2904,11 +3014,12 @@ export default function ScriptEditor({
     if (el) { el.scrollIntoView({ behavior: 'instant', block: align }); return; }
     // Otherwise shift the window and let useLayoutEffect land us there
     pendingNavigateRef.current = { kind: 'block', id: block.id, align };
-    setWindowRange({
+    const nextRange = {
       start: Math.max(0, idx - VSCROLL_BUFFER),
       end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
-    });
-  }, []);
+    };
+    applyWindowRange(nextRange, true);
+  }, [applyWindowRange]);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const existing = document.getElementById(`scene-block-${sceneId}`);
@@ -2916,11 +3027,12 @@ export default function ScriptEditor({
     const idx = blocksRef.current.findIndex(b => b.sceneId === sceneId);
     if (idx < 0) return;
     pendingNavigateRef.current = { kind: 'scene', id: sceneId };
-    setWindowRange({
+    const nextRange = {
       start: Math.max(0, idx - VSCROLL_BUFFER),
       end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
-    });
-  }, []);
+    };
+    applyWindowRange(nextRange, true);
+  }, [applyWindowRange]);
   useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
   // ── Server sync ─────────────────────────────────────────────────────────────
@@ -3657,17 +3769,19 @@ export default function ScriptEditor({
 
   useEffect(() => {
     const handler = (e: PointerEvent) => {
+      if (draggingBlockId.current || isReorderLockedRef.current) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (target.closest("[data-script-confirmation='true']")) return;
       if (target.closest("[data-script-block-bar='true']")) return;
       if (target.closest("[data-script-selection-action='true']")) return;
+      if (selectedBlockIds.size === 0) return;
       setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
       setDismissActionToken((token) => token + 1);
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, []);
+  }, [selectedBlockIds.size]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -3682,57 +3796,109 @@ export default function ScriptEditor({
     return () => document.removeEventListener("keydown", handler);
   }, [deleteBlocks, selectedBlockIds]);
 
-  const moveBlock = useCallback((fromId: string, target: DragTarget) => {
-    const { id: toId, position } = target;
-    if (fromId === toId) return;
-    saveSnapshot();
-    setBlocks((prev) => {
-      const fromIdx = prev.findIndex((b) => b.id === fromId);
-      const toIdx = prev.findIndex((b) => b.id === toId);
-      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
-
-      const next = [...prev];
-      const [moved] = next.splice(fromIdx, 1);
-      const rawInsertIdx = position === "before" ? toIdx : toIdx + 1;
-      const insertIdx = fromIdx < rawInsertIdx ? rawInsertIdx - 1 : rawInsertIdx;
-      const ref = insertIdx > 0 ? next[insertIdx - 1] : null;
-      next.splice(insertIdx, 0, {
-        ...moved,
-        sceneId: ref?.sceneId ?? null,
-        rehearsalMark: ref?.rehearsalMark ?? null,
-      });
-      pendingFocus.current = { id: moved.id, atEnd: false };
-      return next;
-    });
-  }, [saveSnapshot]);
-
-  const moveBlocks = useCallback((fromIds: string[], target: DragTarget) => {
+  const moveDraggedBlocks = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
-    if (movingIds.size === 0 || movingIds.has(target.id)) return;
+    if (movingIds.size === 0) {
+      showReorderNotice("移动失败：未找到被拖拽内容。");
+      return false;
+    }
+    const prev = blocksRef.current;
+    const toIdx = prev.findIndex((b) => b.id === target.id);
+    if (toIdx === -1) {
+      showReorderNotice("移动失败：目标位置已失效，请重新拖拽。");
+      return false;
+    }
+
+    const moving = prev.filter((b) => movingIds.has(b.id));
+    if (moving.length === 0) {
+      showReorderNotice("移动失败：未找到被拖拽内容。");
+      return false;
+    }
+
+    const rawInsertIdx = target.position === "before" ? toIdx : toIdx + 1;
+    const remaining = prev.filter((b) => !movingIds.has(b.id));
+    const removedBeforeInsert = prev
+      .slice(0, rawInsertIdx)
+      .filter((b) => movingIds.has(b.id)).length;
+    const insertIdx = Math.max(0, Math.min(remaining.length, rawInsertIdx - removedBeforeInsert));
+    const ref = insertIdx > 0 ? remaining[insertIdx - 1] : null;
+    const moved = moving.map((b) => ({
+      ...b,
+      sceneId: ref?.sceneId ?? null,
+      rehearsalMark: ref?.rehearsalMark ?? null,
+    }));
+    const next = [...remaining];
+    next.splice(insertIdx, 0, ...moved);
+    if (next.every((b, i) => b.id === prev[i]?.id)) {
+      showReorderNotice("移动未执行：目标位置与当前位置相同。");
+      return false;
+    }
+
     saveSnapshot();
-    setBlocks((prev) => {
-      const toIdx = prev.findIndex((b) => b.id === target.id);
-      if (toIdx === -1) return prev;
+    setBlocks(next);
+    unlockReorderAfterCommit();
+    return true;
+  }, [saveSnapshot, showReorderNotice, unlockReorderAfterCommit]);
 
-      const moving = prev.filter((b) => movingIds.has(b.id));
-      if (moving.length === 0) return prev;
+  const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
+    const movingIds = new Set(fromIds);
+    if (movingIds.size === 0) return true;
+    const currentBlocks = blocksRef.current;
+    const toIdx = currentBlocks.findIndex((b) => b.id === target.id);
+    if (toIdx < 0) return true;
+    const rawInsertIdx = target.position === "before" ? toIdx : toIdx + 1;
+    const remaining = currentBlocks.filter((b) => !movingIds.has(b.id));
+    const removedBeforeInsert = currentBlocks
+      .slice(0, rawInsertIdx)
+      .filter((b) => movingIds.has(b.id)).length;
+    const insertIdx = Math.max(0, Math.min(remaining.length, rawInsertIdx - removedBeforeInsert));
+    const next = [...remaining];
+    next.splice(insertIdx, 0, ...currentBlocks.filter((b) => movingIds.has(b.id)));
+    return next.every((b, i) => b.id === currentBlocks[i]?.id);
+  }, []);
 
-      const remaining = prev.filter((b) => !movingIds.has(b.id));
-      const targetIdx = remaining.findIndex((b) => b.id === target.id);
-      if (targetIdx === -1) return prev;
-      const insertIdx = target.position === "before" ? targetIdx : targetIdx + 1;
-      const ref = insertIdx > 0 ? remaining[insertIdx - 1] : null;
-      const moved = moving.map((b) => ({
-        ...b,
-        sceneId: ref?.sceneId ?? null,
-        rehearsalMark: ref?.rehearsalMark ?? null,
-      }));
-      const next = [...remaining];
-      next.splice(insertIdx, 0, ...moved);
-      pendingFocus.current = { id: moved[0].id, atEnd: false };
-      return next;
-    });
-  }, [saveSnapshot]);
+  const getDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
+    const container = blocksContainerRef.current;
+    if (!container) return null;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-bwrap]"));
+    if (rows.length === 0) return null;
+
+    const currentBlocks = blocksRef.current;
+    let insertIdx = currentBlocks.length;
+    for (const row of rows) {
+      const id = row.dataset.bwrap;
+      const idx = currentBlocks.findIndex((b) => b.id === id);
+      if (idx < 0) continue;
+      const rect = row.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {
+        insertIdx = idx;
+        break;
+      }
+      insertIdx = idx + 1;
+    }
+
+    if (currentBlocks.length === 0) return null;
+    const target = insertIdx >= currentBlocks.length
+      ? { id: currentBlocks[currentBlocks.length - 1].id, position: "after" as const }
+      : { id: currentBlocks[insertIdx].id, position: "before" as const };
+    if (isNoopDragTarget(draggingBlockIds.current, target)) {
+      dragInvalidReasonRef.current = "移动未执行：目标位置与当前位置相同。";
+      return null;
+    }
+    dragInvalidReasonRef.current = null;
+    return target;
+  }, [isNoopDragTarget]);
+
+  const updateDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
+    const nextTarget = getDragTargetFromClientY(clientY);
+    dragTargetRef.current = nextTarget;
+    setDragTarget((current) => (
+      current?.id === nextTarget?.id && current?.position === nextTarget?.position
+        ? current
+        : nextTarget
+    ));
+    return nextTarget;
+  }, [getDragTargetFromClientY]);
 
   const insertBlockAt = useCallback((index: number) => {
     saveSnapshot();
@@ -4242,11 +4408,60 @@ export default function ScriptEditor({
         )}
       </header>
 
+      {(isReorderLocked || reorderNotice) && (
+        <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2">
+          {isReorderLocked ? (
+            <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+              处理进行中...
+            </div>
+          ) : (
+            <div className="rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-800 shadow-sm">
+              {reorderNotice}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Document */}
       <main className="mx-auto max-w-3xl px-4 py-8">
-        <div className="min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
+        <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
           <TableOfContents scenes={scenes} blocks={blocks} onScrollToScene={scrollToScene} />
-          <div ref={blocksContainerRef}>
+          <div
+            ref={blocksContainerRef}
+            onDragOver={(e) => {
+              if (isReorderLockedRef.current) return;
+              if (!draggingBlockId.current) return;
+              const nextTarget = updateDragTargetFromClientY(e.clientY);
+              if (!nextTarget) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(e) => {
+              if (isReorderLockedRef.current) return;
+              if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
+              e.preventDefault();
+              lockReorder();
+              dropHandledRef.current = true;
+              const draggedIds = draggingBlockIds.current.length
+                ? draggingBlockIds.current
+                : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
+              const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current;
+              draggingBlockId.current = null;
+              draggingBlockIds.current = [];
+              dragTargetRef.current = null;
+              setScriptDragging(false);
+              setDragTarget(null);
+              if (!target) {
+                showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                dragInvalidReasonRef.current = null;
+                unlockReorder();
+                return;
+              }
+              dragInvalidReasonRef.current = null;
+              const moved = moveDraggedBlocks(draggedIds, target);
+              if (!moved) unlockReorder();
+            }}
+          >
           {(() => {
             const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter(Boolean));
 
@@ -4398,6 +4613,8 @@ export default function ScriptEditor({
                   selectedCount={selectedCount}
                   canDeleteWithoutConfirmation={canDeleteWithoutConfirmation}
                   dismissToken={dismissActionToken}
+                  isReorderLocked={isReorderLocked}
+                  isScriptDragging={isScriptDragging}
                   charEditToken={charEditTokens[block.id] ?? 0}
                   presenceEditors={Array.from(presenceMap.values()).filter(
                     p => p.blockId === block.id && p.clientId !== clientId
@@ -4432,6 +4649,7 @@ export default function ScriptEditor({
                   onSceneChange={(id) => updateBlockScene(block.id, id)}
                   onMarkChange={(m) => updateBlockMark(block.id, m)}
                   onToggleSelected={() => {
+                    if (isReorderLockedRef.current) return;
                     setSelectedBlockIds((current) => {
                       const next = new Set(current);
                       if (next.has(block.id)) next.delete(block.id);
@@ -4440,55 +4658,81 @@ export default function ScriptEditor({
                     });
                   }}
                   onDragStartBlock={(e) => {
-                    const ids = selectedBlockIds.has(block.id) ? Array.from(selectedBlockIds) : [block.id];
+                    if (isReorderLockedRef.current) {
+                      e.preventDefault();
+                      return;
+                    }
+                    const isDraggingSelection = selectedBlockIds.has(block.id);
+                    const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
+                    if (!isDraggingSelection && selectedBlockIds.size > 0) {
+                      const emptySelection = new Set<string>();
+                      setSelectedBlockIds(emptySelection);
+                      setDismissActionToken((token) => token + 1);
+                    }
+                    clearEditorFocusForDrag();
+                    setScriptDragging(true);
                     draggingBlockId.current = block.id;
                     draggingBlockIds.current = ids;
+                    dropHandledRef.current = false;
+                    pendingFocus.current = null;
+                    dragTargetRef.current = null;
+                    dragInvalidReasonRef.current = null;
                     setDragTarget(null);
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/plain", ids.join(","));
                   }}
                   onDragEndBlock={() => {
+                    const draggedIds = draggingBlockIds.current;
+                    const target = dragTargetRef.current;
+                    if (!dropHandledRef.current && draggedIds.length > 0) {
+                      if (target) {
+                        lockReorder();
+                        const moved = moveDraggedBlocks(draggedIds, target);
+                        if (!moved) unlockReorder();
+                      } else {
+                        showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                      }
+                    }
+                    dropHandledRef.current = false;
                     draggingBlockId.current = null;
                     draggingBlockIds.current = [];
+                    dragTargetRef.current = null;
+                    dragInvalidReasonRef.current = null;
+                    setScriptDragging(false);
                     setDragTarget(null);
                   }}
                   onDragOverBlock={(e) => {
+                    if (isReorderLockedRef.current) return;
                     if (!draggingBlockId.current) return;
-                    if (draggingBlockIds.current.includes(block.id)) {
-                      setDragTarget(null);
-                      return;
-                    }
+                    const nextTarget = updateDragTargetFromClientY(e.clientY);
+                    if (!nextTarget) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const wantsAfter = e.clientY >= rect.top + rect.height / 2;
-                    const position = wantsAfter && bIdx === blocks.length - 1 ? "after" : "before";
-                    const targetId = wantsAfter && bIdx < blocks.length - 1 ? blocks[bIdx + 1].id : block.id;
-                    if (draggingBlockIds.current.includes(targetId)) {
-                      setDragTarget(null);
-                      return;
-                    }
-                    setDragTarget((current) => (
-                      current?.id === targetId && current.position === position
-                        ? current
-                        : { id: targetId, position }
-                    ));
                   }}
                   onDropBlock={(e) => {
+                    if (isReorderLockedRef.current) return;
                     e.preventDefault();
+                    e.stopPropagation();
+                    lockReorder();
+                    dropHandledRef.current = true;
                     const draggedIds = draggingBlockIds.current.length
                       ? draggingBlockIds.current
                       : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const wantsAfter = e.clientY >= rect.top + rect.height / 2;
-                    const position = wantsAfter && bIdx === blocks.length - 1 ? "after" : "before";
-                    const targetId = wantsAfter && bIdx < blocks.length - 1 ? blocks[bIdx + 1].id : block.id;
-                    const target: DragTarget = { id: targetId, position };
+                    const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current ?? dragTarget;
                     draggingBlockId.current = null;
                     draggingBlockIds.current = [];
+                    dragTargetRef.current = null;
+                    setScriptDragging(false);
                     setDragTarget(null);
-                    if (draggedIds.length > 1) moveBlocks(draggedIds, target);
-                    else if (draggedIds[0] && draggedIds[0] !== target.id) moveBlock(draggedIds[0], target);
+                    if (!target) {
+                      showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                      dragInvalidReasonRef.current = null;
+                      unlockReorder();
+                      return;
+                    }
+                    dragInvalidReasonRef.current = null;
+                    const moved = moveDraggedBlocks(draggedIds, target);
+                    if (!moved) unlockReorder();
                   }}
                   isMarkStart={isMarkStart}
                   commentCount={comments.filter(c => c.contextId === block.id).length}
