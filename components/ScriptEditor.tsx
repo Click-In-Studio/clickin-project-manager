@@ -1647,7 +1647,29 @@ function _sameCharacters(a: string[], b: string[]): boolean {
   return b.every((id) => s.has(id));
 }
 
-type DragTarget = { id: string; position: "before" | "after" };
+type DragTarget =
+  | { kind: "block"; id: string; position: "before" | "after" }
+  | { kind: "edge"; edge: "top" | "bottom" };
+type BlockDragTarget = Extract<DragTarget, { kind: "block" }>;
+
+function sameDragTarget(a: DragTarget | null, b: DragTarget | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.kind !== b.kind) return false;
+  if (a.kind === "edge" && b.kind === "edge") return a.edge === b.edge;
+  if (a.kind === "block" && b.kind === "block") return a.id === b.id && a.position === b.position;
+  return false;
+}
+
+function resolveDragTarget(target: DragTarget, blocks: Block[], windowRange: { start: number; end: number }): BlockDragTarget | null {
+  if (target.kind === "block") return target;
+  if (blocks.length === 0) return null;
+  const targetIdx = target.edge === "top"
+    ? Math.min(windowRange.start, blocks.length - 1)
+    : Math.max(0, Math.min(windowRange.end - 1, blocks.length - 1));
+  const anchor = blocks[targetIdx];
+  if (!anchor) return null;
+  return { kind: "block", id: anchor.id, position: target.edge === "top" ? "before" : "after" };
+}
 
 // ─── TagPicker ────────────────────────────────────────────────────────────────
 
@@ -1826,7 +1848,7 @@ function ScriptBlock({
   commentCount: number;
   onCommentClick: () => void;
   onAssetClick: () => void;
-  dragTarget?: DragTarget | null;
+  dragTarget?: BlockDragTarget | null;
   isSelected?: boolean;
   isRecentlyMoved?: boolean;
   selectedCount?: number;
@@ -2683,6 +2705,7 @@ export default function ScriptEditor({
   const windowRangeFrameRef = useRef<number | null>(null);
   const reorderUnlockFrame = useRef<number | null>(null);
   const pendingReorderUnlockRef = useRef(false);
+  const pendingMoveCenterRef = useRef<{ id: string; index: number } | null>(null);
   const reorderNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movedHighlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blocksRef = useRef(blocks);
@@ -3012,6 +3035,33 @@ export default function ScriptEditor({
       }
     }
   });
+
+  useLayoutEffect(() => {
+    const centerTarget = pendingMoveCenterRef.current;
+    if (centerTarget === null) return;
+    if (blocks.length === 0) {
+      pendingMoveCenterRef.current = null;
+      return;
+    }
+    const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocks.length);
+    const centerIdx = Math.max(0, Math.min(blocks.length - 1, centerTarget.index));
+    let start = Math.max(0, centerIdx - Math.floor(windowSize / 2));
+    let end = Math.min(blocks.length, start + windowSize);
+    start = Math.max(0, end - windowSize);
+    pendingMoveCenterRef.current = null;
+    const nextRange = { start, end };
+    const currentRange = windowRangeRef.current;
+    const rangeChanged = currentRange.start !== nextRange.start || currentRange.end !== nextRange.end;
+    pendingNavigateRef.current = { kind: "block", id: centerTarget.id, align: "center" };
+    applyWindowRange(nextRange, true);
+    if (!rangeChanged) {
+      const el = document.getElementById(`block-${centerTarget.id}`);
+      if (el) {
+        pendingNavigateRef.current = null;
+        el.scrollIntoView({ behavior: "instant", block: "center" });
+      }
+    }
+  }, [blocks, applyWindowRange]);
 
   // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
   useLayoutEffect(() => {
@@ -3880,7 +3930,12 @@ export default function ScriptEditor({
       return false;
     }
     const prev = blocksRef.current;
-    const toIdx = prev.findIndex((b) => b.id === target.id);
+    const resolvedTarget = resolveDragTarget(target, prev, windowRangeRef.current);
+    if (!resolvedTarget) {
+      showReorderNotice("移动失败：目标位置已失效，请重新拖拽。");
+      return false;
+    }
+    const toIdx = prev.findIndex((b) => b.id === resolvedTarget.id);
     if (toIdx === -1) {
       showReorderNotice("移动失败：目标位置已失效，请重新拖拽。");
       return false;
@@ -3892,7 +3947,7 @@ export default function ScriptEditor({
       return false;
     }
 
-    const rawInsertIdx = target.position === "before" ? toIdx : toIdx + 1;
+    const rawInsertIdx = resolvedTarget.position === "before" ? toIdx : toIdx + 1;
     const remaining = prev.filter((b) => !movingIds.has(b.id));
     const removedBeforeInsert = prev
       .slice(0, rawInsertIdx)
@@ -3913,13 +3968,17 @@ export default function ScriptEditor({
 
     saveSnapshot();
     setBlocks(next);
+    pendingMoveCenterRef.current = {
+      id: moved[0].id,
+      index: Math.max(0, Math.min(next.length - 1, insertIdx)),
+    };
     if (movedHighlightTimer.current !== null) clearTimeout(movedHighlightTimer.current);
     setRecentlyMovedBlockIds(new Set(moving.map((b) => b.id)));
     movedHighlightTimer.current = setTimeout(() => {
       movedHighlightTimer.current = null;
       setRecentlyMovedBlockIds(new Set());
-    }, 3000);
-    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    }, 1000);
+    setSelectedBlockIds(new Set(moving.map((b) => b.id)));
     unlockReorderAfterCommit();
     return true;
   }, [saveSnapshot, showReorderNotice, unlockReorderAfterCommit]);
@@ -3928,9 +3987,11 @@ export default function ScriptEditor({
     const movingIds = new Set(fromIds);
     if (movingIds.size === 0) return true;
     const currentBlocks = blocksRef.current;
-    const toIdx = currentBlocks.findIndex((b) => b.id === target.id);
+    const resolvedTarget = resolveDragTarget(target, currentBlocks, windowRangeRef.current);
+    if (!resolvedTarget) return true;
+    const toIdx = currentBlocks.findIndex((b) => b.id === resolvedTarget.id);
     if (toIdx < 0) return true;
-    const rawInsertIdx = target.position === "before" ? toIdx : toIdx + 1;
+    const rawInsertIdx = resolvedTarget.position === "before" ? toIdx : toIdx + 1;
     const remaining = currentBlocks.filter((b) => !movingIds.has(b.id));
     const removedBeforeInsert = currentBlocks
       .slice(0, rawInsertIdx)
@@ -3946,6 +4007,11 @@ export default function ScriptEditor({
     if (!container) return null;
     const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-bwrap]"));
     if (rows.length === 0) return null;
+
+    const firstRect = rows[0].getBoundingClientRect();
+    const lastRect = rows[rows.length - 1].getBoundingClientRect();
+    if (clientY < firstRect.top) return { kind: "edge", edge: "top" };
+    if (clientY > lastRect.bottom) return { kind: "edge", edge: "bottom" };
 
     const currentBlocks = blocksRef.current;
     let insertIdx = currentBlocks.length;
@@ -3963,8 +4029,8 @@ export default function ScriptEditor({
 
     if (currentBlocks.length === 0) return null;
     const target = insertIdx >= currentBlocks.length
-      ? { id: currentBlocks[currentBlocks.length - 1].id, position: "after" as const }
-      : { id: currentBlocks[insertIdx].id, position: "before" as const };
+      ? { kind: "block" as const, id: currentBlocks[currentBlocks.length - 1].id, position: "after" as const }
+      : { kind: "block" as const, id: currentBlocks[insertIdx].id, position: "before" as const };
     if (isNoopDragTarget(draggingBlockIds.current, target)) {
       dragInvalidReasonRef.current = "移动未执行：目标位置与当前位置相同。";
       return null;
@@ -3976,13 +4042,50 @@ export default function ScriptEditor({
   const updateDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
     const nextTarget = getDragTargetFromClientY(clientY);
     dragTargetRef.current = nextTarget;
-    setDragTarget((current) => (
-      current?.id === nextTarget?.id && current?.position === nextTarget?.position
-        ? current
-        : nextTarget
-    ));
+    setDragTarget((current) => (sameDragTarget(current, nextTarget) ? current : nextTarget));
     return nextTarget;
   }, [getDragTargetFromClientY]);
+
+  const setEdgeDragTarget = useCallback((edge: "top" | "bottom") => {
+    const nextTarget: DragTarget = { kind: "edge", edge };
+    dragTargetRef.current = nextTarget;
+    setDragTarget((current) => (sameDragTarget(current, nextTarget) ? current : nextTarget));
+    dragInvalidReasonRef.current = null;
+  }, []);
+
+  const clearDragTarget = useCallback(() => {
+    dragTargetRef.current = null;
+    setDragTarget(null);
+  }, []);
+
+  const handleEdgeSpacerDragOver = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isReorderLockedRef.current) return;
+    if (!draggingBlockId.current) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setEdgeDragTarget(edge);
+  }, [setEdgeDragTarget]);
+
+  const handleEdgeSpacerDrop = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isReorderLockedRef.current) return;
+    if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    lockReorder();
+    dropHandledRef.current = true;
+    const draggedIds = draggingBlockIds.current.length
+      ? draggingBlockIds.current
+      : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
+    const target: DragTarget = { kind: "edge", edge };
+    draggingBlockId.current = null;
+    draggingBlockIds.current = [];
+    clearDragTarget();
+    clearDragCountBadge();
+    setScriptDragging(false);
+    dragInvalidReasonRef.current = null;
+    const moved = moveDraggedBlocks(draggedIds, target);
+    if (!moved) unlockReorder();
+  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, unlockReorder]);
 
   const insertBlockAt = useCallback((index: number) => {
     saveSnapshot();
@@ -4105,9 +4208,14 @@ export default function ScriptEditor({
   const selectionNotice = selectedBlockIds.size > 1
     ? `已选中 ${selectedBlockIds.size} 行`
     : "";
-  const dragInstructionNotice = isScriptDragging || isReorderLocked
-    ? "拖拽当前剧本块至指定位置松开以调整位置"
+  const edgeDragNotice = dragTarget?.kind === "edge"
+    ? (dragTarget.edge === "top"
+      ? "拖拽至此释放以移动至更上方区域"
+      : "拖拽至此释放以移动至更下方区域")
     : "";
+  const dragInstructionNotice = !edgeDragNotice && (isScriptDragging || isReorderLocked)
+      ? "拖拽当前剧本块至指定位置松开以调整位置"
+      : "";
 
   return (
     <div className="min-h-screen bg-zinc-100">
@@ -4499,6 +4607,16 @@ export default function ScriptEditor({
         )}
       </header>
 
+      {edgeDragNotice && (
+        <div
+          className={`pointer-events-none fixed left-1/2 z-10 -translate-x-1/2 select-none text-center text-2xl font-semibold tracking-wide text-zinc-400/35 ${
+            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-24" : "bottom-12"
+          }`}
+        >
+          {edgeDragNotice}
+        </div>
+      )}
+
       {(dragInstructionNotice || reorderNotice || selectionNotice) && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2">
           {dragInstructionNotice ? (
@@ -4525,12 +4643,22 @@ export default function ScriptEditor({
       />
       <style jsx global>{`
         @keyframes scriptBlockMovedGlow {
-          0%, 100% { background-color: transparent; }
-          50% { background-color: #eef3fa; }
+          0% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+          50% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0.14);
+          }
+          100% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
         }
 
         .script-block-moved-glow {
-          animation: scriptBlockMovedGlow 1s ease-in-out 3;
+          animation: scriptBlockMovedGlow 1s ease-in-out;
         }
       `}</style>
 
@@ -4563,10 +4691,9 @@ export default function ScriptEditor({
               const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current;
               draggingBlockId.current = null;
               draggingBlockIds.current = [];
-              dragTargetRef.current = null;
+              clearDragTarget();
               clearDragCountBadge();
               setScriptDragging(false);
-              setDragTarget(null);
               if (!target) {
                 showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
                 dragInvalidReasonRef.current = null;
@@ -4605,7 +4732,14 @@ export default function ScriptEditor({
             }
 
             return [
-              <div key="__vtop" ref={topSpacerRef} style={{ height: spacerH.top }} aria-hidden="true" />,
+              <div
+                key="__vtop"
+                ref={topSpacerRef}
+                style={{ height: spacerH.top }}
+                aria-hidden="true"
+                onDragOver={(e) => handleEdgeSpacerDragOver(e, "top")}
+                onDrop={(e) => handleEdgeSpacerDrop(e, "top")}
+              />,
               ...blocks.slice(windowRange.start, windowRange.end).flatMap((block, wIdx) => {
             const bIdx = windowRange.start + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
@@ -4724,7 +4858,7 @@ export default function ScriptEditor({
                   availableScenes={availableScenes}
                   hideCharSelector={hideCharSelector}
                   isFocused={focusedId === block.id}
-                  dragTarget={dragTarget?.id === block.id ? dragTarget : null}
+                  dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
                   isSelected={isSelected}
                   isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
                   selectedCount={selectedCount}
@@ -4795,9 +4929,8 @@ export default function ScriptEditor({
                     draggingBlockIds.current = ids;
                     dropHandledRef.current = false;
                     pendingFocus.current = null;
-                    dragTargetRef.current = null;
+                    clearDragTarget();
                     dragInvalidReasonRef.current = null;
-                    setDragTarget(null);
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/plain", ids.join(","));
                   }}
@@ -4816,11 +4949,10 @@ export default function ScriptEditor({
                     dropHandledRef.current = false;
                     draggingBlockId.current = null;
                     draggingBlockIds.current = [];
-                    dragTargetRef.current = null;
+                    clearDragTarget();
                     dragInvalidReasonRef.current = null;
                     clearDragCountBadge();
                     setScriptDragging(false);
-                    setDragTarget(null);
                   }}
                   onDragOverBlock={(e) => {
                     if (isReorderLockedRef.current) return;
@@ -4842,10 +4974,9 @@ export default function ScriptEditor({
                     const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current ?? dragTarget;
                     draggingBlockId.current = null;
                     draggingBlockIds.current = [];
-                    dragTargetRef.current = null;
+                    clearDragTarget();
                     clearDragCountBadge();
                     setScriptDragging(false);
-                    setDragTarget(null);
                     if (!target) {
                       showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
                       dragInvalidReasonRef.current = null;
@@ -4878,7 +5009,14 @@ export default function ScriptEditor({
               ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
               : [blockEl];
               }),
-              <div key="__vbot" ref={botSpacerRef} style={{ height: spacerH.bot }} aria-hidden="true" />,
+              <div
+                key="__vbot"
+                ref={botSpacerRef}
+                style={{ height: spacerH.bot }}
+                aria-hidden="true"
+                onDragOver={(e) => handleEdgeSpacerDragOver(e, "bottom")}
+                onDrop={(e) => handleEdgeSpacerDrop(e, "bottom")}
+              />,
             ];
           })()}
           {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
