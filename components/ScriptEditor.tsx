@@ -1793,12 +1793,14 @@ function ScriptBlock({
   onDragOverBlock,
   onDropBlock,
   onToggleSelected,
+  onDeleteConfirmationChange,
   isMarkStart,
   commentCount,
   onCommentClick,
   onAssetClick,
   dragTarget = null,
   isSelected = false,
+  isDeleteConfirmHighlighted = false,
   isRecentlyMoved = false,
   deleteConfirmToken,
   selectedCount = 0,
@@ -1851,12 +1853,14 @@ function ScriptBlock({
   onDragOverBlock: (e: DragEvent<HTMLDivElement>) => void;
   onDropBlock: (e: DragEvent<HTMLDivElement>) => void;
   onToggleSelected: () => void;
+  onDeleteConfirmationChange: (active: boolean) => void;
   isMarkStart: boolean;
   commentCount: number;
   onCommentClick: () => void;
   onAssetClick: () => void;
   dragTarget?: BlockDragTarget | null;
   isSelected?: boolean;
+  isDeleteConfirmHighlighted?: boolean;
   isRecentlyMoved?: boolean;
   deleteConfirmToken?: number;
   selectedCount?: number;
@@ -2073,9 +2077,11 @@ function ScriptBlock({
   const searchRingClass =
     isSearchHighlight === "focused" ? "ring-2 ring-inset ring-amber-400" :
     isSearchHighlight === "match"   ? "ring-1 ring-inset ring-amber-200" : "";
-  const blockBgClass = isSelected
-    ? "bg-[#eef3fa]"
-    : isFocused
+  const blockBgClass = isDeleteConfirmHighlighted
+    ? "bg-red-100"
+    : isSelected
+      ? "bg-[#eef3fa]"
+      : isFocused
       ? "bg-zinc-100/70"
       : (index ?? 0) % 2 === 1
         ? "bg-zinc-50/60"
@@ -2131,20 +2137,20 @@ function ScriptBlock({
 
           {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
             confirmDelete ? (
-              <span className="absolute left-0 bottom-0 z-10 flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm" style={compactStageDeleteStyle} data-script-confirmation="true">
+              <span className="absolute left-0 bottom-0 z-10 flex translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm" style={compactStageDeleteStyle} data-script-confirmation="true">
                 <span className="whitespace-nowrap text-[10px] text-zinc-400">
                   {selectedCount > 1 ? `确认删除所选 ${selectedCount} 行？` : "确认删除此行？"}
                 </span>
                 <button
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { setConfirmDelete(false); onDelete(); }}
+                  onClick={() => { setConfirmDelete(false); onDeleteConfirmationChange(false); onDelete(); }}
                   className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
                 >
                   确认
                 </button>
                 <button
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setConfirmDelete(false)}
+                  onClick={() => { setConfirmDelete(false); onDeleteConfirmationChange(false); }}
                   className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
                 >
                   取消
@@ -2154,7 +2160,10 @@ function ScriptBlock({
               <button
                 data-script-selection-action={selectedCount > 1 ? "true" : undefined}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => { if (canDeleteWithoutConfirmation) onDelete(); else setConfirmDelete(true); }}
+                onClick={() => {
+                  if (canDeleteWithoutConfirmation) onDelete();
+                  else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
+                }}
                 style={compactStageDeleteStyle}
                 className="relative flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
                 title="删除此行"
@@ -2716,6 +2725,7 @@ export default function ScriptEditor({
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const [recentlyMovedBlockIds, setRecentlyMovedBlockIds] = useState<Set<string>>(() => new Set());
   const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
+  const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
   const [dismissActionToken, setDismissActionToken] = useState(0);
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
@@ -3989,6 +3999,7 @@ export default function ScriptEditor({
       anchorId,
       token: (current?.token ?? 0) + 1,
     }));
+    setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
   }, [blocks, deleteBlocks, selectedBlockIds, windowRange.end, windowRange.start]);
 
@@ -4001,10 +4012,15 @@ export default function ScriptEditor({
       const isViewportScrollbar = e.clientX >= docEl.clientWidth || e.clientY >= docEl.clientHeight;
       if (isViewportScrollbar) return;
       if (target.closest("[data-script-confirmation='true']")) return;
-      if (target.closest("[data-script-block-bar='true']")) return;
-      if (target.closest("[data-script-selection-action='true']")) return;
-      if (selectedBlockIds.size === 0) return;
-      setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+      if (target.closest("[data-script-block-bar='true']") || target.closest("[data-script-selection-action='true']")) {
+        setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
+        setDismissActionToken((token) => token + 1);
+        return;
+      }
+      if (selectedBlockIds.size > 0) {
+        setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+      }
+      setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
       setDismissActionToken((token) => token + 1);
     };
     document.addEventListener("pointerdown", handler);
@@ -4960,6 +4976,7 @@ export default function ScriptEditor({
                   isFocused={focusedId === block.id}
                   dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
                   isSelected={isSelected}
+                  isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id)}
                   isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
                   deleteConfirmToken={deleteConfirmationRequest?.anchorId === block.id ? deleteConfirmationRequest.token : undefined}
                   selectedCount={selectedCount}
@@ -5009,6 +5026,12 @@ export default function ScriptEditor({
                       return next;
                     });
                   }}
+                  onDeleteConfirmationChange={(active) => {
+                    setDeleteConfirmingBlockIds((current) => {
+                      if (active) return new Set(selectedDeleteIds);
+                      return current.size === 0 ? current : new Set();
+                    });
+                  }}
                   onDragStartBlock={(e) => {
                     if (isReorderLockedRef.current) {
                       e.preventDefault();
@@ -5019,6 +5042,7 @@ export default function ScriptEditor({
                     if (!isDraggingSelection && selectedBlockIds.size > 0) {
                       const emptySelection = new Set<string>();
                       setSelectedBlockIds(emptySelection);
+                      setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
                       setDismissActionToken((token) => token + 1);
                     }
                     clearEditorFocusForDrag();
