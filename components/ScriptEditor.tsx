@@ -2024,6 +2024,7 @@ function ScriptBlock({
   onMerge,
   onDelete,
   onFocus,
+  onDeleteFocus,
   onToggleType,
   onToggleLyric,
   onArrowUpFromChar,
@@ -2088,6 +2089,7 @@ function ScriptBlock({
   onMerge: () => void;
   onDelete: () => void;
   onFocus: () => void;
+  onDeleteFocus: () => void;
   onToggleType: () => void;
   onToggleLyric: () => void;
   onArrowUpFromChar: () => void;
@@ -2178,6 +2180,7 @@ function ScriptBlock({
   );
 
   const isStage = block.type === "stage";
+  const isEditingLocked = isSelected || confirmDelete || isDeleteConfirmHighlighted;
   const hiddenCharacterCollapsed = !isStage && hideCharSelector && !isFocused && !isSelected;
   const effectiveHideCharSelector = hideCharSelector && !(hiddenCharacterCollapsed && unfoldForCompactControls);
   const shouldMeasureCompactControls = canEditText && (isStage || hiddenCharacterCollapsed && !unfoldForCompactControls);
@@ -2487,6 +2490,7 @@ function ScriptBlock({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (isScriptDragging) return;
+                  onDeleteFocus();
                   if (canDeleteWithoutConfirmation) onDelete();
                   else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
                 }}
@@ -2649,15 +2653,15 @@ function ScriptBlock({
           editRequestToken={charEditToken}
           onArrowUp={onArrowUpFromChar}
           onArrowDown={onArrowDownFromChar}
-          readOnly={!canEditText || isSelected}
+          readOnly={!canEditText || isEditingLocked}
         />
       )}
 
       <div
         ref={refCallback}
-        contentEditable={canEditText && !isScriptDragging && !isSelected}
+        contentEditable={canEditText && !isScriptDragging && !isEditingLocked}
         suppressContentEditableWarning
-        tabIndex={isSelected ? -1 : undefined}
+        tabIndex={isEditingLocked ? -1 : undefined}
         onInput={handleInput}
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
@@ -2700,7 +2704,7 @@ function ScriptBlock({
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
         style={compactContentStyle}
-        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging || isSelected ? "caret-transparent" : ""} ${
+        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-center" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
           "font-script text-zinc-700 text-left"
@@ -5647,6 +5651,7 @@ export default function ScriptEditor({
                     else deleteBlock(block.id);
                   }}
                   onFocus={() => markBlockFocused(block.id)}
+                  onDeleteFocus={() => focusBlockContent(block.id, false)}
                   onToggleType={() => {
                     if (isSelected && selectedDeleteIds.length > 1) {
                       setBlocksType(selectedDeleteIds, block.type === "stage" ? "dialogue" : "stage");
