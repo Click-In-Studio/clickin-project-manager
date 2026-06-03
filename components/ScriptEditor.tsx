@@ -29,6 +29,28 @@ import CommentAssetPicker, { type PendingAsset } from "@/components/assets/Comme
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
+const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
+
+type LargeSelectionOperation = "delete" | "move" | "type" | "lyric";
+type PendingLargeSelectionConfirmation = {
+  operation: LargeSelectionOperation;
+  count: number;
+  onConfirm: () => void;
+  onCancel?: () => void;
+};
+
+function largeSelectionOperationMessage(operation: LargeSelectionOperation, count: number) {
+  const actionLabel =
+    operation === "delete" ? "删除" :
+    operation === "move" ? "移动" :
+    operation === "type" ? "更改" :
+    "更改";
+  const objectLabel =
+    operation === "type" ? `${count} 行的类型` :
+    operation === "lyric" ? `${count} 行的文本状态` :
+    `${count} 行`;
+  return `${actionLabel} ${objectLabel}可能导致页面卡顿，建议分批次进行。\n是否确认继续操作？`;
+}
 
 const Chevron = () => (
   <svg className="h-3 w-3 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden>
@@ -2027,6 +2049,7 @@ function ScriptBlock({
   onDeleteFocus,
   onToggleType,
   onToggleLyric,
+  onRequestLargeSelectionOperation,
   onArrowUpFromChar,
   onArrowDownFromChar,
   onArrowUpFromTextarea,
@@ -2092,6 +2115,7 @@ function ScriptBlock({
   onDeleteFocus: () => void;
   onToggleType: () => void;
   onToggleLyric: () => void;
+  onRequestLargeSelectionOperation: (operation: LargeSelectionOperation, count: number, onConfirm: () => void) => void;
   onArrowUpFromChar: () => void;
   onArrowDownFromChar: () => void;
   onArrowUpFromTextarea: () => void;
@@ -2471,7 +2495,13 @@ function ScriptBlock({
                 </span>
                 <button
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { setConfirmDelete(false); onDeleteConfirmationChange(false); onDelete(); }}
+                  onClick={() => {
+                    onRequestLargeSelectionOperation("delete", selectedCount, () => {
+                      setConfirmDelete(false);
+                      onDeleteConfirmationChange(false);
+                      onDelete();
+                    });
+                  }}
                   className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
                 >
                   确认
@@ -2491,7 +2521,9 @@ function ScriptBlock({
                 onClick={() => {
                   if (isScriptDragging) return;
                   onDeleteFocus();
-                  if (canDeleteWithoutConfirmation) onDelete();
+                  if (canDeleteWithoutConfirmation) {
+                    onRequestLargeSelectionOperation("delete", selectedCount, onDelete);
+                  }
                   else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
                 }}
                 style={compactDeleteStyle}
@@ -2565,9 +2597,11 @@ function ScriptBlock({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 const action = confirmTypeAction;
-                setConfirmTypeAction(null);
-                if (action === "type") onToggleType();
-                else onToggleLyric();
+                onRequestLargeSelectionOperation(action, selectedCount, () => {
+                  setConfirmTypeAction(null);
+                  if (action === "type") onToggleType();
+                  else onToggleLyric();
+                });
               }}
               className="text-[10px] text-red-500 hover:text-red-700"
             >
@@ -3089,6 +3123,8 @@ export default function ScriptEditor({
   const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
   const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
   const [dismissActionToken, setDismissActionToken] = useState(0);
+  const [pendingLargeSelectionConfirmation, setPendingLargeSelectionConfirmation] =
+    useState<PendingLargeSelectionConfirmation | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
@@ -3345,6 +3381,19 @@ export default function ScriptEditor({
       selectionChangeNoticeTimer.current = null;
       setSelectionChangeNotice("");
     }, 1800);
+  }, []);
+
+  const requestLargeSelectionOperation = useCallback((
+    operation: LargeSelectionOperation,
+    count: number,
+    onConfirm: () => void,
+    onCancel?: () => void
+  ) => {
+    if (count <= LARGE_SELECTION_BLOCK_THRESHOLD) {
+      onConfirm();
+      return;
+    }
+    setPendingLargeSelectionConfirmation({ operation, count, onConfirm, onCancel });
   }, []);
 
   const glowChangedBlocks = useCallback((ids: string[]) => {
@@ -3687,9 +3736,11 @@ export default function ScriptEditor({
     if (navigatingAwayRef.current) return;
     const cum = cumulativeHRef.current;
     const n = blocks.length;
-    const top = cum[windowRange.start] ?? windowRange.start * DEFAULT_BLOCK_H;
+    const safeStart = n === 0 ? 0 : Math.min(windowRange.start, Math.max(0, n - 1));
+    const safeEnd = Math.min(Math.max(windowRange.end, safeStart), n);
+    const top = cum[safeStart] ?? safeStart * DEFAULT_BLOCK_H;
     const total = cum[n] ?? n * DEFAULT_BLOCK_H;
-    const bot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
+    const bot = Math.max(0, total - (cum[safeEnd] ?? safeEnd * DEFAULT_BLOCK_H));
     setSpacerH(prev => prev.top === top && prev.bot === bot ? prev : { top, bot });
   }, [windowRange, blocks.length]);
 
@@ -4526,7 +4577,7 @@ export default function ScriptEditor({
     const selectedBlocks = blocks.filter((b) => selectedIdSet.has(b.id));
     if (selectedBlocks.length === 0) return false;
     if (selectedBlocks.every(isBlockEmptyForDelete)) {
-      deleteBlocks(selectedIds);
+      requestLargeSelectionOperation("delete", selectedIds.length, () => deleteBlocks(selectedIds));
       return true;
     }
     const visibleAnchor = blocks
@@ -4539,7 +4590,7 @@ export default function ScriptEditor({
     }));
     setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
-  }, [blocks, deleteBlocks, selectedBlockIds, windowRange.end, windowRange.start, isLockedMode]);
+  }, [blocks, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, windowRange.end, windowRange.start, isLockedMode]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -4645,27 +4696,29 @@ export default function ScriptEditor({
       return false;
     }
 
-    saveSnapshot();
-    setBlocks(next);
-    pendingMoveCenterRef.current = {
-      id: moved[0].id,
-      index: Math.max(0, Math.min(next.length - 1, insertIdx)),
-    };
-    glowChangedBlocks(moving.map((b) => b.id));
-    selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
-    rangeSelectionActiveRef.current = false;
-    setSelectedBlockIds(new Set(moving.map((b) => b.id)));
-    if (moving.length > 1 && metadataChanged) {
-      const scene = moved[0].sceneId ? sceneById.get(moved[0].sceneId) : null;
-      const sceneLabel = scene
-        ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
-        : "（无章节）";
-      const markLabel = moved[0].rehearsalMark?.trim() || "(空)";
-      showSelectionChangeNotice(`当前 ${moving.length} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
-    }
-    unlockReorderAfterCommit();
+    requestLargeSelectionOperation("move", moving.length, () => {
+      saveSnapshot();
+      setBlocks(next);
+      pendingMoveCenterRef.current = {
+        id: moved[0].id,
+        index: Math.max(0, Math.min(next.length - 1, insertIdx)),
+      };
+      glowChangedBlocks(moving.map((b) => b.id));
+      selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
+      rangeSelectionActiveRef.current = false;
+      setSelectedBlockIds(new Set(moving.map((b) => b.id)));
+      if (moving.length > 1 && metadataChanged) {
+        const scene = moved[0].sceneId ? sceneById.get(moved[0].sceneId) : null;
+        const sceneLabel = scene
+          ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
+          : "（无章节）";
+        const markLabel = moved[0].rehearsalMark?.trim() || "(空)";
+        showSelectionChangeNotice(`当前 ${moving.length} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
+      }
+      unlockReorderAfterCommit();
+    }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, requestLargeSelectionOperation, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -4899,6 +4952,15 @@ export default function ScriptEditor({
 
   const selectionNotice = selectedBlockIds.size > 1
     ? `已选中 ${selectedBlockIds.size} 行`
+    : "";
+  const safeWindowStart = blocks.length === 0
+    ? 0
+    : Math.min(windowRange.start, Math.max(0, blocks.length - 1));
+  const safeWindowEnd = blocks.length === 0
+    ? 0
+    : Math.min(Math.max(windowRange.end, safeWindowStart + 1), blocks.length);
+  const largeSelectionNotice = selectedBlockIds.size > LARGE_SELECTION_BLOCK_THRESHOLD
+    ? "当前选中行数已超过 500 行，继续操作可能导致页面卡顿。"
     : "";
   const shiftSelectionNotice = shiftKeyDown && selectedBlockIds.size > 0
     ? "连续多选模式"
@@ -5371,7 +5433,7 @@ export default function ScriptEditor({
         </div>
       )}
 
-      {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || selectionChangeNotice) && (
+      {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || largeSelectionNotice || selectionChangeNotice) && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-50 flex -translate-x-1/2 flex-col items-center gap-1">
           {dragInstructionNotice ? (
             <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
@@ -5386,6 +5448,11 @@ export default function ScriptEditor({
               {selectionNotice && (
                 <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
                   {selectionNotice}
+                </div>
+              )}
+              {largeSelectionNotice && (
+                <div className="rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-800 shadow-sm">
+                  {largeSelectionNotice}
                 </div>
               )}
               {selectionChangeNotice && (
@@ -5512,7 +5579,7 @@ export default function ScriptEditor({
 
             // Pre-compute scene-header state for blocks before the visible window
             let lastRenderedActId: string | undefined = undefined;
-            for (let pi = 0; pi < windowRange.start; pi++) {
+            for (let pi = 0; pi < safeWindowStart; pi++) {
               const pb = blocks[pi];
               const pp = pi > 0 ? blocks[pi - 1] : null;
               if (pb.sceneId === null || pb.sceneId === pp?.sceneId) continue;
@@ -5543,8 +5610,8 @@ export default function ScriptEditor({
                 onDragOver={(e) => handleEdgeSpacerDragOver(e, "top")}
                 onDrop={(e) => handleEdgeSpacerDrop(e, "top")}
               />,
-              ...blocks.slice(windowRange.start, windowRange.end).flatMap((block, wIdx) => {
-            const bIdx = windowRange.start + wIdx;
+              ...blocks.slice(safeWindowStart, safeWindowEnd).flatMap((block, wIdx) => {
+            const bIdx = safeWindowStart + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
 
             // Monotonicity-safe scene picker: only show scenes within the window
@@ -5684,6 +5751,7 @@ export default function ScriptEditor({
                   }}
                   onFocus={() => markBlockFocused(block.id)}
                   onDeleteFocus={() => focusBlockContent(block.id, false)}
+                  onRequestLargeSelectionOperation={requestLargeSelectionOperation}
                   onToggleType={() => {
                     if (isSelected && selectedDeleteIds.length > 1) {
                       setBlocksType(selectedDeleteIds, block.type === "stage" ? "dialogue" : "stage");
@@ -5970,6 +6038,52 @@ export default function ScriptEditor({
               </button>
               <button
                 onClick={confirmLockedModeChange}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingLargeSelectionConfirmation && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => {
+            pendingLargeSelectionConfirmation.onCancel?.();
+            setPendingLargeSelectionConfirmation(null);
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-[380px] rounded-2xl bg-white p-5 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-800">确认继续操作？</h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-500">
+              {largeSelectionOperationMessage(
+                pendingLargeSelectionConfirmation.operation,
+                pendingLargeSelectionConfirmation.count
+              )}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  pendingLargeSelectionConfirmation.onCancel?.();
+                  setPendingLargeSelectionConfirmation(null);
+                }}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  const action = pendingLargeSelectionConfirmation.onConfirm;
+                  setPendingLargeSelectionConfirmation(null);
+                  action();
+                }}
                 className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
               >
                 确认
