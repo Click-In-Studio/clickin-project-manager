@@ -3080,6 +3080,7 @@ export default function ScriptEditor({
   const [isScriptDragging, setIsScriptDragging] = useState(false);
   const [isReorderLocked, setIsReorderLocked] = useState(false);
   const [reorderNotice, setReorderNotice] = useState("");
+  const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const selectionAnchorBlockIdRef = useRef<string | null>(null);
   const rangeSelectionActiveRef = useRef(false);
@@ -3171,6 +3172,10 @@ export default function ScriptEditor({
       clearTimeout(reorderNoticeTimer.current);
       reorderNoticeTimer.current = null;
     }
+    if (selectionChangeNoticeTimer.current !== null) {
+      clearTimeout(selectionChangeNoticeTimer.current);
+      selectionChangeNoticeTimer.current = null;
+    }
     if (movedHighlightTimer.current !== null) {
       clearTimeout(movedHighlightTimer.current);
       movedHighlightTimer.current = null;
@@ -3200,6 +3205,7 @@ export default function ScriptEditor({
   const pendingReorderUnlockRef = useRef(false);
   const pendingMoveCenterRef = useRef<{ id: string; index: number } | null>(null);
   const reorderNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionChangeNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movedHighlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigatingAwayRef = useRef(false);
   const blocksRef = useRef(blocks);
@@ -3210,6 +3216,7 @@ export default function ScriptEditor({
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
     if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
+    if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
     if (movedHighlightTimer.current !== null) clearTimeout(movedHighlightTimer.current);
   }, []);
 
@@ -3328,6 +3335,15 @@ export default function ScriptEditor({
     reorderNoticeTimer.current = setTimeout(() => {
       reorderNoticeTimer.current = null;
       setReorderNotice("");
+    }, 1800);
+  }, []);
+
+  const showSelectionChangeNotice = useCallback((message: string) => {
+    if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
+    setSelectionChangeNotice(message);
+    selectionChangeNoticeTimer.current = setTimeout(() => {
+      selectionChangeNoticeTimer.current = null;
+      setSelectionChangeNotice("");
     }, 1800);
   }, []);
 
@@ -4619,6 +4635,9 @@ export default function ScriptEditor({
       sceneId: ref?.sceneId ?? null,
       rehearsalMark: ref?.rehearsalMark ?? null,
     }));
+    const metadataChanged = moving.some((b, i) =>
+      b.sceneId !== moved[i].sceneId || b.rehearsalMark !== moved[i].rehearsalMark
+    );
     const next = [...remaining];
     next.splice(insertIdx, 0, ...moved);
     if (next.every((b, i) => b.id === prev[i]?.id)) {
@@ -4636,9 +4655,17 @@ export default function ScriptEditor({
     selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
     rangeSelectionActiveRef.current = false;
     setSelectedBlockIds(new Set(moving.map((b) => b.id)));
+    if (moving.length > 1 && metadataChanged) {
+      const scene = moved[0].sceneId ? sceneById.get(moved[0].sceneId) : null;
+      const sceneLabel = scene
+        ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
+        : "（无章节）";
+      const markLabel = moved[0].rehearsalMark?.trim() || "(空)";
+      showSelectionChangeNotice(`当前 ${moving.length} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
+    }
     unlockReorderAfterCommit();
     return true;
-  }, [glowChangedBlocks, saveSnapshot, showReorderNotice, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -5344,7 +5371,7 @@ export default function ScriptEditor({
         </div>
       )}
 
-      {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice) && (
+      {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || selectionChangeNotice) && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-50 flex -translate-x-1/2 flex-col items-center gap-1">
           {dragInstructionNotice ? (
             <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
@@ -5359,6 +5386,11 @@ export default function ScriptEditor({
               {selectionNotice && (
                 <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
                   {selectionNotice}
+                </div>
+              )}
+              {selectionChangeNotice && (
+                <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+                  {selectionChangeNotice}
                 </div>
               )}
               {shiftSelectionNotice && (
