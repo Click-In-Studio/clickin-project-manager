@@ -1829,6 +1829,7 @@ function ScriptBlock({
   onTagChange,
   onTagCopyClick,
   onTagPasteClick,
+  onCharacterChangeFocus,
 }: {
   block: Block;
   characters: Character[];
@@ -1889,11 +1890,13 @@ function ScriptBlock({
   onTagChange?: (groupId: string, optionId: string | null, value: number | null, del: boolean) => void;
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
+  onCharacterChangeFocus?: () => void;
 }) {
   const blockRootRef = useRef<HTMLDivElement | null>(null);
   const leftControlsRef = useRef<HTMLDivElement | null>(null);
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
+  const localTypeRef = useRef<BlockType | null>(null);
   const composingRef = useRef(false);
   const compactStageLayoutActiveRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
@@ -1976,8 +1979,9 @@ function ScriptBlock({
   useLayoutEffect(() => {
     const div = divRef.current;
     if (!div) return;
-    if (block.content !== localContentRef.current) {
+    if (block.content !== localContentRef.current || block.type !== localTypeRef.current) {
       localContentRef.current = block.content;
+      localTypeRef.current = block.type;
       div.innerHTML = mdToHtml(block.content);
       if (block.type !== "stage") applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
     }
@@ -2090,7 +2094,9 @@ function ScriptBlock({
       : (index ?? 0) % 2 === 1
         ? "bg-zinc-50/60"
         : "";
-  const movedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
+  const movedGlowClass = isRecentlyMoved
+    ? isSelected ? "script-block-moved-glow" : "script-block-updated-glow"
+    : "";
   const compactStageDeleteStyle: React.CSSProperties | undefined = compactStageLayout?.deleteLeft !== null && compactStageLayout?.deleteLeft !== undefined
     ? { left: compactStageLayout.deleteLeft }
     : undefined;
@@ -2165,6 +2171,7 @@ function ScriptBlock({
                 data-script-selection-action={selectedCount > 1 ? "true" : undefined}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
+                  if (isScriptDragging) return;
                   if (canDeleteWithoutConfirmation) onDelete();
                   else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
                 }}
@@ -2310,24 +2317,25 @@ function ScriptBlock({
         </button>
       </div>
 
-      {!isStage && (!hideCharSelector || isFocused) && (
+      {!isStage && (!hideCharSelector || isFocused || isSelected) && (
         <BlockCharacterSelector
           block={block}
           characters={characters}
-          onChange={(ids) => onUpdate({ characterIds: ids })}
+          onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
           onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
           onEditingChange={setCharSelectorOpen}
           editRequestToken={charEditToken}
           onArrowUp={onArrowUpFromChar}
           onArrowDown={onArrowDownFromChar}
-          readOnly={!canEditText}
+          readOnly={!canEditText || isSelected}
         />
       )}
 
       <div
         ref={refCallback}
-        contentEditable={canEditText && !isScriptDragging}
+        contentEditable={canEditText && !isScriptDragging && !isSelected}
         suppressContentEditableWarning
+        tabIndex={isSelected ? -1 : undefined}
         onInput={handleInput}
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
@@ -2366,7 +2374,7 @@ function ScriptBlock({
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
         style={compactStageContentStyle}
-        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging ? "caret-transparent" : ""} ${
+        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging || isSelected ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-center" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
           "font-script text-zinc-700 text-left"
@@ -2928,6 +2936,17 @@ export default function ScriptEditor({
       reorderNoticeTimer.current = null;
       setReorderNotice("");
     }, 1800);
+  }, []);
+
+  const glowChangedBlocks = useCallback((ids: string[]) => {
+    const next = new Set(ids.filter(Boolean));
+    if (next.size === 0) return;
+    if (movedHighlightTimer.current !== null) clearTimeout(movedHighlightTimer.current);
+    setRecentlyMovedBlockIds(next);
+    movedHighlightTimer.current = setTimeout(() => {
+      movedHighlightTimer.current = null;
+      setRecentlyMovedBlockIds(new Set());
+    }, 1000);
   }, []);
 
   const clearEditorFocusForDrag = useCallback(() => {
@@ -3572,6 +3591,22 @@ export default function ScriptEditor({
     }, 200);
   }, [clientId, effectiveScriptId, userName]);
 
+  const markBlockFocused = useCallback((id: string) => {
+    focusedIdRef.current = id;
+    setFocusedId(id);
+    sendPresence(id);
+  }, [sendPresence]);
+
+  const focusBlockContent = useCallback((id: string, atEnd = true) => {
+    markBlockFocused(id);
+    pendingFocus.current = { id, atEnd };
+  }, [markBlockFocused]);
+
+  const glowAndFocusBlocks = useCallback((ids: string[], focusId = ids[ids.length - 1]) => {
+    glowChangedBlocks(ids);
+    focusBlockContent(focusId);
+  }, [focusBlockContent, glowChangedBlocks]);
+
   // Debounced sync: fires 1500 ms after the last state change.
   const charactersRef = useRef(characters);
   const scenesRef = useRef(scenes);
@@ -3849,14 +3884,16 @@ export default function ScriptEditor({
         ? { ...b, type: b.type === "dialogue" ? "stage" : "dialogue", characterIds: [] }
         : b
     ));
-  }, [saveSnapshot]);
+    glowAndFocusBlocks([id]);
+  }, [glowAndFocusBlocks, saveSnapshot]);
 
   const toggleBlockLyric = useCallback((id: string) => {
     saveSnapshot();
     setBlocks((prev) => prev.map((b) =>
       b.id === id ? { ...b, lyric: !b.lyric } : b
     ));
-  }, [saveSnapshot]);
+    glowAndFocusBlocks([id]);
+  }, [glowAndFocusBlocks, saveSnapshot]);
 
   const setBlocksType = useCallback((ids: string[], type: BlockType) => {
     const targetIds = new Set(ids);
@@ -3867,10 +3904,9 @@ export default function ScriptEditor({
         ? { ...b, type, characterIds: type === "stage" ? [] : b.characterIds }
         : b
     ));
-    selectionAnchorBlockIdRef.current = null;
+    glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
-  }, [saveSnapshot]);
+  }, [glowAndFocusBlocks, saveSnapshot]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
     const targetIds = new Set(ids);
@@ -3881,10 +3917,9 @@ export default function ScriptEditor({
         ? { ...b, lyric }
         : b
     ));
-    selectionAnchorBlockIdRef.current = null;
+    glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
-  }, [saveSnapshot]);
+  }, [glowAndFocusBlocks, saveSnapshot]);
 
   // Apply pending focus on every render until resolved
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3894,8 +3929,12 @@ export default function ScriptEditor({
       const el = taRefs.current.get(pf.id);
       if (el) {
         el.focus();
-        if (pf.atEnd) setCursorAtEnd(el);
-        else if (pf.textOffset !== undefined) setCursorAtTextOffset(el, pf.textOffset);
+        if (el.isContentEditable) {
+          if (pf.atEnd) setCursorAtEnd(el);
+          else if (pf.textOffset !== undefined) setCursorAtTextOffset(el, pf.textOffset);
+        } else {
+          window.getSelection()?.removeAllRanges();
+        }
         pendingFocus.current = null;
       }
     }
@@ -4068,6 +4107,11 @@ export default function ScriptEditor({
     return true;
   }, [blocks, deleteBlocks, selectedBlockIds, windowRange.end, windowRange.start]);
 
+  const dismissBlockConfirmations = useCallback(() => {
+    setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
+    setDismissActionToken((token) => token + 1);
+  }, []);
+
   useEffect(() => {
     const handler = (e: PointerEvent) => {
       if (draggingBlockId.current || isReorderLockedRef.current) return;
@@ -4079,8 +4123,7 @@ export default function ScriptEditor({
       if (isViewportScrollbar) return;
       if (target.closest("[data-script-confirmation='true']")) return;
       if (target.closest("[data-script-block-bar='true']") || target.closest("[data-script-selection-action='true']")) {
-        setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
-        setDismissActionToken((token) => token + 1);
+        dismissBlockConfirmations();
         return;
       }
       if (selectedBlockIds.size > 0) {
@@ -4088,12 +4131,11 @@ export default function ScriptEditor({
         rangeSelectionActiveRef.current = false;
         setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
       }
-      setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
-      setDismissActionToken((token) => token + 1);
+      dismissBlockConfirmations();
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, [selectedBlockIds.size]);
+  }, [dismissBlockConfirmations, selectedBlockIds.size]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -4171,18 +4213,13 @@ export default function ScriptEditor({
       id: moved[0].id,
       index: Math.max(0, Math.min(next.length - 1, insertIdx)),
     };
-    if (movedHighlightTimer.current !== null) clearTimeout(movedHighlightTimer.current);
-    setRecentlyMovedBlockIds(new Set(moving.map((b) => b.id)));
-    movedHighlightTimer.current = setTimeout(() => {
-      movedHighlightTimer.current = null;
-      setRecentlyMovedBlockIds(new Set());
-    }, 1000);
+    glowChangedBlocks(moving.map((b) => b.id));
     selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
     rangeSelectionActiveRef.current = false;
     setSelectedBlockIds(new Set(moving.map((b) => b.id)));
     unlockReorderAfterCommit();
     return true;
-  }, [saveSnapshot, showReorderNotice, unlockReorderAfterCommit]);
+  }, [glowChangedBlocks, saveSnapshot, showReorderNotice, unlockReorderAfterCommit]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -4875,8 +4912,23 @@ export default function ScriptEditor({
           }
         }
 
+        @keyframes scriptBlockUpdatedGlow {
+          0% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0.14);
+          }
+          100% {
+            background-color: rgba(244, 244, 245, 0.7);
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+        }
+
         .script-block-moved-glow {
           animation: scriptBlockMovedGlow 1s ease-in-out;
+        }
+
+        .script-block-updated-glow {
+          animation: scriptBlockUpdatedGlow 1s ease-in-out;
         }
       `}</style>
 
@@ -4978,6 +5030,7 @@ export default function ScriptEditor({
             const hideCharSelector = !!(
               prev &&
               prev.type === "dialogue" &&
+              focusedId !== prev.id &&
               block.type === "dialogue" &&
               block.characterIds.length > 0 &&
               prev.lyric !== block.lyric &&
@@ -5098,7 +5151,7 @@ export default function ScriptEditor({
                     if (selectedDeleteIds.length > 1) deleteBlocks(selectedDeleteIds);
                     else deleteBlock(block.id);
                   }}
-                  onFocus={() => { setFocusedId(block.id); sendPresence(block.id); }}
+                  onFocus={() => markBlockFocused(block.id)}
                   onToggleType={() => {
                     if (isSelected && selectedDeleteIds.length > 1) {
                       setBlocksType(selectedDeleteIds, block.type === "stage" ? "dialogue" : "stage");
@@ -5119,8 +5172,12 @@ export default function ScriptEditor({
                   onArrowDownFromTextarea={() => handleArrowDownFromTextarea(block.id)}
                   onSceneChange={(id) => updateBlockScene(block.id, id)}
                   onMarkChange={(m) => updateBlockMark(block.id, m)}
+                  onCharacterChangeFocus={() => {
+                    glowAndFocusBlocks([block.id]);
+                  }}
                   onToggleSelected={(e) => {
                     if (isReorderLockedRef.current) return;
+                    focusBlockContent(block.id);
                     const isAdditiveSelection = e.ctrlKey || e.metaKey;
                     if (e.shiftKey) {
                       const anchorId = selectionAnchorBlockIdRef.current;
@@ -5184,13 +5241,12 @@ export default function ScriptEditor({
                     }
                     const isDraggingSelection = selectedBlockIds.has(block.id);
                     const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
+                    dismissBlockConfirmations();
                     if (!isDraggingSelection && selectedBlockIds.size > 0) {
                       const emptySelection = new Set<string>();
                       selectionAnchorBlockIdRef.current = null;
                       rangeSelectionActiveRef.current = false;
                       setSelectedBlockIds(emptySelection);
-                      setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
-                      setDismissActionToken((token) => token + 1);
                     }
                     clearEditorFocusForDrag();
                     setScriptDragging(true);
@@ -5225,6 +5281,7 @@ export default function ScriptEditor({
                     dragInvalidReasonRef.current = null;
                     clearDragCountBadge();
                     setScriptDragging(false);
+                    dismissBlockConfirmations();
                   }}
                   onDragOverBlock={(e) => {
                     if (isReorderLockedRef.current) return;
@@ -5249,6 +5306,7 @@ export default function ScriptEditor({
                     clearDragTarget();
                     clearDragCountBadge();
                     setScriptDragging(false);
+                    dismissBlockConfirmations();
                     if (!target) {
                       showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
                       dragInvalidReasonRef.current = null;
