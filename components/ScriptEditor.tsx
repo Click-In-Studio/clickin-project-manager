@@ -37,8 +37,22 @@ const Chevron = () => (
 );
 
 // ── Display settings (cookie-persisted) ───────────────────────────────────────
-type DisplaySettings = { pageBreaks: boolean; lineNumbers: boolean; rehearsalMarks: boolean; blockTags: boolean };
-const DEFAULT_DISPLAY: DisplaySettings = { pageBreaks: true, lineNumbers: true, rehearsalMarks: true, blockTags: true };
+type DisplaySettings = {
+  pageBreaks: boolean;
+  lineNumbers: boolean;
+  rehearsalMarks: boolean;
+  blockTags: boolean;
+  rehearsalMode: boolean;
+  rehearsalBlockScenes: boolean;
+};
+const DEFAULT_DISPLAY: DisplaySettings = {
+  pageBreaks: true,
+  lineNumbers: true,
+  rehearsalMarks: true,
+  blockTags: true,
+  rehearsalMode: false,
+  rehearsalBlockScenes: true,
+};
 const DISPLAY_COOKIE = "script_display";
 function readDisplayCookie(): DisplaySettings {
   try {
@@ -49,6 +63,23 @@ function readDisplayCookie(): DisplaySettings {
 }
 function writeDisplayCookie(s: DisplaySettings) {
   document.cookie = `${DISPLAY_COOKIE}=${encodeURIComponent(JSON.stringify(s))}; path=/; max-age=31536000; SameSite=Lax`;
+}
+
+function RehearsalModeSwitch({ active }: { active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`relative h-4 w-7 rounded-full transition-colors ${
+        active ? "bg-teal-600" : "bg-zinc-200"
+      }`}
+    >
+      <span
+        className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+          active ? "translate-x-3" : "translate-x-0"
+        }`}
+      />
+    </span>
+  );
 }
 
 const makeBlock = (content = "", characterIds: string[] = [], type: BlockType = "dialogue"): Block => ({
@@ -578,7 +609,7 @@ function ScenePanel({
         章节 <Chevron />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
+        <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
             <div className="flex items-center gap-2">
@@ -735,6 +766,17 @@ function ScenePicker({
   );
 }
 
+function SceneLabel({ scene }: { scene: Scene }) {
+  return (
+    <span
+      title={scene.name ? `${scene.number} ${scene.name}` : scene.number}
+      className="pointer-events-none select-none rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-zinc-400"
+    >
+      {scene.number}
+    </span>
+  );
+}
+
 // ─── Per-block rehearsal mark ──────────────────────────────────────────────────
 
 function RehearsalMarkInput({
@@ -802,6 +844,22 @@ function RehearsalMarkInput({
           {mark}
         </span>
       )}
+    </span>
+  );
+}
+
+function RehearsalMarkLabel({ mark }: { mark: string }) {
+  return (
+    <span className="flex items-start gap-1">
+      <span
+        data-rehearsal-triangle="true"
+        className="rounded px-0.5 py-0 text-[8px] font-bold leading-none tracking-wide text-zinc-500"
+      >
+        ▶
+      </span>
+      <span className="text-[9px] font-bold leading-none tracking-wide text-zinc-500">
+        {mark}
+      </span>
     </span>
   );
 }
@@ -916,7 +974,7 @@ function CharacterPanel({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
+        <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2.5">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
             <Link href={`/production/${productionId}/characters`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
@@ -1816,6 +1874,8 @@ function ScriptBlock({
   lineNum,
   isSearchHighlight,
   showRehearsalMark = true,
+  showReadOnlyRehearsalMark = false,
+  readOnlyScene = null,
   stageDelimOpen = "（",
   stageDelimClose = "）",
   canEditText = false,
@@ -1877,6 +1937,8 @@ function ScriptBlock({
   lineNum?: number;
   isSearchHighlight?: "match" | "focused";
   showRehearsalMark?: boolean;
+  showReadOnlyRehearsalMark?: boolean;
+  readOnlyScene?: Scene | null;
   stageDelimOpen?: string;
   stageDelimClose?: string;
   canEditText?: boolean;
@@ -1988,6 +2050,7 @@ function ScriptBlock({
   }, [block.content, block.type]);
 
   const syncContent = () => {
+    if (!canEditText) return;
     let html = divRef.current?.innerHTML ?? "";
     if (html === "<br>") html = "";
     const md = htmlToMd(html);
@@ -1996,6 +2059,7 @@ function ScriptBlock({
   };
 
   const applyInlineFormat = (tag: "b" | "u") => {
+    if (!canEditText) return;
     const sel = window.getSelection();
     if (!sel?.rangeCount || sel.isCollapsed) return;
     toggleInlineTag(sel.getRangeAt(0), tag);
@@ -2003,6 +2067,7 @@ function ScriptBlock({
   };
 
   const handleInput = () => {
+    if (!canEditText) return;
     if (composingRef.current) return;
     const div = divRef.current;
     if (!div) return;
@@ -2011,9 +2076,13 @@ function ScriptBlock({
   };
 
   const handleCompositionStart = () => { composingRef.current = true; };
-  const handleCompositionEnd = () => { composingRef.current = false; syncContent(); };
+  const handleCompositionEnd = () => { composingRef.current = false; if (canEditText) syncContent(); };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!canEditText) {
+      e.preventDefault();
+      return;
+    }
     const div = divRef.current!;
 
     if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
@@ -2103,9 +2172,13 @@ function ScriptBlock({
   const compactStageContentStyle: React.CSSProperties | undefined = compactStageLayout
     ? { paddingLeft: compactStageLayout.contentPaddingLeft }
     : undefined;
-  const rightActionRowClass = isStage
-    ? "absolute right-2 -top-5 z-20 flex items-center transition-opacity"
-    : "absolute right-2 top-1 flex items-center transition-opacity";
+  const hasReadOnlySceneLabel = !canEditMetadata && !!readOnlyScene;
+  const rightActionRowClass = `absolute z-20 flex items-center transition-opacity ${
+    isStage ? "-top-5" : "top-1"
+  } ${hasReadOnlySceneLabel ? "right-8" : "right-2"}`;
+  const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
+    isStage ? "-top-5" : "top-1"
+  }`;
 
   return (
     <div
@@ -2123,7 +2196,7 @@ function ScriptBlock({
         />
       )}
 
-      {(lineNum !== undefined || canEditRehearsalMark) && (
+      {(lineNum !== undefined || canEditRehearsalMark || (showReadOnlyRehearsalMark && isMarkStart && block.rehearsalMark)) && (
         <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
             <span className="pointer-events-none select-none tabular-nums text-[9px] leading-none text-zinc-400 transition-colors group-hover:text-zinc-600">
@@ -2136,6 +2209,11 @@ function ScriptBlock({
                 mark={block.rehearsalMark}
                 onChange={onMarkChange}
               />
+            </span>
+          )}
+          {!canEditRehearsalMark && showReadOnlyRehearsalMark && isMarkStart && block.rehearsalMark && (
+            <span className="relative top-[1px]">
+              <RehearsalMarkLabel mark={block.rehearsalMark} />
             </span>
           )}
         </span>
@@ -2316,6 +2394,11 @@ function ScriptBlock({
           {commentCount > 0 ? `${commentCount} 评` : "评论"}
         </button>
       </div>
+      {hasReadOnlySceneLabel && (
+        <span className={readOnlySceneLabelClass}>
+          <SceneLabel scene={readOnlyScene} />
+        </span>
+      )}
 
       {!isStage && (!hideCharSelector || isFocused || isSelected) && (
         <BlockCharacterSelector
@@ -2342,6 +2425,10 @@ function ScriptBlock({
         onKeyDown={handleKeyDown}
         onFocus={onFocus}
         onPaste={(e) => {
+          if (!canEditText) {
+            e.preventDefault();
+            return;
+          }
           e.preventDefault();
           const html = e.clipboardData.getData("text/html");
           const plain = e.clipboardData.getData("text/plain");
@@ -2394,8 +2481,8 @@ function ScriptBlock({
               return (
                 <span
                   key={group.id}
-                  onClick={() => setTagPickerOpen(v => !v)}
-                  className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-medium transition-opacity select-none ${isDefault ? "opacity-35" : ""}`}
+                  onClick={() => { if (canEditMetadata) setTagPickerOpen(v => !v); }}
+                  className={`${canEditMetadata ? "cursor-pointer" : "cursor-default"} rounded-full px-2 py-0.5 text-[10px] font-medium transition-opacity select-none ${isDefault ? "opacity-35" : ""}`}
                   style={selectedOpt
                     ? { backgroundColor: selectedOpt.color + "20", color: selectedOpt.color }
                     : { backgroundColor: "#f4f4f5", color: "#71717a" }
@@ -2425,7 +2512,11 @@ function ScriptBlock({
   );
 }
 
-// ─── InsertZone ───────────────────────────────────────────────────────────────
+// ─── Block spacing / insertion ────────────────────────────────────────────────
+
+function BlockGap() {
+  return <div className="h-5" aria-hidden="true" />;
+}
 
 function InsertZone({ onInsert }: { onInsert: () => void }) {
   return (
@@ -2725,10 +2816,15 @@ export default function ScriptEditor({
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null);
 
   // Gate edit permissions by version status
-  const canEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
-  const canEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
+  const baseCanEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
+  const baseCanEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
+  const baseCanEdit = baseCanEditText || baseCanEditMetadata || canEditRehearsalMark;
+  const [isLockedMode, setIsLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
+  const canEditText = baseCanEditText && !isLockedMode;
+  const canEditMetadata = baseCanEditMetadata && !isLockedMode;
+  const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
 
-  const canEdit = canEditText || canEditMetadata || canEditRehearsalMark;
+  const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
   const [characters, setCharacters] = useState<Character[]>([]);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
@@ -2761,8 +2857,10 @@ export default function ScriptEditor({
   // ── Script config (page layout, stage delimiters) ─────────────────────────
   const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
 
   const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
+    if (isLockedMode) return;
     const next = { ...scriptConfig, ...patch };
     setScriptConfig(next);
     await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config`, {
@@ -2770,10 +2868,11 @@ export default function ScriptEditor({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(next),
     });
-  }, [scriptConfig, effectiveScriptId]);
+  }, [scriptConfig, effectiveScriptId, isLockedMode]);
 
   // ── Page map (computed client-side, deterministic) ──────────────────────────
   const pageMap = useMemo(() => computePageMap(blocks, scriptConfig.pageLayout), [blocks, scriptConfig.pageLayout]);
+  const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
 
   // ── Search ──────────────────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
@@ -2901,6 +3000,44 @@ export default function ScriptEditor({
   const setScriptDragging = useCallback((dragging: boolean) => {
     setIsScriptDragging((current) => current === dragging ? current : dragging);
   }, []);
+
+  const resetScriptInteractions = useCallback(() => {
+    selectionAnchorBlockIdRef.current = null;
+    rangeSelectionActiveRef.current = false;
+    pendingFocus.current = null;
+    pendingCharOpen.current = null;
+    draggingBlockId.current = null;
+    draggingBlockIds.current = [];
+    dragTargetRef.current = null;
+    dragInvalidReasonRef.current = null;
+    dropHandledRef.current = false;
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
+    setDeleteConfirmationRequest(null);
+    setDismissActionToken((token) => token + 1);
+    setDragTarget(null);
+    setIsScriptDragging(false);
+    clearDragCountBadge();
+    window.getSelection()?.removeAllRanges();
+  }, [clearDragCountBadge]);
+
+  const toggleLockedMode = useCallback(() => {
+    setPendingLockedMode(!isLockedMode);
+    setOpenMenu(null);
+  }, [isLockedMode]);
+
+  const confirmLockedModeChange = useCallback(() => {
+    if (pendingLockedMode === null) return;
+    resetScriptInteractions();
+    setOpenMenu(null);
+    setIsLockedMode(pendingLockedMode);
+    setDisplay(prev => {
+      const next = { ...prev, rehearsalMode: pendingLockedMode };
+      writeDisplayCookie(next);
+      return next;
+    });
+    setPendingLockedMode(null);
+  }, [pendingLockedMode, resetScriptInteractions]);
 
   const unlockReorder = useCallback(() => {
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
@@ -3701,6 +3838,7 @@ export default function ScriptEditor({
   // Called from toolbar buttons via onMouseDown+preventDefault, which keeps
   // the selection alive even after the contenteditable loses focus.
   const applyFormatToFocused = useCallback((tag: "b" | "u") => {
+    if (isLockedMode) return;
     const sel = window.getSelection();
     if (!sel?.rangeCount || sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
@@ -3722,7 +3860,7 @@ export default function ScriptEditor({
     // Re-focus then fire input so ScriptBlock's handleInput → syncContent runs
     editableEl.focus();
     editableEl.dispatchEvent(new Event("input", { bubbles: true }));
-  }, []);
+  }, [isLockedMode]);
 
   const startTypingSession = useCallback(() => {
     if (!isTypingSession.current) {
@@ -3737,6 +3875,7 @@ export default function ScriptEditor({
   }, [saveSnapshot]);
 
   const undo = useCallback(() => {
+    if (isLockedMode) return;
     if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
     isTypingSession.current = false;
     const snapshot = undoStack.current.pop();
@@ -3745,9 +3884,10 @@ export default function ScriptEditor({
     setBlocks(snapshot);
     setCanUndo(undoStack.current.length > 0);
     setCanRedo(true);
-  }, []);
+  }, [isLockedMode]);
 
   const redo = useCallback(() => {
+    if (isLockedMode) return;
     if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
     isTypingSession.current = false;
     const snapshot = redoStack.current.pop();
@@ -3756,7 +3896,7 @@ export default function ScriptEditor({
     setBlocks(snapshot);
     setCanUndo(true);
     setCanRedo(redoStack.current.length > 0);
-  }, []);
+  }, [isLockedMode]);
 
   // ── Tag handlers ─────────────────────────────────────────────────────────────
 
@@ -3769,6 +3909,7 @@ export default function ScriptEditor({
   }, [effectiveScriptId]);
 
   const handleTagChange = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
+    if (isLockedMode) return;
     setBlockTagMap(prev => {
       const map = new Map(prev);
       const existing = map.get(blockId) ?? [];
@@ -3800,19 +3941,20 @@ export default function ScriptEditor({
         setBlocks(bs => bs.map(b => b.id === blockId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
       }
     }
-  }, [upsertBlockTagApi, blockTagMapRef, tagGroups]);
+  }, [upsertBlockTagApi, blockTagMapRef, tagGroups, isLockedMode]);
 
   const handleTagCopy = useCallback((blockId: string) => {
     tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
   }, []);
 
   const handleTagPaste = useCallback((blockId: string) => {
+    if (isLockedMode) return;
     const clipboard = tagClipboardRef.current;
     if (!clipboard?.length) return;
     const inherited = clipboard.map(t => ({ ...t, blockId }));
     setBlockTagMap(prev => { const m = new Map(prev); m.set(blockId, inherited); return m; });
     inherited.forEach(t => upsertBlockTagApi(blockId, t.groupId, t.optionId, t.value, false));
-  }, [upsertBlockTagApi]);
+  }, [upsertBlockTagApi, isLockedMode]);
 
   const inheritTags = useCallback((fromId: string, toId: string) => {
     const sourceTags = blockTagMapRef.current.get(fromId) ?? [];
@@ -3878,6 +4020,7 @@ export default function ScriptEditor({
   }, [blocks, pageMap, scrollToBlockIdx]);
 
   const toggleBlockType = useCallback((id: string) => {
+    if (isLockedMode) return;
     saveSnapshot();
     setBlocks((prev) => prev.map((b) =>
       b.id === id
@@ -3885,17 +4028,19 @@ export default function ScriptEditor({
         : b
     ));
     glowAndFocusBlocks([id]);
-  }, [glowAndFocusBlocks, saveSnapshot]);
+  }, [glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   const toggleBlockLyric = useCallback((id: string) => {
+    if (isLockedMode) return;
     saveSnapshot();
     setBlocks((prev) => prev.map((b) =>
       b.id === id ? { ...b, lyric: !b.lyric } : b
     ));
     glowAndFocusBlocks([id]);
-  }, [glowAndFocusBlocks, saveSnapshot]);
+  }, [glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   const setBlocksType = useCallback((ids: string[], type: BlockType) => {
+    if (isLockedMode) return;
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
@@ -3906,9 +4051,10 @@ export default function ScriptEditor({
     ));
     glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-  }, [glowAndFocusBlocks, saveSnapshot]);
+  }, [glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
+    if (isLockedMode) return;
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
@@ -3919,7 +4065,7 @@ export default function ScriptEditor({
     ));
     glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-  }, [glowAndFocusBlocks, saveSnapshot]);
+  }, [glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   // Apply pending focus on every render until resolved
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3947,10 +4093,11 @@ export default function ScriptEditor({
 
   const updateBlock = useCallback(
     (id: string, changes: Partial<Block>) => {
+      if (isLockedMode) return;
       startTypingSession();
       setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
     },
-    [startTypingSession]
+    [startTypingSession, isLockedMode]
   );
 
   // Cascade a scene boundary change, preserving monotonic scene order.
@@ -3958,6 +4105,7 @@ export default function ScriptEditor({
   // Moving to a later scene  → cascade the tail of the current run forward.
   // Moving to an earlier scene → cascade the head of the current run backward.
   const updateBlockScene = useCallback((id: string, newSceneId: string | null) => {
+    if (isLockedMode) return;
     const ord = (sid: string | null) =>
       sid === null ? -1 : scenes.findIndex((s) => s.id === sid);
 
@@ -3980,10 +4128,11 @@ export default function ScriptEditor({
         return prev.map((b, i) => (i >= start && i <= idx ? { ...b, sceneId: newSceneId } : b));
       }
     });
-  }, [saveSnapshot, scenes]);
+  }, [saveSnapshot, scenes, isLockedMode]);
 
   // Same cascade logic for rehearsal marks.
   const updateBlockMark = useCallback((id: string, newMark: string | null) => {
+    if (isLockedMode) return;
     saveSnapshot();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
@@ -3994,9 +4143,10 @@ export default function ScriptEditor({
       while (end + 1 < prev.length && prev[end + 1].rehearsalMark === oldMark) end++;
       return prev.map((b, i) => (i >= idx && i <= end ? { ...b, rehearsalMark: newMark } : b));
     });
-  }, [saveSnapshot]);
+  }, [saveSnapshot, isLockedMode]);
 
   const splitBlock = useCallback((id: string, before: string, after: string) => {
+    if (isLockedMode) return;
     saveSnapshot();
     let nextId: string | null = null;
     setBlocks((prev) => {
@@ -4018,9 +4168,10 @@ export default function ScriptEditor({
       return updated;
     });
     if (nextId) inheritTags(id, nextId);
-  }, [saveSnapshot, inheritTags]);
+  }, [saveSnapshot, inheritTags, isLockedMode]);
 
   const mergeBlock = useCallback((id: string) => {
+    if (isLockedMode) return;
     saveSnapshot();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
@@ -4043,9 +4194,10 @@ export default function ScriptEditor({
       pendingFocus.current = { id: p.id, textOffset: getTextLength(mdToHtml(p.content)) };
       return updated;
     });
-  }, [saveSnapshot]);
+  }, [saveSnapshot, isLockedMode]);
 
   const deleteBlock = useCallback((id: string) => {
+    if (isLockedMode) return;
     saveSnapshot();
     setBlocks((prev) => {
       if (prev.length <= 1) return prev;
@@ -4059,9 +4211,10 @@ export default function ScriptEditor({
       selectionAnchorBlockIdRef.current = null;
       rangeSelectionActiveRef.current = false;
     }
-  }, [saveSnapshot]);
+  }, [saveSnapshot, isLockedMode]);
 
   const deleteBlocks = useCallback((ids: string[]) => {
+    if (isLockedMode) return;
     const deleteIds = new Set(ids);
     if (deleteIds.size === 0) return;
     saveSnapshot();
@@ -4083,9 +4236,10 @@ export default function ScriptEditor({
       selectionAnchorBlockIdRef.current = null;
       rangeSelectionActiveRef.current = false;
     }
-  }, [saveSnapshot]);
+  }, [saveSnapshot, isLockedMode]);
 
   const requestSelectedBlocksDelete = useCallback(() => {
+    if (isLockedMode) return false;
     const selectedIds = Array.from(selectedBlockIds);
     if (selectedIds.length === 0) return false;
     const selectedIdSet = new Set(selectedIds);
@@ -4105,7 +4259,7 @@ export default function ScriptEditor({
     }));
     setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
-  }, [blocks, deleteBlocks, selectedBlockIds, windowRange.end, windowRange.start]);
+  }, [blocks, deleteBlocks, selectedBlockIds, windowRange.end, windowRange.start, isLockedMode]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -4165,6 +4319,7 @@ export default function ScriptEditor({
   }, []);
 
   const moveDraggedBlocks = useCallback((fromIds: string[], target: DragTarget): boolean => {
+    if (isLockedMode) return false;
     const movingIds = new Set(fromIds);
     if (movingIds.size === 0) {
       showReorderNotice("移动失败：未找到被拖拽内容。");
@@ -4219,7 +4374,7 @@ export default function ScriptEditor({
     setSelectedBlockIds(new Set(moving.map((b) => b.id)));
     unlockReorderAfterCommit();
     return true;
-  }, [glowChangedBlocks, saveSnapshot, showReorderNotice, unlockReorderAfterCommit]);
+  }, [glowChangedBlocks, saveSnapshot, showReorderNotice, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -4297,14 +4452,16 @@ export default function ScriptEditor({
   }, []);
 
   const handleEdgeSpacerDragOver = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isLockedMode) return;
     if (isReorderLockedRef.current) return;
     if (!draggingBlockId.current) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setEdgeDragTarget(edge);
-  }, [setEdgeDragTarget]);
+  }, [setEdgeDragTarget, isLockedMode]);
 
   const handleEdgeSpacerDrop = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isLockedMode) return;
     if (isReorderLockedRef.current) return;
     if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
     e.preventDefault();
@@ -4323,9 +4480,10 @@ export default function ScriptEditor({
     dragInvalidReasonRef.current = null;
     const moved = moveDraggedBlocks(draggedIds, target);
     if (!moved) unlockReorder();
-  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, unlockReorder]);
+  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isLockedMode]);
 
   const insertBlockAt = useCallback((index: number) => {
+    if (isLockedMode) return;
     saveSnapshot();
     let newId: string | null = null;
     let refId: string | null = null;
@@ -4345,13 +4503,15 @@ export default function ScriptEditor({
       return updated;
     });
     if (newId && refId) inheritTags(refId, newId);
-  }, [saveSnapshot, inheritTags]);
+  }, [saveSnapshot, inheritTags, isLockedMode]);
 
   const addChar = (name: string) => {
+    if (isLockedMode) return;
     setCharacters((prev) => [...prev, { id: uid(), name, isAggregate: false }]);
   };
 
   const removeChar = (charId: string) => {
+    if (isLockedMode) return;
     setCharacters((prev) => prev.filter((c) => c.id !== charId));
     setBlocks((prev) =>
       prev.map((b) => {
@@ -4362,11 +4522,12 @@ export default function ScriptEditor({
   };
 
   const renameChar = (charId: string, name: string) =>
-    setCharacters((prev) =>
+    !isLockedMode && setCharacters((prev) =>
       prev.map((c) => (c.id === charId ? { ...c, name } : c))
     );
 
   const addScene = (parentId?: string) => {
+    if (isLockedMode) return;
     const newScene: Scene = { id: uid(), number: "", name: "", parentId: parentId ?? null };
     if (parentId) {
       setScenes((prev) => {
@@ -4386,10 +4547,12 @@ export default function ScriptEditor({
   };
 
   const updateScene = (id: string, number: string, name: string) => {
+    if (isLockedMode) return;
     setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, number, name } : s)));
   };
 
   const removeScene = (id: string) => {
+    if (isLockedMode) return;
     setScenes((prev) => prev.filter((s) => s.id !== id));
     setBlocks((prev) => prev.map((b) => (b.sceneId === id ? { ...b, sceneId: null } : b)));
   };
@@ -4462,7 +4625,7 @@ export default function ScriptEditor({
     <div className="min-h-screen bg-zinc-100">
       {/* Toolbar */}
       <header className="sticky top-0 z-40 border-b border-zinc-100 bg-white shadow-sm">
-        <div className="mx-auto flex h-14 max-w-3xl flex-wrap items-center gap-3 px-6">
+        <div className="relative mx-auto flex h-14 max-w-3xl flex-wrap items-center gap-3 px-6">
           <Link
             href={productionId ? `/production/${productionId}` : "/"}
             onNavigate={prepareForNavigation}
@@ -4471,6 +4634,18 @@ export default function ScriptEditor({
             ← 返回
           </Link>
           <div className="h-4 w-px shrink-0 bg-zinc-100" />
+
+          {baseCanEdit && isLockedMode && (
+            <button
+              onClick={toggleLockedMode}
+              aria-pressed={isLockedMode}
+              title="退出排练模式"
+              className="absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded px-2 py-1 text-sm font-medium text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
+            >
+              <RehearsalModeSwitch active={isLockedMode} />
+              <span>排练模式</span>
+            </button>
+          )}
 
           {/* 剧本▼ — 关于 + 元数据设置 */}
           <div className="relative">
@@ -4502,6 +4677,7 @@ export default function ScriptEditor({
                   <button
                     key={open}
                     onClick={() => { saveScriptConfig({ stageDelimOpen: open, stageDelimClose: close }); setOpenMenu(null); }}
+                    disabled={isLockedMode}
                     className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${scriptConfig.stageDelimOpen === open ? "font-medium text-zinc-800" : "text-zinc-500"}`}
                   >
                     <span>{label}</span>
@@ -4521,13 +4697,14 @@ export default function ScriptEditor({
                   <button
                     key={layout}
                     onClick={() => { saveScriptConfig({ pageLayout: layout }); setOpenMenu(null); }}
+                    disabled={isLockedMode}
                     className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${scriptConfig.pageLayout === layout ? "font-medium text-zinc-800" : "text-zinc-500"}`}
                   >
                     <span>{label}</span>
                     {scriptConfig.pageLayout === layout && <span className="text-[10px] text-zinc-400">✓</span>}
                   </button>
                 ))}
-                {productionId && (
+                {productionId && !isLockedMode && (
                   <>
                     <div className="my-1 border-t border-zinc-50" />
                     <button
@@ -4573,9 +4750,14 @@ export default function ScriptEditor({
           <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
             {canEdit ? "可编辑" : "只读"}
           </span>
+          {!baseCanEdit && (
+            <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+              只读
+            </span>
+          )}
+          <div className="ml-auto h-4 w-px shrink-0 bg-zinc-100" />
           {canEditMetadata && (
             <>
-              <div className="h-4 w-px shrink-0 bg-zinc-100" />
               <ScenePanel
                 scenes={scenes}
                 productionId={productionId ?? ""}
@@ -4598,9 +4780,9 @@ export default function ScriptEditor({
                 onOpenChange={(v) => setOpenMenu(v ? "char" : null)}
                 onNavigate={prepareForNavigation}
               />
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
             </>
           )}
-          <div className="h-4 w-px shrink-0 bg-zinc-100" />
 
           {/* 编辑▼ — undo/redo + 格式 + 搜索/跳转 */}
           <div className="relative">
@@ -4608,11 +4790,11 @@ export default function ScriptEditor({
               onClick={() => toggleMenu("edit")}
               className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
             >
-              编辑 <Chevron />
+              {isLockedMode ? "查找" : "编辑"} <Chevron />
             </button>
             {openMenu === "edit" && (
               <div
-                className="absolute left-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
                 onMouseLeave={() => setOpenMenu(null)}
               >
                 {canEdit && (
@@ -4694,7 +4876,7 @@ export default function ScriptEditor({
             </button>
             {openMenu === "display" && (
               <div
-                className="absolute left-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
                 onMouseLeave={() => setOpenMenu(null)}
               >
                 {(
@@ -4703,7 +4885,7 @@ export default function ScriptEditor({
                     ["lineNumbers",    "行号"],
                     ["rehearsalMarks", "排练记号"],
                     ["blockTags",      "Block 标签"],
-                  ] as [keyof DisplaySettings, string][]
+                  ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "rehearsalMarks" | "blockTags">, string][]
                 ).map(([key, label]) => (
                   <button
                     key={key}
@@ -4714,11 +4896,38 @@ export default function ScriptEditor({
                     <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${display[key] ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"}`}>✓</span>
                   </button>
                 ))}
+                <button
+                  onClick={() => { if (isLockedMode) toggleDisplay("rehearsalBlockScenes"); }}
+                  disabled={!isLockedMode}
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                    isLockedMode ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
+                  }`}
+                  title="排练模式开启时显示每行所属章节"
+                >
+                  <span>逐行章节</span>
+                  <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
+                    display.rehearsalBlockScenes && isLockedMode ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
+                  }`}>✓</span>
+                </button>
+                {baseCanEdit && (
+                  <>
+                    <div className="my-1 border-t border-zinc-50" />
+                    <button
+                      onClick={toggleLockedMode}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span>排练模式</span>
+                      <span className="flex items-center">
+                        <RehearsalModeSwitch active={isLockedMode} />
+                      </span>
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-2">
             {/* Online users: self (dimmed) + others */}
             <div className="flex items-center">
               {(() => {
@@ -5122,6 +5331,8 @@ export default function ScriptEditor({
                   lineNum={display.lineNumbers ? bIdx + 1 : undefined}
                   isSearchHighlight={searchHighlight}
                   showRehearsalMark={display.rehearsalMarks}
+                  showReadOnlyRehearsalMark={isLockedMode && display.rehearsalMarks}
+                  readOnlyScene={isLockedMode && display.rehearsalBlockScenes && block.sceneId ? sceneById.get(block.sceneId) ?? null : null}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
                   characters={characters}
@@ -5323,7 +5534,7 @@ export default function ScriptEditor({
                   onAssetClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(block.id); }}
                   canEditText={canEditText}
                   canEditMetadata={canEditMetadata}
-                  canEditRehearsalMark={canEditRehearsalMark}
+                  canEditRehearsalMark={effectiveCanEditRehearsalMark}
                   canMergeWithPrevious={canMergeWithPrevious}
                   tagGroups={tagGroups}
                   blockTagValues={blockTagMap.get(block.id) ?? []}
@@ -5336,7 +5547,7 @@ export default function ScriptEditor({
               </div>
             );
             return bIdx > 0
-              ? [canEditText && <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} />, blockEl]
+              ? [canEditText ? <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} /> : isLockedMode ? <BlockGap key={`iz-${bIdx}`} /> : null, blockEl]
               : [blockEl];
               }),
               <div
@@ -5349,7 +5560,7 @@ export default function ScriptEditor({
               />,
             ];
           })()}
-          {canEditText && <InsertZone onInsert={() => insertBlockAt(blocks.length)} />}
+          {canEditText ? <InsertZone onInsert={() => insertBlockAt(blocks.length)} /> : isLockedMode ? <BlockGap /> : null}
           </div>
         </div>
         {canEditText && (
@@ -5410,6 +5621,41 @@ export default function ScriptEditor({
           onClose={() => setActiveCommentBlockId(null)}
           onNavigate={prepareForNavigation}
         />
+      )}
+
+      {pendingLockedMode !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPendingLockedMode(null)}
+        >
+          <div
+            className="w-[360px] rounded-2xl bg-white p-5 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-800">
+              {pendingLockedMode ? "确认进入排练模式？" : "确认退出排练模式？"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              {pendingLockedMode
+                ? "进入该模式后，将只能添加附件和评论，对剧本的其他编辑权限将被锁定。"
+                : "退出后，将恢复到可编辑模式。"}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPendingLockedMode(null)}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmLockedModeChange}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 关于 modal */}
