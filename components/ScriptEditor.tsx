@@ -54,6 +54,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   rehearsalBlockScenes: true,
 };
 const DISPLAY_COOKIE = "script_display";
+const CHARACTER_FOCUS_STORAGE_PREFIX = "script_character_focus";
 function readDisplayCookie(): DisplaySettings {
   try {
     const m = document.cookie.match(/(?:^|;\s*)script_display=([^;]*)/);
@@ -65,12 +66,42 @@ function writeDisplayCookie(s: DisplaySettings) {
   document.cookie = `${DISPLAY_COOKIE}=${encodeURIComponent(JSON.stringify(s))}; path=/; max-age=31536000; SameSite=Lax`;
 }
 
-function RehearsalModeSwitch({ active }: { active: boolean }) {
+function characterFocusStorageKey(scriptId: string): string {
+  return `${CHARACTER_FOCUS_STORAGE_PREFIX}:${scriptId}:${getOrCreateClientId()}`;
+}
+
+function readStoredCharacterFocus(scriptId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(characterFocusStorageKey(scriptId));
+    const ids = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeStoredCharacterFocus(scriptId: string, ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = characterFocusStorageKey(scriptId);
+    if (ids.size === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(Array.from(ids)));
+  } catch { /* ignore storage failures */ }
+}
+
+function ModeSwitch({
+  active,
+  activeClassName = "bg-teal-600",
+}: {
+  active: boolean;
+  activeClassName?: string;
+}) {
   return (
     <span
       aria-hidden
       className={`relative h-4 w-7 rounded-full transition-colors ${
-        active ? "bg-teal-600" : "bg-zinc-200"
+        active ? activeClassName : "bg-zinc-200"
       }`}
     >
       <span
@@ -886,12 +917,18 @@ function RehearsalMarkLabel({ mark }: { mark: string }) {
 
 function CharacterRow({
   char,
+  focused,
+  onToggleFocus,
   onRename,
   onRemove,
+  readOnly = false,
 }: {
   char: Character;
+  focused: boolean;
+  onToggleFocus: () => void;
   onRename: (name: string) => void;
   onRemove: () => void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(char.name);
@@ -906,7 +943,7 @@ function CharacterRow({
 
   return (
     <tr className="group border-b border-zinc-50 last:border-0">
-      <td className="px-4 py-2 w-full">
+      <td className="max-w-0 px-4 py-2 w-full">
         {editing ? (
           <input
             autoFocus
@@ -921,39 +958,56 @@ function CharacterRow({
           />
         ) : (
           <span
-            onClick={() => { setDraft(char.name); setEditing(true); }}
-            className="cursor-text text-sm text-zinc-700 hover:text-zinc-900"
-            title="点击重命名"
+            onClick={() => {
+              if (readOnly) return;
+              setDraft(char.name);
+              setEditing(true);
+            }}
+            className={`block truncate whitespace-nowrap text-sm text-zinc-700 ${readOnly ? "" : "cursor-text hover:text-zinc-900"}`}
+            title={readOnly ? undefined : "点击重命名"}
           >
             {char.name}
           </span>
         )}
       </td>
-      <td className="px-4 py-2 text-right">
-        {confirmDelete ? (
-          <span className="inline-flex items-center gap-2 whitespace-nowrap">
-            <button
-              onClick={onRemove}
-              className="text-xs text-red-500 hover:text-red-700"
-            >
-              确认
-            </button>
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="text-xs text-zinc-400 hover:text-zinc-600"
-            >
-              取消
-            </button>
-          </span>
-        ) : (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="text-sm text-zinc-300 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-          >
-            ×
-          </button>
-        )}
+      <td className="w-8 py-2 pr-2 text-right align-middle">
+        <button
+          type="button"
+          onClick={onToggleFocus}
+          className="inline-flex items-center align-middle"
+          title={focused ? "取消聚焦角色" : "聚焦角色"}
+          aria-pressed={focused}
+        >
+          <ModeSwitch active={focused} activeClassName="bg-purple-400" />
+        </button>
       </td>
+      {!readOnly && (
+        <td className="w-7 py-2 pr-4 text-right align-middle whitespace-nowrap">
+          {confirmDelete ? (
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
+              <button
+                onClick={onRemove}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                确认
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs text-zinc-400 hover:text-zinc-600"
+              >
+                取消
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="text-sm text-zinc-300 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+            >
+              ×
+            </button>
+          )}
+        </td>
+      )}
     </tr>
   );
 }
@@ -961,21 +1015,27 @@ function CharacterRow({
 function CharacterPanel({
   characters,
   productionId,
+  focusedCharacterIds,
+  onToggleFocus,
   onAdd,
   onRemove,
   onRename,
   open,
   onOpenChange,
   onNavigate,
+  readOnly = false,
 }: {
   characters: Character[];
   productionId: string;
+  focusedCharacterIds: Set<string>;
+  onToggleFocus: (id: string) => void;
   onAdd: (name: string) => void;
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onNavigate?: () => void;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
@@ -990,6 +1050,7 @@ function CharacterPanel({
   }, [open, onOpenChange]);
 
   const submit = () => {
+    if (readOnly) return;
     const name = draft.trim();
     if (!name) return;
     onAdd(name);
@@ -1013,9 +1074,11 @@ function CharacterPanel({
         <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-xl border border-zinc-100 bg-white shadow-xl flex flex-col" style={{ maxHeight: "min(28rem, calc(100vh - 8rem))" }}>
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2.5">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
-            <Link href={`/production/${productionId}/characters`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
-              管理页 →
-            </Link>
+            {!readOnly && (
+              <Link href={`/production/${productionId}/characters`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
+                管理页 →
+              </Link>
+            )}
           </div>
 
           <div className="overflow-y-auto">
@@ -1030,8 +1093,11 @@ function CharacterPanel({
                   <CharacterRow
                     key={c.id}
                     char={c}
+                    focused={focusedCharacterIds.has(c.id)}
+                    onToggleFocus={() => onToggleFocus(c.id)}
                     onRename={(name) => onRename(c.id, name)}
                     onRemove={() => onRemove(c.id)}
+                    readOnly={readOnly}
                   />
                 ))
               )}
@@ -1039,22 +1105,24 @@ function CharacterPanel({
           </table>
           </div>
 
-          <div className="shrink-0 flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="新角色名…"
-              className="min-w-0 flex-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-300"
-            />
-            <button
-              onClick={submit}
-              disabled={!draft.trim()}
-              className="shrink-0 rounded-md bg-zinc-700 px-2.5 py-1 text-xs text-white hover:bg-zinc-600 disabled:opacity-30"
-            >
-              添加
-            </button>
-          </div>
+          {!readOnly && (
+            <div className="shrink-0 flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder="新角色名…"
+                className="min-w-0 flex-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-300"
+              />
+              <button
+                onClick={submit}
+                disabled={!draft.trim()}
+                className="shrink-0 rounded-md bg-zinc-700 px-2.5 py-1 text-xs text-white hover:bg-zinc-600 disabled:opacity-30"
+              >
+                添加
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1899,6 +1967,7 @@ function ScriptBlock({
   dragTarget = null,
   isSelected = false,
   isDeleteConfirmHighlighted = false,
+  isCharacterFocusHighlighted = false,
   isRecentlyMoved = false,
   deleteConfirmToken,
   selectedCount = 0,
@@ -1962,6 +2031,7 @@ function ScriptBlock({
   dragTarget?: BlockDragTarget | null;
   isSelected?: boolean;
   isDeleteConfirmHighlighted?: boolean;
+  isCharacterFocusHighlighted?: boolean;
   isRecentlyMoved?: boolean;
   deleteConfirmToken?: number;
   selectedCount?: number;
@@ -2194,13 +2264,19 @@ function ScriptBlock({
     ? "bg-red-100"
     : isSelected
       ? "bg-[#eef3fa]"
+    : isCharacterFocusHighlighted
+      ? "bg-purple-50"
       : isFocused
       ? "bg-zinc-100/70"
       : (index ?? 0) % 2 === 1
         ? "bg-zinc-50/60"
         : "";
   const movedGlowClass = isRecentlyMoved
-    ? isSelected ? "script-block-moved-glow" : "script-block-updated-glow"
+    ? isSelected
+      ? "script-block-moved-glow"
+      : isCharacterFocusHighlighted
+        ? "script-block-updated-focus-glow"
+        : "script-block-updated-glow"
     : "";
   const compactStageDeleteStyle: React.CSSProperties | undefined = compactStageLayout?.deleteLeft !== null && compactStageLayout?.deleteLeft !== undefined
     ? { left: compactStageLayout.deleteLeft }
@@ -2215,7 +2291,6 @@ function ScriptBlock({
   const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
     isStage ? "-top-5" : "top-1"
   }`;
-
   return (
     <div
       ref={blockRootRef}
@@ -2862,6 +2937,7 @@ export default function ScriptEditor({
 
   const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [focusedCharacterIds, setFocusedCharacterIds] = useState<Set<string>>(() => readStoredCharacterFocus(effectiveScriptId));
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -2909,6 +2985,18 @@ export default function ScriptEditor({
   // ── Page map (computed client-side, deterministic) ──────────────────────────
   const pageMap = useMemo(() => computePageMap(blocks, scriptConfig.pageLayout), [blocks, scriptConfig.pageLayout]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
+  useEffect(() => {
+    setFocusedCharacterIds(readStoredCharacterFocus(effectiveScriptId));
+  }, [effectiveScriptId]);
+  const toggleCharacterFocus = useCallback((id: string) => {
+    setFocusedCharacterIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeStoredCharacterFocus(effectiveScriptId, next);
+      return next;
+    });
+  }, [effectiveScriptId]);
 
   // ── Search ──────────────────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
@@ -4671,18 +4759,6 @@ export default function ScriptEditor({
           </Link>
           <div className="h-4 w-px shrink-0 bg-zinc-100" />
 
-          {baseCanEdit && isLockedMode && (
-            <button
-              onClick={toggleLockedMode}
-              aria-pressed={isLockedMode}
-              title="退出排练模式"
-              className="absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded px-2 py-1 text-sm font-medium text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
-            >
-              <RehearsalModeSwitch active={isLockedMode} />
-              <span>排练模式</span>
-            </button>
-          )}
-
           {/* 剧本▼ — 关于 + 元数据设置 */}
           <div className="relative">
             <button
@@ -4791,30 +4867,50 @@ export default function ScriptEditor({
               只读
             </span>
           )}
-          <div className="ml-auto h-4 w-px shrink-0 bg-zinc-100" />
-          {canEditMetadata && (
+          <div className="flex min-w-0 flex-1 justify-center">
+            {baseCanEdit && isLockedMode && (
+              <button
+                onClick={toggleLockedMode}
+                aria-pressed={isLockedMode}
+                title="退出排练模式"
+                className="flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
+              >
+                <ModeSwitch active={isLockedMode} />
+                <span>排练模式</span>
+              </button>
+            )}
+          </div>
+          <div className="h-4 w-px shrink-0 bg-zinc-100" />
+          {(canEditMetadata || isLockedMode) && (
             <>
-              <ScenePanel
-                scenes={scenes}
-                productionId={productionId ?? ""}
-                onAdd={(parentId) => addScene(parentId)}
-                onUpdate={updateScene}
-                onRemove={removeScene}
-                open={openMenu === "scene"}
-                onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
-                canImport={canImport}
-                onNavigate={prepareForNavigation}
-              />
-              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              {canEditMetadata && (
+                <>
+                  <ScenePanel
+                    scenes={scenes}
+                    productionId={productionId ?? ""}
+                    onAdd={(parentId) => addScene(parentId)}
+                    onUpdate={updateScene}
+                    onRemove={removeScene}
+                    open={openMenu === "scene"}
+                    onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
+                    canImport={canImport}
+                    onNavigate={prepareForNavigation}
+                  />
+                  <div className="h-4 w-px shrink-0 bg-zinc-100" />
+                </>
+              )}
               <CharacterPanel
                 characters={characters}
                 productionId={productionId ?? ""}
+                focusedCharacterIds={focusedCharacterIds}
+                onToggleFocus={toggleCharacterFocus}
                 onAdd={addChar}
                 onRemove={removeChar}
                 onRename={renameChar}
                 open={openMenu === "char"}
                 onOpenChange={(v) => setOpenMenu(v ? "char" : null)}
                 onNavigate={prepareForNavigation}
+                readOnly={isLockedMode}
               />
               <div className="h-4 w-px shrink-0 bg-zinc-100" />
             </>
@@ -4954,7 +5050,7 @@ export default function ScriptEditor({
                     >
                       <span>排练模式</span>
                       <span className="flex items-center">
-                        <RehearsalModeSwitch active={isLockedMode} />
+                        <ModeSwitch active={isLockedMode} />
                       </span>
                     </button>
                   </>
@@ -5168,12 +5264,31 @@ export default function ScriptEditor({
           }
         }
 
+        @keyframes scriptBlockUpdatedFocusGlow {
+          0% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0.14);
+          }
+          48% {
+            background-color: #ffffff;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+          100% {
+            background-color: #faf5ff;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+        }
+
         .script-block-moved-glow {
           animation: scriptBlockMovedGlow 1s ease-in-out;
         }
 
         .script-block-updated-glow {
           animation: scriptBlockUpdatedGlow 1s ease-in-out;
+        }
+
+        .script-block-updated-focus-glow {
+          animation: scriptBlockUpdatedFocusGlow 1s ease-in-out;
         }
       `}</style>
 
@@ -5245,6 +5360,7 @@ export default function ScriptEditor({
               for (const s of pskipped) sim(s);
               sim(pscene);
             }
+            const hasFocusedCharacters = focusedCharacterIds.size > 0;
 
             return [
               <div
@@ -5288,6 +5404,8 @@ export default function ScriptEditor({
             const searchHighlight: "focused" | "match" | undefined =
               matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
             const isSelected = selectedBlockIds.has(block.id);
+            const isCharacterFocusHighlighted =
+              hasFocusedCharacters && block.characterIds.some((id) => focusedCharacterIds.has(id));
             const selectedDeleteIds = isSelected ? Array.from(selectedBlockIds) : [block.id];
             const selectedCount = selectedDeleteIds.length;
             const canDeleteWithoutConfirmation = selectedDeleteIds.every((id) => {
@@ -5379,6 +5497,7 @@ export default function ScriptEditor({
                   dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
                   isSelected={isSelected}
                   isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id)}
+                  isCharacterFocusHighlighted={isCharacterFocusHighlighted}
                   isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
                   deleteConfirmToken={deleteConfirmationRequest?.anchorId === block.id ? deleteConfirmationRequest.token : undefined}
                   selectedCount={selectedCount}
