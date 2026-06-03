@@ -310,7 +310,14 @@ export default function VersionManagePage({
             href={`/production/${productionId}`}
             className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
           >
-            ← 返回
+            ← 返回项目
+          </Link>
+          <div className="h-4 w-px bg-zinc-100" />
+          <Link
+            href={`/production/${productionId}/script`}
+            className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+          >
+            返回剧本
           </Link>
           <div className="h-4 w-px bg-zinc-100" />
           <span className="text-sm text-zinc-400 truncate">{productionName}</span>
