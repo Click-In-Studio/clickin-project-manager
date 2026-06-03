@@ -13,7 +13,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout } from "@/lib/script-types";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, Version, VersionStatus } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
 import VersionSelector from "@/components/VersionSelector";
@@ -21,7 +21,7 @@ import BlockMountAssets from "@/components/assets/BlockMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState } from "@/lib/script-ops";
-import { computePageMap, DEFAULT_PAGE_CONFIG, PAGE_CONFIGS } from "@/lib/script-page";
+import { computePageMap, DEFAULT_PAGE_CONFIG } from "@/lib/script-page";
 import type { PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
@@ -34,6 +34,15 @@ const Chevron = () => (
   <svg className="h-3 w-3 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden>
     <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
+);
+
+const FoldTriangle = ({ open }: { open: boolean }) => (
+  <span
+    aria-hidden
+    className={`h-0 w-0 border-x-[3px] border-x-transparent ${
+      open ? "border-b-[4px] border-b-current" : "border-t-[4px] border-t-current"
+    }`}
+  />
 );
 
 // ── Display settings (cookie-persisted) ───────────────────────────────────────
@@ -1145,6 +1154,7 @@ function BlockCharacterSelector({
   characters,
   onChange,
   onAnnotationChange,
+  onForceShowCharacterNameChange,
   onEditingChange,
   editRequestToken,
   onArrowUp,
@@ -1155,6 +1165,7 @@ function BlockCharacterSelector({
   characters: Character[];
   onChange: (ids: string[]) => void;
   onAnnotationChange: (charId: string, annotation: string) => void;
+  onForceShowCharacterNameChange: (force: boolean) => void;
   onEditingChange: (editing: boolean) => void;
   editRequestToken: number;
   onArrowUp: () => void;
@@ -1166,6 +1177,7 @@ function BlockCharacterSelector({
   const [query, setQuery] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [showAnnotations, setShowAnnotations] = useState(false);
+  const [displayMenuOpen, setDisplayMenuOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -1186,6 +1198,7 @@ function BlockCharacterSelector({
       if (block.characterIds.some((id) => block.characterAnnotations[id])) setShowAnnotations(true);
     } else {
       setShowAnnotations(false);
+      setDisplayMenuOpen(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
@@ -1206,6 +1219,7 @@ function BlockCharacterSelector({
   const suggestions = characters.filter(
     (c) => !block.characterIds.includes(c.id) && c.name.includes(query)
   );
+  const selectorControlClass = "flex h-4 items-center gap-0.5 text-[11px] leading-none transition-colors";
 
   const addChar = (id: string) => {
     onChange([...block.characterIds, id]);
@@ -1217,7 +1231,7 @@ function BlockCharacterSelector({
   const removeChar = (id: string) =>
     onChange(block.characterIds.filter((c) => c !== id));
 
-  const close = () => { setEditingWithNotify(false); setQuery(""); setHighlightIdx(0); };
+  const close = () => { setEditingWithNotify(false); setQuery(""); setHighlightIdx(0); setDisplayMenuOpen(false); };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
@@ -1284,7 +1298,7 @@ function BlockCharacterSelector({
   }
 
   return (
-    <div ref={wrapRef} className="relative mb-2">
+    <div ref={wrapRef} className="relative z-30 mb-2">
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 transition-colors focus-within:border-zinc-500">
         {selected.map((c) => (
           <span
@@ -1329,13 +1343,57 @@ function BlockCharacterSelector({
             className="min-w-[5rem] flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-300"
           />
         )}
-        {selected.length > 0 && (
-          <button
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowAnnotations((v) => !v); }}
-            className="ml-auto shrink-0 text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors"
-          >
-            备注{showAnnotations ? " ▴" : " ▾"}
-          </button>
+        {selected.length > 0 && !readOnly && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="relative flex h-4 items-center">
+              <button
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setDisplayMenuOpen((v) => !v); }}
+                className={`${selectorControlClass} ${
+                  block.forceShowCharacterName ? "text-zinc-600" : "text-zinc-300 hover:text-zinc-500"
+                }`}
+              >
+                <span>显示状态</span>
+                <FoldTriangle open={displayMenuOpen} />
+              </button>
+              {displayMenuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-xl border border-zinc-100 bg-white py-1 shadow-xl">
+                  <button
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onForceShowCharacterNameChange(true);
+                      setDisplayMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-left text-xs ${
+                      block.forceShowCharacterName ? "text-zinc-900" : "text-zinc-500 hover:bg-zinc-50"
+                    }`}
+                  >
+                    永远显示该行角色
+                  </button>
+                  <button
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onForceShowCharacterNameChange(false);
+                      setDisplayMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-left text-xs ${
+                      block.forceShowCharacterName ? "text-zinc-500 hover:bg-zinc-50" : "text-zinc-900"
+                    }`}
+                  >
+                    自动
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowAnnotations((v) => !v); }}
+              className={`${selectorControlClass} text-zinc-300 hover:text-zinc-500`}
+            >
+              <span>备注</span>
+              <FoldTriangle open={showAnnotations} />
+            </button>
+          </div>
         )}
       </div>
       {showAnnotations && selected.length > 0 && (
@@ -1778,6 +1836,7 @@ function mergeServerBlocks(
       b.content !== s.content ||
       b.type !== s.type ||
       b.lyric !== s.lyric ||
+      (b.forceShowCharacterName ?? false) !== (s.forceShowCharacterName ?? false) ||
       b.rehearsalMark !== s.rehearsalMark ||
       b.sceneId !== s.sceneId ||
       b.characterIds.length !== s.characterIds.length ||
@@ -2556,6 +2615,7 @@ function ScriptBlock({
           characters={characters}
           onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
           onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
+          onForceShowCharacterNameChange={(force) => onUpdate({ forceShowCharacterName: force })}
           onEditingChange={setCharSelectorOpen}
           editRequestToken={charEditToken}
           onArrowUp={onArrowUpFromChar}

@@ -169,6 +169,7 @@ export function requiredPermissions(
       op.block.content !== old.content ||
       op.block.type !== old.type ||
       op.block.lyric !== old.lyric ||
+      (op.block.forceShowCharacterName ?? false) !== (old.forceShowCharacterName ?? false) ||
       JSON.stringify(op.block.characterIds) !== JSON.stringify(old.characterIds)
     ) needed.add("script:edit");
     if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("script:rehearsal_mark");

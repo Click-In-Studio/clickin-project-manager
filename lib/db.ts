@@ -79,11 +79,20 @@ type BlockRow = {
   rehearsal_mark: string | null;
   type: DbBlockType;
   content: string;
+  force_show_character_name: boolean;
 };
 type SceneRow = { id: string; num: string; name: string; sort_order: number; parent_id: string | null };
 type CharRow  = { id: string; name: string; sort_order: number; is_aggregate: boolean };
 // script_character uses snapshot_id as the script_id FK
 type ScCharRow = { script_id: string; character_id: string; annotation: string | null };
+
+let scriptForceShowColumnReady: Promise<void> | null = null;
+function ensureScriptForceShowColumn(): Promise<void> {
+  scriptForceShowColumnReady ??= getPool()
+    .query("ALTER TABLE script ADD COLUMN IF NOT EXISTS force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE")
+    .then(() => undefined);
+  return scriptForceShowColumnReady;
+}
 
 // ─── Version CRUD ─────────────────────────────────────────────────────────────
 
@@ -393,13 +402,14 @@ export type ProductionState = {
  * Returns null if the production doesn't exist.
  */
 export async function loadProduction(productionId: string, versionId: string): Promise<ProductionState | null> {
+  await ensureScriptForceShowColumn();
   const pool = getPool();
 
   const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
     Promise.all([
       pool.query<BlockRow>(
         `SELECT s.id AS snapshot_id, sv.block_id, sv.sort_key,
-                s.scene_id, s.rehearsal_mark, s.type, s.content
+                s.scene_id, s.rehearsal_mark, s.type, s.content, s.force_show_character_name
          FROM script_version sv
          JOIN script s ON s.id = sv.snapshot_id
          WHERE sv.version_id = $1
@@ -458,6 +468,7 @@ export async function loadProduction(productionId: string, versionId: string): P
       type,
       lyric,
       content: row.content,
+      forceShowCharacterName: row.force_show_character_name,
       sceneId: row.scene_id,
       rehearsalMark: row.rehearsal_mark,
       characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
@@ -522,6 +533,7 @@ export async function flushToDBVersioned(
   versionId: string,
   payload: VersionedFlushPayload,
 ): Promise<VersionedFlushResult> {
+  await ensureScriptForceShowColumn();
   const { upsertBlocks, deleteSnapshotIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
   const newSnapshotIds = new Map<string, string>();
 
@@ -608,10 +620,11 @@ export async function flushToDBVersioned(
         // Brand new block: insert snapshot + relation
         const snapshotId = genSnapshotId();
         await client.query(
-          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8)`,
+          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9)`,
           [snapshotId, block.id, productionId, block.lexKey,
-           block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content]
+           block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
+           block.forceShowCharacterName ?? false]
         );
         await client.query(
           "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
@@ -639,8 +652,9 @@ export async function flushToDBVersioned(
         if (refCount <= 1) {
           // Sole reference: update in-place
           await client.query(
-            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type, content = $4 WHERE id = $5`,
-            [block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content, block.snapshotId]
+            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type, content = $4, force_show_character_name = $5 WHERE id = $6`,
+            [block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
+             block.forceShowCharacterName ?? false, block.snapshotId]
           );
           // Update sort_key in relation table
           await client.query(
@@ -665,10 +679,11 @@ export async function flushToDBVersioned(
           // Multi-referenced: copy-on-write
           const newSnapshotId = genSnapshotId();
           await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8)`,
+            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9)`,
             [newSnapshotId, block.id, productionId, block.lexKey,
-             block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content]
+             block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
+             block.forceShowCharacterName ?? false]
           );
           // Remap relation for this version to the new snapshot
           await client.query(
@@ -763,6 +778,7 @@ export async function flushToDBVersioned(
 /** Legacy flush used by management pages (import-script, import-scenes).
  *  Operates on the active editing version; no CoW for blocks. */
 export async function flushToDB(productionId: string, payload: FlushPayload): Promise<void> {
+  await ensureScriptForceShowColumn();
   const { upsertBlocks, deleteBlockIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
   if (!upsertBlocks.length && !deleteBlockIds.length && !upsertChars.length &&
       !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) return;
@@ -848,17 +864,19 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
     if (upsertBlocks.length > 0) {
       // Full upsert into script (using block id as snapshot id — legacy mode)
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
          SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]),
-                unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[])
+                unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]), unnest($8::bool[])
          ON CONFLICT (id) DO UPDATE SET
            block_id = EXCLUDED.block_id, sort_key = EXCLUDED.sort_key, scene_id = EXCLUDED.scene_id,
-           rehearsal_mark = EXCLUDED.rehearsal_mark, type = EXCLUDED.type, content = EXCLUDED.content`,
+           rehearsal_mark = EXCLUDED.rehearsal_mark, type = EXCLUDED.type, content = EXCLUDED.content,
+           force_show_character_name = EXCLUDED.force_show_character_name`,
         [
           upsertBlocks.map(b => b.id), productionId,
           upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
           upsertBlocks.map(b => b.rehearsalMark ?? null), upsertBlocks.map(b => toDbType(b)),
           upsertBlocks.map(b => b.content),
+          upsertBlocks.map(b => b.forceShowCharacterName ?? false),
         ]
       );
 
@@ -955,6 +973,7 @@ export async function importScriptToVersion(
     upsertScenes: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }>;
   },
 ): Promise<void> {
+  await ensureScriptForceShowColumn();
   const { upsertBlocks, upsertChars, upsertScenes } = payload;
   const client = await getPool().connect();
   try {
@@ -1010,15 +1029,17 @@ export async function importScriptToVersion(
 
     if (upsertBlocks.length > 0) {
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
          SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]),
-                unnest($4::text[]), unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[])`,
+                unnest($4::text[]), unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]),
+                unnest($8::bool[])`,
         [
           upsertBlocks.map(b => b.id), productionId,
           upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
           upsertBlocks.map(b => b.rehearsalMark ?? null),
           upsertBlocks.map(b => toDbType(b as Block)),
           upsertBlocks.map(b => b.content),
+          upsertBlocks.map(() => false),
         ]
       );
       await client.query(
@@ -2800,6 +2821,7 @@ export async function cowBlockSnapshotForMount(
   snapshotId: string,
   mode: 'tracking' | 'version_only',
 ): Promise<string> {
+  await ensureScriptForceShowColumn();
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
@@ -2816,8 +2838,8 @@ export async function cowBlockSnapshotForMount(
     const newSnapshotId = genSnapshotId();
 
     await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content)
-       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
+       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name
        FROM script WHERE id = $2`,
       [newSnapshotId, snapshotId]
     );
@@ -2968,4 +2990,3 @@ export async function listMemberProductions(openId: string): Promise<{ id: strin
     archivedAt: r.archived_at?.toISOString() ?? null,
   }));
 }
-

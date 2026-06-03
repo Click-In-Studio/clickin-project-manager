@@ -208,6 +208,7 @@ function blockChanged(a: ServerBlock, b: ServerBlock): boolean {
     a.content !== b.content ||
     a.type !== b.type ||
     a.lyric !== b.lyric ||
+    (a.forceShowCharacterName ?? false) !== (b.forceShowCharacterName ?? false) ||
     a.sceneId !== b.sceneId ||
     a.rehearsalMark !== b.rehearsalMark ||
     a.lexKey !== b.lexKey ||

@@ -5,6 +5,7 @@ import { getActiveVersionId } from "@/lib/db";
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const clientId = req.nextUrl.searchParams.get("cid") ?? Math.random().toString(36).slice(2);
+  const connectionId = `${clientId}:${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id) ?? '';
   const enc = new TextEncoder();
 
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         try { controller.enqueue(enc.encode(frame)); }
         catch { cancelSSE?.(); }
       };
-      cancelSSE = registerSSE(id, versionId, clientId, push);
+      cancelSSE = registerSSE(id, versionId, connectionId, push);
       push(presenceFrameFor(id, versionId));
       push(`: connected\n\n`);
     },
