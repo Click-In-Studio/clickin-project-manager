@@ -85,10 +85,14 @@ function assignColor(clientId: string): string {
 // ─── HMR-safe global singleton ────────────────────────────────────────────────
 
 type SSEPush = (frame: string) => void;
+type SSEClient = {
+  clientId: string;
+  push: SSEPush;
+};
 
 const g = global as typeof globalThis & {
   __scriptCache?: Map<string, CacheEntry>;
-  __sseRegistry?: Map<string, Map<string, SSEPush>>;
+  __sseRegistry?: Map<string, Map<string, SSEClient>>;
   __presenceRegistry?: Map<string, Map<string, PresenceClient>>;
 };
 
@@ -97,7 +101,7 @@ function cache(): Map<string, CacheEntry> {
   return g.__scriptCache;
 }
 
-function sseRegistry(): Map<string, Map<string, SSEPush>> {
+function sseRegistry(): Map<string, Map<string, SSEClient>> {
   if (!g.__sseRegistry) g.__sseRegistry = new Map();
   return g.__sseRegistry;
 }
@@ -112,21 +116,30 @@ function presenceRegistry(): Map<string, Map<string, PresenceClient>> {
 export function registerSSE(
   productionId: string,
   versionId: string,
+  connectionId: string,
   clientId: string,
   push: SSEPush
-): () => void {
+): () => boolean {
   const key = cacheKey(productionId, versionId);
   const reg = sseRegistry();
   if (!reg.has(key)) reg.set(key, new Map());
-  reg.get(key)!.set(clientId, push);
-  return () => reg.get(key)?.delete(clientId);
+  reg.get(key)!.set(connectionId, { clientId, push });
+  return () => {
+    const clients = reg.get(key);
+    clients?.delete(connectionId);
+    if (!clients) return false;
+    for (const client of clients.values()) {
+      if (client.clientId === clientId) return true;
+    }
+    return false;
+  };
 }
 
 function broadcast(scriptId: string, frame: string): void {
   const clients = sseRegistry().get(scriptId);
   if (!clients) return;
-  for (const push of clients.values()) {
-    try { push(frame); } catch { /* ignore broken pipe */ }
+  for (const client of clients.values()) {
+    try { client.push(frame); } catch { /* ignore broken pipe */ }
   }
 }
 

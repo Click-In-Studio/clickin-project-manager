@@ -9,7 +9,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id) ?? '';
   const enc = new TextEncoder();
 
-  let cancelSSE: (() => void) | null = null;
+  let cancelSSE: (() => boolean) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -17,13 +17,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         try { controller.enqueue(enc.encode(frame)); }
         catch { cancelSSE?.(); }
       };
-      cancelSSE = registerSSE(id, versionId, connectionId, push);
+      cancelSSE = registerSSE(id, versionId, connectionId, clientId, push);
       push(presenceFrameFor(id, versionId));
       push(`: connected\n\n`);
     },
     cancel() {
-      cancelSSE?.();
-      removePresence(id, versionId, clientId);
+      const hasOtherConnections = cancelSSE?.() ?? false;
+      if (!hasOtherConnections) {
+        removePresence(id, versionId, clientId);
+      }
     },
   });
 

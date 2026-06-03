@@ -3914,7 +3914,7 @@ export default function ScriptEditor({
     return stored || anonymousName(getOrCreateClientId());
   });
   const [presenceMap, setPresenceMap] = useState<Map<string, RemotePresence>>(new Map());
-  const lastSentPresenceRef = useRef<string | null | undefined>(undefined);
+  const lastSentPresenceRef = useRef<{ versionId: string | null; blockId: string | null } | null>(null);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Hash-based deep link + position restore ──────────────────────────────────
@@ -4053,17 +4053,19 @@ export default function ScriptEditor({
 
   const sendPresence = useCallback((blockId: string | null) => {
     if (!clientId || !effectiveScriptId) return;
-    if (lastSentPresenceRef.current === blockId) return;
-    lastSentPresenceRef.current = blockId;
+    const lastSent = lastSentPresenceRef.current;
+    if (lastSent?.versionId === activeVersionId && lastSent.blockId === blockId) return;
+    lastSentPresenceRef.current = { versionId: activeVersionId, blockId };
     if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current);
     presenceTimerRef.current = setTimeout(() => {
-      fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/presence`, {
+      const presenceQuery = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+      fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/presence${presenceQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId, userName, blockId }),
       }).catch(() => {});
     }, 200);
-  }, [clientId, effectiveScriptId, userName]);
+  }, [clientId, effectiveScriptId, userName, activeVersionId]);
 
   const markBlockFocused = useCallback((id: string) => {
     focusedIdRef.current = id;
