@@ -891,11 +891,13 @@ function ScenePicker({
   );
 }
 
-function SceneLabel({ scene }: { scene: Scene }) {
+function SceneLabel({ scene, focused = false }: { scene: Scene; focused?: boolean }) {
   return (
     <span
       title={scene.name ? `${scene.number} ${scene.name}` : scene.number}
-      className="pointer-events-none select-none rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-zinc-400"
+      className={`pointer-events-none select-none rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide transition-colors ${
+        focused ? "text-zinc-600" : "text-zinc-300 group-hover:text-zinc-500"
+      }`}
     >
       {scene.number}
     </span>
@@ -1502,9 +1504,10 @@ function BlockCharacterSelector({
 
 type PrintItem =
   | { kind: "sceneHeader"; scene: Scene }
-  | { kind: "block"; block: Block; hideChar: boolean };
+  | { kind: "block"; block: Block; hideChar: boolean; leadingCharacterGap: boolean };
 
 const PRINT_CHAR_NAME_HEIGHT = 22;
+const PRINT_CHARACTER_GAP_HEIGHT = 10;
 
 type PrintPageData = {
   items: PrintItem[];
@@ -1540,13 +1543,18 @@ function computePrintPages(
       ? PRINT_CHAR_NAME_HEIGHT
       : 0;
     let firstBlockOnPage = item.kind === "block" && !curHasBlock;
-    let nextH = h + (firstBlockOnPage ? forcedCharHeight : 0);
+    const leadingGapHeight = item.kind === "block" && item.leadingCharacterGap && !firstBlockOnPage
+      ? PRINT_CHARACTER_GAP_HEIGHT
+      : 0;
+    let nextH = h + leadingGapHeight + (firstBlockOnPage ? forcedCharHeight : 0);
     if (curH + nextH > contentH && curItems.length > 0) {
       flush();
       firstBlockOnPage = item.kind === "block";
       nextH = h + (firstBlockOnPage ? forcedCharHeight : 0);
     }
-    const nextItem = firstBlockOnPage ? { ...item, hideChar: false } : item;
+    const nextItem = firstBlockOnPage
+      ? { ...item, hideChar: false, leadingCharacterGap: false }
+      : item;
     curItems.push(nextItem);
     curH += nextH;
     if (item.kind === "block") curHasBlock = true;
@@ -1556,6 +1564,7 @@ function computePrintPages(
     const block = blocks[i];
     const prev = i > 0 ? blocks[i - 1] : null;
     const hideChar = shouldHideCharacterLabel(prev, block);
+    const leadingCharacterGap = shouldShowCharacterGap(prev, block, hideChar);
 
     if (block.sceneId && block.sceneId !== prev?.sceneId) {
       const scene = scenes.find((s) => s.id === block.sceneId);
@@ -1566,7 +1575,7 @@ function computePrintPages(
       }
     }
 
-    addItem({ kind: "block", block, hideChar }, heights[`b-${block.id}`] ?? 60);
+    addItem({ kind: "block", block, hideChar, leadingCharacterGap }, heights[`b-${block.id}`] ?? 60);
   }
 
   flush();
@@ -1690,11 +1699,12 @@ function PrintPreview({
     </div>
   );
 
-  const renderBlock = (block: Block, hideChar: boolean) => {
+  const renderBlock = (block: Block, hideChar: boolean, leadingCharacterGap = false) => {
     const isStage = block.type === "stage";
     const sel = characters.filter((c) => block.characterIds.includes(c.id));
     return (
       <div key={block.id} className="w-full py-1">
+        {leadingCharacterGap && <div className="h-2.5" aria-hidden="true" />}
         {!isStage && !hideChar && sel.length > 0 && (
           <div className="mb-0.5 w-full text-center text-sm font-bold tracking-[0.12em] text-zinc-800">
             {sel.map((c) => { const ann = block.characterAnnotations[c.id]; return ann ? `${c.name}（${ann}）` : c.name; }).join("、")}
@@ -1801,7 +1811,7 @@ function PrintPreview({
               {page.items.map((item, iIdx) =>
                 item.kind === "sceneHeader"
                   ? renderSceneHeader(item.scene, `sh-${item.scene.id}-${iIdx}`)
-                  : renderBlock(item.block, item.hideChar)
+                  : renderBlock(item.block, item.hideChar, item.leadingCharacterGap)
               )}
             </PrintPage>
           ))}
@@ -1949,6 +1959,20 @@ function shouldHideCharacterLabel(prev: Block | null, block: Block): boolean {
   if (block.rehearsalMark !== prev.rehearsalMark) return false;
   if (block.characterIds.length === 0) return false;
   return _sameCharacters(prev.characterIds, block.characterIds);
+}
+
+function shouldShowCharacterGap(prev: Block | null, block: Block, hideChar: boolean): boolean {
+  if (!prev) return false;
+  if (block.type === "stage") return prev.type !== "stage";
+  if (block.type === "dialogue" && block.characterIds.length === 0) {
+    return !(
+      prev.type === "dialogue" &&
+      prev.characterIds.length === 0 &&
+      block.sceneId === prev.sceneId &&
+      block.rehearsalMark === prev.rehearsalMark
+    );
+  }
+  return block.type === "dialogue" && block.characterIds.length > 0 && !hideChar;
 }
 
 type DragTarget =
@@ -2118,6 +2142,7 @@ function ScriptBlock({
   isSearchHighlight,
   showRehearsalMark = true,
   showReadOnlyRehearsalMark = false,
+  readOnlyRehearsalMode = false,
   readOnlyScene = null,
   stageDelimOpen = "（",
   stageDelimClose = "）",
@@ -2184,6 +2209,7 @@ function ScriptBlock({
   isSearchHighlight?: "match" | "focused";
   showRehearsalMark?: boolean;
   showReadOnlyRehearsalMark?: boolean;
+  readOnlyRehearsalMode?: boolean;
   readOnlyScene?: Scene | null;
   stageDelimOpen?: string;
   stageDelimClose?: string;
@@ -2462,6 +2488,11 @@ function ScriptBlock({
   const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
     isStage || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
   }`;
+  const lineNumberClass = isFocused
+    ? "text-zinc-600"
+    : readOnlyRehearsalMode
+      ? "text-zinc-300 group-hover:text-zinc-500"
+      : "text-zinc-400 group-hover:text-zinc-600";
   return (
     <div
       ref={blockRootRef}
@@ -2482,7 +2513,7 @@ function ScriptBlock({
       {(lineNum !== undefined || canEditRehearsalMark || (showReadOnlyRehearsalMark && isMarkStart && block.rehearsalMark)) && (
         <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
-            <span className="pointer-events-none select-none tabular-nums text-[9px] leading-none text-zinc-400 transition-colors group-hover:text-zinc-600">
+            <span className={`pointer-events-none select-none tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}>
               {lineNum}
             </span>
           )}
@@ -2703,7 +2734,7 @@ function ScriptBlock({
       </div>
       {hasReadOnlySceneLabel && (
         <span className={readOnlySceneLabelClass}>
-          <SceneLabel scene={readOnlyScene} />
+          <SceneLabel scene={readOnlyScene} focused={isFocused} />
         </span>
       )}
 
@@ -5683,6 +5714,7 @@ export default function ScriptEditor({
             const pageBreak = bIdx > 0 && pageMap[block.id] !== pageMap[prev!.id];
             const hideCharSelector =
               focusedId === block.id || (pageBreak && display.pageBreaks) ? false : shouldHideCharacterLabel(prev, block);
+            const showCharacterGap = isLockedMode && shouldShowCharacterGap(prev, block, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
               matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
@@ -5769,6 +5801,7 @@ export default function ScriptEditor({
                   isSearchHighlight={searchHighlight}
                   showRehearsalMark={display.rehearsalMarks}
                   showReadOnlyRehearsalMark={isLockedMode && display.rehearsalMarks}
+                  readOnlyRehearsalMode={isLockedMode}
                   readOnlyScene={isLockedMode && display.rehearsalBlockScenes && block.sceneId ? sceneById.get(block.sceneId) ?? null : null}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
@@ -5987,7 +6020,12 @@ export default function ScriptEditor({
               </div>
             );
             return bIdx > 0
-              ? [canEditText ? <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} /> : isLockedMode ? <BlockGap key={`iz-${bIdx}`} /> : null, blockEl]
+              ? [
+                  canEditText ? <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} /> :
+                    isLockedMode && showCharacterGap ? <BlockGap key={`iz-${bIdx}`} /> :
+                    null,
+                  blockEl,
+                ]
               : [blockEl];
               }),
               <div
@@ -6000,7 +6038,7 @@ export default function ScriptEditor({
               />,
             ];
           })()}
-          {canEditText ? <InsertZone onInsert={() => insertBlockAt(blocks.length)} /> : isLockedMode ? <BlockGap /> : null}
+          {canEditText ? <InsertZone onInsert={() => insertBlockAt(blocks.length)} /> : null}
           </div>
         </div>
         {canEditText && (
