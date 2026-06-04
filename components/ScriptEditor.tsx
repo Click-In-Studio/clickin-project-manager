@@ -153,6 +153,7 @@ const makeBlock = (content = "", characterIds: string[] = [], type: BlockType = 
   lyric: false,
   sceneId: null,
   rehearsalMark: null,
+  forceShowCharacterName: false,
 });
 
 const isBlockEmptyForDelete = (block: Block) =>
@@ -6184,12 +6185,13 @@ export default function ScriptEditor({
                 取消
               </button>
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  (e.currentTarget as HTMLButtonElement).disabled = true;
                   const action = pendingLargeSelectionConfirmation.onConfirm;
                   setPendingLargeSelectionConfirmation(null);
                   action();
                 }}
-                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
               >
                 确认
               </button>
