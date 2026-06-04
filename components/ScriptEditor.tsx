@@ -264,6 +264,17 @@ function setCursorAtTextOffset(div: HTMLDivElement, target: number) {
   setCursorAtEnd(div);
 }
 
+function getEditableElementForRange(range: Range): HTMLElement | null {
+  let node: Node | null = range.commonAncestorContainer;
+  while (node) {
+    if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).isContentEditable) {
+      return node as HTMLElement;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
 function getTextLength(html: string): number {
   if (!html) return 0;
   const tmp = document.createElement("div");
@@ -391,6 +402,25 @@ function toggleInlineTag(range: Range, tag: "b" | "u"): void {
   range.insertNode(wrapper);
   if (wrapper.firstChild && wrapper.lastChild)
     restoreSelection(wrapper.firstChild, wrapper.lastChild);
+}
+
+function wrapSelectionAsInlineStageCue(range: Range): void {
+  const frag = range.extractContents();
+  const span = document.createElement("span");
+  span.setAttribute("data-stage-inline", "");
+  span.style.fontStyle = "italic";
+  span.style.color = "#a1a1aa";
+  span.appendChild(document.createTextNode("("));
+  span.appendChild(frag);
+  span.appendChild(document.createTextNode(")"));
+  range.insertNode(span);
+
+  const sel = window.getSelection();
+  const after = document.createRange();
+  after.setStartAfter(span);
+  after.collapse(true);
+  sel?.removeAllRanges();
+  sel?.addRange(after);
 }
 
 function applyInlineStageStyling(div: HTMLDivElement, delimOpen = "（", delimClose = "）") {
@@ -2348,20 +2378,7 @@ function ScriptBlock({
         const sel = window.getSelection();
         if (block.type !== "stage" && sel && !sel.isCollapsed && div.contains(sel.anchorNode)) {
           const range = sel.getRangeAt(0);
-          const frag = range.extractContents();
-          const span = document.createElement("span");
-          span.setAttribute("data-stage-inline", "");
-          span.style.fontStyle = "italic";
-          span.style.color = "#a1a1aa";
-          span.appendChild(document.createTextNode("("));
-          span.appendChild(frag);
-          span.appendChild(document.createTextNode(")"));
-          range.insertNode(span);
-          const after = document.createRange();
-          after.setStartAfter(span);
-          after.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(after);
+          wrapSelectionAsInlineStageCue(range);
           syncContent();
         } else {
           onToggleType();
@@ -4181,16 +4198,7 @@ export default function ScriptEditor({
     const sel = window.getSelection();
     if (!sel?.rangeCount || sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
-    // Walk up to the contenteditable container
-    let node: Node | null = range.commonAncestorContainer;
-    let editableEl: HTMLElement | null = null;
-    while (node) {
-      if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).isContentEditable) {
-        editableEl = node as HTMLElement;
-        break;
-      }
-      node = node.parentNode;
-    }
+    const editableEl = getEditableElementForRange(range);
     if (!editableEl) return;
     // End typing session so startTypingSession (called by updateBlock via input event)
     // saves a fresh pre-format snapshot rather than lumping with active typing.
@@ -4368,6 +4376,31 @@ export default function ScriptEditor({
     ));
     glowAndFocusBlocks([id]);
   }, [glowAndFocusBlocks, saveSnapshot, isLockedMode]);
+
+  const toggleStageCueToFocused = useCallback(() => {
+    const id = focusedIdRef.current;
+    if (!id) return;
+
+    const block = blocksRef.current.find((b) => b.id === id);
+    const sel = window.getSelection();
+    const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
+    const editableEl = range ? getEditableElementForRange(range) : null;
+
+    if (
+      block?.type !== "stage" &&
+      range &&
+      !sel?.isCollapsed &&
+      editableEl &&
+      editableEl === taRefs.current.get(id)
+    ) {
+      wrapSelectionAsInlineStageCue(range);
+      editableEl.focus();
+      editableEl.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+
+    toggleBlockType(id);
+  }, [toggleBlockType]);
 
   const toggleBlockLyric = useCallback((id: string) => {
     if (isLockedMode) return;
@@ -5214,7 +5247,7 @@ export default function ScriptEditor({
                       <kbd className="text-[10px] text-zinc-300">⌘U</kbd>
                     </button>
                     <button
-                      onMouseDown={e => { e.preventDefault(); if (focusedId) toggleBlockType(focusedId); }}
+                      onMouseDown={e => { e.preventDefault(); toggleStageCueToFocused(); }}
                       onClick={() => setOpenMenu(null)}
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
