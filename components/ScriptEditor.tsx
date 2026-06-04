@@ -690,7 +690,7 @@ function ScenePanel({
     <div ref={wrapRef} className="relative">
       <button
         onClick={() => onOpenChange(!open)}
-        className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+        className="flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
       >
         章节 <Chevron />
       </button>
@@ -1107,7 +1107,7 @@ function CharacterPanel({
     <div ref={panelRef} className="relative">
       <button
         onClick={() => onOpenChange(!open)}
-        className={`flex items-center gap-0.5 rounded px-2 py-1 text-sm transition-colors ${
+        className={`flex items-center gap-0.5 rounded px-1.5 py-1 text-sm transition-colors ${
           open
             ? "bg-zinc-100 text-zinc-800"
             : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
@@ -4994,7 +4994,7 @@ export default function ScriptEditor({
     <div className="min-h-screen bg-zinc-100">
       {/* Toolbar */}
       <header className="sticky top-0 z-40 border-b border-zinc-100 bg-white shadow-sm">
-        <div className="relative mx-auto flex h-14 max-w-3xl flex-wrap items-center gap-3 px-6">
+        <div className="relative mx-auto flex h-14 max-w-3xl flex-wrap items-center gap-1 px-4">
           <Link
             href={productionId ? `/production/${productionId}` : "/"}
             onNavigate={prepareForNavigation}
@@ -5008,7 +5008,7 @@ export default function ScriptEditor({
           <div className="relative">
             <button
               onClick={() => toggleMenu("script")}
-              className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+              className="flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
             >
               剧本 <Chevron />
             </button>
@@ -5104,16 +5104,16 @@ export default function ScriptEditor({
               />
             </>
           )}
-          <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+          <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
             {canEdit ? "可编辑" : "只读"}
           </span>
           {!baseCanEdit && (
-            <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+            <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
               只读
             </span>
           )}
-          <div className="flex min-w-0 flex-1 justify-center">
-            {baseCanEdit && isLockedMode && (
+          {baseCanEdit && isLockedMode && (
+            <div className="flex min-w-0 flex-1 justify-center">
               <button
                 onClick={toggleLockedMode}
                 aria-pressed={isLockedMode}
@@ -5123,9 +5123,9 @@ export default function ScriptEditor({
                 <ModeSwitch active={isLockedMode} />
                 <span>排练模式</span>
               </button>
-            )}
-          </div>
-          <div className="h-4 w-px shrink-0 bg-zinc-100" />
+            </div>
+          )}
+          <div className="ml-auto h-4 w-px shrink-0 bg-zinc-100" />
           {(canEditMetadata || isLockedMode) && (
             <>
               {canEditMetadata && (
@@ -5165,7 +5165,7 @@ export default function ScriptEditor({
           <div className="relative">
             <button
               onClick={() => toggleMenu("edit")}
-              className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+              className="flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
             >
               {isLockedMode ? "查找" : "编辑"} <Chevron />
             </button>
@@ -5247,7 +5247,7 @@ export default function ScriptEditor({
           <div className="relative">
             <button
               onClick={() => toggleMenu("display")}
-              className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+              className="flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
             >
               显示 <Chevron />
             </button>
@@ -5304,50 +5304,48 @@ export default function ScriptEditor({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Online users: self (dimmed) + others */}
-            <div className="flex items-center">
-              {(() => {
-                const others = Array.from(presenceMap.values()).filter(p => p.clientId !== clientId);
-                return (
-                  <>
-                    {others.map(p => (
-                      <div key={p.clientId} className="-ml-1 first:ml-0">
-                        <PresenceAvatar name={p.userName} color={p.color} title={p.userName} />
-                      </div>
-                    ))}
-                    {clientId && (
-                      <div className="-ml-1 first:ml-0 opacity-40" title={`${userName}（你）`}>
-                        <PresenceAvatar name={userName || "?"} color={presenceColor(clientId)} />
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
+          {/* Online users: self (dimmed) + others */}
+          <div className="flex items-center">
+            {(() => {
+              const others = Array.from(presenceMap.values()).filter(p => p.clientId !== clientId);
+              return (
+                <>
+                  {others.map(p => (
+                    <div key={p.clientId} className="-ml-1 first:ml-0">
+                      <PresenceAvatar name={p.userName} color={p.color} title={p.userName} />
+                    </div>
+                  ))}
+                  {clientId && (
+                    <div className="-ml-1 first:ml-0 opacity-40" title={`${userName}（你）`}>
+                      <PresenceAvatar name={userName || "?"} color={presenceColor(clientId)} />
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
 
-            {/* 导出▼ */}
-            <div className="relative">
-              <button
-                onClick={() => toggleMenu("export")}
-                className="flex items-center gap-0.5 rounded px-2 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+          {/* 导出▼ */}
+          <div className="relative">
+            <button
+              onClick={() => toggleMenu("export")}
+              className="flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+            >
+              导出 <Chevron />
+            </button>
+            {openMenu === "export" && (
+              <div
+                className="absolute right-0 top-full z-30 mt-1 w-36 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                onMouseLeave={() => setOpenMenu(null)}
               >
-                导出 <Chevron />
-              </button>
-              {openMenu === "export" && (
-                <div
-                  className="absolute right-0 top-full z-30 mt-1 w-36 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
-                  onMouseLeave={() => setOpenMenu(null)}
+                <button
+                  onClick={() => { setPrintPreview(true); setOpenMenu(null); }}
+                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
                 >
-                  <button
-                    onClick={() => { setPrintPreview(true); setOpenMenu(null); }}
-                    className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    打印预览
-                  </button>
-                </div>
-              )}
-            </div>
+                  打印预览
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
