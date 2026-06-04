@@ -20,7 +20,7 @@ import VersionSelector from "@/components/VersionSelector";
 import BlockMountAssets from "@/components/assets/BlockMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
-import { diffState } from "@/lib/script-ops";
+import { diffState, type TagEntry } from "@/lib/script-ops";
 import { computePageMap, DEFAULT_PAGE_CONFIG } from "@/lib/script-page";
 import type { PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
@@ -30,6 +30,30 @@ import CommentAssetPicker, { type PendingAsset } from "@/components/assets/Comme
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
 const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
+
+/**
+ * Computes the `lyric` flag a block should have based on its tags and the
+ * production's lyricSplitAfterOptionId rules (OR logic across groups).
+ *
+ * Returns null if none of the block's tag groups has a lyric-split rule —
+ * meaning the caller should leave block.lyric unchanged.
+ */
+function computeLyricFromTags(tags: BlockTagValue[], tagGroups: TagGroup[]): boolean | null {
+  const lyricGroups = tagGroups.filter(g => g.lyricSplitAfterOptionId);
+  if (lyricGroups.length === 0) return null;
+  for (const tag of tags) {
+    if (!tag.optionId) continue;
+    const group = lyricGroups.find(g => g.id === tag.groupId);
+    if (!group) continue;
+    const splitOpt = group.options.find(o => o.id === group.lyricSplitAfterOptionId);
+    const selOpt = group.options.find(o => o.id === tag.optionId);
+    if (!splitOpt || !selOpt) continue;
+    if (selOpt.sortOrder <= splitOpt.sortOrder) return true;
+  }
+  // Has lyric groups, but no tag qualifies → false
+  const blockHasLyricGroup = tags.some(t => lyricGroups.some(g => g.id === t.groupId));
+  return blockHasLyricGroup ? false : null;
+}
 
 type LargeSelectionOperation = "delete" | "move" | "type" | "lyric";
 type PendingLargeSelectionConfirmation = {
@@ -264,8 +288,14 @@ function setCursorAtTextOffset(div: HTMLDivElement, target: number) {
     if (node.nodeType === Node.ELEMENT_NODE) {
       // BR element: counts as 1 character
       if (offset + 1 > target) {
-        // Target falls before this BR — handled in the previous text node
-        break;
+        // target <= offset: the position is before this BR.
+        // Place the cursor right before the BR element.
+        const r = document.createRange();
+        r.setStartBefore(node);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        return;
       }
       offset += 1;
       if (offset === target) {
@@ -3872,6 +3902,13 @@ export default function ScriptEditor({
   // ── Server sync ─────────────────────────────────────────────────────────────
 
   const syncedStateRef = useRef<ScriptState | null>(null);
+  // Mirrors the tag state that was last successfully pushed to the server.
+  // Used to diff tag changes and embed them in block ops.
+  const syncedBlockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
+  // Tags registered by inheritTags() that must be included in the NEXT insert op
+  // for the corresponding blockId.  Written synchronously from the event handler;
+  // consumed by pushPatchRef when the insert op is found.
+  const pendingTagInsertsRef = useRef<Map<string, TagEntry[]>>(new Map());
   const clientSeqRef = useRef(0);
   const serverSeqRef = useRef(0);
   const isSyncingRef = useRef(false);
@@ -3888,6 +3925,63 @@ export default function ScriptEditor({
       try {
         const seq = ++clientSeqRef.current;
         const patch = diffState(syncedStateRef.current, curr, seq);
+
+        // ── Step 1: pending tag inserts (from inheritTags) ───────────────────────
+        // These are written synchronously into pendingTagInsertsRef when a new block
+        // is created via Enter.  Consume them first so the insert op always carries
+        // the inherited tags, regardless of useEffect / blockTagMapRef timing.
+        if (pendingTagInsertsRef.current.size > 0) {
+          for (const [blockId, tags] of pendingTagInsertsRef.current) {
+            const insertOp = patch.blockOps.find(
+              o => o.op === 'insert' && (o as { block: { id: string } }).block.id === blockId
+            );
+            if (insertOp) {
+              (insertOp as { tags?: TagEntry[] }).tags = tags;
+              pendingTagInsertsRef.current.delete(blockId); // consumed
+            }
+            // If no insert op yet (shouldn't happen), leave for the diff pass below.
+          }
+        }
+
+        // ── Step 2: tag diff — embed all other tag changes into block ops ─────────
+        // blockTagMapRef.current is kept in sync with blockTagMap state via useEffect.
+        const currTagMap = blockTagMapRef.current;
+        const syncedTagMap = syncedBlockTagMapRef.current;
+        const deletedBlockIds = new Set(
+          patch.blockOps.filter(o => o.op === 'delete').map(o => (o as { id: string }).id)
+        );
+
+        const changedTagBlockIds: string[] = [];
+        for (const [blockId, tags] of currTagMap) {
+          if (deletedBlockIds.has(blockId)) continue;
+          const syncedTags = syncedTagMap.get(blockId) ?? [];
+          if (JSON.stringify(tags) !== JSON.stringify(syncedTags)) changedTagBlockIds.push(blockId);
+        }
+        for (const blockId of syncedTagMap.keys()) {
+          if (!currTagMap.has(blockId) && !deletedBlockIds.has(blockId))
+            changedTagBlockIds.push(blockId);
+        }
+
+        if (changedTagBlockIds.length > 0) {
+          for (const blockId of changedTagBlockIds) {
+            const tags: TagEntry[] = (currTagMap.get(blockId) ?? []).map(t => ({
+              groupId: t.groupId, optionId: t.optionId, value: t.value,
+            }));
+            const insertOp = patch.blockOps.find(o => o.op === 'insert' && (o as { block: { id: string } }).block.id === blockId);
+            const updateOp = patch.blockOps.find(o => o.op === 'update' && (o as { block: { id: string } }).block.id === blockId);
+            if (insertOp && 'block' in insertOp) {
+              (insertOp as { tags?: TagEntry[] }).tags = tags; // may already be set by step 1
+            } else if (updateOp && 'block' in updateOp) {
+              (updateOp as { tags?: TagEntry[] }).tags = tags;
+            } else {
+              // Tag-only change: synthesise a minimal update op so tags reach the server.
+              const block = curr.blocks.find(b => b.id === blockId);
+              if (block) patch.blockOps.push({ op: 'update', block, tags });
+            }
+          }
+        }
+        // ── End tag handling ─────────────────────────────────────────────────────
+
         if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
         const vPatch = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
         const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vPatch}`, {
@@ -3899,6 +3993,12 @@ export default function ScriptEditor({
           const body = await res.json() as { ok: boolean; serverSeq: number };
           serverSeqRef.current = body.serverSeq;
           syncedStateRef.current = curr;
+          // Advance the synced tag baseline so the next diff starts fresh.
+          syncedBlockTagMapRef.current = new Map(currTagMap);
+          // Any pending inserts that were consumed above are already deleted;
+          // clear whatever might remain (orphaned entries for blocks that were
+          // deleted before the sync fired).
+          pendingTagInsertsRef.current.clear();
         }
       } catch {
         // Sync failure is non-fatal — will retry on next state change.
@@ -3977,6 +4077,9 @@ export default function ScriptEditor({
                 map.get(tag.blockId)!.push(tag);
               }
               setBlockTagMap(map);
+              // Initialise the synced baseline so we don't re-send tags that
+              // are already on the server after the first load.
+              syncedBlockTagMapRef.current = new Map(map);
             }
           }).catch(() => {});
         }
@@ -4190,7 +4293,10 @@ export default function ScriptEditor({
     return () => {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     };
-  }, [blocks, characters, scenes]);
+  // blockTagMap included so tag-only changes (inherit, paste, manual edit)
+  // also trigger the debounced sync and embed tags in the block op.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, characters, scenes, blockTagMap]);
 
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
@@ -4314,14 +4420,10 @@ export default function ScriptEditor({
   }, [isLockedMode]);
 
   // ── Tag handlers ─────────────────────────────────────────────────────────────
-
-  const upsertBlockTagApi = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
-    fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/block-tags`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(del ? { blockId, groupId, delete: true } : { blockId, groupId, optionId, value }),
-    }).catch(() => {});
-  }, [effectiveScriptId]);
+  // Tag mutations are no longer sent via a dedicated block-tags PATCH.
+  // Instead they are embedded in the block op and synced atomically via the
+  // debounced PATCH to /api/script/[id].  The block-tags route is still
+  // available for server-side / admin use but is not called from here.
 
   const handleTagChange = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
     if (isLockedMode) return;
@@ -4335,7 +4437,8 @@ export default function ScriptEditor({
       }
       return map;
     });
-    upsertBlockTagApi(blockId, groupId, optionId, value, del);
+    // Tag change is synced as part of the block op via the debounced PATCH —
+    // no separate block-tags PATCH needed.
     // Auto-sync block.lyric when any group has a lyric split configured (OR logic)
     const changedGroup = tagGroups.find(g => g.id === groupId);
     if (changedGroup?.lyricSplitAfterOptionId) {
@@ -4356,7 +4459,7 @@ export default function ScriptEditor({
         setBlocks(bs => bs.map(b => b.id === blockId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
       }
     }
-  }, [upsertBlockTagApi, blockTagMapRef, tagGroups, isLockedMode]);
+  }, [blockTagMapRef, tagGroups, isLockedMode]);
 
   const handleTagCopy = useCallback((blockId: string) => {
     tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
@@ -4368,16 +4471,29 @@ export default function ScriptEditor({
     if (!clipboard?.length) return;
     const inherited = clipboard.map(t => ({ ...t, blockId }));
     setBlockTagMap(prev => { const m = new Map(prev); m.set(blockId, inherited); return m; });
-    inherited.forEach(t => upsertBlockTagApi(blockId, t.groupId, t.optionId, t.value, false));
-  }, [upsertBlockTagApi, isLockedMode]);
+    // Tag change is synced as part of the block op via the debounced PATCH.
+  }, [isLockedMode]);
 
   const inheritTags = useCallback((fromId: string, toId: string) => {
-    const sourceTags = blockTagMapRef.current.get(fromId) ?? [];
+    // Use blockTagMap from the closure (latest committed state) rather than
+    // blockTagMapRef so we're never stale when Enter is pressed right after
+    // a tag change (useEffect syncing the ref fires asynchronously).
+    const sourceTags = blockTagMap.get(fromId) ?? [];
     if (!sourceTags.length) return;
     const inherited = sourceTags.map(t => ({ ...t, blockId: toId }));
     setBlockTagMap(prev => { const m = new Map(prev); m.set(toId, inherited); return m; });
-    inherited.forEach(t => upsertBlockTagApi(toId, t.groupId, t.optionId, t.value, false));
-  }, [upsertBlockTagApi]);
+    // Register the tags directly in a ref so pushPatchRef can embed them in the
+    // insert op synchronously, without any dependency on useEffect timing.
+    pendingTagInsertsRef.current.set(toId, inherited.map(t => ({
+      groupId: t.groupId, optionId: t.optionId, value: t.value,
+    })));
+    // Apply the lyric mapping rule immediately so the new block's display is correct.
+    const newLyric = computeLyricFromTags(inherited, tagGroups);
+    if (newLyric !== null) {
+      setBlocks(bs => bs.map(b => b.id === toId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
+    }
+    // Tags (and the corrected lyric) are synced atomically via the debounced block op PATCH.
+  }, [blockTagMap, tagGroups]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -4588,7 +4704,12 @@ export default function ScriptEditor({
   const splitBlock = useCallback((id: string, before: string, after: string) => {
     if (isLockedMode) return;
     saveSnapshot();
-    let nextId: string | null = null;
+    // Pre-generate the new block ID **outside** the setBlocks updater so the ID
+    // is stable across React Strict Mode's double-invocation of the updater.
+    // If makeBlock() were called inside the updater, each invocation would
+    // produce a different uid(), causing nextId (from the 2nd call) to diverge
+    // from the block actually committed to state (from the 1st call).
+    const nextBlockId = uid();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx === -1) return prev;
@@ -4596,11 +4717,11 @@ export default function ScriptEditor({
       // New block inherits scene, rehearsal mark, and character from the block being split
       const next: Block = {
         ...makeBlock(after, cur.characterIds),
+        id: nextBlockId,   // use the pre-generated stable ID
         sceneId: cur.sceneId,
         rehearsalMark: cur.rehearsalMark,
         characterAnnotations: { ...cur.characterAnnotations },
       };
-      nextId = next.id;
       const updated = [...prev];
       updated[idx] = { ...cur, content: before };
       updated.splice(idx + 1, 0, next);
@@ -4608,7 +4729,7 @@ export default function ScriptEditor({
       // Don't auto-open character picker: character is already inherited
       return updated;
     });
-    if (nextId) inheritTags(id, nextId);
+    inheritTags(id, nextBlockId);
   }, [saveSnapshot, inheritTags, isLockedMode]);
 
   const mergeBlock = useCallback((id: string) => {
@@ -4646,11 +4767,13 @@ export default function ScriptEditor({
   const deleteBlock = useCallback((id: string) => {
     if (isLockedMode) return;
     saveSnapshot();
+    // Pre-generate replacement block ID outside the updater (Strict Mode fix).
+    const emptyBlockId = uid();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx === -1) return prev;
       if (prev.length <= 1) {
-        const emptyBlock = makeBlock();
+        const emptyBlock = { ...makeBlock(), id: emptyBlockId };
         pendingFocus.current = { id: emptyBlock.id, atEnd: false };
         return [emptyBlock];
       }
@@ -4669,11 +4792,12 @@ export default function ScriptEditor({
     const deleteIds = new Set(ids);
     if (deleteIds.size === 0) return;
     saveSnapshot();
+    const emptyBlockId2 = uid(); // pre-generated for the case where all blocks are deleted
     setBlocks((prev) => {
       const remaining = prev.filter((b) => !deleteIds.has(b.id));
       if (remaining.length === prev.length) return prev;
       if (remaining.length === 0) {
-        const emptyBlock = makeBlock();
+        const emptyBlock = { ...makeBlock(), id: emptyBlockId2 };
         pendingFocus.current = { id: emptyBlock.id, atEnd: false };
         return [emptyBlock];
       }
@@ -4953,24 +5077,25 @@ export default function ScriptEditor({
   const insertBlockAt = useCallback((index: number) => {
     if (isLockedMode) return;
     saveSnapshot();
-    let newId: string | null = null;
-    let refId: string | null = null;
+    // Pre-generate the new block ID outside the updater (Strict Mode double-invocation fix).
+    const newBlockId = uid();
+    // refId must also be determined outside the updater; read it from blocksRef.
+    const refId = index > 0 ? (blocksRef.current[index - 1]?.id ?? null) : null;
     setBlocks((prev) => {
       // Inherit scene and rehearsal mark from the block immediately before the insertion point
       const ref = index > 0 ? prev[index - 1] : null;
       const newBlock: Block = {
         ...makeBlock(),
+        id: newBlockId,  // use the pre-generated stable ID
         sceneId: ref?.sceneId ?? null,
         rehearsalMark: ref?.rehearsalMark ?? null,
       };
-      newId = newBlock.id;
-      refId = ref?.id ?? null;
       const updated = [...prev];
       updated.splice(index, 0, newBlock);
       pendingCharOpen.current = newBlock.id;
       return updated;
     });
-    if (newId && refId) inheritTags(refId, newId);
+    if (refId) inheritTags(refId, newBlockId);
   }, [saveSnapshot, inheritTags, isLockedMode]);
 
   const addChar = (name: string) => {

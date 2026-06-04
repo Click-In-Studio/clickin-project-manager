@@ -2,9 +2,12 @@ import type { Block, Character, Scene, ScriptState } from "./script-types";
 
 // ─── Op types ─────────────────────────────────────────────────────────────────
 
+/** A single tag entry carried inside a block op (keyed by logical block_id on the server). */
+export type TagEntry = { groupId: string; optionId: string | null; value: number | null };
+
 export type BlockOp =
-  | { op: "insert"; block: Block; afterId: string | null }
-  | { op: "update"; block: Block }
+  | { op: "insert"; block: Block; afterId: string | null; tags?: TagEntry[] }
+  | { op: "update"; block: Block; tags?: TagEntry[] }
   | { op: "delete"; id: string }
   | { op: "reorder"; ids: string[] }; // full ordered id list of retained blocks
 

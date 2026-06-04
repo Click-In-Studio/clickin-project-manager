@@ -5,7 +5,7 @@ import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { Permission, PermissionOverrides } from "./roles";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
-import type { ScriptPatch } from "./script-ops";
+import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap } from "./script-page";
 
@@ -2975,6 +2975,87 @@ export async function listMemberProductions(openId: string): Promise<{ id: strin
 
 const ALL_PATCH_LAYOUTS: PageLayout[] = ["a4", "letter", "a3-2col", "tablet-2col"];
 
+// ── Tag helpers (used inside applyPatchToDB transaction) ──────────────────────
+
+/**
+ * Validates that every groupId in `tags` belongs to `productionId`.
+ * Throws TAG_INVALID_GROUP if any group is invalid.
+ */
+async function validateTagsInTx(
+  client: PoolClient,
+  productionId: string,
+  tags: TagEntry[],
+): Promise<void> {
+  if (tags.length === 0) return;
+  const groupIds = [...new Set(tags.map(t => t.groupId))];
+  const res = await client.query<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM tag_group WHERE id = ANY($1::text[]) AND production_id = $2`,
+    [groupIds, productionId],
+  );
+  if (parseInt(res.rows[0].cnt, 10) !== groupIds.length) {
+    throw new Error('TAG_INVALID_GROUP');
+  }
+}
+
+/**
+ * Computes whether a block should be lyric based on its tags and the production's
+ * lyricSplitAfterOptionId rules (OR logic across groups).
+ *
+ * Returns:
+ *  - true / false when at least one tag group has a lyric-split rule configured
+ *  - null when no lyric-split group is involved in these tags → caller should
+ *    leave block.lyric unchanged
+ */
+async function computeDerivedLyricInTx(
+  client: PoolClient,
+  tags: TagEntry[],
+): Promise<boolean | null> {
+  const optionPairs = tags.filter(t => t.optionId !== null);
+  const groupIds = tags.map(t => t.groupId);
+
+  // Check whether any of the provided groups has a lyric-split rule
+  const ruleRes = await client.query<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM tag_group
+     WHERE id = ANY($1::text[]) AND lyric_split_after_option_id IS NOT NULL`,
+    [groupIds],
+  );
+  if (parseInt(ruleRes.rows[0].cnt, 10) === 0) return null; // no lyric groups → don't override
+
+  if (optionPairs.length === 0) return false; // lyric groups present but no option selected
+
+  const lyricRes = await client.query<{ is_lyric: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM unnest($1::text[], $2::text[]) AS t(group_id, option_id)
+       JOIN tag_group tg ON tg.id = t.group_id
+       JOIN tag_option split_opt ON split_opt.id = tg.lyric_split_after_option_id
+       JOIN tag_option sel_opt  ON sel_opt.id  = t.option_id
+       WHERE sel_opt.sort_order <= split_opt.sort_order
+     ) AS is_lyric`,
+    [optionPairs.map(t => t.groupId), optionPairs.map(t => t.optionId)],
+  );
+  return lyricRes.rows[0].is_lyric;
+}
+
+/**
+ * Replaces all block_tag rows for `blockId` with `tags` atomically (within an
+ * existing transaction).  Must be called after the snapshot row already exists.
+ */
+async function writeBlockTagsInTx(
+  client: PoolClient,
+  blockId: string,
+  tags: TagEntry[],
+): Promise<void> {
+  await client.query('DELETE FROM block_tag WHERE block_id = $1', [blockId]);
+  for (const tag of tags) {
+    await client.query(
+      `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
+       VALUES ($1, $2, $3, $4, now())`,
+      [blockId, tag.groupId, tag.optionId ?? null, tag.value ?? null],
+    );
+  }
+}
+
 /**
  * Applies a ScriptPatch atomically to PostgreSQL.
  *
@@ -3179,26 +3260,41 @@ export async function applyPatchToDB(
           const lexKey = keyBetween(prevLexKey, nextLexKey);
           const snapshotId = genSnapshotId();
 
+          // If tags are included, validate them and derive lyric flag before insertion.
+          let insertBlock = op.block;
+          if (op.tags !== undefined) {
+            await validateTagsInTx(client, productionId, op.tags);
+            const derivedLyric = await computeDerivedLyricInTx(client, op.tags);
+            if (derivedLyric !== null && derivedLyric !== op.block.lyric) {
+              insertBlock = { ...op.block, lyric: derivedLyric };
+            }
+          }
+
           await client.query(
             `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
              VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9)`,
-            [snapshotId, op.block.id, productionId, lexKey,
-             op.block.sceneId ?? null, op.block.rehearsalMark ?? null,
-             toDbType(op.block), op.block.content, op.block.forceShowCharacterName ?? false]
+            [snapshotId, insertBlock.id, productionId, lexKey,
+             insertBlock.sceneId ?? null, insertBlock.rehearsalMark ?? null,
+             toDbType(insertBlock), insertBlock.content, insertBlock.forceShowCharacterName ?? false]
           );
           await client.query(
             "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
-            [snapshotId, versionId, op.block.id, lexKey]
+            [snapshotId, versionId, insertBlock.id, lexKey]
           );
-          if (op.block.characterIds.length > 0) {
+          if (insertBlock.characterIds.length > 0) {
             await client.query(
               `INSERT INTO script_character (script_id, character_id, position, annotation)
                SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-              [op.block.characterIds.map(() => snapshotId),
-               op.block.characterIds,
-               op.block.characterIds.map((_, i) => i),
-               op.block.characterIds.map(cid => op.block.characterAnnotations[cid] ?? null)]
+              [insertBlock.characterIds.map(() => snapshotId),
+               insertBlock.characterIds,
+               insertBlock.characterIds.map((_, i) => i),
+               insertBlock.characterIds.map(cid => insertBlock.characterAnnotations[cid] ?? null)]
             );
+          }
+
+          // Write tags atomically within the same transaction.
+          if (op.tags !== undefined) {
+            await writeBlockTagsInTx(client, insertBlock.id, op.tags);
           }
 
           const newTxBlock: TxBlock = { blockId: op.block.id, snapshotId, lexKey };
@@ -3210,6 +3306,16 @@ export async function applyPatchToDB(
         case 'update': {
           const cur = txBlockMap.get(op.block.id);
           if (!cur) break; // not in this version — skip silently
+
+          // If tags are included, validate them and derive lyric flag before writing.
+          let updateBlock = op.block;
+          if (op.tags !== undefined) {
+            await validateTagsInTx(client, productionId, op.tags);
+            const derivedLyric = await computeDerivedLyricInTx(client, op.tags);
+            if (derivedLyric !== null && derivedLyric !== op.block.lyric) {
+              updateBlock = { ...op.block, lyric: derivedLyric };
+            }
+          }
 
           const refRes = await client.query<{ cnt: string }>(
             "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
@@ -3224,26 +3330,26 @@ export async function applyPatchToDB(
                SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
                    content = $4, force_show_character_name = $5
                WHERE id = $6`,
-              [op.block.sceneId ?? null, op.block.rehearsalMark ?? null,
-               toDbType(op.block), op.block.content,
-               op.block.forceShowCharacterName ?? false, cur.snapshotId]
+              [updateBlock.sceneId ?? null, updateBlock.rehearsalMark ?? null,
+               toDbType(updateBlock), updateBlock.content,
+               updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
             );
             await client.query("DELETE FROM script_character WHERE script_id = $1", [cur.snapshotId]);
-            if (op.block.characterIds.length > 0) {
+            if (updateBlock.characterIds.length > 0) {
               await client.query(
                 `INSERT INTO script_character (script_id, character_id, position, annotation)
                  SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-                [op.block.characterIds.map(() => cur.snapshotId),
-                 op.block.characterIds,
-                 op.block.characterIds.map((_, i) => i),
-                 op.block.characterIds.map(cid => op.block.characterAnnotations[cid] ?? null)]
+                [updateBlock.characterIds.map(() => cur.snapshotId),
+                 updateBlock.characterIds,
+                 updateBlock.characterIds.map((_, i) => i),
+                 updateBlock.characterIds.map(cid => updateBlock.characterAnnotations[cid] ?? null)]
               );
             }
             const oldContent = oldContentMap.get(cur.snapshotId);
-            if (oldContent !== undefined && oldContent !== op.block.content) {
+            if (oldContent !== undefined && oldContent !== updateBlock.content) {
               driftUpdates.push({
                 oldSnapshotId: cur.snapshotId, newSnapshotId: cur.snapshotId,
-                oldContent, newContent: op.block.content,
+                oldContent, newContent: updateBlock.content,
               });
             }
           } else {
@@ -3254,22 +3360,22 @@ export async function applyPatchToDB(
             await client.query(
               `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, force_show_character_name)
                VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9)`,
-              [newSnapshotId, op.block.id, productionId, cur.lexKey,
-               op.block.sceneId ?? null, op.block.rehearsalMark ?? null,
-               toDbType(op.block), op.block.content, op.block.forceShowCharacterName ?? false]
+              [newSnapshotId, updateBlock.id, productionId, cur.lexKey,
+               updateBlock.sceneId ?? null, updateBlock.rehearsalMark ?? null,
+               toDbType(updateBlock), updateBlock.content, updateBlock.forceShowCharacterName ?? false]
             );
             await client.query(
               "UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3",
               [newSnapshotId, oldSnapshotId, versionId]
             );
-            if (op.block.characterIds.length > 0) {
+            if (updateBlock.characterIds.length > 0) {
               await client.query(
                 `INSERT INTO script_character (script_id, character_id, position, annotation)
                  SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-                [op.block.characterIds.map(() => newSnapshotId),
-                 op.block.characterIds,
-                 op.block.characterIds.map((_, i) => i),
-                 op.block.characterIds.map(cid => op.block.characterAnnotations[cid] ?? null)]
+                [updateBlock.characterIds.map(() => newSnapshotId),
+                 updateBlock.characterIds,
+                 updateBlock.characterIds.map((_, i) => i),
+                 updateBlock.characterIds.map(cid => updateBlock.characterAnnotations[cid] ?? null)]
               );
             }
             // block_tag rows are keyed by logical block_id (op.id), not by
@@ -3287,13 +3393,19 @@ export async function applyPatchToDB(
             // Update working state so subsequent ops in this patch see the new snapshotId
             cur.snapshotId = newSnapshotId;
             const oldContent = oldContentMap.get(oldSnapshotId);
-            if (oldContent !== undefined && oldContent !== op.block.content) {
+            if (oldContent !== undefined && oldContent !== updateBlock.content) {
               driftUpdates.push({
                 oldSnapshotId, newSnapshotId,
-                oldContent, newContent: op.block.content,
+                oldContent, newContent: updateBlock.content,
               });
             }
           }
+
+          // Write tags atomically within the same transaction.
+          if (op.tags !== undefined) {
+            await writeBlockTagsInTx(client, op.block.id, op.tags);
+          }
+
           break;
         }
 
