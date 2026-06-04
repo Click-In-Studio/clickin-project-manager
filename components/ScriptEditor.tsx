@@ -247,20 +247,48 @@ function setCursorAtEnd(div: HTMLDivElement) {
 }
 
 function setCursorAtTextOffset(div: HTMLDivElement, target: number) {
-  const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
+  // Walk both text nodes and <br> elements. <br> counts as 1 character (same
+  // as the \n it represents in innerText / mdToHtml output).
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_ALL, {
+    acceptNode(node) {
+      if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
+      if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR")
+        return NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.FILTER_SKIP;
+    },
+  });
+  const sel = window.getSelection();
   let offset = 0;
   while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    if (offset + node.length >= target) {
-      const r = document.createRange();
-      r.setStart(node, target - offset);
-      r.collapse(true);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(r);
-      return;
+    const node = walker.currentNode;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      // BR element: counts as 1 character
+      if (offset + 1 > target) {
+        // Target falls before this BR — handled in the previous text node
+        break;
+      }
+      offset += 1;
+      if (offset === target) {
+        // Position right after the BR (= start of the next line)
+        const r = document.createRange();
+        r.setStartAfter(node);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        return;
+      }
+    } else {
+      const textNode = node as Text;
+      if (offset + textNode.length >= target) {
+        const r = document.createRange();
+        r.setStart(textNode, target - offset);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        return;
+      }
+      offset += textNode.length;
     }
-    offset += node.length;
   }
   setCursorAtEnd(div);
 }
@@ -4040,6 +4068,10 @@ export default function ScriptEditor({
 
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
+        // Re-check: the PATCH response for our own edit may have arrived during
+        // the 300 ms window and already advanced serverSeqRef.  If so there is
+        // nothing to fetch — the server state equals what we already synced.
+        if (seq <= serverSeqRef.current) return;
         try {
           const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
           const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
@@ -4572,7 +4604,7 @@ export default function ScriptEditor({
       const updated = [...prev];
       updated[idx] = { ...cur, content: before };
       updated.splice(idx + 1, 0, next);
-      pendingFocus.current = { id: next.id, atEnd: false };
+      pendingFocus.current = { id: next.id, textOffset: 0 };
       // Don't auto-open character picker: character is already inherited
       return updated;
     });
@@ -4600,7 +4632,13 @@ export default function ScriptEditor({
       const updated = [...prev];
       updated[idx - 1] = merged;
       updated.splice(idx, 1);
-      pendingFocus.current = { id: p.id, textOffset: getTextLength(mdToHtml(p.content)) };
+      // Place cursor right after the \n separator (= start of the merged-in content).
+      // When only one side is non-empty there's no \n, so offset = end of p.content.
+      const pLen = getTextLength(mdToHtml(p.content));
+      pendingFocus.current = {
+        id: p.id,
+        textOffset: p.content && c.content ? pLen + 1 : pLen,
+      };
       return updated;
     });
   }, [saveSnapshot, isLockedMode]);

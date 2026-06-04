@@ -694,14 +694,8 @@ export async function flushToDBVersioned(
               [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
             );
           }
-          // Copy block tags to new snapshot
-          await client.query(
-            `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
-             SELECT $1, group_id, option_id, value, updated_at
-             FROM block_tag WHERE block_id = $2
-             ON CONFLICT (block_id, group_id) DO NOTHING`,
-            [newSnapshotId, block.snapshotId]
-          );
+          // block_tag rows are keyed by logical block_id (block.id), not by
+          // snapshot_id, so they do not need to be copied during CoW.
           // Duplicate asset_mount entries pointing at the old snapshot
           await client.query(
             `INSERT INTO asset_mount
@@ -2839,12 +2833,7 @@ export async function cowBlockSnapshotForMount(
        SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
       [newSnapshotId, snapshotId]
     );
-    await client.query(
-      `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
-       SELECT $1, group_id, option_id, value, updated_at FROM block_tag WHERE block_id = $2
-       ON CONFLICT (block_id, group_id) DO NOTHING`,
-      [newSnapshotId, snapshotId]
-    );
+    // block_tag rows are keyed by logical block_id, not snapshot_id — no copy needed.
 
     if (mode === 'tracking') {
       await client.query(
@@ -3283,13 +3272,8 @@ export async function applyPatchToDB(
                  op.block.characterIds.map(cid => op.block.characterAnnotations[cid] ?? null)]
               );
             }
-            // Copy associated data to new snapshot
-            await client.query(
-              `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
-               SELECT $1, group_id, option_id, value, updated_at FROM block_tag WHERE block_id = $2
-               ON CONFLICT (block_id, group_id) DO NOTHING`,
-              [newSnapshotId, oldSnapshotId]
-            );
+            // block_tag rows are keyed by logical block_id (op.id), not by
+            // snapshot_id — no copy needed during CoW.
             await client.query(
               `INSERT INTO asset_mount
                  (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
@@ -3326,6 +3310,20 @@ export async function applyPatchToDB(
              WHERE s.id IN (SELECT snapshot_id FROM removed)
                AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
             [cur.snapshotId, versionId]
+          );
+
+          // Clean up block_tag rows keyed by logical block_id.
+          // Only delete when the block no longer appears in any version (i.e. the
+          // script snapshot was fully GC'd above). Check by logical block_id.
+          await client.query(
+            `DELETE FROM block_tag
+             WHERE block_id = $1
+               AND NOT EXISTS (
+                 SELECT 1 FROM script s
+                 JOIN script_version sv ON sv.snapshot_id = s.id
+                 WHERE s.block_id = $1
+               )`,
+            [op.id]
           );
 
           const idx = txBlocks.findIndex(b => b.blockId === op.id);

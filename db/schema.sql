@@ -223,7 +223,10 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 CREATE TABLE IF NOT EXISTS block_tag (
-  block_id   TEXT NOT NULL REFERENCES script(id) ON DELETE CASCADE,
+  -- block_id stores the logical block_id (script.block_id), NOT a snapshot_id.
+  -- No FK: tags are keyed by stable logical identity; delete-cascade is handled
+  -- at the application layer when blocks are explicitly removed.
+  block_id   TEXT NOT NULL,
   group_id   TEXT NOT NULL REFERENCES tag_group(id) ON DELETE CASCADE,
   option_id  TEXT REFERENCES tag_option(id) ON DELETE SET NULL,
   value      NUMERIC,
