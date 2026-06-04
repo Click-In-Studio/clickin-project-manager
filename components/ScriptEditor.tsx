@@ -3158,7 +3158,10 @@ export default function ScriptEditor({
   const baseCanEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
   const baseCanEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || canEditRehearsalMark;
-  const [isLockedMode, setIsLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
+  const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
+  const versionForcesLockedMode =
+    versionStatus === "committed" || versionStatus === "frozen" || versionStatus === "archived";
+  const isLockedMode = manualLockedMode || versionForcesLockedMode;
   const canEditText = baseCanEditText && !isLockedMode;
   const canEditMetadata = baseCanEditMetadata && !isLockedMode;
   const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
@@ -3383,15 +3386,16 @@ export default function ScriptEditor({
   }, [clearDragCountBadge]);
 
   const toggleLockedMode = useCallback(() => {
-    setPendingLockedMode(!isLockedMode);
+    if (versionForcesLockedMode) return;
+    setPendingLockedMode(!manualLockedMode);
     setOpenMenu(null);
-  }, [isLockedMode]);
+  }, [manualLockedMode, versionForcesLockedMode]);
 
   const confirmLockedModeChange = useCallback(() => {
     if (pendingLockedMode === null) return;
     resetScriptInteractions();
     setOpenMenu(null);
-    setIsLockedMode(pendingLockedMode);
+    setManualLockedMode(pendingLockedMode);
     setDisplay(prev => {
       const next = { ...prev, rehearsalMode: pendingLockedMode };
       writeDisplayCookie(next);
@@ -5033,6 +5037,7 @@ export default function ScriptEditor({
   const selectionNotice = selectedBlockIds.size > 1
     ? `已选中 ${selectedBlockIds.size} 行`
     : "";
+  const forcedLockedModeSwitchClass = versionForcesLockedMode ? "bg-[#91a8ca]/50" : undefined;
   const safeWindowStart = blocks.length === 0
     ? 0
     : Math.min(windowRange.start, Math.max(0, blocks.length - 1));
@@ -5185,10 +5190,15 @@ export default function ScriptEditor({
               <button
                 onClick={toggleLockedMode}
                 aria-pressed={isLockedMode}
-                title="退出排练模式"
-                className="flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
+                disabled={versionForcesLockedMode}
+                title={versionForcesLockedMode ? "该版本仅可使用排练模式" : "退出排练模式"}
+                className={`flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors ${
+                  versionForcesLockedMode
+                    ? "cursor-default text-[#91a8ca]"
+                    : "text-teal-600 hover:bg-teal-50 hover:text-teal-700"
+                }`}
               >
-                <ModeSwitch active={isLockedMode} />
+                <ModeSwitch active={isLockedMode} activeClassName={forcedLockedModeSwitchClass} />
                 <span>排练模式</span>
               </button>
             </div>
@@ -5359,11 +5369,17 @@ export default function ScriptEditor({
                     <div className="my-1 border-t border-zinc-50" />
                     <button
                       onClick={toggleLockedMode}
-                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                      disabled={versionForcesLockedMode}
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                        versionForcesLockedMode
+                          ? "cursor-not-allowed text-[#91a8ca]"
+                          : "text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                      title={versionForcesLockedMode ? "该版本仅可使用排练模式" : undefined}
                     >
                       <span>排练模式</span>
                       <span className="flex items-center">
-                        <ModeSwitch active={isLockedMode} />
+                        <ModeSwitch active={isLockedMode} activeClassName={forcedLockedModeSwitchClass} />
                       </span>
                     </button>
                   </>
