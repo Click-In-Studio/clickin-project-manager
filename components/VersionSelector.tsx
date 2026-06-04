@@ -71,9 +71,9 @@ export default function VersionSelector({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-zinc-600 hover:bg-zinc-100 transition-colors"
+        className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-sm text-zinc-600 hover:bg-zinc-100 transition-colors"
       >
-        <span className="font-medium truncate max-w-[120px]">{current?.name ?? "选择版本"}</span>
+        <span className="inline-block max-w-[116px] truncate align-bottom font-medium">{current?.name ?? "选择版本"}</span>
         {current && (
           <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[current.status]}`}>
             {STATUS_LABELS[current.status]}
