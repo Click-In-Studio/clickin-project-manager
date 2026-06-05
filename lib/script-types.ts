@@ -5,6 +5,7 @@ export type Block = {
   id: string;
   type: BlockType;
   content: string;
+  stageComment?: string | null;
   characterIds: string[];
   characterAnnotations: Record<string, string>;
   forceShowCharacterName?: boolean;

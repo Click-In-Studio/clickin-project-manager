@@ -170,6 +170,7 @@ export function requiredPermissions(
 
     if (
       op.block.content !== old.content ||
+      (op.block.stageComment ?? "") !== (old.stageComment ?? "") ||
       op.block.type !== old.type ||
       op.block.lyric !== old.lyric ||
       (op.block.forceShowCharacterName ?? false) !== (old.forceShowCharacterName ?? false) ||

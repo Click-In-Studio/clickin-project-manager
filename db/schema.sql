@@ -154,12 +154,14 @@ CREATE TABLE IF NOT EXISTS script (
   rehearsal_mark TEXT,
   type           block_type NOT NULL DEFAULT 'dialogue',
   content        TEXT NOT NULL DEFAULT '',
+  stage_comment  TEXT,
   force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   block_id       TEXT NOT NULL
 );
 
 ALTER TABLE script ADD COLUMN IF NOT EXISTS force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE script ADD COLUMN IF NOT EXISTS stage_comment TEXT;
 
 CREATE INDEX IF NOT EXISTS script_production_sort_idx ON script(production_id, sort_key);
 

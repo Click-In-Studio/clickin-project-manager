@@ -37,6 +37,7 @@ export const PAGE_CONFIGS: Record<PageLayout, PageConfig> = {
 const LINE_HEIGHT    = 28;  // leading-7 (1.75rem)
 const FONT_SIZE      = 14;  // text-sm (0.875rem at 16px base)
 const CHAR_NAME_HEIGHT   = 22;  // text-sm (20px) + mb-0.5 (2px)
+const STAGE_COMMENT_HEIGHT = 22; // text-sm (20px) + mb-0.5 (2px)
 const SCENE_HEADER_HEIGHT = 44; // py-3 (24px) + text-sm content (20px)
 
 function contentWidth(cfg: PageConfig): number {
@@ -99,7 +100,12 @@ function estimateBlockHeight(block: Block, prev: Block | null, upl: number, forc
   const charNameH =
     block.type === "dialogue" && block.characterIds.length > 0 && (forceCharName || !charNameHidden(block, prev))
       ? CHAR_NAME_HEIGHT : 0;
-  return charNameH + lines * LINE_HEIGHT + 8; // 8px = py-1 wrapper
+  const stageCommentH =
+    block.type === "dialogue" &&
+    block.characterIds.length > 0 &&
+    (block.stageComment ?? "").trim()
+      ? STAGE_COMMENT_HEIGHT : 0;
+  return charNameH + stageCommentH + lines * LINE_HEIGHT + 8; // 8px = py-1 wrapper
 }
 
 /**

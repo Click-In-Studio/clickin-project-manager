@@ -183,6 +183,7 @@ const makeBlock = (content = "", characterIds: string[] = [], type: BlockType = 
 
 const isBlockEmptyForDelete = (block: Block) =>
   block.content.trim() === "" &&
+  !(block.stageComment ?? "").trim() &&
   block.characterIds.length === 0 &&
   Object.values(block.characterAnnotations).every((ann) => ann.trim() === "");
 
@@ -1576,6 +1577,102 @@ function BlockCharacterSelector({
   );
 }
 
+function BlockStageComment({
+  value,
+  onChange,
+  showAddButton = true,
+  topGap,
+  readOnly = false,
+}: {
+  value?: string | null;
+  onChange: (value: string | null) => void;
+  showAddButton?: boolean;
+  topGap?: "compact" | "leading";
+  readOnly?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const skipBlurCommitRef = useRef(false);
+  const text = value?.trim() ?? "";
+
+  const commit = () => {
+    const next = draft.trim();
+    onChange(next || null);
+    skipBlurCommitRef.current = false;
+    setEditing(false);
+  };
+  const openEditor = () => {
+    skipBlurCommitRef.current = false;
+    setDraft(value ?? "");
+    setEditing(true);
+  };
+  const topGapClass = topGap === "leading" ? "mt-2 " : topGap === "compact" ? "-mt-1 " : "";
+
+  if (editing && !readOnly) {
+    return (
+      <div className={`${topGapClass}mb-0.5 flex justify-center`}>
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (skipBlurCommitRef.current) {
+              skipBlurCommitRef.current = false;
+              return;
+            }
+            commit();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              skipBlurCommitRef.current = true;
+              setDraft(value ?? "");
+              setEditing(false);
+            }
+          }}
+          placeholder="在此输入补充舞台提示"
+          className="w-full max-w-xs border-b border-zinc-200 bg-transparent px-1 text-center font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+        />
+      </div>
+    );
+  }
+
+  if (text) {
+    const label = `（${text}）`;
+    return (
+      <div className={`${topGapClass}mb-0.5 flex justify-center`}>
+        {readOnly ? (
+          <span className="font-stage text-sm italic text-zinc-400">{label}</span>
+        ) : (
+          <button
+            type="button"
+            onClick={openEditor}
+            className="font-stage text-sm italic text-zinc-400 transition-colors hover:text-zinc-600"
+          >
+            {label}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (readOnly || !showAddButton) return null;
+  return (
+    <div className="mb-1 flex justify-center">
+      <button
+        type="button"
+        onClick={openEditor}
+        className="flex h-4 w-4 items-center justify-center rounded-full text-xs leading-none text-zinc-200 transition-colors hover:bg-zinc-100 hover:text-zinc-500"
+        title="添加舞台备注"
+        aria-label="添加舞台备注"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 // ─── Print ────────────────────────────────────────────────────────────────────
 
 // PageConfig and DEFAULT_PAGE_CONFIG imported from @/lib/script-page
@@ -1788,6 +1885,11 @@ function PrintPreview({
             {sel.map((c) => { const ann = block.characterAnnotations[c.id]; return ann ? `${c.name}（${ann}）` : c.name; }).join("、")}
           </div>
         )}
+        {!isStage && sel.length > 0 && block.stageComment?.trim() && (
+          <div className="mb-0.5 w-full text-center font-stage text-sm italic text-zinc-500">
+            （{block.stageComment.trim()}）
+          </div>
+        )}
         <div
           className={`w-full break-words text-sm leading-7 ${
             isStage
@@ -1982,6 +2084,7 @@ function mergeServerBlocks(
     if (!s) return true;
     return (
       b.content !== s.content ||
+      (b.stageComment ?? "") !== (s.stageComment ?? "") ||
       b.type !== s.type ||
       b.lyric !== s.lyric ||
       (b.forceShowCharacterName ?? false) !== (s.forceShowCharacterName ?? false) ||
@@ -2573,6 +2676,9 @@ function ScriptBlock({
     ? { paddingLeft: compactControlLayout.contentPaddingLeft }
     : undefined;
   const hasReadOnlySceneLabel = !canEditMetadata && !!readOnlyScene;
+  const hasStageComment = !!block.stageComment?.trim();
+  const showStageCommentAddButton = isFocused || isSelected || (hideCharSelector && !effectiveHideCharSelector);
+  const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
     : undefined;
@@ -2832,7 +2938,7 @@ function ScriptBlock({
         </span>
       )}
 
-      {!isStage && (!effectiveHideCharSelector || isFocused || isSelected) && (
+      {!isStage && showCharacterSelector && (
         <BlockCharacterSelector
           block={block}
           characters={characters}
@@ -2843,6 +2949,16 @@ function ScriptBlock({
           editRequestToken={charEditToken}
           onArrowUp={onArrowUpFromChar}
           onArrowDown={onArrowDownFromChar}
+          readOnly={!canEditText || isEditingLocked}
+        />
+      )}
+
+      {!isStage && block.characterIds.length > 0 && (hasStageComment || !effectiveHideCharSelector || isFocused || isSelected) && (
+        <BlockStageComment
+          value={block.stageComment}
+          onChange={(stageComment) => onUpdate({ stageComment })}
+          showAddButton={showStageCommentAddButton}
+          topGap={readOnlyRehearsalMode && hideCharSelector ? "leading" : showCharacterSelector ? "compact" : undefined}
           readOnly={!canEditText || isEditingLocked}
         />
       )}
