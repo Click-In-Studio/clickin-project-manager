@@ -375,7 +375,7 @@ function sanitizePasteHtml(html: string): string {
 
 // ─── Markdown ↔ HTML conversion ───────────────────────────────────────────────
 // Storage format: plain text with **bold** and __underline__ markers.
-// Stage-inline cues are stored as plain (…) / （…） brackets — no span markup.
+// Stage-inline cues are stored as plain bracketed text — no span markup.
 
 function nodeToMd(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
@@ -465,15 +465,19 @@ function toggleInlineTag(range: Range, tag: "b" | "u"): void {
     restoreSelection(wrapper.firstChild, wrapper.lastChild);
 }
 
-function wrapSelectionAsInlineStageCue(range: Range): void {
+function wrapSelectionAsInlineStageCue(
+  range: Range,
+  delimOpen: string,
+  delimClose: string,
+): void {
   const frag = range.extractContents();
   const span = document.createElement("span");
   span.setAttribute("data-stage-inline", "");
   span.style.fontStyle = "italic";
   span.style.color = "#a1a1aa";
-  span.appendChild(document.createTextNode("("));
+  span.appendChild(document.createTextNode(delimOpen));
   span.appendChild(frag);
-  span.appendChild(document.createTextNode(")"));
+  span.appendChild(document.createTextNode(delimClose));
   range.insertNode(span);
 
   const sel = window.getSelection();
@@ -1583,12 +1587,16 @@ function BlockStageComment({
   showAddButton = true,
   topGap,
   readOnly = false,
+  stageDelimOpen,
+  stageDelimClose,
 }: {
   value?: string | null;
   onChange: (value: string | null) => void;
   showAddButton?: boolean;
   topGap?: "compact" | "leading";
   readOnly?: boolean;
+  stageDelimOpen: string;
+  stageDelimClose: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
@@ -1639,7 +1647,7 @@ function BlockStageComment({
   }
 
   if (text) {
-    const label = `（${text}）`;
+    const label = `${stageDelimOpen}${text}${stageDelimClose}`;
     return (
       <div className={`${topGapClass}mb-0.5 flex justify-center`}>
         {readOnly ? (
@@ -1828,11 +1836,15 @@ function PrintPreview({
   blocks,
   characters,
   scenes,
+  stageDelimOpen,
+  stageDelimClose,
   onClose,
 }: {
   blocks: Block[];
   characters: Character[];
   scenes: Scene[];
+  stageDelimOpen: string;
+  stageDelimClose: string;
   onClose: () => void;
 }) {
   const cfg = DEFAULT_PAGE_CONFIG;
@@ -1899,7 +1911,7 @@ function PrintPreview({
         )}
         {!isStage && sel.length > 0 && block.stageComment?.trim() && (
           <div className="mb-0.5 w-full text-center font-stage text-sm italic text-zinc-500">
-            （{block.stageComment.trim()}）
+            {stageDelimOpen}{block.stageComment.trim()}{stageDelimClose}
           </div>
         )}
         <div
@@ -2446,6 +2458,7 @@ function ScriptBlock({
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
   const localTypeRef = useRef<BlockType | null>(null);
+  const localStageDelimRef = useRef<{ open: string | null; close: string | null }>({ open: null, close: null });
   const composingRef = useRef(false);
   const compactControlLayoutActiveRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
@@ -2574,13 +2587,21 @@ function ScriptBlock({
   useLayoutEffect(() => {
     const div = divRef.current;
     if (!div) return;
-    if (block.content !== localContentRef.current || block.type !== localTypeRef.current) {
+    const contentOrTypeChanged = block.content !== localContentRef.current || block.type !== localTypeRef.current;
+    const stageDelimChanged =
+      stageDelimOpen !== localStageDelimRef.current.open ||
+      stageDelimClose !== localStageDelimRef.current.close;
+
+    if (contentOrTypeChanged) {
       localContentRef.current = block.content;
       localTypeRef.current = block.type;
       div.innerHTML = mdToHtml(block.content);
-      if (block.type !== "stage") applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
     }
-  }, [block.content, block.type]);
+    if (block.type !== "stage" && (contentOrTypeChanged || stageDelimChanged)) {
+      applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
+    }
+    localStageDelimRef.current = { open: stageDelimOpen, close: stageDelimClose };
+  }, [block.content, block.type, stageDelimOpen, stageDelimClose]);
 
   const syncContent = () => {
     if (!canEditText) return;
@@ -2632,7 +2653,7 @@ function ScriptBlock({
         const sel = window.getSelection();
         if (block.type !== "stage" && sel && !sel.isCollapsed && div.contains(sel.anchorNode)) {
           const range = sel.getRangeAt(0);
-          wrapSelectionAsInlineStageCue(range);
+          wrapSelectionAsInlineStageCue(range, stageDelimOpen, stageDelimClose);
           syncContent();
         } else {
           onToggleType();
@@ -2991,6 +3012,8 @@ function ScriptBlock({
           showAddButton={showStageCommentAddButton}
           topGap={readOnlyRehearsalMode && hideCharSelector ? "leading" : showCharacterSelector ? "compact" : undefined}
           readOnly={!canEditText || isEditingLocked}
+          stageDelimOpen={stageDelimOpen}
+          stageDelimClose={stageDelimClose}
         />
       )}
 
@@ -5008,7 +5031,7 @@ export default function ScriptEditor({
       editableEl &&
       editableEl === taRefs.current.get(id)
     ) {
-      wrapSelectionAsInlineStageCue(range);
+      wrapSelectionAsInlineStageCue(range, scriptConfigRef.current.stageDelimOpen, scriptConfigRef.current.stageDelimClose);
       editableEl.focus();
       editableEl.dispatchEvent(new Event("input", { bubbles: true }));
       return;
@@ -5589,6 +5612,8 @@ export default function ScriptEditor({
         blocks={blocks}
         characters={characters}
         scenes={scenes}
+        stageDelimOpen={scriptConfig.stageDelimOpen}
+        stageDelimClose={scriptConfig.stageDelimClose}
         onClose={() => setPrintPreview(false)}
       />
     );
