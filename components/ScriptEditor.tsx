@@ -6493,8 +6493,9 @@ export default function ScriptEditor({
             const sceneStart = block.sceneId !== null && block.sceneId !== prev?.sceneId;
             const isMarkStart = block.rehearsalMark !== (prev?.rehearsalMark ?? null);
             const pageBreak = bIdx > 0 && pageMap[block.id] !== pageMap[prev!.id];
+            const isBlockFocused = !isLockedMode && focusedId === block.id;
             const hideCharSelector =
-              focusedId === block.id || (pageBreak && display.pageBreaks) ? false : shouldHideCharacterLabel(prev, block);
+              isBlockFocused || (pageBreak && display.pageBreaks) ? false : shouldHideCharacterLabel(prev, block);
             const showCharacterGap = isLockedMode && shouldShowCharacterGap(prev, block, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
@@ -6590,7 +6591,7 @@ export default function ScriptEditor({
                   scenes={scenes}
                   availableScenes={availableScenes}
                   hideCharSelector={hideCharSelector}
-                  isFocused={focusedId === block.id}
+                  isFocused={isBlockFocused}
                   dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
                   isSelected={isSelected}
                   isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id)}
