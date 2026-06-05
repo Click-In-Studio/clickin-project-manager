@@ -68,10 +68,10 @@ export default function VersionSelector({
   if (!versions.length) return null;
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-sm text-zinc-600 hover:bg-zinc-100 transition-colors"
+        className="flex items-center gap-1 whitespace-nowrap rounded-lg px-1.5 py-1 text-sm text-zinc-600 hover:bg-zinc-100 transition-colors"
       >
         <span className="inline-block max-w-[116px] truncate align-bottom font-medium">{current?.name ?? "选择版本"}</span>
         {current && (
@@ -85,7 +85,7 @@ export default function VersionSelector({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 min-w-[220px] rounded-xl border border-zinc-200 bg-white shadow-lg py-1">
+        <div className="fixed left-2 top-14 z-50 mt-1 min-w-[220px] rounded-xl border border-zinc-200 bg-white py-1 shadow-lg md:absolute md:left-0 md:top-full">
           {versions.map(v => (
             <button
               key={v.id}
