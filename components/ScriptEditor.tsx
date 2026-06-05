@@ -1683,6 +1683,7 @@ type PrintItem =
 
 const PRINT_CHAR_NAME_HEIGHT = 22;
 const PRINT_CHARACTER_GAP_HEIGHT = 10;
+const PRINT_WRAPPER_PADDING_HEIGHT = 8;
 
 type PrintPageData = {
   items: PrintItem[];
@@ -1715,7 +1716,7 @@ function computePrintPages(
 
   const addItem = (item: PrintItem, h: number) => {
     const forcedCharHeight = item.kind === "block" && item.hideChar && item.block.characterIds.length > 0
-      ? PRINT_CHAR_NAME_HEIGHT
+      ? PRINT_CHAR_NAME_HEIGHT + PRINT_WRAPPER_PADDING_HEIGHT
       : 0;
     let firstBlockOnPage = item.kind === "block" && !curHasBlock;
     const leadingGapHeight = item.kind === "block" && item.leadingCharacterGap && !firstBlockOnPage
@@ -1874,11 +1875,22 @@ function PrintPreview({
     </div>
   );
 
-  const renderBlock = (block: Block, hideChar: boolean, leadingCharacterGap = false) => {
+  const renderBlock = (
+    block: Block,
+    hideChar: boolean,
+    leadingCharacterGap = false,
+    continuesToHiddenCharacter = false,
+    endsHiddenCharacterRun = false,
+  ) => {
     const isStage = block.type === "stage";
     const sel = characters.filter((c) => block.characterIds.includes(c.id));
+    const blockPaddingClass = isStage
+      ? "py-0"
+      : hideChar
+        ? endsHiddenCharacterRun ? "pt-0 pb-1" : "py-0"
+        : continuesToHiddenCharacter ? "pt-1 pb-0" : "py-1";
     return (
-      <div key={block.id} className="w-full py-1">
+      <div key={block.id} className={`w-full ${blockPaddingClass}`}>
         {leadingCharacterGap && <div className="h-2.5" aria-hidden="true" />}
         {!isStage && !hideChar && sel.length > 0 && (
           <div className="mb-0.5 w-full text-center text-sm font-bold tracking-[0.12em] text-zinc-800">
@@ -1986,15 +1998,35 @@ function PrintPreview({
           )}
 
           {/* Content pages */}
-          {data?.pages.map((page, idx) => (
-            <PrintPage key={idx} cfg={cfg} header={page.sceneLabel} pageNum={page.pageNum}>
-              {page.items.map((item, iIdx) =>
-                item.kind === "sceneHeader"
-                  ? renderSceneHeader(item.scene, `sh-${item.scene.id}-${iIdx}`)
-                  : renderBlock(item.block, item.hideChar, item.leadingCharacterGap)
-              )}
-            </PrintPage>
-          ))}
+          {data?.pages.map((page, idx) => {
+            const continuesToHiddenCharacter = new Set<string>();
+            const endsHiddenCharacterRun = new Set<string>();
+            let nextBlockHidden = false;
+            let hasNextBlock = false;
+            for (let i = page.items.length - 1; i >= 0; i--) {
+              const item = page.items[i];
+              if (item.kind !== "block") continue;
+              if (!item.hideChar && hasNextBlock && nextBlockHidden) continuesToHiddenCharacter.add(item.block.id);
+              if (item.hideChar && (!hasNextBlock || !nextBlockHidden)) endsHiddenCharacterRun.add(item.block.id);
+              nextBlockHidden = item.hideChar;
+              hasNextBlock = true;
+            }
+            return (
+              <PrintPage key={idx} cfg={cfg} header={page.sceneLabel} pageNum={page.pageNum}>
+                {page.items.map((item, iIdx) =>
+                  item.kind === "sceneHeader"
+                    ? renderSceneHeader(item.scene, `sh-${item.scene.id}-${iIdx}`)
+                    : renderBlock(
+                        item.block,
+                        item.hideChar,
+                        item.leadingCharacterGap,
+                        continuesToHiddenCharacter.has(item.block.id),
+                        endsHiddenCharacterRun.has(item.block.id),
+                      )
+                )}
+              </PrintPage>
+            );
+          })}
         </div>
       </div>
     </div>
