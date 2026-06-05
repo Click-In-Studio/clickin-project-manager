@@ -97,15 +97,17 @@ function charNameHidden(block: Block, prev: Block | null): boolean {
 function estimateBlockHeight(block: Block, prev: Block | null, upl: number, forceCharName = false): number {
   const text = stripHtml(block.content);
   const lines = estimateLines(text, upl);
+  const hideCharName = !forceCharName && charNameHidden(block, prev);
   const charNameH =
-    block.type === "dialogue" && block.characterIds.length > 0 && (forceCharName || !charNameHidden(block, prev))
+    block.type === "dialogue" && block.characterIds.length > 0 && (forceCharName || !hideCharName)
       ? CHAR_NAME_HEIGHT : 0;
   const stageCommentH =
     block.type === "dialogue" &&
     block.characterIds.length > 0 &&
     (block.stageComment ?? "").trim()
       ? STAGE_COMMENT_HEIGHT : 0;
-  return charNameH + stageCommentH + lines * LINE_HEIGHT + 8; // 8px = py-1 wrapper
+  const wrapperPaddingH = block.type === "stage" || hideCharName ? 0 : 8; // 8px = py-1 wrapper
+  return charNameH + stageCommentH + lines * LINE_HEIGHT + wrapperPaddingH;
 }
 
 /**
