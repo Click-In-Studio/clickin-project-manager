@@ -2172,7 +2172,6 @@ function shouldHideCharacterLabel(prev: Block | null, block: Block): boolean {
   if (!prev || prev.type !== "dialogue" || block.type !== "dialogue") return false;
   if (block.sceneId !== prev.sceneId) return false;
   if (block.rehearsalMark !== prev.rehearsalMark) return false;
-  if (block.characterIds.length === 0) return false;
   return _sameCharacters(prev.characterIds, block.characterIds);
 }
 
