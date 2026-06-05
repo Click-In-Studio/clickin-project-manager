@@ -37,6 +37,7 @@ export type ScriptColMap = {
   rehearsalMark?: ColRef;
   typeTag?: ColRef;
   character?: ColRef;
+  stageComment?: ColRef;
   bodyColumns: ColRef[];   // one or more body columns, concatenated in order
   stageInlineColumns?: ColRef[]; // subset of bodyColumns treated as inline stage directions
   /** Bracket patterns in body text that are extracted as stage direction blocks.

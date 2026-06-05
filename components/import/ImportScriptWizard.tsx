@@ -52,7 +52,7 @@ export default function ImportScriptWizard({ productionId, versionId, onDone }: 
 
   const [colMapping, setColMapping] = useState<Record<string, number | number[] | null>>({
     sceneNum: null, rehearsalMark: null, typeTag: null,
-    character: null, bodyColumns: [], stageInlineColumns: [],
+    character: null, stageComment: null, bodyColumns: [], stageInlineColumns: [],
   });
   const [stageInlinePatterns, setStageInlinePatterns] = useState<string[]>([]);
 
@@ -92,13 +92,14 @@ export default function ImportScriptWizard({ productionId, versionId, onDone }: 
       const headers = data.data!.headers;
       const autoMap: Record<string, number | number[] | null> = {
         sceneNum: null, rehearsalMark: null, typeTag: null,
-        character: null, bodyColumns: [], stageInlineColumns: [],
+        character: null, stageComment: null, bodyColumns: [], stageInlineColumns: [],
       };
       const hints: Record<string, string[]> = {
         sceneNum: ["段落", "场次", "编号", "段落号"],
         rehearsalMark: ["排练记号", "记号", "提示"],
         typeTag: ["类型", "tag", "标签"],
         character: ["角色", "演员"],
+        stageComment: ["演员提示", "补充舞台提示", "舞台提示"],
       };
       for (const [field, candidates] of Object.entries(hints)) {
         const idx = headers.findIndex(h => candidates.some(c => h.includes(c)));
@@ -305,6 +306,7 @@ export default function ImportScriptWizard({ productionId, versionId, onDone }: 
       rehearsalMark: (colMapping.rehearsalMark as number | null) ?? undefined,
       typeTag: (colMapping.typeTag as number | null) ?? undefined,
       character: (colMapping.character as number | null) ?? undefined,
+      stageComment: (colMapping.stageComment as number | null) ?? undefined,
       bodyColumns,
       stageInlineColumns: (colMapping.stageInlineColumns as number[] | null) ?? undefined,
       stageInlinePatterns: stageInlinePatterns.length > 0 ? stageInlinePatterns : undefined,
@@ -320,8 +322,9 @@ export default function ImportScriptWizard({ productionId, versionId, onDone }: 
 
   const colDefs = [
     { key: "sceneNum", label: "段落", required: true },
-    { key: "bodyColumns", label: "剧本内容", required: true, multi: true },
     { key: "character", label: "角色" },
+    { key: "stageComment", label: "演员提示" },
+    { key: "bodyColumns", label: "剧本内容", required: true, multi: true },
     { key: "rehearsalMark", label: "排练记号" },
     { key: "typeTag", label: "类型/Tag" },
     { key: "stageInlineColumns", label: "内嵌舞台提示列", multi: true },

@@ -1631,7 +1631,7 @@ function BlockStageComment({
               setEditing(false);
             }
           }}
-          placeholder="在此输入补充舞台提示"
+          placeholder="在此输入演员提示/补充舞台提示"
           className="w-full max-w-xs border-b border-zinc-200 bg-transparent px-1 text-center font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
         />
       </div>

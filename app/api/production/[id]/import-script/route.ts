@@ -53,6 +53,7 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
     rawType: string | null;
     rawChars: string[];
     body: string;
+    stageComment: string | null;
     typeActions: TypeTagMapping[string][];
     warningMark: boolean;
   };
@@ -87,6 +88,7 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
       return isStage ? `（${val}）` : val;
     }).filter(Boolean);
     const body = bodyParts.join("\n");
+    const stageComment = getCell(row, colMap.stageComment);
 
     // Characters
     const rawCharCell = getCell(row, colMap.character);
@@ -94,7 +96,7 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
       ? rawCharCell.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)
       : [];
 
-    result.push({ sceneNum: rawSceneNum, rehearsalMark: rawMark, rawType, rawChars, body, typeActions, warningMark });
+    result.push({ sceneNum: rawSceneNum, rehearsalMark: rawMark, rawType, rawChars, body, stageComment, typeActions, warningMark });
     void characterKinds;
   }
 
@@ -272,6 +274,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     content: string;
     charIds: string[];
     characterAnnotations: Record<string, string>;
+    stageComment: string | null;
     rehearsalMark: string | null;
     tagActions: { groupId: string; optionId: string }[];
   };
@@ -328,13 +331,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       content: row.body,
       charIds,
       characterAnnotations,
+      stageComment: baseType === "stage" ? null : row.stageComment,
       rehearsalMark: row.rehearsalMark,
       tagActions: rowTagActions,
     });
   }
 
   const lexKeys = initialKeys(blockSpecs.length);
-  const upsertBlocks: Array<{ id: string; type: "dialogue" | "stage"; content: string; lyric: boolean; characterIds: string[]; characterAnnotations: Record<string, string>; sceneId: string | null; rehearsalMark: string | null; lexKey: string }> = [];
+  const upsertBlocks: Array<{ id: string; type: "dialogue" | "stage"; content: string; stageComment: string | null; lyric: boolean; characterIds: string[]; characterAnnotations: Record<string, string>; sceneId: string | null; rehearsalMark: string | null; lexKey: string }> = [];
   const blockTagAssignments: Array<{ blockId: string; groupId: string; optionId: string }> = [];
 
   for (let i = 0; i < blockSpecs.length; i++) {
@@ -344,6 +348,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       id: blockId,
       type: spec.blockType,
       content: spec.content,
+      stageComment: spec.stageComment,
       lyric: spec.lyric,
       characterIds: spec.charIds,
       characterAnnotations: spec.characterAnnotations,
