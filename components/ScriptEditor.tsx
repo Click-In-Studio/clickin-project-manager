@@ -2146,7 +2146,7 @@ function TagPicker({
 
 // ─── ScriptBlock ──────────────────────────────────────────────────────────────
 
-const COMPACT_STAGE_CONTROL_THRESHOLD = 56;
+const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
 const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
 const COMPACT_STAGE_CONTENT_GAP_PX = 4;
 
@@ -2287,6 +2287,7 @@ function ScriptBlock({
 }) {
   const blockRootRef = useRef<HTMLDivElement | null>(null);
   const leftControlsRef = useRef<HTMLDivElement | null>(null);
+  const blockTagsRef = useRef<HTMLDivElement | null>(null);
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
   const localTypeRef = useRef<BlockType | null>(null);
@@ -2325,6 +2326,7 @@ function ScriptBlock({
   );
 
   const isStage = block.type === "stage";
+  const hasBlockTags = !isStage && showBlockTags && !!tagGroups?.length;
   const isEditingLocked = isSelected || confirmDelete || isDeleteConfirmHighlighted;
   const hiddenCharacterCollapsed = !isStage && hideCharSelector && !isFocused && !isSelected;
   const effectiveHideCharSelector = hideCharSelector && !(hiddenCharacterCollapsed && unfoldForCompactControls);
@@ -2351,12 +2353,22 @@ function ScriptBlock({
     const blockEl = blockRootRef.current;
     if (!blockEl) return;
 
+    const rootFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+    const compactControlThreshold = COMPACT_STAGE_CONTROL_THRESHOLD_REM * (Number.isFinite(rootFontSize) ? rootFontSize : 16);
+
     const updateCompactControls = () => {
-      const isCompactBlock = blockEl.getBoundingClientRect().height < COMPACT_STAGE_CONTROL_THRESHOLD;
       const railEl = leftControlsRef.current;
       const triangleEl = blockEl.querySelector<HTMLElement>("[data-rehearsal-triangle='true']");
       const mode = isStage ? "stage" : "hidden-character";
       const contentEl = mode === "stage" ? divRef.current : null;
+      const blockRect = blockEl.getBoundingClientRect();
+      const tagRect = hasBlockTags
+        ? blockTagsRef.current?.getBoundingClientRect()
+        : null;
+      const measuredBlockHeight = tagRect
+        ? Math.max(blockRect.height, tagRect.bottom - blockRect.top)
+        : blockRect.height;
+      const isCompactBlock = measuredBlockHeight < compactControlThreshold;
 
       if (isCompactBlock) compactControlLayoutActiveRef.current = true;
 
@@ -2398,8 +2410,10 @@ function ScriptBlock({
     updateCompactControls();
     const observer = new ResizeObserver(updateCompactControls);
     observer.observe(blockEl);
+    const tagEl = blockTagsRef.current;
+    if (tagEl) observer.observe(tagEl);
     return () => observer.disconnect();
-  }, [shouldMeasureCompactControls, isStage, lineNum, canEditRehearsalMark]);
+  }, [shouldMeasureCompactControls, isStage, hasBlockTags, lineNum, canEditRehearsalMark]);
 
   // Sync state → DOM only for external changes (split, merge, type toggle, etc.)
   useLayoutEffect(() => {
@@ -2866,8 +2880,8 @@ function ScriptBlock({
         }`}
       />
 
-      {showBlockTags && !isStage && !!tagGroups?.length && (
-        <div className="relative mt-0.5 pb-1">
+      {hasBlockTags && (
+        <div ref={blockTagsRef} className="relative mt-0.5 pb-1">
           <div className="flex flex-wrap items-center gap-1">
             {tagGroups.map(group => {
               const tagVal = (blockTagValues ?? []).find(t => t.groupId === group.id);
