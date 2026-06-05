@@ -1911,6 +1911,8 @@ const PRESENCE_COLORS = [
   "#E53E3E", "#DD6B20", "#D69E2E", "#38A169",
   "#3182CE", "#805AD5", "#D53F8C", "#00B5D8",
 ];
+const EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS = 3;
+const REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS = 5;
 
 function presenceColor(clientId: string): string {
   let h = 0;
@@ -3303,7 +3305,7 @@ export default function ScriptEditor({
   const [jumpValue, setJumpValue] = useState("");
 
   // ── Toolbar dropdowns — single state enforces mutual exclusion ───────────────
-  type OpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | null;
+  type OpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const toggleMenu = useCallback((name: Exclude<OpenMenu, null>) =>
     setOpenMenu(prev => prev === name ? null : name), []);
@@ -4152,21 +4154,28 @@ export default function ScriptEditor({
   }, [highlightedBlockId]);
 
 
-  // SSE: receive seq pushes (state sync) and presence pushes from other clients
+  // SSE: receive seq pushes (state sync) and presence pushes from other clients.
+  // Multiple open script tabs can exhaust the browser's per-origin HTTP/1.1
+  // connection pool, so tabs share one EventSource through BroadcastChannel.
   useEffect(() => {
     if (loadState !== "ready") return;
 
-    const streamParams = new URLSearchParams();
-    if (clientId) streamParams.set("cid", clientId);
-    if (activeVersionId) streamParams.set("v", activeVersionId);
-    const streamQuery = streamParams.toString() ? `?${streamParams.toString()}` : "";
-    const es = new EventSource(
-      `${BASE_PATH}/api/script/${effectiveScriptId}/stream${streamQuery}`
-    );
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let es: EventSource | null = null;
+    let leaderRenewTimer: ReturnType<typeof setInterval> | null = null;
+    let electionTimer: ReturnType<typeof setInterval> | null = null;
+    let isLeader = false;
+    let closed = false;
+    const tabId = `${clientId || "tab"}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+    const streamKey = `${effectiveScriptId}:${activeVersionId ?? ""}`;
+    const leaderKey = `script_sse_leader:${streamKey}`;
+    const channelName = `script_sse:${streamKey}`;
+    const leaderTtlMs = 8_000;
+    const bc = typeof window !== "undefined" && "BroadcastChannel" in window
+      ? new BroadcastChannel(channelName)
+      : null;
 
-    es.onmessage = (e: MessageEvent) => {
-      const { seq } = JSON.parse(e.data as string) as { seq: number };
+    const handleSeq = (seq: number) => {
       if (seq <= serverSeqRef.current) return;
 
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -4192,18 +4201,121 @@ export default function ScriptEditor({
       }, 300);
     };
 
-    es.addEventListener("presence", (e: MessageEvent) => {
-      const list = JSON.parse(e.data as string) as RemotePresence[];
+    const handlePresence = (list: RemotePresence[]) => {
       setPresenceMap(new Map(list.map(p => [p.clientId, p])));
-    });
+    };
 
-    es.addEventListener("config", (e: MessageEvent) => {
-      const cfg = JSON.parse(e.data as string) as ScriptConfig;
+    const handleConfig = (cfg: ScriptConfig) => {
       setScriptConfig(prev => ({ ...DEFAULT_SCRIPT_CONFIG, ...prev, ...cfg }));
-    });
+    };
+
+    const openEventSource = (streamClientId: string, onEvent: (type: "seq" | "presence" | "config", data: unknown) => void) => {
+      const streamParams = new URLSearchParams();
+      streamParams.set("cid", streamClientId);
+      if (activeVersionId) streamParams.set("v", activeVersionId);
+      const streamQuery = streamParams.toString() ? `?${streamParams.toString()}` : "";
+      const nextEs = new EventSource(`${BASE_PATH}/api/script/${effectiveScriptId}/stream${streamQuery}`);
+
+      nextEs.onmessage = (e: MessageEvent) => {
+        const { seq } = JSON.parse(e.data as string) as { seq: number };
+        handleSeq(seq);
+        onEvent("seq", seq);
+      };
+      nextEs.addEventListener("presence", (e: MessageEvent) => {
+        const list = JSON.parse(e.data as string) as RemotePresence[];
+        handlePresence(list);
+        onEvent("presence", list);
+      });
+      nextEs.addEventListener("config", (e: MessageEvent) => {
+        const cfg = JSON.parse(e.data as string) as ScriptConfig;
+        handleConfig(cfg);
+        onEvent("config", cfg);
+      });
+
+      return nextEs;
+    };
+
+    const broadcast = (type: "seq" | "presence" | "config", data: unknown) => {
+      bc?.postMessage({ source: tabId, type, data });
+    };
+
+    const readLeader = (): { tabId: string; expiresAt: number } | null => {
+      try {
+        const raw = localStorage.getItem(leaderKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tabId?: unknown; expiresAt?: unknown };
+        if (typeof parsed.tabId !== "string" || typeof parsed.expiresAt !== "number") return null;
+        return { tabId: parsed.tabId, expiresAt: parsed.expiresAt };
+      } catch {
+        return null;
+      }
+    };
+
+    const writeLeader = () => {
+      localStorage.setItem(leaderKey, JSON.stringify({ tabId, expiresAt: Date.now() + leaderTtlMs }));
+    };
+
+    const stopLeader = (clearLock: boolean) => {
+      if (leaderRenewTimer) {
+        clearInterval(leaderRenewTimer);
+        leaderRenewTimer = null;
+      }
+      es?.close();
+      es = null;
+      isLeader = false;
+      if (clearLock) {
+        try {
+          const current = readLeader();
+          if (current?.tabId === tabId) localStorage.removeItem(leaderKey);
+        } catch { /* ignore */ }
+      }
+    };
+
+    const startLeader = () => {
+      if (closed || isLeader) return;
+      const current = readLeader();
+      if (current && current.tabId !== tabId && current.expiresAt > Date.now()) return;
+      try {
+        writeLeader();
+        const confirmed = readLeader();
+        if (confirmed?.tabId !== tabId) return;
+      } catch {
+        return;
+      }
+
+      isLeader = true;
+      es = openEventSource(`stream:${streamKey}`, broadcast);
+      leaderRenewTimer = setInterval(() => {
+        try { writeLeader(); }
+        catch { stopLeader(true); }
+      }, 2_000);
+    };
+
+    const maybeElectLeader = () => {
+      if (closed || isLeader) return;
+      const current = readLeader();
+      if (!current || current.expiresAt <= Date.now()) startLeader();
+    };
+
+    if (bc) {
+      bc.onmessage = (event: MessageEvent) => {
+        const msg = event.data as { source?: string; type?: string; data?: unknown };
+        if (msg.source === tabId) return;
+        if (msg.type === "seq" && typeof msg.data === "number") handleSeq(msg.data);
+        else if (msg.type === "presence" && Array.isArray(msg.data)) handlePresence(msg.data as RemotePresence[]);
+        else if (msg.type === "config" && msg.data && typeof msg.data === "object") handleConfig(msg.data as ScriptConfig);
+      };
+      electionTimer = setInterval(maybeElectLeader, 2_500);
+      maybeElectLeader();
+    } else {
+      es = openEventSource(clientId || tabId, () => {});
+    }
 
     return () => {
-      es.close();
+      closed = true;
+      stopLeader(true);
+      if (electionTimer) clearInterval(electionTimer);
+      bc?.close();
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [effectiveScriptId, loadState, clientId, activeVersionId]);
@@ -5553,20 +5665,88 @@ export default function ScriptEditor({
             )}
           </div>
 
-          {/* Online users: self (dimmed) + others */}
-          <div className="flex items-center">
+          {/* Online users: self (dimmed) + overflow menu */}
+          <div className="relative">
             {(() => {
-              const others = Array.from(presenceMap.values()).filter(p => p.clientId !== clientId);
-              return (
-                <>
-                  {others.map(p => (
-                    <div key={p.clientId} className="-ml-1 first:ml-0">
-                      <PresenceAvatar name={p.userName} color={p.color} title={p.userName} />
+              const selfPresence: RemotePresence | null = clientId
+                ? {
+                    clientId,
+                    userName: userName || "?",
+                    color: presenceColor(clientId),
+                    blockId: null,
+                  }
+                : null;
+              const onlineUsers = [
+                ...Array.from(presenceMap.values()).filter(p => p.clientId !== clientId),
+                ...(selfPresence ? [selfPresence] : []),
+              ];
+              const maxVisibleAvatars = isLockedMode
+                ? REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS
+                : EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS;
+              const overflowCount = onlineUsers.length > maxVisibleAvatars
+                ? onlineUsers.length - maxVisibleAvatars + 1
+                : 0;
+              const visibleUsers = overflowCount > 0
+                ? onlineUsers.slice(0, maxVisibleAvatars - 1)
+                : onlineUsers;
+
+              if (onlineUsers.length === 0) return null;
+
+              const avatarStack = (
+                <div className="flex items-center">
+                  {visibleUsers.map(p => (
+                    <div key={p.clientId} className={`-ml-1 first:ml-0 ${p.clientId === clientId ? "opacity-40" : ""}`}>
+                      <PresenceAvatar
+                        name={p.userName}
+                        color={p.color}
+                        title={p.clientId === clientId ? `${p.userName}（你）` : p.userName}
+                      />
                     </div>
                   ))}
-                  {clientId && (
-                    <div className="-ml-1 first:ml-0 opacity-40" title={`${userName}（你）`}>
-                      <PresenceAvatar name={userName || "?"} color={presenceColor(clientId)} />
+                  {overflowCount > 0 && (
+                    <div className="-ml-1 first:ml-0">
+                      <div
+                        title={`展开 ${overflowCount} 位在线人员`}
+                        className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500"
+                      >
+                        +{overflowCount}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+
+              if (overflowCount === 0) return avatarStack;
+
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => toggleMenu("presence")}
+                    className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
+                    aria-label={`在线人员：${onlineUsers.length} 人`}
+                    title={`在线人员：${onlineUsers.map(p => p.clientId === clientId ? `${p.userName}（你）` : p.userName).join("、")}`}
+                  >
+                    {avatarStack}
+                  </button>
+                  {openMenu === "presence" && (
+                    <div
+                      className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                      onMouseLeave={() => setOpenMenu(null)}
+                    >
+                      <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">在线人员</p>
+                      {onlineUsers.map(p => (
+                        <div key={p.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
+                          <span
+                            aria-hidden
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: p.color }}
+                          />
+                          <span className="min-w-0 flex-1 truncate">
+                            {p.userName}{p.clientId === clientId ? "（你）" : ""}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </>
