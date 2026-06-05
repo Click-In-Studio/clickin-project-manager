@@ -1,4 +1,5 @@
 import type { Block, Character, Scene, ScriptState } from "./script-types";
+import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 
 const BASE = "https://open.feishu.cn/open-apis";
 
@@ -268,7 +269,7 @@ export function toScriptState(
     };
   });
 
-  return { blocks, characters, scenes, config: { stageDelimOpen: "（", stageDelimClose: "）", pageLayout: "a4" } };
+  return { blocks, characters, scenes, config: { ...DEFAULT_SCRIPT_CONFIG } };
 }
 
 /**

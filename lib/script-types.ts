@@ -15,17 +15,20 @@ export type Block = {
 };
 
 export type PageLayout = "a4" | "letter" | "a3-2col" | "tablet-2col";
+export type ScriptTextLayoutMode = "center" | "compact";
 
 export type ScriptConfig = {
   stageDelimOpen: string;
   stageDelimClose: string;
   pageLayout: PageLayout;
+  textLayoutMode: ScriptTextLayoutMode;
 };
 
 export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
   stageDelimOpen: "（",
   stageDelimClose: "）",
   pageLayout: "a4",
+  textLayoutMode: "center",
 };
 
 export type ScriptState = {

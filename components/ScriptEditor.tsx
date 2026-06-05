@@ -13,7 +13,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig } from "@/lib/script-types";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, Version, VersionStatus } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
 import VersionSelector from "@/components/VersionSelector";
@@ -934,7 +934,7 @@ function ScenePicker({
         title="设置章节起点"
         className={`rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide transition-colors ${
           current
-            ? "text-zinc-500 hover:text-zinc-700"
+            ? "text-zinc-400 hover:text-zinc-600"
             : "text-zinc-200 hover:text-zinc-400"
         }`}
       >
@@ -1303,6 +1303,7 @@ function BlockCharacterSelector({
   onArrowUp,
   onArrowDown,
   readOnly = false,
+  layoutMode = "center",
 }: {
   block: Block;
   characters: Character[];
@@ -1314,6 +1315,7 @@ function BlockCharacterSelector({
   onArrowUp: () => void;
   onArrowDown: () => void;
   readOnly?: boolean;
+  layoutMode?: ScriptTextLayoutMode;
 }) {
   const [editing, setEditing] = useState(false);
   const setEditingWithNotify = useCallback((v: boolean) => { setEditing(v); onEditingChange(v); }, [onEditingChange]);
@@ -1337,7 +1339,6 @@ function BlockCharacterSelector({
   useEffect(() => {
     if (editing) {
       inputRef.current?.focus();
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (block.characterIds.some((id) => block.characterAnnotations[id])) setShowAnnotations(true);
     } else {
       setShowAnnotations(false);
@@ -1356,7 +1357,7 @@ function BlockCharacterSelector({
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [editing]);
+  }, [editing, setEditingWithNotify]);
 
   const selected = characters.filter((c) => block.characterIds.includes(c.id));
   const suggestions = characters.filter(
@@ -1416,18 +1417,20 @@ function BlockCharacterSelector({
     const ann = block.characterAnnotations[c.id];
     return ann ? `${c.name}（${ann}）` : c.name;
   };
+  const compactLayout = layoutMode === "compact";
 
   if (!editing) {
     return (
-      <div className="mb-2 flex justify-center">
+      <div className={`${compactLayout ? "mb-0 flex justify-end text-right" : "mb-2 flex translate-x-px justify-center"}`}>
         {readOnly ? (
-          <span className={`text-sm font-bold tracking-[0.12em] ${selected.length ? "text-zinc-800" : "text-zinc-300"}`}>
+          <span data-character-label="true" className={`max-w-full break-words text-sm font-bold leading-7 tracking-[0.12em] ${selected.length ? "text-zinc-800" : "text-zinc-300"}`}>
             {selected.length ? selected.map(charLabel).join("、") : "无角色"}
           </span>
         ) : (
           <button
+            data-character-label="true"
             onClick={() => setEditingWithNotify(true)}
-            className={`text-sm font-bold tracking-[0.12em] transition-colors ${
+            className={`max-w-full break-words text-right text-sm font-bold leading-7 tracking-[0.12em] transition-colors ${
               selected.length
                 ? "text-zinc-800 hover:text-zinc-500"
                 : "text-zinc-300 hover:text-zinc-400"
@@ -1441,7 +1444,7 @@ function BlockCharacterSelector({
   }
 
   return (
-    <div ref={wrapRef} className="relative z-30 mb-2">
+    <div ref={wrapRef} className={`relative z-30 ${compactLayout ? "mb-0" : "mb-2"}`}>
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 transition-colors focus-within:border-zinc-500">
         {selected.map((c) => (
           <span
@@ -1589,6 +1592,17 @@ function BlockStageComment({
   readOnly = false,
   stageDelimOpen,
   stageDelimClose,
+  layoutMode = "center",
+  placementClassName = "",
+  placementStyle,
+  onEditingChange,
+  addButtonCenter = false,
+  alignFirstLineToEnd = false,
+  onOverflowBelowChange,
+  addButtonRevealOnHover = false,
+  lineAnchorCenter,
+  lineAnchorRowHeight,
+  zeroHeightAddButton = false,
 }: {
   value?: string | null;
   onChange: (value: string | null) => void;
@@ -1597,10 +1611,24 @@ function BlockStageComment({
   readOnly?: boolean;
   stageDelimOpen: string;
   stageDelimClose: string;
+  layoutMode?: ScriptTextLayoutMode;
+  placementClassName?: string;
+  placementStyle?: React.CSSProperties;
+  onEditingChange?: (editing: boolean) => void;
+  addButtonCenter?: boolean;
+  alignFirstLineToEnd?: boolean;
+  onOverflowBelowChange?: (height: number) => void;
+  addButtonRevealOnHover?: boolean;
+  lineAnchorCenter?: number;
+  lineAnchorRowHeight?: number;
+  zeroHeightAddButton?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
   const skipBlurCommitRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [lineAnchorShift, setLineAnchorShift] = useState(0);
   const text = value?.trim() ?? "";
 
   const commit = () => {
@@ -1608,18 +1636,73 @@ function BlockStageComment({
     onChange(next || null);
     skipBlurCommitRef.current = false;
     setEditing(false);
+    onEditingChange?.(false);
   };
   const openEditor = () => {
     skipBlurCommitRef.current = false;
     setDraft(value ?? "");
     setEditing(true);
+    onEditingChange?.(true);
   };
   const topGapClass = topGap === "leading" ? "mt-2 " : topGap === "compact" ? "-mt-1 " : "";
+  const compactLayout = layoutMode === "compact";
+  const alignClass = compactLayout ? "justify-start text-left" : "justify-center text-center";
+  const addButtonAlignClass = addButtonCenter ? "justify-center" : alignClass;
+  const stageCommentTextClass = `font-stage text-sm italic text-zinc-400 ${compactLayout ? "text-left leading-tight" : ""} whitespace-pre-wrap`;
+  const rootStyle: React.CSSProperties | undefined = alignFirstLineToEnd && lineAnchorShift !== 0
+    ? { transform: `translateY(${lineAnchorShift}px)` }
+    : undefined;
+  const combinedRootStyle: React.CSSProperties | undefined =
+    rootStyle || placementStyle ? { ...placementStyle, ...rootStyle } : undefined;
+  const addButtonStyle: React.CSSProperties | undefined = zeroHeightAddButton
+    ? { transform: "translateY(-0.75rem)" }
+    : undefined;
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [editing, draft]);
+
+  useLayoutEffect(() => {
+    if (!alignFirstLineToEnd) {
+      setLineAnchorShift(0);
+      onOverflowBelowChange?.(0);
+      return;
+    }
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => {
+      const body = el.querySelector<HTMLElement>("[data-stage-comment-body='true']");
+      if (!body) return;
+      const rootRect = el.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      const lineHeight = parseFloat(window.getComputedStyle(body).lineHeight);
+      const firstLineCenter = bodyRect.top - rootRect.top + (Number.isFinite(lineHeight) ? lineHeight : bodyRect.height) / 2;
+      if (lineAnchorCenter === undefined) {
+        setLineAnchorShift(0);
+        onOverflowBelowChange?.(0);
+        return;
+      }
+      const shift = Math.round(lineAnchorCenter - firstLineCenter);
+      const rowHeight = Math.max(lineAnchorRowHeight ?? 0, rootRect.height);
+      setLineAnchorShift(shift);
+      onOverflowBelowChange?.(Math.max(0, Math.ceil(shift + rootRect.height - rowHeight)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [alignFirstLineToEnd, editing, draft, text, onOverflowBelowChange, lineAnchorCenter, lineAnchorRowHeight]);
 
   if (editing && !readOnly) {
     return (
-      <div className={`${topGapClass}mb-0.5 flex justify-center`}>
-        <input
+      <div ref={rootRef} style={combinedRootStyle} className={`${topGapClass}mb-0.5 flex ${alignClass} ${placementClassName}`}>
+        <textarea
+          data-stage-comment-body="true"
+          ref={textareaRef}
           autoFocus
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -1631,32 +1714,38 @@ function BlockStageComment({
             commit();
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); commit(); }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
             if (e.key === "Escape") {
               e.preventDefault();
               skipBlurCommitRef.current = true;
               setDraft(value ?? "");
               setEditing(false);
+              onEditingChange?.(false);
             }
           }}
           placeholder="在此输入演员提示/补充舞台提示"
-          className="w-full max-w-xs border-b border-zinc-200 bg-transparent px-1 text-center font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+          rows={1}
+          className={`w-full ${compactLayout ? "min-h-[1.125rem] leading-tight" : "min-h-7 max-w-xs leading-7"} resize-none overflow-hidden border-b border-zinc-200 bg-transparent px-1 ${compactLayout ? "text-left" : "text-center"} font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400`}
         />
       </div>
     );
   }
 
   if (text) {
-    const label = `${stageDelimOpen}${text}${stageDelimClose}`;
+    const label = text
+      .split(/\r\n|\r|\n/)
+      .map((line) => `${stageDelimOpen}${line}${stageDelimClose}`)
+      .join("\n");
     return (
-      <div className={`${topGapClass}mb-0.5 flex justify-center`}>
+      <div ref={rootRef} style={combinedRootStyle} className={`${topGapClass}mb-0.5 flex ${alignClass} ${placementClassName}`}>
         {readOnly ? (
-          <span className="font-stage text-sm italic text-zinc-400">{label}</span>
+          <span data-stage-comment-body="true" className={stageCommentTextClass}>{label}</span>
         ) : (
           <button
+            data-stage-comment-body="true"
             type="button"
             onClick={openEditor}
-            className="font-stage text-sm italic text-zinc-400 transition-colors hover:text-zinc-600"
+            className={`${stageCommentTextClass} transition-colors hover:text-zinc-600`}
           >
             {label}
           </button>
@@ -1667,15 +1756,24 @@ function BlockStageComment({
 
   if (readOnly || !showAddButton) return null;
   return (
-    <div className="mb-1 flex justify-center">
+    <div
+      ref={rootRef}
+      style={combinedRootStyle}
+      className={`${zeroHeightAddButton ? "mb-0 h-0 overflow-visible" : "mb-1"} flex ${addButtonAlignClass} ${placementClassName}`}
+    >
       <button
         type="button"
         onClick={openEditor}
-        className="flex h-4 w-4 items-center justify-center rounded-full text-xs leading-none text-zinc-200 transition-colors hover:bg-zinc-100 hover:text-zinc-500"
-        title="添加舞台备注"
-        aria-label="添加舞台备注"
+        title="添加演员提示/补充舞台提示"
+        aria-label="添加演员提示/补充舞台提示"
+        style={addButtonStyle}
+        className={`relative flex h-4 w-4 items-center justify-center rounded-full text-zinc-200 transition-colors hover:bg-zinc-100 hover:text-zinc-500 ${
+          addButtonRevealOnHover ? "opacity-0 transition-opacity group-hover:opacity-100" : ""
+        }`}
       >
-        +
+        <span aria-hidden className="absolute left-1/2 top-1/2 h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-current" />
+        <span aria-hidden className="absolute left-1/2 top-1/2 h-px w-[5px] -translate-x-1/2 -translate-y-1/2 rounded bg-current" />
+        <span aria-hidden className="absolute left-1/2 top-1/2 h-[5px] w-px -translate-x-1/2 -translate-y-1/2 rounded bg-current" />
       </button>
     </div>
   );
@@ -2316,6 +2414,9 @@ function TagPicker({
 const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
 const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
 const COMPACT_STAGE_CONTENT_GAP_PX = 4;
+const COMPACT_IN_BLOCK_ADD_BUTTON_SIZE_PX = 16;
+const COMPACT_DEFAULT_LINE_HEIGHT_PX = 28;
+const COMPACT_CONTENT_OPTICAL_OFFSET_PX = -1;
 
 function ScriptBlock({
   block,
@@ -2372,6 +2473,7 @@ function ScriptBlock({
   readOnlyScene = null,
   stageDelimOpen = "（",
   stageDelimClose = "）",
+  textLayoutMode = "center",
   canEditText = false,
   canEditMetadata = false,
   canEditRehearsalMark = false,
@@ -2439,6 +2541,7 @@ function ScriptBlock({
   readOnlyScene?: Scene | null;
   stageDelimOpen?: string;
   stageDelimClose?: string;
+  textLayoutMode?: ScriptTextLayoutMode;
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
@@ -2455,10 +2558,13 @@ function ScriptBlock({
   const blockRootRef = useRef<HTMLDivElement | null>(null);
   const leftControlsRef = useRef<HTMLDivElement | null>(null);
   const blockTagsRef = useRef<HTMLDivElement | null>(null);
+  const compactCharacterColumnRef = useRef<HTMLDivElement | null>(null);
   const divRef = useRef<HTMLDivElement | null>(null);
   const localContentRef = useRef<string | null>(null);
   const localTypeRef = useRef<BlockType | null>(null);
   const localStageDelimRef = useRef<{ open: string | null; close: string | null }>({ open: null, close: null });
+  const latestBlockRef = useRef(block);
+  const latestStageDelimRef = useRef({ open: stageDelimOpen, close: stageDelimClose });
   const composingRef = useRef(false);
   const compactControlLayoutActiveRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
@@ -2466,6 +2572,11 @@ function ScriptBlock({
   const [scenePickerOpen, setScenePickerOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTypeAction, setConfirmTypeAction] = useState<"type" | "lyric" | null>(null);
+  const [stageCommentEditing, setStageCommentEditing] = useState(false);
+  const [stageCommentOverflowBelow, setStageCommentOverflowBelow] = useState(0);
+  const [compactCharacterColumnHeight, setCompactCharacterColumnHeight] = useState(0);
+  const [compactCharacterLineHeight, setCompactCharacterLineHeight] = useState(COMPACT_DEFAULT_LINE_HEIGHT_PX);
+  const [compactContentLineHeight, setCompactContentLineHeight] = useState(COMPACT_DEFAULT_LINE_HEIGHT_PX);
   const [unfoldForCompactControls, setUnfoldForCompactControls] = useState(false);
   const [compactControlLayout, setCompactControlLayout] = useState<{
     deleteLeft: number | null;
@@ -2485,20 +2596,35 @@ function ScriptBlock({
     setConfirmDelete(true);
   }, [deleteConfirmToken]);
 
+  latestBlockRef.current = block;
+  latestStageDelimRef.current = { open: stageDelimOpen, close: stageDelimClose };
+
   const refCallback = useCallback(
     (el: HTMLDivElement | null) => {
       divRef.current = el;
+      if (el) {
+        const currentBlock = latestBlockRef.current;
+        const currentDelims = latestStageDelimRef.current;
+        el.innerHTML = mdToHtml(currentBlock.content);
+        localContentRef.current = currentBlock.content;
+        localTypeRef.current = currentBlock.type;
+        if (currentBlock.type !== "stage") applyInlineStageStyling(el, currentDelims.open, currentDelims.close);
+        localStageDelimRef.current = currentDelims;
+      }
       onRegisterRef(block.id, el);
     },
     [block.id, onRegisterRef]
   );
 
   const isStage = block.type === "stage";
+  const isCompactTextLayout = textLayoutMode === "compact" && !isStage;
   const hasBlockTags = !isStage && showBlockTags && !!tagGroups?.length;
   const isEditingLocked = isSelected || confirmDelete || isDeleteConfirmHighlighted;
   const hiddenCharacterCollapsed = !isStage && hideCharSelector && !isFocused && !isSelected;
   const effectiveHideCharSelector = hideCharSelector && !(hiddenCharacterCollapsed && unfoldForCompactControls);
-  const shouldMeasureCompactControls = canEditText && (isStage || hiddenCharacterCollapsed && !unfoldForCompactControls);
+  const shouldMeasureCompactControls = canEditText && (
+    isStage || (isCompactTextLayout || hiddenCharacterCollapsed) && !unfoldForCompactControls
+  );
   const isCompactHiddenCharacterLayout = !!(
     compactControlLayout?.compact && compactControlLayout.mode === "hidden-character"
   );
@@ -2729,22 +2855,71 @@ function ScriptBlock({
     : undefined;
   const hasReadOnlySceneLabel = !canEditMetadata && !!readOnlyScene;
   const hasStageComment = !!block.stageComment?.trim();
-  const showStageCommentAddButton = isFocused || isSelected || (hideCharSelector && !effectiveHideCharSelector);
+  const showCompactStageCommentRow = hasStageComment || stageCommentEditing;
+  const compactCharacterLastLineCenter = compactCharacterColumnHeight - compactCharacterLineHeight / 2;
+  const compactStageCommentAddTop = Math.max(
+    0,
+    Math.round(compactCharacterLastLineCenter - COMPACT_IN_BLOCK_ADD_BUTTON_SIZE_PX / 2)
+  );
+  const compactContentFirstLineTop = Math.max(
+    0,
+    Math.round(compactCharacterLastLineCenter - compactContentLineHeight / 2 + COMPACT_CONTENT_OPTICAL_OFFSET_PX)
+  );
+  const showStageCommentAddButton = !hasStageComment && (
+    isCompactTextLayout ||
+    (!isCompactTextLayout && !effectiveHideCharSelector)
+  );
   const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
     : undefined;
   const rightActionRowClass = `absolute ${scenePickerOpen ? "z-40" : "z-20"} flex items-center transition-opacity ${
-    isStage || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
+    isStage || isCompactTextLayout || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
   } ${hasReadOnlySceneLabel ? "right-8" : "right-2"}`;
   const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
-    isStage || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
+    isStage || isCompactTextLayout || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
   }`;
   const lineNumberClass = isFocused
     ? "text-zinc-600"
     : readOnlyRehearsalMode
       ? "text-zinc-300 group-hover:text-zinc-500"
       : "text-zinc-400 group-hover:text-zinc-600";
+
+  useLayoutEffect(() => {
+    if (!isCompactTextLayout) {
+      setCompactCharacterColumnHeight(0);
+      setCompactCharacterLineHeight(COMPACT_DEFAULT_LINE_HEIGHT_PX);
+      setCompactContentLineHeight(COMPACT_DEFAULT_LINE_HEIGHT_PX);
+      return;
+    }
+    const el = compactCharacterColumnRef.current;
+    if (!el) return;
+    const measure = () => {
+      const height = el.getBoundingClientRect().height;
+      setCompactCharacterColumnHeight(height);
+      const characterLabelEl = el.querySelector<HTMLElement>("[data-character-label='true']");
+      if (characterLabelEl) {
+        const lineHeight = parseFloat(window.getComputedStyle(characterLabelEl).lineHeight);
+        if (Number.isFinite(lineHeight)) setCompactCharacterLineHeight(lineHeight);
+      }
+      const contentEl = divRef.current;
+      if (contentEl) {
+        const lineHeight = parseFloat(window.getComputedStyle(contentEl).lineHeight);
+        if (Number.isFinite(lineHeight)) setCompactContentLineHeight(lineHeight);
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isCompactTextLayout, showCharacterSelector, block.characterIds, block.characterAnnotations]);
+
+  useEffect(() => {
+    if (!showCompactStageCommentRow && stageCommentOverflowBelow !== 0) {
+      setStageCommentOverflowBelow(0);
+    }
+  }, [showCompactStageCommentRow, stageCommentOverflowBelow]);
+
   return (
     <div
       ref={blockRootRef}
@@ -2990,34 +3165,142 @@ function ScriptBlock({
         </span>
       )}
 
-      {!isStage && showCharacterSelector && (
-        <BlockCharacterSelector
-          block={block}
-          characters={characters}
-          onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
-          onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
-          onForceShowCharacterNameChange={(force) => onUpdate({ forceShowCharacterName: force })}
-          onEditingChange={setCharSelectorOpen}
-          editRequestToken={charEditToken}
-          onArrowUp={onArrowUpFromChar}
-          onArrowDown={onArrowDownFromChar}
-          readOnly={!canEditText || isEditingLocked}
-        />
-      )}
+      {isCompactTextLayout ? (
+        <div className="grid grid-cols-[7.5rem_1rem_minmax(0,1fr)] items-start gap-x-2 text-left">
+          <div ref={compactCharacterColumnRef} className="col-start-1 row-start-1 min-w-0 pt-0.5">
+            {(showCharacterSelector || hiddenCharacterCollapsed) && (
+              <div className={hiddenCharacterCollapsed && !showCharacterSelector ? "opacity-0 transition-opacity group-hover:opacity-100" : undefined}>
+                <BlockCharacterSelector
+                  block={block}
+                  characters={characters}
+                  onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
+                  onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
+                  onForceShowCharacterNameChange={(force) => onUpdate({ forceShowCharacterName: force })}
+                  onEditingChange={setCharSelectorOpen}
+                  editRequestToken={charEditToken}
+                  onArrowUp={onArrowUpFromChar}
+                  onArrowDown={onArrowDownFromChar}
+                  readOnly={!canEditText || isEditingLocked}
+                  layoutMode={textLayoutMode}
+                />
+              </div>
+            )}
+            {!showCharacterSelector && !hiddenCharacterCollapsed && (
+              <span aria-hidden className="block invisible text-sm font-bold leading-7 tracking-[0.12em]">
+                无角色
+              </span>
+            )}
+          </div>
+          {block.characterIds.length > 0 && (hasStageComment || isFocused || isSelected || isCompactTextLayout) && (
+            <BlockStageComment
+              value={block.stageComment}
+              onChange={(stageComment) => onUpdate({ stageComment })}
+              showAddButton={showStageCommentAddButton}
+              readOnly={!canEditText || isEditingLocked}
+              stageDelimOpen={stageDelimOpen}
+              stageDelimClose={stageDelimClose}
+              layoutMode={textLayoutMode}
+              placementClassName={showCompactStageCommentRow ? "col-start-3 row-start-1 self-start pt-[0.0625rem]" : "col-start-2 row-start-1 self-start justify-self-center"}
+              placementStyle={!showCompactStageCommentRow ? { marginTop: compactStageCommentAddTop } : undefined}
+              onEditingChange={setStageCommentEditing}
+              addButtonCenter
+              addButtonRevealOnHover
+              alignFirstLineToEnd={showCompactStageCommentRow}
+              onOverflowBelowChange={setStageCommentOverflowBelow}
+              lineAnchorCenter={compactCharacterColumnHeight > 0 ? compactCharacterLastLineCenter : undefined}
+              lineAnchorRowHeight={compactCharacterColumnHeight || undefined}
+            />
+          )}
+          <div
+            className={`col-start-3 min-w-0 ${showCompactStageCommentRow ? "row-start-2" : "row-start-1"}`}
+            style={showCompactStageCommentRow
+              ? stageCommentOverflowBelow > 0 ? { marginTop: stageCommentOverflowBelow } : undefined
+              : compactContentFirstLineTop > 0 ? { marginTop: compactContentFirstLineTop } : undefined}
+          >
+            <div
+              ref={refCallback}
+              contentEditable={canEditText && !isScriptDragging && !isEditingLocked}
+              suppressContentEditableWarning
+              tabIndex={isEditingLocked ? -1 : undefined}
+              onInput={handleInput}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              onKeyDown={handleKeyDown}
+              onFocus={onFocus}
+              onPaste={(e) => {
+                if (!canEditText) {
+                  e.preventDefault();
+                  return;
+                }
+                e.preventDefault();
+                const html = e.clipboardData.getData("text/html");
+                const plain = e.clipboardData.getData("text/plain");
+                const sel = window.getSelection();
+                if (!sel || !sel.rangeCount) return;
+                sel.deleteFromDocument();
+                const range = sel.getRangeAt(0);
+                if (html) {
+                  const sanitized = sanitizePasteHtml(html);
+                  const tmp = document.createElement("div");
+                  tmp.innerHTML = sanitized;
+                  const frag = document.createDocumentFragment();
+                  while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+                  const last = frag.lastChild;
+                  range.insertNode(frag);
+                  if (last) {
+                    const r = document.createRange();
+                    r.setStartAfter(last);
+                    r.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(r);
+                  }
+                } else {
+                  const node = document.createTextNode(plain);
+                  range.insertNode(node);
+                  sel.collapseToEnd();
+                }
+                if (block.type !== "stage") applyInlineStageStyling(divRef.current!, stageDelimOpen, stageDelimClose);
+                syncContent();
+              }}
+              data-placeholder="在此输入台词…"
+              className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words text-left ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
+                block.lyric ? "font-lyric font-bold text-zinc-700 uppercase" : "font-script text-zinc-700"
+              }`}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {!isStage && showCharacterSelector && (
+            <BlockCharacterSelector
+              block={block}
+              characters={characters}
+              onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
+              onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
+              onForceShowCharacterNameChange={(force) => onUpdate({ forceShowCharacterName: force })}
+              onEditingChange={setCharSelectorOpen}
+              editRequestToken={charEditToken}
+              onArrowUp={onArrowUpFromChar}
+              onArrowDown={onArrowDownFromChar}
+              readOnly={!canEditText || isEditingLocked}
+            />
+          )}
 
-      {!isStage && block.characterIds.length > 0 && (hasStageComment || !effectiveHideCharSelector || isFocused || isSelected) && (
-        <BlockStageComment
-          value={block.stageComment}
-          onChange={(stageComment) => onUpdate({ stageComment })}
-          showAddButton={showStageCommentAddButton}
-          topGap={readOnlyRehearsalMode && hideCharSelector ? "leading" : showCharacterSelector ? "compact" : undefined}
-          readOnly={!canEditText || isEditingLocked}
-          stageDelimOpen={stageDelimOpen}
-          stageDelimClose={stageDelimClose}
-        />
-      )}
+          {!isStage && block.characterIds.length > 0 && (hasStageComment || !effectiveHideCharSelector || isFocused || isSelected) && (
+            <BlockStageComment
+              value={block.stageComment}
+              onChange={(stageComment) => onUpdate({ stageComment })}
+              showAddButton={showStageCommentAddButton}
+              topGap={readOnlyRehearsalMode && hideCharSelector ? "leading" : showCharacterSelector ? "compact" : undefined}
+              readOnly={!canEditText || isEditingLocked}
+              stageDelimOpen={stageDelimOpen}
+              stageDelimClose={stageDelimClose}
+              addButtonRevealOnHover
+              zeroHeightAddButton
+            />
+          )}
 
-      <div
+          <div
         ref={refCallback}
         contentEditable={canEditText && !isScriptDragging && !isEditingLocked}
         suppressContentEditableWarning
@@ -3064,12 +3347,14 @@ function ScriptBlock({
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
         style={compactContentStyle}
-        className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
+        className={`w-full min-h-[1.75rem] ${isStage ? "pl-1" : ""} outline-none text-base leading-7 break-words ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-left" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
           "font-script text-zinc-700 text-center"
         }`}
-      />
+          />
+        </>
+      )}
 
       {hasBlockTags && (
         <div ref={blockTagsRef} className="relative mt-0.5 pb-1">
@@ -3470,7 +3755,7 @@ export default function ScriptEditor({
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
 
   const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
-    if (isLockedMode) return;
+    if (!baseCanEditMetadata) return;
     const next = { ...scriptConfig, ...patch };
     setScriptConfig(next);
     await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config`, {
@@ -3478,7 +3763,7 @@ export default function ScriptEditor({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(next),
     });
-  }, [scriptConfig, effectiveScriptId, isLockedMode]);
+  }, [baseCanEditMetadata, scriptConfig, effectiveScriptId]);
 
   // ── Page map (computed client-side, deterministic) ──────────────────────────
   const pageMap = useMemo(() => computePageMap(blocks, scriptConfig.pageLayout), [blocks, scriptConfig.pageLayout]);
@@ -6004,6 +6289,28 @@ export default function ScriptEditor({
                     display.rehearsalBlockScenes && isLockedMode ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
                   }`}>✓</span>
                 </button>
+                <div className="my-1 border-t border-zinc-50" />
+                <button
+                  onClick={() => {
+                    if (!baseCanEditMetadata) return;
+                    saveScriptConfig({
+                      textLayoutMode: scriptConfig.textLayoutMode === "compact" ? "center" : "compact",
+                    });
+                  }}
+                  disabled={!baseCanEditMetadata}
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                    baseCanEditMetadata ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
+                  }`}
+                  title={baseCanEditMetadata ? "保存为所有人共用的剧本排版模式" : "无权修改剧本排版模式"}
+                >
+                  <span>紧凑排版</span>
+                  <span className="flex items-center">
+                    <ModeSwitch
+                      active={scriptConfig.textLayoutMode === "compact"}
+                      activeClassName="bg-[#637ca1]" /* my signature color (darker version). ^v^ -- QPT */
+                    />
+                  </span>
+                </button>
                 {baseCanEdit && (
                   <>
                     <div className="my-1 border-t border-zinc-50" />
@@ -6587,6 +6894,7 @@ export default function ScriptEditor({
                   readOnlyScene={isLockedMode && display.rehearsalBlockScenes && block.sceneId ? sceneById.get(block.sceneId) ?? null : null}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
+                  textLayoutMode={scriptConfig.textLayoutMode}
                   characters={characters}
                   scenes={scenes}
                   availableScenes={availableScenes}
