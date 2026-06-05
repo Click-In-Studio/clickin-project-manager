@@ -79,7 +79,9 @@ body {
 }
 
 /* Inline stage directions within dialogue blocks */
-.stage-inline {
+.stage-inline,
+span[data-stage-inline] {
+  font-family: var(--font-stage);
   font-style: italic;
   color: #a1a1aa;
 }
