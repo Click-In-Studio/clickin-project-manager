@@ -1889,6 +1889,14 @@ type PrintPageData = {
   sceneLabel: string;
   pageNum: number;
 };
+type PrintHeaderMode = "all-left" | "all-right" | "first-right" | "first-left";
+const PRINT_HEADER_MODES: PrintHeaderMode[] = ["all-left", "all-right", "first-right", "first-left"];
+const PRINT_HEADER_MODE_LABELS: Record<PrintHeaderMode, string> = {
+  "all-left": "页眉统一靠左",
+  "all-right": "页眉统一靠右",
+  "first-right": "首页页眉靠右",
+  "first-left": "首页页眉靠左",
+};
 
 function computePrintPages(
   blocks: Block[],
@@ -1969,12 +1977,14 @@ function computePrintPages(
 function PrintPage({
   cfg,
   header,
+  headerAlign = "left",
   pageNum,
   isToc,
   children,
 }: {
   cfg: PageConfig;
   header: string;
+  headerAlign?: "left" | "right";
   pageNum: number | null;
   isToc?: boolean;
   children: React.ReactNode;
@@ -1986,7 +1996,9 @@ function PrintPage({
     >
       {/* Header band */}
       <div
-        className="absolute flex items-center border-b border-zinc-100"
+        className={`absolute flex items-center border-b border-zinc-100 ${
+          headerAlign === "right" ? "justify-end" : "justify-start"
+        }`}
         style={{
           top: cfg.marginTop - cfg.headerHeight,
           left: cfg.marginX,
@@ -2028,6 +2040,44 @@ function PrintPage({
           <span className="text-xs text-zinc-500">— {pageNum} —</span>
         )}
       </div>
+    </div>
+  );
+}
+
+function PrintHeaderModeMenu({
+  headerMode,
+  onHeaderModeChange,
+}: {
+  headerMode: PrintHeaderMode;
+  onHeaderModeChange: (mode: PrintHeaderMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative" onMouseLeave={() => setOpen(false)}>
+      <button
+        onClick={() => setOpen((value) => !value)}
+        className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+        title="选择页眉位置"
+      >
+        <span>{PRINT_HEADER_MODE_LABELS[headerMode]}</span>
+        <Chevron />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 w-36 rounded-xl border border-zinc-100 bg-white py-1 shadow-md">
+          {PRINT_HEADER_MODES.map((mode) => (
+            <button
+              key={mode}
+              onClick={() => { onHeaderModeChange(mode); setOpen(false); }}
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${
+                headerMode === mode ? "font-medium text-zinc-900" : "text-zinc-500"
+              }`}
+            >
+              <span>{PRINT_HEADER_MODE_LABELS[mode]}</span>
+              {headerMode === mode && <span className="text-[10px] text-zinc-900">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2206,6 +2256,7 @@ function PrintPreview({
   const forceLoadingNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layoutSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
+  const [headerMode, setHeaderMode] = useState<PrintHeaderMode>("first-right");
   const requestLayoutRemeasure = useCallback(() => {
     setData(null);
     setLayoutMeasureTick((tick) => tick + 1);
@@ -2258,6 +2309,13 @@ function PrintPreview({
       layoutSwitchTimerRef.current = null;
       onTextLayoutModeChange(nextLayoutMode);
     }, 0);
+  };
+
+  const getHeaderAlign = (pageNum: number): "left" | "right" => {
+    if (headerMode === "all-left") return "left";
+    if (headerMode === "all-right") return "right";
+    const firstPageRight = headerMode === "first-right";
+    return pageNum % 2 === (firstPageRight ? 1 : 0) ? "right" : "left";
   };
 
   // Scenes in document order for TOC
@@ -2355,6 +2413,7 @@ function PrintPreview({
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 print:hidden">
         <span className="text-sm font-semibold text-zinc-700">打印预览</span>
         <div className="flex items-center gap-3">
+          <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
           <button
             onClick={handleTextLayoutModeToggle}
             disabled={!canEditTextLayout || !printPreviewReady}
@@ -2474,7 +2533,13 @@ function PrintPreview({
               hasNextBlock = true;
             }
             return (
-              <PrintPage key={idx} cfg={cfg} header={page.sceneLabel} pageNum={page.pageNum}>
+              <PrintPage
+                key={idx}
+                cfg={cfg}
+                header={page.sceneLabel}
+                headerAlign={getHeaderAlign(page.pageNum)}
+                pageNum={page.pageNum}
+              >
                 {page.items.map((item, iIdx) =>
                   item.kind === "sceneHeader"
                     ? renderSceneHeader(item.scene, `sh-${item.scene.id}-${iIdx}`)
