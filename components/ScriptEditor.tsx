@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script-types";
@@ -1879,6 +1880,9 @@ type PrintItem =
 const PRINT_CHAR_NAME_HEIGHT = 22;
 const PRINT_CHARACTER_GAP_HEIGHT = 10;
 const PRINT_WRAPPER_PADDING_HEIGHT = 8;
+const PRINT_TEXT_CLASS = "w-full break-words text-sm leading-7";
+const PRINT_STAGE_COMMENT_CLASS = "font-stage text-sm italic leading-7 text-zinc-400 whitespace-pre-wrap";
+const PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX: number = 1;
 
 type PrintPageData = {
   items: PrintItem[];
@@ -2019,12 +2023,152 @@ function PrintPage({
   );
 }
 
+function getElementLineBounds(el: HTMLElement): DOMRect[] {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  range.detach();
+
+  if (rects.length === 0) {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 ? [rect] : [];
+  }
+
+  const lines: DOMRect[] = [];
+  for (const rect of rects) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(rect.top - last.top) < 2) {
+      const left = Math.min(last.left, rect.left);
+      const top = Math.min(last.top, rect.top);
+      const right = Math.max(last.right, rect.right);
+      const bottom = Math.max(last.bottom, rect.bottom);
+      lines[lines.length - 1] = new DOMRect(left, top, right - left, bottom - top);
+    } else {
+      lines.push(new DOMRect(rect.left, rect.top, rect.width, rect.height));
+    }
+  }
+  return lines;
+}
+
+function CompactPrintBlock({
+  block,
+  blockPaddingClass,
+  characterLabel,
+  showCharacterLabel,
+  stageCommentText,
+  leadingCharacterGap,
+  stageDelimOpen,
+  stageDelimClose,
+  onLayoutChange,
+}: {
+  block: Block;
+  blockPaddingClass: string;
+  characterLabel: string;
+  showCharacterLabel: boolean;
+  stageCommentText: string;
+  leadingCharacterGap: boolean;
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  onLayoutChange?: () => void;
+}) {
+  const characterColumnRef = useRef<HTMLDivElement | null>(null);
+  const firstLineRef = useRef<HTMLDivElement | null>(null);
+  const lastNotifiedOffsetRef = useRef(0);
+  const [firstLineOffset, setFirstLineOffset] = useState(0);
+
+  useLayoutEffect(() => {
+    const characterEl = characterColumnRef.current;
+    const firstLineEl = firstLineRef.current;
+    if (!characterEl || !firstLineEl || !showCharacterLabel) {
+      setFirstLineOffset((prev) => {
+        if (prev === 0) return prev;
+        return 0;
+      });
+      return;
+    }
+
+    const characterLines = getElementLineBounds(characterEl);
+    const firstLines = getElementLineBounds(firstLineEl);
+    const targetLine = characterLines[characterLines.length - 1];
+    const currentLine = firstLines[0];
+    if (!targetLine || !currentLine) return;
+
+    const targetCenter = targetLine.top + targetLine.height / 2 - PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX;
+    const currentCenter = currentLine.top + currentLine.height / 2;
+    const nextOffset = Math.max(
+      0,
+      Math.round(firstLineOffset + targetCenter - currentCenter)
+    );
+
+    setFirstLineOffset((prev) => {
+      if (Math.abs(prev - nextOffset) < 1) return prev;
+      return nextOffset;
+    });
+  }, [block.id, characterLabel, showCharacterLabel, stageCommentText, firstLineOffset]);
+
+  useLayoutEffect(() => {
+    if (!onLayoutChange) return;
+    if (lastNotifiedOffsetRef.current === firstLineOffset) return;
+    lastNotifiedOffsetRef.current = firstLineOffset;
+    onLayoutChange();
+  }, [firstLineOffset, onLayoutChange]);
+
+  const firstLineStyle: React.CSSProperties | undefined = firstLineOffset > 0
+    ? { marginTop: firstLineOffset }
+    : undefined;
+  const characterLabelStyle: React.CSSProperties | undefined =
+    PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX !== 0
+      ? { transform: `translateY(${PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX}px)` }
+      : undefined;
+
+  return (
+    <div key={block.id} className={`w-full ${blockPaddingClass}`}>
+      {leadingCharacterGap && <div className="h-2.5" aria-hidden="true" />}
+      <div className="grid grid-cols-[7.5rem_1rem_minmax(0,1fr)] items-start gap-x-2 text-left">
+        <div className="col-start-1 row-start-1 min-w-0 text-right">
+          {showCharacterLabel && (
+            <div
+              ref={characterColumnRef}
+              style={characterLabelStyle}
+              className="max-w-full break-words text-sm font-bold leading-7 tracking-[0.12em] text-zinc-800"
+            >
+              {characterLabel}
+            </div>
+          )}
+        </div>
+        {stageCommentText && (
+          <div
+            ref={firstLineRef}
+            style={firstLineStyle}
+            className={`col-start-3 row-start-1 self-start ${PRINT_STAGE_COMMENT_CLASS}`}
+          >
+            {stageCommentText}
+          </div>
+        )}
+        <div
+          ref={stageCommentText ? undefined : firstLineRef}
+          style={stageCommentText ? undefined : firstLineStyle}
+          className={`col-start-3 min-w-0 ${stageCommentText ? "row-start-2" : "row-start-1"} ${PRINT_TEXT_CLASS} ${
+            block.lyric
+              ? "font-lyric font-bold uppercase text-zinc-800"
+              : "font-script text-zinc-800"
+          }`}
+          dangerouslySetInnerHTML={{ __html: mdToHtml(block.content, stageDelimOpen, stageDelimClose) || "　" }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PrintPreview({
   blocks,
   characters,
   scenes,
   stageDelimOpen,
   stageDelimClose,
+  textLayoutMode,
+  canEditTextLayout,
+  onTextLayoutModeChange,
   onClose,
 }: {
   blocks: Block[];
@@ -2032,27 +2176,80 @@ function PrintPreview({
   scenes: Scene[];
   stageDelimOpen: string;
   stageDelimClose: string;
+  textLayoutMode: ScriptTextLayoutMode;
+  canEditTextLayout: boolean;
+  onTextLayoutModeChange: (mode: ScriptTextLayoutMode) => void;
   onClose: () => void;
 }) {
   const cfg = DEFAULT_PAGE_CONFIG;
   const contentW = cfg.width - cfg.marginX * 2;
   const contentH = cfg.height - cfg.marginTop - cfg.marginBottom;
+  const compactLayout = textLayoutMode === "compact";
 
   const measureRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<{
     pages: PrintPageData[];
     scenePageNums: Record<string, number>;
+    layoutMode: ScriptTextLayoutMode;
+    measureTick: number;
   } | null>(null);
+  const [forceLoadingNotice, setForceLoadingNotice] = useState(false);
+  const forceLoadingNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layoutSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
+  const requestLayoutRemeasure = useCallback(() => {
+    setData(null);
+    setLayoutMeasureTick((tick) => tick + 1);
+  }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const el = measureRef.current;
     if (!el) return;
     const heights: Record<string, number> = {};
     el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
       if (node.dataset.mid) heights[node.dataset.mid] = node.offsetHeight;
     });
-    setData(computePrintPages(blocks, scenes, heights, contentH));
-  }, [blocks, scenes, contentH]);
+    setData({
+      ...computePrintPages(blocks, scenes, heights, contentH),
+      layoutMode: textLayoutMode,
+      measureTick: layoutMeasureTick,
+    });
+  }, [blocks, scenes, contentH, textLayoutMode, layoutMeasureTick]);
+
+  const printPreviewReady = !!data &&
+    data.layoutMode === textLayoutMode &&
+    data.measureTick === layoutMeasureTick;
+  const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
+
+  useEffect(() => {
+    if (!forceLoadingNotice || !printPreviewReady) return;
+    if (forceLoadingNoticeTimerRef.current) clearTimeout(forceLoadingNoticeTimerRef.current);
+    forceLoadingNoticeTimerRef.current = setTimeout(() => {
+      setForceLoadingNotice(false);
+      forceLoadingNoticeTimerRef.current = null;
+    }, 250);
+  }, [forceLoadingNotice, printPreviewReady]);
+
+  useEffect(() => {
+    return () => {
+      if (forceLoadingNoticeTimerRef.current) clearTimeout(forceLoadingNoticeTimerRef.current);
+      if (layoutSwitchTimerRef.current) clearTimeout(layoutSwitchTimerRef.current);
+    };
+  }, []);
+
+  const handleTextLayoutModeToggle = () => {
+    if (!canEditTextLayout || !printPreviewReady) return;
+    const nextLayoutMode = compactLayout ? "center" : "compact";
+    flushSync(() => {
+      setForceLoadingNotice(true);
+      setData(null);
+    });
+    if (layoutSwitchTimerRef.current) clearTimeout(layoutSwitchTimerRef.current);
+    layoutSwitchTimerRef.current = setTimeout(() => {
+      layoutSwitchTimerRef.current = null;
+      onTextLayoutModeChange(nextLayoutMode);
+    }, 0);
+  };
 
   // Scenes in document order for TOC
   const tocScenes: Scene[] = [];
@@ -2080,27 +2277,57 @@ function PrintPreview({
     leadingCharacterGap = false,
     continuesToHiddenCharacter = false,
     endsHiddenCharacterRun = false,
+    measureLayout = false,
   ) => {
     const isStage = block.type === "stage";
     const sel = characters.filter((c) => block.characterIds.includes(c.id));
-    const content = !isStage && sel.length > 0 && block.stageComment?.trim()
-      ? `${block.stageComment.trim().split(/\r\n|\r|\n/).map((line) => `${stageDelimOpen}${line}${stageDelimClose}`).join("\n")}\n${block.content}`
-      : block.content;
     const blockPaddingClass = isStage
       ? "py-0"
       : hideChar
         ? endsHiddenCharacterRun ? "pt-0 pb-1" : "py-0"
         : continuesToHiddenCharacter ? "pt-1 pb-0" : "py-1";
+    const characterLabel = sel.map((c) => {
+      const ann = block.characterAnnotations[c.id];
+      return ann ? `${c.name}（${ann}）` : c.name;
+    }).join("、");
+
+    if (compactLayout && !isStage) {
+      const stageCommentText = sel.length > 0 && block.stageComment?.trim()
+        ? block.stageComment.trim()
+            .split(/\r\n|\r|\n/)
+            .map((line) => `${stageDelimOpen}${line}${stageDelimClose}`)
+            .join("\n")
+        : "";
+      return (
+        <CompactPrintBlock
+          key={block.id}
+          block={block}
+          blockPaddingClass={blockPaddingClass}
+          characterLabel={characterLabel}
+          showCharacterLabel={!hideChar && sel.length > 0}
+          stageCommentText={stageCommentText}
+          leadingCharacterGap={leadingCharacterGap}
+          stageDelimOpen={stageDelimOpen}
+          stageDelimClose={stageDelimClose}
+          onLayoutChange={measureLayout ? requestLayoutRemeasure : undefined}
+        />
+      );
+    }
+
+    const content = !isStage && sel.length > 0 && block.stageComment?.trim()
+      ? `${block.stageComment.trim().split(/\r\n|\r|\n/).map((line) => `${stageDelimOpen}${line}${stageDelimClose}`).join("\n")}\n${block.content}`
+      : block.content;
+
     return (
       <div key={block.id} className={`w-full ${blockPaddingClass}`}>
         {leadingCharacterGap && <div className="h-2.5" aria-hidden="true" />}
         {!isStage && !hideChar && sel.length > 0 && (
           <div className="mb-0.5 w-full text-center text-sm font-bold tracking-[0.12em] text-zinc-800">
-            {sel.map((c) => { const ann = block.characterAnnotations[c.id]; return ann ? `${c.name}（${ann}）` : c.name; }).join("、")}
+            {characterLabel}
           </div>
         )}
         <div
-          className={`w-full break-words text-sm leading-7 ${
+          className={`${PRINT_TEXT_CLASS} ${
             isStage
               ? "font-stage text-left italic text-zinc-500"
               : block.lyric
@@ -2120,6 +2347,28 @@ function PrintPreview({
         <span className="text-sm font-semibold text-zinc-700">打印预览</span>
         <div className="flex items-center gap-3">
           <button
+            onClick={handleTextLayoutModeToggle}
+            disabled={!canEditTextLayout || !printPreviewReady}
+            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
+              canEditTextLayout && printPreviewReady
+                ? "text-zinc-600 hover:bg-zinc-100"
+                : "cursor-not-allowed text-zinc-300"
+            }`}
+            title={
+              !canEditTextLayout
+                ? "无权修改剧本排版模式"
+                : printPreviewReady
+                  ? "保存为所有人共用的剧本排版模式"
+                  : "打印预览加载中"
+            }
+          >
+            <span>紧凑排版</span>
+            <ModeSwitch
+              active={compactLayout}
+              activeClassName="bg-[#637ca1]"
+            />
+          </button>
+          <button
             onClick={() => window.print()}
             className="rounded-md bg-zinc-800 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
           >
@@ -2135,7 +2384,14 @@ function PrintPreview({
       </div>
 
       {/* Scrollable page stack */}
-      <div className="flex-1 overflow-auto print:overflow-visible print:h-auto">
+      <div className="relative flex-1 overflow-auto print:overflow-visible print:h-auto">
+        {showLoadingNotice && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 top-14 z-[60] flex items-center justify-center bg-zinc-300 print:hidden">
+            <span className="rounded-md border border-zinc-200 bg-white/95 px-4 py-2 text-sm font-medium text-zinc-500 shadow-lg">
+              加载中...
+            </span>
+          </div>
+        )}
         <div className="mx-auto flex flex-col items-center gap-6 py-8 print:gap-0 print:py-0">
           {/* Hidden measurement container — off-screen, rendered at print content width */}
           <div
@@ -2163,7 +2419,7 @@ function PrintPreview({
                       </div>
                     ) : null;
                   })()}
-                  <div data-mid={`b-${block.id}`}>{renderBlock(block, hideChar)}</div>
+                  <div data-mid={`b-${block.id}`}>{renderBlock(block, hideChar, false, false, false, true)}</div>
                 </div>
               );
             })}
@@ -2219,6 +2475,7 @@ function PrintPreview({
                         item.leadingCharacterGap,
                         continuesToHiddenCharacter.has(item.block.id),
                         endsHiddenCharacterRun.has(item.block.id),
+                        false,
                       )
                 )}
               </PrintPage>
@@ -6050,6 +6307,9 @@ export default function ScriptEditor({
         scenes={scenes}
         stageDelimOpen={scriptConfig.stageDelimOpen}
         stageDelimClose={scriptConfig.stageDelimClose}
+        textLayoutMode={scriptConfig.textLayoutMode}
+        canEditTextLayout={baseCanEditMetadata}
+        onTextLayoutModeChange={(mode) => saveScriptConfig({ textLayoutMode: mode })}
         onClose={() => setPrintPreview(false)}
       />
     );
