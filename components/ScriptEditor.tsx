@@ -31,6 +31,8 @@ let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
 const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
 const TOOLBAR_FOLD_HYSTERESIS_PX = 16;
+const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
+const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
 
 /**
  * Computes the `lyric` flag a block should have based on its tags and the
@@ -1603,6 +1605,7 @@ function BlockStageComment({
   lineAnchorCenter,
   lineAnchorRowHeight,
   zeroHeightAddButton = false,
+  getEditorWidth,
 }: {
   value?: string | null;
   onChange: (value: string | null) => void;
@@ -1622,6 +1625,7 @@ function BlockStageComment({
   lineAnchorCenter?: number;
   lineAnchorRowHeight?: number;
   zeroHeightAddButton?: boolean;
+  getEditorWidth?: () => number | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
@@ -1630,6 +1634,7 @@ function BlockStageComment({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const [lineAnchorShift, setLineAnchorShift] = useState(0);
+  const [editorWidth, setEditorWidth] = useState<number | null>(null);
   const text = value?.trim() ?? "";
 
   const commit = () => {
@@ -1642,6 +1647,7 @@ function BlockStageComment({
   const openEditor = () => {
     skipBlurCommitRef.current = false;
     setDraft(value ?? "");
+    setEditorWidth(getEditorWidth?.() ?? null);
     setEditing(true);
     onEditingChange?.(true);
   };
@@ -1746,7 +1752,8 @@ function BlockStageComment({
           }}
           placeholder="在此输入演员提示/补充舞台提示"
           rows={1}
-          className={`w-full ${compactLayout ? "min-h-[1.125rem] leading-tight" : "min-h-7 max-w-xs leading-7"} resize-none overflow-hidden border-b border-zinc-200 bg-transparent px-1 ${compactLayout ? "text-left" : "text-center"} font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400`}
+          style={editorWidth ? { width: editorWidth } : undefined}
+          className={`${editorWidth ? "shrink-0" : "w-full max-w-xs"} ${compactLayout ? "min-h-[1.125rem] leading-tight" : "min-h-7 leading-7"} resize-none overflow-hidden border-b border-zinc-200 bg-transparent px-1 ${compactLayout ? "text-left" : "text-center"} font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400`}
         />
       </div>
     );
@@ -2907,6 +2914,21 @@ function ScriptBlock({
       ? "text-zinc-300 group-hover:text-zinc-500"
       : "text-zinc-400 group-hover:text-zinc-600";
 
+  const measureStageCommentEditorWidth = useCallback(() => {
+    const blockEl = blockRootRef.current;
+    if (!blockEl) return null;
+    const blockStyle = window.getComputedStyle(blockEl);
+    const rootFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+    const remPx = Number.isFinite(rootFontSize) ? rootFontSize : 16;
+    const blockContentWidth =
+      blockEl.getBoundingClientRect().width -
+      parseFloat(blockStyle.paddingLeft) -
+      parseFloat(blockStyle.paddingRight);
+    const compactContentWidth = blockContentWidth - COMPACT_TEXT_SIDE_WIDTH_REM * remPx;
+    const width = Math.round(compactContentWidth * COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO);
+    return width > 0 ? width : null;
+  }, []);
+
   useLayoutEffect(() => {
     if (!isCompactTextLayout) {
       setCompactCharacterColumnHeight(0);
@@ -3223,7 +3245,7 @@ function ScriptBlock({
               stageDelimOpen={stageDelimOpen}
               stageDelimClose={stageDelimClose}
               layoutMode={textLayoutMode}
-              placementClassName={showCompactStageCommentRow ? "col-start-3 row-start-1 self-start pt-[0.0625rem]" : "col-start-2 row-start-1 self-start justify-self-center"}
+              placementClassName={showCompactStageCommentRow ? "col-start-3 row-start-1 self-start pt-[0.0625rem]" : stageCommentEditing ? "col-start-3 row-start-1 self-start" : "col-start-2 row-start-1 self-start justify-self-center"}
               onEditingChange={setStageCommentEditing}
               addButtonCenter
               alignAddButtonToLineAnchor={!showCompactStageCommentRow}
@@ -3232,6 +3254,7 @@ function ScriptBlock({
               onOverflowBelowChange={setStageCommentOverflowBelow}
               lineAnchorCenter={compactCharacterColumnHeight > 0 ? compactCharacterLastLineCenter : undefined}
               lineAnchorRowHeight={compactCharacterColumnHeight || undefined}
+              getEditorWidth={measureStageCommentEditorWidth}
             />
           )}
           <div
@@ -3320,6 +3343,7 @@ function ScriptBlock({
               stageDelimClose={stageDelimClose}
               addButtonRevealOnHover
               zeroHeightAddButton
+              getEditorWidth={measureStageCommentEditorWidth}
             />
           )}
 
