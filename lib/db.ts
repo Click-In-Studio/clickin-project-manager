@@ -113,7 +113,7 @@ type BlockRow = {
   force_show_character_name: boolean;
 };
 type SceneRow = { id: string; num: string; name: string; sort_order: number; parent_id: string | null };
-type CharRow  = { id: string; name: string; sort_order: number; is_aggregate: boolean };
+type CharRow  = { id: string; name: string; sort_order: number; is_aggregate: boolean; member_ids: string[] | null };
 // script_character uses snapshot_id as the script_id FK
 type ScCharRow = { script_id: string; character_id: string; annotation: string | null };
 
@@ -446,8 +446,13 @@ export async function loadProduction(productionId: string, versionId: string): P
         [versionId]
       ),
       pool.query<CharRow>(
-        `SELECT cv.character_id AS id, cv.name, cv.sort_order, cv.is_aggregate
-         FROM character_version cv WHERE cv.version_id = $1 ORDER BY cv.sort_order`,
+        `SELECT cv.character_id AS id, cv.name, cv.sort_order, cv.is_aggregate,
+                COALESCE(array_remove(array_agg(ca.member_id ORDER BY ca.member_id), NULL), ARRAY[]::text[]) AS member_ids
+         FROM character_version cv
+         LEFT JOIN character_aggregate ca ON ca.aggregate_id = cv.character_id
+         WHERE cv.version_id = $1
+         GROUP BY cv.character_id, cv.name, cv.sort_order, cv.is_aggregate
+         ORDER BY cv.sort_order`,
         [versionId]
       ),
     ]),
@@ -507,7 +512,7 @@ export async function loadProduction(productionId: string, versionId: string): P
     state: {
       blocks,
       scenes: scenesRes.rows.map(r => ({ id: r.id, number: r.num, name: r.name, parentId: r.parent_id })),
-      characters: charsRes.rows.map(r => ({ id: r.id, name: r.name, isAggregate: r.is_aggregate })),
+      characters: charsRes.rows.map(r => ({ id: r.id, name: r.name, isAggregate: r.is_aggregate, memberIds: r.member_ids ?? [] })),
       config,
     },
     sortKeys,

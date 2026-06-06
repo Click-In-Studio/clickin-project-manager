@@ -27,6 +27,10 @@ export type ScriptPatch = {
   sceneOps: SceneOp[];
 };
 
+function sameCharacterMetadata(a: Character, b: Character): boolean {
+  return a.id === b.id && a.name === b.name && a.isAggregate === b.isAggregate;
+}
+
 // ─── diffState ────────────────────────────────────────────────────────────────
 
 export function diffState(
@@ -60,7 +64,7 @@ export function diffState(
 
   for (const char of curr.characters) {
     const old = prevCharMap.get(char.id);
-    if (!old || JSON.stringify(old) !== JSON.stringify(char)) {
+    if (!old || !sameCharacterMetadata(old, char)) {
       charOps.push({ op: "upsert", char });
     }
   }

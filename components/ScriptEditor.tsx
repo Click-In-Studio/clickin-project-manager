@@ -70,6 +70,11 @@ type PendingStageDelimiterChange = {
   open: string;
   close: string;
 };
+type PendingAggregateFocusPrompt = {
+  characterId: string;
+  aggregateIds: string[];
+  selectedIds: Set<string>;
+};
 
 function largeSelectionOperationMessage(operation: LargeSelectionOperation, count: number) {
   const actionLabel =
@@ -4157,6 +4162,7 @@ export default function ScriptEditor({
   const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
   const [characters, setCharacters] = useState<Character[]>([]);
   const [focusedCharacterIds, setFocusedCharacterIds] = useState<Set<string>>(() => readStoredCharacterFocus(effectiveScriptId));
+  const [pendingAggregateFocusPrompt, setPendingAggregateFocusPrompt] = useState<PendingAggregateFocusPrompt | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -4220,16 +4226,68 @@ export default function ScriptEditor({
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
   useEffect(() => {
     setFocusedCharacterIds(readStoredCharacterFocus(effectiveScriptId));
+    setPendingAggregateFocusPrompt(null);
+  }, [effectiveScriptId]);
+  const setAndStoreFocusedCharacterIds = useCallback((ids: Set<string>) => {
+    setFocusedCharacterIds(ids);
+    writeStoredCharacterFocus(effectiveScriptId, ids);
   }, [effectiveScriptId]);
   const toggleCharacterFocus = useCallback((id: string) => {
-    setFocusedCharacterIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      writeStoredCharacterFocus(effectiveScriptId, next);
-      return next;
+    const ids = new Set(focusedCharacterIds);
+    if (ids.has(id)) {
+      ids.delete(id);
+      setAndStoreFocusedCharacterIds(ids);
+      setPendingAggregateFocusPrompt((prompt) => prompt?.characterId === id ? null : prompt);
+      return;
+    }
+
+    ids.add(id);
+    setAndStoreFocusedCharacterIds(ids);
+
+    const aggregateIds = characters
+      .filter((char) => char.isAggregate && (char.memberIds ?? []).includes(id) && !focusedCharacterIds.has(char.id))
+      .map((char) => char.id);
+    if (aggregateIds.length > 0) {
+      setPendingAggregateFocusPrompt({
+        characterId: id,
+        aggregateIds,
+        selectedIds: new Set(),
+      });
+    }
+  }, [characters, focusedCharacterIds, setAndStoreFocusedCharacterIds]);
+  const confirmAggregateFocusPrompt = useCallback(() => {
+    if (!pendingAggregateFocusPrompt) return;
+    const ids = new Set(focusedCharacterIds);
+    ids.add(pendingAggregateFocusPrompt.characterId);
+    for (const aggregateId of pendingAggregateFocusPrompt.selectedIds) ids.add(aggregateId);
+    setAndStoreFocusedCharacterIds(ids);
+    setPendingAggregateFocusPrompt(null);
+  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
+  const addAllAggregateFocusPrompt = useCallback(() => {
+    if (!pendingAggregateFocusPrompt) return;
+    const ids = new Set(focusedCharacterIds);
+    ids.add(pendingAggregateFocusPrompt.characterId);
+    for (const aggregateId of pendingAggregateFocusPrompt.aggregateIds) ids.add(aggregateId);
+    setAndStoreFocusedCharacterIds(ids);
+    setPendingAggregateFocusPrompt(null);
+  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
+  const cancelAggregateFocusPrompt = useCallback(() => {
+    if (!pendingAggregateFocusPrompt) return;
+    const ids = new Set(focusedCharacterIds);
+    ids.add(pendingAggregateFocusPrompt.characterId);
+    for (const aggregateId of pendingAggregateFocusPrompt.aggregateIds) ids.delete(aggregateId);
+    setAndStoreFocusedCharacterIds(ids);
+    setPendingAggregateFocusPrompt(null);
+  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
+  const togglePendingAggregateFocus = useCallback((id: string) => {
+    setPendingAggregateFocusPrompt((prompt) => {
+      if (!prompt) return prompt;
+      const selectedIds = new Set(prompt.selectedIds);
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
+      return { ...prompt, selectedIds };
     });
-  }, [effectiveScriptId]);
+  }, []);
 
   // ── Search ──────────────────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
@@ -7710,6 +7768,72 @@ export default function ScriptEditor({
           </div>
         </div>
       )}
+
+      {pendingAggregateFocusPrompt && (() => {
+        const currentCharacter = characters.find((char) => char.id === pendingAggregateFocusPrompt.characterId);
+        const aggregateCharacters = pendingAggregateFocusPrompt.aggregateIds
+          .map((id) => characters.find((char) => char.id === id))
+          .filter((char): char is Character => Boolean(char));
+        if (!currentCharacter || aggregateCharacters.length === 0) return null;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={cancelAggregateFocusPrompt}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="w-[420px] rounded-2xl bg-white p-5 shadow-xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-base font-semibold text-zinc-800">
+                是否同时聚焦以下包含该角色的聚合角色？
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                “{currentCharacter.name}” 也是以下聚合角色的一部分。<br />按需求添加所需要的角色后，点击确认。
+              </p>
+              <div className="mt-4 max-h-56 overflow-y-auto rounded-xl border border-zinc-100">
+                {aggregateCharacters.map((char) => {
+                  const active = pendingAggregateFocusPrompt.selectedIds.has(char.id);
+                  return (
+                    <button
+                      key={char.id}
+                      type="button"
+                      onClick={() => togglePendingAggregateFocus(char.id)}
+                      className="flex w-full items-center justify-between border-b border-zinc-50 px-4 py-2.5 text-left last:border-0 hover:bg-zinc-50"
+                    >
+                      <span className="min-w-0 truncate text-sm text-zinc-700">{char.name}</span>
+                      <ModeSwitch active={active} activeClassName="bg-purple-400" />
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-5 flex justify-between gap-2">
+                <button
+                  onClick={addAllAggregateFocusPrompt}
+                  className="rounded border border-purple-100 px-3 py-1.5 text-sm text-purple-500 hover:border-purple-200 hover:text-purple-700"
+                >
+                  全部添加
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={cancelAggregateFocusPrompt}
+                    className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={confirmAggregateFocusPrompt}
+                    className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                  >
+                    确认
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {pendingLargeSelectionConfirmation && (
         <div
