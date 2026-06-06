@@ -1901,6 +1901,7 @@ function computePrintPages(
   let curItems: PrintItem[] = [];
   let curH = 0;
   let curLabel = "";
+  let activeSceneLabel = "";
   let pageNum = 1;
   let curHasBlock = false;
 
@@ -1910,6 +1911,7 @@ function computePrintPages(
     pageNum++;
     curItems = [];
     curH = 0;
+    curLabel = "";
     curHasBlock = false;
   };
 
@@ -1932,7 +1934,10 @@ function computePrintPages(
       : item;
     curItems.push(nextItem);
     curH += nextH;
-    if (item.kind === "block") curHasBlock = true;
+    if (item.kind === "block") {
+      if (!curHasBlock) curLabel = activeSceneLabel;
+      curHasBlock = true;
+    }
   };
 
   for (let i = 0; i < blocks.length; i++) {
@@ -1941,12 +1946,16 @@ function computePrintPages(
     const hideChar = shouldHideCharacterLabel(prev, block);
     const leadingCharacterGap = shouldShowCharacterGap(prev, block, hideChar);
 
-    if (block.sceneId && block.sceneId !== prev?.sceneId) {
+    if (!block.sceneId) {
+      activeSceneLabel = "";
+    } else if (block.sceneId !== prev?.sceneId) {
       const scene = scenes.find((s) => s.id === block.sceneId);
       if (scene) {
+        activeSceneLabel = scene.number;
         addItem({ kind: "sceneHeader", scene }, heights[`sh-${block.sceneId}`] ?? 52);
-        curLabel = scene.number;
         if (!(scene.id in scenePageNums)) scenePageNums[scene.id] = pageNum;
+      } else {
+        activeSceneLabel = "";
       }
     }
 
