@@ -5946,13 +5946,16 @@ export default function ScriptEditor({
   const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
     setLoadState("loading");
     setLoadError("");
-    setBlocks([makeBlock()]);
+    const placeholderBlock = makeBlock();
+    measuredHeightsRef.current.clear();
+    cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
+    setBlocks([placeholderBlock]);
+    applyWindowRange({ start: 0, end: 1 }, true);
+    setSpacerH({ top: 0, bot: 0 });
     setCharacters([]);
     setScenes([]);
-    /* eslint-enable react-hooks/set-state-in-effect */
     syncedStateRef.current = null;
 
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
@@ -5975,6 +5978,17 @@ export default function ScriptEditor({
           : (body as ScriptState);
 
         if (state.blocks.length > 0) {
+          measuredHeightsRef.current.clear();
+          cumulativeHRef.current = new Array(state.blocks.length + 1);
+          cumulativeHRef.current[0] = 0;
+          for (let i = 0; i < state.blocks.length; i++) {
+            cumulativeHRef.current[i + 1] = cumulativeHRef.current[i] + DEFAULT_BLOCK_H;
+          }
+          applyWindowRange({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, state.blocks.length) }, true);
+          setSpacerH({
+            top: 0,
+            bot: Math.max(0, (state.blocks.length - Math.min(INITIAL_WINDOW_SIZE, state.blocks.length)) * DEFAULT_BLOCK_H),
+          });
           setBlocks(state.blocks);
           setCharacters(state.characters);
           setScenes(state.scenes);
@@ -6018,7 +6032,7 @@ export default function ScriptEditor({
         }
       })
       .catch(() => { setLoadError("网络错误，请稍后重试"); setLoadState("error"); });
-  }, [effectiveScriptId, productionId, activeVersionId]);
+  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange]);
 
   // ── Presence — must be declared before the SSE effect that closes over setPresenceMap ──
 
