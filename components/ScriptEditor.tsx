@@ -2601,6 +2601,210 @@ type Comment = {
   updatedAt: string;
 };
 
+type CommentBlockCaption = {
+  label: string;
+  body: string;
+};
+
+const EMPTY_COMMENTS: Comment[] = [];
+const COMMENT_BUBBLE_MIN_WIDTH_PX = 135;
+const COMMENT_BUBBLE_MIN_GUTTER_PX = 170;
+const SPEECH_TAIL_PIN_OFFSET_PX = 96;
+const SPEECH_TAIL_BASE_HALF_PX = 14;
+const SPEECH_TAIL_EDGE_INSET_PX = 24;
+const SIDE_PANEL_TOP_PX = 56;
+const SIDE_PANEL_MIN_WIDTH_PX = 360;
+const SIDE_PANEL_MAX_WIDTH_PX = 576;
+const SIDE_PANEL_GUTTER_PADDING_PX = 15;
+
+function buildCommentBlockCaption(block: Block, characters: Character[], index: number): CommentBlockCaption {
+  const normalizedBlockContent = block.content.replace(/\s+/g, " ").trim();
+  const blockContentPreview = normalizedBlockContent.slice(0, 20);
+  const blockContentSuffix = normalizedBlockContent.length > blockContentPreview.length ? "..." : "";
+  const characterCaption = block.type === "stage"
+    ? ""
+    : block.characterIds
+        .map(id => characters.find(c => c.id === id)?.name)
+        .filter((name): name is string => !!name)
+        .join("/");
+
+  return {
+    label: `【${index + 1}】`,
+    body: `${characterCaption ? `${characterCaption}: ` : ""}${blockContentPreview || "（空）"}${blockContentSuffix}`,
+  };
+}
+
+function SpeechTail({
+  offsetY = 0,
+  top = "50%",
+}: {
+  offsetY?: number;
+  top?: number | string;
+}) {
+  const rawPointOffset = -Math.round(offsetY);
+  const width = 24;
+  const overlap = 4;
+  const baseHalf = SPEECH_TAIL_BASE_HALF_PX;
+  const padding = 16;
+  const pointSlideLimit = SPEECH_TAIL_PIN_OFFSET_PX;
+  const baseSlideLimit = 48;
+  const isPinned = Math.abs(offsetY) >= pointSlideLimit;
+  const pointOffset = Math.max(-pointSlideLimit, Math.min(pointSlideLimit, rawPointOffset));
+  const baseOffset = Math.max(-baseSlideLimit, Math.min(baseSlideLimit, rawPointOffset * 0.65));
+  const height = isPinned ? 36 : Math.max(32, (Math.max(Math.abs(pointOffset), Math.abs(baseOffset)) + padding) * 2);
+  const centerY = height / 2;
+  const pinnedFromTop = offsetY > 0;
+  const pointY = isPinned ? (pinnedFromTop ? 2 : height - 2) : centerY + pointOffset;
+  const baseY = isPinned ? pointY : centerY + baseOffset;
+  const baseTopY = isPinned && pinnedFromTop ? pointY : isPinned ? pointY - baseHalf * 2 : baseY - baseHalf;
+  const baseBottomY = isPinned && !pinnedFromTop ? pointY : isPinned ? pointY + baseHalf * 2 : baseY + baseHalf;
+  const topValue = typeof top === "number" ? `${top}px` : top;
+
+  return (
+    <svg
+      className="pointer-events-none absolute left-0 z-[5] overflow-visible"
+      style={{
+        top: topValue,
+        width,
+        height,
+        transform: `translate(${-width + overlap}px, ${-height / 2}px)`,
+      }}
+      aria-hidden="true"
+    >
+      <polygon
+        points={`0,${pointY} ${width},${baseTopY} ${width},${baseBottomY}`}
+        fill="white"
+        stroke="#e4e4e7"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function useBlockSpeechTail(blockId: string) {
+  const [pointerTop, setPointerTop] = useState(SPEECH_TAIL_EDGE_INSET_PX);
+  const [pointerOffsetY, setPointerOffsetY] = useState(0);
+
+  useLayoutEffect(() => {
+    const updatePointer = () => {
+      const panelHeight = window.innerHeight - SIDE_PANEL_TOP_PX;
+      const blockEl = document.getElementById(`block-${blockId}`);
+      if (!blockEl) {
+        setPointerTop(SPEECH_TAIL_EDGE_INSET_PX);
+        setPointerOffsetY(0);
+        return;
+      }
+      const rect = blockEl.getBoundingClientRect();
+      const raw = rect.top + rect.height / 2 - SIDE_PANEL_TOP_PX;
+      const minPointerTop = SPEECH_TAIL_EDGE_INSET_PX;
+      const maxPointerTop = Math.max(minPointerTop, panelHeight - minPointerTop);
+      if (raw - SPEECH_TAIL_BASE_HALF_PX <= minPointerTop) {
+        setPointerTop(minPointerTop);
+        setPointerOffsetY(SPEECH_TAIL_PIN_OFFSET_PX);
+        return;
+      }
+      if (raw + SPEECH_TAIL_BASE_HALF_PX >= maxPointerTop) {
+        setPointerTop(maxPointerTop);
+        setPointerOffsetY(-SPEECH_TAIL_PIN_OFFSET_PX);
+        return;
+      }
+      setPointerTop(raw);
+      setPointerOffsetY(0);
+    };
+    updatePointer();
+    window.addEventListener("resize", updatePointer);
+    window.addEventListener("scroll", updatePointer, true);
+    return () => {
+      window.removeEventListener("resize", updatePointer);
+      window.removeEventListener("scroll", updatePointer, true);
+    };
+  }, [blockId]);
+
+  return { pointerTop, pointerOffsetY };
+}
+
+function CommentBubble({
+  comments,
+  active,
+  offsetY = 0,
+  hasGutterSpace,
+  maxWidth,
+  blockLabel,
+  captionBody,
+  onClick,
+}: {
+  comments: Comment[];
+  active: boolean;
+  offsetY?: number;
+  hasGutterSpace: boolean;
+  maxWidth: number;
+  blockLabel: string;
+  captionBody: string;
+  onClick: () => void;
+}) {
+  if (comments.length === 0 || !hasGutterSpace) return null;
+
+  if (active) return null;
+
+  const sortedComments = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const childrenByParent = new Map<string, Comment[]>();
+  for (const comment of sortedComments) {
+    if (!comment.parentId) continue;
+    const replies = childrenByParent.get(comment.parentId) ?? [];
+    replies.push(comment);
+    childrenByParent.set(comment.parentId, replies);
+  }
+  const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
+  for (const comment of sortedComments.filter(c => c.parentId === null)) {
+    orderedComments.push({ comment, reply: false });
+    for (const reply of childrenByParent.get(comment.id) ?? []) {
+      orderedComments.push({ comment: reply, reply: true });
+    }
+  }
+  for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !sortedComments.some(parent => parent.id === c.parentId))) {
+    orderedComments.push({ comment: orphanReply, reply: true });
+  }
+  const visible = orderedComments.slice(0, 4);
+  const hiddenCount = orderedComments.length - visible.length;
+
+  return (
+    <div
+      className="absolute left-full top-1/2 z-10 ml-6 hover:z-40 focus-within:z-40"
+      style={{ transform: `translateY(calc(-50% + ${offsetY}px))` }}
+    >
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+        style={{ width: maxWidth, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
+        title="打开评论"
+      >
+        <div
+          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-50 px-2.5 py-1 text-[10px] font-medium text-zinc-500"
+          title={`${blockLabel} ${captionBody}`}
+        >
+          <span className="font-bold text-zinc-700">{blockLabel}</span>{" "}
+          <span>{captionBody}</span>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden px-2.5 py-2">
+          {visible.map(({ comment, reply }) => (
+            <p key={comment.id} className={`line-clamp-1 text-[11px] leading-snug text-zinc-700 ${reply ? "pl-3 text-zinc-500" : ""}`}>
+              {reply && <span className="text-zinc-400">↳ </span>}
+              <span className="font-semibold text-zinc-900">{comment.authorName}: </span>
+              <span className="font-normal">{comment.body.trim() || "（空评论）"}</span>
+            </p>
+          ))}
+        </div>
+        {hiddenCount > 0 && (
+          <p className="border-t border-zinc-100 px-2.5 py-1 text-center text-[10px] font-semibold text-zinc-500">
+            +{hiddenCount}
+          </p>
+        )}
+      </button>
+    </div>
+  );
+}
+
 const PRESENCE_COLORS = [
   "#E53E3E", "#DD6B20", "#D69E2E", "#38A169",
   "#3182CE", "#805AD5", "#D53F8C", "#00B5D8",
@@ -2887,6 +3091,12 @@ function ScriptBlock({
   onDeleteConfirmationChange,
   isMarkStart,
   commentCount,
+  blockComments,
+  isCommentPanelActive,
+  isAssetPanelActive,
+  commentBubbleOffsetY = 0,
+  rightGutterCanShowComments,
+  commentBubbleMaxWidth,
   onCommentClick,
   onAssetClick,
   dragTarget = null,
@@ -2956,6 +3166,12 @@ function ScriptBlock({
   onDeleteConfirmationChange: (active: boolean) => void;
   isMarkStart: boolean;
   commentCount: number;
+  blockComments: Comment[];
+  isCommentPanelActive: boolean;
+  isAssetPanelActive: boolean;
+  commentBubbleOffsetY?: number;
+  rightGutterCanShowComments: boolean;
+  commentBubbleMaxWidth: number;
   onCommentClick: () => void;
   onAssetClick: () => void;
   dragTarget?: BlockDragTarget | null;
@@ -3261,14 +3477,20 @@ function ScriptBlock({
   const searchRingClass =
     isSearchHighlight === "focused" ? "ring-2 ring-inset ring-amber-400" :
     isSearchHighlight === "match"   ? "ring-1 ring-inset ring-amber-200" : "";
+  const hasExpandedSidePanel = isCommentPanelActive || isAssetPanelActive;
+  const hasSideVisibleHighlight = hasExpandedSidePanel || isCharacterFocusHighlighted;
+  const hasHardBlockHighlight = isDeleteConfirmHighlighted || isSelected;
+  const usePartialFocusHighlight = isFocused && !hasHardBlockHighlight && hasSideVisibleHighlight;
   const blockBgClass = isDeleteConfirmHighlighted
     ? "bg-red-100"
     : isSelected
       ? "bg-[#eef3fa]"
+      : isFocused && !hasSideVisibleHighlight
+      ? "bg-zinc-100/70"
+      : hasExpandedSidePanel
+        ? "bg-emerald-500/10"
     : isCharacterFocusHighlighted
       ? "bg-purple-50"
-      : isFocused
-      ? "bg-zinc-100/70"
       : (index ?? 0) % 2 === 1
         ? "bg-zinc-50/60"
         : "";
@@ -3320,6 +3542,19 @@ function ScriptBlock({
   const blockRootStyle: React.CSSProperties | undefined = lineIndexWidth
     ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
     : undefined;
+  const partialFocusStyle: React.CSSProperties | undefined = usePartialFocusHighlight
+    ? {
+        backgroundImage: "linear-gradient(rgba(244, 244, 245, 0.7), rgba(244, 244, 245, 0.7))",
+        backgroundPosition: "left 1.5rem center",
+        backgroundRepeat: "no-repeat",
+        backgroundSize: "calc(100% - 2rem) 100%",
+      }
+    : undefined;
+  const combinedBlockRootStyle: React.CSSProperties | undefined =
+    blockRootStyle || partialFocusStyle
+      ? { ...blockRootStyle, ...partialFocusStyle }
+      : undefined;
+  const commentBlockCaption = buildCommentBlockCaption(block, characters, index ?? 0);
   const lineIndexSlotStyle: React.CSSProperties = {
     width: lineIndexWidth
       ? lineIndexWidth
@@ -3383,7 +3618,7 @@ function ScriptBlock({
       onDragOver={onDragOverBlock}
       onDrop={onDropBlock}
       onMouseLeave={resetCompactControlHover}
-      style={blockRootStyle}
+      style={combinedBlockRootStyle}
       className={`group relative px-6 py-0 text-center transition-colors ${searchRingClass} ${blockBgClass} ${movedGlowClass}`}
     >
       {dragTarget && (
@@ -3536,6 +3771,17 @@ function ScriptBlock({
           ))}
         </div>
       )}
+
+      <CommentBubble
+        comments={blockComments}
+        active={isCommentPanelActive}
+        offsetY={commentBubbleOffsetY}
+        hasGutterSpace={rightGutterCanShowComments}
+        maxWidth={commentBubbleMaxWidth}
+        blockLabel={commentBlockCaption.label}
+        captionBody={commentBlockCaption.body}
+        onClick={onCommentClick}
+      />
 
       {/* Right-side action buttons — flex row, no overlap */}
       <div className={`${rightActionRowClass} ${charSelectorOpen ? "opacity-0 pointer-events-none" : ""}`}>
@@ -3899,17 +4145,74 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-CN");
 }
 
+function SideBlockPanel({
+  blockId,
+  title,
+  blockCaption,
+  hasGutterSpace,
+  gutterWidth,
+  viewportWidth,
+  onClose,
+  children,
+}: {
+  blockId: string;
+  title: string;
+  blockCaption?: CommentBlockCaption | null;
+  hasGutterSpace: boolean;
+  gutterWidth: number;
+  viewportWidth: number;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const { pointerTop, pointerOffsetY } = useBlockSpeechTail(blockId);
+
+  return (
+    <div
+      className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-zinc-200 bg-white shadow-xl"
+      style={{
+        top: SIDE_PANEL_TOP_PX,
+        width: hasGutterSpace
+          ? Math.min(SIDE_PANEL_MAX_WIDTH_PX, Math.max(SIDE_PANEL_MIN_WIDTH_PX, gutterWidth - SIDE_PANEL_GUTTER_PADDING_PX))
+          : Math.min(SIDE_PANEL_MIN_WIDTH_PX, viewportWidth || SIDE_PANEL_MIN_WIDTH_PX),
+      }}
+    >
+      <SpeechTail top={pointerTop} offsetY={pointerOffsetY} />
+      <div className="relative z-10 flex shrink-0 items-start justify-between gap-3 border-y border-emerald-600/80 bg-white px-4 py-3">
+        <div className="min-w-0">
+          <span className="block text-sm font-semibold text-zinc-700">{title}</span>
+          {blockCaption && (
+            <p className="mt-1 line-clamp-1 text-xs leading-snug text-zinc-500" title={`${blockCaption.label} ${blockCaption.body}`}>
+              <span className="font-bold text-zinc-700">{blockCaption.label}</span>{" "}
+              <span>{blockCaption.body}</span>
+            </p>
+          )}
+        </div>
+        <button onClick={onClose} className="text-lg leading-none text-zinc-800 hover:text-emerald-600/80">×</button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ─── CommentsPanel ────────────────────────────────────────────────────────────
 
 function CommentsPanel({
-  blockId, productionId, versionId, comments, currentOpenId, isAdmin,
+  blockId, productionId, comments, currentOpenId, isAdmin,
   onAdd, onEdit, onDelete, onClose, onNavigate,
+  hasGutterSpace,
+  gutterWidth,
+  viewportWidth,
+  blockCaption,
 }: {
-  blockId: string; productionId: string; versionId?: string | null; comments: Comment[];
+  blockId: string; productionId: string; comments: Comment[];
   currentOpenId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
   onNavigate?: () => void;
+  hasGutterSpace: boolean;
+  gutterWidth: number;
+  viewportWidth: number;
+  blockCaption?: CommentBlockCaption | null;
 }) {
   const [members, setMembers] = useState<Mention[]>([]);
   const [newText, setNewText] = useState("");
@@ -3931,9 +4234,9 @@ function CommentsPanel({
   }, [productionId]);
 
   const topLevel = useMemo(
-    () => comments.filter(c => c.contextId === blockId && c.parentId === null)
+    () => comments.filter(c => c.parentId === null)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    [comments, blockId],
+    [comments],
   );
   const repliesFor = useCallback(
     (parentId: string) => comments.filter(c => c.parentId === parentId)
@@ -4001,15 +4304,18 @@ function CommentsPanel({
   };
 
   const taClass = "w-full resize-none rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-zinc-400";
+  const replyThreadBorderClass = "border-emerald-600/30";
 
   // Shared: header row (author + timestamp + edit/delete)
   const commentHeader = (c: Comment) => (
     <div className="flex items-baseline justify-between">
-      <span className="text-xs font-semibold text-zinc-700">{c.authorName}</span>
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-zinc-300" title={new Date(c.createdAt).toLocaleString("zh-CN")}>
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span className="truncate text-xs font-semibold text-zinc-700">{c.authorName}</span>
+        <span className="shrink-0 text-[10px] text-zinc-500" title={new Date(c.createdAt).toLocaleString("zh-CN")}>
           {relativeTime(c.createdAt)}
         </span>
+      </span>
+      <div className="flex items-center gap-2">
         {editingId !== c.id && (
           <>
             {c.openId === currentOpenId && (
@@ -4042,9 +4348,9 @@ function CommentsPanel({
       </div>
     ) : (
       <div className="mt-0.5">
-        <SmartText content={c.body} memberMention={{ members: c.mentions }} className="whitespace-pre-wrap text-zinc-600" />
+        <SmartText content={c.body} memberMention={{ members: c.mentions }} className="inline whitespace-pre-wrap text-zinc-600" />
         {replyAction && (
-          <button onClick={replyAction.onClick} className="mt-0.5 text-[11px] text-zinc-300 hover:text-zinc-500">
+          <button onClick={replyAction.onClick} className="ml-2 inline text-[11px] text-zinc-300 hover:text-zinc-500">
             {replyAction.label}
           </button>
         )}
@@ -4053,13 +4359,16 @@ function CommentsPanel({
   );
 
   return (
-    <div className="fixed right-0 top-14 bottom-0 z-30 flex w-80 flex-col border-l border-zinc-200 bg-white shadow-xl">
-      <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
-        <span className="text-sm font-semibold text-zinc-700">评论</span>
-        <button onClick={onClose} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+    <SideBlockPanel
+      blockId={blockId}
+      title="评论"
+      blockCaption={blockCaption}
+      hasGutterSpace={hasGutterSpace}
+      gutterWidth={gutterWidth}
+      viewportWidth={viewportWidth}
+      onClose={onClose}
+    >
+      <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3 space-y-4">
         {topLevel.length === 0 && <p className="py-4 text-center text-xs text-zinc-300">暂无评论</p>}
         {topLevel.map(topC => (
           <div key={topC.id}>
@@ -4082,7 +4391,7 @@ function CommentsPanel({
 
             {/* Replies */}
             {repliesFor(topC.id).map(r => (
-              <div key={r.id} className="group mt-2 ml-3 border-l-2 border-zinc-200 pl-3">
+              <div key={r.id} className={`group mt-2 ml-3 border-l-2 pl-3 ${replyThreadBorderClass}`}>
                 <p className="mb-0.5 text-[10px] text-zinc-300">↳ 回复 {r.mentions[0]?.name ?? topC.authorName}</p>
                 {commentHeader(r)}
                 {commentBody(r, {
@@ -4102,7 +4411,7 @@ function CommentsPanel({
 
             {/* Reply compose */}
             {replyingTo === topC.id && (
-              <div className="mt-2 ml-3 border-l-2 border-zinc-200 pl-3">
+              <div className={`mt-2 ml-3 border-l-2 pl-3 ${replyThreadBorderClass}`}>
                 <SmartTextarea value={replyText} onChange={setReplyText}
                   memberMention={{ members, onMentionsChange: setReplyMentions }}
                   placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
@@ -4124,7 +4433,7 @@ function CommentsPanel({
         ))}
       </div>
 
-      <div className="shrink-0 border-t border-zinc-100 px-4 py-3">
+      <div className="relative z-10 shrink-0 border-t border-zinc-100 bg-white px-4 py-3">
         <SmartTextarea value={newText} onChange={setNewText}
           memberMention={{ members, onMentionsChange: setNewMentions }}
           placeholder="添加评论… (⌘↵ 发布)" rows={3}
@@ -4138,7 +4447,7 @@ function CommentsPanel({
           </button>
         </div>
       </div>
-    </div>
+    </SideBlockPanel>
   );
 }
 
@@ -5506,6 +5815,14 @@ export default function ScriptEditor({
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [meOpenId, setMeOpenId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(0);
+
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    updateViewportWidth();
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
 
   // Resolve Feishu display name and identity on mount
   useEffect(() => {
@@ -5530,6 +5847,16 @@ export default function ScriptEditor({
       .then(d => { if (d?.comments) setComments(d.comments); })
       .catch(() => {});
   }, [productionId]);
+
+  const commentsByBlockId = useMemo(() => {
+    const grouped = new Map<string, Comment[]>();
+    for (const comment of comments) {
+      const blockComments = grouped.get(comment.contextId);
+      if (blockComments) blockComments.push(comment);
+      else grouped.set(comment.contextId, [comment]);
+    }
+    return grouped;
+  }, [comments]);
 
   const sendPresence = useCallback((blockId: string | null) => {
     if (!clientId || !effectiveScriptId) return;
@@ -6549,6 +6876,22 @@ export default function ScriptEditor({
       ? "拖拽至此释放以移动至更上方区域"
       : "拖拽至此释放以移动至更下方区域")
     : "";
+  const effectiveViewportWidth = viewportWidth || (typeof window === "undefined" ? 0 : window.innerWidth);
+  const rightGutterWidth = Math.max(0, (effectiveViewportWidth - 768) / 2);
+  const rightGutterCanShowComments = rightGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
+  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, rightGutterWidth - 24);
+  const activeCommentBlockIndex = activeCommentBlockId
+    ? blocks.findIndex(block => block.id === activeCommentBlockId)
+    : -1;
+  const activeCommentBlockCaption = activeCommentBlockIndex >= 0
+    ? buildCommentBlockCaption(blocks[activeCommentBlockIndex], characters, activeCommentBlockIndex)
+    : null;
+  const activeAssetBlockIndex = activeAssetBlockId
+    ? blocks.findIndex(block => block.id === activeAssetBlockId)
+    : -1;
+  const activeAssetBlockCaption = activeAssetBlockIndex >= 0
+    ? buildCommentBlockCaption(blocks[activeAssetBlockIndex], characters, activeAssetBlockIndex)
+    : null;
   const dragInstructionNotice = !edgeDragNotice && (isScriptDragging || isReorderLocked)
       ? "拖拽当前剧本块至指定位置松开以调整位置"
       : "";
@@ -7367,6 +7710,22 @@ export default function ScriptEditor({
               sim(pscene);
             }
             const hasFocusedCharacters = focusedCharacterIds.size > 0;
+            const commentBubbleOffsets = new Map<string, number>();
+            let lastBubbleBottom = -Infinity;
+            for (let i = safeWindowStart; i < safeWindowEnd; i++) {
+              const windowBlock = blocks[i];
+              const count = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
+              if (count === 0 || activeCommentBlockId === windowBlock.id) continue;
+              const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
+              const blockTop = cumulativeHRef.current[i] - spacerH.top;
+              const desiredCenter = blockTop + blockHeight / 2;
+              const visibleCount = Math.min(count, 4);
+              const bubbleHeight = Math.min(160, 38 + visibleCount * 17 + (count > visibleCount ? 22 : 0));
+              const desiredTop = desiredCenter - bubbleHeight / 2;
+              const top = Math.max(desiredTop, lastBubbleBottom + 6);
+              lastBubbleBottom = top + bubbleHeight;
+              commentBubbleOffsets.set(windowBlock.id, top - desiredTop);
+            }
 
             return [
               <div
@@ -7409,6 +7768,7 @@ export default function ScriptEditor({
               hasFocusedCharacters && block.characterIds.some((id) => focusedCharacterIds.has(id));
             const selectedDeleteIds = isSelected ? Array.from(selectedBlockIds) : [block.id];
             const selectedCount = selectedDeleteIds.length;
+            const blockComments = commentsByBlockId.get(block.id) ?? EMPTY_COMMENTS;
             const canDeleteWithoutConfirmation = selectedDeleteIds.every((id) => {
               const selectedBlock = blocks.find((b) => b.id === id);
               return selectedBlock ? isBlockEmptyForDelete(selectedBlock) : false;
@@ -7690,7 +8050,13 @@ export default function ScriptEditor({
                     if (!moved) unlockReorder();
                   }}
                   isMarkStart={isMarkStart}
-                  commentCount={comments.filter(c => c.contextId === block.id).length}
+                  commentCount={blockComments.length}
+                  blockComments={blockComments}
+                  isCommentPanelActive={activeCommentBlockId === block.id}
+                  isAssetPanelActive={activeAssetBlockId === block.id}
+                  commentBubbleOffsetY={commentBubbleOffsets.get(block.id) ?? 0}
+                  rightGutterCanShowComments={rightGutterCanShowComments}
+                  commentBubbleMaxWidth={commentBubbleMaxWidth}
                   onCommentClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(block.id); }}
                   onAssetClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(block.id); }}
                   canEditText={canEditText}
@@ -7754,12 +8120,16 @@ export default function ScriptEditor({
       )}
 
       {activeAssetBlockId && productionId && (
-        <div className="fixed right-0 top-14 bottom-0 z-30 flex w-80 flex-col border-l border-zinc-200 bg-white shadow-xl">
-          <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
-            <span className="text-sm font-semibold text-zinc-700">附件</span>
-            <button onClick={() => setActiveAssetBlockId(null)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 py-3">
+        <SideBlockPanel
+          blockId={activeAssetBlockId}
+          title="附件"
+          blockCaption={activeAssetBlockCaption}
+          hasGutterSpace={rightGutterCanShowComments}
+          gutterWidth={rightGutterWidth}
+          viewportWidth={effectiveViewportWidth}
+          onClose={() => setActiveAssetBlockId(null)}
+        >
+          <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3">
             <BlockMountAssets
               productionId={productionId}
               blockId={activeAssetBlockId}
@@ -7770,15 +8140,14 @@ export default function ScriptEditor({
               onNavigate={prepareForNavigation}
             />
           </div>
-        </div>
+        </SideBlockPanel>
       )}
 
       {activeCommentBlockId && productionId && (
         <CommentsPanel
           blockId={activeCommentBlockId}
           productionId={productionId}
-          versionId={activeVersionId}
-          comments={comments}
+          comments={commentsByBlockId.get(activeCommentBlockId) ?? EMPTY_COMMENTS}
           currentOpenId={meOpenId}
           isAdmin={meIsAdmin}
           onAdd={c => setComments(prev => [...prev, c])}
@@ -7786,6 +8155,10 @@ export default function ScriptEditor({
           onDelete={id => setComments(prev => prev.filter(x => x.id !== id))}
           onClose={() => setActiveCommentBlockId(null)}
           onNavigate={prepareForNavigation}
+          hasGutterSpace={rightGutterCanShowComments}
+          gutterWidth={rightGutterWidth}
+          viewportWidth={effectiveViewportWidth}
+          blockCaption={activeCommentBlockCaption}
         />
       )}
 
