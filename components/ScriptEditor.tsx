@@ -36,6 +36,139 @@ const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
 const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
 const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
 const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;
+const SCRIPT_TOC_CENTER_EVENT = "script-toc-center-active";
+const SCRIPT_EDITOR_MAX_WIDTH_PX = 768; // Tailwind max-w-3xl
+const SCRIPT_TOC_RAIL_MAX_WIDTH_REM = 14;
+const SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM = 4;
+const SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM = 2.5;
+const SCRIPT_TOC_RAIL_NUMBER_SLOT_REM = 0.5; // Minimum number slot width; widened when longer scene numbers need it.
+const SCRIPT_TOC_RAIL_LABEL_GAP_REM = 1.5;
+const SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM = 2; // Right-edge gap between chapter numbers and scene numbers.
+const SCRIPT_TOC_RAIL_GAP_REM = -1;
+const SCRIPT_TOC_ACTIVE_SCENE_BUFFER_PX = 150;
+let scriptTocMeasureElement: HTMLSpanElement | null = null;
+let scriptTocMeasureCache: {
+  scenes: Scene[];
+  layoutKey: string;
+  railWidthPx: number;
+  chapterNumberSlotWidthPx: number;
+  sceneNumberSlotWidthPx: number;
+} | null = null;
+
+function measureScriptTocTextWidth(
+  text: string,
+  {
+    fontSizePx,
+    fontWeight,
+    letterSpacingPx = 0,
+  }: {
+    fontSizePx: number;
+    fontWeight: number;
+    letterSpacingPx?: number;
+  }
+): number {
+  scriptTocMeasureElement ??= document.createElement("span");
+  const el = scriptTocMeasureElement;
+  if (!el.isConnected) document.body.appendChild(el);
+  Object.assign(el.style, {
+    position: "fixed",
+    top: "-9999px",
+    left: "-9999px",
+    visibility: "hidden",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+    fontFamily: window.getComputedStyle(document.body).fontFamily,
+    fontSize: `${fontSizePx}px`,
+    fontWeight: String(fontWeight),
+    letterSpacing: `${letterSpacingPx}px`,
+  });
+  el.textContent = text;
+  return el.getBoundingClientRect().width;
+}
+
+function measureScriptTocRailLayout(scenes: Scene[], rootFontSizePx: number): {
+  railWidthPx: number;
+  chapterNumberSlotWidthPx: number;
+  sceneNumberSlotWidthPx: number;
+} {
+  const maxWidthPx = SCRIPT_TOC_RAIL_MAX_WIDTH_REM * rootFontSizePx;
+  const minimumNumberSlotWidthPx = SCRIPT_TOC_RAIL_NUMBER_SLOT_REM * rootFontSizePx;
+  const gapPx = SCRIPT_TOC_RAIL_LABEL_GAP_REM * rootFontSizePx;
+  const subSceneIndentPx = SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM * rootFontSizePx;
+  const scrollbarWidthPx = SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM * rootFontSizePx;
+  const minWidthPx = (SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
+  const layoutKey = [
+    rootFontSizePx,
+    maxWidthPx,
+    minimumNumberSlotWidthPx,
+    gapPx,
+    subSceneIndentPx,
+    scrollbarWidthPx,
+    minWidthPx,
+  ].join("|");
+  if (scriptTocMeasureCache?.scenes === scenes && scriptTocMeasureCache.layoutKey === layoutKey) {
+    return {
+      railWidthPx: scriptTocMeasureCache.railWidthPx,
+      chapterNumberSlotWidthPx: scriptTocMeasureCache.chapterNumberSlotWidthPx,
+      sceneNumberSlotWidthPx: scriptTocMeasureCache.sceneNumberSlotWidthPx,
+    };
+  }
+  if (typeof document === "undefined" || scenes.length === 0) {
+    return {
+      railWidthPx: maxWidthPx,
+      chapterNumberSlotWidthPx: minimumNumberSlotWidthPx,
+      sceneNumberSlotWidthPx: minimumNumberSlotWidthPx,
+    };
+  }
+
+  const horizontalPaddingPx = 2 * rootFontSizePx;
+  let requiredWidthPx = 0;
+  const sceneNameWidths: Array<{ scene: Scene; nameWidthPx: number }> = [];
+  let chapterNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  let sceneNumberSlotWidthPx = minimumNumberSlotWidthPx;
+
+  const numberFontSizePx = 0.75 * rootFontSizePx;
+  const numberTrackingPx = 0.05 * numberFontSizePx;
+
+  for (const scene of scenes) {
+    const numberText = scene.number || "—";
+    const measuredNumberWidthPx = measureScriptTocTextWidth(numberText, {
+      fontSizePx: numberFontSizePx,
+      fontWeight: 700,
+      letterSpacingPx: numberTrackingPx,
+    });
+    if (scene.parentId === null) {
+      chapterNumberSlotWidthPx = Math.max(chapterNumberSlotWidthPx, measuredNumberWidthPx);
+    } else {
+      sceneNumberSlotWidthPx = Math.max(sceneNumberSlotWidthPx, measuredNumberWidthPx);
+    }
+    const nameWidthPx = scene.name
+      ? measureScriptTocTextWidth(scene.name, {
+        fontSizePx: scene.parentId === null ? 0.875 * rootFontSizePx : 0.75 * rootFontSizePx,
+        fontWeight: scene.parentId === null ? 500 : 400,
+      })
+      : 32;
+    sceneNameWidths.push({ scene, nameWidthPx });
+  }
+
+  for (const { scene, nameWidthPx } of sceneNameWidths) {
+    const numberSlotWidthPx = scene.parentId === null ? chapterNumberSlotWidthPx : sceneNumberSlotWidthPx;
+    requiredWidthPx = Math.max(
+      requiredWidthPx,
+      horizontalPaddingPx + (scene.parentId === null ? 0 : subSceneIndentPx) + numberSlotWidthPx + gapPx + nameWidthPx + scrollbarWidthPx
+    );
+  }
+
+  const railWidthPx = Math.ceil(Math.min(maxWidthPx, Math.max(minWidthPx, requiredWidthPx)));
+  scriptTocMeasureCache = {
+    scenes,
+    layoutKey,
+    railWidthPx,
+    chapterNumberSlotWidthPx,
+    sceneNumberSlotWidthPx,
+  };
+  return { railWidthPx, chapterNumberSlotWidthPx, sceneNumberSlotWidthPx };
+}
 
 /**
  * Computes the `lyric` flag a block should have based on its tags and the
@@ -660,30 +793,22 @@ function applyInlineStageStyling(div: HTMLDivElement, delimOpen = "（", delimCl
 
 // ─── TableOfContents ──────────────────────────────────────────────────────────
 
-function TableOfContents({
-  scenes,
-  blocks,
-  onScrollToScene,
-}: {
-  scenes: Scene[];
-  blocks: Block[];
-  onScrollToScene?: (sceneId: string) => void;
-}) {
-  // Build ordered scene list matching the render: used scenes in block order,
-  // with unused scenes inserted at their correct position between used ones.
-  const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter(Boolean));
+function buildOrderedTocScenes(scenes: Scene[], blocks: Block[]): Scene[] {
+  const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter((id): id is string => id !== null));
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
   const usedOrdered: Scene[] = [];
+  const usedOrderedIds = new Set<string>();
   for (const b of blocks) {
     if (b.sceneId) {
-      const scene = scenes.find((s) => s.id === b.sceneId);
-      if (scene && !usedOrdered.some((s) => s.id === scene.id)) {
+      const scene = sceneById.get(b.sceneId);
+      if (scene && !usedOrderedIds.has(scene.id)) {
+        usedOrderedIds.add(scene.id);
         usedOrdered.push(scene);
       }
     }
   }
-  if (usedOrdered.length === 0 && usedSceneIds.size === 0) return null;
+  if (usedOrdered.length === 0 && usedSceneIds.size === 0) return [];
 
-  // Merge unused scenes into their correct position between used scenes.
   const orderedScenes: Scene[] = [];
   const orderedSceneIds = new Set<string>();
   const pushOrderedScene = (scene: Scene) => {
@@ -691,6 +816,7 @@ function TableOfContents({
     orderedSceneIds.add(scene.id);
     orderedScenes.push(scene);
   };
+
   for (let i = 0; i < usedOrdered.length; i++) {
     const prevIdx = i === 0 ? -1 : scenes.findIndex((s) => s.id === usedOrdered[i - 1].id);
     const currIdx = scenes.findIndex((s) => s.id === usedOrdered[i].id);
@@ -699,13 +825,71 @@ function TableOfContents({
     }
     pushOrderedScene(usedOrdered[i]);
   }
-  // Append any unused scenes that come after the last used scene.
+
   const lastIdx = usedOrdered.length
     ? scenes.findIndex((s) => s.id === usedOrdered[usedOrdered.length - 1].id)
     : -1;
   for (let j = lastIdx + 1; j < scenes.length; j++) {
     if (!usedSceneIds.has(scenes[j].id)) pushOrderedScene(scenes[j]);
   }
+
+  return orderedScenes;
+}
+
+function TableOfContents({
+  scenes,
+  blocks,
+  onScrollToScene,
+  activeSceneId,
+  placement = "inline",
+  chapterNumberSlotWidthPx,
+  sceneNumberSlotWidthPx,
+}: {
+  scenes: Scene[];
+  blocks: Block[];
+  onScrollToScene?: (sceneId: string) => void;
+  activeSceneId?: string | null;
+  placement?: "inline" | "rail" | "rail-compact";
+  chapterNumberSlotWidthPx?: number;
+  sceneNumberSlotWidthPx?: number;
+}) {
+  const isRailPlacement = placement !== "inline";
+  const isCompactRail = placement === "rail-compact";
+  const orderedScenes = useMemo(() => buildOrderedTocScenes(scenes, blocks), [scenes, blocks]);
+  const navRef = useRef<HTMLElement | null>(null);
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
+  const didInitialCenterRef = useRef(false);
+  const centerFrameRef = useRef<number | null>(null);
+  const centerActiveItem = useCallback(() => {
+    const nav = navRef.current;
+    const item = activeItemRef.current;
+    if (!nav || !item) return;
+    const navRect = nav.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    nav.scrollTop += itemRect.top + itemRect.height / 2 - (navRect.top + nav.clientHeight / 2);
+  }, []);
+  const centerActiveItemSoon = useCallback(() => {
+    if (centerFrameRef.current !== null) cancelAnimationFrame(centerFrameRef.current);
+    centerFrameRef.current = requestAnimationFrame(() => {
+      centerFrameRef.current = null;
+      centerActiveItem();
+    });
+  }, [centerActiveItem]);
+
+  useEffect(() => {
+    if (!isRailPlacement || !activeSceneId || didInitialCenterRef.current) return;
+    didInitialCenterRef.current = true;
+    centerActiveItem();
+  }, [activeSceneId, centerActiveItem, isRailPlacement]);
+
+  useEffect(() => {
+    if (!isRailPlacement) return;
+    window.addEventListener(SCRIPT_TOC_CENTER_EVENT, centerActiveItemSoon);
+    return () => {
+      window.removeEventListener(SCRIPT_TOC_CENTER_EVENT, centerActiveItemSoon);
+      if (centerFrameRef.current !== null) cancelAnimationFrame(centerFrameRef.current);
+    };
+  }, [centerActiveItemSoon, isRailPlacement]);
 
   if (orderedScenes.length === 0) return null;
 
@@ -714,24 +898,66 @@ function TableOfContents({
     document.getElementById(`scene-block-${sceneId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const wrapClass = isRailPlacement
+    ? `flex h-full flex-col rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
+    : "px-8 pt-6 pb-5 border-b border-zinc-100";
+  const navClass = isRailPlacement
+    ? "script-toc-rail-scrollbar flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain pr-1"
+    : "flex flex-col gap-0.5";
+
   return (
-    <div className="px-8 pt-6 pb-5 border-b border-zinc-100">
-      <p className="mb-3 text-[10px] font-bold tracking-widest text-zinc-300 uppercase">目录</p>
-      <nav className="flex flex-col gap-0.5">
+    <div className={wrapClass}>
+      <p className={`mb-3 text-[10px] font-bold tracking-widest text-zinc-300 uppercase ${isCompactRail ? "text-center" : ""}`}>目录</p>
+      <nav ref={navRef} className={navClass}>
         {orderedScenes.map((scene) => {
           const isSubScene = scene.parentId !== null;
+          const isActive = scene.id === activeSceneId;
+          const numberSlotWidthPx = isSubScene ? sceneNumberSlotWidthPx : chapterNumberSlotWidthPx;
           return (
             <button
               key={scene.id}
-              onClick={() => scrollTo(scene.id)}
-              className={`flex items-baseline gap-3 rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group${isSubScene ? " pl-6" : ""}`}
+              ref={isActive ? activeItemRef : undefined}
+              title={scene.name ? `${scene.number || "—"} ${scene.name}` : (scene.number || "—")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                scrollTo(scene.id);
+              }}
+              style={isCompactRail ? undefined : {
+                columnGap: `${SCRIPT_TOC_RAIL_LABEL_GAP_REM}rem`,
+                ...(isRailPlacement && isSubScene ? { paddingLeft: `calc(0.5rem + ${SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM}rem)` } : {}),
+              }}
+              className={`flex items-baseline rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group ${
+                isCompactRail ? "justify-center gap-0" : `${!isRailPlacement && isSubScene ? "pl-6" : ""}`
+              } ${
+                isActive ? "bg-white hover:bg-white" : ""
+              }`}
             >
-              <span className={`min-w-[3rem] text-xs tracking-wider ${isSubScene ? "font-medium text-zinc-300 group-hover:text-zinc-400" : "font-bold text-zinc-400 group-hover:text-zinc-600"}`}>
+              <span
+                style={isCompactRail
+                  ? undefined
+                  : { minWidth: numberSlotWidthPx ? `${numberSlotWidthPx}px` : `${SCRIPT_TOC_RAIL_NUMBER_SLOT_REM}rem` }}
+                className={`${isCompactRail ? "min-w-0" : "inline-block text-right"} text-xs tracking-wider ${
+                isActive
+                  ? "font-bold text-[#637ca1]"
+                  : isSubScene
+                    ? "font-medium text-zinc-300 group-hover:text-zinc-400"
+                    : "font-bold text-zinc-400 group-hover:text-zinc-600"
+                }`}
+              >
                 {scene.number || "—"}
               </span>
-              <span className={`${isSubScene ? "text-xs text-zinc-300 group-hover:text-zinc-500" : "text-sm font-medium text-zinc-500 group-hover:text-zinc-700"}`}>
-                {scene.name || <span className="italic text-zinc-200">未命名</span>}
-              </span>
+              {!isCompactRail && (
+                <span className={`min-w-0 truncate ${
+                  isActive
+                    ? `${isSubScene ? "text-xs" : "text-sm"} font-semibold text-zinc-700`
+                    : isSubScene
+                      ? "text-xs text-zinc-300 group-hover:text-zinc-500"
+                      : "text-sm font-medium text-zinc-500 group-hover:text-zinc-700"
+                }`}>
+                  {scene.name || <span className="italic text-zinc-200">未命名</span>}
+                </span>
+              )}
             </button>
           );
         })}
@@ -3678,6 +3904,8 @@ function ScriptBlock({
 
   return (
     <div
+      id={`block-content-${block.id}`}
+      data-block-content={block.id}
       ref={blockRootRef}
       onDragOver={onDragOverBlock}
       onDrop={onDropBlock}
@@ -4595,6 +4823,9 @@ export default function ScriptEditor({
     useState<PendingLargeSelectionConfirmation | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  const activeSceneIdRef = useRef<string | null>(null);
+  const activeSceneViewportCenterRef = useRef<number | null>(null);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
   const lineIndexMeasureRef = useRef<HTMLSpanElement | null>(null);
   const [lineIndexWidth, setLineIndexWidth] = useState(0);
@@ -4897,8 +5128,12 @@ export default function ScriptEditor({
   const movedHighlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigatingAwayRef = useRef(false);
   const blocksRef = useRef(blocks);
+  const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
   const prevBlocksLengthRef = useRef(blocks.length);
-  useLayoutEffect(() => { blocksRef.current = blocks; }, [blocks]);
+  useLayoutEffect(() => {
+    blocksRef.current = blocks;
+    blockIndexByIdRef.current = new Map(blocks.map((block, index) => [block.id, index]));
+  }, [blocks]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
   useEffect(() => () => {
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
@@ -5152,7 +5387,7 @@ export default function ScriptEditor({
   }, []);
 
   // Binary search: first block index whose top >= offset
-  const blockAtOffset = (offset: number) => {
+  const blockAtOffset = useCallback((offset: number) => {
     const cum = cumulativeHRef.current;
     const n = cum.length - 1;
     if (n <= 0) return 0;
@@ -5163,14 +5398,119 @@ export default function ScriptEditor({
       else hi = mid;
     }
     return lo;
-  };
+  }, []);
 
-  const recomputeWindow = useCallback(() => {
-    if (navigatingAwayRef.current) return;
-    if (draggingBlockId.current || isReorderLockedRef.current) return;
+  const getBlockScrollElement = useCallback((blockId: string) => (
+    document.getElementById(`block-content-${blockId}`) ?? document.getElementById(`block-${blockId}`)
+  ), []);
+
+  const updateActiveSceneFromScroll = useCallback(() => {
     const container = blocksContainerRef.current;
     const bl = blocksRef.current;
-    if (!container || bl.length === 0) return;
+    if (!container || bl.length === 0) {
+      if (activeSceneIdRef.current !== null) {
+        activeSceneIdRef.current = null;
+        activeSceneViewportCenterRef.current = null;
+        setActiveSceneId(null);
+        return true;
+      }
+      return false;
+    }
+
+    const viewportCenterY = window.innerHeight / 2;
+    const viewportCenter = window.scrollY + viewportCenterY;
+    let idx = -1;
+    let blockTop = 0;
+    let blockBottom = 0;
+
+    let closestDistance = Infinity;
+    let closestIdx = -1;
+    let closestTop = 0;
+    let closestBottom = 0;
+    let previousIdx = -1;
+    let previousTop = 0;
+    let previousBottom = 0;
+    const considerClosest = (blockIdx: number, top: number, bottom: number) => {
+      const distance = Math.min(Math.abs(top - viewportCenterY), Math.abs(bottom - viewportCenterY));
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIdx = blockIdx;
+        closestTop = window.scrollY + top;
+        closestBottom = window.scrollY + bottom;
+      }
+    };
+    for (const el of container.querySelectorAll<HTMLElement>("[data-block-content]")) {
+      const id = el.dataset.blockContent;
+      if (!id) continue;
+      const rect = el.getBoundingClientRect();
+      const blockIdx = blockIndexByIdRef.current.get(id) ?? -1;
+      if (blockIdx < 0) continue;
+      if (rect.top <= viewportCenterY && rect.bottom >= viewportCenterY) {
+        idx = blockIdx;
+        blockTop = window.scrollY + rect.top;
+        blockBottom = window.scrollY + rect.bottom;
+        break;
+      }
+      if (rect.top > viewportCenterY) {
+        if (previousIdx >= 0) considerClosest(previousIdx, previousTop, previousBottom);
+        considerClosest(blockIdx, rect.top, rect.bottom);
+        break;
+      }
+      previousIdx = blockIdx;
+      previousTop = rect.top;
+      previousBottom = rect.bottom;
+    }
+
+    if (idx < 0 && closestIdx < 0 && previousIdx >= 0) {
+      considerClosest(previousIdx, previousTop, previousBottom);
+    }
+
+    if (idx < 0) {
+      if (activeSceneIdRef.current !== null && closestIdx >= 0) {
+        activeSceneViewportCenterRef.current = viewportCenter;
+        return false;
+      }
+      if (closestIdx >= 0) {
+        idx = closestIdx;
+        blockTop = closestTop;
+        blockBottom = closestBottom;
+      }
+    }
+
+    if (idx < 0) {
+      const containerTop = container.getBoundingClientRect().top + window.scrollY;
+      idx = blockAtOffset(Math.max(0, viewportCenter - containerTop));
+      const cum = cumulativeHRef.current;
+      blockTop = containerTop + (cum[idx] ?? idx * DEFAULT_BLOCK_H);
+      blockBottom = containerTop + (cum[idx + 1] ?? blockTop + DEFAULT_BLOCK_H);
+    }
+
+    const nextSceneId = bl[idx]?.sceneId ?? null;
+    const previousViewportCenter = activeSceneViewportCenterRef.current;
+    activeSceneViewportCenterRef.current = viewportCenter;
+    if (nextSceneId !== activeSceneIdRef.current && previousViewportCenter !== null) {
+      const blockBuffer = Math.min(
+        SCRIPT_TOC_ACTIVE_SCENE_BUFFER_PX,
+        Math.max(0, (blockBottom - blockTop) / 2 - 1)
+      );
+      const movingDown = viewportCenter >= previousViewportCenter;
+      if (movingDown && viewportCenter < blockTop + blockBuffer) return false;
+      if (!movingDown && viewportCenter > blockBottom - blockBuffer) return false;
+    }
+    if (nextSceneId !== activeSceneIdRef.current) {
+      activeSceneIdRef.current = nextSceneId;
+      setActiveSceneId(nextSceneId);
+      return true;
+    }
+    return false;
+  }, [blockAtOffset]);
+
+  const recomputeWindow = useCallback(() => {
+    if (navigatingAwayRef.current) return false;
+    if (draggingBlockId.current || isReorderLockedRef.current) return false;
+    const container = blocksContainerRef.current;
+    const bl = blocksRef.current;
+    if (!container || bl.length === 0) return false;
     const containerTop = container.getBoundingClientRect().top + window.scrollY;
     const sy = window.scrollY;
     const viewStart = Math.max(0, sy - containerTop);
@@ -5186,7 +5526,8 @@ export default function ScriptEditor({
     if (pfi >= 0) { newStart = Math.min(newStart, pfi); newEnd = Math.max(newEnd, pfi + 1); }
 
     applyWindowRange({ start: newStart, end: newEnd });
-  }, [applyWindowRange]);
+    return updateActiveSceneFromScroll();
+  }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll]);
 
   // Always-fresh scroll-position saver (reads DOM directly; avoids stale cumulative-height estimates)
   const saveScrollPosRef = useRef<() => void>(() => {});
@@ -5229,11 +5570,29 @@ export default function ScriptEditor({
   // Scroll listener + debounced position save
   useEffect(() => {
     let rafId = 0;
+    let didCenterForScrollGesture = false;
+    let scrollGestureTimer: ReturnType<typeof setTimeout> | undefined;
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
-    const onScroll = () => {
+    const onScroll = (e: Event) => {
       if (navigatingAwayRef.current) return;
+      const target = e.target;
+      const isDocumentScroll =
+        target === document ||
+        target === document.documentElement ||
+        target === document.scrollingElement ||
+        target === window;
+      if (!isDocumentScroll) return;
       cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(recomputeWindow);
+      const shouldRecenterToc = !didCenterForScrollGesture;
+      didCenterForScrollGesture = true;
+      clearTimeout(scrollGestureTimer);
+      scrollGestureTimer = setTimeout(() => {
+        didCenterForScrollGesture = false;
+      }, 350);
+      rafId = requestAnimationFrame(() => {
+        const activeSceneChanged = recomputeWindow();
+        if (shouldRecenterToc || activeSceneChanged) window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+      });
       if (!scrollLockedRef.current) {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
@@ -5243,8 +5602,13 @@ export default function ScriptEditor({
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     recomputeWindow();
-    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId); clearTimeout(saveTimer); };
-  }, [recomputeWindow]);
+    updateActiveSceneFromScroll();
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId); clearTimeout(saveTimer); clearTimeout(scrollGestureTimer); };
+  }, [recomputeWindow, updateActiveSceneFromScroll]);
+
+  useEffect(() => {
+    updateActiveSceneFromScroll();
+  }, [blocks.length, windowRange.start, windowRange.end, spacerH.top, updateActiveSceneFromScroll]);
 
   // Clamp window when blocks list length changes (insert/delete)
   useLayoutEffect(() => {
@@ -5321,12 +5685,13 @@ export default function ScriptEditor({
     applyWindowRange(nextRange, true);
     if (!rangeChanged) {
       const el = document.getElementById(`block-${centerTarget.id}`);
-      if (el) {
+      const scrollEl = getBlockScrollElement(centerTarget.id);
+      if (scrollEl || el) {
         pendingNavigateRef.current = null;
-        el.scrollIntoView({ behavior: "instant", block: "center" });
+        (scrollEl ?? el)?.scrollIntoView({ behavior: "instant", block: "center" });
       }
     }
-  }, [blocks, applyWindowRange]);
+  }, [blocks, applyWindowRange, getBlockScrollElement]);
 
   // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
   useLayoutEffect(() => {
@@ -5336,7 +5701,7 @@ export default function ScriptEditor({
     if (!nav) return;
     postNavCorrectionRef.current = null;
     const el = nav.kind === 'block'
-      ? document.getElementById(`block-${nav.id}`)
+      ? getBlockScrollElement(nav.id)
       : document.getElementById(`scene-block-${nav.id}`);
     if (!el) return;
     // Measurements are now fresh — rebuild and re-correct spacers before scrollIntoView
@@ -5348,12 +5713,16 @@ export default function ScriptEditor({
     const newBot = Math.max(0, total - (cum[windowRange.end] ?? windowRange.end * DEFAULT_BLOCK_H));
     if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
     if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
-    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'start' });
+    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
     setScrollLocked(false);
+    requestAnimationFrame(() => {
+      updateActiveSceneFromScroll();
+      window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+    });
   // windowRange is intentionally in deps — ensures this captures the post-recomputeWindow value;
   // postNavCorrectionRef going null after the first correction prevents repeated firing.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [correctionTick, windowRange]);
+  }, [correctionTick, windowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
 
   // After each window-changing render, execute any pending navigation (fires before paint)
   useLayoutEffect(() => {
@@ -5361,7 +5730,7 @@ export default function ScriptEditor({
     const nav = pendingNavigateRef.current;
     if (!nav) return;
     const el = nav.kind === 'block'
-      ? document.getElementById(`block-${nav.id}`)
+      ? getBlockScrollElement(nav.id)
       : document.getElementById(`scene-block-${nav.id}`);
     if (!el) return;
     pendingNavigateRef.current = null;
@@ -5377,12 +5746,16 @@ export default function ScriptEditor({
     if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
     if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
 
-    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'start' });
+    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
 
     // Newly-rendered blocks haven't been measured yet so the cumulative heights are estimated.
     // Store the target so the measurement effect can trigger a precise correction pass.
     postNavCorrectionRef.current = nav;
-  }, [windowRange, rebuildCumulative]);
+    requestAnimationFrame(() => {
+      updateActiveSceneFromScroll();
+      window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+    });
+  }, [windowRange, rebuildCumulative, getBlockScrollElement, updateActiveSceneFromScroll]);
 
   // Update spacer heights from cumulative cache after each render (safe: layoutEffect, not render)
   useLayoutEffect(() => {
@@ -5402,8 +5775,15 @@ export default function ScriptEditor({
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
     // If already rendered, jump immediately
-    const el = document.getElementById(`block-${block.id}`);
-    if (el) { el.scrollIntoView({ behavior: 'instant', block: align }); return; }
+    const el = getBlockScrollElement(block.id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'instant', block: align });
+      requestAnimationFrame(() => {
+        updateActiveSceneFromScroll();
+        window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+      });
+      return;
+    }
     // Otherwise shift the window and let useLayoutEffect land us there
     pendingNavigateRef.current = { kind: 'block', id: block.id, align };
     const nextRange = {
@@ -5411,20 +5791,23 @@ export default function ScriptEditor({
       end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
     };
     applyWindowRange(nextRange, true);
-  }, [applyWindowRange]);
+  }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
 
   const scrollToScene = useCallback((sceneId: string) => {
-    const existing = document.getElementById(`scene-block-${sceneId}`);
-    if (existing) { existing.scrollIntoView({ behavior: 'instant', block: 'start' }); return; }
     const idx = blocksRef.current.findIndex(b => b.sceneId === sceneId);
-    if (idx < 0) return;
+    if (idx >= 0) {
+      scrollToBlockIdx(idx, "center");
+      return;
+    }
+    const existing = document.getElementById(`scene-block-${sceneId}`);
+    if (existing) { existing.scrollIntoView({ behavior: 'instant', block: 'center' }); return; }
     pendingNavigateRef.current = { kind: 'scene', id: sceneId };
     const nextRange = {
-      start: Math.max(0, idx - VSCROLL_BUFFER),
-      end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
+      start: 0,
+      end: Math.min(blocksRef.current.length, VSCROLL_BUFFER + 1),
     };
     applyWindowRange(nextRange, true);
-  }, [applyWindowRange]);
+  }, [applyWindowRange, scrollToBlockIdx]);
   useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
   // ── Server sync ─────────────────────────────────────────────────────────────
@@ -5982,7 +6365,11 @@ export default function ScriptEditor({
     focusedIdRef.current = id;
     setFocusedId(id);
     sendPresence(id);
-  }, [sendPresence]);
+    requestAnimationFrame(() => {
+      updateActiveSceneFromScroll();
+      window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+    });
+  }, [sendPresence, updateActiveSceneFromScroll]);
 
   const focusBlockContent = useCallback((id: string, atEnd = true) => {
     markBlockFocused(id);
@@ -6981,9 +7368,28 @@ export default function ScriptEditor({
       : "拖拽至此释放以移动至更下方区域")
     : "";
   const effectiveViewportWidth = viewportWidth || (typeof window === "undefined" ? 0 : window.innerWidth);
-  const rightGutterWidth = Math.max(0, (effectiveViewportWidth - 768) / 2);
-  const rightGutterCanShowComments = rightGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
-  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, rightGutterWidth - 24);
+  const rootFontSizePx = typeof window === "undefined"
+    ? 16
+    : parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+  const scriptSideGutterWidth = Math.max(0, (effectiveViewportWidth - SCRIPT_EDITOR_MAX_WIDTH_PX) / 2);
+  const scriptTocRailGapPx = SCRIPT_TOC_RAIL_GAP_REM * rootFontSizePx;
+  const scriptTocRailLayout = measureScriptTocRailLayout(scenes, rootFontSizePx);
+  const scriptTocRailFullWidthPx = scriptTocRailLayout.railWidthPx;
+  const scriptTocRailCompactWidthPx =
+    (SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
+  const scriptTocRailMode: "full" | "compact" | null =
+    effectiveViewportWidth <= 0
+      ? null
+      : scriptSideGutterWidth >= scriptTocRailFullWidthPx
+        ? "full"
+        : scriptSideGutterWidth >= scriptTocRailCompactWidthPx
+          ? "compact"
+          : null;
+  const scriptTocRailWidthPx = scriptTocRailMode === "compact"
+    ? scriptTocRailCompactWidthPx
+    : scriptTocRailFullWidthPx;
+  const rightGutterCanShowComments = scriptSideGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
+  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, scriptSideGutterWidth - 24);
   const activeCommentBlockIndex = activeCommentBlockId
     ? blocks.findIndex(block => block.id === activeCommentBlockId)
     : -1;
@@ -7011,7 +7417,11 @@ export default function ScriptEditor({
     <div className="min-h-screen bg-zinc-100">
       {/* Toolbar */}
       <header className="sticky top-0 z-40 border-b border-zinc-100 bg-white shadow-sm">
-        <div ref={setToolbarElement} className="relative mx-auto flex h-14 max-w-3xl flex-nowrap items-center gap-1 px-4">
+        <div
+          ref={setToolbarElement}
+          className="relative mx-auto flex h-14 flex-nowrap items-center gap-1 px-4"
+          style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}
+        >
           <Link
             href={productionId ? `/production/${productionId}` : "/"}
             onNavigate={prepareForNavigation}
@@ -7734,10 +8144,59 @@ export default function ScriptEditor({
         .script-block-updated-focus-glow {
           animation: scriptBlockUpdatedFocusGlow 1s ease-in-out;
         }
+
+        .script-toc-rail-scrollbar {
+          scrollbar-color: transparent transparent;
+          scrollbar-width: thin;
+        }
+
+        .script-toc-rail-scrollbar:hover {
+          scrollbar-color: rgba(161, 161, 170, 0.45) transparent;
+        }
+
+        .script-toc-rail-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .script-toc-rail-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+
+        .script-toc-rail-scrollbar::-webkit-scrollbar-thumb {
+          background: transparent;
+          border-radius: 9999px;
+        }
+
+        .script-toc-rail-scrollbar:hover::-webkit-scrollbar-thumb {
+          background: rgba(161, 161, 170, 0.45);
+        }
+
+        .script-toc-rail-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(113, 113, 122, 0.55);
+        }
       `}</style>
 
       {/* Document */}
-      <main className="mx-auto max-w-3xl px-4 py-8">
+      {scriptTocRailMode && (
+        <aside
+          className="fixed top-20 z-20 h-[calc((100vh-5rem)/3)] min-h-44 max-h-96"
+          style={{
+            left: `${Math.max(rootFontSizePx, scriptSideGutterWidth - scriptTocRailGapPx - scriptTocRailWidthPx)}px`,
+            width: `${scriptTocRailWidthPx}px`,
+          }}
+        >
+          <TableOfContents
+            scenes={scenes}
+            blocks={blocks}
+            onScrollToScene={scrollToScene}
+            activeSceneId={activeSceneId}
+            placement={scriptTocRailMode === "compact" ? "rail-compact" : "rail"}
+            chapterNumberSlotWidthPx={scriptTocRailLayout.chapterNumberSlotWidthPx}
+            sceneNumberSlotWidthPx={scriptTocRailLayout.sceneNumberSlotWidthPx}
+          />
+        </aside>
+      )}
+      <main className="mx-auto px-4 py-8" style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}>
         <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
           {display.lineNumbers && (
             <span
@@ -8235,7 +8694,7 @@ export default function ScriptEditor({
           title="附件"
           blockCaption={activeAssetBlockCaption}
           hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={rightGutterWidth}
+          gutterWidth={scriptSideGutterWidth}
           viewportWidth={effectiveViewportWidth}
           onClose={() => setActiveAssetBlockId(null)}
         >
@@ -8267,7 +8726,7 @@ export default function ScriptEditor({
           onClose={() => setActiveCommentBlockId(null)}
           onNavigate={prepareForNavigation}
           hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={rightGutterWidth}
+          gutterWidth={scriptSideGutterWidth}
           viewportWidth={effectiveViewportWidth}
           blockCaption={activeCommentBlockCaption}
         />
