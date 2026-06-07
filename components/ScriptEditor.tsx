@@ -2644,9 +2644,11 @@ function buildCommentBlockCaption(block: Block, characters: Character[], index: 
 function SpeechTail({
   offsetY = 0,
   top = "50%",
+  fillClassName = "fill-white",
 }: {
   offsetY?: number;
   top?: number | string;
+  fillClassName?: string;
 }) {
   const rawPointOffset = -Math.round(offsetY);
   const width = 24;
@@ -2679,8 +2681,8 @@ function SpeechTail({
       aria-hidden="true"
     >
       <polygon
+        className={fillClassName}
         points={`0,${pointY} ${width},${baseTopY} ${width},${baseBottomY}`}
-        fill="white"
         stroke="#e4e4e7"
         strokeWidth="1"
       />
@@ -2781,9 +2783,7 @@ function CommentBubble({
   const visibleAssets = assets.slice(0, maxVisible - visibleComments.length);
   const hiddenCommentCount = orderedComments.length - visibleComments.length;
   const hiddenAssetCount = assets.length - visibleAssets.length;
-  const hiddenCount = hiddenCommentCount + hiddenAssetCount;
   const defaultAction = comments.length > 0 ? onCommentClick : onAssetClick;
-  const hiddenAction = hiddenCommentCount > 0 ? onCommentClick : onAssetClick;
   const handleClick = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
     action();
@@ -2795,56 +2795,73 @@ function CommentBubble({
       style={{ transform: `translateY(calc(-50% + ${offsetY}px))` }}
     >
       <div
-        className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+        className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300"
         style={{ width: maxWidth, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
         title={comments.length > 0 ? "打开评论" : "打开附件"}
       >
         <button
           type="button"
           onClick={(e) => handleClick(e, defaultAction)}
-          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-50 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-500"
+          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-100 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-600"
           title={`${blockLabel} ${captionBody}`}
         >
-          <span className="font-bold text-zinc-700">{blockLabel}</span>{" "}
+          <span className="font-bold text-zinc-800">{blockLabel}</span>{" "}
           <span>{captionBody}</span>
         </button>
-        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden px-2.5 py-2">
-          {visibleComments.map(({ comment, reply }) => (
-            <button
-              key={comment.id}
-              type="button"
-              onClick={(e) => handleClick(e, onCommentClick)}
-              className={`line-clamp-1 text-left text-[11px] leading-snug text-zinc-700 ${reply ? "pl-3 text-zinc-500" : ""}`}
-            >
-              {reply && <span className="text-zinc-400">↳ </span>}
-              <span className="font-semibold text-zinc-900">{comment.authorName}: </span>
-              <span className="font-normal">{comment.body.trim() || "（空评论）"}</span>
-            </button>
-          ))}
-          {visibleComments.length > 0 && visibleAssets.length > 0 && (
-            <div className="border-t border-zinc-100" aria-hidden="true" />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {(visibleComments.length > 0 || hiddenCommentCount > 0) && (
+            <div className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenCommentCount > 0 ? "relative pr-10" : ""}`}>
+              {visibleComments.map(({ comment, reply }) => (
+                <button
+                  key={comment.id}
+                  type="button"
+                  onClick={(e) => handleClick(e, onCommentClick)}
+                  className={`line-clamp-1 shrink-0 text-left text-[11px] leading-snug text-zinc-700 ${reply ? "pl-3 text-zinc-500" : ""}`}
+                >
+                  {reply && <span className="text-zinc-400">↳ </span>}
+                  <span className="font-semibold text-zinc-900">{comment.authorName}: </span>
+                  <span className="font-normal">{comment.body.trim() || "（空评论）"}</span>
+                </button>
+              ))}
+              {hiddenCommentCount > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => handleClick(e, onCommentClick)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-zinc-500 shadow-sm hover:border-zinc-300 hover:text-zinc-700"
+                >
+                  +{hiddenCommentCount}
+                </button>
+              )}
+            </div>
           )}
-          {visibleAssets.map(asset => (
-            <button
-              key={asset.id}
-              type="button"
-              onClick={(e) => handleClick(e, onAssetClick)}
-              className="line-clamp-1 text-left text-[11px] leading-snug text-zinc-700"
-            >
-              <span className="font-semibold text-zinc-900">附件: </span>
-              <span className="font-normal">{asset.name ?? asset.fileName}</span>
-            </button>
-          ))}
+          {visibleComments.length > 0 && visibleAssets.length > 0 && (
+            <div className="shrink-0 border-t border-zinc-300" aria-hidden="true" />
+          )}
+          {(visibleAssets.length > 0 || hiddenAssetCount > 0) && (
+            <div className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenAssetCount > 0 ? "relative pr-10" : ""}`}>
+              {visibleAssets.map(asset => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={(e) => handleClick(e, onAssetClick)}
+                  className="line-clamp-1 shrink-0 text-left text-[11px] leading-snug text-zinc-700"
+                >
+                  <span className="font-semibold text-zinc-900">附件: </span>
+                  <span className="font-normal">{asset.name ?? asset.fileName}</span>
+                </button>
+              ))}
+              {hiddenAssetCount > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => handleClick(e, onAssetClick)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-zinc-500 shadow-sm hover:border-zinc-300 hover:text-zinc-700"
+                >
+                  +{hiddenAssetCount}
+                </button>
+              )}
+            </div>
+          )}
         </div>
-        {hiddenCount > 0 && (
-          <button
-            type="button"
-            onClick={(e) => handleClick(e, hiddenAction)}
-            className="border-t border-zinc-100 px-2.5 py-1 text-center text-[10px] font-semibold text-zinc-500"
-          >
-            +{hiddenCount}
-          </button>
-        )}
       </div>
     </div>
   );
@@ -4214,6 +4231,17 @@ function SideBlockPanel({
   children: React.ReactNode;
 }) {
   const { pointerTop, pointerOffsetY } = useBlockSpeechTail(blockId);
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const updateHeaderHeight = () => setHeaderHeight(headerRef.current?.offsetHeight ?? 0);
+    updateHeaderHeight();
+    window.addEventListener("resize", updateHeaderHeight);
+    return () => window.removeEventListener("resize", updateHeaderHeight);
+  }, [title, blockCaption?.label, blockCaption?.body]);
+
+  const tailUsesHeaderFill = pointerTop + SPEECH_TAIL_BASE_HALF_PX <= headerHeight;
 
   return (
     <div
@@ -4225,8 +4253,8 @@ function SideBlockPanel({
           : Math.min(SIDE_PANEL_MIN_WIDTH_PX, viewportWidth || SIDE_PANEL_MIN_WIDTH_PX),
       }}
     >
-      <SpeechTail top={pointerTop} offsetY={pointerOffsetY} />
-      <div className="relative z-10 flex shrink-0 items-start justify-between gap-3 border-y border-emerald-600/80 bg-white px-4 py-3">
+      <SpeechTail top={pointerTop} offsetY={pointerOffsetY} fillClassName={tailUsesHeaderFill ? "fill-zinc-100" : "fill-white"} />
+      <div ref={headerRef} className="relative z-10 flex shrink-0 items-start justify-between gap-3 border-y border-emerald-600/80 bg-zinc-100 px-4 py-3">
         <div className="min-w-0">
           <span className="block text-sm font-semibold text-zinc-700">{title}</span>
           {blockCaption && (
@@ -7797,9 +7825,10 @@ export default function ScriptEditor({
               const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
               const blockTop = cumulativeHRef.current[i] - spacerH.top;
               const desiredCenter = blockTop + blockHeight / 2;
-              const visibleCount = Math.min(count, 4);
+              const visibleCommentCount = assetCount > 0 ? Math.min(3, commentCount) : Math.min(4, commentCount);
+              const visibleAssetCount = Math.min(assetCount, 4 - visibleCommentCount);
               const hasDivider = commentCount > 0 && assetCount > 0;
-              const bubbleHeight = Math.min(160, 38 + visibleCount * 17 + (hasDivider ? 9 : 0) + (count > visibleCount ? 22 : 0));
+              const bubbleHeight = Math.min(160, 38 + (visibleCommentCount + visibleAssetCount) * 17 + (hasDivider ? 11 : 0));
               const desiredTop = desiredCenter - bubbleHeight / 2;
               const top = Math.max(desiredTop, lastBubbleBottom + 6);
               lastBubbleBottom = top + bubbleHeight;
