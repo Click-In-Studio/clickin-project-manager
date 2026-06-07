@@ -1426,7 +1426,7 @@ function CharacterRow({
           title={focused ? "取消聚焦角色" : "聚焦角色"}
           aria-pressed={focused}
         >
-          <ModeSwitch active={focused} activeClassName="bg-purple-400" />
+          <ModeSwitch active={focused} activeClassName="bg-purple-800/60" />
         </button>
       </td>
       {!readOnly && (
@@ -1465,6 +1465,7 @@ function CharacterPanel({
   productionId,
   focusedCharacterIds,
   onToggleFocus,
+  onClearFocus,
   onAdd,
   onRemove,
   onRename,
@@ -1480,6 +1481,7 @@ function CharacterPanel({
   productionId: string;
   focusedCharacterIds: Set<string>;
   onToggleFocus: (id: string) => void;
+  onClearFocus: () => void;
   onAdd: (name: string) => void;
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
@@ -1526,15 +1528,28 @@ function CharacterPanel({
 
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-64" : "absolute right-0 top-full"} z-30 mt-2 flex w-56 flex-col rounded-xl border border-zinc-100 bg-white shadow-xl`}
+          className={`${nestedFromMore ? "fixed right-2 top-64" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-zinc-100 bg-white shadow-xl`}
           style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 18rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
-          <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2.5">
+          <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
-            {!readOnly && (
-              <Link href={`/production/${productionId}/characters`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
-                管理页 →
-              </Link>
+            {(focusedCharacterIds.size > 0 || !readOnly) && (
+              <div className="flex items-center gap-2">
+                {focusedCharacterIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={onClearFocus}
+                    className="whitespace-nowrap text-[11px] text-purple-800/60 transition-colors hover:text-purple-800"
+                  >
+                    重置聚焦
+                  </button>
+                )}
+                {!readOnly && (
+                  <Link href={`/production/${productionId}/characters`} onNavigate={onNavigate} className="whitespace-nowrap text-[11px] text-zinc-300 transition-colors hover:text-zinc-500">
+                    管理页 →
+                  </Link>
+                )}
+              </div>
             )}
           </div>
 
@@ -4898,6 +4913,9 @@ export default function ScriptEditor({
       });
     }
   }, [characters, focusedCharacterIds, setAndStoreFocusedCharacterIds]);
+  const clearCharacterFocus = useCallback(() => {
+    setAndStoreFocusedCharacterIds(new Set());
+  }, [setAndStoreFocusedCharacterIds]);
   const confirmAggregateFocusPrompt = useCallback(() => {
     if (!pendingAggregateFocusPrompt) return;
     const ids = new Set(focusedCharacterIds);
@@ -4970,6 +4988,10 @@ export default function ScriptEditor({
     setMoreMenuOpen(true);
     setOpenMenu(name);
   }, []);
+  const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
+    if (!open && pendingAggregateFocusPrompt) return;
+    setOpenMenu(open ? "char" : null);
+  }, [pendingAggregateFocusPrompt]);
   const setToolbarElement = useCallback((el: HTMLDivElement | null) => {
     toolbarRef.current = el;
     if (el) setToolbarMeasureTick(tick => tick + 1);
@@ -7590,11 +7612,12 @@ export default function ScriptEditor({
                 productionId={productionId ?? ""}
                 focusedCharacterIds={focusedCharacterIds}
                 onToggleFocus={toggleCharacterFocus}
+                onClearFocus={clearCharacterFocus}
                 onAdd={addChar}
                 onRemove={removeChar}
                 onRename={renameChar}
                 open={openMenu === "char"}
-                onOpenChange={(v) => setOpenMenu(v ? "char" : null)}
+                onOpenChange={handleCharacterPanelOpenChange}
                 onNavigate={prepareForNavigation}
                 readOnly={isLockedMode}
                 triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
@@ -8801,7 +8824,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between border-b border-zinc-50 px-4 py-2.5 text-left last:border-0 hover:bg-zinc-50"
                     >
                       <span className="min-w-0 truncate text-sm text-zinc-700">{char.name}</span>
-                      <ModeSwitch active={active} activeClassName="bg-purple-400" />
+                      <ModeSwitch active={active} activeClassName="bg-purple-800/60" />
                     </button>
                   );
                 })}
@@ -8809,7 +8832,7 @@ export default function ScriptEditor({
               <div className="mt-5 flex justify-between gap-2">
                 <button
                   onClick={addAllAggregateFocusPrompt}
-                  className="rounded border border-purple-100 px-3 py-1.5 text-sm text-purple-500 hover:border-purple-200 hover:text-purple-700"
+                  className="rounded bg-purple-900/70 px-3 py-1.5 text-sm text-white hover:bg-purple-800/80"
                 >
                   全部添加
                 </button>
