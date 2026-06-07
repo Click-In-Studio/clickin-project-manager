@@ -34,6 +34,7 @@ const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
 const TOOLBAR_FOLD_HYSTERESIS_PX = 16;
 const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
 const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
+const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
 
 /**
  * Computes the `lyric` flag a block should have based on its tags and the
@@ -2836,7 +2837,6 @@ function TagPicker({
 
 const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
 const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
-const COMPACT_STAGE_CONTENT_GAP_PX = 4;
 const COMPACT_CONTENT_OPTICAL_OFFSET_PX = -2;
 
 function getCompactFallbackLineHeightPx() {
@@ -2893,6 +2893,7 @@ function ScriptBlock({
   isScriptDragging = false,
   index = 0,
   lineNum,
+  lineIndexWidth,
   isSearchHighlight,
   showRehearsalMark = true,
   showReadOnlyRehearsalMark = false,
@@ -2961,6 +2962,7 @@ function ScriptBlock({
   isScriptDragging?: boolean;
   index?: number;
   lineNum?: number;
+  lineIndexWidth?: string;
   isSearchHighlight?: "match" | "focused";
   showRehearsalMark?: boolean;
   showReadOnlyRehearsalMark?: boolean;
@@ -3007,7 +3009,6 @@ function ScriptBlock({
   const [unfoldForCompactControls, setUnfoldForCompactControls] = useState(false);
   const [compactControlLayout, setCompactControlLayout] = useState<{
     deleteLeft: number | null;
-    contentPaddingLeft: number | null;
     compact: boolean;
     hoverWidth: number;
     mode: "stage" | "hidden-character";
@@ -3082,7 +3083,6 @@ function ScriptBlock({
       const railEl = leftControlsRef.current;
       const triangleEl = blockEl.querySelector<HTMLElement>("[data-rehearsal-triangle='true']");
       const mode = isStage ? "stage" : "hidden-character";
-      const contentEl = mode === "stage" ? divRef.current : null;
       const blockRect = blockEl.getBoundingClientRect();
       const tagRect = hasBlockTags
         ? blockTagsRef.current?.getBoundingClientRect()
@@ -3094,7 +3094,7 @@ function ScriptBlock({
 
       if (isCompactBlock) compactControlLayoutActiveRef.current = true;
 
-      if (!compactControlLayoutActiveRef.current || !railEl || !triangleEl || (mode === "stage" && !contentEl)) {
+      if (!compactControlLayoutActiveRef.current || !railEl || !triangleEl) {
         setCompactControlLayout(null);
         return;
       }
@@ -3105,11 +3105,6 @@ function ScriptBlock({
       const deleteLeft = isCompactBlock ? measuredDeleteLeft : null;
       const controlRight = Math.max(triangleRect.right, railRect.left + measuredDeleteLeft + 16);
       const hoverWidth = Math.max(16, Math.ceil(controlRight - railRect.left));
-      const contentPaddingLeft = (() => {
-        if (mode !== "stage" || !contentEl) return null;
-        const contentRect = contentEl.getBoundingClientRect();
-        return Math.max(4, Math.ceil(controlRight - contentRect.left + COMPACT_STAGE_CONTENT_GAP_PX));
-      })();
 
       setCompactControlLayout((prev) => {
         if (
@@ -3118,14 +3113,11 @@ function ScriptBlock({
           prev.mode === mode &&
           Math.abs(prev.hoverWidth - hoverWidth) < 0.5 &&
           (prev.deleteLeft === null && deleteLeft === null ||
-            prev.deleteLeft !== null && deleteLeft !== null && Math.abs(prev.deleteLeft - deleteLeft) < 0.5) &&
-          (prev.contentPaddingLeft === null && contentPaddingLeft === null ||
-            prev.contentPaddingLeft !== null && contentPaddingLeft !== null &&
-              Math.abs(prev.contentPaddingLeft - contentPaddingLeft) < 0.5)
+            prev.deleteLeft !== null && deleteLeft !== null && Math.abs(prev.deleteLeft - deleteLeft) < 0.5)
         ) {
           return prev;
         }
-        return { deleteLeft, contentPaddingLeft, compact: isCompactBlock, hoverWidth, mode };
+        return { deleteLeft, compact: isCompactBlock, hoverWidth, mode };
       });
     };
 
@@ -3280,9 +3272,6 @@ function ScriptBlock({
   const compactDeleteStyle: React.CSSProperties | undefined = compactControlLayout?.deleteLeft !== null && compactControlLayout?.deleteLeft !== undefined
     ? { left: compactControlLayout.deleteLeft }
     : undefined;
-  const compactContentStyle: React.CSSProperties | undefined = compactControlLayout?.contentPaddingLeft !== null && compactControlLayout?.contentPaddingLeft !== undefined
-    ? { paddingLeft: compactControlLayout.contentPaddingLeft }
-    : undefined;
   const hasReadOnlySceneLabel = !canEditMetadata && !!readOnlyScene;
   const hasStageComment = !!block.stageComment?.trim();
   const showCompactStageCommentRow = hasStageComment || stageCommentEditing;
@@ -3310,6 +3299,12 @@ function ScriptBlock({
     : readOnlyRehearsalMode
       ? "text-zinc-300 group-hover:text-zinc-500"
       : "text-zinc-400 group-hover:text-zinc-600";
+  const blockRootStyle: React.CSSProperties | undefined = lineIndexWidth
+    ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
+    : undefined;
+  const lineIndexStyle: React.CSSProperties | undefined = lineIndexWidth
+    ? { width: lineIndexWidth }
+    : undefined;
 
   const measureStageCommentEditorWidth = useCallback(() => {
     const blockEl = blockRootRef.current;
@@ -3368,6 +3363,7 @@ function ScriptBlock({
       onDragOver={onDragOverBlock}
       onDrop={onDropBlock}
       onMouseLeave={resetCompactControlHover}
+      style={blockRootStyle}
       className={`group relative px-6 py-0 text-center transition-colors ${searchRingClass} ${blockBgClass} ${movedGlowClass}`}
     >
       {dragTarget && (
@@ -3382,7 +3378,10 @@ function ScriptBlock({
       {(lineNum !== undefined || canEditRehearsalMark || (showReadOnlyRehearsalMark && isMarkStart && block.rehearsalMark)) && (
         <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
-            <span className={`pointer-events-none select-none tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}>
+            <span
+              style={lineIndexStyle}
+              className={`pointer-events-none select-none text-right tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
+            >
               {lineNum}
             </span>
           )}
@@ -3790,7 +3789,6 @@ function ScriptBlock({
           syncContent();
         }}
         data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
-        style={compactContentStyle}
         className={`w-full min-h-[1.75rem] ${isStage ? "pl-1" : ""} outline-none text-base leading-7 break-words ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-left" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
@@ -4187,6 +4185,8 @@ export default function ScriptEditor({
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
+  const lineIndexMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const [lineIndexWidth, setLineIndexWidth] = useState(0);
 
   // ── Block tags ───────────────────────────────────────────────────────────────
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -4224,6 +4224,7 @@ export default function ScriptEditor({
   // ── Page map (computed client-side, deterministic) ──────────────────────────
   const pageMap = useMemo(() => computePageMap(blocks, scriptConfig.pageLayout), [blocks, scriptConfig.pageLayout]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
+  const maxLineIndexText = String(Math.max(1, blocks.length));
   useEffect(() => {
     setFocusedCharacterIds(readStoredCharacterFocus(effectiveScriptId));
     setPendingAggregateFocusPrompt(null);
@@ -4395,6 +4396,25 @@ export default function ScriptEditor({
 
   // ── Display settings (cookie-persisted) ──────────────────────────────────────
   const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
+  useLayoutEffect(() => {
+    if (!display.lineNumbers) {
+      setLineIndexWidth(0);
+      return;
+    }
+    const el = lineIndexMeasureRef.current;
+    if (!el) return;
+    const measure = () => {
+      const width = Math.ceil(el.getBoundingClientRect().width);
+      setLineIndexWidth((prev) => prev === width ? prev : width);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [display.lineNumbers, maxLineIndexText]);
+  const lineIndexWidthStyle = display.lineNumbers && lineIndexWidth > 0
+    ? `${lineIndexWidth}px`
+    : undefined;
   const toggleDisplay = useCallback((key: keyof DisplaySettings) => {
     setDisplay(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -7247,6 +7267,15 @@ export default function ScriptEditor({
       {/* Document */}
       <main className="mx-auto max-w-3xl px-4 py-8">
         <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
+          {display.lineNumbers && (
+            <span
+              ref={lineIndexMeasureRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute left-0 top-0 -z-10 select-none whitespace-pre tabular-nums text-[9px] leading-none opacity-0"
+            >
+              {maxLineIndexText}
+            </span>
+          )}
           <TableOfContents scenes={scenes} blocks={blocks} onScrollToScene={scrollToScene} />
           <div
             ref={blocksContainerRef}
@@ -7430,6 +7459,7 @@ export default function ScriptEditor({
                   block={block}
                   index={bIdx}
                   lineNum={display.lineNumbers ? bIdx + 1 : undefined}
+                  lineIndexWidth={lineIndexWidthStyle}
                   isSearchHighlight={searchHighlight}
                   showRehearsalMark={display.rehearsalMarks}
                   showReadOnlyRehearsalMark={isLockedMode && display.rehearsalMarks}
