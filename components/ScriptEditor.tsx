@@ -35,6 +35,7 @@ const TOOLBAR_FOLD_HYSTERESIS_PX = 16;
 const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
 const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
 const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
+const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;
 
 /**
  * Computes the `lyric` flag a block should have based on its tags and the
@@ -3303,9 +3304,11 @@ function ScriptBlock({
   const blockRootStyle: React.CSSProperties | undefined = lineIndexWidth
     ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
     : undefined;
-  const lineIndexStyle: React.CSSProperties | undefined = lineIndexWidth
-    ? { width: lineIndexWidth }
-    : undefined;
+  const lineIndexSlotStyle: React.CSSProperties = {
+    width: lineIndexWidth
+      ? lineIndexWidth
+      : `${LINE_INDEX_CONTROL_MIN_WIDTH_REM}rem`,
+  };
 
   const measureStageCommentEditorWidth = useCallback(() => {
     const blockEl = blockRootRef.current;
@@ -3380,11 +3383,14 @@ function ScriptBlock({
         <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
             <span
-              style={lineIndexStyle}
-              className={`pointer-events-none select-none text-right tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
+              style={lineIndexSlotStyle}
+              className={`pointer-events-none shrink-0 select-none text-right tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
             >
               {lineNum}
             </span>
+          )}
+          {lineNum === undefined && (
+            <span aria-hidden className="pointer-events-none shrink-0 select-none" style={lineIndexSlotStyle} />
           )}
           {canEditRehearsalMark && (
             <span
