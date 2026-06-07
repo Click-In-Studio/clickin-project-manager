@@ -3050,15 +3050,16 @@ function ScriptBlock({
   const hasBlockTags = !isStage && showBlockTags && !!tagGroups?.length;
   const isEditingLocked = isSelected || confirmDelete || isDeleteConfirmHighlighted;
   const hiddenCharacterCollapsed = !isStage && hideCharSelector && !isFocused && !isSelected;
-  const effectiveHideCharSelector = hideCharSelector && !(hiddenCharacterCollapsed && unfoldForCompactControls);
+  const canUnfoldHiddenCharacterControls = hiddenCharacterCollapsed && !isCompactTextLayout;
+  const effectiveHideCharSelector = hideCharSelector && !(canUnfoldHiddenCharacterControls && unfoldForCompactControls);
   const shouldMeasureCompactControls = canEditText && (
-    isStage || (isCompactTextLayout || hiddenCharacterCollapsed) && !unfoldForCompactControls
+    isStage || isCompactTextLayout || canUnfoldHiddenCharacterControls && !unfoldForCompactControls
   );
   const isCompactHiddenCharacterLayout = !!(
     compactControlLayout?.compact && compactControlLayout.mode === "hidden-character"
   );
   const unfoldCompactControls = () => {
-    if (hiddenCharacterCollapsed && isCompactHiddenCharacterLayout && !unfoldForCompactControls) {
+    if (canUnfoldHiddenCharacterControls && isCompactHiddenCharacterLayout && !unfoldForCompactControls) {
       setUnfoldForCompactControls(true);
     }
   };
