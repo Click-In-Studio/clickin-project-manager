@@ -29,11 +29,12 @@ interface Props {
   // panel: full vertical list with add button below
   display?: "compact" | "panel";
   onNavigate?: () => void;
+  onChange?: () => void;
 }
 
 export default function MountPointAssets({
   productionId, mountType, mountId, mountAuxId, versionId, stableId,
-  label, canEdit = false, display = "panel", onNavigate,
+  label, canEdit = false, display = "panel", onNavigate, onChange,
 }: Props) {
   const [results, setResults] = useState<MountResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +69,7 @@ export default function MountPointAssets({
       { method: "DELETE" }
     );
     setResults(p => p.filter(r => r.mount.id !== mount.id));
+    onChange?.();
   }
 
   if (display === "compact") {
@@ -101,7 +103,7 @@ export default function MountPointAssets({
             productionId={productionId}
             mountCtx={mountCtx}
             versionId={versionId}
-            onDone={() => { setShowModal(false); load(); }}
+            onDone={() => { setShowModal(false); load(); onChange?.(); }}
             onClose={() => setShowModal(false)}
           />
         )}
@@ -160,7 +162,7 @@ export default function MountPointAssets({
           productionId={productionId}
           mountCtx={mountCtx}
           versionId={versionId}
-          onDone={() => { setShowModal(false); load(); }}
+          onDone={() => { setShowModal(false); load(); onChange?.(); }}
           onClose={() => setShowModal(false)}
         />
       )}

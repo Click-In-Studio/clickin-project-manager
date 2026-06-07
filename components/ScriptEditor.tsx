@@ -2606,7 +2606,14 @@ type CommentBlockCaption = {
   body: string;
 };
 
+type BlockAssetBubbleItem = {
+  id: string;
+  name: string | null;
+  fileName: string;
+};
+
 const EMPTY_COMMENTS: Comment[] = [];
+const EMPTY_BLOCK_ASSETS: BlockAssetBubbleItem[] = [];
 const COMMENT_BUBBLE_MIN_WIDTH_PX = 135;
 const COMMENT_BUBBLE_MIN_GUTTER_PX = 170;
 const SPEECH_TAIL_PIN_OFFSET_PX = 96;
@@ -2725,24 +2732,28 @@ function useBlockSpeechTail(blockId: string) {
 
 function CommentBubble({
   comments,
+  assets,
   active,
   offsetY = 0,
   hasGutterSpace,
   maxWidth,
   blockLabel,
   captionBody,
-  onClick,
+  onCommentClick,
+  onAssetClick,
 }: {
   comments: Comment[];
+  assets: BlockAssetBubbleItem[];
   active: boolean;
   offsetY?: number;
   hasGutterSpace: boolean;
   maxWidth: number;
   blockLabel: string;
   captionBody: string;
-  onClick: () => void;
+  onCommentClick: () => void;
+  onAssetClick: () => void;
 }) {
-  if (comments.length === 0 || !hasGutterSpace) return null;
+  if ((comments.length === 0 && assets.length === 0) || !hasGutterSpace) return null;
 
   if (active) return null;
 
@@ -2764,43 +2775,77 @@ function CommentBubble({
   for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !sortedComments.some(parent => parent.id === c.parentId))) {
     orderedComments.push({ comment: orphanReply, reply: true });
   }
-  const visible = orderedComments.slice(0, 4);
-  const hiddenCount = orderedComments.length - visible.length;
+  const maxVisible = 4;
+  const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : maxVisible;
+  const visibleComments = orderedComments.slice(0, visibleCommentLimit);
+  const visibleAssets = assets.slice(0, maxVisible - visibleComments.length);
+  const hiddenCommentCount = orderedComments.length - visibleComments.length;
+  const hiddenAssetCount = assets.length - visibleAssets.length;
+  const hiddenCount = hiddenCommentCount + hiddenAssetCount;
+  const defaultAction = comments.length > 0 ? onCommentClick : onAssetClick;
+  const hiddenAction = hiddenCommentCount > 0 ? onCommentClick : onAssetClick;
+  const handleClick = (e: React.MouseEvent, action: () => void) => {
+    e.stopPropagation();
+    action();
+  };
 
   return (
     <div
       className="absolute left-full top-1/2 z-10 ml-6 hover:z-40 focus-within:z-40"
       style={{ transform: `translateY(calc(-50% + ${offsetY}px))` }}
     >
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
+      <div
         className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300 hover:bg-zinc-50"
         style={{ width: maxWidth, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
-        title="打开评论"
+        title={comments.length > 0 ? "打开评论" : "打开附件"}
       >
-        <div
-          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-50 px-2.5 py-1 text-[10px] font-medium text-zinc-500"
+        <button
+          type="button"
+          onClick={(e) => handleClick(e, defaultAction)}
+          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-50 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-500"
           title={`${blockLabel} ${captionBody}`}
         >
           <span className="font-bold text-zinc-700">{blockLabel}</span>{" "}
           <span>{captionBody}</span>
-        </div>
+        </button>
         <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden px-2.5 py-2">
-          {visible.map(({ comment, reply }) => (
-            <p key={comment.id} className={`line-clamp-1 text-[11px] leading-snug text-zinc-700 ${reply ? "pl-3 text-zinc-500" : ""}`}>
+          {visibleComments.map(({ comment, reply }) => (
+            <button
+              key={comment.id}
+              type="button"
+              onClick={(e) => handleClick(e, onCommentClick)}
+              className={`line-clamp-1 text-left text-[11px] leading-snug text-zinc-700 ${reply ? "pl-3 text-zinc-500" : ""}`}
+            >
               {reply && <span className="text-zinc-400">↳ </span>}
               <span className="font-semibold text-zinc-900">{comment.authorName}: </span>
               <span className="font-normal">{comment.body.trim() || "（空评论）"}</span>
-            </p>
+            </button>
+          ))}
+          {visibleComments.length > 0 && visibleAssets.length > 0 && (
+            <div className="border-t border-zinc-100" aria-hidden="true" />
+          )}
+          {visibleAssets.map(asset => (
+            <button
+              key={asset.id}
+              type="button"
+              onClick={(e) => handleClick(e, onAssetClick)}
+              className="line-clamp-1 text-left text-[11px] leading-snug text-zinc-700"
+            >
+              <span className="font-semibold text-zinc-900">附件: </span>
+              <span className="font-normal">{asset.name ?? asset.fileName}</span>
+            </button>
           ))}
         </div>
         {hiddenCount > 0 && (
-          <p className="border-t border-zinc-100 px-2.5 py-1 text-center text-[10px] font-semibold text-zinc-500">
+          <button
+            type="button"
+            onClick={(e) => handleClick(e, hiddenAction)}
+            className="border-t border-zinc-100 px-2.5 py-1 text-center text-[10px] font-semibold text-zinc-500"
+          >
             +{hiddenCount}
-          </p>
+          </button>
         )}
-      </button>
+      </div>
     </div>
   );
 }
@@ -3092,6 +3137,7 @@ function ScriptBlock({
   isMarkStart,
   commentCount,
   blockComments,
+  blockAssets,
   isCommentPanelActive,
   isAssetPanelActive,
   commentBubbleOffsetY = 0,
@@ -3167,6 +3213,7 @@ function ScriptBlock({
   isMarkStart: boolean;
   commentCount: number;
   blockComments: Comment[];
+  blockAssets: BlockAssetBubbleItem[];
   isCommentPanelActive: boolean;
   isAssetPanelActive: boolean;
   commentBubbleOffsetY?: number;
@@ -3774,13 +3821,15 @@ function ScriptBlock({
 
       <CommentBubble
         comments={blockComments}
-        active={isCommentPanelActive}
+        assets={blockAssets}
+        active={isCommentPanelActive || isAssetPanelActive}
         offsetY={commentBubbleOffsetY}
         hasGutterSpace={rightGutterCanShowComments}
         maxWidth={commentBubbleMaxWidth}
         blockLabel={commentBlockCaption.label}
         captionBody={commentBlockCaption.body}
-        onClick={onCommentClick}
+        onCommentClick={onCommentClick}
+        onAssetClick={onAssetClick}
       />
 
       {/* Right-side action buttons — flex row, no overlap */}
@@ -5810,6 +5859,7 @@ export default function ScriptEditor({
   }, [effectiveScriptId, loadState, clientId, activeVersionId, resetToolbarMeasurement, streamVisible]);
 
   const [comments, setComments] = useState<Comment[]>([]);
+  const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
   const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
@@ -5847,6 +5897,32 @@ export default function ScriptEditor({
       .then(d => { if (d?.comments) setComments(d.comments); })
       .catch(() => {});
   }, [productionId]);
+
+  const loadBlockAssetBubbles = useCallback(() => {
+    if (!productionId) {
+      setBlockAssetsByBlockId(new Map());
+      return;
+    }
+    const qs = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary${qs}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
+        const grouped = new Map<string, BlockAssetBubbleItem[]>();
+        for (const item of data?.blocks ?? []) {
+          const blockAssets = grouped.get(item.blockId);
+          if (blockAssets) {
+            if (!blockAssets.some(asset => asset.id === item.asset.id)) blockAssets.push(item.asset);
+          }
+          else grouped.set(item.blockId, [item.asset]);
+        }
+        setBlockAssetsByBlockId(grouped);
+      })
+      .catch(() => setBlockAssetsByBlockId(new Map()));
+  }, [productionId, activeVersionId]);
+
+  useEffect(() => {
+    loadBlockAssetBubbles();
+  }, [loadBlockAssetBubbles]);
 
   const commentsByBlockId = useMemo(() => {
     const grouped = new Map<string, Comment[]>();
@@ -7714,13 +7790,16 @@ export default function ScriptEditor({
             let lastBubbleBottom = -Infinity;
             for (let i = safeWindowStart; i < safeWindowEnd; i++) {
               const windowBlock = blocks[i];
-              const count = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
-              if (count === 0 || activeCommentBlockId === windowBlock.id) continue;
+              const commentCount = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
+              const assetCount = blockAssetsByBlockId.get(windowBlock.id)?.length ?? 0;
+              const count = commentCount + assetCount;
+              if (count === 0 || activeCommentBlockId === windowBlock.id || activeAssetBlockId === windowBlock.id) continue;
               const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
               const blockTop = cumulativeHRef.current[i] - spacerH.top;
               const desiredCenter = blockTop + blockHeight / 2;
               const visibleCount = Math.min(count, 4);
-              const bubbleHeight = Math.min(160, 38 + visibleCount * 17 + (count > visibleCount ? 22 : 0));
+              const hasDivider = commentCount > 0 && assetCount > 0;
+              const bubbleHeight = Math.min(160, 38 + visibleCount * 17 + (hasDivider ? 9 : 0) + (count > visibleCount ? 22 : 0));
               const desiredTop = desiredCenter - bubbleHeight / 2;
               const top = Math.max(desiredTop, lastBubbleBottom + 6);
               lastBubbleBottom = top + bubbleHeight;
@@ -7769,6 +7848,7 @@ export default function ScriptEditor({
             const selectedDeleteIds = isSelected ? Array.from(selectedBlockIds) : [block.id];
             const selectedCount = selectedDeleteIds.length;
             const blockComments = commentsByBlockId.get(block.id) ?? EMPTY_COMMENTS;
+            const blockAssets = blockAssetsByBlockId.get(block.id) ?? EMPTY_BLOCK_ASSETS;
             const canDeleteWithoutConfirmation = selectedDeleteIds.every((id) => {
               const selectedBlock = blocks.find((b) => b.id === id);
               return selectedBlock ? isBlockEmptyForDelete(selectedBlock) : false;
@@ -8052,6 +8132,7 @@ export default function ScriptEditor({
                   isMarkStart={isMarkStart}
                   commentCount={blockComments.length}
                   blockComments={blockComments}
+                  blockAssets={blockAssets}
                   isCommentPanelActive={activeCommentBlockId === block.id}
                   isAssetPanelActive={activeAssetBlockId === block.id}
                   commentBubbleOffsetY={commentBubbleOffsets.get(block.id) ?? 0}
@@ -8138,6 +8219,7 @@ export default function ScriptEditor({
               canEdit={true}
               display="panel"
               onNavigate={prepareForNavigation}
+              onChange={loadBlockAssetBubbles}
             />
           </div>
         </SideBlockPanel>
