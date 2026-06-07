@@ -3116,6 +3116,18 @@ type CommentBlockCaption = {
   body: string;
 };
 
+type SideBlockPanelNavigation = {
+  hasPrevious: boolean;
+  hasNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+};
+
+type SideBlockPanelNavigationTargets = {
+  previousBlockId: string | null;
+  nextBlockId: string | null;
+};
+
 type BlockAssetBubbleItem = {
   id: string;
   name: string | null;
@@ -3149,6 +3161,32 @@ function buildCommentBlockCaption(block: Block, characters: Character[], index: 
     label: `【${index + 1}】`,
     body: `${characterCaption ? `${characterCaption}: ` : ""}${blockContentPreview || "（空）"}${blockContentSuffix}`,
   };
+}
+
+function findSideBlockPanelNavigationTargets(
+  blocks: Block[],
+  activeBlockId: string | null,
+  hasPanelItem: (blockId: string) => boolean,
+): SideBlockPanelNavigationTargets {
+  if (!activeBlockId) return { previousBlockId: null, nextBlockId: null };
+  const activeIndex = blocks.findIndex(block => block.id === activeBlockId);
+  if (activeIndex < 0) return { previousBlockId: null, nextBlockId: null };
+
+  let previousBlockId: string | null = null;
+  let nextBlockId: string | null = null;
+  for (let index = activeIndex - 1; index >= 0; index--) {
+    if (hasPanelItem(blocks[index].id)) {
+      previousBlockId = blocks[index].id;
+      break;
+    }
+  }
+  for (let index = activeIndex + 1; index < blocks.length; index++) {
+    if (hasPanelItem(blocks[index].id)) {
+      nextBlockId = blocks[index].id;
+      break;
+    }
+  }
+  return { previousBlockId, nextBlockId };
 }
 
 function SpeechTail({
@@ -4749,6 +4787,7 @@ function SideBlockPanel({
   hasGutterSpace,
   gutterWidth,
   viewportWidth,
+  navigation,
   onClose,
   children,
 }: {
@@ -4758,6 +4797,7 @@ function SideBlockPanel({
   hasGutterSpace: boolean;
   gutterWidth: number;
   viewportWidth: number;
+  navigation?: SideBlockPanelNavigation;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -4795,7 +4835,45 @@ function SideBlockPanel({
             </p>
           )}
         </div>
-        <button onClick={onClose} className="text-lg leading-none text-zinc-800 hover:text-emerald-600/80">×</button>
+        <div className="flex shrink-0 items-center gap-2">
+          {navigation && (
+            <>
+              <button
+                type="button"
+                onClick={navigation.onPrevious}
+                disabled={!navigation.hasPrevious}
+                className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                title="上一条"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <polyline points="3 7.5 6 4.5 9 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={navigation.onNext}
+                disabled={!navigation.hasNext}
+                className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                title="下一条"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <polyline points="3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
+                </svg>
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80"
+            title="关闭"
+          >
+            <span className="relative h-3 w-3" aria-hidden="true">
+              <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+              <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 -rotate-45 bg-current" />
+            </span>
+          </button>
+        </div>
       </div>
       {children}
     </div>
@@ -4811,6 +4889,7 @@ function CommentsPanel({
   gutterWidth,
   viewportWidth,
   blockCaption,
+  navigation,
 }: {
   blockId: string; productionId: string; comments: Comment[];
   currentOpenId: string; isAdmin: boolean;
@@ -4821,6 +4900,7 @@ function CommentsPanel({
   gutterWidth: number;
   viewportWidth: number;
   blockCaption?: CommentBlockCaption | null;
+  navigation?: SideBlockPanelNavigation;
 }) {
   const [members, setMembers] = useState<Mention[]>([]);
   const [newText, setNewText] = useState("");
@@ -4974,6 +5054,7 @@ function CommentsPanel({
       hasGutterSpace={hasGutterSpace}
       gutterWidth={gutterWidth}
       viewportWidth={viewportWidth}
+      navigation={navigation}
       onClose={onClose}
     >
       <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3 space-y-4">
@@ -7649,6 +7730,42 @@ export default function ScriptEditor({
   };
 
   const [printPreview, setPrintPreview] = useState(false);
+  const commentPanelNavigationTargets = useMemo(
+    () => findSideBlockPanelNavigationTargets(
+      blocks,
+      activeCommentBlockId,
+      blockId => (commentsByBlockId.get(blockId)?.length ?? 0) > 0,
+    ),
+    [activeCommentBlockId, blocks, commentsByBlockId],
+  );
+  const assetPanelNavigationTargets = useMemo(
+    () => findSideBlockPanelNavigationTargets(
+      blocks,
+      activeAssetBlockId,
+      blockId => (blockAssetsByBlockId.get(blockId)?.length ?? 0) > 0,
+    ),
+    [activeAssetBlockId, blocks, blockAssetsByBlockId],
+  );
+  const navigateSidePanelBlock = useCallback((kind: "comment" | "asset", direction: -1 | 1) => {
+    const targets = kind === "comment" ? commentPanelNavigationTargets : assetPanelNavigationTargets;
+    const nextBlockId = direction === -1 ? targets.previousBlockId : targets.nextBlockId;
+    if (!nextBlockId) return;
+
+    if (kind === "comment") {
+      setActiveAssetBlockId(null);
+      setActiveCommentBlockId(nextBlockId);
+    } else {
+      setActiveCommentBlockId(null);
+      setActiveAssetBlockId(nextBlockId);
+    }
+
+    const blockIndex = blocksRef.current.findIndex(block => block.id === nextBlockId);
+    if (blockIndex >= 0) scrollToBlockIdx(blockIndex, "center");
+  }, [
+    assetPanelNavigationTargets,
+    commentPanelNavigationTargets,
+    scrollToBlockIdx,
+  ]);
 
   if (printPreview) {
     return (
@@ -9103,6 +9220,12 @@ export default function ScriptEditor({
           hasGutterSpace={rightGutterCanShowComments}
           gutterWidth={scriptSideGutterWidth}
           viewportWidth={effectiveViewportWidth}
+          navigation={{
+            hasPrevious: assetPanelNavigationTargets.previousBlockId !== null,
+            hasNext: assetPanelNavigationTargets.nextBlockId !== null,
+            onPrevious: () => navigateSidePanelBlock("asset", -1),
+            onNext: () => navigateSidePanelBlock("asset", 1),
+          }}
           onClose={() => setActiveAssetBlockId(null)}
         >
           <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3">
@@ -9136,6 +9259,12 @@ export default function ScriptEditor({
           gutterWidth={scriptSideGutterWidth}
           viewportWidth={effectiveViewportWidth}
           blockCaption={activeCommentBlockCaption}
+          navigation={{
+            hasPrevious: commentPanelNavigationTargets.previousBlockId !== null,
+            hasNext: commentPanelNavigationTargets.nextBlockId !== null,
+            onPrevious: () => navigateSidePanelBlock("comment", -1),
+            onNext: () => navigateSidePanelBlock("comment", 1),
+          }}
         />
       )}
 
