@@ -3253,6 +3253,7 @@ function CommentBubble({
   captionBody,
   onCommentClick,
   onAssetClick,
+  onHoverChange,
 }: {
   comments: Comment[];
   assets: BlockAssetBubbleItem[];
@@ -3264,6 +3265,7 @@ function CommentBubble({
   captionBody: string;
   onCommentClick: () => void;
   onAssetClick: () => void;
+  onHoverChange: (hovered: boolean) => void;
 }) {
   if ((comments.length === 0 && assets.length === 0) || !hasGutterSpace) return null;
 
@@ -3303,11 +3305,12 @@ function CommentBubble({
     <div
       className="absolute left-full top-1/2 z-10 ml-6 hover:z-40 focus-within:z-40"
       style={{ transform: `translateY(calc(-50% + ${offsetY}px))` }}
+      onMouseEnter={() => onHoverChange(true)}
+      onMouseLeave={() => onHoverChange(false)}
     >
       <div
         className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300"
         style={{ width: maxWidth, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
-        title={comments.length > 0 ? "打开评论" : "打开附件"}
       >
         <button
           type="button"
@@ -3320,7 +3323,10 @@ function CommentBubble({
         </button>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {(visibleComments.length > 0 || hiddenCommentCount > 0) && (
-            <div className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenCommentCount > 0 ? "relative pr-10" : ""}`}>
+            <div
+              className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenCommentCount > 0 ? "relative pr-10" : ""}`}
+              title="打开评论"
+            >
               {visibleComments.map(({ comment, reply }) => (
                 <button
                   key={comment.id}
@@ -3348,7 +3354,10 @@ function CommentBubble({
             <div className="shrink-0 border-t border-zinc-300" aria-hidden="true" />
           )}
           {(visibleAssets.length > 0 || hiddenAssetCount > 0) && (
-            <div className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenAssetCount > 0 ? "relative pr-10" : ""}`}>
+            <div
+              className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenAssetCount > 0 ? "relative pr-10" : ""}`}
+              title="打开附件"
+            >
               {visibleAssets.map(asset => (
                 <button
                   key={asset.id}
@@ -3802,6 +3811,7 @@ function ScriptBlock({
   const [confirmTypeAction, setConfirmTypeAction] = useState<"type" | "lyric" | null>(null);
   const [stageCommentEditing, setStageCommentEditing] = useState(false);
   const [stageCommentOverflowBelow, setStageCommentOverflowBelow] = useState(0);
+  const [commentBubbleHovered, setCommentBubbleHovered] = useState(false);
   const [compactCharacterColumnHeight, setCompactCharacterColumnHeight] = useState(0);
   const [compactCharacterLineHeight, setCompactCharacterLineHeight] = useState(getCompactFallbackLineHeightPx);
   const [compactContentLineHeight, setCompactContentLineHeight] = useState(getCompactFallbackLineHeightPx);
@@ -4051,7 +4061,7 @@ function ScriptBlock({
   const searchRingClass =
     isSearchHighlight === "focused" ? "ring-2 ring-inset ring-amber-400" :
     isSearchHighlight === "match"   ? "ring-1 ring-inset ring-amber-200" : "";
-  const hasExpandedSidePanel = isCommentPanelActive || isAssetPanelActive;
+  const hasExpandedSidePanel = isCommentPanelActive || isAssetPanelActive || commentBubbleHovered;
   const hasSideVisibleHighlight = hasExpandedSidePanel || isCharacterFocusHighlighted;
   const hasHardBlockHighlight = isDeleteConfirmHighlighted || isSelected;
   const usePartialFocusHighlight = isFocused && !hasHardBlockHighlight && hasSideVisibleHighlight;
@@ -4098,6 +4108,14 @@ function ScriptBlock({
     isCompactTextLayout ||
     (!isCompactTextLayout && !effectiveHideCharSelector)
   );
+  const handleCommentClick = () => {
+    setCommentBubbleHovered(false);
+    onCommentClick();
+  };
+  const handleAssetClick = () => {
+    setCommentBubbleHovered(false);
+    onAssetClick();
+  };
   const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
@@ -4357,8 +4375,9 @@ function ScriptBlock({
         maxWidth={commentBubbleMaxWidth}
         blockLabel={commentBlockCaption.label}
         captionBody={commentBlockCaption.body}
-        onCommentClick={onCommentClick}
-        onAssetClick={onAssetClick}
+        onCommentClick={handleCommentClick}
+        onAssetClick={handleAssetClick}
+        onHoverChange={setCommentBubbleHovered}
       />
 
       {/* Right-side action buttons — flex row, no overlap */}
