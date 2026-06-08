@@ -71,33 +71,6 @@ function fromDbType(t: DbBlockType): { type: Block["type"]; lyric: boolean } {
   return { type: "dialogue", lyric: false };
 }
 
-let ensureStageCommentColumnPromise: Promise<void> | null = null;
-
-async function ensureScriptStageCommentColumn(): Promise<void> {
-  if (!ensureStageCommentColumnPromise) {
-    ensureStageCommentColumnPromise = (async () => {
-      const pool = getPool();
-      const res = await pool.query<{ exists: boolean }>(
-        `SELECT EXISTS (
-           SELECT 1
-           FROM pg_attribute
-           WHERE attrelid = 'script'::regclass
-             AND attname = 'stage_comment'
-             AND NOT attisdropped
-         ) AS exists`
-      );
-      if (!res.rows[0]?.exists) {
-        await pool.query("ALTER TABLE script ADD COLUMN IF NOT EXISTS stage_comment TEXT");
-      }
-    })()
-      .catch((err) => {
-        ensureStageCommentColumnPromise = null;
-        throw err;
-      });
-  }
-  await ensureStageCommentColumnPromise;
-}
-
 // ─── Row types (internal) ─────────────────────────────────────────────────────
 
 // Versioned block row: comes from JOIN of script_version + script
@@ -427,7 +400,6 @@ export type ProductionState = {
  */
 export async function loadProduction(productionId: string, versionId: string): Promise<ProductionState | null> {
   const pool = getPool();
-  await ensureScriptStageCommentColumn();
 
   const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
     Promise.all([
@@ -577,7 +549,6 @@ export async function flushToDBVersioned(
       !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) {
     return { newSnapshotIds };
   }
-  await ensureScriptStageCommentColumn();
 
   // ── Phase 1: snapshot pre-flush for cue drift ─────────────────────────────
   const oldContents  = new Map<string, string>(); // snapshot_id → old content
@@ -812,7 +783,6 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
   const { upsertBlocks, deleteBlockIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
   if (!upsertBlocks.length && !deleteBlockIds.length && !upsertChars.length &&
       !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) return;
-  await ensureScriptStageCommentColumn();
 
   const versionId = await getActiveVersionId(productionId);
 
@@ -1006,7 +976,6 @@ export async function importScriptToVersion(
     upsertScenes: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }>;
   },
 ): Promise<void> {
-  await ensureScriptStageCommentColumn();
   const { upsertBlocks, upsertChars, upsertScenes } = payload;
   const client = await getPool().connect();
   try {
@@ -2855,7 +2824,6 @@ export async function cowBlockSnapshotForMount(
   snapshotId: string,
   mode: 'tracking' | 'version_only',
 ): Promise<string> {
-  await ensureScriptStageCommentColumn();
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
@@ -3122,7 +3090,6 @@ export async function applyPatchToDB(
   patch: ScriptPatch,
 ): Promise<void> {
   if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
-  await ensureScriptStageCommentColumn();
 
   // Local working-state types
   type TxBlock = { blockId: string; snapshotId: string; lexKey: string };
