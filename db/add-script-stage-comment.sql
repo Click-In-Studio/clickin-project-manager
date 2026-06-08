@@ -1,0 +1,1 @@
+ALTER TABLE script ADD COLUMN IF NOT EXISTS stage_comment TEXT;
