@@ -9,6 +9,10 @@ const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 // Files above this should be transferred by other means (rsync, rclone, etc.)
 const MAX_BROWSER_UPLOAD = 50 * 1024 * 1024 * 1024; // 50 GB
 const CONCURRENCY = 5;
+// After this many consecutive part final-failures (after all retries), switch to server relay
+const RELAY_FALLBACK_THRESHOLD = 1;
+// Reduced concurrency when using relay — avoid overloading the server
+const RELAY_CONCURRENCY = 1;
 
 // Target ≤200 parts; clamp part size between 50 MB and 5 GB (R2 hard max per part)
 function calcPartSize(fileSize: number): number {
@@ -57,6 +61,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [transferMode, setTransferMode] = useState<"direct" | "relay">("direct");
   const fileRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0); // track nested dragenter/dragleave to avoid flicker
 
@@ -110,6 +115,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
     setError(null);
     setLoading(true);
     setProgress(null);
+    setTransferMode("direct");
     try {
       const base = `${BASE_PATH}/api/production/${productionId}/assets`;
 
@@ -220,41 +226,118 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         };
         r2Key = mp.r2Key; fileId = mp.fileId;
 
-        // Upload parts with CONCURRENCY parallel XHRs, track bytes for progress
+        // Upload parts — direct R2 first, relay fallback on repeated failure
         const eTags: { partNumber: number; eTag: string }[] = [];
         let uploadedBytes = 0;
+        let useRelay = false;         // flipped after RELAY_FALLBACK_THRESHOLD final failures
+        let consecutiveFinals = 0;    // final failures (after all retries) so far
+        const PART_MAX_RETRIES = 3;
+        const PART_RETRY_DELAY_MS = 1500;
 
-        for (let i = 0; i < mp.parts.length; i += CONCURRENCY) {
-          const batch = mp.parts.slice(i, i + CONCURRENCY);
-          await Promise.all(batch.map(({ partNumber, uploadUrl }) =>
-            new Promise<void>((resolve, reject) => {
-              const start = (partNumber - 1) * partSize;
-              const chunk = file.slice(start, Math.min(start + partSize, file.size));
-
-              const xhr = new XMLHttpRequest();
-              let lastLoaded = 0;
-              xhr.upload.addEventListener("progress", e => {
-                uploadedBytes += e.loaded - lastLoaded;
-                lastLoaded = e.loaded;
+        // ── Direct XHR upload to R2 ─────────────────────────────────────────
+        const uploadPartDirect = (partNumber: number, uploadUrl: string, attempt = 0): Promise<void> =>
+          new Promise<void>((resolve, reject) => {
+            const start = (partNumber - 1) * partSize;
+            const chunk = file.slice(start, Math.min(start + partSize, file.size));
+            const xhr = new XMLHttpRequest();
+            let lastLoaded = 0;
+            xhr.upload.addEventListener("progress", e => {
+              uploadedBytes += e.loaded - lastLoaded;
+              lastLoaded = e.loaded;
+              setProgress(Math.round((uploadedBytes / file.size) * 100));
+            });
+            xhr.addEventListener("load", () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                const eTag = xhr.getResponseHeader("ETag") ?? "";
+                eTags.push({ partNumber, eTag });
+                uploadedBytes += chunk.size - lastLoaded;
                 setProgress(Math.round((uploadedBytes / file.size) * 100));
-              });
-              xhr.addEventListener("load", () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  const eTag = xhr.getResponseHeader("ETag") ?? "";
-                  eTags.push({ partNumber, eTag });
-                  // Account for any un-fired progress events
-                  uploadedBytes += chunk.size - lastLoaded;
-                  setProgress(Math.round((uploadedBytes / file.size) * 100));
-                  resolve();
-                } else {
-                  reject(new Error(`Part ${partNumber} 上传失败 (${xhr.status})`));
-                }
-              });
-              xhr.addEventListener("error", () => reject(new Error(`Part ${partNumber} 网络错误`)));
-              xhr.open("PUT", uploadUrl);
-              xhr.send(chunk);
-            })
-          ));
+                resolve();
+              } else if (xhr.status >= 500 && attempt < PART_MAX_RETRIES) {
+                uploadedBytes -= lastLoaded;
+                setTimeout(() => uploadPartDirect(partNumber, uploadUrl, attempt + 1).then(resolve, reject), PART_RETRY_DELAY_MS * (attempt + 1));
+              } else {
+                uploadedBytes -= lastLoaded;
+                reject(new Error(`Part ${partNumber} 直传失败 (${xhr.status})`));
+              }
+            });
+            xhr.addEventListener("error", () => {
+              uploadedBytes -= lastLoaded;
+              if (attempt < PART_MAX_RETRIES) {
+                setTimeout(() => uploadPartDirect(partNumber, uploadUrl, attempt + 1).then(resolve, reject), PART_RETRY_DELAY_MS * (attempt + 1));
+              } else {
+                reject(new Error(`Part ${partNumber} 直传网络错误（已重试 ${PART_MAX_RETRIES} 次）`));
+              }
+            });
+            xhr.open("PUT", uploadUrl);
+            xhr.send(chunk);
+          });
+
+        // ── Relay upload through server ──────────────────────────────────────
+        const uploadPartViaRelay = (partNumber: number): Promise<void> =>
+          new Promise<void>((resolve, reject) => {
+            const start = (partNumber - 1) * partSize;
+            const chunk = file.slice(start, Math.min(start + partSize, file.size));
+            const xhr = new XMLHttpRequest();
+            let lastLoaded = 0;
+            xhr.upload.addEventListener("progress", e => {
+              uploadedBytes += e.loaded - lastLoaded;
+              lastLoaded = e.loaded;
+              setProgress(Math.round((uploadedBytes / file.size) * 100));
+            });
+            xhr.addEventListener("load", () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                const { eTag } = JSON.parse(xhr.responseText) as { eTag: string };
+                eTags.push({ partNumber, eTag });
+                uploadedBytes += chunk.size - lastLoaded;
+                setProgress(Math.round((uploadedBytes / file.size) * 100));
+                resolve();
+              } else if (xhr.status === 503) {
+                // Server relay busy — back off and retry
+                uploadedBytes -= lastLoaded;
+                setTimeout(() => uploadPartViaRelay(partNumber).then(resolve, reject), 3000);
+              } else {
+                uploadedBytes -= lastLoaded;
+                reject(new Error(`Part ${partNumber} 中继失败 (${xhr.status})`));
+              }
+            });
+            xhr.addEventListener("error", () => {
+              uploadedBytes -= lastLoaded;
+              reject(new Error(`Part ${partNumber} 中继网络错误`));
+            });
+            const relayUrl = `${base}/relay-part?r2Key=${encodeURIComponent(mp.r2Key)}`
+              + `&uploadId=${encodeURIComponent(mp.uploadId)}&partNumber=${partNumber}`;
+            xhr.open("POST", relayUrl);
+            xhr.setRequestHeader("Content-Type", "application/octet-stream");
+            xhr.send(chunk);
+          });
+
+        // ── Dispatch: direct with relay fallback ─────────────────────────────
+        const uploadPart = async (partNumber: number, uploadUrl: string): Promise<void> => {
+          if (useRelay) return uploadPartViaRelay(partNumber);
+          try {
+            await uploadPartDirect(partNumber, uploadUrl);
+          } catch {
+            consecutiveFinals++;
+            if (consecutiveFinals >= RELAY_FALLBACK_THRESHOLD) {
+              useRelay = true;
+              setTransferMode("relay");
+            }
+            // Retry the failed part via relay immediately
+            return uploadPartViaRelay(partNumber);
+          }
+        };
+
+        const effectiveConcurrency = () => useRelay ? RELAY_CONCURRENCY : CONCURRENCY;
+
+        // Process parts in batches; re-slice each batch with current concurrency
+        // (may shrink mid-upload when relay kicks in).
+        let i = 0;
+        while (i < mp.parts.length) {
+          const batchSize = effectiveConcurrency();
+          const batch = mp.parts.slice(i, i + batchSize);
+          await Promise.all(batch.map(({ partNumber, uploadUrl }) => uploadPart(partNumber, uploadUrl)));
+          i += batchSize;
         }
 
         setProgress(100);
@@ -388,11 +471,16 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
 
       {/* Upload progress bar */}
       {progress !== null && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
-          <div
-            className="h-full rounded-full bg-zinc-800 transition-all duration-150"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="space-y-1">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+            <div
+              className="h-full rounded-full bg-zinc-800 transition-all duration-150"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {transferMode === "relay" && (
+            <p className="text-xs text-amber-600">⚠ 直传受阻，已切换至服务器中转</p>
+          )}
         </div>
       )}
 

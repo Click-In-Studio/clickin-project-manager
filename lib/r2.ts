@@ -110,6 +110,28 @@ export function presignedPut(key: string, mimeType: string, expiresIn = 3600): {
   return { url: `${endpoint}/${r2Bucket}/${key}?${params.toString()}`, contentType: mimeType };
 }
 
+/**
+ * Upload a single multipart part from server-side (relay path).
+ * Returns the ETag from R2.
+ */
+export async function uploadPartRelay(
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  body: ArrayBuffer,
+): Promise<string> {
+  const url = presignedUploadPart(key, uploadId, partNumber);
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Length": String(body.byteLength) },
+    body: new Uint8Array(body),
+  });
+  if (!res.ok) throw new Error(`UploadPart relay failed: ${res.status} ${await res.text()}`);
+  const eTag = res.headers.get("etag");
+  if (!eTag) throw new Error("No ETag in UploadPart relay response");
+  return eTag;
+}
+
 /** Upload a buffer to R2 from server-side. */
 export async function putR2Object(key: string, body: Buffer, mimeType: string): Promise<void> {
   const { url, contentType } = presignedPut(key, mimeType);
