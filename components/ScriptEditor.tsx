@@ -14,7 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script-types";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, Version, VersionStatus, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
 import VersionSelector from "@/components/VersionSelector";
@@ -23,7 +23,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/DurationInput";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { diffState, type TagEntry } from "@/lib/script-ops";
-import { computePageMap, DEFAULT_PAGE_CONFIG } from "@/lib/script-page";
+import { COMPACT_TEXT_SIDE_WIDTH_REM, computePageMap, PAGE_CONFIGS } from "@/lib/script-page";
 import type { PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
@@ -35,7 +35,6 @@ const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
 const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
 const TOOLBAR_FOLD_HYSTERESIS_PX = 16;
 const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
-const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
 const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
 const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;
 const SCRIPT_TOC_CENTER_EVENT = "script-toc-center-active";
@@ -554,22 +553,15 @@ function htmlToMd(html: string): string {
   return Array.from(tmp.childNodes).map(nodeToMd).join("").replace(/\n$/, "");
 }
 
-const stagePairRegexCache = new Map<string, RegExp>();
-
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function stagePairRegex(delimOpen = "（", delimClose = "）"): RegExp {
-  const cacheKey = `${delimOpen}\u0000${delimClose}`;
-  const cached = stagePairRegexCache.get(cacheKey);
-  if (cached) return cached;
-  const regex = new RegExp(
+  return new RegExp(
     `${escapeRegex(delimOpen)}[^${escapeRegex(delimClose)}\n]*${escapeRegex(delimClose)}`,
     "g"
   );
-  stagePairRegexCache.set(cacheKey, regex);
-  return regex;
 }
 
 function mdToHtml(md: string, delimOpen?: string, delimClose?: string): string {
@@ -579,7 +571,6 @@ function mdToHtml(md: string, delimOpen?: string, delimClose?: string): string {
     .replace(/>/g, "&gt;");
   if (delimOpen !== undefined && delimClose !== undefined) {
     const pairRegex = stagePairRegex(delimOpen, delimClose);
-    pairRegex.lastIndex = 0;
     s = s.replace(pairRegex, (match) =>
       `<span data-stage-inline="" style="font-family:var(--font-stage);font-style:italic;color:#a1a1aa">${match}</span>`
     );
@@ -595,7 +586,6 @@ function mdToHtml(md: string, delimOpen?: string, delimClose?: string): string {
 
 function replaceInlineStageDelimiters(content: string, fromOpen: string, fromClose: string, toOpen: string, toClose: string): string {
   const pairRegex = stagePairRegex(fromOpen, fromClose);
-  pairRegex.lastIndex = 0;
   return content.replace(pairRegex, (match) =>
     `${toOpen}${match.slice(fromOpen.length, match.length - fromClose.length)}${toClose}`
   );
@@ -2394,8 +2384,6 @@ function BlockStageComment({
 
 // ─── Print ────────────────────────────────────────────────────────────────────
 
-// PageConfig and DEFAULT_PAGE_CONFIG imported from @/lib/script-page
-
 type PrintItem =
   | { kind: "sceneHeader"; scene: Scene }
   | { kind: "block"; block: Block; hideChar: boolean; leadingCharacterGap: boolean };
@@ -2495,6 +2483,219 @@ function computePrintPages(
 
   flush();
   return { pages, scenePageNums };
+}
+
+function pageMapFromPrintPages(pages: PrintPageData[]): Record<string, number> {
+  const pageMap: Record<string, number> = {};
+  for (const page of pages) {
+    for (const item of page.items) {
+      if (item.kind === "block") pageMap[item.block.id] = page.pageNum;
+    }
+  }
+  return pageMap;
+}
+
+function samePageMap(a: Record<string, number> | null, b: Record<string, number>): boolean {
+  if (!a) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return bKeys.every((key) => a[key] === b[key]);
+}
+
+function PrintMeasurementLayer({
+  blocks,
+  characters,
+  scenes,
+  contentW,
+  compactLayout,
+  stageDelimOpen,
+  stageDelimClose,
+  measureRef,
+  onLayoutChange,
+}: {
+  blocks: Block[];
+  characters: Character[];
+  scenes: Scene[];
+  contentW: number;
+  compactLayout: boolean;
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  measureRef: React.RefObject<HTMLDivElement | null>;
+  onLayoutChange?: () => void;
+}) {
+  const characterById = useMemo(() => new Map(characters.map((c) => [c.id, c])), [characters]);
+  const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
+
+  const renderSceneHeader = (scene: Scene) => (
+    <div className="flex items-center gap-3 py-3">
+      <div className="h-px flex-1 bg-zinc-200" />
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs font-bold tracking-widest text-zinc-400">{scene.number}</span>
+        {scene.name && <span className="text-sm text-zinc-500">{scene.name}</span>}
+      </div>
+      <div className="h-px flex-1 bg-zinc-200" />
+    </div>
+  );
+
+  const renderBlock = (block: Block, hideChar: boolean) => {
+    const isStage = block.type === "stage";
+    const sel = block.characterIds
+      .map((id) => characterById.get(id))
+      .filter((c): c is Character => !!c);
+    const blockPaddingClass = isStage ? "py-0" : hideChar ? "py-0" : "py-1";
+    const characterLabel = sel.map((c) => {
+      const ann = block.characterAnnotations[c.id];
+      return ann ? `${c.name}（${ann}）` : c.name;
+    }).join("、");
+
+    if (compactLayout && !isStage) {
+      const stageCommentText = sel.length > 0 && block.stageComment?.trim()
+        ? block.stageComment.trim()
+            .split(/\r\n|\r|\n/)
+            .map((line) => `${stageDelimOpen}${line}${stageDelimClose}`)
+            .join("\n")
+        : "";
+      return (
+        <CompactPrintBlock
+          block={block}
+          blockPaddingClass={blockPaddingClass}
+          characterLabel={characterLabel}
+          showCharacterLabel={!hideChar && sel.length > 0}
+          stageCommentText={stageCommentText}
+          leadingCharacterGap={false}
+          stageDelimOpen={stageDelimOpen}
+          stageDelimClose={stageDelimClose}
+          onLayoutChange={onLayoutChange}
+        />
+      );
+    }
+
+    const content = !isStage && sel.length > 0 && block.stageComment?.trim()
+      ? `${block.stageComment.trim().split(/\r\n|\r|\n/).map((line) => `${stageDelimOpen}${line}${stageDelimClose}`).join("\n")}\n${block.content}`
+      : block.content;
+
+    return (
+      <div className={`w-full ${blockPaddingClass}`}>
+        {!isStage && !hideChar && sel.length > 0 && (
+          <div className="mb-0.5 w-full text-center text-sm font-bold tracking-[0.12em] text-zinc-800">
+            {characterLabel}
+          </div>
+        )}
+        <div
+          className={`${PRINT_TEXT_CLASS} ${
+            isStage
+              ? "font-stage text-left italic text-zinc-500"
+              : block.lyric
+              ? "font-lyric text-center font-bold uppercase text-zinc-800"
+              : "font-script text-center text-zinc-800"
+          }`}
+          dangerouslySetInnerHTML={{ __html: mdToHtml(content, stageDelimOpen, stageDelimClose) || "　" }}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div
+      ref={measureRef}
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        left: -9999,
+        top: 0,
+        width: contentW,
+        visibility: "hidden",
+      }}
+    >
+      {blocks.map((block, i) => {
+        const prev = i > 0 ? blocks[i - 1] : null;
+        const hideChar = shouldHideCharacterLabel(prev, block);
+        const sceneStart = block.sceneId !== null && block.sceneId !== prev?.sceneId;
+        return (
+          <div key={block.id}>
+            {sceneStart && (() => {
+              const sceneId = block.sceneId;
+              if (sceneId === null) return null;
+              const scene = sceneById.get(sceneId);
+              return scene ? (
+                <div data-mid={`sh-${sceneId}`}>
+                  {renderSceneHeader(scene)}
+                </div>
+              ) : null;
+            })()}
+            <div data-mid={`b-${block.id}`}>{renderBlock(block, hideChar)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PrintPaginationMeasure({
+  blocks,
+  characters,
+  scenes,
+  pageLayout,
+  stageDelimOpen,
+  stageDelimClose,
+  textLayoutMode,
+  onPageMapChange,
+}: {
+  blocks: Block[];
+  characters: Character[];
+  scenes: Scene[];
+  pageLayout: PageLayout;
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  textLayoutMode: ScriptTextLayoutMode;
+  onPageMapChange: (pageMap: Record<string, number>) => void;
+}) {
+  const cfg = PAGE_CONFIGS[pageLayout];
+  const contentW = cfg.width - cfg.marginX * 2;
+  const contentH = cfg.height - cfg.marginTop - cfg.marginBottom;
+  const compactLayout = textLayoutMode === "compact";
+  const measureRef = useRef<HTMLDivElement>(null);
+  const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
+  const requestLayoutRemeasure = useCallback(() => {
+    if (remeasureTimerRef.current) return;
+    remeasureTimerRef.current = setTimeout(() => {
+      remeasureTimerRef.current = null;
+      setLayoutMeasureTick((tick) => tick + 1);
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const heights: Record<string, number> = {};
+    el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
+      if (node.dataset.mid) heights[node.dataset.mid] = node.offsetHeight;
+    });
+    const result = computePrintPages(blocks, scenes, heights, contentH);
+    onPageMapChange(pageMapFromPrintPages(result.pages));
+  }, [blocks, characters, scenes, contentW, contentH, textLayoutMode, stageDelimOpen, stageDelimClose, layoutMeasureTick, onPageMapChange]);
+
+  return (
+    <PrintMeasurementLayer
+      blocks={blocks}
+      characters={characters}
+      scenes={scenes}
+      contentW={contentW}
+      compactLayout={compactLayout}
+      stageDelimOpen={stageDelimOpen}
+      stageDelimClose={stageDelimClose}
+      measureRef={measureRef}
+      onLayoutChange={requestLayoutRemeasure}
+    />
+  );
 }
 
 function PrintPage({
@@ -2688,7 +2889,7 @@ function CompactPrintBlock({
     });
   }, [block.id, characterLabel, showCharacterLabel, stageCommentText, firstLineOffset]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!onLayoutChange) return;
     if (lastNotifiedOffsetRef.current === firstLineOffset) return;
     lastNotifiedOffsetRef.current = firstLineOffset;
@@ -2746,6 +2947,7 @@ function PrintPreview({
   blocks,
   characters,
   scenes,
+  pageLayout,
   stageDelimOpen,
   stageDelimClose,
   textLayoutMode,
@@ -2756,6 +2958,7 @@ function PrintPreview({
   blocks: Block[];
   characters: Character[];
   scenes: Scene[];
+  pageLayout: PageLayout;
   stageDelimOpen: string;
   stageDelimClose: string;
   textLayoutMode: ScriptTextLayoutMode;
@@ -2763,7 +2966,7 @@ function PrintPreview({
   onTextLayoutModeChange: (mode: ScriptTextLayoutMode) => void;
   onClose: () => void;
 }) {
-  const cfg = DEFAULT_PAGE_CONFIG;
+  const cfg = PAGE_CONFIGS[pageLayout];
   const contentW = cfg.width - cfg.marginX * 2;
   const contentH = cfg.height - cfg.marginTop - cfg.marginBottom;
   const compactLayout = textLayoutMode === "compact";
@@ -2778,11 +2981,16 @@ function PrintPreview({
   const [forceLoadingNotice, setForceLoadingNotice] = useState(false);
   const forceLoadingNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layoutSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
   const [headerMode, setHeaderMode] = useState<PrintHeaderMode>("first-right");
   const requestLayoutRemeasure = useCallback(() => {
-    setData(null);
-    setLayoutMeasureTick((tick) => tick + 1);
+    if (remeasureTimerRef.current) return;
+    remeasureTimerRef.current = setTimeout(() => {
+      remeasureTimerRef.current = null;
+      setData(null);
+      setLayoutMeasureTick((tick) => tick + 1);
+    }, 0);
   }, []);
 
   useEffect(() => {
@@ -2797,7 +3005,7 @@ function PrintPreview({
       layoutMode: textLayoutMode,
       measureTick: layoutMeasureTick,
     });
-  }, [blocks, scenes, contentH, textLayoutMode, layoutMeasureTick]);
+  }, [blocks, characters, scenes, contentW, contentH, textLayoutMode, stageDelimOpen, stageDelimClose, layoutMeasureTick]);
 
   const printPreviewReady = !!data &&
     data.layoutMode === textLayoutMode &&
@@ -2817,6 +3025,7 @@ function PrintPreview({
     return () => {
       if (forceLoadingNoticeTimerRef.current) clearTimeout(forceLoadingNoticeTimerRef.current);
       if (layoutSwitchTimerRef.current) clearTimeout(layoutSwitchTimerRef.current);
+      if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
     };
   }, []);
 
@@ -2984,37 +3193,17 @@ function PrintPreview({
           </div>
         )}
         <div className="mx-auto flex flex-col items-center gap-6 py-8 print:gap-0 print:py-0">
-          {/* Hidden measurement container — off-screen, rendered at print content width */}
-          <div
-            ref={measureRef}
-            aria-hidden="true"
-            style={{
-              position: "fixed",
-              left: -9999,
-              top: 0,
-              width: contentW,
-              visibility: "hidden",
-            }}
-          >
-            {blocks.map((block, i) => {
-              const prev = i > 0 ? blocks[i - 1] : null;
-              const hideChar = shouldHideCharacterLabel(prev, block);
-              const sceneStart = block.sceneId !== null && block.sceneId !== prev?.sceneId;
-              return (
-                <div key={block.id}>
-                  {sceneStart && (() => {
-                    const scene = scenes.find((s) => s.id === block.sceneId);
-                    return scene ? (
-                      <div data-mid={`sh-${block.sceneId}`}>
-                        {renderSceneHeader(scene, `m-sh-${block.sceneId}`)}
-                      </div>
-                    ) : null;
-                  })()}
-                  <div data-mid={`b-${block.id}`}>{renderBlock(block, hideChar, false, false, false, true)}</div>
-                </div>
-              );
-            })}
-          </div>
+          <PrintMeasurementLayer
+            blocks={blocks}
+            characters={characters}
+            scenes={scenes}
+            contentW={contentW}
+            compactLayout={compactLayout}
+            stageDelimOpen={stageDelimOpen}
+            stageDelimClose={stageDelimClose}
+            measureRef={measureRef}
+            onLayoutChange={requestLayoutRemeasure}
+          />
 
           {/* TOC page */}
           {tocScenes.length > 0 && (
@@ -3914,7 +4103,7 @@ function ScriptBlock({
     if (unfoldForCompactControls) setUnfoldForCompactControls(false);
   };
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!shouldMeasureCompactControls) {
       compactControlLayoutActiveRef.current = false;
       setCompactControlLayout(null);
@@ -3969,7 +4158,6 @@ function ScriptBlock({
       });
     };
 
-    updateCompactControls();
     const observer = new ResizeObserver(updateCompactControls);
     observer.observe(blockEl);
     const tagEl = blockTagsRef.current;
@@ -4206,7 +4394,7 @@ function ScriptBlock({
     return width > 0 ? width : null;
   }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!isCompactTextLayout) {
       setCompactCharacterColumnHeight(0);
       const fallbackLineHeight = getCompactFallbackLineHeightPx();
@@ -4230,7 +4418,6 @@ function ScriptBlock({
         if (Number.isFinite(lineHeight)) setCompactContentLineHeight(lineHeight);
       }
     };
-    measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
@@ -4754,9 +4941,12 @@ function BlockGap() {
   return <div className="h-5" aria-hidden="true" />;
 }
 
-function InsertZone({ onInsert }: { onInsert: () => void }) {
+function InsertZone({ lineIndexWidth, onInsert }: { lineIndexWidth?: string; onInsert: () => void }) {
+  const style: React.CSSProperties | undefined = lineIndexWidth
+    ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
+    : undefined;
   return (
-    <div className="group flex h-5 items-center justify-center">
+    <div className="group flex h-5 items-center justify-center px-6" style={style}>
       <button
         onClick={onInsert}
         title="插入新块"
@@ -5249,7 +5439,15 @@ export default function ScriptEditor({
   }, [scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
 
   // ── Page map (computed client-side, deterministic) ──────────────────────────
-  const pageMap = useMemo(() => computePageMap(blocks, scriptConfig.pageLayout), [blocks, scriptConfig.pageLayout]);
+  const pageMap = useMemo(
+    () => computePageMap(blocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode),
+    [blocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode],
+  );
+  const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
+  const [printPageMapMeasureEnabled, setPrintPageMapMeasureEnabled] = useState(false);
+  const handlePrintPageMapChange = useCallback((nextPageMap: Record<string, number>) => {
+    setPrintDividerPageMap((prev) => samePageMap(prev, nextPageMap) ? prev : nextPageMap);
+  }, []);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
   const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);
   const maxLineIndexText = String(Math.max(1, blocks.length));
@@ -5431,6 +5629,29 @@ export default function ScriptEditor({
 
   // ── Display settings (cookie-persisted) ──────────────────────────────────────
   const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
+  useEffect(() => {
+    setPrintDividerPageMap(null);
+    setPrintPageMapMeasureEnabled(false);
+    if (!display.pageBreaks) return;
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(
+        () => setPrintPageMapMeasureEnabled(true),
+        { timeout: 1000 },
+      );
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timer = window.setTimeout(() => setPrintPageMapMeasureEnabled(true), 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    display.pageBreaks,
+    blocks,
+    characters,
+    scenes,
+    scriptConfig.pageLayout,
+    scriptConfig.textLayoutMode,
+    scriptConfig.stageDelimOpen,
+    scriptConfig.stageDelimClose,
+  ]);
   useLayoutEffect(() => {
     if (!display.lineNumbers) {
       setLineIndexWidth(0);
@@ -7773,6 +7994,7 @@ export default function ScriptEditor({
         blocks={blocks}
         characters={characters}
         scenes={scenes}
+        pageLayout={scriptConfig.pageLayout}
         stageDelimOpen={scriptConfig.stageDelimOpen}
         stageDelimClose={scriptConfig.stageDelimClose}
         textLayoutMode={scriptConfig.textLayoutMode}
@@ -8675,6 +8897,19 @@ export default function ScriptEditor({
         }
       `}</style>
 
+      {printPageMapMeasureEnabled && display.pageBreaks && (
+        <PrintPaginationMeasure
+          blocks={blocks}
+          characters={characters}
+          scenes={scenes}
+          pageLayout={scriptConfig.pageLayout}
+          stageDelimOpen={scriptConfig.stageDelimOpen}
+          stageDelimClose={scriptConfig.stageDelimClose}
+          textLayoutMode={scriptConfig.textLayoutMode}
+          onPageMapChange={handlePrintPageMapChange}
+        />
+      )}
+
       {/* Document */}
       {scriptTocRailMode && (
         <aside
@@ -8846,10 +9081,18 @@ export default function ScriptEditor({
 
             const sceneStart = block.sceneId !== null && block.sceneId !== prev?.sceneId;
             const isMarkStart = block.rehearsalMark !== (prev?.rehearsalMark ?? null);
-            const pageBreak = bIdx > 0 && pageMap[block.id] !== pageMap[prev!.id];
+            const dividerPage = printDividerPageMap?.[block.id];
+            const prevDividerPage = prev ? printDividerPageMap?.[prev.id] : undefined;
+            const pageBreak = !!(
+              display.pageBreaks &&
+              bIdx > 0 &&
+              dividerPage !== undefined &&
+              prevDividerPage !== undefined &&
+              dividerPage !== prevDividerPage
+            );
             const isBlockFocused = !isLockedMode && focusedId === block.id;
             const hideCharSelector =
-              isBlockFocused || (pageBreak && display.pageBreaks) ? false : shouldHideCharacterLabel(prev, block);
+              isBlockFocused || pageBreak ? false : shouldHideCharacterLabel(prev, block);
             const showCharacterGap = isLockedMode && shouldShowCharacterGap(prev, block, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
@@ -8882,11 +9125,11 @@ export default function ScriptEditor({
               >
                 {/* Scene anchor for TableOfContents links */}
                 {sceneStart && <span id={`scene-block-${block.sceneId}`} className="pointer-events-none absolute" />}
-                {pageBreak && display.pageBreaks && (
+                {pageBreak && (
                   <div className="relative my-2 flex items-center gap-2 px-6 select-none">
                     <div className="flex-1 border-t border-dashed border-zinc-200" />
                     <span className="shrink-0 rounded bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300">
-                      第 {pageMap[block.id]} 页
+                      第 {dividerPage} 页
                     </span>
                     <div className="flex-1 border-t border-dashed border-zinc-200" />
                   </div>
@@ -9168,7 +9411,7 @@ export default function ScriptEditor({
             );
             return bIdx > 0
               ? [
-                  canEditText ? <InsertZone key={`iz-${bIdx}`} onInsert={() => insertBlockAt(bIdx)} /> :
+                  canEditText ? <InsertZone key={`iz-${bIdx}`} lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
                     isLockedMode && showCharacterGap ? <BlockGap key={`iz-${bIdx}`} /> :
                     null,
                   blockEl,
@@ -9185,7 +9428,7 @@ export default function ScriptEditor({
               />,
             ];
           })()}
-          {canEditText ? <InsertZone onInsert={() => insertBlockAt(blocks.length)} /> : null}
+          {canEditText ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(blocks.length)} /> : null}
           </div>
         </div>
         {canEditText && (

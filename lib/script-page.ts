@@ -1,5 +1,5 @@
 import type { Block } from "./script-types";
-import type { PageLayout } from "./script-types";
+import type { PageLayout, ScriptTextLayoutMode } from "./script-types";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 
@@ -38,6 +38,8 @@ const LINE_HEIGHT    = 28;  // leading-7 (1.75rem)
 const FONT_SIZE      = 14;  // text-sm (0.875rem at 16px base)
 const CHAR_NAME_HEIGHT   = 22;  // text-sm (20px) + mb-0.5 (2px)
 const SCENE_HEADER_HEIGHT = 44; // py-3 (24px) + text-sm content (20px)
+export const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
+const REM_SIZE = 16;
 
 function contentWidth(cfg: PageConfig): number {
   return cfg.width - 2 * cfg.marginX;
@@ -45,8 +47,12 @@ function contentWidth(cfg: PageConfig): number {
 function contentHeight(cfg: PageConfig): number {
   return cfg.height - cfg.marginTop - cfg.marginBottom;
 }
-function unitsPerLine(cfg: PageConfig): number {
-  return Math.floor(contentWidth(cfg) / FONT_SIZE);
+function unitsPerLine(cfg: PageConfig, textLayoutMode: ScriptTextLayoutMode = "center"): number {
+  const width = contentWidth(cfg);
+  const compactTextWidth = textLayoutMode === "compact"
+    ? width - COMPACT_TEXT_SIDE_WIDTH_REM * REM_SIZE
+    : width;
+  return Math.max(1, Math.floor(compactTextWidth / FONT_SIZE));
 }
 
 function stripHtml(html: string): string {
@@ -111,9 +117,13 @@ function estimateBlockHeight(block: Block, prev: Block | null, upl: number, forc
  * Returns a mapping of blockId → page number (1-based).
  * Mirrors the layout algorithm in computePrintPages (ScriptEditor.tsx).
  */
-export function computePageMap(blocks: Block[], layout: PageLayout = "a4"): Record<string, number> {
+export function computePageMap(
+  blocks: Block[],
+  layout: PageLayout = "a4",
+  textLayoutMode: ScriptTextLayoutMode = "center",
+): Record<string, number> {
   const cfg = PAGE_CONFIGS[layout];
-  const upl = unitsPerLine(cfg);
+  const upl = unitsPerLine(cfg, textLayoutMode);
   const maxH = contentHeight(cfg);
 
   const pageMap: Record<string, number> = {};
