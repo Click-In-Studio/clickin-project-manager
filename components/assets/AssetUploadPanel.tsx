@@ -239,7 +239,9 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         r2Key = mp.r2Key; fileId = mp.fileId;
 
         // ── Adaptive state ──────────────────────────────────────────────────
-        const eTags: { partNumber: number; eTag: string }[] = [];
+        // ETags are collected server-side via listMultipartParts — the browser
+        // cannot read the ETag response header from cross-origin R2 requests
+        // (Access-Control-Expose-Headers does not include ETag on this bucket).
         let uploadedBytes = 0;
         let useRelay  = false;
         let directLvl = 0;
@@ -260,8 +262,8 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
           return ((await res.json()) as { uploadUrl: string }).uploadUrl;
         };
 
-        // Upload one chunk; returns eTag on success, updates progress
-        const uploadOnePart = (partNumber: number, offset: number, chunkBytes: number): Promise<string> => {
+        // Upload one chunk; resolves on success, updates progress
+        const uploadOnePart = (partNumber: number, offset: number, chunkBytes: number): Promise<void> => {
           const chunk = file.slice(offset, Math.min(offset + chunkBytes, file.size));
           let tracked = 0;
 
@@ -287,13 +289,13 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
               + `?r2Key=${encodeURIComponent(mp.r2Key)}`
               + `&uploadId=${encodeURIComponent(mp.uploadId)}`
               + `&partNumber=${partNumber}`;
-            return new Promise<string>((resolve, reject) => {
+            return new Promise<void>((resolve, reject) => {
               const xhr = new XMLHttpRequest();
               xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(e.loaded); });
               xhr.addEventListener("load", () => {
                 if (xhr.status >= 200 && xhr.status < 300) {
                   onSuccess();
-                  resolve((JSON.parse(xhr.responseText) as { eTag: string }).eTag);
+                  resolve();
                 } else {
                   onFail();
                   const err = new Error(`中继 part ${partNumber} 失败 (${xhr.status})`);
@@ -308,13 +310,13 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
             });
           } else {
             return presignPart(partNumber).then(uploadUrl =>
-              new Promise<string>((resolve, reject) => {
+              new Promise<void>((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(e.loaded); });
                 xhr.addEventListener("load", () => {
                   if (xhr.status >= 200 && xhr.status < 300) {
                     onSuccess();
-                    resolve(xhr.getResponseHeader("ETag") ?? "");
+                    resolve();
                   } else {
                     onFail();
                     reject(new Error(`直传 part ${partNumber} 失败 (${xhr.status})`));
@@ -348,14 +350,10 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
             batch.map(({ partNumber, offset }) => uploadOnePart(partNumber, offset, chunkBytes))
           );
 
-          // Commit leading (front-contiguous) successes only
+          // Count leading (front-contiguous) successes only
           let nCommitted = 0;
           for (; nCommitted < results.length; nCommitted++) {
             if (results[nCommitted].status !== "fulfilled") break;
-            eTags.push({
-              partNumber: batch[nCommitted].partNumber,
-              eTag: (results[nCommitted] as PromiseFulfilledResult<string>).value,
-            });
           }
           const anyFailed = nCommitted < batch.length;
 
@@ -409,7 +407,9 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
           body: JSON.stringify({
             storageType: "r2-multipart",
             uploadId: mp.uploadId, r2Key, fileId,
-            parts: eTags,
+            // ETags collected server-side via listMultipartParts; parts: [] passes
+            // the Array.isArray guard while carrying no data.
+            parts: [],
             ...assetMeta,
           }),
         });
