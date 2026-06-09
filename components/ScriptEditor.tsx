@@ -4454,7 +4454,7 @@ function ScriptBlock({
           {lineNum !== undefined && (
             <span
               style={lineIndexSlotStyle}
-              className={`pointer-events-none shrink-0 select-none text-right tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
+              className={`pointer-events-none shrink-0 select-none text-left tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
             >
               {lineNum}
             </span>
