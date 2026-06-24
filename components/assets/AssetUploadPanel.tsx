@@ -8,22 +8,24 @@ import { BASE_PATH } from "@/lib/base-path";
 const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 // Files above this should be transferred by other means (rsync, rclone, etc.)
 const MAX_BROWSER_UPLOAD = 50 * 1024 * 1024 * 1024; // 50 GB
-// Adaptive upload levels — chunk size and concurrency are co-scheduled.
-// Promoting/demoting a level changes both dimensions together.
+// S3/R2 multipart rule: ALL non-trailing parts MUST be exactly the same size.
+// Chunk size must therefore be fixed for the entire upload — only concurrency adapts.
+const MULTIPART_CHUNK_BYTES = 16 << 20; // 16 MB per part, fixed
+// Adaptive upload levels — only concurrency changes; chunk size is always MULTIPART_CHUNK_BYTES.
 //
 // Direct path (client → R2): starts at level 0, promotes after PROMOTE_AFTER
 // consecutive fully-successful batches, demotes on any batch failure.
 // Reaching level 0 with another failure → switch to relay.
-const DIRECT_LEVELS: readonly { chunkBytes: number; concurrency: number }[] = [
-  { chunkBytes: 16 << 20, concurrency: 1 },  // level 0 — start / degraded
-  { chunkBytes: 16 << 20, concurrency: 3 },  // level 1 — stable
-  { chunkBytes: 32 << 20, concurrency: 2 },  // level 2 — fast
-  { chunkBytes: 64 << 20, concurrency: 2 },  // level 3 — max throughput
+const DIRECT_LEVELS: readonly { concurrency: number }[] = [
+  { concurrency: 1 },  // level 0 — start / degraded
+  { concurrency: 3 },  // level 1 — stable
+  { concurrency: 6 },  // level 2 — fast
+  { concurrency: 8 },  // level 3 — max throughput
 ];
-// Relay path (client → server → R2): starts at level 0; shrinks on failure.
-const RELAY_LEVELS: readonly { chunkBytes: number; concurrency: number }[] = [
-  { chunkBytes: 16 << 20, concurrency: 1 },  // relay level 0
-  { chunkBytes:  8 << 20, concurrency: 1 },  // relay level 1 — degraded
+// Relay path (client → server → R2): starts at level 0; only concurrency shrinks.
+const RELAY_LEVELS: readonly { concurrency: number }[] = [
+  { concurrency: 1 },  // relay level 0
+  { concurrency: 1 },  // relay level 1 — degraded (placeholder for future tuning)
 ];
 const PROMOTE_AFTER     = 2;     // consecutive fully-successful batches to level up
 const RETRY_DELAY_MS    = 1500;  // pause before retry after a direct failure
@@ -332,9 +334,10 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
 
         // ── Main adaptive loop ──────────────────────────────────────────────
         while (nextOffset < file.size) {
-          const { chunkBytes, concurrency } = (useRelay ? RELAY_LEVELS : DIRECT_LEVELS)[
+          const { concurrency } = (useRelay ? RELAY_LEVELS : DIRECT_LEVELS)[
             useRelay ? relayLvl : directLvl
           ];
+          const chunkBytes = MULTIPART_CHUNK_BYTES; // fixed for the entire upload
 
           // Build batch segments starting from nextOffset
           const batch: { partNumber: number; offset: number }[] = [];
