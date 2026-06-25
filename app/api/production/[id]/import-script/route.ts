@@ -2,12 +2,19 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listProductionScenes, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, listScenesByVersion, listSceneVersionsByVersion, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
 import type { ScriptColMap, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
+import { toAlphaLabel } from "@/lib/script-generated-labels";
+import {
+  FIXED_INITIAL_CHAPTER_BLOCK_ID,
+  FIXED_INITIAL_CHAPTER_NAME,
+} from "@/lib/script-fixed-markers";
+import type { BlockType } from "@/lib/script-types";
+import type { MarkerMeta } from "@/lib/script-types";
 import { randomUUID } from "node:crypto";
 
 async function guard(req: NextRequest, productionId: string) {
@@ -33,6 +40,8 @@ type ImportScriptBody = {
   aggregateMembers?: AggregateMembers;
   stageDelimiterPattern?: ScriptConfigStageDelimiterPattern;
   headerRowIncluded?: boolean;
+  replaceScenesFromScript?: boolean;
+  useVersionSceneRows?: boolean;
 };
 
 const REHEARSAL_MARK_RE = /^[A-Za-z]\d*$|^\d+[A-Za-z]?$/;
@@ -45,7 +54,52 @@ const STAGE_DELIMITERS: Record<StageDelimiterPattern, { open: string; close: str
 const STAGE_DELIMITER_PATTERNS = Object.keys(STAGE_DELIMITERS) as StageDelimiterPattern[];
 type StageDelimiter = { open: string; close: string };
 type StageDelimiterReplacement = { regex: RegExp; replacement: string };
+type ParsedImportRow = {
+  sourceIndex: number;
+  sceneNum: string;
+  rehearsalMark: string | null;
+  rawType: string | null;
+  rawChars: string[];
+  body: string;
+  stageComment: string | null;
+  typeActions: TypeTagMapping[string][];
+  warningMark: boolean;
+};
+type MarkerImportRow = {
+  sourceIndex: number;
+  sceneNum: string;
+  body: string;
+};
+type ImportBlock = {
+  id: string;
+  blockId?: string;
+  type: BlockType;
+  content: string;
+  stageComment: string | null;
+  lyric: boolean;
+  characterIds: string[];
+  characterAnnotations: Record<string, string>;
+  sceneId: string | null;
+  rehearsalMark: string | null;
+  markerMeta?: MarkerMeta | null;
+  lexKey: string;
+};
 
+async function resolveImportVersionId(req: NextRequest, productionId: string): Promise<string | Response> {
+  const versionIdParam = req.nextUrl.searchParams.get("v");
+  if (!versionIdParam) {
+    const versionId = await getActiveVersionId(productionId);
+    return versionId ?? Response.json({ error: "没有可编辑的版本，请先创建一个版本" }, { status: 400 });
+  }
+  const ver = await getVersion(versionIdParam);
+  if (!ver || ver.productionId !== productionId) {
+    return Response.json({ error: "版本不存在" }, { status: 404 });
+  }
+  if (ver.status !== "editing") {
+    return Response.json({ error: "只能向编辑中的版本导入剧本" }, { status: 400 });
+  }
+  return versionIdParam;
+}
 
 function getCell(row: (string | null)[], col: number | undefined): string | null {
   if (col == null) return null;
@@ -100,21 +154,12 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
   const bodyDelimiterReplacements = buildStageDelimiterReplacements(stageDelimiter, colMap.stageInlinePatterns ?? []);
   const stageCommentDelimiterReplacements = buildStageDelimiterReplacements(stageDelimiter, STAGE_DELIMITER_PATTERNS);
 
-  type ParsedRow = {
-    sceneNum: string;
-    rehearsalMark: string | null;
-    rawType: string | null;
-    rawChars: string[];
-    body: string;
-    stageComment: string | null;
-    typeActions: TypeTagMapping[string][];
-    warningMark: boolean;
-  };
-
-  const result: ParsedRow[] = [];
+  const result: ParsedImportRow[] = [];
+  const markerRows: MarkerImportRow[] = [];
   const warningMarks: string[] = [];
 
-  for (const row of dataRows) {
+  for (let i = 0; i < dataRows.length; i++) {
+    const row = dataRows[i];
     const rawSceneNum = getCell(row, colMap.sceneNum);
     if (!rawSceneNum) continue;
 
@@ -142,6 +187,11 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
       return isStage ? `${stageDelimiter.open}${normalized}${stageDelimiter.close}` : normalized;
     }).filter(Boolean);
     const body = bodyParts.join("\n");
+    if (typeActions.some(a => a.action === "mapType" && a.blockType === "marker")) {
+      markerRows.push({ sourceIndex: i, sceneNum: rawSceneNum, body });
+      continue;
+    }
+
     const rawStageComment = getCell(row, colMap.stageComment);
     const stageComment = rawStageComment
       ? normalizeStageDelimiters(stripOuterStageDelimiter(rawStageComment), stageCommentDelimiterReplacements)
@@ -153,11 +203,116 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
       ? rawCharCell.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)
       : [];
 
-    result.push({ sceneNum: rawSceneNum, rehearsalMark: rawMark, rawType, rawChars, body, stageComment, typeActions, warningMark });
+    result.push({ sourceIndex: i, sceneNum: rawSceneNum, rehearsalMark: rawMark, rawType, rawChars, body, stageComment, typeActions, warningMark });
     void characterKinds;
   }
 
-  return { rows: result, warningMarks };
+  return { rows: result, markerRows, warningMarks };
+}
+
+function normalizeMarkerName(text: string | null | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function markerNameCandidates(row: MarkerImportRow): string[] {
+  return row.body
+    .split(/\r\n|\r|\n/)
+    .map(part => normalizeMarkerName(stripOuterStageDelimiter(part)))
+    .filter(Boolean);
+}
+
+function sceneLabel(scene: { number: string; name: string | null }): string {
+  return scene.name ? `${scene.number} ${scene.name}` : scene.number;
+}
+
+function validateProvidedMarkers(markerRows: MarkerImportRow[], textRows: ParsedImportRow[]): string[] {
+  if (markerRows.length === 0) return [];
+
+  const conflicts: string[] = [];
+  const chapterByNum = new Map<string, { number: string; name: string | null }>();
+  const sceneByNum = new Map<string, { number: string; name: string | null; parentNum: string | null }>();
+
+  for (const row of textRows) {
+    const parsed = parseSceneNum(row.sceneNum);
+    if (!parsed) continue;
+    if (parsed.parentNum && !chapterByNum.has(parsed.parentNum)) {
+      chapterByNum.set(parsed.parentNum, { number: parsed.parentNum, name: parsed.parentName });
+    }
+    if (parsed.childNum && !sceneByNum.has(parsed.childNum)) {
+      sceneByNum.set(parsed.childNum, { number: parsed.childNum, name: parsed.childName, parentNum: parsed.parentNum });
+    } else if (!parsed.childNum && parsed.parentNum && !sceneByNum.has(parsed.parentNum)) {
+      sceneByNum.set(parsed.parentNum, { number: parsed.parentNum, name: parsed.parentName, parentNum: null });
+    }
+  }
+
+  for (const marker of markerRows) {
+    const parsedMarker = parseSceneNum(marker.sceneNum);
+    const nextTextRow = textRows.find(row => row.sourceIndex > marker.sourceIndex);
+    if (!parsedMarker) {
+      conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的段落无法解析：${marker.sceneNum}`);
+      continue;
+    }
+    if (!nextTextRow) {
+      conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 后没有正文行`);
+      continue;
+    }
+    const parsedNext = parseSceneNum(nextTextRow.sceneNum);
+    if (!parsedNext) {
+      conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 后的正文段落无法解析：${nextTextRow.sceneNum}`);
+      continue;
+    }
+
+    const isSceneMarker = !!parsedMarker.childNum;
+    const markerNum = parsedMarker.childNum ?? parsedMarker.parentNum;
+    if (!markerNum) {
+      conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的段落无法匹配到章/场：${marker.sceneNum}`);
+      continue;
+    }
+
+    if (isSceneMarker) {
+      if (parsedNext.childNum !== markerNum) {
+        conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 指向场 ${markerNum}，但后续正文属于 ${parsedNext.childNum ?? parsedNext.parentNum ?? "空段落"}`);
+        continue;
+      }
+      const expected = sceneByNum.get(markerNum);
+      if (!expected) {
+        conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 指向不存在的场：${markerNum}`);
+        continue;
+      }
+      const markerName = parsedMarker.childName ? normalizeMarkerName(parsedMarker.childName) : null;
+      const expectedName = normalizeMarkerName(expected.name);
+      if (markerName && expectedName && markerName !== expectedName) {
+        conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的场名不一致：${markerName} / ${expectedName}`);
+      }
+      for (const candidate of markerNameCandidates(marker)) {
+        if (expectedName && candidate !== expectedName && candidate !== sceneLabel(expected)) {
+          conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的场名不一致：${candidate} / ${expectedName}`);
+        }
+      }
+    } else {
+      if (parsedNext.parentNum !== markerNum) {
+        conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 指向章 ${markerNum}，但后续正文属于章 ${parsedNext.parentNum ?? "空段落"}`);
+        continue;
+      }
+      const expected = chapterByNum.get(markerNum);
+      if (!expected) {
+        conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 指向不存在的章：${markerNum}`);
+        continue;
+      }
+      const markerName = parsedMarker.parentName ? normalizeMarkerName(parsedMarker.parentName) : null;
+      const expectedName = normalizeMarkerName(expected.name);
+      if (markerName && expectedName && markerName !== expectedName) {
+        conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的章名不一致：${markerName} / ${expectedName}`);
+      }
+      for (const candidate of markerNameCandidates(marker)) {
+        if (expectedName && candidate !== expectedName && candidate !== sceneLabel(expected)) {
+          conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的章名不一致：${candidate} / ${expectedName}`);
+        }
+      }
+    }
+  }
+
+  return conflicts;
 }
 
 /** POST: preview what would be imported */
@@ -169,16 +324,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const body = (await req.json()) as ImportScriptBody;
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
+  const previewVersionId = await resolveImportVersionId(req, productionId);
+  if (previewVersionId instanceof Response) return previewVersionId;
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
-  const { rows: parsed, warningMarks } = parseRows(rawRows, body);
+  const { rows: parsed, markerRows, warningMarks } = parseRows(rawRows, body);
+  const markerConflicts = validateProvidedMarkers(markerRows, parsed);
+  if (markerConflicts.length > 0) {
+    return Response.json({ error: `章节分界线与段落推断不一致：${markerConflicts.join("；")}` }, { status: 400 });
+  }
 
-  const previewVersionId = await getActiveVersionId(productionId);
-  const [existingChars, existingScenes] = await Promise.all([
-    previewVersionId ? listCharactersByVersion(previewVersionId) : Promise.resolve([]),
-    listProductionScenes(productionId),
-  ]);
+  const existingChars = await listCharactersByVersion(previewVersionId);
   const existingCharByName = new Map(existingChars.map(c => [c.name, c]));
-  void existingScenes;
 
   // Collect all unique character names from import
   const allRawChars = parsed.flatMap(r => r.rawChars);
@@ -223,29 +379,25 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
 
-  // Resolve target version: ?v= param → fallback to newest editing version
-  const versionIdParam = req.nextUrl.searchParams.get("v");
-  let versionId: string | null = null;
-  if (versionIdParam) {
-    const ver = await getVersion(versionIdParam);
-    if (!ver || ver.productionId !== productionId)
-      return Response.json({ error: "版本不存在" }, { status: 404 });
-    if (ver.status !== "editing")
-      return Response.json({ error: "只能向编辑中的版本导入剧本" }, { status: 400 });
-    versionId = versionIdParam;
-  } else {
-    versionId = await getActiveVersionId(productionId);
+  const versionId = await resolveImportVersionId(req, productionId);
+  if (versionId instanceof Response) return versionId;
+  const migration = await ensureScriptMarkerMigration(versionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
   }
-  if (!versionId) return Response.json({ error: "没有可编辑的版本，请先创建一个版本" }, { status: 400 });
 
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
-  const { rows: parsed } = parseRows(rawRows, body);
+  const { rows: parsed, markerRows } = parseRows(rawRows, body);
+  const markerConflicts = validateProvidedMarkers(markerRows, parsed);
+  if (markerConflicts.length > 0) {
+    return Response.json({ error: `章节分界线与段落推断不一致：${markerConflicts.join("；")}` }, { status: 400 });
+  }
   const stageDelimiter = getStageDelimiter(body.stageDelimiterPattern);
   const stageBlockDelimiterReplacements = buildStageDelimiterReplacements(stageDelimiter, STAGE_DELIMITER_PATTERNS);
 
   const [existingChars, existingScenes, tagGroups] = await Promise.all([
     listCharactersByVersion(versionId),
-    listProductionScenes(productionId),
+    body.useVersionSceneRows ? listSceneVersionsByVersion(versionId) : listScenesByVersion(versionId),
     listTagGroups(productionId),
   ]);
 
@@ -264,16 +416,50 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   // Build a combined scene lookup that auto-creates any scenes referenced by script rows
   // but not yet in the DB. This way scene import is not required before script import.
-  const sceneByNum = new Map(existingScenes.map(s => [s.number, { id: s.id, number: s.number, name: s.name }]));
+  const sceneByNum = new Map(existingScenes.map(s => [s.number, {
+    id: s.id,
+    number: s.number,
+    name: s.name,
+    parentId: s.parentId,
+    synopsis: s.synopsis,
+    actionLine: s.actionLine,
+    music: s.music,
+    stageNotes: s.stageNotes,
+    expectedDuration: s.expectedDuration,
+  }]));
   const upsertScenesFromScript: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }> = [];
-  let autoSceneSortOrder = existingScenes.length + 1;
+  const upsertSceneNums = new Set<string>();
+  const replacementSceneIds = new Set<string>();
+  let autoSceneSortOrder = body.replaceScenesFromScript ? 1 : existingScenes.length + 1;
 
   function ensureScene(num: string, name: string | null, parentNum: string | null) {
-    if (sceneByNum.has(num)) return;
-    const id = randomUUID();
-    sceneByNum.set(num, { id, number: num, name: name ?? "" });
+    const existing = sceneByNum.get(num);
     // Resolve parentId — parent must be ensured first (caller guarantees order)
     const parentId = parentNum ? (sceneByNum.get(parentNum)?.id ?? null) : null;
+    if (existing) {
+      const nextName = name ?? existing.name ?? "";
+      sceneByNum.set(num, { ...existing, name: nextName, parentId });
+      if (body.replaceScenesFromScript && !upsertSceneNums.has(num)) {
+        upsertSceneNums.add(num);
+        replacementSceneIds.add(existing.id);
+        upsertScenesFromScript.push({ id: existing.id, number: num, name: nextName, parentId, sortOrder: autoSceneSortOrder++ });
+      }
+      return;
+    }
+    const id = randomUUID();
+    sceneByNum.set(num, {
+      id,
+      number: num,
+      name: name ?? "",
+      parentId,
+      synopsis: "",
+      actionLine: "",
+      music: "",
+      stageNotes: "",
+      expectedDuration: "",
+    });
+    upsertSceneNums.add(num);
+    if (body.replaceScenesFromScript) replacementSceneIds.add(id);
     upsertScenesFromScript.push({ id, number: num, name: name ?? "", parentId, sortOrder: autoSceneSortOrder++ });
   }
 
@@ -399,14 +585,128 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
   }
 
-  const lexKeys = initialKeys(blockSpecs.length);
-  const upsertBlocks: Array<{ id: string; type: "dialogue" | "stage"; content: string; stageComment: string | null; lyric: boolean; characterIds: string[]; characterAnnotations: Record<string, string>; sceneId: string | null; rehearsalMark: string | null; lexKey: string }> = [];
+  const existingFixedInitialScene = existingScenes.find((scene) => scene.id === FIXED_INITIAL_CHAPTER_BLOCK_ID) ?? null;
+  if (!existingFixedInitialScene || existingFixedInitialScene.name === "") {
+    upsertScenesFromScript.unshift({
+      id: FIXED_INITIAL_CHAPTER_BLOCK_ID,
+      number: "",
+      name: FIXED_INITIAL_CHAPTER_NAME,
+      parentId: null,
+      sortOrder: 0,
+    });
+  }
+  if (body.replaceScenesFromScript) replacementSceneIds.add(FIXED_INITIAL_CHAPTER_BLOCK_ID);
+
+  const upsertBlocksWithoutKeys: Omit<ImportBlock, "lexKey">[] = [];
   const blockTagAssignments: Array<{ blockId: string; groupId: string; optionId: string }> = [];
+  const sceneById = new Map([...sceneByNum.values()].map((scene) => [scene.id, scene]));
+  const chapterIdsWithScriptBlocks = new Set<string>();
+  let currentChapterId: string | null = null;
+  let currentSceneId: string | null = null;
+  let currentRehearsalIndex = 0;
+
+  upsertBlocksWithoutKeys.push({
+    id: randomUUID(),
+    blockId: FIXED_INITIAL_CHAPTER_BLOCK_ID,
+    type: "chapter_marker",
+    content: "",
+    stageComment: null,
+    lyric: false,
+    characterIds: [],
+    characterAnnotations: {},
+    sceneId: FIXED_INITIAL_CHAPTER_BLOCK_ID,
+    rehearsalMark: null,
+    markerMeta: {
+      name: FIXED_INITIAL_CHAPTER_NAME,
+      parentMarkerId: null,
+    },
+  });
+  currentChapterId = FIXED_INITIAL_CHAPTER_BLOCK_ID;
+
+  const pushSceneMarkerBlock = (type: Extract<BlockType, "chapter_marker" | "scene_marker">, sceneId: string) => {
+    const scene = sceneById.get(sceneId);
+    const markerId = sceneId;
+    const parentMarkerId = scene?.parentId
+      ? scene.parentId
+      : null;
+    upsertBlocksWithoutKeys.push({
+      id: randomUUID(),
+      blockId: markerId,
+      type,
+      content: "",
+      stageComment: null,
+      lyric: false,
+      characterIds: [],
+      characterAnnotations: {},
+      sceneId: markerId,
+      rehearsalMark: null,
+      markerMeta: {
+        number: scene?.number ?? "",
+        name: scene?.name ?? "",
+        parentMarkerId,
+        synopsis: scene?.synopsis ?? "",
+        actionLine: scene?.actionLine ?? "",
+        music: scene?.music ?? "",
+        stageNotes: scene?.stageNotes ?? "",
+        expectedDuration: scene?.expectedDuration ?? "",
+      },
+    });
+  };
+  const pushRehearsalMarkerBlock = (rehearsalMark: string) => {
+    upsertBlocksWithoutKeys.push({
+      id: randomUUID(),
+      type: "rehearsal_marker",
+      content: "",
+      stageComment: null,
+      lyric: false,
+      characterIds: [],
+      characterAnnotations: {},
+      sceneId: null,
+      rehearsalMark,
+    });
+  };
 
   for (let i = 0; i < blockSpecs.length; i++) {
     const spec = blockSpecs[i];
+    const scene = spec.sceneId ? sceneById.get(spec.sceneId) ?? null : null;
+    if (scene) {
+      if (scene.parentId === null) {
+        chapterIdsWithScriptBlocks.add(scene.id);
+        if (currentChapterId !== scene.id) {
+          if (scene.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID) {
+            pushSceneMarkerBlock("chapter_marker", scene.id);
+          }
+          currentChapterId = scene.id;
+          currentSceneId = null;
+          currentRehearsalIndex = 0;
+        }
+      } else {
+        chapterIdsWithScriptBlocks.add(scene.parentId);
+        if (currentChapterId !== scene.parentId) {
+          if (scene.parentId !== FIXED_INITIAL_CHAPTER_BLOCK_ID) {
+            pushSceneMarkerBlock("chapter_marker", scene.parentId);
+          }
+          currentChapterId = scene.parentId;
+          currentSceneId = null;
+          currentRehearsalIndex = 0;
+        }
+        if (currentSceneId !== scene.id) {
+          pushSceneMarkerBlock("scene_marker", scene.id);
+          currentSceneId = scene.id;
+          currentRehearsalIndex = 0;
+        }
+      }
+    }
+    const previousSpec = i > 0 ? blockSpecs[i - 1] : null;
+    if (spec.rehearsalMark && (
+      spec.rehearsalMark !== previousSpec?.rehearsalMark ||
+      spec.sceneId !== previousSpec?.sceneId
+    )) {
+      pushRehearsalMarkerBlock(toAlphaLabel(currentRehearsalIndex));
+      currentRehearsalIndex++;
+    }
     const blockId = randomUUID();
-    upsertBlocks.push({
+    upsertBlocksWithoutKeys.push({
       id: blockId,
       type: spec.blockType,
       content: spec.content,
@@ -414,19 +714,44 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       lyric: spec.lyric,
       characterIds: spec.charIds,
       characterAnnotations: spec.characterAnnotations,
-      sceneId: spec.sceneId,
-      rehearsalMark: spec.rehearsalMark,
-      lexKey: lexKeys[i],
+      sceneId: null,
+      rehearsalMark: null,
     });
     for (const ta of spec.tagActions) {
       blockTagAssignments.push({ blockId, groupId: ta.groupId, optionId: ta.optionId });
     }
   }
+  const lexKeys = initialKeys(upsertBlocksWithoutKeys.length);
+  const upsertBlocks: ImportBlock[] = upsertBlocksWithoutKeys.map((block, index) => ({
+    ...block,
+    lexKey: lexKeys[index],
+  }));
+  const blankChapterIds = new Set(
+    [...sceneById.values()]
+      .filter((scene) => (
+        scene.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID &&
+        scene.parentId === null &&
+        !chapterIdsWithScriptBlocks.has(scene.id)
+      ))
+      .map((scene) => scene.id)
+  );
+  const deleteSceneIds = [
+    ...blankChapterIds,
+    ...[...sceneById.values()]
+      .filter((scene) => scene.parentId !== null && blankChapterIds.has(scene.parentId))
+      .map((scene) => scene.id),
+    ...(body.replaceScenesFromScript
+      ? existingScenes
+          .filter((scene) => !replacementSceneIds.has(scene.id))
+          .map((scene) => scene.id)
+      : []),
+  ].filter((id, index, ids) => ids.indexOf(id) === index);
 
   await importScriptToVersion(productionId, versionId, {
     upsertBlocks,
     upsertChars,
     upsertScenes: upsertScenesFromScript,
+    deleteSceneIds,
   });
 
   await saveScriptStageDelimiters(productionId, stageDelimiter.open, stageDelimiter.close);
@@ -440,7 +765,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         const memberIds = memberNames
           .map(n => charIdByName.get(n))
           .filter((id): id is string => !!id);
-        return setCharacterMembers(aggId, memberIds);
+        return setCharacterMembers(productionId, aggId, memberIds);
       })
     );
   }
@@ -454,8 +779,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   // Build per-scene block count summary (covers both existing and auto-created scenes)
   const sceneIdToInfo = new Map([...sceneByNum.values()].map(s => [s.id, { num: s.number, name: s.name }]));
   const countBySceneId = new Map<string | null, number>();
-  for (const b of upsertBlocks) {
-    const key = b.sceneId ?? null;
+  for (const spec of blockSpecs) {
+    const key = spec.sceneId ?? null;
     countBySceneId.set(key, (countBySceneId.get(key) ?? 0) + 1);
   }
   const sceneSummary = [...countBySceneId.entries()]
@@ -465,5 +790,5 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     })
     .sort((a, b) => (a.num ?? "￿").localeCompare(b.num ?? "￿", undefined, { numeric: true }));
 
-  return Response.json({ ok: true, blocksImported: upsertBlocks.length, charsAdded: upsertChars.length, sceneSummary });
+  return Response.json({ ok: true, blocksImported: blockSpecs.length, charsAdded: upsertChars.length, sceneSummary });
 }

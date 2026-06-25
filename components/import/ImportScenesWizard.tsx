@@ -10,10 +10,27 @@ type Step = "sheet" | "columns" | "preview" | "done";
 
 type Props = {
   productionId: string;
+  versionId?: string | null;
   onDone?: () => void;
 };
 
-export default function ImportScenesWizard({ productionId, onDone }: Props) {
+type ApiResult<T> = Partial<T> & { error?: string; status?: string; migration?: { phase?: string } };
+
+async function readApiResult<T>(res: Response, fallback: string): Promise<ApiResult<T>> {
+  const text = await res.text();
+  if (!text) return {} as ApiResult<T>;
+  try {
+    const data = JSON.parse(text) as ApiResult<T>;
+    if (data.status === "updating") {
+      return { error: data.migration?.phase ? `剧本数据正在更新：${data.migration.phase}` : "剧本数据正在更新，请稍后重试" } as ApiResult<T>;
+    }
+    return data;
+  } catch {
+    return { error: `${fallback}（HTTP ${res.status}）：${text.slice(0, 120)}` } as ApiResult<T>;
+  }
+}
+
+export default function ImportScenesWizard({ productionId, versionId, onDone }: Props) {
   const [step, setStep] = useState<Step>("sheet");
   const [spreadsheetToken, setSpreadsheetToken] = useState<string | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<SheetMeta | null>(null);
@@ -92,12 +109,13 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
     setPreviewLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-scenes`, {
+      const versionQuery = versionId ? `?v=${encodeURIComponent(versionId)}` : "";
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-scenes${versionQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ spreadsheetToken, sheetId: selectedSheet!.sheetId, rowCount: selectedSheet!.rowCount, colMap, headerRowIncluded: false }),
       });
-      const data = await res.json() as { preview?: ImportScenePreview; error?: string };
+      const data = await readApiResult<{ preview?: ImportScenePreview }>(res, "预览失败");
       if (!res.ok || data.error) { setError(data.error ?? "预览失败"); return; }
       setPreview(data.preview!);
       setStep("preview");
@@ -114,12 +132,13 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
     setCommitLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-scenes`, {
+      const versionQuery = versionId ? `?v=${encodeURIComponent(versionId)}` : "";
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-scenes${versionQuery}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ spreadsheetToken, sheetId: selectedSheet!.sheetId, rowCount: selectedSheet!.rowCount, colMap, headerRowIncluded: false }),
       });
-      const data = await res.json() as { imported?: number; error?: string };
+      const data = await readApiResult<{ imported?: number }>(res, "导入失败");
       if (!res.ok || data.error) { setError(data.error ?? "导入失败"); return; }
       setCommitResult({ imported: data.imported! });
       setStep("done");
@@ -245,6 +264,7 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
                     <li key={i} className="text-red-600">
                       {c.kind === "parentMissing" && `段落 ${c.sceneNum} 缺少上级段落 ${c.parentNum}`}
                       {c.kind === "nameMismatch" && `段落 ${c.sceneNum} 名称冲突：现有"${c.existing}"，导入"${c.incoming}"`}
+                      {c.kind === "markerMissing" && `段落 ${c.sceneNum} 尚未在剧本中建立章节/场标记`}
                     </li>
                   ))}
                 </ul>
@@ -264,7 +284,7 @@ export default function ImportScenesWizard({ productionId, onDone }: Props) {
 
           <div className="flex gap-3">
             <button onClick={() => setStep("columns")} className="px-4 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50">返回</button>
-            {(preview.scenesToAdd.length > 0 || preview.scenesToUpdate.length > 0 || preview.metaToUpdate > 0) && (
+            {preview.conflicts.length === 0 && (preview.scenesToAdd.length > 0 || preview.scenesToUpdate.length > 0 || preview.metaToUpdate > 0) && (
               <button
                 onClick={handleCommit}
                 disabled={commitLoading}

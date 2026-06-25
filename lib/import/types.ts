@@ -76,7 +76,7 @@ export type ParsedChar = {
 export type TypeAction =
   | { action: "ignore" }
   | { action: "mapTag"; groupId: string; optionId: string }
-  | { action: "mapType"; blockType: "dialogue" | "stage" | "lyric" };
+  | { action: "mapType"; blockType: "dialogue" | "stage" | "lyric" | "marker" };
 
 export type TypeTagMapping = Record<string, TypeAction>; // rawValue → action
 
@@ -85,7 +85,8 @@ export type TypeTagMapping = Record<string, TypeAction>; // rawValue → action
 export type SceneConflict =
   | { kind: "nameMismatch"; sceneNum: string; existing: string; incoming: string }
   | { kind: "orderConflict"; sceneNum: string; existingOrder: number; incomingOrder: number }
-  | { kind: "parentMissing"; sceneNum: string; parentNum: string };
+  | { kind: "parentMissing"; sceneNum: string; parentNum: string }
+  | { kind: "markerMissing"; sceneNum: string };
 
 export type ImportScenePreview = {
   scenesToAdd: { num: string; name: string; parentNum: string | null }[];

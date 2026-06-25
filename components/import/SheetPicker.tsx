@@ -1,36 +1,67 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { SheetMeta } from "@/lib/import/types";
+import type { ReactNode } from "react";
 
 type Props = {
-  onSelect: (spreadsheetToken: string, sheet: SheetMeta) => void;
+  onSelect: (spreadsheetToken: string, sheet: SheetMeta) => void | Promise<void>;
+  onLoaded?: (spreadsheetToken: string, sheets: SheetMeta[], url: string) => void;
+  disabled?: boolean;
+  initialUrl?: string;
+  initialSpreadsheetToken?: string | null;
+  initialSheets?: SheetMeta[];
+  beforeLoadButton?: ReactNode;
 };
 
-export default function SheetPicker({ onSelect }: Props) {
-  const [url, setUrl] = useState("");
+const EMPTY_SHEETS: SheetMeta[] = [];
+
+export default function SheetPicker({ onSelect, onLoaded, disabled = false, initialUrl = "", initialSpreadsheetToken = null, initialSheets = EMPTY_SHEETS, beforeLoadButton }: Props) {
+  const [url, setUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [spreadsheetToken, setSpreadsheetToken] = useState<string | null>(null);
-  const [sheets, setSheets] = useState<SheetMeta[]>([]);
+  const [spreadsheetToken, setSpreadsheetToken] = useState<string | null>(initialSpreadsheetToken);
+  const [sheets, setSheets] = useState<SheetMeta[]>(initialSheets);
+  const [selectingSheetId, setSelectingSheetId] = useState<string | null>(null);
+  const effectiveDisabled = disabled || loading;
+
+  useEffect(() => {
+    setUrl(initialUrl);
+    setSpreadsheetToken(initialSpreadsheetToken);
+    setSheets(initialSheets);
+    setError(null);
+    setSelectingSheetId(null);
+  }, [initialUrl, initialSpreadsheetToken, initialSheets]);
 
   async function handleLoad() {
-    if (!url.trim()) return;
+    const trimmedUrl = url.trim();
+    if (effectiveDisabled || !trimmedUrl) return;
     setLoading(true);
     setError(null);
     setSheets([]);
     try {
-      const res = await fetch(`${BASE_PATH}/api/feishu-sheet?url=${encodeURIComponent(url)}`);
+      const res = await fetch(`${BASE_PATH}/api/feishu-sheet?url=${encodeURIComponent(trimmedUrl)}`);
       const data = await res.json() as { spreadsheetToken?: string; sheets?: SheetMeta[]; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? "加载失败"); return; }
       setSpreadsheetToken(data.spreadsheetToken!);
       setSheets(data.sheets!);
+      onLoaded?.(data.spreadsheetToken!, data.sheets!, trimmedUrl);
       if (data.sheets!.length === 1) onSelect(data.spreadsheetToken!, data.sheets![0]);
     } catch {
       setError("网络错误");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSheetSelect(sheet: SheetMeta) {
+    if (effectiveDisabled || !spreadsheetToken) return;
+    setSelectingSheetId(sheet.sheetId);
+    try {
+      await onSelect(spreadsheetToken, sheet);
+    } finally {
+      setSelectingSheetId(null);
     }
   }
 
@@ -46,14 +77,16 @@ export default function SheetPicker({ onSelect }: Props) {
             value={url}
             onChange={e => setUrl(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleLoad()}
+            disabled={effectiveDisabled}
           />
           <button
             onClick={handleLoad}
-            disabled={loading || !url.trim()}
+            disabled={effectiveDisabled || !url.trim()}
             className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? "加载中…" : "加载"}
           </button>
+          {beforeLoadButton}
         </div>
         {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
       </div>
@@ -65,11 +98,18 @@ export default function SheetPicker({ onSelect }: Props) {
             {sheets.map(sheet => (
               <button
                 key={sheet.sheetId}
-                onClick={() => onSelect(spreadsheetToken!, sheet)}
-                className="w-full text-left px-3 py-2 rounded border border-gray-200 hover:bg-blue-50 hover:border-blue-300 text-sm"
+                onClick={() => handleSheetSelect(sheet)}
+                disabled={effectiveDisabled}
+                className="w-full text-left px-3 py-2 rounded border border-gray-200 hover:bg-blue-50 hover:border-blue-300 text-sm disabled:opacity-50 disabled:hover:bg-white disabled:hover:border-gray-200"
               >
-                <span className="font-medium">{sheet.title}</span>
-                <span className="ml-2 text-gray-400 text-xs">{sheet.rowCount} 行 × {sheet.columnCount} 列</span>
+                {selectingSheetId === sheet.sheetId ? (
+                  <span className="font-medium text-gray-600">加载中...</span>
+                ) : (
+                  <>
+                    <span className="font-medium">{sheet.title}</span>
+                    <span className="ml-2 text-gray-400 text-xs">{sheet.rowCount} 行 × {sheet.columnCount} 列</span>
+                  </>
+                )}
               </button>
             ))}
           </div>

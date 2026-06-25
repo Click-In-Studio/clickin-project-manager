@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import ImportScriptWizardPage from "@/components/import/ImportScriptWizardPage";
+import ImportJointWizardPage from "@/components/import/ImportJointWizardPage";
 
 export default async function ImportScriptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,5 +19,5 @@ export default async function ImportScriptPage({ params }: { params: Promise<{ i
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 
-  return <ImportScriptWizardPage productionId={id} versionId={versionId} />;
+  return <ImportJointWizardPage productionId={id} versionId={versionId} />;
 }

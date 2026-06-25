@@ -1,12 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import ImportScriptWizard from "./ImportScriptWizard";
+import ImportJointWizard from "./ImportJointWizard";
 
-export default function ImportScriptWizardPage({ productionId, versionId }: { productionId: string; versionId?: string | null }) {
+export default function ImportJointWizardPage({ productionId, versionId }: { productionId: string; versionId?: string | null }) {
   const router = useRouter();
   return (
-    <ImportScriptWizard
+    <ImportJointWizard
       productionId={productionId}
       versionId={versionId}
       onDone={() => router.push(`/production/${productionId}/script`)}

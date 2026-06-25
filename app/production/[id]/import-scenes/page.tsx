@@ -17,5 +17,7 @@ export default async function ImportScenesPage({ params }: { params: Promise<{ i
   const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) redirect(`/production/${id}`);
 
-  return <ImportScenesWizardPage productionId={id} />;
+  const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
+
+  return <ImportScenesWizardPage productionId={id} versionId={versionId} />;
 }

@@ -1,9 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listScenesByVersion, listProductionScenes, flushToDB, updateSceneMetadata, getActiveVersionId } from "@/lib/db";
+import { getProductionMemberContext, listScenesByVersion, listSceneVersionsByVersion, listProductionScenes, flushToDB, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import type { SceneColMap, ParsedSceneNum, SceneConflict, ImportScenePreview } from "@/lib/import/types";
+import { FIXED_INITIAL_CHAPTER_BLOCK_ID } from "@/lib/script-fixed-markers";
 import { randomUUID } from "node:crypto";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
@@ -25,6 +26,7 @@ type ImportScenesBody = {
   rowCount?: number;
   colMap: SceneColMap;
   headerRowIncluded?: boolean;
+  replaceExisting?: boolean;
 };
 
 type SceneRow = {
@@ -40,6 +42,28 @@ type SceneRow = {
   stagePres: string | null;
   duration: string | null;
 };
+
+async function resolveImportVersionId(req: NextRequest, productionId: string): Promise<string | null | Response> {
+  const versionIdParam = req.nextUrl.searchParams.get("v");
+  if (!versionIdParam) return getActiveVersionId(productionId);
+  const ver = await getVersion(versionIdParam);
+  if (!ver || ver.productionId !== productionId) {
+    return Response.json({ error: "版本不存在" }, { status: 404 });
+  }
+  if (ver.status !== "editing") {
+    return Response.json({ error: "只能向编辑中的版本导入构作" }, { status: 400 });
+  }
+  return versionIdParam;
+}
+
+async function listExistingScenesForImport(versionId: string | null, productionId: string) {
+  if (!versionId) return { scenes: await listProductionScenes(productionId), markerBacked: false };
+  const markerScenes = await listScenesByVersion(versionId);
+  if (markerScenes.some((scene) => scene.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID)) {
+    return { scenes: markerScenes, markerBacked: true };
+  }
+  return { scenes: await listSceneVersionsByVersion(versionId), markerBacked: false };
+}
 
 function buildSceneRows(rows: (string | null)[][], colMap: SceneColMap, headerRowIncluded?: boolean): SceneRow[] {
   const dataRows = headerRowIncluded ? rows.slice(1) : rows;
@@ -135,25 +159,25 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { deny } = await guard(req, productionId);
   if (deny) return deny;
 
-  const t0 = Date.now();
   const body = (await req.json()) as ImportScenesBody;
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
-  console.log(`[import-scenes POST] fetched ${rawRows.length} rows in ${Date.now() - t0}ms`);
 
   const sceneRows = buildSceneRows(rawRows, body.colMap, body.headerRowIncluded);
-  console.log(`[import-scenes POST] sceneRows built: ${sceneRows.length} in ${Date.now() - t0}ms`);
 
-  const activeVersionId = await getActiveVersionId(productionId);
-  const existing = activeVersionId
-    ? await listScenesByVersion(activeVersionId)
-    : await listProductionScenes(productionId);
-  console.log(`[import-scenes POST] listScenes: ${existing.length} existing in ${Date.now() - t0}ms`);
+  const resolvedVersionId = await resolveImportVersionId(req, productionId);
+  if (resolvedVersionId instanceof Response) return resolvedVersionId;
+  if (resolvedVersionId) {
+    const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+    if (migration.status === "running") {
+      return Response.json({ status: "updating", migration }, { status: 202 });
+    }
+  }
+  const { scenes: existing, markerBacked } = await listExistingScenesForImport(resolvedVersionId, productionId);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
 
   const sceneMap = buildSceneMap(sceneRows, existingByNum, existing.length + 1);
-  console.log(`[import-scenes POST] sceneMap built: ${sceneMap.size} scenes in ${Date.now() - t0}ms`);
 
   const conflicts: SceneConflict[] = [];
   const scenesToAdd: ImportScenePreview["scenesToAdd"] = [];
@@ -164,7 +188,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       conflicts.push({ kind: "parentMissing", sceneNum: num, parentNum: entry.parentNum });
     }
     const ex = existingByNum.get(num);
-    if (!ex) {
+    if (!ex && markerBacked) {
+      conflicts.push({ kind: "markerMissing", sceneNum: num });
+    } else if (!ex) {
       scenesToAdd.push({ num, name: entry.name, parentNum: entry.parentNum });
     } else if (entry.name && ex.name && entry.name !== ex.name) {
       scenesToUpdate.push({ num, oldName: ex.name, newName: entry.name });
@@ -178,7 +204,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return num != null && existingByNum.has(num);
   }).length;
 
-  console.log(`[import-scenes POST] preview done in ${Date.now() - t0}ms`);
   return Response.json({ preview: { scenesToAdd, scenesToUpdate, metaToUpdate, conflicts } as ImportScenePreview });
 }
 
@@ -188,22 +213,34 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { deny } = await guard(req, productionId);
   if (deny) return deny;
 
-  const t0 = Date.now();
   const body = (await req.json()) as ImportScenesBody;
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const sceneRows = buildSceneRows(rawRows, body.colMap, body.headerRowIncluded);
-  console.log(`[import-scenes PUT] sceneRows: ${sceneRows.length} in ${Date.now() - t0}ms`);
 
-  const activeVersionId = await getActiveVersionId(productionId);
-  const existing = activeVersionId
-    ? await listScenesByVersion(activeVersionId)
-    : await listProductionScenes(productionId);
-  console.log(`[import-scenes PUT] listScenes: ${existing.length} in ${Date.now() - t0}ms`);
+  const resolvedVersionId = await resolveImportVersionId(req, productionId);
+  if (resolvedVersionId instanceof Response) return resolvedVersionId;
+  if (resolvedVersionId) {
+    const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+    if (migration.status === "running") {
+      return Response.json({ status: "updating", migration }, { status: 202 });
+    }
+  }
+  const { scenes: existing, markerBacked } = await listExistingScenesForImport(resolvedVersionId, productionId);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
+  const existingOrderByNum = new Map(existing.map((scene, index) => [scene.number, index + 1]));
 
   const sceneMap = buildSceneMap(sceneRows, existingByNum, existing.length + 1);
+  if (markerBacked) {
+    const missingMarkerSceneNums = [...sceneMap.keys()].filter((num) => !existingByNum.has(num));
+    if (missingMarkerSceneNums.length > 0) {
+      return Response.json(
+        { error: `构作导入包含尚未在剧本中建立标记块的段落：${missingMarkerSceneNums.join("、")}。请先在剧本中建立对应章节/场标记。` },
+        { status: 400 }
+      );
+    }
+  }
 
   // Assign sortOrders for existing scenes using their current position
   let newSortOrder = existing.length + 1;
@@ -212,7 +249,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   for (const [num, entry] of sceneMap) {
     const ex = existingByNum.get(num);
     const sortOrder = ex
-      ? existing.findIndex(s => s.number === num) + 1
+      ? existingOrderByNum.get(num) ?? newSortOrder++
       : (entry.sortOrder === -1 ? newSortOrder++ : entry.sortOrder);
     const parentId = entry.parentNum
       ? (existingByNum.get(entry.parentNum)?.id ?? sceneMap.get(entry.parentNum)?.id ?? null)
@@ -225,6 +262,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       sortOrder,
     });
   }
+  const deleteSceneIds = body.replaceExisting
+    ? existing.filter(scene => !sceneMap.has(scene.number)).map(scene => scene.id)
+    : [];
 
   // Metadata updates keyed by row
   const metadataUpdates: { id: string; row: SceneRow }[] = [];
@@ -236,20 +276,28 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (entry) metadataUpdates.push({ id: entry.id, row });
   }
 
-  console.log(`[import-scenes PUT] flushing ${upsertScenes.length} scenes, ${metadataUpdates.length} meta updates at ${Date.now() - t0}ms`);
-  await flushToDB(productionId, {
-    upsertScenes,
-    deleteSceneIds: [],
-    upsertBlocks: [],
-    deleteBlockIds: [],
-    upsertChars: [],
-    deleteCharIds: [],
-  });
-  console.log(`[import-scenes PUT] flushToDB done at ${Date.now() - t0}ms`);
-
-  if (activeVersionId) {
+  if (resolvedVersionId) {
+    await flushToDBVersioned(productionId, resolvedVersionId, {
+      upsertScenes,
+      deleteSceneIds,
+      upsertBlocks: [],
+      deleteSnapshotIds: [],
+      upsertChars: [],
+      deleteCharIds: [],
+    });
+  } else {
+    await flushToDB(productionId, {
+      upsertScenes,
+      deleteSceneIds,
+      upsertBlocks: [],
+      deleteBlockIds: [],
+      upsertChars: [],
+      deleteCharIds: [],
+    });
+  }
+  if (resolvedVersionId) {
     await Promise.all(metadataUpdates.map(({ id, row }) =>
-      updateSceneMetadata(id, activeVersionId, {
+      updateSceneMetadata(productionId, id, resolvedVersionId, {
         synopsis: row.intro ?? undefined,
         actionLine: row.actionLine ?? undefined,
         music: row.music ?? undefined,
@@ -258,7 +306,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       })
     ));
   }
-  console.log(`[import-scenes PUT] metadata done at ${Date.now() - t0}ms`);
 
   return Response.json({ ok: true, imported: upsertScenes.length });
 }
