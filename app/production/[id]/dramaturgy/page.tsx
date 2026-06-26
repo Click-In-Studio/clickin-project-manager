@@ -12,8 +12,7 @@ import {
   listScenesByVersion,
   listCharactersByVersion,
   listRehearsalMarksByVersion,
-  listProductionScenes,
-  listRehearsalMarksByScene,
+  ensureScriptMarkerMigration,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import Dramaturgy from "@/components/Dramaturgy";
@@ -46,24 +45,27 @@ export default async function DramaturgyPage({
   if (!name) redirect("/");
 
   // Resolve version: URL param > cookie > editing version > first
+  const validCookieVersionId = cookieVersionId && versions.some(ver => ver.id === cookieVersionId)
+    ? cookieVersionId
+    : null;
   const resolvedVersionId =
     (v && versions.some(ver => ver.id === v) ? v : null)
-    ?? cookieVersionId
+    ?? validCookieVersionId
     ?? versions.find(ver => ver.status === "editing")?.id
     ?? versions[0]?.id
     ?? null;
 
   const [scenes, rehearsalMarks, characters] = resolvedVersionId
-    ? await Promise.all([
-        listScenesByVersion(resolvedVersionId),
-        listRehearsalMarksByVersion(resolvedVersionId),
-        listCharactersByVersion(resolvedVersionId),
-      ])
-    : await Promise.all([
-        listProductionScenes(id),
-        listRehearsalMarksByScene(id),
-        Promise.resolve([]),
-      ]);
+    ? await (async () => {
+        const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+        if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
+        return Promise.all([
+          listScenesByVersion(resolvedVersionId),
+          listRehearsalMarksByVersion(resolvedVersionId),
+          listCharactersByVersion(resolvedVersionId),
+        ]);
+      })()
+    : [[], {}, []];
 
   return (
     <Suspense>

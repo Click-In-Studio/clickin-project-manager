@@ -1,10 +1,11 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
-import { canUserAccessProduction, listCues, loadProduction, getActiveVersionId } from "@/lib/db";
+import { canUserAccessProduction, listCues, loadProduction, getActiveVersionId, ensureScriptMarkerMigration } from "@/lib/db";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/feishu-sheet";
 import { formatCuePosition } from "@/lib/cue-export";
 import type { CueAnchor } from "@/lib/cue-types";
+import { textBlocksWithMarkerOwnership } from "@/lib/script-marker-blocks";
 
 function sseFrame(event: string, data: string): string {
   return `event: ${event}\ndata: ${data}\n\n`;
@@ -56,9 +57,12 @@ export async function POST(
         push("log", "正在加载剧本数据…");
         const versionId = await getActiveVersionId(productionId);
         if (!versionId) { push("error", "制作无可用版本"); controller.close(); return; }
+        const migration = await ensureScriptMarkerMigration(versionId);
+        if (migration.status === "running") { push("error", "剧本数据正在更新，请稍后重试"); controller.close(); return; }
         const prod = await loadProduction(productionId, versionId);
         if (!prod) { push("error", "制作不存在"); controller.close(); return; }
-        const { blocks, characters } = prod.state;
+        const blocks = textBlocksWithMarkerOwnership(prod.state.blocks);
+        const { characters } = prod.state;
 
         push("log", `正在加载 ${cueListIds.length} 个 Cue 表…`);
         const allCues = (await Promise.all(cueListIds.map((id) => listCues(id)))).flat();

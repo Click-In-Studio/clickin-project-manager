@@ -7,7 +7,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionMemberContext, getProductionName,
   loadProduction, listCueLists, listCuesByProduction, listCueListPermissions,
-  getActiveVersionId, getVersion, listVersions,
+  getActiveVersionId, getVersion, listVersions, ensureScriptMarkerMigration,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { canEditCueList } from "@/lib/cue-list-types";
@@ -30,18 +30,28 @@ export default async function CuesPage({
   const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
 
+  const versions = await listVersions(id);
+  const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
+  const validUrlVersionId = v && versions.some(ver => ver.id === v) ? v : null;
+  const validCookieVersionId = cookieVersionId && versions.some(ver => ver.id === cookieVersionId)
+    ? cookieVersionId
+    : null;
+
   // Resolve version: URL param > cookie > active version
   const resolvedVersionId =
-    v
-    ?? cookieStore.get(`ver_${id}`)?.value
+    validUrlVersionId
+    ?? validCookieVersionId
     ?? await getActiveVersionId(id);
+  if (resolvedVersionId) {
+    const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+    if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
+  }
 
-  const [name, production, cueLists, allCues, versions, version] = await Promise.all([
+  const [name, production, cueLists, allCues, version] = await Promise.all([
     getProductionName(id),
     resolvedVersionId ? loadProduction(id, resolvedVersionId) : Promise.resolve(null),
     listCueLists(id),
     listCuesByProduction(id, resolvedVersionId ?? undefined),
-    listVersions(id),
     resolvedVersionId ? getVersion(resolvedVersionId) : Promise.resolve(null),
   ]);
   if (!name || !production) redirect("/");
