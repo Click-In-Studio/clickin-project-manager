@@ -1093,6 +1093,11 @@ function ScriptSceneDetailRail({
     [expectedDuration]
   );
   const durationText = scene ? formatDuration(expectedDurationSeconds) || "—" : "—";
+  const sceneCaptionNumber = scene ? scene.number.trim() || "—" : "";
+  const sceneCaptionName = scene ? scene.name.trim() || "未命名" : "";
+  const sceneCaptionText = scene
+    ? `【${sceneCaptionNumber}】${sceneCaptionName}`
+    : "";
 
   useEffect(() => {
     setNameDraft(scene?.name ?? "");
@@ -1155,14 +1160,21 @@ function ScriptSceneDetailRail({
           paddingRight: `calc(${scrollbarOffsetPx}px + 8px + ${SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM}rem)`,
         }}
       >
-        <div className="flex min-w-0 items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           {sectionCanEdit ? (
             <p className="shrink-0 text-xs font-bold tracking-widest text-zinc-500 uppercase">章节详情</p>
           ) : scene ? (
-            <p className="min-w-0 truncate text-xs text-zinc-600">
-              <span className="font-bold">预期时长：</span>
-              <span className="font-normal">{durationText}</span>
-            </p>
+            <>
+              <p className="min-w-0 flex-1 truncate text-xs text-zinc-600" title={sceneCaptionText}>
+                <span className="font-bold">【{sceneCaptionNumber}】</span>
+                <span>{sceneCaptionName}</span>
+              </p>
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              <p className="shrink-0 whitespace-nowrap text-xs text-zinc-600">
+                <span className="font-bold">预期时长：</span>
+                <span className="font-normal">{durationText}</span>
+              </p>
+            </>
           ) : (
             <p className="shrink-0 text-xs font-bold tracking-widest text-zinc-500 uppercase">章节详情</p>
           )}
