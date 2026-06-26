@@ -86,7 +86,7 @@ export type SceneConflict =
   | { kind: "nameMismatch"; sceneNum: string; existing: string; incoming: string }
   | { kind: "orderConflict"; sceneNum: string; existingOrder: number; incomingOrder: number }
   | { kind: "parentMissing"; sceneNum: string; parentNum: string }
-  | { kind: "markerMissing"; sceneNum: string };
+  | { kind: "markerMissing"; sceneNum: string; sceneName: string };
 
 export type ImportScenePreview = {
   scenesToAdd: { num: string; name: string; parentNum: string | null }[];
@@ -104,4 +104,28 @@ export type ImportScriptPreview = {
   charConflicts: CharConflict[];
   blockCount: number;
   warningRehearsalMarks: string[];  // marks that don't match expected pattern
+};
+
+export type JointImportMarker = {
+  num: string;
+  name: string;
+  parentNum: string | null;
+  sourceNums?: string[];
+  synopsis?: string;
+  actionLine?: string;
+  music?: string;
+  stageNotes?: string;
+  expectedDuration?: string;
+};
+
+export type JointImportMappingRow = {
+  id: string;
+  extracted: JointImportMarker | null;
+  imported: JointImportMarker | null;
+};
+
+export type JointImportPreview = {
+  extractedMarkers: JointImportMarker[];
+  importedMarkers: JointImportMarker[];
+  mappingRows: JointImportMappingRow[];
 };

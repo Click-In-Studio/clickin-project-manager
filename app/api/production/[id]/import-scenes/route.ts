@@ -66,7 +66,10 @@ async function listExistingScenesForImport(versionId: string | null, productionI
 }
 
 function buildSceneRows(rows: (string | null)[][], colMap: SceneColMap, headerRowIncluded?: boolean): SceneRow[] {
-  const dataRows = headerRowIncluded ? rows.slice(1) : rows;
+  const headerIndex = headerRowIncluded ? rows.findIndex(row => row.some(cell => cell?.trim())) : -1;
+  const dataRows = headerRowIncluded && headerIndex >= 0
+    ? rows.filter((_, index) => index !== headerIndex)
+    : rows;
   const results: SceneRow[] = [];
 
   for (const row of dataRows) {
@@ -189,7 +192,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
     const ex = existingByNum.get(num);
     if (!ex && markerBacked) {
-      conflicts.push({ kind: "markerMissing", sceneNum: num });
+      conflicts.push({ kind: "markerMissing", sceneNum: num, sceneName: entry.name });
     } else if (!ex) {
       scenesToAdd.push({ num, name: entry.name, parentNum: entry.parentNum });
     } else if (entry.name && ex.name && entry.name !== ex.name) {
