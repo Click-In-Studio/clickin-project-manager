@@ -1656,6 +1656,77 @@ export async function importScriptToVersion(
   }
 }
 
+export async function ensureEmptyScriptBlocksForEmptyScenes(
+  productionId: string,
+  versionId: string,
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<{
+      block_id: string;
+      sort_key: string;
+      type: string;
+      marker_meta: MarkerMeta | null;
+    }>(
+      `SELECT sv.block_id, sv.sort_key, s.type::text, s.marker_meta
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1
+       ORDER BY sv.sort_key`,
+      [versionId],
+    );
+
+    const childSceneParentIds = new Set(
+      res.rows
+        .filter(row => row.type === "scene_marker" && row.marker_meta?.parentMarkerId)
+        .map(row => row.marker_meta?.parentMarkerId)
+        .filter((id): id is string => !!id),
+    );
+
+    for (let index = 0; index < res.rows.length; index++) {
+      const row = res.rows[index];
+      if (row.type !== "scene_marker" && row.type !== "chapter_marker") continue;
+      if (row.block_id === FIXED_INITIAL_CHAPTER_BLOCK_ID) continue;
+      if (row.type === "chapter_marker" && childSceneParentIds.has(row.block_id)) continue;
+
+      let hasScriptBlock = false;
+      for (let cursor = index + 1; cursor < res.rows.length; cursor++) {
+        const next = res.rows[cursor];
+        if (next.type === "chapter_marker" || next.type === "scene_marker") {
+          break;
+        }
+        if (next.type === "dialogue" || next.type === "stage" || next.type === "lyric") {
+          hasScriptBlock = true;
+          break;
+        }
+      }
+      if (hasScriptBlock) continue;
+
+      const snapshotId = genSnapshotId();
+      const blockId = `blk_${snapshotId}`;
+      const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
+      const lexKey = keyBetween(row.sort_key, nextSortKey);
+      await client.query(
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta)
+         VALUES ($1, $2, $3, $4, NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb)`,
+        [snapshotId, blockId, productionId, lexKey],
+      );
+      await client.query(
+        "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
+        [snapshotId, versionId, blockId, lexKey],
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // ─── Production management ────────────────────────────────────────────────────
 
 export async function createProduction(id: string, name: string): Promise<void> {

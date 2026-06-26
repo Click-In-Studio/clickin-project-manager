@@ -2,11 +2,11 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, listScenesByVersion, listSceneVersionsByVersion, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
-import type { ScriptColMap, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern } from "@/lib/import/types";
+import type { ScriptColMap, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
 import { toAlphaLabel } from "@/lib/script-generated-labels";
 import {
@@ -40,8 +40,8 @@ type ImportScriptBody = {
   aggregateMembers?: AggregateMembers;
   stageDelimiterPattern?: ScriptConfigStageDelimiterPattern;
   headerRowIncluded?: boolean;
-  replaceScenesFromScript?: boolean;
-  useVersionSceneRows?: boolean;
+  sceneOverrides?: JointImportMarker[];
+  rows?: (string | null)[][];
 };
 
 const REHEARSAL_MARK_RE = /^[A-Za-z]\d*$|^\d+[A-Za-z]?$/;
@@ -106,6 +106,13 @@ function getCell(row: (string | null)[], col: number | undefined): string | null
   return row[col]?.trim() || null;
 }
 
+function getDataRows(rows: (string | null)[][], headerRowIncluded?: boolean) {
+  if (!headerRowIncluded) return rows;
+  const headerIndex = rows.findIndex(row => row.some(cell => cell?.trim()));
+  if (headerIndex < 0) return [];
+  return rows.filter((_, index) => index !== headerIndex);
+}
+
 function getStageDelimiter(pattern: ScriptConfigStageDelimiterPattern | undefined) {
   return pattern === "【】" ? STAGE_DELIMITERS["【】"] : STAGE_DELIMITERS["（）"];
 }
@@ -149,7 +156,7 @@ function normalizeStageDelimiters(text: string, replacements: StageDelimiterRepl
 /** Parse rows into intermediate import records */
 function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spreadsheetToken" | "sheetId" | "rowCount">) {
   const { colMap, typeTagMapping, characterKinds, headerRowIncluded } = body;
-  const dataRows = headerRowIncluded ? rows.slice(1) : rows;
+  const dataRows = getDataRows(rows, headerRowIncluded);
   const stageDelimiter = getStageDelimiter(body.stageDelimiterPattern);
   const bodyDelimiterReplacements = buildStageDelimiterReplacements(stageDelimiter, colMap.stageInlinePatterns ?? []);
   const stageCommentDelimiterReplacements = buildStageDelimiterReplacements(stageDelimiter, STAGE_DELIMITER_PATTERNS);
@@ -326,7 +333,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
   const previewVersionId = await resolveImportVersionId(req, productionId);
   if (previewVersionId instanceof Response) return previewVersionId;
-  const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
+  const rawRows = body.rows ?? await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows, warningMarks } = parseRows(rawRows, body);
   const markerConflicts = validateProvidedMarkers(markerRows, parsed);
   if (markerConflicts.length > 0) {
@@ -397,9 +404,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const [existingChars, existingScenes, tagGroups] = await Promise.all([
     listCharactersByVersion(versionId),
-    body.useVersionSceneRows ? listSceneVersionsByVersion(versionId) : listScenesByVersion(versionId),
+    listScenesByVersion(versionId),
     listTagGroups(productionId),
   ]);
+  const replaceScenes = !!body.sceneOverrides;
 
   const existingCharByName = new Map(existingChars.map(c => [c.name, c]));
 
@@ -430,7 +438,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const upsertScenesFromScript: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }> = [];
   const upsertSceneNums = new Set<string>();
   const replacementSceneIds = new Set<string>();
-  let autoSceneSortOrder = body.replaceScenesFromScript ? 1 : existingScenes.length + 1;
+  let autoSceneSortOrder = replaceScenes ? 1 : existingScenes.length + 1;
+  const overrideSceneNums = new Set<string>();
+  const sourceSceneNumToOverrideNum = new Map<string, string>();
 
   function ensureScene(num: string, name: string | null, parentNum: string | null) {
     const existing = sceneByNum.get(num);
@@ -439,7 +449,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (existing) {
       const nextName = name ?? existing.name ?? "";
       sceneByNum.set(num, { ...existing, name: nextName, parentId });
-      if (body.replaceScenesFromScript && !upsertSceneNums.has(num)) {
+      if (replaceScenes && !upsertSceneNums.has(num)) {
         upsertSceneNums.add(num);
         replacementSceneIds.add(existing.id);
         upsertScenesFromScript.push({ id: existing.id, number: num, name: nextName, parentId, sortOrder: autoSceneSortOrder++ });
@@ -459,20 +469,70 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       expectedDuration: "",
     });
     upsertSceneNums.add(num);
-    if (body.replaceScenesFromScript) replacementSceneIds.add(id);
+    if (replaceScenes) replacementSceneIds.add(id);
     upsertScenesFromScript.push({ id, number: num, name: name ?? "", parentId, sortOrder: autoSceneSortOrder++ });
   }
 
-  for (const row of parsed) {
-    const ps = parseSceneNum(row.sceneNum);
-    if (!ps) continue;
-    if (ps.childNum && ps.parentNum) {
-      ensureScene(ps.parentNum, ps.parentName, null);
-      ensureScene(ps.childNum, ps.childName, ps.parentNum);
-    } else if (ps.parentNum) {
-      ensureScene(ps.parentNum, ps.parentName, null);
-    } else if (ps.childNum) {
-      ensureScene(ps.childNum, ps.childName, null);
+  if (body.sceneOverrides) {
+    sceneByNum.clear();
+    const existingByNum = new Map(existingScenes.map(scene => [scene.number, scene]));
+    const overrideByNum = new Map(body.sceneOverrides.map(scene => [scene.num, scene]));
+    body.sceneOverrides.forEach((scene, index) => {
+      if (!scene.num || overrideSceneNums.has(scene.num)) return;
+      overrideSceneNums.add(scene.num);
+      sourceSceneNumToOverrideNum.set(scene.num, scene.num);
+      for (const sourceNum of scene.sourceNums ?? []) {
+        if (sourceNum) sourceSceneNumToOverrideNum.set(sourceNum, scene.num);
+      }
+      const existing = existingByNum.get(scene.num);
+      const id = existing?.id ?? randomUUID();
+      sceneByNum.set(scene.num, {
+        id,
+        number: scene.num,
+        name: scene.name,
+        parentId: null,
+        synopsis: scene.synopsis ?? "",
+        actionLine: scene.actionLine ?? "",
+        music: scene.music ?? "",
+        stageNotes: scene.stageNotes ?? "",
+        expectedDuration: scene.expectedDuration ?? "",
+      });
+      replacementSceneIds.add(id);
+      upsertScenesFromScript.push({ id, number: scene.num, name: scene.name, parentId: null, sortOrder: index + 1 });
+    });
+    upsertScenesFromScript.forEach(scene => {
+      const override = overrideByNum.get(scene.number);
+      scene.parentId = override?.parentNum ? (sceneByNum.get(override.parentNum)?.id ?? null) : null;
+      const entry = sceneByNum.get(scene.number);
+      if (entry) sceneByNum.set(scene.number, { ...entry, parentId: scene.parentId });
+    });
+    const missingParentNums = body.sceneOverrides
+      .filter(scene => scene.parentNum && !overrideSceneNums.has(scene.parentNum))
+      .map(scene => `${scene.num}→${scene.parentNum}`);
+    if (missingParentNums.length > 0) {
+      return Response.json({ error: `构作映射缺少上级段落：${missingParentNums.join("、")}` }, { status: 400 });
+    }
+    const missingScriptSceneNums = new Set<string>();
+    for (const row of parsed) {
+      const ps = parseSceneNum(row.sceneNum);
+      const sceneNum = ps?.childNum ?? ps?.parentNum ?? null;
+      if (sceneNum && !sourceSceneNumToOverrideNum.has(sceneNum)) missingScriptSceneNums.add(sceneNum);
+    }
+    if (missingScriptSceneNums.size > 0) {
+      return Response.json({ error: `构作映射缺少剧本中的段落：${[...missingScriptSceneNums].join("、")}。请重新生成预览。` }, { status: 400 });
+    }
+  } else {
+    for (const row of parsed) {
+      const ps = parseSceneNum(row.sceneNum);
+      if (!ps) continue;
+      if (ps.childNum && ps.parentNum) {
+        ensureScene(ps.parentNum, ps.parentName, null);
+        ensureScene(ps.childNum, ps.childName, ps.parentNum);
+      } else if (ps.parentNum) {
+        ensureScene(ps.parentNum, ps.parentName, null);
+      } else if (ps.childNum) {
+        ensureScene(ps.childNum, ps.childName, null);
+      }
     }
   }
 
@@ -527,7 +587,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   for (const row of parsed) {
     const ps = parseSceneNum(row.sceneNum);
-    const sceneNum = ps?.childNum ?? ps?.parentNum ?? null;
+    const sourceSceneNum = ps?.childNum ?? ps?.parentNum ?? null;
+    const sceneNum = sourceSceneNum ? (sourceSceneNumToOverrideNum.get(sourceSceneNum) ?? sourceSceneNum) : null;
     const scene = sceneNum ? sceneByNum.get(sceneNum) : null;
     const sceneId = scene?.id ?? null;
 
@@ -595,7 +656,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       sortOrder: 0,
     });
   }
-  if (body.replaceScenesFromScript) replacementSceneIds.add(FIXED_INITIAL_CHAPTER_BLOCK_ID);
+  if (replaceScenes) replacementSceneIds.add(FIXED_INITIAL_CHAPTER_BLOCK_ID);
 
   const upsertBlocksWithoutKeys: Omit<ImportBlock, "lexKey">[] = [];
   const blockTagAssignments: Array<{ blockId: string; groupId: string; optionId: string }> = [];
@@ -666,7 +727,74 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
   };
 
-  for (let i = 0; i < blockSpecs.length; i++) {
+  const pushScriptBlock = (spec: BlockSpec) => {
+    const blockId = randomUUID();
+    upsertBlocksWithoutKeys.push({
+      id: blockId,
+      type: spec.blockType,
+      content: spec.content,
+      stageComment: spec.stageComment,
+      lyric: spec.lyric,
+      characterIds: spec.charIds,
+      characterAnnotations: spec.characterAnnotations,
+      sceneId: null,
+      rehearsalMark: null,
+    });
+    for (const ta of spec.tagActions) {
+      blockTagAssignments.push({ blockId, groupId: ta.groupId, optionId: ta.optionId });
+    }
+  };
+  const pushSpecWithRehearsal = (spec: BlockSpec, previousSpec: BlockSpec | null) => {
+    if (spec.rehearsalMark && (
+      spec.rehearsalMark !== previousSpec?.rehearsalMark ||
+      spec.sceneId !== previousSpec?.sceneId
+    )) {
+      pushRehearsalMarkerBlock(toAlphaLabel(currentRehearsalIndex));
+      currentRehearsalIndex++;
+    }
+    pushScriptBlock(spec);
+  };
+
+  if (body.sceneOverrides) {
+    const specsBySceneId = new Map<string | null, BlockSpec[]>();
+    for (const spec of blockSpecs) {
+      const key = spec.sceneId ?? null;
+      const specs = specsBySceneId.get(key);
+      if (specs) specs.push(spec);
+      else specsBySceneId.set(key, [spec]);
+    }
+    let previousSpec: BlockSpec | null = null;
+    for (const spec of specsBySceneId.get(null) ?? []) {
+      pushSpecWithRehearsal(spec, previousSpec);
+      previousSpec = spec;
+    }
+    for (const override of body.sceneOverrides) {
+      const scene = sceneByNum.get(override.num);
+      if (!scene) continue;
+      if (scene.parentId === null) {
+        if (scene.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID) {
+          pushSceneMarkerBlock("chapter_marker", scene.id);
+        }
+        currentChapterId = scene.id;
+        currentRehearsalIndex = 0;
+      } else {
+        if (currentChapterId !== scene.parentId) {
+          if (scene.parentId !== FIXED_INITIAL_CHAPTER_BLOCK_ID) {
+            pushSceneMarkerBlock("chapter_marker", scene.parentId);
+          }
+          currentChapterId = scene.parentId;
+          currentRehearsalIndex = 0;
+        }
+        pushSceneMarkerBlock("scene_marker", scene.id);
+        currentRehearsalIndex = 0;
+      }
+      const sceneSpecs = specsBySceneId.get(scene.id) ?? [];
+      for (const spec of sceneSpecs) {
+        pushSpecWithRehearsal(spec, previousSpec);
+        previousSpec = spec;
+      }
+    }
+  } else for (let i = 0; i < blockSpecs.length; i++) {
     const spec = blockSpecs[i];
     const scene = spec.sceneId ? sceneById.get(spec.sceneId) ?? null : null;
     if (scene) {
@@ -698,35 +826,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       }
     }
     const previousSpec = i > 0 ? blockSpecs[i - 1] : null;
-    if (spec.rehearsalMark && (
-      spec.rehearsalMark !== previousSpec?.rehearsalMark ||
-      spec.sceneId !== previousSpec?.sceneId
-    )) {
-      pushRehearsalMarkerBlock(toAlphaLabel(currentRehearsalIndex));
-      currentRehearsalIndex++;
-    }
-    const blockId = randomUUID();
-    upsertBlocksWithoutKeys.push({
-      id: blockId,
-      type: spec.blockType,
-      content: spec.content,
-      stageComment: spec.stageComment,
-      lyric: spec.lyric,
-      characterIds: spec.charIds,
-      characterAnnotations: spec.characterAnnotations,
-      sceneId: null,
-      rehearsalMark: null,
-    });
-    for (const ta of spec.tagActions) {
-      blockTagAssignments.push({ blockId, groupId: ta.groupId, optionId: ta.optionId });
-    }
+    pushSpecWithRehearsal(spec, previousSpec);
   }
   const lexKeys = initialKeys(upsertBlocksWithoutKeys.length);
   const upsertBlocks: ImportBlock[] = upsertBlocksWithoutKeys.map((block, index) => ({
     ...block,
     lexKey: lexKeys[index],
   }));
-  const blankChapterIds = new Set(
+  const blankChapterIds = body.sceneOverrides ? new Set<string>() : new Set(
     [...sceneById.values()]
       .filter((scene) => (
         scene.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID &&
@@ -740,7 +847,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     ...[...sceneById.values()]
       .filter((scene) => scene.parentId !== null && blankChapterIds.has(scene.parentId))
       .map((scene) => scene.id),
-    ...(body.replaceScenesFromScript
+    ...(replaceScenes
       ? existingScenes
           .filter((scene) => !replacementSceneIds.has(scene.id))
           .map((scene) => scene.id)
@@ -753,6 +860,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     upsertScenes: upsertScenesFromScript,
     deleteSceneIds,
   });
+  if (body.sceneOverrides) await ensureEmptyScriptBlocksForEmptyScenes(productionId, versionId);
 
   await saveScriptStageDelimiters(productionId, stageDelimiter.open, stageDelimiter.close);
 
