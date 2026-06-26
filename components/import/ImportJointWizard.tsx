@@ -784,9 +784,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               initialUrl={scriptPickerPreset?.url ?? ""}
               initialSpreadsheetToken={scriptPickerPreset?.token ?? null}
               initialSheets={scriptPickerPreset?.sheets}
-              onLoaded={(token, sheets) => {
+              onLoaded={(token, sheets, url) => {
                 setScriptWorkbook({ token, sheets });
-                setScriptPickerPreset(null);
+                setScriptPickerPreset(prev => prev ? { url, token, sheets, nonce: prev.nonce } : prev);
               }}
               onSelect={(token, sheet) => loadSheetData(token, sheet, "script")}
               disabled={loadingData}
