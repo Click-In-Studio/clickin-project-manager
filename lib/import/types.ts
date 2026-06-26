@@ -78,7 +78,7 @@ export type TypeAction =
   | { action: "mapTag"; groupId: string; optionId: string }
   | { action: "mapType"; blockType: "dialogue" | "stage" | "lyric" | "marker" };
 
-export type TypeTagMapping = Record<string, TypeAction>; // rawValue → action
+export type TypeTagMapping = Record<string, TypeAction | TypeAction[]>; // rawValue → action(s)
 
 // ─── Import Preview ────────────────────────────────────────────────────────────
 

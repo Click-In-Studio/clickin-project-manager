@@ -6,7 +6,7 @@ import { getProductionMemberContext, listCharactersByVersion, importScriptToVers
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
-import type { ScriptColMap, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
+import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
 import { toAlphaLabel } from "@/lib/script-generated-labels";
 import {
@@ -54,6 +54,7 @@ const STAGE_DELIMITERS: Record<StageDelimiterPattern, { open: string; close: str
 const STAGE_DELIMITER_PATTERNS = Object.keys(STAGE_DELIMITERS) as StageDelimiterPattern[];
 type StageDelimiter = { open: string; close: string };
 type StageDelimiterReplacement = { regex: RegExp; replacement: string };
+const TYPE_VALUE_SPLIT_RE = /[,，;；、/\n]+/;
 type ParsedImportRow = {
   sourceIndex: number;
   sceneNum: string;
@@ -62,7 +63,7 @@ type ParsedImportRow = {
   rawChars: string[];
   body: string;
   stageComment: string | null;
-  typeActions: TypeTagMapping[string][];
+  typeActions: TypeAction[];
   warningMark: boolean;
 };
 type MarkerImportRow = {
@@ -171,14 +172,16 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
     if (!rawSceneNum) continue;
 
     const rawType = getCell(row, colMap.typeTag);
-    // Split multi-value type cells (same delimiter as character column).
+    // Split multi-value type cells using the same delimiters as the import UI.
     // An empty cell uses key "" so users can map blank cells explicitly.
     const typeParts = rawType
-      ? rawType.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)
+      ? rawType.split(TYPE_VALUE_SPLIT_RE).map(s => s.trim()).filter(Boolean)
       : [""];
-    const typeActions = typeParts
-      .map(p => typeTagMapping?.[p] ?? null)
-      .filter((a): a is TypeTagMapping[string] => a !== null);
+    const typeActions = typeParts.flatMap(p => {
+      const action = typeTagMapping?.[p];
+      if (!action) return [];
+      return Array.isArray(action) ? action : [action];
+    });
     if (typeActions.some(a => a.action === "ignore")) continue;
 
     const rawMark = getCell(row, colMap.rehearsalMark);

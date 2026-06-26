@@ -4,7 +4,7 @@ import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import SheetPicker from "./SheetPicker";
 import ColumnMapper from "./ColumnMapper";
-import type { SheetMeta, SheetData, SceneColMap, ScriptColMap, ImportScriptPreview, TypeTagMapping, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportPreview, JointImportMappingRow, JointImportMarker } from "@/lib/import/types";
+import type { SheetMeta, SheetData, SceneColMap, ScriptColMap, ImportScriptPreview, TypeAction, TypeTagMapping, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportPreview, JointImportMappingRow, JointImportMarker } from "@/lib/import/types";
 
 type Step = "choose-dramaturgy" | "choose-script" | "scene-columns" | "script-columns" | "types" | "characters" | "aggregates" | "preview" | "done";
 type Props = { productionId: string; versionId?: string | null; onDone?: () => void; };
@@ -14,6 +14,8 @@ type Workbook = { token: string; sheets: SheetMeta[] };
 type SheetPickerPreset = { url: string; token: string; sheets: SheetMeta[]; nonce: number };
 type ApiResult<T> = Partial<T> & { error?: string; status?: string; migration?: { phase?: string } };
 type JointImportMappingAction = "create" | "preserve";
+type SceneSummaryItem = { sceneId: string | null; num: string | null; name: string | null; count: number };
+type TagTypeAction = Extract<TypeAction, { action: "mapTag" }>;
 
 async function readApiResult<T>(res: Response, fallback: string): Promise<ApiResult<T>> {
   const text = await res.text();
@@ -39,11 +41,26 @@ function parseCharName(raw: string): { name: string; note: string | null } {
 }
 const guessAgg = (name: string) => /们|全体|合唱|合|众|群/.test(name);
 const effectiveName = (e: CharEntry) => e.parsedSuffix !== null && e.mergeAsNote ? e.parsedBase : e.raw;
+const splitCellValues = (value: string) => value.split(/[,，;；、/\n]+/).map(s => s.trim()).filter(Boolean);
 const STAGE_DELIMITER_PATTERNS: StageDelimiterPattern[] = ["（）", "【】", "()", "[]"];
 const SCRIPT_CONFIG_STAGE_DELIMITER_PATTERNS: ScriptConfigStageDelimiterPattern[] = ["（）", "【】"];
 const BLOCK_TYPE_LABELS: Record<string, string> = { dialogue: "台词", stage: "舞台提示", lyric: "歌词", marker: "章节分界线" };
 const MAPPING_BUTTON_CLASS = "px-2 py-0.5 rounded border text-xs disabled:opacity-25 disabled:cursor-not-allowed";
 const MAPPING_CURRENT_BUTTON_CLASS = "px-2 py-0.5 rounded border text-xs cursor-not-allowed";
+const DEFAULT_TYPE_ACTION: Extract<TypeAction, { action: "mapType" }> = { action: "mapType", blockType: "dialogue" };
+
+function normalizeTypeActions(action: TypeTagMapping[string] | undefined): TypeAction[] {
+  if (!action) return [DEFAULT_TYPE_ACTION];
+  return Array.isArray(action) ? action : [action];
+}
+
+function primaryTypeAction(action: TypeTagMapping[string] | undefined): TypeAction {
+  return normalizeTypeActions(action).find(item => item.action !== "mapTag") ?? DEFAULT_TYPE_ACTION;
+}
+
+function tagActions(action: TypeTagMapping[string] | undefined): TagTypeAction[] {
+  return normalizeTypeActions(action).filter((item): item is TagTypeAction => item.action === "mapTag");
+}
 export default function ImportJointWizard({ productionId, versionId, onDone }: Props) {
   const [step, setStep] = useState<Step>("choose-dramaturgy");
   const [dramWorkbook, setDramWorkbook] = useState<Workbook | null>(null);
@@ -68,6 +85,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const [typeTagMapping, setTypeTagMapping] = useState<TypeTagMapping>({});
   const [tagGroups, setTagGroups] = useState<TagGroupInfo[]>([]);
   const [tagGroupsLoading, setTagGroupsLoading] = useState(false);
+  const [tagGroupsError, setTagGroupsError] = useState<string | null>(null);
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
+  const [confirmDeleteOptionId, setConfirmDeleteOptionId] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
   const [newOptionLabel, setNewOptionLabel] = useState<Record<string, string>>({});
   const [charEntries, setCharEntries] = useState<CharEntry[]>([]);
@@ -77,7 +97,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const [scriptPreview, setScriptPreview] = useState<ImportScriptPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [commitLoading, setCommitLoading] = useState(false);
-  const [commitResult, setCommitResult] = useState<{ importedScenes: number; blocksImported: number; charsAdded: number } | null>(null);
+  const [commitResult, setCommitResult] = useState<{ importedScenes: number; blocksImported: number; charsAdded: number; sceneSummary: SceneSummaryItem[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function goBack() {
@@ -102,7 +122,10 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     };
     const next: Record<string, number | null> = { sceneNum: null, sceneName: null, intro: null, actionLine: null, music: null, stagePres: null, duration: null };
     for (const [field, candidates] of Object.entries(hints)) {
-      const idx = headers.findIndex(h => candidates.some(c => h.includes(c)));
+      const idx = headers.findIndex(h => {
+        const normalized = h.toLowerCase();
+        return candidates.some(c => normalized.includes(c.toLowerCase()));
+      });
       if (idx >= 0) next[field] = idx;
     }
     return next;
@@ -118,10 +141,16 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     };
     const next: Record<string, number | number[] | null> = { sceneNum: null, rehearsalMark: null, typeTag: null, character: null, stageComment: null, bodyColumns: [], stageInlineColumns: [] };
     for (const [field, candidates] of Object.entries(hints)) {
-      const idx = headers.findIndex(h => candidates.some(c => h.includes(c)));
+      const idx = headers.findIndex(h => {
+        const normalized = h.toLowerCase();
+        return candidates.some(c => normalized.includes(c.toLowerCase()));
+      });
       if (idx >= 0) next[field] = idx;
     }
-    const bodyIdx = headers.findIndex(h => ["剧本", "内容", "台词", "文本"].some(c => h.includes(c)));
+    const bodyIdx = headers.findIndex(h => {
+      const normalized = h.toLowerCase();
+      return ["剧本", "内容", "台词", "文本"].some(c => normalized.includes(c.toLowerCase()));
+    });
     if (bodyIdx >= 0) next.bodyColumns = [bodyIdx];
     return next;
   }
@@ -151,6 +180,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
         setTypeValues([]);
         setTypeTagMapping({});
         setTagGroups([]);
+        setTagGroupsError(null);
+        setConfirmDeleteGroupId(null);
+        setConfirmDeleteOptionId(null);
         setCharEntries([]);
         setAggregateMembers({});
         setScriptPreview(null);
@@ -595,9 +627,14 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           sceneOverrides,
         }),
       });
-      const scriptData = await readApiResult<{ blocksImported?: number; charsAdded?: number }>(scriptRes, "剧本导入失败");
+      const scriptData = await readApiResult<{ blocksImported?: number; charsAdded?: number; sceneSummary?: SceneSummaryItem[] }>(scriptRes, "剧本导入失败");
       if (!scriptRes.ok || scriptData.error) { setError(scriptData.error ?? "剧本导入失败"); return; }
-      setCommitResult({ importedScenes: sceneOverrides.length, blocksImported: scriptData.blocksImported!, charsAdded: scriptData.charsAdded! });
+      setCommitResult({
+        importedScenes: sceneOverrides.length,
+        blocksImported: scriptData.blocksImported!,
+        charsAdded: scriptData.charsAdded!,
+        sceneSummary: scriptData.sceneSummary ?? [],
+      });
       setStep("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "网络错误");
@@ -607,6 +644,12 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   }
 
   function gotoScriptTypes() {
+    const bodyColumns = (scriptMapping.bodyColumns as number[] | null) ?? [];
+    if (bodyColumns.length === 0) {
+      setError("“剧本内容”不可为空，请选择作为剧本内容导入的字段（表格列）。");
+      return;
+    }
+    setError(null);
     const typeCol = scriptMapping.typeTag as number | null;
     if (typeCol == null || !scriptData) {
       gotoCharacters();
@@ -614,9 +657,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     }
     const vals = new Set<string>([""]);
     for (const row of scriptData.rows) {
-      const v = row[typeCol]?.trim();
+      const v = String(row[typeCol] ?? "").trim();
       if (!v) continue;
-      for (const part of v.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)) vals.add(part);
+      for (const part of splitCellValues(v)) vals.add(part);
     }
     const next = [...vals];
     setTypeValues(next);
@@ -627,8 +670,16 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     });
     setTagGroupsLoading(true);
     fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`)
-      .then(r => r.json())
-      .then((data: { groups?: TagGroupInfo[] }) => { if (data.groups) setTagGroups(data.groups); })
+      .then(async r => {
+        const data = await readApiResult<{ groups?: TagGroupInfo[] }>(r, "加载 Tag 组失败");
+        if (!r.ok || data.error) throw new Error(data.error ?? "加载 Tag 组失败");
+        setTagGroups(data.groups ?? []);
+        setTagGroupsError(null);
+      })
+      .catch(err => {
+        setTagGroups([]);
+        setTagGroupsError(err instanceof Error ? err.message : "加载 Tag 组失败");
+      })
       .finally(() => setTagGroupsLoading(false));
     setStep("types");
   }
@@ -642,31 +693,119 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, type: "exclusive" }),
       });
-      const data = await res.json() as { group?: TagGroupInfo };
+      const data = await readApiResult<{ group?: TagGroupInfo }>(res, "创建 Tag 组失败");
+      if (!res.ok || data.error) throw new Error(data.error ?? "创建 Tag 组失败");
       if (data.group) {
         setTagGroups(groups => [...groups, { ...data.group!, options: [] }]);
         setNewGroupName("");
+        setTagGroupsError(null);
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      setTagGroupsError(err instanceof Error ? err.message : "创建 Tag 组失败");
+    }
   }
 
   async function addTagOption(groupId: string) {
     const label = (newOptionLabel[groupId] ?? "").trim();
     if (!label) return;
+    const option = await createTagOption(groupId, label);
+    if (option) setNewOptionLabel(labels => ({ ...labels, [groupId]: "" }));
+  }
+
+  async function createTagOption(groupId: string, label: string): Promise<TagGroupInfo["options"][number] | null> {
     try {
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${groupId}/options`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ label, color: "#a1a1aa", sortOrder: 0 }),
       });
-      const data = await res.json() as { option?: TagGroupInfo["options"][number] };
+      const data = await readApiResult<{ option?: TagGroupInfo["options"][number] }>(res, "创建 Tag 选项失败");
+      if (!res.ok || data.error) throw new Error(data.error ?? "创建 Tag 选项失败");
       if (data.option) {
         setTagGroups(groups => groups.map(group => (
           group.id === groupId ? { ...group, options: [...group.options, data.option!] } : group
         )));
-        setNewOptionLabel(labels => ({ ...labels, [groupId]: "" }));
+        setTagGroupsError(null);
+        return data.option;
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      setTagGroupsError(err instanceof Error ? err.message : "创建 Tag 选项失败");
+    }
+    return null;
+  }
+
+  function setRawPrimaryAction(rawValue: string, nextPrimary: TypeAction) {
+    setTypeTagMapping(mapping => {
+      const tags = tagActions(mapping[rawValue]);
+      return { ...mapping, [rawValue]: [nextPrimary, ...tags] };
+    });
+  }
+
+  async function toggleRawTagInGroup(rawValue: string, group: TagGroupInfo) {
+    if (tagActions(typeTagMapping[rawValue]).some(action => action.groupId === group.id)) {
+      setTypeTagMapping(mapping => {
+        const primary = primaryTypeAction(mapping[rawValue]);
+        const tags = tagActions(mapping[rawValue]).filter(action => action.groupId !== group.id);
+        return { ...mapping, [rawValue]: [primary, ...tags] };
+      });
+      return;
+    }
+    const option = group.options.find(item => item.label === rawValue) ?? await createTagOption(group.id, rawValue);
+    if (!option) return;
+    setTypeTagMapping(mapping => {
+      const primary = primaryTypeAction(mapping[rawValue]);
+      const tags = tagActions(mapping[rawValue]).filter(action => action.groupId !== group.id);
+      return { ...mapping, [rawValue]: [primary, ...tags, { action: "mapTag", groupId: group.id, optionId: option.id }] };
+    });
+  }
+
+  async function deleteTagGroupFromImport(groupId: string) {
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${groupId}`, { method: "DELETE" });
+      const data = await readApiResult<{ ok?: boolean }>(res, "删除 Tag 组失败");
+      if (!res.ok || data.error) throw new Error(data.error ?? "删除 Tag 组失败");
+      setTagGroups(groups => groups.filter(group => group.id !== groupId));
+      setTypeTagMapping(mapping => {
+        const next: TypeTagMapping = {};
+        for (const [rawValue, action] of Object.entries(mapping)) {
+          const primary = primaryTypeAction(action);
+          const tags = tagActions(action).filter(item => item.groupId !== groupId);
+          next[rawValue] = [primary, ...tags];
+        }
+        return next;
+      });
+      setConfirmDeleteGroupId(null);
+      setConfirmDeleteOptionId(null);
+      setTagGroupsError(null);
+    } catch (err) {
+      setTagGroupsError(err instanceof Error ? err.message : "删除 Tag 组失败");
+    }
+  }
+
+  async function deleteTagOptionFromImport(groupId: string, optionId: string) {
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${groupId}/options/${optionId}`, { method: "DELETE" });
+      const data = await readApiResult<{ ok?: boolean }>(res, "删除 Tag 选项失败");
+      if (!res.ok || data.error) throw new Error(data.error ?? "删除 Tag 选项失败");
+      setTagGroups(groups => groups.map(group => (
+        group.id === groupId
+          ? { ...group, options: group.options.filter(option => option.id !== optionId) }
+          : group
+      )));
+      setTypeTagMapping(mapping => {
+        const next: TypeTagMapping = {};
+        for (const [rawValue, action] of Object.entries(mapping)) {
+          const primary = primaryTypeAction(action);
+          const tags = tagActions(action).filter(item => item.groupId !== groupId || item.optionId !== optionId);
+          next[rawValue] = [primary, ...tags];
+        }
+        return next;
+      });
+      setConfirmDeleteOptionId(null);
+      setTagGroupsError(null);
+    } catch (err) {
+      setTagGroupsError(err instanceof Error ? err.message : "删除 Tag 选项失败");
+    }
   }
 
   function gotoCharacters() {
@@ -718,6 +857,12 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const showMappingControls = !skipDramaturgy;
   const finalImportMarkers = buildFinalImportMarkers(compactMappingRows);
   const preserveDisplayMarkers = showMappingControls ? new Map(finalImportMarkers.map(item => [item.rowIndex, item.marker])) : null;
+  const rawTypeValues = typeValues.filter(Boolean);
+  const selectedTagGroupIdsByRawValue = new Map(rawTypeValues.map(value => [
+    value,
+    new Set(tagActions(typeTagMapping[value]).map(action => action.groupId)),
+  ]));
+  const usedRawTypeValues = new Set(rawTypeValues.filter(value => (selectedTagGroupIdsByRawValue.get(value)?.size ?? 0) > 0));
 
   const stepLabels: Record<Step, string> = {
     "choose-dramaturgy": "导入构作",
@@ -778,6 +923,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       {step === "choose-script" && (
         <div className="space-y-4">
           <p className="text-sm text-gray-700">请输入剧本所在的飞书表格链接。</p>
+          {skipDramaturgy && <p className="text-sm text-gray-700">【剧本构作】将直接根据剧本内容中的章节段落生成。</p>}
           <div className="space-y-4">
             <SheetPicker
               key={scriptPickerPreset?.nonce ?? "script-picker"}
@@ -929,6 +1075,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
             <button onClick={gotoScriptTypes} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">下一步：类型映射</button>
           </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       )}
 
@@ -936,28 +1083,129 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
         <div className="space-y-4">
           <div className="rounded border border-gray-200 p-3 space-y-3">
             <p className="text-sm font-medium text-gray-700">Tag 组{tagGroupsLoading ? "（加载中...）" : ""}</p>
-            {tagGroups.map(group => (
-              <div key={group.id} className="space-y-1.5">
-                <p className="text-xs font-medium text-gray-600">{group.name}</p>
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  {group.options.map(option => (
-                    <span key={option.id} className="px-2 py-0.5 rounded text-xs text-white" style={{ background: option.color }}>{option.label}</span>
-                  ))}
-                  <div className="flex gap-1">
-                    <input
-                      type="text"
-                      placeholder="新选项"
-                      value={newOptionLabel[group.id] ?? ""}
-                      onChange={e => setNewOptionLabel(labels => ({ ...labels, [group.id]: e.target.value }))}
-                      onKeyDown={e => { if (e.key === "Enter") addTagOption(group.id); }}
-                      className="border border-gray-200 rounded px-1.5 py-0.5 text-xs w-20 focus:outline-none focus:border-blue-400"
-                    />
-                    <button onClick={() => addTagOption(group.id)} className="px-1.5 py-0.5 text-xs bg-gray-100 rounded hover:bg-gray-200">+</button>
+            {tagGroupsError && <p className="text-xs text-red-600">{tagGroupsError}</p>}
+            {rawTypeValues.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-gray-500">剧本中既有的全部类型标签：</span>
+                {rawTypeValues.map(value => {
+                  const used = usedRawTypeValues.has(value);
+                  return (
+                    <span
+                      key={value}
+                      className={`rounded border px-2 py-0.5 text-xs ${
+                        used
+                          ? "border-violet-900/20 bg-violet-900/10 text-gray-700"
+                          : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                    >
+                      {value}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            <div>
+              {tagGroups.map(group => (
+                <div key={group.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="rounded border border-gray-100 bg-gray-50/60 p-2.5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-semibold text-gray-700">{group.name}</p>
+                      {confirmDeleteGroupId === group.id ? (
+                        <span className="inline-flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => deleteTagGroupFromImport(group.id)}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            确认删除该组
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteGroupId(null)}
+                            className="text-xs text-zinc-400 hover:text-zinc-600"
+                          >
+                            取消
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteGroupId(group.id)}
+                          className="text-sm leading-none text-zinc-400 hover:text-zinc-700"
+                          aria-label={`删除 Tag 组 ${group.name}`}
+                          title="删除"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {rawTypeValues.map(rawValue => {
+                        const selected = selectedTagGroupIdsByRawValue.get(rawValue)?.has(group.id) ?? false;
+                        return (
+                          <button
+                            key={rawValue}
+                            type="button"
+                            onClick={() => void toggleRawTagInGroup(rawValue, group)}
+                            className={`px-2 py-0.5 rounded text-xs border ${
+                              selected
+                                ? "bg-violet-900/60 text-white border-violet-900/60 hover:bg-violet-900/80"
+                                : "bg-white text-gray-600 border-gray-200 hover:border-violet-300"
+                            }`}
+                          >
+                            {rawValue}
+                          </button>
+                        );
+                      })}
+                      {group.options
+                        .filter(option => !rawTypeValues.includes(option.label))
+                        .map(option => (
+                          confirmDeleteOptionId === option.id ? (
+                            <span key={option.id} className="inline-flex items-center gap-1.5 rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs">
+                              <span className="text-red-700">{option.label}</span>
+                              <button
+                                type="button"
+                                onClick={() => deleteTagOptionFromImport(group.id, option.id)}
+                                className="text-xs text-red-500 hover:text-red-700"
+                              >
+                                确认删除
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteOptionId(null)}
+                                className="text-xs text-zinc-400 hover:text-zinc-600"
+                              >
+                                取消
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => setConfirmDeleteOptionId(option.id)}
+                              className="px-2 py-0.5 rounded text-xs border bg-violet-900/60 text-white border-violet-900/60 hover:bg-violet-900/80"
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        ))}
+                      <div className="flex gap-1">
+                        <input
+                          type="text"
+                          placeholder="新选项"
+                          value={newOptionLabel[group.id] ?? ""}
+                          onChange={e => setNewOptionLabel(labels => ({ ...labels, [group.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter") addTagOption(group.id); }}
+                          className="border border-gray-200 rounded px-1.5 py-0.5 text-xs w-20 focus:outline-none focus:border-violet-400"
+                        />
+                        <button onClick={() => addTagOption(group.id)} className="px-1.5 py-0.5 text-xs bg-violet-900/10 rounded hover:bg-violet-200">+</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            <div className="flex gap-1.5 items-center pt-1">
+              ))}
+            </div>
+            <div className="flex gap-1.5 items-center border-t border-gray-100 pt-3">
               <input
                 type="text"
                 placeholder="新建 Tag 组名称"
@@ -966,34 +1214,23 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                 onKeyDown={e => { if (e.key === "Enter") createTagGroup(); }}
                 className="border border-gray-200 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:border-blue-400"
               />
-              <button onClick={createTagGroup} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">创建</button>
+              <button onClick={createTagGroup} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-violet-700">创建</button>
             </div>
           </div>
 
           <p className="text-sm font-medium text-gray-700">类型映射</p>
           {typeValues.map(val => {
-            const action = typeTagMapping[val] ?? { action: "mapType", blockType: "dialogue" };
-            const tagAction = action.action === "mapTag" ? action as { action: "mapTag"; groupId: string; optionId: string } : null;
+            const action = primaryTypeAction(typeTagMapping[val]);
             return (
               <div key={val} className="flex items-center gap-2 flex-wrap">
                 <span className="w-28 text-sm font-medium truncate">{val || <span className="text-gray-400 italic">空白</span>}</span>
                 <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={action.action} onChange={e => {
-                  const a = e.target.value as TypeTagMapping[string]["action"];
-                  const firstGroup = tagGroups[0]; const firstOption = firstGroup?.options[0];
-                  setTypeTagMapping(m => ({
-                    ...m,
-                    [val]: a === "ignore" ? { action: "ignore" }
-                      : a === "mapTag" ? { action: "mapTag", groupId: firstGroup?.id ?? "", optionId: firstOption?.id ?? "" }
-                      : { action: "mapType", blockType: "dialogue" },
-                  }));
+                  const a = e.target.value as TypeAction["action"];
+                  setRawPrimaryAction(val, a === "ignore" ? { action: "ignore" } : { action: "mapType", blockType: "dialogue" });
                 }}>
-                  <option value="mapType">映射到类型</option><option value="mapTag" disabled={tagGroups.length === 0}>映射到 Tag</option><option value="ignore">忽略该行</option>
+                  <option value="mapType">映射到类型</option><option value="ignore">忽略该行</option>
                 </select>
-                {action.action === "mapType" && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={(action as { action: "mapType"; blockType: string }).blockType} onChange={e => setTypeTagMapping(m => ({ ...m, [val]: { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" } }))}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
-                {tagAction && <>
-                  <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={tagAction.groupId} onChange={e => { const gid = e.target.value; const firstOpt = tagGroups.find(g => g.id === gid)?.options[0]; setTypeTagMapping(m => ({ ...m, [val]: { action: "mapTag", groupId: gid, optionId: firstOpt?.id ?? "" } })); }}>{tagGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
-                  <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={tagAction.optionId} onChange={e => setTypeTagMapping(m => ({ ...m, [val]: { ...tagAction, optionId: e.target.value } }))}>{(tagGroups.find(g => g.id === tagAction.groupId)?.options ?? []).map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</select>
-                </>}
+                {action.action === "mapType" && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={(action as { action: "mapType"; blockType: string }).blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
               </div>
             );
           })}
@@ -1024,6 +1261,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
             <button onClick={gotoAggregates} disabled={previewLoading} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">{previewLoading ? "加载中..." : aggEntries.length > 0 ? "下一步：聚合角色" : "下一步：确认"}</button>
           </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       )}
 
@@ -1031,7 +1269,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
         <div className="space-y-4">
           {aggEntries.map(agg => {
             const aggName = effectiveName(agg);
-            return <div key={aggName} className="rounded border border-gray-200 p-3 space-y-2"><p className="font-medium text-sm">{aggName}</p><div className="flex flex-wrap gap-2">{normalEntries.map(m => { const mName = effectiveName(m); const selected = (aggregateMembers[aggName] ?? []).includes(mName); return <button key={mName} onClick={() => setAggregateMembers(prev => { const cur = prev[aggName] ?? []; return { ...prev, [aggName]: selected ? cur.filter(n => n !== mName) : [...cur, mName] }; })} className={`px-2 py-0.5 rounded text-sm border ${selected ? "bg-blue-600 text-white border-blue-600" : "border-gray-200 text-gray-600"}`}>{mName}</button>; })}</div></div>;
+            return <div key={aggName} className="rounded border border-gray-200 p-3 space-y-2"><p className="font-medium text-sm">{aggName}</p><div className="flex flex-wrap gap-2">{normalEntries.map(m => { const mName = effectiveName(m); const selected = (aggregateMembers[aggName] ?? []).includes(mName); return <button key={mName} onClick={() => setAggregateMembers(prev => { const cur = prev[aggName] ?? []; return { ...prev, [aggName]: selected ? cur.filter(n => n !== mName) : [...cur, mName] }; })} className={`px-2 py-0.5 rounded text-sm border ${selected ? "bg-violet-900/60 text-white border-violet-900/60" : "border-gray-200 text-gray-600"}`}>{mName}</button>; })}</div></div>;
           })}
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
@@ -1254,6 +1492,28 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       {step === "done" && commitResult && (
         <div className="space-y-4">
           <div className="rounded bg-green-50 border border-green-200 p-4 text-green-800">成功导入：构作 {skipDramaturgy ? "已生成" : commitResult.importedScenes}，剧本 {commitResult.blocksImported}，角色 {commitResult.charsAdded}</div>
+          {commitResult.sceneSummary.length > 0 && (
+            <div className="rounded border border-gray-200 overflow-hidden text-sm">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr className="text-left text-xs text-gray-500">
+                    <th className="px-3 py-2 font-medium">段落</th>
+                    <th className="px-3 py-2 font-medium">名称</th>
+                    <th className="px-3 py-2 font-medium text-right">行数</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {commitResult.sceneSummary.map((scene, index) => (
+                    <tr key={scene.sceneId ?? `__none_${index}`} className="text-gray-700">
+                      <td className="px-3 py-1.5 font-mono text-xs">{scene.num ?? "—"}</td>
+                      <td className="px-3 py-1.5">{scene.name ?? <span className="text-gray-400">未分配段落</span>}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{scene.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <button onClick={() => onDone?.()} className="px-4 py-2 bg-gray-800 text-white text-sm rounded">完成</button>
         </div>
       )}
