@@ -732,7 +732,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-6">
+    <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <h1 className="text-xl font-bold">导入</h1>
       <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">本次导入将会覆盖既有的构作和剧本内容。</p>
       <div className="flex flex-wrap items-center gap-1 text-xs">

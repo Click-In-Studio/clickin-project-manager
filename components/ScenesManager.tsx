@@ -328,7 +328,7 @@ function InsertSceneRow({
             {!open ? (
               <button
                 onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
-                className="flex h-5 w-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-xs leading-none text-zinc-300 opacity-0 shadow-sm transition-all hover:border-zinc-300 hover:text-zinc-600 group-hover:opacity-100"
+                className="flex h-5 w-5 items-center justify-center rounded-full text-[12px] leading-none text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-500 group-hover:opacity-100"
                 aria-label="添加章节或场景"
               >
                 +

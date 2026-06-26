@@ -1331,7 +1331,7 @@ function ScenePanel({
 }: {
   scenes: Scene[];
   productionId: string;
-  onAdd: (parentId?: string) => void;
+  onAdd: (parentId?: string, target?: { insertAfterSceneId?: string; insertBeforeSceneId?: string }) => void;
   onUpdate: (id: string, name: string) => void;
   onRemove: (id: string) => void;
   open: boolean;
@@ -1408,7 +1408,7 @@ function ScenePanel({
                           <tr>
                             <td colSpan={3} className="pt-0 pb-1 pl-5">
                               <button
-                                onClick={() => onAdd(s.id)}
+                                onClick={() => onAdd(s.id, { insertAfterSceneId: s.id })}
                                 className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors"
                               >
                                 + 添加场景
@@ -1425,7 +1425,7 @@ function ScenePanel({
           </div>
           <div className="shrink-0 border-t border-zinc-100 p-3">
             <button
-              onClick={() => onAdd()}
+              onClick={() => onAdd(undefined, scenes.length > 0 ? { insertAfterSceneId: scenes[scenes.length - 1].id } : undefined)}
               className="w-full rounded-lg border border-dashed border-zinc-200 py-1.5 text-sm text-zinc-400 transition-colors hover:border-zinc-400 hover:text-zinc-600"
             >
               + 添加幕
@@ -4253,6 +4253,73 @@ function normalizeSceneRowsForMarkers<T extends Scene>(rows: T[], markerBlocks: 
   return withGeneratedSceneNumbers(orderSceneRowsByMarkers(rows, markerBlocks));
 }
 
+function shouldInsertEmptyBlockAfterMarker(blocks: Block[], markerIndex: number): boolean {
+  const marker = blocks[markerIndex];
+  if (!marker || (marker.type !== "chapter_marker" && marker.type !== "scene_marker")) return false;
+
+  for (let cursor = markerIndex + 1; cursor < blocks.length; cursor++) {
+    const next = blocks[cursor];
+    if (next.type === "chapter_marker") break;
+    if (marker.type === "chapter_marker" && next.type === "scene_marker") return false;
+    if (next.type === "scene_marker") break;
+    if (isTextBlock(next)) return false;
+  }
+  return true;
+}
+
+function insertMarkerWithEmptyBlockIfNeeded(blocks: Block[], marker: Block, insertIndex: number): Block[] {
+  const next = [...blocks];
+  const boundedIndex = Math.max(0, Math.min(next.length, insertIndex));
+  next.splice(boundedIndex, 0, marker);
+  if (shouldInsertEmptyBlockAfterMarker(next, boundedIndex)) {
+    next.splice(boundedIndex + 1, 0, makeBlock());
+  }
+  return normalizeScriptBlockStream(next);
+}
+
+function previousChapterSceneMarker(blocks: Block[], index: number): Block | null {
+  for (let cursor = Math.min(index, blocks.length - 1); cursor >= 0; cursor--) {
+    const block = blocks[cursor];
+    if (block.type === "chapter_marker" || block.type === "scene_marker") return block;
+  }
+  return null;
+}
+
+function repairEmptyMarkerSegments(blocks: Block[], markerIds: Iterable<string>): Block[] {
+  let next = blocks;
+  let changed = false;
+  for (const markerId of markerIds) {
+    const markerIndex = next.findIndex((block) => block.id === markerId);
+    if (markerIndex < 0) continue;
+    if (!shouldInsertEmptyBlockAfterMarker(next, markerIndex)) continue;
+    next = [...next];
+    next.splice(markerIndex + 1, 0, makeBlock());
+    changed = true;
+  }
+  return changed ? normalizeScriptBlockStream(next) : blocks;
+}
+
+function isOnlyTextBlockInMarkerSegment(blocks: Block[], index: number): boolean {
+  const block = blocks[index];
+  if (!block || isMarkerBlock(block)) return false;
+
+  let start = index;
+  while (start > 0) {
+    const prev = blocks[start - 1];
+    if (prev.type === "chapter_marker" || prev.type === "scene_marker") break;
+    start--;
+  }
+
+  let textCount = 0;
+  for (let cursor = start; cursor < blocks.length; cursor++) {
+    const current = blocks[cursor];
+    if (cursor !== start && (current.type === "chapter_marker" || current.type === "scene_marker")) break;
+    if (isTextBlock(current)) textCount++;
+    if (textCount > 1) return false;
+  }
+  return textCount === 1;
+}
+
 function findTocSceneBlockIndex(sceneId: string, scenes: Scene[], blocks: Block[]): number {
   const directIdx = blocks.findIndex((block) => block.sceneId === sceneId);
   if (directIdx >= 0) return directIdx;
@@ -4287,12 +4354,6 @@ function markProgrammaticScroll(
     frameRef.current = null;
     suppressRef.current = false;
   });
-}
-
-function sceneDetailsFromSceneRows(rows: Scene[], details: SceneDetail[]): SceneDetail[] {
-  const detailById = new Map(details.map((detail) => [detail.id, detail]));
-  const next = rows.map((row) => ({ ...(detailById.get(row.id) ?? toSceneDetail(row)), ...row }));
-  return sameSceneDetails(next, details) ? details : next;
 }
 
 function sameSceneRows(a: Scene[], b: Scene[]): boolean {
@@ -4506,6 +4567,7 @@ function ScriptBlock({
   selectedCount = 0,
   dismissToken = 0,
   canDeleteWithoutConfirmation = false,
+  deleteConfirmNoopMessage,
   isReorderLocked = false,
   isScriptDragging = false,
   index = 0,
@@ -4583,6 +4645,7 @@ function ScriptBlock({
   selectedCount?: number;
   dismissToken?: number;
   canDeleteWithoutConfirmation?: boolean;
+  deleteConfirmNoopMessage?: string;
   isReorderLocked?: boolean;
   isScriptDragging?: boolean;
   index?: number;
@@ -5099,11 +5162,16 @@ function ScriptBlock({
                 data-script-confirmation="true"
               >
                 <span className="whitespace-nowrap text-[10px] text-zinc-400">
-                  {selectedCount > 1 ? `确认删除所选 ${selectedCount} 行？` : "确认删除此行？"}
+                  {deleteConfirmNoopMessage ?? (selectedCount > 1 ? `确认删除所选 ${selectedCount} 行？` : "确认删除此行？")}
                 </span>
                 <button
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
+                    if (deleteConfirmNoopMessage) {
+                      setConfirmDelete(false);
+                      onDeleteConfirmationChange(false);
+                      return;
+                    }
                     onRequestLargeSelectionOperation("delete", selectedCount, () => {
                       setConfirmDelete(false);
                       onDeleteConfirmationChange(false);
@@ -6080,6 +6148,20 @@ export default function ScriptEditor({
   const handlePrintPageMapChange = useCallback((nextPageMap: Record<string, number>) => {
     setPrintDividerPageMap((prev) => samePageMap(prev, nextPageMap) ? prev : nextPageMap);
   }, []);
+  const reloadScriptState = useCallback(async () => {
+    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
+    if (response.status === 202) return;
+    if (!response.ok) throw new Error("Failed to reload script state");
+    const serverState = await response.json() as ScriptState;
+    const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
+    const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes);
+    setBlocks(normalized.blocks);
+    setCharacters(serverState.characters);
+    setScenes(normalized.scenes);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+    syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes };
+  }, [activeVersionId, effectiveScriptId]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
   const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);
   const scriptLineNumberByBlockId = useMemo(() => {
@@ -6102,7 +6184,7 @@ export default function ScriptEditor({
     }
     if (!sameSceneRows(normalized.scenes, scenes)) {
       setScenes(normalized.scenes);
-      setSceneDetails((prev) => sceneDetailsFromSceneRows(normalized.scenes, prev));
+      setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
     }
   }, [blocks, markOwnershipDirty, scenes]);
   useEffect(() => {
@@ -7198,6 +7280,7 @@ export default function ScriptEditor({
   const clientSeqRef = useRef(0);
   const serverSeqRef = useRef(0);
   const isSyncingRef = useRef(false);
+  const syncIdleWaitersRef = useRef<Array<() => void>>([]);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable ref to the push function so the debounce closure never goes stale.
@@ -7297,6 +7380,9 @@ export default function ScriptEditor({
         // Sync failure is non-fatal — will retry on next state change.
       } finally {
         isSyncingRef.current = false;
+        const waiters = syncIdleWaitersRef.current;
+        syncIdleWaitersRef.current = [];
+        for (const resolve of waiters) resolve();
       }
     };
   }, [effectiveScriptId, activeVersionId, canEdit, loadState]);
@@ -7840,6 +7926,25 @@ export default function ScriptEditor({
   // also trigger the debounced sync and embed tags in the block op.
   }, [blocks, characters, scenes, blockTagMap, loadState]);
 
+  const flushPendingPatch = useCallback(async () => {
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+    if (isSyncingRef.current) {
+      await new Promise<void>((resolve) => {
+        syncIdleWaitersRef.current.push(resolve);
+      });
+    }
+    const curr: ScriptState = {
+      config: scriptConfigRef.current,
+      blocks: normalizeScriptBlockStream(blocksRef.current),
+      characters: charactersRef.current,
+      scenes: scenesRef.current,
+    };
+    await pushPatchRef.current(curr);
+  }, []);
+
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -8276,16 +8381,17 @@ export default function ScriptEditor({
     setScenes((prev) => normalizeSceneRowsForMarkers([...prev, scene], [...blocksRef.current, marker]));
     setSceneDetails((prev) => {
       const nextScenes = normalizeSceneRowsForMarkers([...scenesRef.current, scene], [...blocksRef.current, marker]);
-      return sceneDetailsFromSceneRows(nextScenes, [...prev, toSceneDetail(scene)]);
+      return syncSceneDetailsWithScenes([...prev, toSceneDetail(scene)], nextScenes);
     });
     const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
     const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
     markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === blockId);
-      const next = [...prev];
-      next.splice(idx === -1 ? prev.length : idx, 0, marker);
-      return normalizeScriptBlockStream(next);
+      const insertIndex = idx === -1 ? prev.length : idx;
+      const previousMarker = previousChapterSceneMarker(prev, insertIndex - 1);
+      const inserted = insertMarkerWithEmptyBlockIfNeeded(prev, marker, insertIndex);
+      return repairEmptyMarkerSegments(inserted, [previousMarker?.id, marker.id].filter((id): id is string => !!id));
     });
   }, [canEditMetadata, isLockedMode, markOwnershipDirty, saveSnapshot]);
 
@@ -8299,16 +8405,17 @@ export default function ScriptEditor({
     setScenes((prev) => normalizeSceneRowsForMarkers([...prev, scene], [...blocksRef.current, marker]));
     setSceneDetails((prev) => {
       const nextScenes = normalizeSceneRowsForMarkers([...scenesRef.current, scene], [...blocksRef.current, marker]);
-      return sceneDetailsFromSceneRows(nextScenes, [...prev, toSceneDetail(scene)]);
+      return syncSceneDetailsWithScenes([...prev, toSceneDetail(scene)], nextScenes);
     });
     const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
     const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
     markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === blockId);
-      const next = [...prev];
-      next.splice(idx === -1 ? prev.length : idx, 0, marker);
-      return normalizeScriptBlockStream(next);
+      const insertIndex = idx === -1 ? prev.length : idx;
+      const previousMarker = previousChapterSceneMarker(prev, insertIndex - 1);
+      const inserted = insertMarkerWithEmptyBlockIfNeeded(prev, marker, insertIndex);
+      return repairEmptyMarkerSegments(inserted, [previousMarker?.id, marker.id].filter((id): id is string => !!id));
     });
   }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markOwnershipDirty, saveSnapshot]);
 
@@ -8410,9 +8517,15 @@ export default function ScriptEditor({
         pendingFocus.current = { id: emptyBlock.id, atEnd: false };
         return [emptyBlock];
       }
+      const deletedBlock = prev[idx];
+      const currentMarker = isMarkerBlock(deletedBlock) && (deletedBlock.type === "chapter_marker" || deletedBlock.type === "scene_marker")
+        ? deletedBlock
+        : previousChapterSceneMarker(prev, idx);
+      const previousMarker = previousChapterSceneMarker(prev, idx - 1);
       const nextFocus = prev[idx + 1] ?? prev[idx - 1];
       if (nextFocus) pendingFocus.current = { id: nextFocus.id, atEnd: false };
-      return prev.filter((b) => b.id !== id);
+      const remaining = prev.filter((b) => b.id !== id);
+      return repairEmptyMarkerSegments(remaining, [currentMarker?.id, previousMarker?.id].filter((markerId): markerId is string => !!markerId));
     });
     if (selectionAnchorBlockIdRef.current === id) {
       selectionAnchorBlockIdRef.current = null;
@@ -8437,9 +8550,20 @@ export default function ScriptEditor({
         return [emptyBlock];
       }
       const firstDeletedIdx = prev.findIndex((b) => deleteIds.has(b.id));
+      const markersToRepair = new Set<string>();
+      for (let index = 0; index < prev.length; index++) {
+        if (!deleteIds.has(prev[index].id)) continue;
+        const deletedBlock = prev[index];
+        const currentMarker = isMarkerBlock(deletedBlock) && (deletedBlock.type === "chapter_marker" || deletedBlock.type === "scene_marker")
+          ? deletedBlock
+          : previousChapterSceneMarker(prev, index);
+        const previousMarker = previousChapterSceneMarker(prev, index - 1);
+        if (currentMarker) markersToRepair.add(currentMarker.id);
+        if (previousMarker) markersToRepair.add(previousMarker.id);
+      }
       const focusIdx = Math.min(firstDeletedIdx, remaining.length - 1);
       pendingFocus.current = { id: remaining[focusIdx].id, atEnd: false };
-      return remaining;
+      return repairEmptyMarkerSegments(remaining, markersToRepair);
     });
     setSelectedBlockIds((current) => {
       const next = new Set(current);
@@ -8452,20 +8576,47 @@ export default function ScriptEditor({
     }
   }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
 
+  const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
+    const index = blockIndexByIdRef.current.get(id);
+    if (index === undefined) return false;
+    const block = blocks[index];
+    return !!block && isBlockEmptyForDelete(block) && isOnlyTextBlockInMarkerSegment(ownedBlocks, index);
+  }), [blocks, ownedBlocks]);
+
+  const blockIdsAreEmptyForDelete = useCallback((ids: string[]) => ids.every((id) => {
+    const index = blockIndexByIdRef.current.get(id);
+    const block = index === undefined ? undefined : blocks[index];
+    return block ? isBlockEmptyForDelete(block) : false;
+  }), [blocks]);
+
+  const selectedBlockIdsArray = useMemo(() => Array.from(selectedBlockIds), [selectedBlockIds]);
+  const selectedBlocksRequireNonEmptySceneConfirm = useMemo(
+    () => blockIdsRequireNonEmptySceneConfirm(selectedBlockIdsArray),
+    [blockIdsRequireNonEmptySceneConfirm, selectedBlockIdsArray]
+  );
+  const selectedBlocksAreEmptyForDelete = useMemo(
+    () => blockIdsAreEmptyForDelete(selectedBlockIdsArray),
+    [blockIdsAreEmptyForDelete, selectedBlockIdsArray]
+  );
+
   const requestSelectedBlocksDelete = useCallback(() => {
     if (isLockedMode) return false;
-    const selectedIds = Array.from(selectedBlockIds);
+    const selectedIds = selectedBlockIdsArray;
     if (selectedIds.length === 0) return false;
-    const selectedIdSet = new Set(selectedIds);
-    const selectedBlocks = blocks.filter((b) => selectedIdSet.has(b.id));
+    const selectedBlocks = selectedIds
+      .map((id) => {
+        const index = blockIndexByIdRef.current.get(id);
+        return index === undefined ? null : blocks[index] ?? null;
+      })
+      .filter((block): block is Block => block !== null);
     if (selectedBlocks.length === 0) return false;
-    if (selectedBlocks.every(isBlockEmptyForDelete)) {
+    if (selectedBlocksAreEmptyForDelete && !selectedBlocksRequireNonEmptySceneConfirm) {
       requestLargeSelectionOperation("delete", selectedIds.length, () => deleteBlocks(selectedIds));
       return true;
     }
     const visibleAnchor = blocks
       .slice(windowRange.start, windowRange.end)
-      .find((b) => selectedIdSet.has(b.id));
+      .find((b) => selectedBlockIds.has(b.id));
     const anchorId = visibleAnchor?.id ?? selectedBlocks[0].id;
     setDeleteConfirmationRequest((current) => ({
       anchorId,
@@ -8473,7 +8624,7 @@ export default function ScriptEditor({
     }));
     setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
-  }, [blocks, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, windowRange.end, windowRange.start, isLockedMode]);
+  }, [blocks, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, selectedBlockIdsArray, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, windowRange.end, windowRange.start, isLockedMode]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -8598,7 +8749,7 @@ export default function ScriptEditor({
       if (movingHasMarker) {
         const nextScenes = normalizeSceneRowsForMarkers(scenesRef.current, normalizedNext);
         setScenes(nextScenes);
-        setSceneDetails((prev) => sceneDetailsFromSceneRows(nextScenes, prev));
+        setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, nextScenes));
       }
       setBlocks(normalizedNext);
       glowChangedBlocks(moving.map((b) => b.id));
@@ -8773,49 +8924,58 @@ export default function ScriptEditor({
       prev.map((c) => (c.id === charId ? { ...c, name } : c))
     );
 
-  const addScene = (parentId?: string) => {
-    if (isLockedMode) return;
-    const newScene: Scene = { id: uid(), number: "", name: "", parentId: parentId ?? null };
-    if (parentId) {
-      setScenes((prev) => {
-        // Insert after the last sub-scene of this parent (or after the parent itself)
-        let insertAfter = prev.findIndex((s) => s.id === parentId);
-        for (let i = insertAfter + 1; i < prev.length; i++) {
-          if (prev[i].parentId === parentId) insertAfter = i;
-          else break;
-        }
-        const next = [...prev];
-        next.splice(insertAfter + 1, 0, newScene);
-        return next;
-      });
-    } else {
-      setScenes((prev) => [...prev, newScene]);
+  const runSceneMenuMutation = async (request: () => Promise<Response>, failureMessage: string) => {
+    try {
+      await flushPendingPatch();
+      const response = await request();
+      if (!response.ok || response.status === 202) throw new Error(failureMessage);
+      await reloadScriptState();
+    } catch (error) {
+      showReorderNotice(error instanceof Error ? error.message : failureMessage);
     }
-    setSceneDetails((prev) => [...prev, toSceneDetail(newScene)]);
   };
 
-  const updateScene = (id: string, name: string) => {
-    if (isLockedMode) return;
-    const nextScenes = normalizeSceneRowsForMarkers(
-      scenesRef.current.map((s) => (s.id === id ? { ...s, name } : s)),
-      blocksRef.current
+  const addScene = async (
+    parentId?: string,
+    target?: { insertAfterSceneId?: string; insertBeforeSceneId?: string }
+  ) => {
+    if (isLockedMode || !productionId || !canEditMetadata) return;
+    const payload = activeVersionId
+      ? { name: "", parentId: parentId ?? null, versionId: activeVersionId, ...target }
+      : { name: "", parentId: parentId ?? null, ...target };
+    await runSceneMenuMutation(
+      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+      "添加章节失败，请稍后重试。"
     );
-    setScenes(nextScenes);
-    setSceneDetails((prev) => sceneDetailsFromSceneRows(nextScenes, prev.map((s) => (s.id === id ? { ...s, name } : s))));
   };
 
-  const removeScene = (id: string) => {
-    if (isLockedMode) return;
+  const updateScene = async (id: string, name: string) => {
+    if (isLockedMode || !productionId || !canEditMetadata) return;
+    await runSceneMenuMutation(
+      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(activeVersionId ? { name, versionId: activeVersionId } : { name }),
+      }),
+      "更新章节失败，请稍后重试。"
+    );
+  };
+
+  const removeScene = async (id: string) => {
+    if (isLockedMode || !productionId || !canEditMetadata) return;
     if (id === FIXED_INITIAL_CHAPTER_BLOCK_ID) return;
-    const removedIds = new Set([id, ...scenesRef.current.filter((scene) => scene.parentId === id).map((scene) => scene.id)]);
-    setScenes((prev) => prev.filter((s) => !removedIds.has(s.id)));
-    setSceneDetails((prev) => prev.filter((s) => !removedIds.has(s.id)));
-    markOwnershipDirty("full");
-    setBlocks((prev) => normalizeScriptBlockStream(prev.flatMap((b) => {
-      if (!b.sceneId || !removedIds.has(b.sceneId)) return [b];
-      if (b.type === "chapter_marker" || b.type === "scene_marker") return [];
-      return [{ ...b, sceneId: null, rehearsalMark: null }];
-    })));
+    await runSceneMenuMutation(
+      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(activeVersionId ? { versionId: activeVersionId } : {}),
+      }),
+      "删除章节失败，请稍后重试。"
+    );
   };
 
   const patchSceneMeta = async (id: string, fields: Partial<SceneMetaFields>) => {
@@ -10151,14 +10311,19 @@ export default function ScriptEditor({
             const isSelected = selectedBlockIds.has(block.id);
             const isCharacterFocusHighlighted =
               hasFocusedCharacters && block.characterIds.some((id) => focusedCharacterIds.has(id));
-            const selectedDeleteIds = isSelected ? Array.from(selectedBlockIds) : [block.id];
+            const selectedDeleteIds = isSelected ? selectedBlockIdsArray : [block.id];
             const selectedCount = selectedDeleteIds.length;
             const blockComments = commentsByBlockId.get(block.id) ?? EMPTY_COMMENTS;
             const blockAssets = blockAssetsByBlockId.get(block.id) ?? EMPTY_BLOCK_ASSETS;
-            const canDeleteWithoutConfirmation = selectedDeleteIds.every((id) => {
-              const selectedBlock = blocks.find((b) => b.id === id);
-              return selectedBlock ? isBlockEmptyForDelete(selectedBlock) : false;
-            });
+            const requiresNonEmptySceneConfirm = isSelected
+              ? selectedBlocksRequireNonEmptySceneConfirm
+              : blockIdsRequireNonEmptySceneConfirm(selectedDeleteIds);
+            const canDeleteWithoutConfirmation = (
+              isSelected ? selectedBlocksAreEmptyForDelete : blockIdsAreEmptyForDelete(selectedDeleteIds)
+            ) && !requiresNonEmptySceneConfirm;
+            const deleteConfirmNoopMessage = requiresNonEmptySceneConfirm
+              ? "章节或段落内容不可为空，至少需包含一个剧本块。"
+              : undefined;
             const canMergeWithPrevious = !!(
               prev &&
               prev.type === block.type &&
@@ -10215,6 +10380,7 @@ export default function ScriptEditor({
                   deleteConfirmToken={deleteConfirmationRequest?.anchorId === block.id ? deleteConfirmationRequest.token : undefined}
                   selectedCount={selectedCount}
                   canDeleteWithoutConfirmation={canDeleteWithoutConfirmation}
+                  deleteConfirmNoopMessage={deleteConfirmNoopMessage}
                   dismissToken={dismissActionToken}
                   isReorderLocked={isReorderLocked}
                   isScriptDragging={isScriptDragging}

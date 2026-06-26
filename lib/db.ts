@@ -4089,12 +4089,20 @@ export async function applyPatchToDB(
             }
           }
 
+          const insertType = toDbType(insertBlock);
+          if (isChapterSceneMarkerType(insertType) && insertBlock.sceneId) {
+            await client.query(
+              `INSERT INTO scene (id, production_id) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+              [insertBlock.sceneId, productionId]
+            );
+          }
+
           await client.query(
             `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
              VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
             [snapshotId, insertBlock.id, productionId, lexKey,
              insertBlock.sceneId ?? null, insertBlock.rehearsalMark ?? null,
-             toDbType(insertBlock), insertBlock.content,
+             insertType, insertBlock.content,
              insertBlock.stageComment?.trim() || null, markerMetaJson(insertBlock), insertBlock.forceShowCharacterName ?? false]
           );
           await client.query(

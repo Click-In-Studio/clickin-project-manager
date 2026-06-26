@@ -36,6 +36,20 @@ function makeMarkerBlock(type: Extract<BlockType, "chapter_marker" | "scene_mark
   };
 }
 
+function shouldInsertEmptyBlockAfterMarker(blocks: Block[], markerIndex: number): boolean {
+  const marker = blocks[markerIndex];
+  if (!marker || (marker.type !== "chapter_marker" && marker.type !== "scene_marker")) return false;
+
+  for (let cursor = markerIndex + 1; cursor < blocks.length; cursor++) {
+    const next = blocks[cursor];
+    if (next.type === "chapter_marker") break;
+    if (marker.type === "chapter_marker" && next.type === "scene_marker") return false;
+    if (next.type === "scene_marker") break;
+    if (next.type === "dialogue" || next.type === "stage") return false;
+  }
+  return true;
+}
+
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
@@ -150,19 +164,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   }
   if (insertBeforeIndex < 0) insertBeforeIndex = blocks.length;
   const afterId = insertBeforeIndex > 0 ? blocks[insertBeforeIndex - 1]?.id ?? null : null;
-  let needsEmptyBlock = true;
-  if (parentId) {
-    const parentMarkerIndex = blocks.findIndex((block) => block.type === "chapter_marker" && block.sceneId === parentId);
-    if (parentMarkerIndex >= 0) {
-      const nextChapterIndex = blocks.findIndex((block, index) => index > parentMarkerIndex && block.type === "chapter_marker");
-      needsEmptyBlock = !blocks.some((block, index) => (
-        index > parentMarkerIndex &&
-        (nextChapterIndex < 0 || index < nextChapterIndex) &&
-        block.type !== "chapter_marker" &&
-        block.type !== "scene_marker"
-      ));
-    }
-  }
+  const nextBlocks = [...blocks];
+  nextBlocks.splice(insertBeforeIndex, 0, marker);
+  const needsEmptyBlock = shouldInsertEmptyBlockAfterMarker(nextBlocks, insertBeforeIndex);
 
   await applyPatchToDB(id, versionId, {
     clientSeq: 0,
