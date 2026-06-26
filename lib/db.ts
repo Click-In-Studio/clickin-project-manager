@@ -1,6 +1,7 @@
 import { getPool } from "./pg";
 import type { PoolClient } from "pg";
-import type { Block, Character, Scene, ScriptState, ScriptConfig, PageLayout } from "./script-types";
+import { readFile } from "fs/promises";
+import type { Block, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { Permission, PermissionOverrides } from "./roles";
 import type { Cue, CueAnchor } from "./cue-types";
@@ -8,6 +9,63 @@ import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap } from "./script-page";
+import { generatedRehearsalMarksByScene, withGeneratedSceneNumbers } from "./script-generated-labels";
+import { VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
+import { FIXED_INITIAL_CHAPTER_BLOCK_ID } from "./script-fixed-markers";
+
+type MarkerMigrationState = {
+  status: "idle" | "running" | "failed";
+  error: string | null;
+  startedAt: number | null;
+  progress: number;
+  phase: string;
+  estimatedTotalMs: number | null;
+};
+
+const markerMigrationState: MarkerMigrationState = (
+  globalThis as typeof globalThis & { __scriptMarkerMigrationState?: MarkerMigrationState }
+).__scriptMarkerMigrationState ??= {
+  status: "idle",
+  error: null,
+  startedAt: null,
+  progress: 0,
+  phase: "",
+  estimatedTotalMs: null,
+};
+markerMigrationState.estimatedTotalMs ??= null;
+
+const markerMigrationNeededChecks = new Map<string, Promise<boolean>>();
+
+export type MarkerMigrationProgress = {
+  status: "ready" | "running" | "failed";
+  progress: number;
+  phase: string;
+  startedAt: number | null;
+  elapsedMs: number;
+  estimatedTotalMs: number | null;
+  estimatedRemainingMs: number | null;
+};
+
+function markerMigrationProgress(status: "ready" | "running" | "failed" = markerMigrationState.status === "running" ? "running" : markerMigrationState.status === "failed" ? "failed" : "ready"): MarkerMigrationProgress {
+  const startedAt = markerMigrationState.startedAt;
+  const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+  const progress = status === "ready"
+    ? 100
+    : Math.max(1, Math.min(99, markerMigrationState.progress || 1));
+  const estimatedTotalMs = markerMigrationState.estimatedTotalMs;
+  const estimatedRemainingMs = status === "running" && estimatedTotalMs !== null
+    ? Math.max(1000, estimatedTotalMs - elapsedMs)
+    : null;
+  return {
+    status,
+    progress,
+    phase: status === "ready" ? "更新完成" : markerMigrationState.phase || "准备更新数据",
+    startedAt,
+    elapsedMs,
+    estimatedTotalMs,
+    estimatedRemainingMs,
+  };
+}
 
 // ─── Version types ────────────────────────────────────────────────────────────
 
@@ -55,17 +113,112 @@ export type VersionedFlushResult = {
   newSnapshotIds: Map<string, string>;
 };
 
+async function normalizeSceneOwnershipOrderInTx(client: PoolClient, versionId: string): Promise<void> {
+  await client.query(
+    `WITH RECURSIVE ranked AS (
+       SELECT
+         sv.version_id,
+         sv.scene_id,
+         sv.parent_id,
+         sv.sort_order,
+         row_number() OVER (
+           PARTITION BY sv.version_id
+           ORDER BY sv.sort_order, sv.scene_id
+         )::bigint AS old_rank
+       FROM scene_version sv
+       WHERE sv.version_id = $1
+     ),
+     roots AS (
+       SELECT r.*
+       FROM ranked r
+       WHERE r.parent_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+            FROM ranked parent
+            WHERE parent.version_id = r.version_id
+              AND parent.scene_id = r.parent_id
+          )
+     ),
+     scene_tree AS (
+       SELECT
+         r.version_id,
+         r.scene_id AS root_id,
+         r.scene_id,
+         r.old_rank AS root_old_rank,
+         r.old_rank,
+         ARRAY[]::bigint[] AS ownership_path,
+         ARRAY[r.scene_id]::text[] AS visited_scene_ids
+       FROM roots r
+
+       UNION ALL
+
+       SELECT
+         child.version_id,
+         tree.root_id,
+         child.scene_id,
+         tree.root_old_rank,
+         child.old_rank,
+         tree.ownership_path || child.old_rank,
+         tree.visited_scene_ids || child.scene_id
+       FROM scene_tree tree
+       JOIN ranked child
+         ON child.version_id = tree.version_id
+        AND child.parent_id = tree.scene_id
+       WHERE NOT child.scene_id = ANY(tree.visited_scene_ids)
+     ),
+     root_positions AS (
+       SELECT
+         version_id,
+         root_id,
+         min(old_rank) AS first_owned_rank
+       FROM scene_tree
+       GROUP BY version_id, root_id
+     ),
+     ordered AS (
+       SELECT
+         tree.version_id,
+         tree.scene_id,
+         row_number() OVER (
+           PARTITION BY tree.version_id
+           ORDER BY
+             root_positions.first_owned_rank,
+             tree.root_old_rank,
+             tree.ownership_path,
+             tree.old_rank,
+             tree.scene_id
+         )::int - 1 AS new_sort_order
+       FROM scene_tree tree
+       JOIN root_positions
+         ON root_positions.version_id = tree.version_id
+        AND root_positions.root_id = tree.root_id
+     )
+     UPDATE scene_version sv
+     SET sort_order = ordered.new_sort_order
+     FROM ordered
+     WHERE sv.version_id = ordered.version_id
+       AND sv.scene_id = ordered.scene_id
+       AND sv.sort_order <> ordered.new_sort_order`,
+    [versionId]
+  );
+}
+
 // ─── Type conversions ─────────────────────────────────────────────────────────
 
-type DbBlockType = "dialogue" | "stage" | "lyric";
+type DbBlockType = "dialogue" | "stage" | "lyric" | "chapter_marker" | "scene_marker" | "rehearsal_marker";
 
 function toDbType(block: Block): DbBlockType {
+  if (block.type === "chapter_marker") return "chapter_marker";
+  if (block.type === "scene_marker") return "scene_marker";
+  if (block.type === "rehearsal_marker") return "rehearsal_marker";
   if (block.type === "stage") return "stage";
   if (block.lyric) return "lyric";
   return "dialogue";
 }
 
 function fromDbType(t: DbBlockType): { type: Block["type"]; lyric: boolean } {
+  if (t === "chapter_marker") return { type: "chapter_marker", lyric: false };
+  if (t === "scene_marker") return { type: "scene_marker", lyric: false };
+  if (t === "rehearsal_marker") return { type: "rehearsal_marker", lyric: false };
   if (t === "stage") return { type: "stage", lyric: false };
   if (t === "lyric") return { type: "dialogue", lyric: true };
   return { type: "dialogue", lyric: false };
@@ -80,6 +233,7 @@ type BlockRow = {
   sort_key: string;
   scene_id: string | null;
   rehearsal_mark: string | null;
+  marker_meta: MarkerMeta | null;
   type: DbBlockType;
   content: string;
   stage_comment: string | null;
@@ -89,6 +243,360 @@ type SceneRow = { id: string; num: string; name: string; sort_order: number; par
 type CharRow  = { id: string; name: string; sort_order: number; is_aggregate: boolean; member_ids: string[] | null };
 // script_character uses snapshot_id as the script_id FK
 type ScCharRow = { script_id: string; character_id: string; annotation: string | null };
+
+function cleanMarkerMeta(meta: MarkerMeta | null | undefined): MarkerMeta {
+  if (!meta || typeof meta !== "object") return {};
+  return {
+    number: typeof meta.number === "string" ? meta.number : undefined,
+    name: typeof meta.name === "string" ? meta.name : undefined,
+    parentMarkerId: typeof meta.parentMarkerId === "string" ? meta.parentMarkerId : meta.parentMarkerId === null ? null : undefined,
+    synopsis: typeof meta.synopsis === "string" ? meta.synopsis : undefined,
+    actionLine: typeof meta.actionLine === "string" ? meta.actionLine : undefined,
+    music: typeof meta.music === "string" ? meta.music : undefined,
+    stageNotes: typeof meta.stageNotes === "string" ? meta.stageNotes : undefined,
+    expectedDuration: typeof meta.expectedDuration === "string" ? meta.expectedDuration : undefined,
+  };
+}
+
+function markerMetaJson(block: Block): string {
+  return JSON.stringify(cleanMarkerMeta(block.markerMeta));
+}
+
+async function scriptMarkerMigrationNeeded(versionId: string): Promise<boolean> {
+  const res = await getPool().query<{ needed: boolean }>(
+    `WITH marker_rows AS (
+       SELECT
+         sv.version_id,
+         sv.block_id AS marker_block_id,
+         s.id AS marker_snapshot_id,
+         s.scene_id AS legacy_scene_id,
+         s.marker_meta,
+         s.type::text AS marker_type
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1
+         AND s.type IN ('chapter_marker', 'scene_marker')
+     ),
+     counts AS (
+       SELECT
+         COUNT(*) - COUNT(DISTINCT (sv.version_id, sv.block_id)) AS duplicate_version_block_count,
+         COUNT(*) FILTER (
+           WHERE s.type IN ('chapter_marker', 'scene_marker', 'rehearsal_marker')
+         ) AS marker_count,
+         COUNT(*) FILTER (
+           WHERE s.type NOT IN ('chapter_marker', 'scene_marker', 'rehearsal_marker')
+             AND (s.scene_id IS NOT NULL OR s.rehearsal_mark IS NOT NULL)
+         ) AS legacy_owned_count
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1
+     ),
+     orphan_scene_versions AS (
+       SELECT COUNT(*) AS cnt
+       FROM scene_version scene_v
+       LEFT JOIN marker_rows marker
+         ON marker.version_id = scene_v.version_id
+        AND scene_v.scene_id IN (marker.marker_block_id, marker.legacy_scene_id)
+       WHERE scene_v.version_id = $1
+         AND marker.marker_block_id IS NULL
+         AND COALESCE(
+           NULLIF(scene_v.name, ''),
+           NULLIF(scene_v.synopsis, ''),
+           NULLIF(scene_v.action_line, ''),
+           NULLIF(scene_v.music, ''),
+           NULLIF(scene_v.stage_notes, ''),
+           NULLIF(scene_v.expected_duration, '')
+         ) IS NOT NULL
+     ),
+     unsynced_marker_meta AS (
+       SELECT COUNT(*) AS cnt
+       FROM marker_rows marker
+       JOIN scene_version scene_v
+         ON scene_v.version_id = marker.version_id
+        AND scene_v.scene_id IN (marker.marker_block_id, marker.legacy_scene_id)
+       WHERE marker.version_id = $1
+         AND (
+           (NULLIF(scene_v.num, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'number', '') IS NULL)
+           OR (NULLIF(scene_v.name, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'name', '') IS NULL)
+           OR (NULLIF(scene_v.synopsis, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'synopsis', '') IS NULL)
+           OR (NULLIF(scene_v.action_line, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'actionLine', '') IS NULL)
+           OR (NULLIF(scene_v.music, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'music', '') IS NULL)
+           OR (NULLIF(scene_v.stage_notes, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'stageNotes', '') IS NULL)
+           OR (NULLIF(scene_v.expected_duration, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'expectedDuration', '') IS NULL)
+         )
+     ),
+     marker_counts AS (
+       SELECT
+         COUNT(*) FILTER (WHERE marker_type = 'chapter_marker') AS chapter_count,
+         COUNT(*) FILTER (WHERE marker_type = 'scene_marker') AS scene_count
+       FROM marker_rows
+     ),
+     legacy_scene_marker_mismatch AS (
+       SELECT COUNT(*) AS cnt
+       FROM marker_rows marker
+       JOIN scene_version scene_v
+         ON scene_v.version_id = marker.version_id
+        AND scene_v.scene_id IN (marker.marker_block_id, marker.legacy_scene_id)
+       WHERE marker.version_id = $1
+         AND marker.marker_type = 'chapter_marker'
+         AND marker.marker_block_id <> '__fixed_initial_chapter_marker'
+         AND (SELECT chapter_count > 1 FROM marker_counts)
+         AND btrim(scene_v.num) ~ '^[0-9]+\\s*-\\s*[0-9]+'
+         AND COALESCE(
+           NULLIF(scene_v.num, ''),
+           NULLIF(scene_v.name, ''),
+           NULLIF(scene_v.synopsis, ''),
+           NULLIF(scene_v.action_line, ''),
+           NULLIF(scene_v.music, ''),
+           NULLIF(scene_v.stage_notes, ''),
+           NULLIF(scene_v.expected_duration, '')
+         ) IS NOT NULL
+     ),
+     marker_meta_scene_mismatch AS (
+       SELECT COUNT(*) AS cnt
+       FROM marker_rows marker
+       WHERE marker.version_id = $1
+         AND marker.marker_type = 'chapter_marker'
+         AND marker.marker_block_id <> '__fixed_initial_chapter_marker'
+         AND (SELECT chapter_count > 1 FROM marker_counts)
+         AND btrim(marker.marker_meta->>'number') ~ '^[0-9]+\\s*-\\s*[0-9]+'
+     ),
+     empty_generated_marker_placeholders AS (
+       SELECT COUNT(*) AS cnt
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       LEFT JOIN scene_version source_sv
+         ON source_sv.version_id = sv.version_id
+        AND source_sv.scene_id = sv.block_id
+       WHERE sv.version_id = $1
+         AND sv.snapshot_id LIKE 'sn_orphan_marker_%'
+         AND s.type IN ('chapter_marker', 'scene_marker')
+         AND COALESCE(
+           NULLIF(source_sv.name, ''),
+           NULLIF(source_sv.synopsis, ''),
+           NULLIF(source_sv.action_line, ''),
+           NULLIF(source_sv.music, ''),
+           NULLIF(source_sv.stage_notes, ''),
+           NULLIF(source_sv.expected_duration, ''),
+           NULLIF(s.marker_meta->>'name', ''),
+           NULLIF(s.marker_meta->>'synopsis', ''),
+           NULLIF(s.marker_meta->>'actionLine', ''),
+           NULLIF(s.marker_meta->>'music', ''),
+           NULLIF(s.marker_meta->>'stageNotes', ''),
+           NULLIF(s.marker_meta->>'expectedDuration', '')
+         ) IS NULL
+     )
+     SELECT (
+       (SELECT duplicate_version_block_count > 0 FROM counts)
+       OR (SELECT marker_count = 0 AND legacy_owned_count > 0 FROM counts)
+       OR (SELECT cnt > 0 FROM orphan_scene_versions)
+       OR (SELECT cnt > 0 FROM unsynced_marker_meta)
+       OR (SELECT cnt > 0 FROM legacy_scene_marker_mismatch)
+       OR (SELECT cnt > 0 FROM marker_meta_scene_mismatch)
+       OR (SELECT cnt > 0 FROM empty_generated_marker_placeholders)
+     ) AS needed`,
+    [versionId]
+  );
+  return res.rows[0]?.needed ?? false;
+}
+
+async function scriptMarkerMigrationNeededOnce(versionId: string): Promise<boolean> {
+  const existing = markerMigrationNeededChecks.get(versionId);
+  if (existing) return existing;
+  const check = scriptMarkerMigrationNeeded(versionId).finally(() => {
+    markerMigrationNeededChecks.delete(versionId);
+  });
+  markerMigrationNeededChecks.set(versionId, check);
+  return check;
+}
+
+async function runScriptMarkerMigration(): Promise<void> {
+  markerMigrationState.phase = "正在统计剧本数据量，耗时取决于数据库大小";
+  markerMigrationState.progress = 5;
+  const rawSql = await readFile(`${process.cwd()}/db/migrate-script-marker-blocks.sql`, "utf8");
+  markerMigrationState.progress = 15;
+  markerMigrationState.phase = "正在更新旧格式数据，耗时取决于数据库大小";
+  const appSafeSql = rawSql
+    .replace(/ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'chapter_marker';/g, "")
+    .replace(/ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'scene_marker';/g, "")
+    .replace(/ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'rehearsal_marker';/g, "")
+    .replace(/ALTER TABLE script ADD COLUMN IF NOT EXISTS marker_meta JSONB NOT NULL DEFAULT '\{\}';/g, "")
+    .replace(/CREATE UNIQUE INDEX IF NOT EXISTS script_version_version_block_uidx\s+ON script_version\(version_id, block_id\);/g, "");
+  await getPool().query(appSafeSql);
+  markerMigrationState.progress = 95;
+  markerMigrationState.phase = "正在完成数据校验";
+}
+
+export async function ensureScriptMarkerMigration(versionId: string): Promise<MarkerMigrationProgress> {
+  if (markerMigrationState.status === "running") return markerMigrationProgress("running");
+  if (markerMigrationState.status === "failed" && markerMigrationState.error) {
+    markerMigrationState.status = "idle";
+    markerMigrationState.error = null;
+    markerMigrationState.startedAt = null;
+    markerMigrationState.progress = 0;
+    markerMigrationState.phase = "";
+    markerMigrationState.estimatedTotalMs = null;
+  }
+  const needed = await scriptMarkerMigrationNeededOnce(versionId);
+  if (!needed) {
+    return markerMigrationProgress("ready");
+  }
+
+  markerMigrationState.status = "running";
+  markerMigrationState.error = null;
+  markerMigrationState.startedAt = Date.now();
+  markerMigrationState.progress = 2;
+  markerMigrationState.phase = "正在统计剧本数据量，耗时取决于数据库大小";
+  markerMigrationState.estimatedTotalMs = null;
+  void runScriptMarkerMigration()
+    .then(() => {
+      markerMigrationState.status = "idle";
+      markerMigrationState.error = null;
+      markerMigrationState.startedAt = null;
+      markerMigrationState.progress = 100;
+      markerMigrationState.phase = "更新完成";
+      markerMigrationState.estimatedTotalMs = null;
+    })
+    .catch((err) => {
+      markerMigrationState.status = "failed";
+      markerMigrationState.error = err instanceof Error ? err.message : String(err);
+      markerMigrationState.progress = Math.max(markerMigrationState.progress, 1);
+      markerMigrationState.phase = "更新失败";
+      markerMigrationState.estimatedTotalMs = null;
+      console.error("[marker migration] failed:", err);
+    });
+  return markerMigrationProgress("running");
+}
+
+async function syncSceneVersionsFromMarkersInTx(
+  client: PoolClient,
+  productionId: string,
+  versionId: string,
+): Promise<void> {
+  await client.query(
+    `WITH marker_rows AS (
+       SELECT
+         sv.block_id AS scene_id,
+         s.marker_meta,
+         s.type::text AS type,
+         sv.sort_key,
+         sv.snapshot_id
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1
+         AND s.type IN ('chapter_marker', 'scene_marker')
+     ),
+     unique_marker_rows AS (
+       SELECT
+         scene_id,
+         marker_meta,
+         type,
+         sort_key,
+         COUNT(*) FILTER (WHERE type = 'chapter_marker') OVER (ORDER BY sort_key) AS chapter_seq
+       FROM (
+         SELECT DISTINCT ON (scene_id)
+           scene_id,
+           marker_meta,
+           type,
+           sort_key,
+           snapshot_id
+         FROM marker_rows
+         ORDER BY
+           scene_id,
+           CASE WHEN COALESCE(
+             NULLIF(marker_meta->>'name', ''),
+             NULLIF(marker_meta->>'number', ''),
+             NULLIF(marker_meta->>'synopsis', ''),
+             NULLIF(marker_meta->>'actionLine', ''),
+             NULLIF(marker_meta->>'music', ''),
+             NULLIF(marker_meta->>'stageNotes', ''),
+             NULLIF(marker_meta->>'expectedDuration', '')
+           ) IS NOT NULL THEN 0 ELSE 1 END,
+           sort_key DESC,
+           snapshot_id DESC
+       ) deduped_marker_rows
+	     ),
+     marker_scenes AS (
+       SELECT
+         mr.scene_id,
+         mr.marker_meta,
+         ROW_NUMBER() OVER (ORDER BY mr.sort_key) - 1 AS sort_order,
+         CASE
+           WHEN mr.type = 'chapter_marker' THEN NULL
+           ELSE (
+             SELECT chapter.scene_id
+             FROM unique_marker_rows chapter
+             WHERE chapter.type = 'chapter_marker'
+               AND chapter.chapter_seq = mr.chapter_seq
+             ORDER BY chapter.sort_key DESC
+             LIMIT 1
+           )
+         END AS parent_id
+       FROM unique_marker_rows mr
+     ),
+     ensured AS (
+       INSERT INTO scene (id, production_id)
+       SELECT scene_id, $2
+       FROM marker_scenes
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id
+     ),
+     upserted AS (
+       INSERT INTO scene_version (
+         scene_id, version_id, num, name, sort_order, parent_id,
+         synopsis, action_line, music, stage_notes, expected_duration
+       )
+       SELECT
+         ms.scene_id,
+         $1,
+         COALESCE(ms.marker_meta->>'number', ''),
+         COALESCE(ms.marker_meta->>'name', ''),
+         ms.sort_order,
+         ms.parent_id,
+         ms.marker_meta->>'synopsis',
+         ms.marker_meta->>'actionLine',
+         ms.marker_meta->>'music',
+         ms.marker_meta->>'stageNotes',
+         ms.marker_meta->>'expectedDuration'
+       FROM marker_scenes ms
+       ON CONFLICT (scene_id, version_id) DO UPDATE
+         SET num = EXCLUDED.num,
+             name = EXCLUDED.name,
+             sort_order = EXCLUDED.sort_order,
+             parent_id = EXCLUDED.parent_id,
+             synopsis = EXCLUDED.synopsis,
+             action_line = EXCLUDED.action_line,
+             music = EXCLUDED.music,
+             stage_notes = EXCLUDED.stage_notes,
+             expected_duration = EXCLUDED.expected_duration
+       RETURNING scene_id
+     )
+     SELECT COUNT(*) FROM upserted`,
+    [versionId, productionId]
+  );
+  await client.query(
+    `WITH marker_scene_ids AS (
+       SELECT sv.block_id AS scene_id
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1
+         AND s.type IN ('chapter_marker', 'scene_marker')
+     )
+     DELETE FROM scene_version sv
+     WHERE sv.version_id = $1
+       AND NOT EXISTS (
+         SELECT 1
+         FROM marker_scene_ids ms
+         WHERE ms.scene_id = sv.scene_id
+       )`,
+    [versionId]
+  );
+  await normalizeSceneOwnershipOrderInTx(client, versionId);
+}
+
+function isChapterSceneMarkerType(type: string | null | undefined): boolean {
+  return type === "chapter_marker" || type === "scene_marker";
+}
 
 
 // ─── Version CRUD ─────────────────────────────────────────────────────────────
@@ -185,11 +693,15 @@ export async function createVersion(
   try {
     await client.query("BEGIN");
 
-    const parentRes = await client.query<{ status: string }>(
-      "SELECT status FROM version WHERE id = $1",
+    const parentRes = await client.query<{ status: string; production_id: string }>(
+      "SELECT status, production_id FROM version WHERE id = $1",
       [fromVersionId]
     );
-    const parentStatus = parentRes.rows[0]?.status;
+    const parent = parentRes.rows[0];
+    if (!parent || parent.production_id !== productionId) {
+      throw new Error("Source version does not belong to production");
+    }
+    const parentStatus = parent.status;
 
     if (parentStatus === 'editing') {
       await client.query(
@@ -281,6 +793,17 @@ export async function rollbackToVersion(
   try {
     await client.query("BEGIN");
 
+    const versionOwnerRes = await client.query<{ current_owner: string | null; target_owner: string | null }>(
+      `SELECT
+         (SELECT production_id FROM version WHERE id = $1) AS current_owner,
+         (SELECT production_id FROM version WHERE id = $2) AS target_owner`,
+      [currentVersionId, targetVersionId]
+    );
+    const owners = versionOwnerRes.rows[0];
+    if (owners?.current_owner !== productionId || owners?.target_owner !== productionId) {
+      throw new Error("Rollback versions do not belong to production");
+    }
+
     await client.query(
       "UPDATE version SET status = 'committed' WHERE id = $1",
       [currentVersionId]
@@ -321,6 +844,13 @@ export async function rollbackToVersion(
     );
 
     await client.query(
+      `INSERT INTO asset_version_rel (asset_id, version_id, asset_file_id)
+       SELECT asset_id, $1, asset_file_id FROM asset_version_rel WHERE version_id = $2
+       ON CONFLICT (asset_id, version_id) DO NOTHING`,
+      [newVersionId, targetVersionId]
+    );
+
+    await client.query(
       "UPDATE production SET active_version_id = $1 WHERE id = $2",
       [newVersionId, productionId]
     );
@@ -345,6 +875,7 @@ export async function rollbackToVersion(
 }
 
 export async function updateVersionMeta(
+  productionId: string,
   versionId: string,
   fields: { name?: string; description?: string; tags?: string[] },
 ): Promise<void> {
@@ -355,12 +886,13 @@ export async function updateVersionMeta(
   if (fields.tags        !== undefined) sets.push(`tags        = $${vals.push(fields.tags)}`);
   if (!sets.length) return;
   await getPool().query(
-    `UPDATE version SET ${sets.join(', ')} WHERE id = $1`,
+    `UPDATE version SET ${sets.join(', ')} WHERE id = $1 AND production_id = $${vals.push(productionId)}`,
     vals
   );
 }
 
 export async function updateVersionStatus(
+  productionId: string,
   versionId: string,
   status: 'committed' | 'frozen' | 'archived',
 ): Promise<void> {
@@ -368,20 +900,21 @@ export async function updateVersionStatus(
     // Freeze the target version and all its ancestors (except archived ones).
     await getPool().query(
       `WITH RECURSIVE ancestors AS (
-         SELECT id, parent_version_id FROM version WHERE id = $1
+         SELECT id, parent_version_id, production_id FROM version WHERE id = $1 AND production_id = $2
          UNION ALL
-         SELECT v.id, v.parent_version_id FROM version v
+         SELECT v.id, v.parent_version_id, v.production_id FROM version v
          JOIN ancestors a ON v.id = a.parent_version_id
+         WHERE v.production_id = a.production_id
        )
        UPDATE version SET status = 'frozen'
        WHERE id IN (SELECT id FROM ancestors)
          AND status != 'archived'`,
-      [versionId]
+      [versionId, productionId]
     );
   } else {
     await getPool().query(
-      "UPDATE version SET status = $1 WHERE id = $2",
-      [status, versionId]
+      "UPDATE version SET status = $1 WHERE id = $2 AND production_id = $3",
+      [status, versionId, productionId]
     );
   }
 }
@@ -402,19 +935,33 @@ export async function loadProduction(productionId: string, versionId: string): P
   const pool = getPool();
 
   const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
-    Promise.all([
-      pool.query<BlockRow>(
-        `SELECT s.id AS snapshot_id, sv.block_id, sv.sort_key,
-                s.scene_id, s.rehearsal_mark, s.type, s.content, s.stage_comment, s.force_show_character_name
-         FROM script_version sv
-         JOIN script s ON s.id = sv.snapshot_id
-         WHERE sv.version_id = $1
-         ORDER BY sv.sort_key`,
-        [versionId]
-      ),
+	    Promise.all([
+	      pool.query<BlockRow>(
+	        `SELECT
+	           s.id AS snapshot_id,
+	           sv.block_id,
+	           sv.sort_key,
+	           s.scene_id,
+	           s.rehearsal_mark,
+	           s.marker_meta,
+	           s.type,
+	           s.content,
+	           s.stage_comment,
+	           s.force_show_character_name
+	         FROM script_version sv
+	         JOIN script s ON s.id = sv.snapshot_id
+	         WHERE sv.version_id = $1
+	         ORDER BY sv.sort_key`,
+	        [versionId]
+	      ),
       pool.query<SceneRow>(
-        `SELECT sv.scene_id AS id, sv.num, sv.name, sv.sort_order, sv.parent_id
-         FROM scene_version sv WHERE sv.version_id = $1 ORDER BY sv.sort_order`,
+        `${VERSION_SCENES_FROM_MARKERS_CTE}
+         SELECT ms.id,
+                COALESCE(ms.marker_meta->>'number', '') AS num,
+                COALESCE(ms.marker_meta->>'name', '') AS name,
+                ms.sort_order, ms.parent_id
+         FROM marker_scenes ms
+         ORDER BY ms.sort_order`,
         [versionId]
       ),
       pool.query<CharRow>(
@@ -428,13 +975,16 @@ export async function loadProduction(productionId: string, versionId: string): P
         [versionId]
       ),
     ]),
-    pool.query<{ exists: boolean; script_config: ScriptConfig | null }>(
-      "SELECT EXISTS(SELECT 1 FROM production WHERE id = $1) AS exists, (SELECT script_config FROM production WHERE id = $1) AS script_config",
-      [productionId]
+    pool.query<{ script_config: ScriptConfig | null }>(
+      `SELECT p.script_config
+       FROM production p
+       JOIN version v ON v.production_id = p.id
+       WHERE p.id = $1 AND v.id = $2`,
+      [productionId, versionId]
     ),
   ]);
 
-  if (!prodRes.rows[0].exists) return null;
+  if (!prodRes.rows.length) return null;
   const rawConfig = prodRes.rows[0]?.script_config;
 
   // script_character joins on snapshot_id (script.id)
@@ -470,12 +1020,13 @@ export async function loadProduction(productionId: string, versionId: string): P
       lyric,
       content: row.content,
       stageComment: row.stage_comment,
-      forceShowCharacterName: row.force_show_character_name,
-      sceneId: row.scene_id,
-      rehearsalMark: row.rehearsal_mark,
-      characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
-      characterAnnotations: annotationsBySnapshot.get(row.snapshot_id) ?? {},
-    };
+          forceShowCharacterName: row.force_show_character_name,
+          sceneId: isChapterSceneMarkerType(row.type) ? row.block_id : row.scene_id,
+          rehearsalMark: row.rehearsal_mark,
+          markerMeta: cleanMarkerMeta(row.marker_meta),
+          characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
+          characterAnnotations: annotationsBySnapshot.get(row.snapshot_id) ?? {},
+        };
   });
 
   const config: ScriptConfig = { ...DEFAULT_SCRIPT_CONFIG, ...(rawConfig ?? {}) };
@@ -628,11 +1179,11 @@ export async function flushToDBVersioned(
         // Brand new block: insert snapshot + relation
         const snapshotId = genSnapshotId();
         await client.query(
-          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10)`,
+          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
           [snapshotId, block.id, productionId, block.lexKey,
            block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
-           block.stageComment?.trim() || null, block.forceShowCharacterName ?? false]
+           block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false]
         );
         await client.query(
           "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
@@ -660,9 +1211,9 @@ export async function flushToDBVersioned(
         if (refCount <= 1) {
           // Sole reference: update in-place
           await client.query(
-            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type, content = $4, stage_comment = $5, force_show_character_name = $6 WHERE id = $7`,
+            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type, content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7 WHERE id = $8`,
             [block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
-             block.stageComment?.trim() || null, block.forceShowCharacterName ?? false, block.snapshotId]
+             block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false, block.snapshotId]
           );
           // Update sort_key in relation table
           await client.query(
@@ -687,11 +1238,11 @@ export async function flushToDBVersioned(
           // Multi-referenced: copy-on-write
           const newSnapshotId = genSnapshotId();
           await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10)`,
+            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
             [newSnapshotId, block.id, productionId, block.lexKey,
              block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
-             block.stageComment?.trim() || null, block.forceShowCharacterName ?? false]
+             block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false]
           );
           // Remap relation for this version to the new snapshot
           await client.query(
@@ -751,6 +1302,9 @@ export async function flushToDBVersioned(
         "DELETE FROM scene_version WHERE scene_id = ANY($1::text[]) AND version_id = $2",
         [deleteSceneIds, versionId]
       );
+    if (upsertScenes.length > 0 || deleteSceneIds.length > 0) {
+      await normalizeSceneOwnershipOrderInTx(client, versionId);
+    }
 
     await client.query("COMMIT");
   } catch (err) {
@@ -865,19 +1419,22 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
     if (upsertBlocks.length > 0) {
       // Full upsert into script (using block id as snapshot id — legacy mode)
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
          SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]),
-                unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]), unnest($8::text[]), unnest($9::bool[])
+                unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]), unnest($8::text[]),
+                unnest($9::jsonb[]), unnest($10::bool[])
          ON CONFLICT (id) DO UPDATE SET
            block_id = EXCLUDED.block_id, sort_key = EXCLUDED.sort_key, scene_id = EXCLUDED.scene_id,
            rehearsal_mark = EXCLUDED.rehearsal_mark, type = EXCLUDED.type, content = EXCLUDED.content,
-           stage_comment = EXCLUDED.stage_comment, force_show_character_name = EXCLUDED.force_show_character_name`,
+           stage_comment = EXCLUDED.stage_comment, marker_meta = EXCLUDED.marker_meta,
+           force_show_character_name = EXCLUDED.force_show_character_name`,
         [
           upsertBlocks.map(b => b.id), productionId,
           upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
           upsertBlocks.map(b => b.rehearsalMark ?? null), upsertBlocks.map(b => toDbType(b)),
           upsertBlocks.map(b => b.content),
           upsertBlocks.map(b => b.stageComment?.trim() || null),
+          upsertBlocks.map(b => markerMetaJson(b)),
           upsertBlocks.map(b => b.forceShowCharacterName ?? false),
         ]
       );
@@ -962,7 +1519,8 @@ export async function importScriptToVersion(
   payload: {
     upsertBlocks: Array<{
       id: string;
-      type: "dialogue" | "stage";
+      blockId?: string;
+      type: Block["type"];
       content: string;
       stageComment?: string | null;
       lyric: boolean;
@@ -970,13 +1528,15 @@ export async function importScriptToVersion(
       characterAnnotations: Record<string, string>;
       sceneId: string | null;
       rehearsalMark: string | null;
+      markerMeta?: MarkerMeta | null;
       lexKey: string;
     }>;
     upsertChars: Array<{ id: string; name: string; isAggregate: boolean; sortOrder: number }>;
     upsertScenes: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }>;
+    deleteSceneIds?: string[];
   },
 ): Promise<void> {
-  const { upsertBlocks, upsertChars, upsertScenes } = payload;
+  const { upsertBlocks, upsertChars, upsertScenes, deleteSceneIds = [] } = payload;
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -984,13 +1544,23 @@ export async function importScriptToVersion(
     // Clear all blocks from this version; GC snapshots no longer referenced by any version
     await client.query(
       `WITH removed AS (
-         DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id
+         DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id, block_id
+       ),
+       deleted_orphan_tags AS (
+         DELETE FROM block_tag bt
+         WHERE bt.block_id IN (SELECT block_id FROM removed)
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.block_id = bt.block_id)
+         RETURNING 1
        )
        DELETE FROM script s
        WHERE s.id IN (SELECT snapshot_id FROM removed)
          AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
       [versionId]
     );
+
+    // Import is a full replacement of script + dramaturgy for this version.
+    // scene_version is only a compatibility cache; rebuild it from markers below.
+    await client.query("DELETE FROM scene_version WHERE version_id = $1", [versionId]);
 
     if (upsertScenes.length > 0) {
       await client.query(
@@ -1008,6 +1578,12 @@ export async function importScriptToVersion(
         [upsertScenes.map(s => s.id), versionId,
          upsertScenes.map(s => s.number), upsertScenes.map(s => s.name),
          upsertScenes.map(s => s.sortOrder), upsertScenes.map(s => s.parentId ?? null)]
+      );
+    }
+    if (deleteSceneIds.length > 0) {
+      await client.query(
+        "DELETE FROM scene_version WHERE scene_id = ANY($1::text[]) AND version_id = $2",
+        [deleteSceneIds, versionId]
       );
     }
 
@@ -1031,10 +1607,10 @@ export async function importScriptToVersion(
 
     if (upsertBlocks.length > 0) {
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
-         SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]),
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta)
+         SELECT unnest($1::text[]), unnest($10::text[]), $2::text, unnest($3::text[]),
                 unnest($4::text[]), unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]),
-                unnest($8::text[]), unnest($9::bool[])`,
+                unnest($8::text[]), unnest($9::bool[]), unnest($11::jsonb[])`,
         [
           upsertBlocks.map(b => b.id), productionId,
           upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
@@ -1043,12 +1619,19 @@ export async function importScriptToVersion(
           upsertBlocks.map(b => b.content),
           upsertBlocks.map(b => b.stageComment?.trim() || null),
           upsertBlocks.map(() => false),
+          upsertBlocks.map(b => b.blockId ?? b.id),
+          upsertBlocks.map(b => JSON.stringify(cleanMarkerMeta(b.markerMeta))),
         ]
       );
       await client.query(
         `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
-         SELECT unnest($1::text[]), $2::text, unnest($1::text[]), unnest($3::text[])`,
-        [upsertBlocks.map(b => b.id), versionId, upsertBlocks.map(b => b.lexKey)]
+         SELECT unnest($1::text[]), $2::text, unnest($4::text[]), unnest($3::text[])`,
+        [
+          upsertBlocks.map(b => b.id),
+          versionId,
+          upsertBlocks.map(b => b.lexKey),
+          upsertBlocks.map(b => b.blockId ?? b.id),
+        ]
       );
       const scRows = upsertBlocks.flatMap(b =>
         b.characterIds.map((cid, pos) => ({ sid: b.id, cid, pos, ann: b.characterAnnotations[cid] ?? null }))
@@ -1061,6 +1644,8 @@ export async function importScriptToVersion(
         );
       }
     }
+
+    await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
 
     await client.query("COMMIT");
   } catch (err) {
@@ -1568,10 +2153,18 @@ export async function listProductionCharacters(productionId: string): Promise<Ch
   return listCharactersByVersion(versionId);
 }
 
-export async function setCharacterMembers(aggregateId: string, memberIds: string[]): Promise<void> {
+export async function setCharacterMembers(productionId: string, aggregateId: string, memberIds: string[]): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const allIds = [...new Set([aggregateId, ...memberIds])];
+    const ownerRes = await client.query<{ id: string }>(
+      "SELECT id FROM character WHERE production_id = $1 AND id = ANY($2::text[])",
+      [productionId, allIds]
+    );
+    if (ownerRes.rows.length !== allIds.length) {
+      throw new Error("Character aggregate members must belong to the production");
+    }
     await client.query("DELETE FROM character_aggregate WHERE aggregate_id = $1", [aggregateId]);
     if (memberIds.length > 0) {
       await client.query(
@@ -1620,20 +2213,18 @@ export async function patchCharacterMeta(
 
 /** Returns ordered rehearsal marks grouped by scene_id. */
 export async function listRehearsalMarksByScene(productionId: string): Promise<Record<string, string[]>> {
-  const res = await getPool().query<{ scene_id: string; rehearsal_mark: string }>(
-    `SELECT scene_id, rehearsal_mark
+  const res = await getPool().query<{ scene_id: string | null; rehearsal_mark: string | null; type: string }>(
+    `SELECT scene_id, rehearsal_mark, type::text AS type
      FROM script
-     WHERE production_id = $1 AND scene_id IS NOT NULL AND rehearsal_mark IS NOT NULL
+     WHERE production_id = $1
      ORDER BY sort_key`,
     [productionId]
   );
-  const map: Record<string, string[]> = {};
-  for (const row of res.rows) {
-    if (!map[row.scene_id]) map[row.scene_id] = [];
-    const arr = map[row.scene_id];
-    if (arr[arr.length - 1] !== row.rehearsal_mark) arr.push(row.rehearsal_mark);
-  }
-  return map;
+  return generatedRehearsalMarksByScene(res.rows.map((row) => ({
+    sceneId: row.scene_id,
+    rehearsalMark: row.rehearsal_mark,
+    type: row.type,
+  })));
 }
 
 export async function listScenesByVersion(versionId: string): Promise<SceneDetail[]> {
@@ -1642,15 +2233,48 @@ export async function listScenesByVersion(versionId: string): Promise<SceneDetai
     synopsis: string | null; action_line: string | null; music: string | null;
     stage_notes: string | null; expected_duration: string | null;
   }>(
-    `SELECT scene_id AS id, num, name, parent_id,
+    `${VERSION_SCENES_FROM_MARKERS_CTE}
+     SELECT ms.id,
+            COALESCE(ms.marker_meta->>'number', '') AS num,
+            COALESCE(ms.marker_meta->>'name', '') AS name,
+            ms.parent_id,
+            ms.marker_meta->>'synopsis' AS synopsis,
+            ms.marker_meta->>'actionLine' AS action_line,
+            ms.marker_meta->>'music' AS music,
+            ms.marker_meta->>'stageNotes' AS stage_notes,
+            ms.marker_meta->>'expectedDuration' AS expected_duration
+     FROM marker_scenes ms
+     ORDER BY ms.sort_key`,
+    [versionId]
+  );
+  return withGeneratedSceneNumbers(res.rows.map((r) => ({
+    id: r.id, number: r.num, name: r.name, parentId: r.parent_id,
+    synopsis: r.synopsis ?? "",
+    actionLine: r.action_line ?? "",
+    music: r.music ?? "",
+    stageNotes: r.stage_notes ?? "",
+    expectedDuration: r.expected_duration ?? "",
+  })));
+}
+
+export async function listSceneVersionsByVersion(versionId: string): Promise<SceneDetail[]> {
+  const res = await getPool().query<{
+    id: string; num: string; name: string; sort_order: number; parent_id: string | null;
+    synopsis: string | null; action_line: string | null; music: string | null;
+    stage_notes: string | null; expected_duration: string | null;
+  }>(
+    `SELECT scene_id AS id, num, name, sort_order, parent_id,
             synopsis, action_line, music, stage_notes, expected_duration
      FROM scene_version
      WHERE version_id = $1
-     ORDER BY sort_order`,
+     ORDER BY sort_order, scene_id`,
     [versionId]
   );
   return res.rows.map((r) => ({
-    id: r.id, number: r.num, name: r.name, parentId: r.parent_id,
+    id: r.id,
+    number: r.num,
+    name: r.name,
+    parentId: r.parent_id,
     synopsis: r.synopsis ?? "",
     actionLine: r.action_line ?? "",
     music: r.music ?? "",
@@ -1694,21 +2318,18 @@ export async function listCharactersByVersion(versionId: string): Promise<Charac
 }
 
 export async function listRehearsalMarksByVersion(versionId: string): Promise<Record<string, string[]>> {
-  const res = await getPool().query<{ scene_id: string; rehearsal_mark: string }>(
-    `SELECT s.scene_id, s.rehearsal_mark
-     FROM script_version sv
-     JOIN script s ON s.id = sv.snapshot_id
-     WHERE sv.version_id = $1 AND s.scene_id IS NOT NULL AND s.rehearsal_mark IS NOT NULL
-     ORDER BY sv.sort_key`,
+  const res = await getPool().query<{ scene_id: string | null; rehearsal_mark: string | null; type: string }>(
+    `${VERSION_OWNED_BLOCKS_CTE}
+     SELECT scene_id, rehearsal_mark, type
+     FROM owned_blocks
+     ORDER BY sort_key`,
     [versionId]
   );
-  const map: Record<string, string[]> = {};
-  for (const row of res.rows) {
-    if (!map[row.scene_id]) map[row.scene_id] = [];
-    const arr = map[row.scene_id];
-    if (arr[arr.length - 1] !== row.rehearsal_mark) arr.push(row.rehearsal_mark);
-  }
-  return map;
+  return generatedRehearsalMarksByScene(res.rows.map((row) => ({
+    sceneId: row.scene_id,
+    rehearsalMark: row.rehearsal_mark,
+    type: row.type,
+  })));
 }
 
 export async function listProductionScenes(productionId: string): Promise<SceneDetail[]> {
@@ -1762,25 +2383,9 @@ export async function getSceneById(
   sceneId: string, productionId: string, versionId?: string | null
 ): Promise<SceneDetail | null> {
   if (versionId) {
-    const res = await getPool().query<{
-      id: string; num: string; name: string; parent_id: string | null;
-      synopsis: string | null; action_line: string | null; music: string | null;
-      stage_notes: string | null; expected_duration: string | null;
-    }>(
-      `SELECT sv.scene_id AS id, sv.num, sv.name, sv.parent_id,
-              sv.synopsis, sv.action_line, sv.music, sv.stage_notes, sv.expected_duration
-       FROM scene_version sv
-       JOIN scene s ON s.id = sv.scene_id
-       WHERE sv.scene_id = $1 AND s.production_id = $2 AND sv.version_id = $3`,
-      [sceneId, productionId, versionId]
-    );
-    if (!res.rows[0]) return null;
-    const r = res.rows[0];
-    return {
-      id: r.id, number: r.num, name: r.name, parentId: r.parent_id,
-      synopsis: r.synopsis ?? "", actionLine: r.action_line ?? "",
-      music: r.music ?? "", stageNotes: r.stage_notes ?? "", expectedDuration: r.expected_duration ?? "",
-    };
+    const markerScenes = await listScenesByVersion(versionId);
+    const markerScene = markerScenes.find((scene) => scene.id === sceneId);
+    return markerScene ?? null;
   }
   // No cookie version: fall back to production's active version
   console.error(`[fallback] getSceneById called without versionId for scene ${sceneId} production ${productionId} — frontend bug`);
@@ -1790,27 +2395,122 @@ export async function getSceneById(
 }
 
 export async function updateSceneMetadata(
+  productionId: string,
   sceneId: string,
   versionId: string,
   fields: Partial<Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>
 ): Promise<void> {
-  const sets: string[] = [];
-  const values: unknown[] = [sceneId, versionId];
-  const col: Record<string, string> = {
-    synopsis: "synopsis", actionLine: "action_line", music: "music",
-    stageNotes: "stage_notes", expectedDuration: "expected_duration",
-  };
-  for (const [key, colName] of Object.entries(col)) {
-    if (key in fields) {
-      values.push(fields[key as keyof typeof fields] ?? "");
-      sets.push(`${colName} = $${values.length}`);
-    }
+  const meta: MarkerMeta = {};
+  for (const key of ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const) {
+    if (key in fields) meta[key] = fields[key] ?? "";
   }
-  if (sets.length === 0) return;
-  await getPool().query(
-    `UPDATE scene_version SET ${sets.join(", ")} WHERE scene_id = $1 AND version_id = $2`,
-    values
-  );
+  if (Object.keys(meta).length === 0) return;
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
+    const versionRes = await client.query<{ production_id: string }>(
+      "SELECT production_id FROM version WHERE id = $1",
+      [versionId]
+    );
+    if (versionRes.rows[0]?.production_id !== productionId) {
+      throw new Error("Scene metadata version does not belong to production");
+    }
+    const markerRes = await client.query<{ snapshot_id: string; production_id: string; refs: string }>(
+      `SELECT sv.snapshot_id, s.production_id, COUNT(*) OVER (PARTITION BY sv.block_id) AS refs
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $2
+         AND sv.block_id = $1
+         AND s.type IN ('chapter_marker', 'scene_marker')`,
+      [sceneId, versionId]
+    );
+    if (markerRes.rows.length === 0) {
+      const markerCountRes = await client.query<{ cnt: string }>(
+        `SELECT COUNT(*) AS cnt
+         FROM script_version sv
+         JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1
+           AND sv.block_id <> $2
+           AND s.type IN ('chapter_marker', 'scene_marker')`,
+        [versionId, FIXED_INITIAL_CHAPTER_BLOCK_ID]
+      );
+      const markerCount = parseInt(markerCountRes.rows[0]?.cnt ?? "0", 10);
+      if (markerCount > 0) {
+        throw new Error(`Expected exactly one marker block for scene ${sceneId} in version ${versionId}, found ${markerRes.rows.length}`);
+      }
+      const stagedRes = await client.query<{ production_id: string }>(
+        `UPDATE scene_version sv
+         SET synopsis = COALESCE($3, synopsis),
+             action_line = COALESCE($4, action_line),
+             music = COALESCE($5, music),
+             stage_notes = COALESCE($6, stage_notes),
+             expected_duration = COALESCE($7, expected_duration)
+         FROM version v
+         WHERE sv.version_id = $1
+           AND sv.scene_id = $2
+           AND v.id = sv.version_id
+         RETURNING v.production_id`,
+        [
+          versionId,
+          sceneId,
+          fields.synopsis ?? null,
+          fields.actionLine ?? null,
+          fields.music ?? null,
+          fields.stageNotes ?? null,
+          fields.expectedDuration ?? null,
+        ]
+      );
+      if (stagedRes.rows[0]?.production_id !== productionId) {
+        throw new Error("Scene metadata row does not belong to production");
+      }
+      await client.query("COMMIT");
+      return;
+    }
+    if (markerRes.rows.length !== 1) {
+      throw new Error(`Expected exactly one marker block for scene ${sceneId} in version ${versionId}, found ${markerRes.rows.length}`);
+    }
+    const marker = markerRes.rows[0];
+    if (marker.production_id !== productionId) {
+      throw new Error("Scene marker does not belong to production");
+    }
+    const refRes = await client.query<{ cnt: string }>(
+      "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
+      [marker.snapshot_id]
+    );
+    const refCount = parseInt(refRes.rows[0]?.cnt ?? "0", 10);
+    if (refCount <= 1) {
+      await client.query(
+        `UPDATE script
+         SET marker_meta = COALESCE(marker_meta, '{}'::jsonb) || $2::jsonb
+         WHERE id = $1`,
+        [marker.snapshot_id, JSON.stringify(meta)]
+      );
+    } else {
+      const newSnapshotId = genSnapshotId();
+      await client.query(
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+         SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment,
+                COALESCE(marker_meta, '{}'::jsonb) || $2::jsonb, force_show_character_name
+         FROM script
+         WHERE id = $3`,
+        [newSnapshotId, JSON.stringify(meta), marker.snapshot_id]
+      );
+      await client.query(
+        `UPDATE script_version
+         SET snapshot_id = $1
+         WHERE version_id = $2 AND block_id = $3`,
+        [newSnapshotId, versionId, sceneId]
+      );
+    }
+    await syncSceneVersionsFromMarkersInTx(client, marker.production_id, versionId);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Cue lists ────────────────────────────────────────────────────────────────
@@ -2829,10 +3529,18 @@ export async function cowBlockSnapshotForMount(
     await client.query('BEGIN');
 
     const refRes = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM script_version WHERE version_id = $1 AND snapshot_id = $2',
+      [versionId, snapshotId]
+    );
+    if (parseInt(refRes.rows[0].cnt, 10) !== 1) {
+      throw new Error("Block snapshot does not belong to version");
+    }
+
+    const allRefRes = await client.query<{ cnt: string }>(
       'SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1',
       [snapshotId]
     );
-    if (parseInt(refRes.rows[0].cnt, 10) <= 1) {
+    if (parseInt(allRefRes.rows[0].cnt, 10) <= 1) {
       await client.query('COMMIT');
       return snapshotId;
     }
@@ -2840,8 +3548,8 @@ export async function cowBlockSnapshotForMount(
     const newSnapshotId = genSnapshotId();
 
     await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
-       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name
        FROM script WHERE id = $2`,
       [newSnapshotId, snapshotId]
     );
@@ -2904,10 +3612,18 @@ export async function cowCueRevisionForMount(
     await client.query('BEGIN');
 
     const refRes = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM cue_version WHERE version_id = $1 AND revision_id = $2',
+      [versionId, revisionId]
+    );
+    if (parseInt(refRes.rows[0].cnt, 10) !== 1) {
+      throw new Error("Cue revision does not belong to version");
+    }
+
+    const allRefRes = await client.query<{ cnt: string }>(
       'SELECT COUNT(*) AS cnt FROM cue_version WHERE revision_id = $1',
       [revisionId]
     );
-    if (parseInt(refRes.rows[0].cnt, 10) <= 1) {
+    if (parseInt(allRefRes.rows[0].cnt, 10) <= 1) {
       await client.query('COMMIT');
       return revisionId;
     }
@@ -3092,7 +3808,7 @@ export async function applyPatchToDB(
   if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
 
   // Local working-state types
-  type TxBlock = { blockId: string; snapshotId: string; lexKey: string };
+  type TxBlock = { blockId: string; snapshotId: string; lexKey: string; type: string };
   type TxScene = Scene & { sortOrder: number };
   type TxChar  = Character & { sortOrder: number };
 
@@ -3106,10 +3822,21 @@ export async function applyPatchToDB(
 
     // ── Serialise concurrent patches for the same version ────────────────────
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
+    const versionOwner = await client.query<{ production_id: string }>(
+      "SELECT production_id FROM version WHERE id = $1",
+      [versionId]
+    );
+    if (versionOwner.rows[0]?.production_id !== productionId) {
+      throw new Error("Version does not belong to production");
+    }
 
     // ── Load current version state (within the lock) ─────────────────────────
-    const blockRows = await client.query<{ block_id: string; snapshot_id: string; sort_key: string }>(
-      "SELECT block_id, snapshot_id, sort_key FROM script_version WHERE version_id = $1 ORDER BY sort_key",
+    const blockRows = await client.query<{ block_id: string; snapshot_id: string; sort_key: string; type: string }>(
+      `SELECT sv.block_id, sv.snapshot_id, sv.sort_key, s.type::text AS type
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1
+       ORDER BY sv.sort_key`,
       [versionId]
     );
     const sceneRows = await client.query<{ scene_id: string; num: string; name: string; sort_order: number; parent_id: string | null }>(
@@ -3123,9 +3850,10 @@ export async function applyPatchToDB(
 
     // Working ordered block list (mutated as ops are applied)
     const txBlocks: TxBlock[] = blockRows.rows.map(r => ({
-      blockId: r.block_id, snapshotId: r.snapshot_id, lexKey: r.sort_key,
+      blockId: r.block_id, snapshotId: r.snapshot_id, lexKey: r.sort_key, type: r.type,
     }));
     const txBlockMap = new Map<string, TxBlock>(txBlocks.map(b => [b.blockId, b]));
+    let shouldSyncSceneVersions = patch.sceneOps.length > 0;
 
     // Working scene / char lists
     const txScenes: TxScene[] = sceneRows.rows.map(r => ({
@@ -3214,6 +3942,9 @@ export async function applyPatchToDB(
          toWrite.map(s => s.sortOrder), toWrite.map(s => s.parentId ?? null)]
       );
     }
+    if (dirtySceneIds.size > 0 || deletedSceneIds.size > 0) {
+      await normalizeSceneOwnershipOrderInTx(client, versionId);
+    }
 
     // ── Apply char ops ────────────────────────────────────────────────────────
     const dirtyCharIds  = new Set<string>();
@@ -3288,12 +4019,12 @@ export async function applyPatchToDB(
           }
 
           await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10)`,
+            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
             [snapshotId, insertBlock.id, productionId, lexKey,
              insertBlock.sceneId ?? null, insertBlock.rehearsalMark ?? null,
              toDbType(insertBlock), insertBlock.content,
-             insertBlock.stageComment?.trim() || null, insertBlock.forceShowCharacterName ?? false]
+             insertBlock.stageComment?.trim() || null, markerMetaJson(insertBlock), insertBlock.forceShowCharacterName ?? false]
           );
           await client.query(
             "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
@@ -3315,7 +4046,9 @@ export async function applyPatchToDB(
             await writeBlockTagsInTx(client, insertBlock.id, op.tags);
           }
 
-          const newTxBlock: TxBlock = { blockId: op.block.id, snapshotId, lexKey };
+          if (isChapterSceneMarkerType(toDbType(insertBlock))) shouldSyncSceneVersions = true;
+
+          const newTxBlock: TxBlock = { blockId: op.block.id, snapshotId, lexKey, type: toDbType(insertBlock) };
           txBlocks.splice(insertAt, 0, newTxBlock);
           txBlockMap.set(op.block.id, newTxBlock);
           break;
@@ -3334,6 +4067,10 @@ export async function applyPatchToDB(
               updateBlock = { ...op.block, lyric: derivedLyric };
             }
           }
+          const nextType = toDbType(updateBlock);
+          if (isChapterSceneMarkerType(cur.type) || isChapterSceneMarkerType(nextType)) {
+            shouldSyncSceneVersions = true;
+          }
 
           const refRes = await client.query<{ cnt: string }>(
             "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
@@ -3346,11 +4083,11 @@ export async function applyPatchToDB(
             await client.query(
               `UPDATE script
                SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
-                   content = $4, stage_comment = $5, force_show_character_name = $6
-               WHERE id = $7`,
+                   content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7
+               WHERE id = $8`,
               [updateBlock.sceneId ?? null, updateBlock.rehearsalMark ?? null,
-               toDbType(updateBlock), updateBlock.content,
-               updateBlock.stageComment?.trim() || null,
+               nextType, updateBlock.content,
+               updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock),
                updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
             );
             await client.query("DELETE FROM script_character WHERE script_id = $1", [cur.snapshotId]);
@@ -3377,12 +4114,12 @@ export async function applyPatchToDB(
             const newSnapshotId = genSnapshotId();
 
             await client.query(
-              `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10)`,
+              `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
               [newSnapshotId, updateBlock.id, productionId, cur.lexKey,
                updateBlock.sceneId ?? null, updateBlock.rehearsalMark ?? null,
-               toDbType(updateBlock), updateBlock.content,
-               updateBlock.stageComment?.trim() || null, updateBlock.forceShowCharacterName ?? false]
+               nextType, updateBlock.content,
+               updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock), updateBlock.forceShowCharacterName ?? false]
             );
             await client.query(
               "UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3",
@@ -3425,6 +4162,7 @@ export async function applyPatchToDB(
           if (op.tags !== undefined) {
             await writeBlockTagsInTx(client, op.block.id, op.tags);
           }
+          cur.type = nextType;
 
           break;
         }
@@ -3432,6 +4170,7 @@ export async function applyPatchToDB(
         case 'delete': {
           const cur = txBlockMap.get(op.id);
           if (!cur) break; // already gone — skip silently
+          if (isChapterSceneMarkerType(cur.type)) shouldSyncSceneVersions = true;
 
           // Remove from version; GC orphan snapshot if no other version references it
           await client.query(
@@ -3471,6 +4210,15 @@ export async function applyPatchToDB(
             .map(id => txBlockMap.get(id))
             .filter((b): b is TxBlock => !!b);
           if (!ordered.length) break;
+          const oldMarkerOrder = txBlocks
+            .filter((block) => isChapterSceneMarkerType(block.type))
+            .map((block) => block.blockId)
+            .join(",");
+          const nextMarkerOrder = ordered
+            .filter((block) => isChapterSceneMarkerType(block.type))
+            .map((block) => block.blockId)
+            .join(",");
+          if (oldMarkerOrder !== nextMarkerOrder) shouldSyncSceneVersions = true;
 
           // Assign fresh evenly-distributed keys; update only the rows that changed.
           const newKeys = initialKeys(ordered.length);
@@ -3489,6 +4237,10 @@ export async function applyPatchToDB(
           break;
         }
       }
+    }
+
+    if (shouldSyncSceneVersions) {
+      await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
     }
 
     await client.query("COMMIT");

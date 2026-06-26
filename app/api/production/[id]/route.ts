@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { loadProduction, canUserAccessProduction, getActiveVersionId, listVersions, updateProductionName, getProductionMemberContext } from "@/lib/db";
+import { loadProduction, canUserAccessProduction, getActiveVersionId, listVersions, updateProductionName, getProductionMemberContext, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { hasPermission } from "@/lib/roles";
 
@@ -18,6 +18,15 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
     const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id);
     if (!versionId) {
       return Response.json({ error: "剧本不存在或无版本" }, { status: 404 });
+    }
+    const version = await getVersion(versionId);
+    if (!version || version.productionId !== id) {
+      return Response.json({ error: "版本不存在" }, { status: 404 });
+    }
+
+    const migration = await ensureScriptMarkerMigration(versionId);
+    if (migration.status === "running") {
+      return Response.json({ status: "updating", migration }, { status: 202 });
     }
 
     const [result, versions] = await Promise.all([

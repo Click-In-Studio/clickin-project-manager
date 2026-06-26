@@ -1,6 +1,16 @@
 export type Character = { id: string; name: string; isAggregate: boolean; memberIds?: string[] };
 export type Scene = { id: string; number: string; name: string; parentId: string | null };
-export type BlockType = "dialogue" | "stage";
+export type BlockType = "dialogue" | "stage" | "chapter_marker" | "scene_marker" | "rehearsal_marker";
+export type MarkerMeta = {
+  number?: string;
+  name?: string;
+  parentMarkerId?: string | null;
+  synopsis?: string;
+  actionLine?: string;
+  music?: string;
+  stageNotes?: string;
+  expectedDuration?: string;
+};
 export type Block = {
   id: string;
   type: BlockType;
@@ -12,6 +22,7 @@ export type Block = {
   lyric: boolean;
   sceneId: string | null;
   rehearsalMark: string | null;
+  markerMeta?: MarkerMeta | null;
 };
 
 export type PageLayout = "a4" | "letter" | "a3-2col" | "tablet-2col";

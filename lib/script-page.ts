@@ -1,5 +1,7 @@
 import type { Block } from "./script-types";
 import type { PageLayout, ScriptTextLayoutMode } from "./script-types";
+import { isMarkerBlock, textBlocksWithMarkerOwnership, withMarkerOwnership } from "./script-marker-blocks";
+import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "./script-marker-ownership-cache";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 
@@ -113,6 +115,66 @@ function estimateBlockHeight(block: Block, prev: Block | null, upl: number, forc
   return charNameH + lines * LINE_HEIGHT + wrapperPaddingH;
 }
 
+type TextBlockEntry = {
+  block: Block;
+  sourceIndex: number;
+};
+
+type EstimatedPageMapCacheEntry = {
+  blockId: string;
+  sourceIndex: number;
+  page: number;
+  usedAfter: number;
+};
+
+export type EstimatedPageMapCache = {
+  layout: PageLayout;
+  textLayoutMode: ScriptTextLayoutMode;
+  blocksHaveMarkerOwnership: boolean;
+  entries: EstimatedPageMapCacheEntry[];
+  pageMap: Record<string, number>;
+};
+
+function textBlockEntries(blocks: Block[], blocksHaveMarkerOwnership: boolean): TextBlockEntry[] {
+  const ownedBlocks = blocksHaveMarkerOwnership ? blocks : withMarkerOwnership(blocks);
+  const entries: TextBlockEntry[] = [];
+  for (let i = 0; i < ownedBlocks.length; i++) {
+    if (!isMarkerBlock(ownedBlocks[i])) {
+      entries.push({ block: ownedBlocks[i], sourceIndex: i });
+    }
+  }
+  return entries;
+}
+
+function normalizeDirtyRanges(dirty: MarkerOwnershipDirty, length: number): MarkerOwnershipRange[] | null {
+  if (!dirty || dirty === "full") return null;
+  const ranges = Array.isArray(dirty) ? dirty : [dirty];
+  const normalized = ranges
+    .map((range) => ({
+      ...range,
+      start: Math.max(0, Math.min(length, range.start)),
+      end: Math.max(0, Math.min(length, range.end)),
+    }))
+    .filter((range) => range.start < range.end)
+    .sort((a, b) => a.start - b.start);
+  return normalized.length > 0 ? normalized : [];
+}
+
+function firstDirtyTextIndex(entries: TextBlockEntry[], ranges: MarkerOwnershipRange[]): number {
+  let first = entries.length;
+  for (const range of ranges) {
+    let lo = 0;
+    let hi = entries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (entries[mid].sourceIndex < range.start) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo < entries.length) first = Math.min(first, lo);
+  }
+  return first;
+}
+
 /**
  * Returns a mapping of blockId → page number (1-based).
  * Mirrors the layout algorithm in computePrintPages (ScriptEditor.tsx).
@@ -121,6 +183,7 @@ export function computePageMap(
   blocks: Block[],
   layout: PageLayout = "a4",
   textLayoutMode: ScriptTextLayoutMode = "center",
+  blocksHaveMarkerOwnership = false,
 ): Record<string, number> {
   const cfg = PAGE_CONFIGS[layout];
   const upl = unitsPerLine(cfg, textLayoutMode);
@@ -130,10 +193,13 @@ export function computePageMap(
   let page = 1;
   let used = 0;
   let hasBlockOnPage = false;
+  let prevTextBlock: Block | null = null;
 
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
-    const prev = i > 0 ? blocks[i - 1] : null;
+  const textBlocks = blocksHaveMarkerOwnership ? blocks : textBlocksWithMarkerOwnership(blocks);
+  for (let i = 0; i < textBlocks.length; i++) {
+    const block = textBlocks[i];
+    if (blocksHaveMarkerOwnership && isMarkerBlock(block)) continue;
+    const prev = prevTextBlock;
 
     if (block.sceneId && block.sceneId !== prev?.sceneId) {
       if (used > 0 && used + SCENE_HEADER_HEIGHT > maxH) {
@@ -144,17 +210,117 @@ export function computePageMap(
       used += SCENE_HEADER_HEIGHT;
     }
 
-    let h = estimateBlockHeight(block, prev, upl, !hasBlockOnPage);
-    if (used > 0 && used + h > maxH) {
+    let height = estimateBlockHeight(block, prev, upl, !hasBlockOnPage);
+    if (used > 0 && used + height > maxH) {
       page++;
       used = 0;
       hasBlockOnPage = false;
-      h = estimateBlockHeight(block, prev, upl, true);
+      height = estimateBlockHeight(block, prev, upl, true);
     }
+
     pageMap[block.id] = page;
-    used += h;
+    used += height;
     hasBlockOnPage = true;
+    prevTextBlock = block;
   }
 
   return pageMap;
+}
+
+export function updateEstimatedPageMap(
+  previous: EstimatedPageMapCache | null,
+  blocks: Block[],
+  layout: PageLayout = "a4",
+  textLayoutMode: ScriptTextLayoutMode = "center",
+  blocksHaveMarkerOwnership = false,
+  dirty: MarkerOwnershipDirty = "full",
+): EstimatedPageMapCache {
+  const cfg = PAGE_CONFIGS[layout];
+  const upl = unitsPerLine(cfg, textLayoutMode);
+  const maxH = contentHeight(cfg);
+  const entries = textBlockEntries(blocks, blocksHaveMarkerOwnership);
+  const ranges = normalizeDirtyRanges(dirty, blocks.length);
+  const canReuse =
+    previous &&
+    ranges &&
+    previous.layout === layout &&
+    previous.textLayoutMode === textLayoutMode &&
+    previous.blocksHaveMarkerOwnership === blocksHaveMarkerOwnership;
+
+  let startTextIndex = 0;
+  if (canReuse) {
+    const dirtyTextIndex = firstDirtyTextIndex(entries, ranges);
+    startTextIndex = dirtyTextIndex === entries.length ? entries.length : Math.max(0, dirtyTextIndex - 1);
+    startTextIndex = Math.min(startTextIndex, previous.entries.length);
+    const reusablePrefixEnd = Math.min(startTextIndex, previous.entries.length, entries.length);
+    for (let i = 0; i < reusablePrefixEnd; i++) {
+      const cached = previous.entries[i];
+      const current = entries[i];
+      if (cached.blockId !== current.block.id || cached.sourceIndex !== current.sourceIndex) {
+        startTextIndex = i;
+        break;
+      }
+    }
+  }
+
+  const pageMap: Record<string, number> = {};
+  const nextEntries: EstimatedPageMapCacheEntry[] = [];
+  let page = 1;
+  let used = 0;
+  let hasBlockOnPage = false;
+  let prevTextBlock: Block | null = null;
+
+  if (canReuse && startTextIndex > 0) {
+    for (let i = 0; i < startTextIndex; i++) {
+      const cached = previous.entries[i];
+      nextEntries.push(cached);
+      pageMap[cached.blockId] = cached.page;
+    }
+    const prefix = previous.entries[startTextIndex - 1];
+    page = prefix.page;
+    used = prefix.usedAfter;
+    hasBlockOnPage = true;
+    prevTextBlock = entries[startTextIndex - 1]?.block ?? null;
+  }
+
+  for (let i = startTextIndex; i < entries.length; i++) {
+    const { block, sourceIndex } = entries[i];
+    const prev = prevTextBlock;
+
+    if (block.sceneId && block.sceneId !== prev?.sceneId) {
+      if (used > 0 && used + SCENE_HEADER_HEIGHT > maxH) {
+        page++;
+        used = 0;
+        hasBlockOnPage = false;
+      }
+      used += SCENE_HEADER_HEIGHT;
+    }
+
+    let height = estimateBlockHeight(block, prev, upl, !hasBlockOnPage);
+    if (used > 0 && used + height > maxH) {
+      page++;
+      used = 0;
+      hasBlockOnPage = false;
+      height = estimateBlockHeight(block, prev, upl, true);
+    }
+
+    pageMap[block.id] = page;
+    used += height;
+    hasBlockOnPage = true;
+    nextEntries.push({
+      blockId: block.id,
+      sourceIndex,
+      page: pageMap[block.id],
+      usedAfter: used,
+    });
+    prevTextBlock = block;
+  }
+
+  return {
+    layout,
+    textLayoutMode,
+    blocksHaveMarkerOwnership,
+    entries: nextEntries,
+    pageMap,
+  };
 }

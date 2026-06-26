@@ -1,4 +1,6 @@
 import { getScriptEditorPool } from "./db";
+import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "../lib/script-marker-sql";
+import { withGeneratedSceneNumbers } from "../lib/script-generated-labels";
 
 export type ScriptBlockRow = {
   id:            string;
@@ -91,28 +93,39 @@ function computePageMapFromBlocks(
 export async function getPageMapForProduction(
   productionId: string,
   layout = "a4",
+  versionId?: string | null,
 ): Promise<Record<string, number>> {
   const pool = getScriptEditorPool();
+  const resolvedVersionId = versionId === undefined ? await getActiveVersionId(productionId) : versionId;
 
-  // Use server-cached page map when available (written by server-cache after each flush)
-  const prodRes = await pool.query<{ page_map: Record<string, Record<string, number>> | null }>(
-    "SELECT page_map FROM production WHERE id = $1",
-    [productionId],
-  );
-  const stored = prodRes.rows[0]?.page_map;
-  if (stored && stored[layout] && Object.keys(stored[layout]).length > 0) {
-    return stored[layout];
-  }
-
-  // Fall back to on-demand computation from blocks
-  const blocksRes = await pool.query<{
-    id: string; type: string; content: string; scene_id: string | null;
-  }>(
-    `SELECT id, type, content, scene_id FROM script WHERE production_id = $1 ORDER BY sort_key`,
-    [productionId],
-  );
+  const blocksRes = resolvedVersionId
+    ? await pool.query<{
+        id: string; snapshot_id: string; type: string; content: string; scene_id: string | null;
+      }>(
+        `${VERSION_OWNED_BLOCKS_CTE},
+         version_snapshots AS (
+           SELECT block_id, snapshot_id
+           FROM script_version
+           WHERE version_id = $1
+         )
+         SELECT ob.id, vs.snapshot_id, ob.type, ob.content, ob.scene_id
+         FROM owned_blocks ob
+         JOIN version_snapshots vs ON vs.block_id = ob.id
+         WHERE ob.type NOT IN (${MARKER_TYPES_SQL})
+         ORDER BY ob.sort_key`,
+        [resolvedVersionId],
+      )
+    : await pool.query<{
+        id: string; snapshot_id: string; type: string; content: string; scene_id: string | null;
+      }>(
+        `SELECT id, id AS snapshot_id, type::text AS type, content, scene_id
+         FROM script
+         WHERE production_id = $1 AND type::text NOT IN (${MARKER_TYPES_SQL})
+         ORDER BY sort_key`,
+        [productionId],
+      );
   if ((blocksRes.rowCount ?? 0) === 0) return {};
-  const ids = blocksRes.rows.map(r => r.id);
+  const ids = blocksRes.rows.map(r => r.snapshot_id);
   const charRes = await pool.query<{ script_id: string; character_id: string }>(
     `SELECT script_id, character_id FROM script_character WHERE script_id = ANY($1::text[]) ORDER BY script_id, position`,
     [ids],
@@ -128,27 +141,53 @@ export async function getPageMapForProduction(
     lyric: r.type === "lyric",
     content: r.content,
     sceneId: r.scene_id,
-    characterIds: charMap.get(r.id) ?? [],
+    characterIds: charMap.get(r.snapshot_id) ?? [],
   }));
   return computePageMapFromBlocks(blocks, layout);
 }
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
 
-// CTE that assigns 1-based line numbers to all blocks in a production.
-const lineNumCTE = `
-  WITH ordered AS (
-    SELECT id, ROW_NUMBER() OVER (ORDER BY sort_key) AS line_num
-    FROM script WHERE production_id = $1
-  )
-`;
+async function getActiveVersionId(productionId: string): Promise<string | null> {
+  const pool = getScriptEditorPool();
+  const res = await pool.query<{ active_version_id: string | null }>(
+    "SELECT active_version_id FROM production WHERE id = $1",
+    [productionId],
+  );
+  return res.rows[0]?.active_version_id ?? null;
+}
+
+function versionedBlocksCTE(): string {
+  return `${VERSION_OWNED_BLOCKS_CTE},
+  version_snapshots AS (
+    SELECT block_id, snapshot_id
+    FROM script_version
+    WHERE version_id = $1
+  ),
+  ordered AS (
+    SELECT ob.id, vs.snapshot_id, ob.sort_key, ob.type, ob.content, ob.scene_id, ob.rehearsal_mark,
+           ROW_NUMBER() OVER (ORDER BY ob.sort_key) AS line_num
+    FROM owned_blocks ob
+    JOIN version_snapshots vs ON vs.block_id = ob.id
+    WHERE ob.type NOT IN (${MARKER_TYPES_SQL})
+  )`;
+}
+
+function legacyBlocksCTE(): string {
+  return `WITH ordered AS (
+    SELECT id, id AS snapshot_id, sort_key, type::text AS type, content, scene_id, rehearsal_mark,
+           ROW_NUMBER() OVER (ORDER BY sort_key) AS line_num
+    FROM script
+    WHERE production_id = $1 AND type::text NOT IN (${MARKER_TYPES_SQL})
+  )`;
+}
 
 async function attachCharacters(
   pool: ReturnType<typeof getScriptEditorPool>,
-  rows: Omit<ScriptBlockRow, "characters">[],
+  rows: Array<Omit<ScriptBlockRow, "characters"> & { snapshotId: string }>,
 ): Promise<ScriptBlockRow[]> {
   if (rows.length === 0) return [];
-  const ids = rows.map(r => r.id);
+  const ids = rows.map(r => r.snapshotId);
   const res = await pool.query<{ script_id: string; char_name: string }>(
     `SELECT sc.script_id, c.name AS char_name
      FROM script_character sc
@@ -162,17 +201,25 @@ async function attachCharacters(
     if (!charMap.has(r.script_id)) charMap.set(r.script_id, []);
     charMap.get(r.script_id)!.push(r.char_name);
   }
-  return rows.map(r => ({ ...r, characters: charMap.get(r.id) ?? [] }));
+  return rows.map(({ snapshotId: _snapshotId, ...r }) => ({
+    ...r,
+    characters: charMap.get(_snapshotId) ?? [],
+  }));
 }
 
 type RawBlockRow = {
-  id: string; line_num: string; type: string; content: string;
-  rehearsal_mark: string | null; scene_name: string | null; scene_number: string | null;
+  id: string; snapshot_id: string; line_num: string; type: string; content: string;
+  rehearsal_mark: string | null; scene_id: string | null; scene_name: string | null; scene_number: string | null;
 };
 
-function toBlockRow(r: RawBlockRow): Omit<ScriptBlockRow, "characters"> {
+type BlockRowWithSnapshot = Omit<ScriptBlockRow, "characters"> & { snapshotId: string };
+type BlockRowWithSceneId = BlockRowWithSnapshot & { sceneId: string | null };
+
+function toBlockRow(r: RawBlockRow): BlockRowWithSceneId {
   return {
     id:            r.id,
+    snapshotId:    r.snapshot_id,
+    sceneId:       r.scene_id,
     lineNum:       parseInt(r.line_num, 10),
     pageNum:       null,
     type:          r.type as ScriptBlockRow["type"],
@@ -183,23 +230,98 @@ function toBlockRow(r: RawBlockRow): Omit<ScriptBlockRow, "characters"> {
   };
 }
 
-const selectCols = `s.id, o.line_num, s.type, s.content, s.rehearsal_mark,
-  sc.name AS scene_name, sc.num AS scene_number`;
-const joinClause = `JOIN ordered o ON o.id = s.id LEFT JOIN scene sc ON sc.id = s.scene_id`;
+const selectCols = `o.id, o.snapshot_id, o.line_num, o.type, o.content, o.rehearsal_mark,
+  o.scene_id, sc.name AS scene_name, sc.num AS scene_number`;
+const versionedJoinClause = `LEFT JOIN scene_version sc ON sc.scene_id = o.scene_id AND sc.version_id = $1`;
+const legacyJoinClause = `LEFT JOIN scene scene_anchor ON scene_anchor.id = o.scene_id
+  LEFT JOIN production p ON p.id = scene_anchor.production_id
+  LEFT JOIN scene_version sc ON sc.scene_id = scene_anchor.id AND sc.version_id = p.active_version_id`;
+
+async function getGeneratedSceneNumberMap(
+  productionId: string,
+  resolvedVersionId: string | null,
+): Promise<Map<string, string>> {
+  const scenes = await getGeneratedSceneRows(productionId, resolvedVersionId);
+  return sceneNumberMap(scenes);
+}
+
+function sceneNumberMap(scenes: Array<{ id: string; number: string }>): Map<string, string> {
+  return new Map(scenes.map((scene) => [scene.id, scene.number]));
+}
+
+async function getGeneratedSceneRows(
+  productionId: string,
+  resolvedVersionId: string | null,
+): Promise<Array<{ id: string; number: string; name: string; parentId: string | null }>> {
+  const pool = getScriptEditorPool();
+  const res = await pool.query<{ id: string; num: string; name: string | null; parent_id: string | null }>(
+    resolvedVersionId
+      ? `SELECT scene_id AS id, num, name, parent_id
+         FROM scene_version
+         WHERE version_id = $1
+         ORDER BY sort_order`
+      : `SELECT sc.id, COALESCE(sv.num, '') AS num, COALESCE(sv.name, '') AS name, sv.parent_id
+         FROM scene sc
+         LEFT JOIN production p ON p.id = sc.production_id
+         LEFT JOIN scene_version sv ON sv.scene_id = sc.id AND sv.version_id = p.active_version_id
+         WHERE sc.production_id = $1
+         ORDER BY COALESCE(sv.sort_order, 0), sc.id`,
+    [resolvedVersionId ?? productionId],
+  );
+  return withGeneratedSceneNumbers(res.rows.map((r) => ({
+    id: r.id,
+    number: r.num,
+    name: r.name ?? "",
+    parentId: r.parent_id,
+  })));
+}
+
+async function applyGeneratedSceneNumbers(
+  productionId: string,
+  rows: BlockRowWithSceneId[],
+  resolvedVersionId: string | null,
+  numberMap?: Map<string, string>,
+): Promise<BlockRowWithSnapshot[]> {
+  if (rows.length === 0) return [];
+  if (!rows.some((row) => row.sceneId)) {
+    return rows.map((row) => ({
+      id: row.id,
+      snapshotId: row.snapshotId,
+      lineNum: row.lineNum,
+      pageNum: row.pageNum,
+      type: row.type,
+      content: row.content,
+      rehearsalMark: row.rehearsalMark,
+      sceneName: row.sceneName,
+      sceneNumber: row.sceneNumber,
+    }));
+  }
+  const generatedNumbers = numberMap ?? await getGeneratedSceneNumberMap(productionId, resolvedVersionId);
+  return rows.map(({ sceneId, ...row }) => ({
+    ...row,
+    sceneNumber: sceneId ? (generatedNumbers.get(sceneId) ?? row.sceneNumber) : row.sceneNumber,
+  }));
+}
 
 export async function getBlockById(
   productionId: string,
   blockId:      string,
 ): Promise<ScriptBlockRow | null> {
   const pool = getScriptEditorPool();
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
-    `${lineNumCTE}
-     SELECT ${selectCols} FROM script s ${joinClause}
-     WHERE s.production_id = $1 AND s.id = $3`,
-    [productionId, productionId, blockId],
+    resolvedVersionId
+      ? `${versionedBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${versionedJoinClause}
+         WHERE o.id = $2`
+      : `${legacyBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${legacyJoinClause}
+         WHERE o.id = $2`,
+    [resolvedVersionId ?? productionId, blockId],
   );
   if (res.rowCount === 0) return null;
-  const [row] = await attachCharacters(pool, res.rows.map(toBlockRow));
+  const numberedRows = await applyGeneratedSceneNumbers(productionId, res.rows.map(toBlockRow), resolvedVersionId);
+  const [row] = await attachCharacters(pool, numberedRows);
   return row;
 }
 
@@ -208,14 +330,20 @@ export async function getBlockByLine(
   lineNum:      number,
 ): Promise<ScriptBlockRow | null> {
   const pool = getScriptEditorPool();
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
-    `${lineNumCTE}
-     SELECT ${selectCols} FROM script s ${joinClause}
-     WHERE s.production_id = $1 AND o.line_num = $2`,
-    [productionId, lineNum],
+    resolvedVersionId
+      ? `${versionedBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${versionedJoinClause}
+         WHERE o.line_num = $2`
+      : `${legacyBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${legacyJoinClause}
+         WHERE o.line_num = $2`,
+    [resolvedVersionId ?? productionId, lineNum],
   );
   if (res.rowCount === 0) return null;
-  const [row] = await attachCharacters(pool, res.rows.map(toBlockRow));
+  const numberedRows = await applyGeneratedSceneNumbers(productionId, res.rows.map(toBlockRow), resolvedVersionId);
+  const [row] = await attachCharacters(pool, numberedRows);
   return row;
 }
 
@@ -226,28 +354,43 @@ export async function searchBlocks(
   limit         = 20,
 ): Promise<ScriptBlockRow[]> {
   const pool = getScriptEditorPool();
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
-    `${lineNumCTE}
-     SELECT ${selectCols} FROM script s ${joinClause}
-     WHERE s.production_id = $1 AND s.content ILIKE $2
-     ORDER BY o.line_num LIMIT $3`,
-    [productionId, `%${query}%`, limit * (page ? 5 : 1)],
+    resolvedVersionId
+      ? `${versionedBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${versionedJoinClause}
+         WHERE o.content ILIKE $2
+         ORDER BY o.line_num LIMIT $3`
+      : `${legacyBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${legacyJoinClause}
+         WHERE o.content ILIKE $2
+         ORDER BY o.line_num LIMIT $3`,
+    [resolvedVersionId ?? productionId, `%${query}%`, limit * (page ? 5 : 1)],
   );
-  const rows = await attachCharacters(pool, res.rows.map(toBlockRow));
+  const numberedRows = await applyGeneratedSceneNumbers(productionId, res.rows.map(toBlockRow), resolvedVersionId);
+  const rows = await attachCharacters(pool, numberedRows);
 
   if (page === null) return rows;
 
   // Filter by page: compute page map and attach page numbers
-  const pageMap = await getPageMapForProduction(productionId);
+  const pageMap = await getPageMapForProduction(productionId, undefined, resolvedVersionId);
   const withPage = rows.map(r => ({ ...r, pageNum: pageMap[r.id] ?? null }));
   return withPage.filter(r => r.pageNum === page).slice(0, limit);
 }
 
 export async function getBlockCount(productionId: string): Promise<number> {
   const pool = getScriptEditorPool();
+  const versionId = await getActiveVersionId(productionId);
   const res = await pool.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM script WHERE production_id = $1`,
-    [productionId],
+    versionId
+      ? `${VERSION_OWNED_BLOCKS_CTE}
+         SELECT COUNT(*)::text AS count
+         FROM owned_blocks
+         WHERE type NOT IN (${MARKER_TYPES_SQL})`
+      : `SELECT COUNT(*)::text AS count
+         FROM script
+         WHERE production_id = $1 AND type::text NOT IN (${MARKER_TYPES_SQL})`,
+    [versionId ?? productionId],
   );
   return parseInt(res.rows[0].count, 10);
 }
@@ -268,41 +411,63 @@ export async function queryBlocks(
 ): Promise<ScriptBlockRow[]> {
   const pool = getScriptEditorPool();
   const { page, type, scene, rehearsalMark, limit = 30 } = filter;
+  const resolvedVersionId = await getActiveVersionId(productionId);
 
-  const params: unknown[] = [productionId];
+  const params: unknown[] = [resolvedVersionId ?? productionId];
   const conditions: string[] = [];
 
   if (type) {
     const dbType = type === "lyric" ? "lyric" : type;
     params.push(dbType);
-    conditions.push(`s.type = $${params.length}::block_type`);
+    conditions.push(`o.type = $${params.length}`);
   }
-  if (scene) {
-    params.push(`%${scene}%`);
-    const p = params.length;
-    conditions.push(`(sc.name ILIKE $${p} OR sc.num ILIKE $${p})`);
+  const sceneFilter = scene?.toLocaleLowerCase() ?? null;
+  let precomputedSceneNumberMap: Map<string, string> | undefined;
+  if (sceneFilter) {
+    const generatedScenes = await getGeneratedSceneRows(productionId, resolvedVersionId);
+    precomputedSceneNumberMap = sceneNumberMap(generatedScenes);
+    const sceneIds = generatedScenes
+      .filter((s) =>
+        s.name.toLocaleLowerCase().includes(sceneFilter)
+        || s.number.toLocaleLowerCase().includes(sceneFilter)
+      )
+      .map((s) => s.id);
+    if (sceneIds.length === 0) return [];
+    params.push(sceneIds);
+    conditions.push(`o.scene_id = ANY($${params.length}::text[])`);
   }
   if (rehearsalMark) {
     params.push(`%${rehearsalMark}%`);
-    conditions.push(`s.rehearsal_mark ILIKE $${params.length}`);
+    conditions.push(`o.rehearsal_mark ILIKE $${params.length}`);
   }
 
-  const whereExtra = conditions.length ? " AND " + conditions.join(" AND ") : "";
+  const whereExtra = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
   // Overfetch when filtering by page so we have enough candidates after post-filtering
   params.push(page != null ? limit * 15 : limit);
 
   const res = await pool.query<RawBlockRow>(
-    `${lineNumCTE}
-     SELECT ${selectCols} FROM script s ${joinClause}
-     WHERE s.production_id = $1${whereExtra}
+    resolvedVersionId
+      ? `${versionedBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${versionedJoinClause}
+         ${whereExtra}
+         ORDER BY o.line_num LIMIT $${params.length}`
+      : `${legacyBlocksCTE()}
+         SELECT ${selectCols} FROM ordered o ${legacyJoinClause}
+         ${whereExtra}
      ORDER BY o.line_num LIMIT $${params.length}`,
     params,
   );
 
-  const rows = await attachCharacters(pool, res.rows.map(toBlockRow));
-  if (page == null) return rows;
+  const numberedRows = await applyGeneratedSceneNumbers(
+    productionId,
+    res.rows.map(toBlockRow),
+    resolvedVersionId,
+    precomputedSceneNumberMap,
+  );
+  const rows = await attachCharacters(pool, numberedRows);
+  if (page == null) return rows.slice(0, limit);
 
-  const pageMap = await getPageMapForProduction(productionId);
+  const pageMap = await getPageMapForProduction(productionId, undefined, resolvedVersionId);
   return rows
     .map(r => ({ ...r, pageNum: pageMap[r.id] ?? null }))
     .filter(r => r.pageNum === page)
@@ -325,20 +490,15 @@ export type ScriptMetaResult = {
 
 export async function getScriptMeta(productionId: string): Promise<ScriptMetaResult | null> {
   const pool = getScriptEditorPool();
+  const resolvedVersionId = await getActiveVersionId(productionId);
 
   const prodRes = await pool.query<{
     name:          string;
     script_config: Record<string, string> | null;
-    page_map:      Record<string, Record<string, number>> | null;
-    block_count:   string;
-    scene_count:   string;
-    char_count:    string;
   }>(
-    `SELECT p.name, p.script_config, p.page_map,
-       (SELECT COUNT(*) FROM script    WHERE production_id = p.id)::text AS block_count,
-       (SELECT COUNT(*) FROM scene     WHERE production_id = p.id)::text AS scene_count,
-       (SELECT COUNT(*) FROM character WHERE production_id = p.id)::text AS char_count
-     FROM production p WHERE p.id = $1`,
+    `SELECT p.name, p.script_config
+     FROM production p
+     WHERE p.id = $1`,
     [productionId],
   );
   if (prodRes.rowCount === 0) return null;
@@ -347,13 +507,33 @@ export async function getScriptMeta(productionId: string): Promise<ScriptMetaRes
   const layout      = pr.script_config?.pageLayout      ?? "a4";
   const delimOpen   = pr.script_config?.stageDelimOpen  ?? "（";
   const delimClose  = pr.script_config?.stageDelimClose ?? "）";
-  const totalBlocks = parseInt(pr.block_count, 10);
-  const totalScenes = parseInt(pr.scene_count, 10);
-  const totalChars  = parseInt(pr.char_count, 10);
 
-  // Count total pages from cached page map
-  const stored = pr.page_map;
-  const rawMap: Record<string, number> = (stored && stored[layout]) ? stored[layout] : {};
+  const [rawMap, sceneCountRes, charCountRes] = await Promise.all([
+    getPageMapForProduction(productionId, layout, resolvedVersionId),
+    resolvedVersionId
+      ? pool.query<{ count: string }>(
+          "SELECT COUNT(*)::text AS count FROM scene_version WHERE version_id = $1",
+          [resolvedVersionId],
+        )
+      : pool.query<{ count: string }>(
+          "SELECT COUNT(*)::text AS count FROM scene WHERE production_id = $1",
+          [productionId],
+        ),
+    resolvedVersionId
+      ? pool.query<{ count: string }>(
+          "SELECT COUNT(*)::text AS count FROM character_version WHERE version_id = $1",
+          [resolvedVersionId],
+        )
+      : pool.query<{ count: string }>(
+          "SELECT COUNT(*)::text AS count FROM character WHERE production_id = $1",
+          [productionId],
+        ),
+  ]);
+
+  const totalBlocks = Object.keys(rawMap).length;
+  const totalScenes = parseInt(sceneCountRes.rows[0]?.count ?? "0", 10);
+  const totalChars  = parseInt(charCountRes.rows[0]?.count ?? "0", 10);
+
   const totalPages = Object.keys(rawMap).length > 0
     ? Math.max(...Object.values(rawMap))
     : 0;
@@ -382,22 +562,41 @@ export type SceneRow = {
 
 export async function getScenesForProduction(productionId: string): Promise<SceneRow[]> {
   const pool = getScriptEditorPool();
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<{
     id: string; num: string; name: string | null; parent_id: string | null;
     synopsis: string | null; action_line: string | null; music: string | null;
     stage_notes: string | null; expected_duration: number | null; block_count: string;
   }>(
-    `SELECT sc.id, sc.num, sc.name, sc.parent_id,
-            sc.synopsis, sc.action_line, sc.music, sc.stage_notes, sc.expected_duration,
-            COUNT(s.id)::text AS block_count
-     FROM scene sc
-     LEFT JOIN script s ON s.scene_id = sc.id AND s.production_id = $1
-     WHERE sc.production_id = $1
-     GROUP BY sc.id
-     ORDER BY sc.sort_order`,
-    [productionId],
+    resolvedVersionId
+      ? `${VERSION_OWNED_BLOCKS_CTE},
+         text_block_counts AS (
+           SELECT scene_id, COUNT(*)::text AS block_count
+           FROM owned_blocks
+           WHERE type NOT IN (${MARKER_TYPES_SQL})
+           GROUP BY scene_id
+         )
+         SELECT sc.scene_id AS id, sc.num, sc.name, sc.parent_id,
+                sc.synopsis, sc.action_line, sc.music, sc.stage_notes, sc.expected_duration,
+                COALESCE(tbc.block_count, '0') AS block_count
+         FROM scene_version sc
+         LEFT JOIN text_block_counts tbc ON tbc.scene_id = sc.scene_id
+         WHERE sc.version_id = $1
+         ORDER BY sc.sort_order`
+      : `SELECT sc.id, COALESCE(sv.num, '') AS num, sv.name, sv.parent_id,
+                sv.synopsis, sv.action_line, sv.music, sv.stage_notes, sv.expected_duration,
+                COUNT(s.id) FILTER (WHERE s.type::text NOT IN (${MARKER_TYPES_SQL}))::text AS block_count
+         FROM scene sc
+         LEFT JOIN production p ON p.id = sc.production_id
+         LEFT JOIN scene_version sv ON sv.scene_id = sc.id AND sv.version_id = p.active_version_id
+         LEFT JOIN script s ON s.scene_id = sc.id AND s.production_id = $1
+         WHERE sc.production_id = $1
+         GROUP BY sc.id, sv.num, sv.name, sv.parent_id, sv.synopsis, sv.action_line,
+                  sv.music, sv.stage_notes, sv.expected_duration, sv.sort_order
+         ORDER BY COALESCE(sv.sort_order, 0), sc.id`,
+    [resolvedVersionId ?? productionId],
   );
-  return res.rows.map(r => ({
+  const rows: SceneRow[] = res.rows.map(r => ({
     id:               r.id,
     number:           r.num,
     name:             r.name,
@@ -409,6 +608,13 @@ export async function getScenesForProduction(productionId: string): Promise<Scen
     expectedDuration: r.expected_duration,
     blockCount:       parseInt(r.block_count, 10),
   }));
+  const numbered = withGeneratedSceneNumbers(rows.map((r) => ({
+    id: r.id,
+    number: r.number,
+    name: r.name ?? "",
+    parentId: r.parentId,
+  })));
+  return rows.map((row, i) => ({ ...row, number: numbered[i]?.number ?? row.number }));
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────

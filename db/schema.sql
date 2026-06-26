@@ -14,6 +14,10 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'chapter_marker';
+ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'scene_marker';
+ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'rehearsal_marker';
+
 DO $$ BEGIN
   CREATE TYPE version_status AS ENUM ('editing', 'committed', 'frozen', 'archived');
 EXCEPTION WHEN duplicate_object THEN NULL;
@@ -155,6 +159,7 @@ CREATE TABLE IF NOT EXISTS script (
   type           block_type NOT NULL DEFAULT 'dialogue',
   content        TEXT NOT NULL DEFAULT '',
   stage_comment  TEXT,
+  marker_meta    JSONB NOT NULL DEFAULT '{}',
   force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   block_id       TEXT NOT NULL
@@ -162,6 +167,7 @@ CREATE TABLE IF NOT EXISTS script (
 
 ALTER TABLE script ADD COLUMN IF NOT EXISTS force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE script ADD COLUMN IF NOT EXISTS stage_comment TEXT;
+ALTER TABLE script ADD COLUMN IF NOT EXISTS marker_meta JSONB NOT NULL DEFAULT '{}';
 
 CREATE INDEX IF NOT EXISTS script_production_sort_idx ON script(production_id, sort_key);
 
@@ -184,6 +190,7 @@ CREATE TABLE IF NOT EXISTS script_version (
 );
 
 CREATE INDEX IF NOT EXISTS script_version_version_idx ON script_version(version_id, sort_key);
+CREATE UNIQUE INDEX IF NOT EXISTS script_version_version_block_uidx ON script_version(version_id, block_id);
 
 -- ── Block tags ────────────────────────────────────────────────────────────────
 -- tag_group and tag_option have a circular FK; resolved with deferred ALTER TABLE.

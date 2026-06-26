@@ -1,4 +1,5 @@
 import type { Block, Character, Scene, ScriptState } from "./script-types";
+import { isMarkerBlock } from "./script-marker-blocks";
 
 // ─── Op types ─────────────────────────────────────────────────────────────────
 
@@ -90,10 +91,12 @@ export function diffState(
     }
   }
 
-  // Scene reorder detection
-  const retainedPrevScenes = prev.scenes.filter((s) => currSceneIds.has(s.id)).map((s) => s.id);
-  const retainedCurrScenes = curr.scenes.filter((s) => prevSceneMap.has(s.id)).map((s) => s.id);
-  if (retainedPrevScenes.join(",") !== retainedCurrScenes.join(",")) {
+  // Scene reorder detection. Compare the full current scene order, including
+  // inserted scenes, so a newly inserted chapter/scene is persisted at its
+  // local position instead of being appended by the server-side upsert path.
+  const prevSceneOrder = prev.scenes.map((s) => s.id).join(",");
+  const currSceneOrder = curr.scenes.map((s) => s.id).join(",");
+  if (prevSceneOrder !== currSceneOrder) {
     sceneOps.push({ op: "reorder", ids: curr.scenes.map((s) => s.id) });
   }
 
@@ -149,6 +152,14 @@ export type ScriptPermissions = {
   "script:rehearsal_mark": boolean;
 };
 
+function addMarkerPermission(block: Block, needed: Set<keyof ScriptPermissions>): void {
+  if (block.type === "rehearsal_marker") {
+    needed.add("script:rehearsal_mark");
+  } else if (block.type === "chapter_marker" || block.type === "scene_marker") {
+    needed.add("script:metadata");
+  }
+}
+
 /**
  * Returns the set of script permissions required by a patch, given the current
  * server state (needed to diff block updates field-by-field).
@@ -164,13 +175,44 @@ export function requiredPermissions(
   if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("script:metadata");
 
   for (const op of patch.blockOps) {
-    if (op.op === "insert" || op.op === "delete" || op.op === "reorder") {
-      needed.add("script:edit");
+    if (op.op === "insert") {
+      if (isMarkerBlock(op.block)) addMarkerPermission(op.block, needed);
+      else needed.add("script:edit");
       continue;
     }
+    if (op.op === "delete") {
+      const old = prevBlockMap.get(op.id);
+      if (old && isMarkerBlock(old)) addMarkerPermission(old, needed);
+      else needed.add("script:edit");
+      continue;
+    }
+    if (op.op === "reorder") {
+      const nextBlocks = op.ids.map((id) => prevBlockMap.get(id)).filter((block): block is Block => !!block);
+      const prevIndexById = new Map(prevState.blocks.map((block, index) => [block.id, index]));
+      const nextIndexById = new Map(op.ids.map((id, index) => [id, index]));
+      const prevTextOrder = prevState.blocks.filter((block) => !isMarkerBlock(block)).map((block) => block.id).join(",");
+      const nextTextOrder = nextBlocks.filter((block) => !isMarkerBlock(block)).map((block) => block.id).join(",");
+      if (prevTextOrder !== nextTextOrder) needed.add("script:edit");
+      for (const block of nextBlocks) {
+        if (isMarkerBlock(block) && prevIndexById.get(block.id) !== nextIndexById.get(block.id)) {
+          addMarkerPermission(block, needed);
+        }
+      }
+      continue;
+    }
+
     // op === "update" — diff against previous block to see what changed
     const old = prevBlockMap.get(op.block.id);
     if (!old) { needed.add("script:edit"); continue; }
+
+    if (isMarkerBlock(op.block) || isMarkerBlock(old)) {
+      if (op.block.type !== old.type && (!isMarkerBlock(op.block) || !isMarkerBlock(old))) {
+        needed.add("script:edit");
+      }
+      addMarkerPermission(op.block, needed);
+      addMarkerPermission(old, needed);
+      continue;
+    }
 
     if (
       op.block.content !== old.content ||
