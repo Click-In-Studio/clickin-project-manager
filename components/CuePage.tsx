@@ -16,6 +16,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
+import { textBlocksWithMarkerOwnership } from "@/lib/script-marker-blocks";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
 
@@ -843,11 +844,12 @@ function ExportModal({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CuePage({
-  productionId, productionName, blocks, characters, scenes,
+  productionId, productionName, blocks: rawBlocks, characters, scenes,
   cueLists, initialCues, editableListIds, myOpenId, isAdmin, pageMap,
   versions = [], versionId, versionStatus, canManageVersions = false,
 }: Props) {
   const router = useRouter();
+  const blocks = useMemo(() => textBlocksWithMarkerOwnership(rawBlocks), [rawBlocks]);
   const versionIdRef = useRef(versionId);
   useEffect(() => {
     versionIdRef.current = versionId;
@@ -970,7 +972,6 @@ export default function CuePage({
   // Comment panel follows cue selection: auto-open on select, close on deselect
   useEffect(() => {
     if (selection.kind === "cue") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveCommentCueId(selection.cueId);
     } else if (selection.kind === "none") {
       setActiveCommentCueId(null);
@@ -1487,7 +1488,6 @@ export default function CuePage({
   }, [recomputeWindow]);
 
   useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setWindowRange(prev => ({
       start: Math.min(prev.start, Math.max(0, blocks.length - 1)),
       end: Math.min(prev.end, blocks.length),

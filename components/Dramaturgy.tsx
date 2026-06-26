@@ -24,6 +24,10 @@ type Props = {
   initialCharacterId?: string;
 };
 
+function isUpdatingResponse(payload: unknown): payload is { status: "updating" } {
+  return typeof payload === "object" && payload !== null && "status" in payload && payload.status === "updating";
+}
+
 export default function Dramaturgy({
   productionId,
   productionName,
@@ -47,13 +51,16 @@ export default function Dramaturgy({
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
 
   const handleVersionChange = async (versionId: string) => {
-    const [scenesData, charsData] = await Promise.all([
-      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}`).then(r => r.json()),
+    const [scenePayload, charsData] = await Promise.all([
+      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}&includeRehearsalMarks=1`).then(r => r.json()),
       fetch(`${BASE_PATH}/api/production/${productionId}/characters?versionId=${versionId}`).then(r => r.json()),
     ]);
-    setScenes(scenesData);
+    if (isUpdatingResponse(scenePayload) || isUpdatingResponse(charsData)) {
+      return;
+    }
+    setScenes(scenePayload.scenes);
     setCharacters(charsData);
-    setRehearsalMarks({});
+    setRehearsalMarks(scenePayload.rehearsalMarks);
     setCurrentVersionId(versionId);
   };
 
@@ -85,8 +92,8 @@ export default function Dramaturgy({
               </span>
             </div>
             {canImport && tab === "scenes" && (
-              <Link href={`/production/${productionId}/import-scenes`} className="text-xs text-blue-500 hover:underline">
-                导入章节信息
+              <Link href={`/production/${productionId}/import-script`} className="text-xs text-blue-500 hover:underline">
+                导入
               </Link>
             )}
           </div>

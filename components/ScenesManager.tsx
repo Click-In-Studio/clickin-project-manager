@@ -8,6 +8,8 @@ import MountPointAssets from "./assets/MountPointAssets";
 import type { SceneDetail, Version } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
+import { withGeneratedSceneNumbers } from "@/lib/script-generated-labels";
+import { FIXED_INITIAL_CHAPTER_BLOCK_ID } from "@/lib/script-fixed-markers";
 
 type MetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
 
@@ -22,6 +24,10 @@ type Props = {
   versionId?: string | null;
   initialExpandedId?: string;
 };
+
+function isUpdatingResponse(payload: unknown): payload is { status: "updating" } {
+  return typeof payload === "object" && payload !== null && "status" in payload && payload.status === "updating";
+}
 
 function MetaField({
   label,
@@ -87,6 +93,7 @@ function SceneEditRow({
   indent,
   marks,
   canEdit,
+  canDelete,
   productionId,
   versionId,
   initialExpanded,
@@ -98,16 +105,15 @@ function SceneEditRow({
   indent: boolean;
   marks: string[];
   canEdit: boolean;
+  canDelete: boolean;
   productionId: string;
   versionId: string | null;
   initialExpanded?: boolean;
-  onUpdate: (number: string, name: string) => Promise<void>;
+  onUpdate: (name: string) => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<MetaFields>) => Promise<void>;
 }) {
-  const [editingNumber, setEditingNumber] = useState(false);
   const [editingName, setEditingName] = useState(false);
-  const [draftNumber, setDraftNumber] = useState(scene.number);
   const [draftName, setDraftName] = useState(scene.name);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -122,15 +128,13 @@ function SceneEditRow({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (draftNumber !== scene.number && !editingNumber) setDraftNumber(scene.number);
   if (draftName !== scene.name && !editingName) setDraftName(scene.name);
 
-  const commit = async (number: string, name: string) => {
-    setEditingNumber(false);
+  const commit = async (name: string) => {
     setEditingName(false);
-    if (number === scene.number && name === scene.name) return;
+    if (name === scene.name) return;
     setSaving(true);
-    try { await onUpdate(number, name); } finally { setSaving(false); }
+    try { await onUpdate(name); } finally { setSaving(false); }
   };
 
   const del = async () => {
@@ -156,25 +160,9 @@ function SceneEditRow({
         className={`group cursor-pointer border-b ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}`}
       >
         <td className={`py-3 w-24${indent ? " pl-8 pr-4" : " px-4"}`}>
-          {editingNumber ? (
-            <input
-              autoFocus
-              value={draftNumber}
-              onChange={(e) => setDraftNumber(e.target.value)}
-              onBlur={() => commit(draftNumber.trim(), draftName.trim())}
-              onKeyDown={(e) => { if (e.key === "Enter") commit(draftNumber.trim(), draftName.trim()); if (e.key === "Escape") { setDraftNumber(scene.number); setEditingNumber(false); } }}
-              disabled={saving}
-              className="w-full border-b border-zinc-400 text-sm outline-none disabled:opacity-50"
-            />
-          ) : (
-            <span
-              onClick={() => canEdit && setEditingNumber(true)}
-              data-scene-editable={canEdit ? "true" : undefined}
-              className={`text-sm ${indent ? "text-zinc-400" : "font-semibold text-zinc-600"} ${canEdit ? "cursor-text hover:opacity-70" : ""}`}
-            >
-              {scene.number || "—"}
-            </span>
-          )}
+          <span className={`text-sm tabular-nums ${indent ? "text-zinc-400" : "font-semibold text-zinc-600"}`}>
+            {scene.number || "—"}
+          </span>
         </td>
         <td className="px-4 py-3">
           {editingName ? (
@@ -182,8 +170,8 @@ function SceneEditRow({
               autoFocus
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              onBlur={() => commit(draftNumber.trim(), draftName.trim())}
-              onKeyDown={(e) => { if (e.key === "Enter") commit(draftNumber.trim(), draftName.trim()); if (e.key === "Escape") { setDraftName(scene.name); setEditingName(false); } }}
+              onBlur={() => commit(draftName.trim())}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(draftName.trim()); if (e.key === "Escape") { setDraftName(scene.name); setEditingName(false); } }}
               disabled={saving}
               className="w-full border-b border-zinc-400 text-sm text-zinc-800 outline-none disabled:opacity-50"
             />
@@ -210,7 +198,7 @@ function SceneEditRow({
         </td>
         <td className="px-4 py-3 text-right">
           <div className="flex items-center justify-end gap-3">
-            {canEdit && (
+            {canEdit && canDelete && (
               confirmDelete ? (
                 <>
                   <button onClick={del} disabled={deleting} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
@@ -301,30 +289,30 @@ function SceneEditRow({
   );
 }
 
-function AddSceneRow({
-  indent,
-  placeholder,
+function InsertSceneRow({
   colSpan,
-  onAdd,
+  onAddChapter,
+  onAddScene,
 }: {
-  indent: boolean;
-  placeholder: string;
   colSpan: number;
-  onAdd: (number: string, name: string) => Promise<void>;
+  onAddChapter: ((name: string) => Promise<void>) | null;
+  onAddScene: ((name: string) => Promise<void>) | null;
 }) {
-  const [draftNumber, setDraftNumber] = useState("");
+  const [open, setOpen] = useState<"chapter" | "scene" | null>(null);
   const [draftName, setDraftName] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async () => {
-    if (!draftNumber.trim() && !draftName.trim()) return;
+  const submit = async (kind: "chapter" | "scene") => {
+    if (!draftName.trim()) return;
+    const handler = kind === "chapter" ? onAddChapter : onAddScene;
+    if (!handler) return;
     setAdding(true);
     setError(null);
     try {
-      await onAdd(draftNumber.trim(), draftName.trim());
-      setDraftNumber("");
+      await handler(draftName.trim());
       setDraftName("");
+      setOpen(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "添加失败");
     } finally {
@@ -334,33 +322,57 @@ function AddSceneRow({
 
   return (
     <>
-      <tr className={indent ? "bg-zinc-50/40" : ""}>
-        <td className={`pb-2 w-24${indent ? " pl-8 pr-4" : " px-4"}`}>
-          <input
-            value={draftNumber}
-            onChange={(e) => { setDraftNumber(e.target.value); setError(null); }}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            placeholder="编号"
-            className="w-full text-sm text-zinc-700 outline-none placeholder:text-zinc-300 border-b border-zinc-200 focus:border-zinc-400"
-          />
-        </td>
-        <td className="px-4 pb-2">
-          <input
-            value={draftName}
-            onChange={(e) => { setDraftName(e.target.value); setError(null); }}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            placeholder={placeholder}
-            className="w-full text-sm text-zinc-700 outline-none placeholder:text-zinc-300 border-b border-zinc-200 focus:border-zinc-400"
-          />
-        </td>
-        <td colSpan={colSpan - 2} className="px-4 pb-2 text-right">
-          <button
-            onClick={submit}
-            disabled={(!draftNumber.trim() && !draftName.trim()) || adding}
-            className="text-xs text-zinc-400 hover:text-zinc-700 disabled:opacity-30 transition-colors"
-          >
-            {adding ? "…" : "+ 添加"}
-          </button>
+      <tr className="group border-b border-zinc-50">
+        <td colSpan={colSpan} className="px-4 py-1">
+          <div className="relative flex justify-center">
+            {!open ? (
+              <button
+                onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
+                className="flex h-5 w-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-xs leading-none text-zinc-300 opacity-0 shadow-sm transition-all hover:border-zinc-300 hover:text-zinc-600 group-hover:opacity-100"
+                aria-label="添加章节或场景"
+              >
+                +
+              </button>
+            ) : (
+              <div className="flex w-full items-center gap-2 rounded border border-zinc-200 bg-white px-2 py-1 shadow-sm">
+                <input
+                  autoFocus
+                  value={draftName}
+                  onChange={(e) => { setDraftName(e.target.value); setError(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submit(open);
+                    if (e.key === "Escape") { setOpen(null); setDraftName(""); setError(null); }
+                  }}
+                  placeholder={open === "chapter" ? "新章节名称" : "新场景名称"}
+                  className="min-w-0 flex-1 text-sm text-zinc-700 outline-none placeholder:text-zinc-300"
+                />
+                {onAddChapter && (
+                  <button
+                    onClick={() => open === "chapter" ? submit("chapter") : setOpen("chapter")}
+                    disabled={adding || (open === "chapter" && !draftName.trim())}
+                    className={`rounded px-2 py-1 text-xs transition-colors disabled:opacity-30 ${open === "chapter" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-100"}`}
+                  >
+                    添加章节
+                  </button>
+                )}
+                {onAddScene && (
+                  <button
+                    onClick={() => open === "scene" ? submit("scene") : setOpen("scene")}
+                    disabled={adding || (open === "scene" && !draftName.trim())}
+                    className={`rounded px-2 py-1 text-xs transition-colors disabled:opacity-30 ${open === "scene" ? "bg-blue-600 text-white" : "text-zinc-500 hover:bg-zinc-100"}`}
+                  >
+                    添加场景
+                  </button>
+                )}
+                <button
+                  onClick={() => { setOpen(null); setDraftName(""); setError(null); }}
+                  className="rounded px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                >
+                  取消
+                </button>
+              </div>
+            )}
+          </div>
         </td>
       </tr>
       {error && (
@@ -379,44 +391,70 @@ export default function ScenesManager({ productionId, productionName, initialSce
   const effectiveCanEdit = canEdit && (!currentVersionId || !currentVersion || currentVersion.status === "editing" || currentVersion.status === "committed");
 
   const handleVersionChange = async (vId: string) => {
-    const data: SceneDetail[] = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${vId}`).then(r => r.json());
-    setScenes(data);
-    setMarksMap({});
+    const data: { scenes: SceneDetail[]; rehearsalMarks: Record<string, string[]> } =
+      await fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${vId}&includeRehearsalMarks=1`).then(r => r.json());
+    if (isUpdatingResponse(data)) {
+      return;
+    }
+    setScenes(data.scenes);
+    setMarksMap(data.rehearsalMarks);
     setCurrentVersionId(vId);
   };
 
-  const update = async (id: string, number: string, name: string) => {
-    await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+  const update = async (id: string, name: string) => {
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ number, name }),
+      body: JSON.stringify(currentVersionId ? { name, versionId: currentVersionId } : { name }),
     });
-    setScenes((prev) => prev.map((s) => s.id === id ? { ...s, number, name } : s));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+    setScenes((prev) => withGeneratedSceneNumbers(prev.map((s) => s.id === id ? { ...s, name } : s)));
   };
 
   const patchMeta = async (id: string, fields: Partial<MetaFields>) => {
-    await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(currentVersionId ? { ...fields, versionId: currentVersionId } : fields),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
     setScenes((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s));
   };
 
   const del = async (id: string) => {
-    await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, { method: "DELETE" });
-    setScenes((prev) => prev.filter((s) => s.id !== id && s.parentId !== id));
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentVersionId ? { versionId: currentVersionId } : {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败");
+    setScenes((prev) => withGeneratedSceneNumbers(prev.filter((s) => s.id !== id && s.parentId !== id)));
   };
 
-  const add = async (number: string, name: string, parentId: string | null) => {
+  const add = async (name: string, parentId: string | null, target?: { insertBeforeSceneId?: string; insertAfterSceneId?: string }) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ number, name, parentId }),
+      body: JSON.stringify(currentVersionId ? { name, parentId, versionId: currentVersionId, ...target } : { name, parentId, ...target }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "添加失败");
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "添加失败");
     setScenes((prev) => {
+      const beforeIndex = target?.insertBeforeSceneId ? prev.findIndex((s) => s.id === target.insertBeforeSceneId) : -1;
+      const afterIndex = target?.insertAfterSceneId ? prev.findIndex((s) => s.id === target.insertAfterSceneId) : -1;
+      if (beforeIndex >= 0) {
+        const next = [...prev];
+        next.splice(beforeIndex, 0, data.scene);
+        return withGeneratedSceneNumbers(next);
+      }
+      if (afterIndex >= 0) {
+        const next = [...prev];
+        next.splice(afterIndex + 1, 0, data.scene);
+        return withGeneratedSceneNumbers(next);
+      }
       if (parentId) {
         let insertAfter = prev.findIndex((s) => s.id === parentId);
         for (let i = insertAfter + 1; i < prev.length; i++) {
@@ -425,9 +463,9 @@ export default function ScenesManager({ productionId, productionName, initialSce
         }
         const next = [...prev];
         next.splice(insertAfter + 1, 0, data.scene);
-        return next;
+        return withGeneratedSceneNumbers(next);
       }
-      return [...prev, data.scene];
+      return withGeneratedSceneNumbers([...prev, data.scene]);
     });
   };
 
@@ -439,7 +477,20 @@ export default function ScenesManager({ productionId, productionName, initialSce
   const card = (
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
           {acts.length === 0 && orphans.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>
+            <div>
+              <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>
+              {effectiveCanEdit && (
+                <table className="w-full border-t border-zinc-100">
+                  <tbody>
+                    <InsertSceneRow
+                      colSpan={colSpan}
+                      onAddChapter={(name) => add(name, null)}
+                      onAddScene={null}
+                    />
+                  </tbody>
+                </table>
+              )}
+            </div>
           ) : (
             <table className="w-full">
               <thead>
@@ -451,6 +502,13 @@ export default function ScenesManager({ productionId, productionName, initialSce
                 </tr>
               </thead>
               <tbody>
+                {effectiveCanEdit && (
+                  <InsertSceneRow
+                    colSpan={colSpan}
+                    onAddChapter={(name) => add(name, null, acts[0] ? { insertBeforeSceneId: acts[0].id } : undefined)}
+                    onAddScene={null}
+                  />
+                )}
                 {acts.map((act) => {
                   const children = subScenes(act.id);
                   const actMarkList: string[] = [];
@@ -464,36 +522,45 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         indent={false}
                         marks={actMarkList}
                         canEdit={effectiveCanEdit}
+                        canDelete={act.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID}
                         productionId={productionId}
                         versionId={currentVersionId}
                         initialExpanded={act.id === initialExpandedId}
-                        onUpdate={(number, name) => update(act.id, number, name)}
+                        onUpdate={(name) => update(act.id, name)}
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
                       />
-                      {children.map((sub) => (
-                        <SceneEditRow
-                          key={sub.id}
-                          scene={sub}
-                          indent={true}
-                          marks={marksMap[sub.id] ?? []}
-                          canEdit={effectiveCanEdit}
-                          productionId={productionId}
-                          versionId={currentVersionId}
-                          initialExpanded={sub.id === initialExpandedId}
-                          onUpdate={(number, name) => update(sub.id, number, name)}
-                          onDelete={() => del(sub.id)}
-                          onPatchMeta={(fields) => patchMeta(sub.id, fields)}
-                        />
-                      ))}
                       {effectiveCanEdit && (
-                        <AddSceneRow
-                          indent={true}
-                          placeholder={`在「${act.number || act.name}」下添加场景…`}
+                        <InsertSceneRow
                           colSpan={colSpan}
-                          onAdd={(number, name) => add(number, name, act.id)}
+                          onAddChapter={(name) => add(name, null, { insertAfterSceneId: act.id })}
+                          onAddScene={(name) => add(name, act.id, children[0] ? { insertBeforeSceneId: children[0].id } : { insertAfterSceneId: act.id })}
                         />
                       )}
+                      {children.map((sub, childIndex) => (
+                        <React.Fragment key={sub.id}>
+                          <SceneEditRow
+                            scene={sub}
+                            indent={true}
+                            marks={marksMap[sub.id] ?? []}
+                            canEdit={effectiveCanEdit}
+                            canDelete={sub.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID}
+                            productionId={productionId}
+                            versionId={currentVersionId}
+                            initialExpanded={sub.id === initialExpandedId}
+                            onUpdate={(name) => update(sub.id, name)}
+                            onDelete={() => del(sub.id)}
+                            onPatchMeta={(fields) => patchMeta(sub.id, fields)}
+                          />
+                          {effectiveCanEdit && (
+                            <InsertSceneRow
+                              colSpan={colSpan}
+                              onAddChapter={(name) => add(name, null, { insertAfterSceneId: sub.id })}
+                              onAddScene={(name) => add(name, act.id, children[childIndex + 1] ? { insertBeforeSceneId: children[childIndex + 1].id } : { insertAfterSceneId: sub.id })}
+                            />
+                          )}
+                        </React.Fragment>
+                      ))}
                     </React.Fragment>
                   );
                 })}
@@ -504,10 +571,11 @@ export default function ScenesManager({ productionId, productionName, initialSce
                     indent={false}
                     marks={marksMap[s.id] ?? []}
                     canEdit={effectiveCanEdit}
+                    canDelete={s.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID}
                     productionId={productionId}
                     versionId={currentVersionId}
                     initialExpanded={s.id === initialExpandedId}
-                    onUpdate={(number, name) => update(s.id, number, name)}
+                    onUpdate={(name) => update(s.id, name)}
                     onDelete={() => del(s.id)}
                     onPatchMeta={(fields) => patchMeta(s.id, fields)}
                   />
@@ -516,20 +584,6 @@ export default function ScenesManager({ productionId, productionName, initialSce
             </table>
           )}
 
-          {effectiveCanEdit && (
-            <div className="border-t border-zinc-100">
-              <table className="w-full">
-                <tbody>
-                  <AddSceneRow
-                    indent={false}
-                    placeholder="添加幕…"
-                    colSpan={colSpan}
-                    onAdd={(number, name) => add(number, name, null)}
-                  />
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
   );
 

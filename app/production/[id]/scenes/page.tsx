@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "场景" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listProductionScenes, listRehearsalMarksByScene, listVersions, listScenesByVersion, listRehearsalMarksByVersion } from "@/lib/db";
+import { getProductionMemberContext, getProductionName, listProductionScenes, listRehearsalMarksByScene, listVersions, listScenesByVersion, listRehearsalMarksByVersion, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import ScenesManager from "@/components/ScenesManager";
 
@@ -28,13 +28,20 @@ export default async function ScenesPage({
   const [name, versions] = await Promise.all([getProductionName(id), listVersions(id)]);
   if (!name) redirect("/");
 
-  const resolvedVersionId = cookieVersionId
+  const validCookieVersionId = cookieVersionId && versions.some(v => v.id === cookieVersionId)
+    ? cookieVersionId
+    : null;
+  const resolvedVersionId = validCookieVersionId
     ?? versions.find(v => v.status === "editing")?.id
     ?? versions[0]?.id
     ?? null;
 
   const [scenes, rehearsalMarks] = resolvedVersionId
-    ? await Promise.all([listScenesByVersion(resolvedVersionId), listRehearsalMarksByVersion(resolvedVersionId)])
+    ? await (async () => {
+        const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+        if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
+        return Promise.all([listScenesByVersion(resolvedVersionId), listRehearsalMarksByVersion(resolvedVersionId)]);
+      })()
     : await Promise.all([listProductionScenes(id), listRehearsalMarksByScene(id)]);
 
   return (

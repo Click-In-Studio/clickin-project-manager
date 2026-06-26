@@ -1,17 +1,29 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, updateSceneMetadata, getActiveVersionId,
-  loadProduction, applyPatchToDB,
+  getProductionMemberContext, getActiveVersionId,
+  loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/roles";
+import { FIXED_INITIAL_CHAPTER_BLOCK_ID } from "@/lib/script-fixed-markers";
+import { isMarkerBlock } from "@/lib/script-marker-blocks";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
   const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   return { session, memberRoles, overrides, isArchived };
+}
+
+async function resolveProductionVersion(productionId: string, requestedVersionId?: unknown) {
+  const versionId = ((typeof requestedVersionId === "string" && requestedVersionId) ? requestedVersionId : await getActiveVersionId(productionId)) ?? "";
+  if (!versionId) return { error: Response.json({ error: "无可用版本" }, { status: 404 }) };
+  const version = await getVersion(versionId);
+  if (!version || version.productionId !== productionId) {
+    return { error: Response.json({ error: "版本不存在" }, { status: 404 }) };
+  }
+  return { versionId };
 }
 
 const METADATA_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const;
@@ -27,38 +39,41 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
   const body = await req.json();
 
-  // Handle number/name through the DB
-  const hasStructural = "number" in body || "name" in body;
-  if (hasStructural) {
-    const versionId = await getActiveVersionId(id) ?? '';
-    if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
-
-    const result = await loadProduction(id, versionId);
-    const scene = result?.state.scenes.find((s) => s.id === sceneId);
-    if (!scene) return Response.json({ error: "未找到章节" }, { status: 404 });
-
-    const updated = {
-      ...scene,
-      number: typeof body.number === "string" ? body.number.trim() : scene.number,
-      name:   typeof body.name   === "string" ? body.name.trim()   : scene.name,
-    };
-    await applyPatchToDB(id, versionId, {
-      clientSeq: 0, blockOps: [], charOps: [],
-      sceneOps: [{ op: "upsert", scene: updated }],
-    });
-    tickAndBroadcastSeq(id, versionId);
+  const resolved = await resolveProductionVersion(id, body.versionId);
+  if (resolved.error) return resolved.error;
+  const { versionId } = resolved;
+  const migration = await ensureScriptMarkerMigration(versionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
   }
 
-  // Handle metadata fields — write to scene_version (requires version context)
+  const result = await loadProduction(id, versionId);
+  if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
+  const marker = result.state.blocks.find((block) => (
+    isMarkerBlock(block) &&
+    block.type !== "rehearsal_marker" &&
+    block.id === sceneId
+  ));
+  if (!marker) return Response.json({ error: "未找到章节" }, { status: 404 });
+
+  const markerMeta = { ...(marker.markerMeta ?? {}) };
+  if (typeof body.number === "string") markerMeta.number = body.number.trim();
+  if (typeof body.name === "string") markerMeta.name = body.name.trim();
+
   const metaFields: Record<string, string> = {};
   for (const key of METADATA_KEYS) {
     if (key in body && typeof body[key] === "string") metaFields[key] = body[key];
   }
-  if (Object.keys(metaFields).length > 0) {
-    const metaVersionId = (typeof body.versionId === "string" && body.versionId)
-      ? body.versionId
-      : (await getActiveVersionId(id) ?? "");
-    if (metaVersionId) await updateSceneMetadata(sceneId, metaVersionId, metaFields);
+  Object.assign(markerMeta, metaFields);
+
+  if ("number" in body || "name" in body || Object.keys(metaFields).length > 0) {
+    await applyPatchToDB(id, versionId, {
+      clientSeq: 0,
+      blockOps: [{ op: "update", block: { ...marker, markerMeta } }],
+      charOps: [],
+      sceneOps: [],
+    });
+    tickAndBroadcastSeq(id, versionId);
   }
 
   return Response.json({ ok: true });
@@ -72,13 +87,39 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/producti
   if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
+  if (sceneId === FIXED_INITIAL_CHAPTER_BLOCK_ID) {
+    return Response.json({ error: "开场章节不可删除" }, { status: 400 });
+  }
 
-  const versionId = await getActiveVersionId(id) ?? '';
-  if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
+  const body = _req.method === "DELETE" ? await _req.json().catch(() => ({})) : {};
+  const resolved = await resolveProductionVersion(id, body.versionId);
+  if (resolved.error) return resolved.error;
+  const { versionId } = resolved;
+  const migration = await ensureScriptMarkerMigration(versionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
+  }
+
+  const result = await loadProduction(id, versionId);
+  if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
+  const removedSceneIds = new Set([
+    sceneId,
+    ...result.state.scenes.filter((scene) => scene.parentId === sceneId).map((scene) => scene.id),
+  ]);
+  const blockOps = result.state.blocks
+    .filter((block) => (
+      isMarkerBlock(block) &&
+      block.type !== "rehearsal_marker" &&
+      block.sceneId !== null &&
+      removedSceneIds.has(block.sceneId)
+    ))
+    .map((block) => ({ op: "delete" as const, id: block.id }));
 
   await applyPatchToDB(id, versionId, {
-    clientSeq: 0, blockOps: [], charOps: [],
-    sceneOps: [{ op: "delete", id: sceneId }],
+    clientSeq: 0,
+    blockOps,
+    charOps: [],
+    sceneOps: [],
   });
   tickAndBroadcastSeq(id, versionId);
   return Response.json({ ok: true });

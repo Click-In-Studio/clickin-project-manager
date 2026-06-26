@@ -17,6 +17,10 @@ type Props = {
   versionId?: string | null;
 };
 
+function isUpdatingResponse(payload: unknown): payload is { status: "updating" } {
+  return typeof payload === "object" && payload !== null && "status" in payload && payload.status === "updating";
+}
+
 function Field({
   label,
   value,
@@ -88,11 +92,13 @@ export default function SceneDetailView({ productionId, productionName, scene, c
   if (lastSeenName !== scene.name) { setLastSeenName(scene.name); setName(scene.name); }
 
   const patchScene = async (body: Record<string, string>) => {
-    await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${scene.id}`, {
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${scene.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(versionId ? { ...body, versionId } : body),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
   };
 
   const saveIdentity = async () => {
@@ -105,7 +111,13 @@ export default function SceneDetailView({ productionId, productionName, scene, c
   const del = async () => {
     setDeleting(true);
     try {
-      await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${scene.id}`, { method: "DELETE" });
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${scene.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { versionId } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败");
       router.push(`/production/${productionId}/scenes`);
     } finally { setDeleting(false); }
   };
