@@ -97,6 +97,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const [scriptPreview, setScriptPreview] = useState<ImportScriptPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [commitLoading, setCommitLoading] = useState(false);
+  const [pendingCommitConfirmation, setPendingCommitConfirmation] = useState(false);
   const [commitResult, setCommitResult] = useState<{ importedScenes: number; blocksImported: number; charsAdded: number; sceneSummary: SceneSummaryItem[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -599,7 +600,12 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     const scriptColMap = buildScriptColMap();
     if (!scriptColMap || !scriptSheet || !scriptWorkbook) return;
     if (!skipDramaturgy && (!sceneColMap || !dramSheet || !dramWorkbook)) return;
-    if (!window.confirm(skipDramaturgy ? "将从剧本段落推断构作，并覆盖当前版本的构作与剧本。确认继续？" : "将同时导入章节信息和剧本内容，并覆盖当前版本的构作与剧本。确认继续？")) return;
+    setPendingCommitConfirmation(true);
+  }
+
+  async function commitImport() {
+    const scriptColMap = buildScriptColMap();
+    if (!scriptColMap || !scriptSheet || !scriptWorkbook) return;
     setCommitLoading(true);
     setError(null);
     const characterKinds: Record<string, "normal" | "aggregate"> = {};
@@ -1485,6 +1491,45 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
             <button onClick={handleCommit} disabled={commitLoading} className="px-4 py-2 border border-red-600 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50">{commitLoading ? "导入中…" : "确认导入"}</button>
+          </div>
+        </div>
+      )}
+
+      {pendingCommitConfirmation && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPendingCommitConfirmation(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-[380px] rounded-2xl bg-white p-5 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-800">确认继续操作？</h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-500">
+              {skipDramaturgy
+                ? "将从剧本中推断章节信息，并覆盖当前版本。\n所有在当前剧本和构作中未保存的更新将会丢失。\n确认继续？"
+                : "将同时导入章节信息和剧本内容，并覆盖当前版本。\n所有在当前剧本和构作中未保存的更新将会丢失。\n确认继续？"}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPendingCommitConfirmation(false)}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={(e) => {
+                  (e.currentTarget as HTMLButtonElement).disabled = true;
+                  setPendingCommitConfirmation(false);
+                  void commitImport();
+                }}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+              >
+                确认
+              </button>
+            </div>
           </div>
         </div>
       )}

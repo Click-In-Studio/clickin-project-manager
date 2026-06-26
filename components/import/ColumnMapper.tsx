@@ -80,7 +80,7 @@ export default function ColumnMapper({ sheetData, columns, mapping, onChange, sh
                 onChange(col.key, val === "" ? null : parseInt(val));
               }}
             >
-              <option value="">{col.required ? "请选择" : "不导入"}</option>
+              <option value="">{col.required ? "请选择" : "【不导入】"}</option>
               {options.map(o => (
                 <option key={o.idx} value={o.idx}>{o.label}</option>
               ))}

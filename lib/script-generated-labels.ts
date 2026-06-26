@@ -14,17 +14,19 @@ export function toAlphaLabel(index: number): string {
 export function withGeneratedSceneNumbers<T extends Scene>(scenes: T[]): T[] {
   let changed = false;
   let chapterIndex = 0;
+  const chapterCount = scenes.reduce((count, scene) => scene.parentId === null ? count + 1 : count, 0);
+  const chapterWidth = String(Math.max(0, chapterCount - 1)).length;
   const sceneIndexByChapterId = new Map<string, number>();
   const numberById = new Map<string, string>();
 
   const next = scenes.map((scene) => {
     let generatedNumber: string;
     if (scene.parentId === null) {
-      generatedNumber = String(chapterIndex);
+      generatedNumber = String(chapterIndex).padStart(chapterWidth, "0");
       chapterIndex++;
       sceneIndexByChapterId.set(scene.id, 0);
     } else {
-      const chapterNumber = numberById.get(scene.parentId) ?? "0";
+      const chapterNumber = numberById.get(scene.parentId) ?? "0".padStart(chapterWidth, "0");
       const sceneIndex = (sceneIndexByChapterId.get(scene.parentId) ?? 0) + 1;
       sceneIndexByChapterId.set(scene.parentId, sceneIndex);
       generatedNumber = `${chapterNumber}-${sceneIndex}`;
