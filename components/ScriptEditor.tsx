@@ -216,6 +216,11 @@ type PendingStageDelimiterChange = {
   open: string;
   close: string;
 };
+type EmptyScriptCleanupTarget = {
+  id: string;
+  label: string;
+  kind: "chapter" | "scene";
+};
 type PendingAggregateFocusPrompt = {
   characterId: string;
   aggregateIds: string[];
@@ -356,6 +361,8 @@ const isBlockEmptyForDelete = (block: Block) =>
   !(block.stageComment ?? "").trim() &&
   block.characterIds.length === 0 &&
   Object.values(block.characterAnnotations).every((ann) => ann.trim() === "");
+
+const isEmptyTextBlock = (block: Block) => isTextBlock(block) && isBlockEmptyForDelete(block);
 
 // ─── contenteditable helpers ─────────────────────────────────────────────────
 
@@ -4332,6 +4339,67 @@ function isOnlyTextBlockInMarkerSegment(blocks: Block[], index: number): boolean
   return textCount === 1;
 }
 
+function analyzeEmptyScriptCleanup(blocks: Block[], scenes: Scene[]): EmptyScriptCleanupTarget[] {
+  const textCountsBySceneId = new Map<string, number>();
+  let currentSceneId: string | null = null;
+
+  for (const block of blocks) {
+    if (block.type === "chapter_marker") {
+      currentSceneId = block.sceneId;
+      continue;
+    }
+    if (block.type === "scene_marker") {
+      currentSceneId = block.sceneId;
+      continue;
+    }
+    if (isMarkerBlock(block)) continue;
+    if (isEmptyTextBlock(block)) {
+      continue;
+    }
+    if (!currentSceneId) continue;
+    textCountsBySceneId.set(currentSceneId, (textCountsBySceneId.get(currentSceneId) ?? 0) + 1);
+  }
+
+  const removableSceneIds = new Set<string>();
+  const removableChapterIds = new Set<string>();
+  const childSceneIdsByChapter = new Map<string, string[]>();
+  for (const scene of scenes) {
+    if (!scene.parentId) continue;
+    const childIds = childSceneIdsByChapter.get(scene.parentId);
+    if (childIds) childIds.push(scene.id);
+    else childSceneIdsByChapter.set(scene.parentId, [scene.id]);
+  }
+
+  for (const block of blocks) {
+    if (block.type !== "scene_marker" || !block.sceneId) continue;
+    if ((textCountsBySceneId.get(block.sceneId) ?? 0) > 0) continue;
+    removableSceneIds.add(block.sceneId);
+  }
+
+  for (const block of blocks) {
+    if (block.type !== "chapter_marker" || !block.sceneId) continue;
+    if (block.id === FIXED_INITIAL_CHAPTER_BLOCK_ID) continue;
+    const chapterHasOwnText = (textCountsBySceneId.get(block.sceneId) ?? 0) > 0;
+    const chapterHasRemainingScene = (childSceneIdsByChapter.get(block.sceneId) ?? [])
+      .some((sceneId) => !removableSceneIds.has(sceneId));
+    if (chapterHasOwnText || chapterHasRemainingScene) continue;
+    removableChapterIds.add(block.sceneId);
+  }
+
+  return scenes
+    .filter((scene) => removableChapterIds.has(scene.id) || removableSceneIds.has(scene.id))
+    .map((scene) => {
+      const kind = scene.parentId === null ? "chapter" : "scene";
+      const label = [scene.number.trim(), scene.name.trim()].filter(Boolean).join(" ") ||
+        (kind === "chapter" ? "未命名章节" : "未命名段落");
+      return {
+        id: scene.id,
+        label,
+        kind,
+      };
+    });
+}
+
 function findTocSceneBlockIndex(sceneId: string, scenes: Scene[], blocks: Block[]): number {
   const directIdx = blocks.findIndex((block) => block.sceneId === sceneId);
   if (directIdx >= 0) return directIdx;
@@ -6071,6 +6139,8 @@ export default function ScriptEditor({
   const [dismissActionToken, setDismissActionToken] = useState(0);
   const [pendingLargeSelectionConfirmation, setPendingLargeSelectionConfirmation] =
     useState<PendingLargeSelectionConfirmation | null>(null);
+  const [pendingEmptyScriptCleanup, setPendingEmptyScriptCleanup] =
+    useState<EmptyScriptCleanupTarget[] | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
@@ -8588,6 +8658,90 @@ export default function ScriptEditor({
     }
   }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
 
+  const requestEmptyScriptCleanup = useCallback(() => {
+    if (isLockedMode || !canEditText) return;
+    if (!blocksRef.current.some(isEmptyTextBlock)) {
+      showReorderNotice("没有可清除的空白剧本块。");
+      setOpenMenu(null);
+      return;
+    }
+    setPendingEmptyScriptCleanup(analyzeEmptyScriptCleanup(blocksRef.current, scenesRef.current));
+    setOpenMenu(null);
+  }, [canEditText, isLockedMode, showReorderNotice]);
+
+  const applyEmptyScriptCleanup = useCallback((removeEmptySections: boolean) => {
+    if (isLockedMode || !canEditText) return;
+    const currentBlocks = blocksRef.current;
+    const emptyTextBlockIds = currentBlocks
+      .filter(isEmptyTextBlock)
+      .map((block) => block.id);
+    if (emptyTextBlockIds.length === 0) {
+      setPendingEmptyScriptCleanup(null);
+      return;
+    }
+
+    if (!removeEmptySections) {
+      setPendingEmptyScriptCleanup(null);
+      deleteBlocks(emptyTextBlockIds);
+      showReorderNotice("已清除空白剧本块。");
+      return;
+    }
+
+    if (!pendingEmptyScriptCleanup) return;
+    const removableSectionIds = new Set(pendingEmptyScriptCleanup.map((target) => target.id));
+    const deleteBlockIds = new Set<string>(emptyTextBlockIds);
+    const markersToRepair = new Set<string>();
+    let currentSceneId: string | null = null;
+    let currentMarkerId: string | null = null;
+    for (const block of currentBlocks) {
+      if (block.type === "chapter_marker") {
+        currentSceneId = block.sceneId;
+        currentMarkerId = block.id;
+        if (
+          block.sceneId &&
+          removableSectionIds.has(block.sceneId) &&
+          block.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID
+        ) {
+          deleteBlockIds.add(block.id);
+        }
+        continue;
+      }
+      if (block.type === "scene_marker") {
+        currentSceneId = block.sceneId;
+        currentMarkerId = block.id;
+        if (block.sceneId && removableSectionIds.has(block.sceneId)) {
+          deleteBlockIds.add(block.id);
+        }
+        continue;
+      }
+      if (currentSceneId && removableSectionIds.has(currentSceneId)) {
+        deleteBlockIds.add(block.id);
+      } else if (currentMarkerId && isEmptyTextBlock(block)) {
+        markersToRepair.add(currentMarkerId);
+      }
+    }
+
+    const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
+    const remainingScenes = scenesRef.current.filter((scene) => !removableSectionIds.has(scene.id));
+    const repairedBlocks = repairEmptyMarkerSegments(remainingBlocks, markersToRepair);
+    const normalized = normalizeScriptMarkerInvariants(
+      repairedBlocks.length > 0 ? repairedBlocks : [makeBlock()],
+      remainingScenes
+    );
+
+    saveSnapshot();
+    markOwnershipDirty("full");
+    resetScriptInteractions();
+    setPendingEmptyScriptCleanup(null);
+    setBlocks(normalized.blocks);
+    setScenes(normalized.scenes);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(
+      prev.filter((scene) => !removableSectionIds.has(scene.id)),
+      normalized.scenes
+    ));
+    showReorderNotice("已清除所有空白内容。");
+  }, [canEditText, deleteBlocks, isLockedMode, markOwnershipDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, showReorderNotice]);
+
   const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
     const index = blockIndexByIdRef.current.get(id);
     if (index === undefined) return false;
@@ -9319,9 +9473,15 @@ export default function ScriptEditor({
                         >
                           标签设置…
                         </button>
+                        <div className="my-1 border-t border-zinc-50" />
+                        <button
+                          onClick={requestEmptyScriptCleanup}
+                          className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                        >
+                          清除所有空白内容
+                        </button>
                         {canImport && (
                           <>
-                            <div className="my-1 border-t border-zinc-50" />
                             <Link
                               href={`/production/${productionId}/import-script`}
                               onNavigate={prepareForNavigation}
@@ -10848,6 +11008,71 @@ export default function ScriptEditor({
               >
                 确认
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingEmptyScriptCleanup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPendingEmptyScriptCleanup(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-[520px] max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-5 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-800">确认清除空白内容？</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              如选择清除所有空白内容，以下空章节和空段落将被移除：
+            </p>
+            {pendingEmptyScriptCleanup.length > 0 ? (
+              <div className="mt-3 max-h-52 overflow-y-auto rounded-xl border border-zinc-100 bg-zinc-50/60">
+                {pendingEmptyScriptCleanup.map((target) => (
+                  <div
+                    key={`${target.kind}:${target.id}`}
+                    className={`flex items-center gap-2 border-b border-[#91a8ca]/20 px-3 py-2 text-sm last:border-0 ${
+                      target.kind === "chapter" ? "bg-[#eef3fa]" : ""
+                    }`}
+                  >
+                    <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[11px] text-[#637ca1]">
+                      {target.kind === "chapter" ? "章节" : "段落"}
+                    </span>
+                    <span className="min-w-0 truncate text-zinc-700">{target.label}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2 text-sm text-zinc-500">
+                无空章节或空段落会被移除。
+              </p>
+            )}
+            <p className="mt-3 text-sm leading-6 text-zinc-500">
+              如需保留以上章节和段落，仅清除所有空白的剧本块，请选择“仅清除空白剧本块”。
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              <button
+                onClick={() => setPendingEmptyScriptCleanup(null)}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  onClick={() => applyEmptyScriptCleanup(false)}
+                  className="rounded bg-[#637ca1] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#536b8e]"
+                >
+                  仅清除空白剧本块
+                </button>
+                <button
+                  onClick={() => applyEmptyScriptCleanup(true)}
+                  className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800"
+                >
+                  清除所有空白内容
+                </button>
+              </div>
             </div>
           </div>
         </div>
