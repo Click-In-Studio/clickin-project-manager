@@ -24,7 +24,8 @@ export default function SheetPicker({ onSelect, onLoaded, disabled = false, init
   const [spreadsheetToken, setSpreadsheetToken] = useState<string | null>(initialSpreadsheetToken);
   const [sheets, setSheets] = useState<SheetMeta[]>(initialSheets);
   const [selectingSheetId, setSelectingSheetId] = useState<string | null>(null);
-  const effectiveDisabled = disabled || loading;
+  const selectingSheet = selectingSheetId !== null;
+  const effectiveDisabled = disabled || loading || selectingSheet;
 
   useEffect(() => {
     setUrl(initialUrl);
@@ -100,19 +101,18 @@ export default function SheetPicker({ onSelect, onLoaded, disabled = false, init
                 key={sheet.sheetId}
                 onClick={() => handleSheetSelect(sheet)}
                 disabled={effectiveDisabled}
-                className="w-full text-left px-3 py-2 rounded border border-gray-200 hover:bg-blue-50 hover:border-blue-300 text-sm disabled:opacity-50 disabled:hover:bg-white disabled:hover:border-gray-200"
+                className={`w-full text-left px-3 py-2 rounded border text-sm disabled:opacity-50 ${
+                  selectingSheetId === sheet.sheetId
+                    ? "border-blue-300 bg-blue-50 disabled:bg-blue-50 disabled:border-blue-300"
+                    : "border-gray-200 hover:bg-blue-50 hover:border-blue-300 disabled:hover:bg-white disabled:hover:border-gray-200"
+                }`}
               >
-                {selectingSheetId === sheet.sheetId ? (
-                  <span className="font-medium text-gray-600">加载中...</span>
-                ) : (
-                  <>
-                    <span className="font-medium">{sheet.title}</span>
-                    <span className="ml-2 text-gray-400 text-xs">{sheet.rowCount} 行 × {sheet.columnCount} 列</span>
-                  </>
-                )}
+                <span className="font-medium">{sheet.title}</span>
+                <span className="ml-2 text-gray-400 text-xs">{sheet.rowCount} 行 × {sheet.columnCount} 列</span>
               </button>
             ))}
           </div>
+          {selectingSheet && <p className="mt-2 text-sm text-gray-500">多维表格加载中...</p>}
         </div>
       )}
     </div>
