@@ -227,6 +227,33 @@ type PendingAggregateFocusPrompt = {
   selectedIds: Set<string>;
 };
 type SceneMetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
+type MarkerDetailDeleteBlockedKind = "chapter" | "scene";
+
+function sceneDetailDeleteBlockedMessage(kind: MarkerDetailDeleteBlockedKind): string {
+  const label = kind === "chapter" ? "章节" : "段落";
+  return `${label}详情不为空，不可删除当前${label}块。\n如需删除，请确保详情内容（包括${label}名称）均已转移或清空。`;
+}
+
+function markerBlockDramaturgyDeleteBlockedKind(block: Block, detail?: SceneDetail | null): MarkerDetailDeleteBlockedKind | null {
+  if (block.type !== "chapter_marker" && block.type !== "scene_marker") return null;
+  const markerMeta = block.markerMeta ?? {};
+  const hasValue = (value: string | null | undefined) => typeof value === "string" && value.trim().length > 0;
+  const hasDetails =
+    hasValue(markerMeta.name) ||
+    hasValue(markerMeta.synopsis) ||
+    hasValue(markerMeta.actionLine) ||
+    hasValue(markerMeta.music) ||
+    hasValue(markerMeta.stageNotes) ||
+    hasValue(markerMeta.expectedDuration) ||
+    hasValue(detail?.name) ||
+    hasValue(detail?.synopsis) ||
+    hasValue(detail?.actionLine) ||
+    hasValue(detail?.music) ||
+    hasValue(detail?.stageNotes) ||
+    hasValue(detail?.expectedDuration);
+  if (!hasDetails) return null;
+  return block.type === "chapter_marker" ? "chapter" : "scene";
+}
 
 function largeSelectionOperationMessage(operation: LargeSelectionOperation, count: number) {
   const actionLabel =
@@ -511,6 +538,24 @@ function getEditableElementForRange(range: Range): HTMLElement | null {
     node = node.parentNode;
   }
   return null;
+}
+
+function eventTargetElement(target: EventTarget | null): HTMLElement | null {
+  const node = target instanceof Node ? target : null;
+  return node instanceof HTMLElement
+    ? node
+    : node?.parentElement ?? null;
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  const element = eventTargetElement(target);
+  if (!element) return false;
+  return !!element.closest("input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only']");
+}
+
+function isFormEditingTarget(target: EventTarget | null): boolean {
+  const element = eventTargetElement(target);
+  return !!element?.closest("input, textarea, select");
 }
 
 function getTextLength(html: string): number {
@@ -1077,6 +1122,7 @@ function ScriptSceneDetailRail({
   productionId,
   versionId,
   canEdit,
+  isDeleteConfirmHighlighted = false,
   scrollbarOffsetPx,
   onUpdateIdentity,
   onPatchMeta,
@@ -1085,6 +1131,7 @@ function ScriptSceneDetailRail({
   productionId: string;
   versionId: string | null;
   canEdit: boolean;
+  isDeleteConfirmHighlighted?: boolean;
   scrollbarOffsetPx: number;
   onUpdateIdentity: (id: string, name: string) => void;
   onPatchMeta: (id: string, fields: Partial<SceneMetaFields>) => Promise<void>;
@@ -1157,7 +1204,9 @@ function ScriptSceneDetailRail({
       data-script-scene-detail="true"
       className="group/scene-detail box-border flex h-full min-h-0 w-full flex-col rounded-lg px-3 pt-3 text-left"
       style={{
-        background: `linear-gradient(to bottom, rgb(255, 255, 255) 0, rgb(255, 255, 255) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) 100%)`,
+        background: isDeleteConfirmHighlighted
+          ? "#fee2e2"
+          : `linear-gradient(to bottom, rgb(255, 255, 255) 0, rgb(255, 255, 255) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) 100%)`,
       }}
     >
       <div
@@ -1571,6 +1620,7 @@ function ScriptMarkerRow({
   onDragOver,
   onDrop,
   onSelect,
+  onDeleteConfirmChange,
   onSceneNameChange,
   lineIndexWidth,
   isFixed = false,
@@ -1590,6 +1640,7 @@ function ScriptMarkerRow({
   onDragOver: (e: DragEvent<HTMLDivElement>) => void;
   onDrop: (e: DragEvent<HTMLDivElement>) => void;
   onSelect: () => void;
+  onDeleteConfirmChange?: (confirming: boolean) => void;
   onSceneNameChange?: (id: string, name: string) => void;
   lineIndexWidth?: string;
   isFixed?: boolean;
@@ -1664,6 +1715,7 @@ function ScriptMarkerRow({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   setConfirmDelete(false);
+                  onDeleteConfirmChange?.(false);
                   onRemove();
                 }}
                 className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
@@ -1685,6 +1737,7 @@ function ScriptMarkerRow({
               onClick={() => {
                 if (isScriptDragging) return;
                 setConfirmDelete(true);
+                onDeleteConfirmChange?.(true);
               }}
               className="absolute left-0 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100"
               title="删除此标记"
@@ -6136,9 +6189,12 @@ export default function ScriptEditor({
   const [tocHighlightedMarkerIds, setTocHighlightedMarkerIds] = useState<Set<string>>(() => new Set());
   const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
   const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
+  const [markerDetailDeleteConfirmBlockId, setMarkerDetailDeleteConfirmBlockId] = useState<string | null>(null);
   const [dismissActionToken, setDismissActionToken] = useState(0);
   const [pendingLargeSelectionConfirmation, setPendingLargeSelectionConfirmation] =
     useState<PendingLargeSelectionConfirmation | null>(null);
+  const [markerDetailDeleteBlockedKind, setMarkerDetailDeleteBlockedKind] =
+    useState<MarkerDetailDeleteBlockedKind | null>(null);
   const [pendingEmptyScriptCleanup, setPendingEmptyScriptCleanup] =
     useState<EmptyScriptCleanupTarget[] | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
@@ -8265,8 +8321,16 @@ export default function ScriptEditor({
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
-      else if (e.key === "z" && e.shiftKey) { e.preventDefault(); redo(); }
+      if (e.key === "z" && !e.shiftKey) {
+        if (isFormEditingTarget(e.target)) return;
+        e.preventDefault();
+        undo();
+      }
+      else if (e.key === "z" && e.shiftKey) {
+        if (isFormEditingTarget(e.target)) return;
+        e.preventDefault();
+        redo();
+      }
       else if (e.key === "f" && !e.shiftKey) { e.preventDefault(); setSearchOpen(true); }
       // Tag clipboard: ⌘/Ctrl+Shift+C copies tags from focused block, ⌘/Ctrl+Shift+V pastes
       else if (e.key === "c" && e.shiftKey) {
@@ -8583,9 +8647,28 @@ export default function ScriptEditor({
     });
   }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
 
+  const blockedDramaturgyMarkerKindForBlockIds = useCallback((ids: Iterable<string>): MarkerDetailDeleteBlockedKind | null => {
+    const currentBlocks = blocksRef.current;
+    const currentIndexById = blockIndexByIdRef.current;
+    for (const id of ids) {
+      const index = currentIndexById.get(id);
+      const block = index === undefined ? undefined : currentBlocks[index];
+      if (!block) continue;
+      const detail = block.sceneId ? sceneDetailById.get(block.sceneId) ?? null : null;
+      const blockedKind = markerBlockDramaturgyDeleteBlockedKind(block, detail);
+      if (blockedKind) return blockedKind;
+    }
+    return null;
+  }, [sceneDetailById]);
+
   const deleteBlock = useCallback((id: string) => {
     if (isLockedMode) return;
     if (id === FIXED_INITIAL_CHAPTER_BLOCK_ID) return;
+    const blockedKind = blockedDramaturgyMarkerKindForBlockIds([id]);
+    if (blockedKind) {
+      setMarkerDetailDeleteBlockedKind(blockedKind);
+      return;
+    }
     saveSnapshot();
     // Pre-generate replacement block ID outside the updater (Strict Mode fix).
     const emptyBlockId = uid();
@@ -8613,12 +8696,17 @@ export default function ScriptEditor({
       selectionAnchorBlockIdRef.current = null;
       rangeSelectionActiveRef.current = false;
     }
-  }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [blockedDramaturgyMarkerKindForBlockIds, markOwnershipDirty, saveSnapshot, isLockedMode]);
 
   const deleteBlocks = useCallback((ids: string[]) => {
     if (isLockedMode) return;
     const deleteIds = new Set(ids.filter((id) => id !== FIXED_INITIAL_CHAPTER_BLOCK_ID));
     if (deleteIds.size === 0) return;
+    const blockedKind = blockedDramaturgyMarkerKindForBlockIds(deleteIds);
+    if (blockedKind) {
+      setMarkerDetailDeleteBlockedKind(blockedKind);
+      return;
+    }
     saveSnapshot();
     const emptyBlockId2 = uid(); // pre-generated for the case where all blocks are deleted
     const firstDeletedIdx = blocksRef.current.findIndex((block) => deleteIds.has(block.id));
@@ -8656,7 +8744,7 @@ export default function ScriptEditor({
       selectionAnchorBlockIdRef.current = null;
       rangeSelectionActiveRef.current = false;
     }
-  }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [blockedDramaturgyMarkerKindForBlockIds, markOwnershipDirty, saveSnapshot, isLockedMode]);
 
   const requestEmptyScriptCleanup = useCallback(() => {
     if (isLockedMode || !canEditText) return;
@@ -8826,6 +8914,7 @@ export default function ScriptEditor({
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (isTextEditingTarget(e.target)) return;
       if (!requestSelectedBlocksDelete()) return;
       e.preventDefault();
       e.stopPropagation();
@@ -9357,9 +9446,12 @@ export default function ScriptEditor({
     ? (detailBlockVisibility.selected ? sceneIdForBlockId(selectedDetailBlockId) : null)
     : null;
   const focusedDetailSceneId = detailBlockVisibility.focused ? sceneIdForBlockId(focusedId) : null;
-  const detailSceneId = selectedBlockIds.size > 1
-    ? null
-    : selectedDetailSceneId ?? focusedDetailSceneId ?? activeSceneId;
+  const markerDeleteConfirmDetailSceneId = sceneIdForBlockId(markerDetailDeleteConfirmBlockId);
+  const detailSceneId = markerDeleteConfirmDetailSceneId ?? (
+    selectedBlockIds.size > 1
+      ? null
+      : selectedDetailSceneId ?? focusedDetailSceneId ?? activeSceneId
+  );
   const activeScene = detailSceneId ? sceneById.get(detailSceneId) ?? null : null;
   const activeSceneDetail = activeScene
     ? sceneDetailById.get(activeScene.id) ?? toSceneDetail(activeScene)
@@ -10213,6 +10305,7 @@ export default function ScriptEditor({
                 productionId={productionId}
                 versionId={activeVersionId ?? null}
                 canEdit={canEditMetadata}
+                isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
                 scrollbarOffsetPx={scriptSceneDetailScrollbarOffsetPx}
                 onUpdateIdentity={updateScene}
                 onPatchMeta={patchSceneMeta}
@@ -10347,6 +10440,7 @@ export default function ScriptEditor({
                     isMoveGlowFading={moveGlowFadingBlockIds.has(block.id)}
                     isTocHighlighted={tocHighlightedMarkerIds.has(block.id)}
                     onRemove={() => deleteBlock(block.id)}
+                    onDeleteConfirmChange={(confirming) => setMarkerDetailDeleteConfirmBlockId(confirming ? block.id : null)}
                     onSelect={() => {
                       selectionAnchorBlockIdRef.current = block.id;
                       rangeSelectionActiveRef.current = false;
@@ -10965,6 +11059,35 @@ export default function ScriptEditor({
           </div>
         );
       })()}
+
+      {markerDetailDeleteBlockedKind && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setMarkerDetailDeleteBlockedKind(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-[380px] rounded-2xl bg-white p-5 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-zinc-800">
+              不可删除该{markerDetailDeleteBlockedKind === "chapter" ? "章节" : "段落"}
+            </h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-500">
+              {sceneDetailDeleteBlockedMessage(markerDetailDeleteBlockedKind)}
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setMarkerDetailDeleteBlockedKind(null)}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingLargeSelectionConfirmation && (
         <div
