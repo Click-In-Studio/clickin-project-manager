@@ -520,6 +520,10 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     return !!(marker?.synopsis || marker?.actionLine || marker?.music || marker?.stageNotes || marker?.expectedDuration);
   }
 
+  function markerDetailsUpdateLabel(marker: JointImportMarker | null): string {
+    return marker?.parentNum ? "段落详情将更新" : "章节详情将更新";
+  }
+
   async function runPreview() {
     const sceneColMap = buildSceneColMap();
     const scriptColMap = buildScriptColMap();
@@ -1352,7 +1356,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                             <td className="px-3 py-2">
                               {hasMarkerDetails(finalMarker) && (
                                 <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 border border-emerald-100">
-                                  章节详情将更新
+                                  {markerDetailsUpdateLabel(finalMarker)}
                                 </span>
                               )}
                             </td>
@@ -1443,7 +1447,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                           <td className="px-3 py-2">
                             {hasMarkerDetails(importedDisplayMarker) && (
                               <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 border border-emerald-100">
-                                章节详情将更新
+                                {markerDetailsUpdateLabel(importedDisplayMarker)}
                               </span>
                             )}
                           </td>

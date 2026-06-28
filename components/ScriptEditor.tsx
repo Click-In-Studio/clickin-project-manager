@@ -230,7 +230,8 @@ type EmptyScriptCleanupTarget = {
   label: string;
   kind: "chapter" | "scene" | "rehearsal";
   parentKey: string | null;
-  groupKey: string;
+  dividerKey: string;
+  chapterKey: string;
   disabledReason?: string;
 };
 type EmptyScriptCleanupAnalysis = {
@@ -1667,6 +1668,7 @@ function ScriptMarkerRow({
   onDeleteConfirmChange,
   onSceneNameChange,
   lineIndexWidth,
+  dismissToken = 0,
   isFixed = false,
   isRecentlyMoved = false,
   isTocHighlighted = false,
@@ -1693,11 +1695,15 @@ function ScriptMarkerRow({
   onDeleteConfirmChange?: (confirming: boolean) => void;
   onSceneNameChange?: (id: string, name: string) => void;
   lineIndexWidth?: string;
+  dismissToken?: number;
   isFixed?: boolean;
   isRecentlyMoved?: boolean;
   isTocHighlighted?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  useEffect(() => {
+    setConfirmDelete(false);
+  }, [dismissToken]);
   const isRehearsal = node.kind === "rehearsal";
   const markerRootStyle: React.CSSProperties | undefined = lineIndexWidth
     ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
@@ -1918,6 +1924,7 @@ function ScriptMarkerRow({
                 onClick={(e) => {
                   e.stopPropagation();
                   setConfirmDelete(false);
+                  onDeleteConfirmChange?.(false);
                   onRemove();
                 }}
                 className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
@@ -1929,6 +1936,7 @@ function ScriptMarkerRow({
                 onClick={(e) => {
                   e.stopPropagation();
                   setConfirmDelete(false);
+                  onDeleteConfirmChange?.(false);
                 }}
                 className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
               >
@@ -1938,12 +1946,14 @@ function ScriptMarkerRow({
           ) : canEdit && !isFixed ? (
             <button
               type="button"
+              data-script-confirmation="true"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 if (isScriptDragging) return;
                 onSelect();
                 setConfirmDelete(true);
+                onDeleteConfirmChange?.(true);
               }}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -4749,7 +4759,8 @@ function analyzeEmptyScriptCleanup(
           label: rehearsalLabel || "未命名排练记号",
           kind: "rehearsal",
           parentKey,
-          groupKey: parentScene?.parentId ?? currentSceneId,
+          dividerKey: currentSceneId,
+          chapterKey: parentScene?.parentId ?? currentSceneId,
         });
       }
       continue;
@@ -4806,7 +4817,8 @@ function analyzeEmptyScriptCleanup(
       label,
       kind,
       parentKey: scene.parentId ? `chapter:${scene.parentId}` : null,
-      groupKey: scene.parentId ?? scene.id,
+      dividerKey: scene.id,
+      chapterKey: scene.parentId ?? scene.id,
       disabledReason: hasDetails ? (kind === "chapter" ? "章节详情不为空" : "段落详情不为空") : undefined,
     };
   };
@@ -7110,6 +7122,7 @@ export default function ScriptEditor({
     setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmationRequest(null);
+    setMarkerDetailDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
     setDragTarget(null);
     setIsScriptDragging(false);
@@ -9394,6 +9407,7 @@ export default function ScriptEditor({
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
+    setMarkerDetailDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
   }, []);
 
@@ -10969,6 +10983,7 @@ export default function ScriptEditor({
                     onConvertToChapter={!isFixedInitialChapter && canEditMetadata ? () => convertMarkerBlockType(block.id, "chapter_marker") : undefined}
                     onConvertToScene={!isFixedInitialChapter && canEditMetadata ? () => convertMarkerBlockType(block.id, "scene_marker") : undefined}
                     onDeleteConfirmChange={(confirming) => setMarkerDetailDeleteConfirmBlockId(confirming ? block.id : null)}
+                    dismissToken={dismissActionToken}
                     onSelect={() => {
                       selectionAnchorBlockIdRef.current = block.id;
                       rangeSelectionActiveRef.current = false;
@@ -11680,8 +11695,8 @@ export default function ScriptEditor({
             </p>
             {pendingEmptyScriptCleanup.length > 0 ? (
               <div className="mt-3 overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50/60">
-                <div className="flex items-center justify-between border-b border-zinc-100 bg-white px-3 py-2">
-                  <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+                  <span className="text-xs font-semibold tracking-wide text-zinc-600 uppercase">
                     可清除空白章节/段落/排练记号
                   </span>
                   <div className="flex items-center gap-3">
@@ -11692,14 +11707,14 @@ export default function ScriptEditor({
                           .filter((target) => !target.disabledReason)
                           .map((target) => target.key)
                       ))}
-                      className="text-[11px] font-medium text-[#637ca1] transition-colors hover:text-[#536b8e]"
+                      className="text-[11px] font-medium text-[#637ca1]/75 transition-colors hover:text-[#637ca1]"
                     >
                       全选
                     </button>
                     <button
                       type="button"
                       onClick={() => setSelectedEmptyScriptCleanupKeys(new Set())}
-                      className="text-[11px] text-zinc-400 transition-colors hover:text-zinc-600"
+                      className="text-[11px] font-medium text-zinc-400 transition-colors hover:text-[#637ca1]"
                     >
                       清空
                     </button>
@@ -11709,7 +11724,15 @@ export default function ScriptEditor({
                   {pendingEmptyScriptCleanup.map((target, index) => {
                     const disabled = !!target.disabledReason;
                     const selected = !disabled && selectedEmptyScriptCleanupKeys.has(target.key);
-                    const showDivider = index > 0 && pendingEmptyScriptCleanup[index - 1].groupKey !== target.groupKey;
+                    const previousTarget = index > 0 ? pendingEmptyScriptCleanup[index - 1] : null;
+                    const entersNewChapter = !!previousTarget &&
+                      previousTarget.chapterKey !== target.chapterKey;
+                    const nextTarget = pendingEmptyScriptCleanup[index + 1] ?? null;
+                    const showSceneDivider = !!nextTarget &&
+                      target.chapterKey === nextTarget.chapterKey &&
+                      target.kind !== "chapter" &&
+                      nextTarget.kind === "rehearsal" &&
+                      target.dividerKey !== nextTarget.dividerKey;
                     const kindLabel =
                       target.kind === "chapter" ? "章节" :
                       target.kind === "scene" ? "段落" :
@@ -11720,7 +11743,9 @@ export default function ScriptEditor({
                       "pl-10";
                     return (
                       <React.Fragment key={target.key}>
-                        {showDivider && <div className="border-t-2 border-zinc-700/30" />}
+                        {entersNewChapter ? (
+                          <div className="border-t-[3px] border-zinc-900/30" />
+                        ) : null}
                         <button
                           type="button"
                           role="switch"
@@ -11728,10 +11753,14 @@ export default function ScriptEditor({
                           disabled={disabled}
                           onClick={() => toggleEmptyScriptCleanupTarget(target)}
                           className={`flex w-full items-center gap-3 border-b px-3 py-2.5 text-left text-sm transition-colors last:border-0 disabled:cursor-not-allowed ${
-                            disabled ? "border-zinc-100 bg-white/60" : selected ? "border-[#91a8ca]/20 bg-[#eef3fa]" : "border-zinc-100 bg-white hover:border-zinc-200 hover:bg-white"
+                            showSceneDivider ? "bg-[linear-gradient(to_right,#a1a1aa_0_9px,transparent_9px_12px)] bg-[length:12px_1px] bg-bottom bg-repeat-x" : ""
+                          } ${
+                            showSceneDivider ? "border-transparent" : disabled ? "border-zinc-100" : selected ? "border-[#91a8ca]/20" : "border-zinc-50"
+                          } ${
+                            disabled ? "bg-white/60" : selected ? "bg-[#eef3fa]" : "bg-white hover:bg-zinc-50"
                           } ${indentClass}`}
                         >
-                          <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[11px] text-[#637ca1]">
+                          <span className="shrink-0 rounded border border-[#91a8ca]/30 bg-zinc-50 px-1.5 py-0.5 text-[11px] text-[#637ca1]">
                             {kindLabel}
                           </span>
                           <span className={`min-w-0 truncate ${disabled ? "text-zinc-400" : "text-zinc-700"}`}>{target.label}</span>
