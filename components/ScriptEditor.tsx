@@ -1741,7 +1741,7 @@ function ScriptMarkerRow({
       : node.kind === "scene"
         ? "确认删除此段落标记？"
         : "确认删除此排练记号？";
-  const markerMovedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
+  const markerMovedGlowClass = isRecentlyMoved && !isRehearsal ? "script-block-moved-glow" : "";
   const markerTocGlowClass = !isRehearsal && !isRecentlyMoved && isTocHighlighted ? "script-toc-marker-glow" : "";
   const isDeleteHighlighted = confirmDelete || isDeleteConfirmHighlighted;
   const markerGlowEndColor = !isRehearsal && isTocHighlighted
@@ -1837,10 +1837,18 @@ function ScriptMarkerRow({
           : isDeleteHighlighted ? "bg-red-100" : isSelected ? "bg-[#eef3fa]" : "hover:bg-zinc-50/70"
       } ${markerMovedGlowClass} ${markerTocGlowClass} px-6 ${isRehearsal ? "overflow-visible" : ""}`}
     >
+      {isRehearsal && isTocHighlighted ? (
+        <div
+          className="pointer-events-none absolute left-6 right-6 top-1/2 -translate-y-1/2 rounded script-toc-marker-glow"
+          style={{ height: "1.25rem", "--script-block-glow-fade-end": isDeleteHighlighted ? "#fee2e2" : "#ffffff" } as React.CSSProperties}
+        />
+      ) : null}
       {dragTarget && (
         <div
           className={`pointer-events-none absolute left-4 right-4 z-10 border-t-2 ${
-            dragTarget.kind !== "edge" && dragTarget.position === "before" ? "-top-0.5" : "-bottom-0.5"
+            dragTarget.kind !== "edge" && dragTarget.position === "before"
+              ? isRehearsal ? "-top-3.5" : "-top-0.5"
+              : isRehearsal ? "-bottom-3.5" : "-bottom-0.5"
           }`}
           style={{ borderColor: "#91a8ca" }}
         />
@@ -9490,10 +9498,19 @@ export default function ScriptEditor({
         setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, nextScenes));
       }
       setBlocks(normalizedNext);
-      glowChangedBlocks(moving.map((b) => b.id));
+      const movedBlockIds: string[] = [];
+      const movedRehearsalMarkerIds: string[] = [];
+      const movedNonRehearsalIds: string[] = [];
+      for (const block of moving) {
+        movedBlockIds.push(block.id);
+        if (block.type === "rehearsal_marker") movedRehearsalMarkerIds.push(block.id);
+        else movedNonRehearsalIds.push(block.id);
+      }
+      glowChangedBlocks(movedNonRehearsalIds);
+      movedRehearsalMarkerIds.forEach(glowTocMarker);
       selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
       rangeSelectionActiveRef.current = false;
-      setSelectedBlockIds(new Set(moving.map((b) => b.id)));
+      setSelectedBlockIds(new Set(movedBlockIds));
       if (movingHasMarker) {
         showSelectionChangeNotice("章节标记/段落标记/排练记号已更新。");
       } else if (movedTextOwnershipChanged) {
@@ -9507,7 +9524,7 @@ export default function ScriptEditor({
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, markOwnershipDirty, requestLargeSelectionOperation, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, requestLargeSelectionOperation, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds.filter((id) => id !== FIXED_INITIAL_CHAPTER_BLOCK_ID));
