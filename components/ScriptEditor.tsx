@@ -245,6 +245,10 @@ type PendingAggregateFocusPrompt = {
 };
 type SceneMetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
 type MarkerDetailDeleteBlockedKind = "chapter" | "scene";
+type NonEmptyDramaturgyMarker = {
+  id: string;
+  kind: MarkerDetailDeleteBlockedKind;
+};
 
 function hasTextValue(value: string | null | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
@@ -291,6 +295,13 @@ function markerBlockDramaturgyDeleteBlockedKind(block: Block, detail?: SceneDeta
     hasTextValue(detail?.expectedDuration);
   if (!hasDetails) return null;
   return block.type === "chapter_marker" ? "chapter" : "scene";
+}
+
+function markerBlockDisplayName(block: Block, scene?: Scene | null): string {
+  if (block.type === "rehearsal_marker") return `排练记号 ${block.rehearsalMark ?? ""}`.trim();
+  const kind = block.type === "chapter_marker" ? "章节" : "段落";
+  const title = [scene?.number, scene?.name].filter(Boolean).join(" ");
+  return title ? `${kind} ${title}` : kind;
 }
 
 function largeSelectionOperationMessage(operation: LargeSelectionOperation, count: number) {
@@ -1649,10 +1660,12 @@ function ScriptMarkerRow({
   node,
   canEdit,
   isSelected,
+  isDeleteConfirmHighlighted,
   isReorderLocked,
   isScriptDragging,
   dragTarget,
   onRemove,
+  onRequestDelete,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -1667,6 +1680,7 @@ function ScriptMarkerRow({
   onConvertToScene,
   onDeleteConfirmChange,
   onSceneNameChange,
+  deleteCount = 1,
   lineIndexWidth,
   dismissToken = 0,
   isFixed = false,
@@ -1676,10 +1690,12 @@ function ScriptMarkerRow({
   node: ScriptMarkerNode;
   canEdit: boolean;
   isSelected: boolean;
+  isDeleteConfirmHighlighted: boolean;
   isReorderLocked: boolean;
   isScriptDragging: boolean;
   dragTarget?: DragTarget | null;
   onRemove: () => void;
+  onRequestDelete: () => void;
   onDragStart: (e: DragEvent<HTMLButtonElement>) => void;
   onDragEnd: () => void;
   onDragOver: (e: DragEvent<HTMLDivElement>) => void;
@@ -1694,6 +1710,7 @@ function ScriptMarkerRow({
   onConvertToScene?: () => void;
   onDeleteConfirmChange?: (confirming: boolean) => void;
   onSceneNameChange?: (id: string, name: string) => void;
+  deleteCount?: number;
   lineIndexWidth?: string;
   dismissToken?: number;
   isFixed?: boolean;
@@ -1717,16 +1734,18 @@ function ScriptMarkerRow({
   const title = isRehearsal
     ? `排练记号 ${node.mark}`
     : [node.scene.number, node.scene.name].filter(Boolean).join(" ");
-  const deleteConfirmText =
-    node.kind === "chapter"
+  const deleteConfirmText = deleteCount > 1
+    ? `确认删除所选 ${deleteCount} 行？`
+    : node.kind === "chapter"
       ? "确认删除此章节标记？"
       : node.kind === "scene"
         ? "确认删除此段落标记？"
         : "确认删除此排练记号？";
   const markerMovedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
   const markerTocGlowClass = !isRehearsal && !isRecentlyMoved && isTocHighlighted ? "script-toc-marker-glow" : "";
+  const isDeleteHighlighted = confirmDelete || isDeleteConfirmHighlighted;
   const markerGlowEndColor = !isRehearsal && isTocHighlighted
-    ? confirmDelete ? "#fee2e2" : isSelected ? "#eef3fa" : "#ffffff"
+    ? isDeleteHighlighted ? "#fee2e2" : isSelected ? "#eef3fa" : "#ffffff"
     : undefined;
   const convertToChapter = node.kind === "scene" || node.kind === "rehearsal" ? onConvertToChapter : undefined;
   const convertToScene = node.kind === "chapter" || node.kind === "rehearsal" ? onConvertToScene : undefined;
@@ -1757,6 +1776,45 @@ function ScriptMarkerRow({
         } as React.CSSProperties)
       : undefined
   );
+  const openDeleteConfirmation = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isScriptDragging) return;
+    onRequestDelete();
+    setConfirmDelete(true);
+    onDeleteConfirmChange?.(true);
+  };
+  const deleteConfirmationControl = (
+    <span
+      className="flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm"
+      data-script-confirmation="true"
+    >
+      <span className="whitespace-nowrap text-[10px] text-zinc-400">{deleteConfirmText}</span>
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setConfirmDelete(false);
+          onDeleteConfirmChange?.(false);
+          onRemove();
+        }}
+        className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
+      >
+        确认
+      </button>
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setConfirmDelete(false);
+          onDeleteConfirmChange?.(false);
+        }}
+        className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
+      >
+        取消
+      </button>
+    </span>
+  );
 
   return (
     <div
@@ -1776,7 +1834,7 @@ function ScriptMarkerRow({
       className={`group/marker relative select-none text-left transition-colors ${
         isRehearsal
           ? ""
-          : confirmDelete ? "bg-red-100" : isSelected ? "bg-[#eef3fa]" : "hover:bg-zinc-50/70"
+          : isDeleteHighlighted ? "bg-red-100" : isSelected ? "bg-[#eef3fa]" : "hover:bg-zinc-50/70"
       } ${markerMovedGlowClass} ${markerTocGlowClass} px-6 ${isRehearsal ? "overflow-visible" : ""}`}
     >
       {dragTarget && (
@@ -1791,44 +1849,21 @@ function ScriptMarkerRow({
         <div className="absolute left-0 top-1 bottom-1 z-20 w-12">
           {canEdit && confirmDelete ? (
             <span
-              className="absolute left-0 top-1/2 z-10 flex -translate-y-1/2 translate-x-8 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm"
-              data-script-confirmation="true"
+              className="absolute left-0 top-1/2 z-10 -translate-y-1/2 translate-x-8"
             >
-              <span className="whitespace-nowrap text-[10px] text-zinc-400">{deleteConfirmText}</span>
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setConfirmDelete(false);
-                  onDeleteConfirmChange?.(false);
-                  onRemove();
-                }}
-                className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
-              >
-                确认
-              </button>
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setConfirmDelete(false);
-                  onDeleteConfirmChange?.(false);
-                }}
-                className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
-              >
-                取消
-              </button>
+              {deleteConfirmationControl}
             </span>
           ) : canEdit ? (
             <button
               type="button"
+              data-script-confirmation="true"
+              onPointerDown={openDeleteConfirmation}
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (isScriptDragging) return;
-                setConfirmDelete(true);
-                onDeleteConfirmChange?.(true);
               }}
               style={{ left: MARKER_CONTROL_DELETE_LEFT_PX }}
               className="absolute top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100"
@@ -1902,12 +1937,12 @@ function ScriptMarkerRow({
               onSelect();
             }}
             className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${confirmDelete ? "transition-none" : "transition-all"} ${
-              confirmDelete
+              isDeleteHighlighted
                 ? "bg-red-100 text-red-600 ring-1 ring-red-300"
                 : isSelected ? "bg-[#eef3fa] text-[#637ca1] ring-1 ring-[#91a8ca]" : "bg-zinc-100 text-zinc-500"
             } ${
               canEdit && !isFixed && !isReorderLocked
-                ? confirmDelete
+                ? isDeleteHighlighted
                   ? "cursor-grab hover:bg-red-100 hover:text-red-700 active:cursor-grabbing"
                   : "cursor-grab hover:bg-[#dbe5f3] hover:text-[#637ca1] active:cursor-grabbing"
                 : "cursor-default"
@@ -1918,46 +1953,12 @@ function ScriptMarkerRow({
             {node.mark}
           </button>
           {canEdit && !isFixed && confirmDelete ? (
-            <span
-              className="flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm"
-              data-script-confirmation="true"
-            >
-              <span className="whitespace-nowrap text-[10px] text-zinc-400">{deleteConfirmText}</span>
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirmDelete(false);
-                  onDeleteConfirmChange?.(false);
-                  onRemove();
-                }}
-                className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
-              >
-                确认
-              </button>
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirmDelete(false);
-                  onDeleteConfirmChange?.(false);
-                }}
-                className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
-              >
-                取消
-              </button>
-            </span>
+            deleteConfirmationControl
           ) : canEdit && !isFixed ? (
             <button
               type="button"
               data-script-confirmation="true"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (isScriptDragging) return;
-                setConfirmDelete(true);
-                onDeleteConfirmChange?.(true);
-              }}
+              onPointerDown={openDeleteConfirmation}
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -4432,23 +4433,6 @@ function withLeadingRehearsalMarkersForMarkedSegments(blocks: Block[]): Block[] 
   return normalizeScriptBlockStream(next);
 }
 
-function rehearsalMarkerDeleteIds(blocks: Block[], index: number): Set<string> {
-  const block = blocks[index];
-  if (block?.type !== "rehearsal_marker") return new Set(block ? [block.id] : []);
-  const previousBlock = blocks[index - 1] ?? null;
-  if (previousBlock?.type !== "chapter_marker" && previousBlock?.type !== "scene_marker") {
-    return new Set([block.id]);
-  }
-
-  for (let cursor = index + 1; cursor < blocks.length; cursor++) {
-    const candidate = blocks[cursor];
-    if (candidate.type === "chapter_marker" || candidate.type === "scene_marker") break;
-    if (candidate.type === "rehearsal_marker") return new Set();
-  }
-
-  return new Set([block.id]);
-}
-
 function sameBlocks(a: Block[], b: Block[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((block, index) => {
@@ -6590,6 +6574,8 @@ export default function ScriptEditor({
     useState<PendingLargeSelectionConfirmation | null>(null);
   const [markerDetailDeleteBlockedKind, setMarkerDetailDeleteBlockedKind] =
     useState<MarkerDetailDeleteBlockedKind | null>(null);
+  const [pendingNonEmptyMarkerSelectionDeleteIds, setPendingNonEmptyMarkerSelectionDeleteIds] =
+    useState<string[] | null>(null);
   const [pendingEmptyScriptCleanup, setPendingEmptyScriptCleanup] =
     useState<EmptyScriptCleanupTarget[] | null>(null);
   const [selectedEmptyScriptCleanupKeys, setSelectedEmptyScriptCleanupKeys] =
@@ -9063,96 +9049,36 @@ export default function ScriptEditor({
     });
   }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
 
-  const blockedDramaturgyMarkerKindForBlockIds = useCallback((ids: Iterable<string>): MarkerDetailDeleteBlockedKind | null => {
+  const nonEmptyDramaturgyMarkersForBlockIds = useCallback((ids: Iterable<string>): NonEmptyDramaturgyMarker[] => {
     const currentBlocks = blocksRef.current;
     const currentIndexById = blockIndexByIdRef.current;
+    const markers: NonEmptyDramaturgyMarker[] = [];
     for (const id of ids) {
       const index = currentIndexById.get(id);
       const block = index === undefined ? undefined : currentBlocks[index];
       if (!block) continue;
       const detail = block.sceneId ? sceneDetailById.get(block.sceneId) ?? null : null;
-      const blockedKind = markerBlockDramaturgyDeleteBlockedKind(block, detail);
-      if (blockedKind) return blockedKind;
+      const kind = markerBlockDramaturgyDeleteBlockedKind(block, detail);
+      if (kind) markers.push({ id, kind });
     }
-    return null;
+    return markers;
   }, [sceneDetailById]);
 
-  const deleteBlock = useCallback((id: string) => {
-    if (isLockedMode) return;
-    if (id === FIXED_INITIAL_CHAPTER_BLOCK_ID) return;
-    const currentIdx = blockIndexByIdRef.current.get(id);
-    if (currentIdx === undefined) return;
-    if (
-      blocksRef.current[currentIdx].type === "rehearsal_marker" &&
-      rehearsalMarkerDeleteIds(blocksRef.current, currentIdx).size === 0
-    ) {
-      return;
-    }
-    const blockedKind = blockedDramaturgyMarkerKindForBlockIds([id]);
-    if (blockedKind) {
-      setMarkerDetailDeleteBlockedKind(blockedKind);
-      return;
-    }
-    saveSnapshot();
-    // Pre-generate replacement block ID outside the updater (Strict Mode fix).
-    const emptyBlockId = uid();
-    markOwnershipDirty({ start: currentIdx, end: currentIdx + 1, affectsMarkers: true });
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx === -1) return prev;
-      if (prev.length <= 1) {
-        const emptyBlock = { ...makeBlock(), id: emptyBlockId };
-        pendingFocus.current = { id: emptyBlock.id, atEnd: false };
-        return [emptyBlock];
-      }
-      const previousMarker = previousAdjacentMarker(prev, idx);
-      const deleteIds = rehearsalMarkerDeleteIds(prev, idx);
-      let nextFocus: Block | undefined;
-      for (let cursor = idx + 1; cursor < prev.length; cursor++) {
-        if (!deleteIds.has(prev[cursor].id)) {
-          nextFocus = prev[cursor];
-          break;
-        }
-      }
-      for (let cursor = idx - 1; !nextFocus && cursor >= 0; cursor--) {
-        if (!deleteIds.has(prev[cursor].id)) nextFocus = prev[cursor];
-      }
-      if (nextFocus) pendingFocus.current = { id: nextFocus.id, atEnd: false };
-      const remaining = prev.filter((b) => !deleteIds.has(b.id));
-      return repairEmptyMarkerSegments(remaining, [previousMarker?.id].filter((markerId): markerId is string => !!markerId));
-    });
-    setSelectedBlockIds((current) => {
-      if (!current.has(id)) return current;
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
-    if (selectionAnchorBlockIdRef.current === id) {
-      selectionAnchorBlockIdRef.current = null;
-      rangeSelectionActiveRef.current = false;
-    }
-  }, [blockedDramaturgyMarkerKindForBlockIds, markOwnershipDirty, saveSnapshot, isLockedMode]);
-
-  const deleteBlocks = useCallback((ids: string[]) => {
+  const deleteBlocks = useCallback((ids: string[], options?: { forceDeleteNonEmptyMarkerDetails?: boolean }) => {
     if (isLockedMode) return;
     const deleteIds = new Set<string>();
     for (const id of ids) {
       if (id === FIXED_INITIAL_CHAPTER_BLOCK_ID) continue;
-      const index = blockIndexByIdRef.current.get(id);
-      if (
-        ids.length === 1 &&
-        index !== undefined &&
-        blocksRef.current[index]?.type === "rehearsal_marker" &&
-        rehearsalMarkerDeleteIds(blocksRef.current, index).size === 0
-      ) {
-        continue;
-      }
       deleteIds.add(id);
     }
     if (deleteIds.size === 0) return;
-    const blockedKind = blockedDramaturgyMarkerKindForBlockIds(deleteIds);
-    if (blockedKind) {
-      setMarkerDetailDeleteBlockedKind(blockedKind);
+    const blockedMarkers = nonEmptyDramaturgyMarkersForBlockIds(deleteIds);
+    if (blockedMarkers.length > 0 && !options?.forceDeleteNonEmptyMarkerDetails) {
+      if (deleteIds.size === 1) {
+        setMarkerDetailDeleteBlockedKind(blockedMarkers[0].kind);
+      } else {
+        setPendingNonEmptyMarkerSelectionDeleteIds(Array.from(deleteIds));
+      }
       return;
     }
     saveSnapshot();
@@ -9192,7 +9118,7 @@ export default function ScriptEditor({
       selectionAnchorBlockIdRef.current = null;
       rangeSelectionActiveRef.current = false;
     }
-  }, [blockedDramaturgyMarkerKindForBlockIds, markOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [markOwnershipDirty, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, isLockedMode]);
 
   const emptyScriptCleanupDescendantKeys = useMemo(() => {
     const childKeysByParent = new Map<string, string[]>();
@@ -9407,6 +9333,17 @@ export default function ScriptEditor({
     setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
   }, [blocks, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, selectedBlockIdsArray, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, windowRange.end, windowRange.start, isLockedMode]);
+
+  const requestMarkerDelete = useCallback((id: string) => {
+    if (isLockedMode) return;
+    const ids = selectedBlockIds.has(id) ? selectedBlockIdsArray : [id];
+    if (!selectedBlockIds.has(id) && selectedBlockIds.size > 0) {
+      selectionAnchorBlockIdRef.current = null;
+      rangeSelectionActiveRef.current = false;
+      setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    }
+    setDeleteConfirmingBlockIds(new Set(ids));
+  }, [isLockedMode, selectedBlockIds, selectedBlockIdsArray]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -10965,6 +10902,7 @@ export default function ScriptEditor({
                     : block.type === "rehearsal_marker"
                       ? { kind: "rehearsal", id: block.id, mark: block.rehearsalMark ?? "" }
                       : null;
+              const markerDeleteIds = selectedBlockIds.has(block.id) ? selectedBlockIdsArray : [block.id];
               const markerEl = markerNode ? (
                 <div
                   key={block.id}
@@ -10978,13 +10916,16 @@ export default function ScriptEditor({
                     node={markerNode}
                     canEdit={block.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata}
                     isSelected={selectedBlockIds.has(block.id)}
+                    isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id)}
                     isReorderLocked={isReorderLocked}
                     isScriptDragging={isScriptDragging}
                     dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
                     isFixed={isFixedInitialChapter}
                     isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
                     isTocHighlighted={tocHighlightedMarkerIds.has(block.id)}
-                    onRemove={() => deleteBlock(block.id)}
+                    onRemove={() => deleteBlocks(markerDeleteIds)}
+                    onRequestDelete={() => requestMarkerDelete(block.id)}
+                    deleteCount={markerDeleteIds.length}
                     canAddChapterScene={!isFixedInitialChapter && canEditMetadata}
                     canAddRehearsal={!isFixedInitialChapter && effectiveCanEditRehearsalMark}
                     onAddChapterBefore={() => addChapterBeforeBlock(block.id)}
@@ -10992,7 +10933,13 @@ export default function ScriptEditor({
                     onAddRehearsalBefore={() => addRehearsalBeforeBlock(block.id)}
                     onConvertToChapter={!isFixedInitialChapter && canEditMetadata ? () => convertMarkerBlockType(block.id, "chapter_marker") : undefined}
                     onConvertToScene={!isFixedInitialChapter && canEditMetadata ? () => convertMarkerBlockType(block.id, "scene_marker") : undefined}
-                    onDeleteConfirmChange={(confirming) => setMarkerDetailDeleteConfirmBlockId(confirming ? block.id : null)}
+                    onDeleteConfirmChange={(confirming) => {
+                      if (confirming) {
+                        setMarkerDetailDeleteConfirmBlockId(block.id);
+                        return;
+                      }
+                      dismissBlockConfirmations();
+                    }}
                     dismissToken={dismissActionToken}
                     onSelect={() => {
                       selectionAnchorBlockIdRef.current = block.id;
@@ -11212,7 +11159,7 @@ export default function ScriptEditor({
                   onMerge={() => mergeBlock(block.id)}
                   onDelete={() => {
                     if (selectedDeleteIds.length > 1) deleteBlocks(selectedDeleteIds);
-                    else deleteBlock(block.id);
+                    else deleteBlocks([block.id]);
                   }}
                   onFocus={() => markBlockFocused(block.id)}
                   onDeleteFocus={() => focusBlockContent(block.id, false)}
@@ -11640,6 +11587,85 @@ export default function ScriptEditor({
           </div>
         </div>
       )}
+
+      {pendingNonEmptyMarkerSelectionDeleteIds && (() => {
+        const blockedMarkers = nonEmptyDramaturgyMarkersForBlockIds(pendingNonEmptyMarkerSelectionDeleteIds)
+          .map((marker) => {
+            const index = blockIndexByIdRef.current.get(marker.id);
+            const block = index === undefined ? null : blocks[index] ?? null;
+            if (!block) return null;
+            return {
+              id: marker.id,
+              label: markerBlockDisplayName(block, block.sceneId ? sceneById.get(block.sceneId) ?? null : null),
+            };
+          })
+          .filter((item): item is { id: string; label: string } => item !== null);
+        const scriptBlockDeleteIds = pendingNonEmptyMarkerSelectionDeleteIds.filter((id) => {
+          const index = blockIndexByIdRef.current.get(id);
+          const block = index === undefined ? undefined : blocks[index];
+          return !!block && (block.type === "rehearsal_marker" || !isMarkerBlock(block));
+        });
+        const cancelNonEmptyMarkerSelectionDelete = () => {
+          setPendingNonEmptyMarkerSelectionDeleteIds(null);
+          selectionAnchorBlockIdRef.current = null;
+          rangeSelectionActiveRef.current = false;
+          setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+          dismissBlockConfirmations();
+        };
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={cancelNonEmptyMarkerSelectionDelete}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="w-[460px] max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-5 shadow-xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-base font-semibold text-zinc-800">所选标记详情不为空</h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                以下章节/段落标记包含详情内容。请选择只删除剧本块，或连同这些标记一起删除。
+              </p>
+              <div className="mt-3 max-h-44 overflow-y-auto rounded-xl border border-zinc-100 bg-zinc-50/60">
+                {blockedMarkers.map((marker) => (
+                  <div key={marker.id} className="border-b border-zinc-100 px-3 py-2 text-sm text-zinc-600 last:border-0">
+                    {marker.label}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  onClick={cancelNonEmptyMarkerSelectionDelete}
+                  className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    const ids = scriptBlockDeleteIds;
+                    setPendingNonEmptyMarkerSelectionDeleteIds(null);
+                    if (ids.length > 0) deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
+                  }}
+                  className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-300 hover:text-zinc-800"
+                >
+                  仅删除剧本块
+                </button>
+                <button
+                  onClick={() => {
+                    const ids = pendingNonEmptyMarkerSelectionDeleteIds;
+                    setPendingNonEmptyMarkerSelectionDeleteIds(null);
+                    deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
+                  }}
+                  className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                >
+                  删除全部
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {pendingLargeSelectionConfirmation && (
         <div
