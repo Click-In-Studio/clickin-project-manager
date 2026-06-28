@@ -4885,8 +4885,10 @@ function markProgrammaticScroll(
     cancelAnimationFrame(frameRef.current);
   }
   frameRef.current = requestAnimationFrame(() => {
-    frameRef.current = null;
-    suppressRef.current = false;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      suppressRef.current = false;
+    });
   });
 }
 
@@ -7026,8 +7028,8 @@ export default function ScriptEditor({
   const blocksRef = useRef(blocks);
   const ownedBlocksRef = useRef(ownedBlocks);
   const scenesRef = useRef(scenes);
+  const sceneIdSetRef = useRef<Set<string>>(new Set(scenes.map((scene) => scene.id)));
   const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
-  const prevBlocksLengthRef = useRef(blocks.length);
   const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => {
     if (blockCount <= 0) return { start: 0, end: 0 };
     const start = Math.max(0, Math.min(range.start, blockCount - 1));
@@ -7039,7 +7041,10 @@ export default function ScriptEditor({
     blockIndexByIdRef.current = new Map(blocks.map((block, index) => [block.id, index]));
   }, [blocks]);
   useLayoutEffect(() => { ownedBlocksRef.current = ownedBlocks; }, [ownedBlocks]);
-  useEffect(() => { scenesRef.current = scenes; }, [scenes]);
+  useLayoutEffect(() => {
+    scenesRef.current = scenes;
+    sceneIdSetRef.current = new Set(scenes.map((scene) => scene.id));
+  }, [scenes]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
   const markBlockOwnershipDirty = useCallback((id: string) => {
     const idx = blockIndexByIdRef.current.get(id);
@@ -7256,13 +7261,14 @@ export default function ScriptEditor({
   }, []);
 
   // ── Virtual scroll ────────────────────────────────────────────────────────────
-  const VSCROLL_BUFFER = 80;
+  const VSCROLL_BUFFER = 120;
   const DEFAULT_BLOCK_H = 80;
-  const INITIAL_WINDOW_SIZE = 200;
+  const INITIAL_WINDOW_SIZE = 240;
   const blocksContainerRef = useRef<HTMLDivElement>(null);
   const topSpacerRef = useRef<HTMLDivElement>(null);
   const botSpacerRef = useRef<HTMLDivElement>(null);
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const measuredHeightTotalRef = useRef(0);
   const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
   const updateDragCountBadge = useCallback((clientX: number, clientY: number, count: number, buttons?: number) => {
     if (buttons !== undefined) {
@@ -7292,6 +7298,7 @@ export default function ScriptEditor({
   useLayoutEffect(() => { windowRangeRef.current = windowRange; }, [windowRange]);
   const pendingWindowRangeRef = useRef<{ start: number; end: number } | null>(null);
   const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
+  const pendingVirtualScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
   const pendingNavigateRef = useRef<
     { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
@@ -7303,11 +7310,47 @@ export default function ScriptEditor({
   // Incremented by the measurement effect to trigger the correction layout effect
   const [correctionTick, setCorrectionTick] = useState(0);
 
-  const applyWindowRange = useCallback((next: { start: number; end: number }, sync = false) => {
+  const captureVirtualScrollAnchor = useCallback((): { id: string; top: number } | null => {
+    const container = blocksContainerRef.current;
+    if (!container) return null;
+    const anchorLine = Math.max(0, Math.min(window.innerHeight - 1, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX));
+    let fallback: { id: string; top: number } | null = null;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
+      const id = el.dataset.vitem;
+      if (!id) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < 0) continue;
+      if (rect.top > window.innerHeight) break;
+      fallback ??= { id, top: rect.top };
+      if (rect.bottom >= anchorLine) return { id, top: rect.top };
+    }
+    return fallback;
+  }, []);
+
+  const restoreVirtualScrollAnchor = useCallback((anchor: { id: string; top: number } | null) => {
+    if (!anchor) return;
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    let target: HTMLElement | null = null;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
+      if (el.dataset.vitem === anchor.id) {
+        target = el;
+        break;
+      }
+    }
+    if (!target) return;
+    const delta = target.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(delta) < 0.5) return;
+    markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+    window.scrollBy({ top: delta, behavior: "instant" });
+  }, []);
+
+  const applyWindowRange = useCallback((next: { start: number; end: number }, sync = false, preserveAnchor = false, flushCommit = false) => {
     const targetRange = clampWindowRange(next);
     const pending = pendingWindowRangeRef.current;
     const current = pending ?? windowRangeRef.current;
     if (current.start === targetRange.start && current.end === targetRange.end) return;
+    if (preserveAnchor) pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
     pendingWindowRangeRef.current = targetRange;
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
     const commit = () => {
@@ -7324,21 +7367,25 @@ export default function ScriptEditor({
         return target;
       });
     };
-    if (sync) commit();
+    if (sync) {
+      if (flushCommit) {
+        queueMicrotask(() => {
+          if (navigatingAwayRef.current) return;
+          if (pendingWindowRangeRef.current !== targetRange) return;
+          flushSync(commit);
+        });
+      }
+      else commit();
+    }
     else windowRangeFrameRef.current = requestAnimationFrame(commit);
-  }, [clampWindowRange]);
+  }, [captureVirtualScrollAnchor, clampWindowRange]);
 
   // Rebuild cumulative heights from cache
   const rebuildCumulative = useCallback(() => {
     const bl = ownedBlocksRef.current;
     const measured = measuredHeightsRef.current;
     // Use measured average for unmeasured blocks — much more accurate than a fixed default
-    let avgH = DEFAULT_BLOCK_H;
-    if (measured.size > 0) {
-      let sum = 0;
-      measured.forEach(h => { sum += h; });
-      avgH = sum / measured.size;
-    }
+    const avgH = measured.size > 0 ? measuredHeightTotalRef.current / measured.size : DEFAULT_BLOCK_H;
     const arr = new Array(bl.length + 1);
     arr[0] = 0;
     for (let i = 0; i < bl.length; i++) {
@@ -7346,6 +7393,20 @@ export default function ScriptEditor({
     }
     cumulativeHRef.current = arr;
   }, []);
+
+  const syncSpacerHeights = useCallback((range: { start: number; end: number }, anchor: { id: string; top: number } | null = null) => {
+    const cum = cumulativeHRef.current;
+    const n = blocksRef.current.length;
+    const safeRange = clampWindowRange(range, n);
+    const top = cum[safeRange.start] ?? safeRange.start * DEFAULT_BLOCK_H;
+    const total = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const bot = Math.max(0, total - (cum[safeRange.end] ?? safeRange.end * DEFAULT_BLOCK_H));
+    if (topSpacerRef.current) topSpacerRef.current.style.height = `${top}px`;
+    if (botSpacerRef.current) botSpacerRef.current.style.height = `${bot}px`;
+    if (anchor) restoreVirtualScrollAnchor(anchor);
+    const next = { top, bot };
+    setSpacerH((prev) => prev.top === top && prev.bot === bot ? prev : next);
+  }, [clampWindowRange, restoreVirtualScrollAnchor]);
 
   // Binary search: first block index whose top >= offset
   const blockAtOffset = useCallback((offset: number) => {
@@ -7365,10 +7426,44 @@ export default function ScriptEditor({
     document.getElementById(`block-content-${blockId}`) ?? document.getElementById(`block-${blockId}`)
   ), []);
 
+  const resolveActiveSceneIdForBlockIndex = useCallback((index: number): string | null => {
+    const bl = blocksRef.current;
+    const owned = ownedBlocksRef.current;
+    const sceneIds = sceneIdSetRef.current;
+    if (bl.length === 0 || sceneIds.size === 0) return null;
+
+    const validSceneId = (id: string | null | undefined): string | null => (
+      id && sceneIds.has(id) ? id : null
+    );
+    const sceneIdAt = (idx: number): string | null => {
+      const block = bl[idx];
+      if (!block) return null;
+      if ((block.type === "chapter_marker" || block.type === "scene_marker") && block.sceneId) {
+        return validSceneId(block.sceneId);
+      }
+      return validSceneId(owned[idx]?.sceneId) ?? validSceneId(block.sceneId);
+    };
+
+    const safeIndex = Math.max(0, Math.min(index, bl.length - 1));
+    const direct = sceneIdAt(safeIndex);
+    if (direct) return direct;
+
+    const nearbyStart = Math.max(0, safeIndex - VSCROLL_BUFFER);
+    const nearbyEnd = Math.min(bl.length - 1, safeIndex + VSCROLL_BUFFER);
+    for (let idx = safeIndex - 1; idx >= nearbyStart; idx--) {
+      const sceneId = sceneIdAt(idx);
+      if (sceneId) return sceneId;
+    }
+    for (let idx = safeIndex + 1; idx <= nearbyEnd; idx++) {
+      const sceneId = sceneIdAt(idx);
+      if (sceneId) return sceneId;
+    }
+    return null;
+  }, []);
+
   const updateActiveSceneFromScroll = useCallback(() => {
     const container = blocksContainerRef.current;
     const bl = blocksRef.current;
-    const owned = ownedBlocksRef.current;
     if (!container || bl.length === 0) {
       if (activeSceneIdRef.current !== null) {
         activeSceneIdRef.current = null;
@@ -7403,14 +7498,14 @@ export default function ScriptEditor({
       idx = blockAtOffset(Math.max(0, window.scrollY + anchorY - containerTop));
     }
 
-    const nextSceneId = owned[idx]?.sceneId ?? bl[idx]?.sceneId ?? null;
+    const nextSceneId = resolveActiveSceneIdForBlockIndex(idx) ?? activeSceneIdRef.current;
     if (nextSceneId !== activeSceneIdRef.current) {
       activeSceneIdRef.current = nextSceneId;
       setActiveSceneId(nextSceneId);
       return true;
     }
     return false;
-  }, [blockAtOffset]);
+  }, [blockAtOffset, resolveActiveSceneIdForBlockIndex]);
 
   const recomputeWindow = useCallback(() => {
     if (navigatingAwayRef.current) return false;
@@ -7418,21 +7513,46 @@ export default function ScriptEditor({
     const container = blocksContainerRef.current;
     const bl = blocksRef.current;
     if (!container || bl.length === 0) return false;
-    const containerTop = container.getBoundingClientRect().top + window.scrollY;
-    const sy = window.scrollY;
-    const viewStart = Math.max(0, sy - containerTop);
-    const viewEnd = viewStart + window.innerHeight;
 
-    let newStart = Math.max(0, blockAtOffset(viewStart) - VSCROLL_BUFFER);
-    let newEnd = Math.min(bl.length, blockAtOffset(viewEnd) + VSCROLL_BUFFER + 1);
+    let firstVisibleIdx = -1;
+    let lastVisibleIdx = -1;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
+      const id = el.dataset.vitem;
+      if (!id) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < 0) continue;
+      if (rect.top > window.innerHeight) break;
+      const idx = blockIndexByIdRef.current.get(id) ?? -1;
+      if (idx < 0) continue;
+      if (firstVisibleIdx < 0) firstVisibleIdx = idx;
+      lastVisibleIdx = idx;
+    }
 
-    // Always keep the focused block rendered
+    if (firstVisibleIdx < 0 || lastVisibleIdx < 0) {
+      const containerTop = container.getBoundingClientRect().top + window.scrollY;
+      const viewStart = Math.max(0, window.scrollY - containerTop);
+      const viewEnd = viewStart + window.innerHeight;
+      firstVisibleIdx = blockAtOffset(viewStart);
+      lastVisibleIdx = blockAtOffset(viewEnd);
+    }
+
+    const currentRange = windowRangeRef.current;
+    const edgeThreshold = Math.max(40, Math.floor(VSCROLL_BUFFER / 3));
+    const hasEnoughHeadroom = firstVisibleIdx >= currentRange.start + edgeThreshold;
+    const hasEnoughFootroom = lastVisibleIdx <= currentRange.end - edgeThreshold;
+    if (hasEnoughHeadroom && hasEnoughFootroom) {
+      return updateActiveSceneFromScroll();
+    }
+
+    let newStart = Math.max(0, firstVisibleIdx - VSCROLL_BUFFER);
+    let newEnd = Math.min(bl.length, lastVisibleIdx + VSCROLL_BUFFER + 1);
+
     const fi = focusedIdRef.current ? blockIndexByIdRef.current.get(focusedIdRef.current) ?? -1 : -1;
     if (fi >= 0) { newStart = Math.min(newStart, fi); newEnd = Math.max(newEnd, fi + 1); }
     const pfi = pendingFocus.current ? blockIndexByIdRef.current.get(pendingFocus.current.id) ?? -1 : -1;
     if (pfi >= 0) { newStart = Math.min(newStart, pfi); newEnd = Math.max(newEnd, pfi + 1); }
 
-    applyWindowRange({ start: newStart, end: newEnd });
+    applyWindowRange({ start: newStart, end: newEnd }, true, true, true);
     return updateActiveSceneFromScroll();
   }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll]);
 
@@ -7494,6 +7614,12 @@ export default function ScriptEditor({
     let rafId = 0;
     let didCenterForScrollGesture = false;
     let scrollGestureTimer: ReturnType<typeof setTimeout> | undefined;
+    const cancelPendingCorrectionForUserScroll = () => {
+      if (suppressProgrammaticScrollRef.current) return;
+      postNavCorrectionRef.current = null;
+      pendingNavigateRef.current = null;
+      setScrollLocked(false);
+    };
     const onScroll = (e: Event) => {
       if (navigatingAwayRef.current) return;
       const target = e.target;
@@ -7517,74 +7643,124 @@ export default function ScriptEditor({
       });
       if (!scrollLockedRef.current) postNavCorrectionRef.current = null;
     };
+    window.addEventListener('wheel', cancelPendingCorrectionForUserScroll, { passive: true });
+    window.addEventListener('touchmove', cancelPendingCorrectionForUserScroll, { passive: true });
+    window.addEventListener('keydown', cancelPendingCorrectionForUserScroll);
     window.addEventListener('scroll', onScroll, { passive: true });
     recomputeWindow();
     updateActiveSceneFromScroll();
-    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId); clearTimeout(scrollGestureTimer); };
+    return () => {
+      window.removeEventListener('wheel', cancelPendingCorrectionForUserScroll);
+      window.removeEventListener('touchmove', cancelPendingCorrectionForUserScroll);
+      window.removeEventListener('keydown', cancelPendingCorrectionForUserScroll);
+      window.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(rafId);
+      clearTimeout(scrollGestureTimer);
+    };
   }, [recomputeWindow, updateActiveSceneFromScroll]);
 
   useEffect(() => {
     updateActiveSceneFromScroll();
-  }, [blocks.length, windowRange.start, windowRange.end, spacerH.top, updateActiveSceneFromScroll]);
+  }, [blocks.length, updateActiveSceneFromScroll]);
 
-  // Clamp window when blocks list length changes (insert/delete)
   useLayoutEffect(() => {
     const bl = blocksRef.current;
-    const prevLength = prevBlocksLengthRef.current;
-    prevBlocksLengthRef.current = bl.length;
-    const prev = windowRangeRef.current;
+    const current = windowRangeRef.current;
+    const measured = measuredHeightsRef.current;
+    if (measured.size > 0) {
+      const liveIds = new Set(bl.map((block) => block.id));
+      let total = 0;
+      let changed = false;
+      measured.forEach((height, id) => {
+        if (liveIds.has(id)) total += height;
+        else {
+          measured.delete(id);
+          changed = true;
+        }
+      });
+      if (changed) measuredHeightTotalRef.current = total;
+    }
     if (bl.length === 0) {
       applyWindowRange({ start: 0, end: 0 }, true);
       return;
     }
-
-    let start = Math.min(prev.start, Math.max(0, bl.length - 1));
-    let end = Math.min(prev.end, bl.length);
-
-    const addedCount = bl.length - prevLength;
-    if (addedCount > 0 && addedCount <= 5 && prev.end >= prevLength) {
-      end = Math.min(bl.length, end + addedCount);
-    }
-
-    const pendingFocusId = pendingFocus.current?.id;
-    const pendingFocusIdx = pendingFocusId ? bl.findIndex((b) => b.id === pendingFocusId) : -1;
+    let start = Math.min(current.start, Math.max(0, bl.length - 1));
+    let end = Math.min(Math.max(current.end, start + 1), bl.length);
+    const pendingFocusId = pendingFocus.current?.id ?? pendingCharOpen.current;
+    const pendingFocusIdx = pendingFocusId ? blockIndexByIdRef.current.get(pendingFocusId) ?? -1 : -1;
     if (pendingFocusIdx >= 0) {
       start = Math.min(start, pendingFocusIdx);
       end = Math.max(end, pendingFocusIdx + 1);
     }
-    if (end <= start) end = Math.min(bl.length, start + 1);
-
-    applyWindowRange({ start, end }, true);
+    applyWindowRange({ start, end }, true, true);
   }, [blocks.length, applyWindowRange]);
 
-  // Measure rendered block heights after each render pass
-  useEffect(() => {
-    if (navigatingAwayRef.current) return;
-    const container = blocksContainerRef.current;
-    if (!container) return;
+  const measureVirtualItemElements = useCallback((elements: Iterable<HTMLElement>) => {
     let changed = false;
-    container.querySelectorAll<HTMLElement>('[data-bwrap]').forEach(el => {
-      const id = el.dataset.bwrap;
-      if (!id) return;
+    for (const el of elements) {
+      const id = el.dataset.vitem;
+      if (!id) continue;
       const h = el.offsetHeight;
-      if (h > 0 && measuredHeightsRef.current.get(id) !== h) {
+      const prevH = measuredHeightsRef.current.get(id);
+      if (h > 0 && prevH !== h) {
         measuredHeightsRef.current.set(id, h);
+        measuredHeightTotalRef.current += h - (prevH ?? 0);
         changed = true;
       }
-    });
+    }
     if (changed) {
       rebuildCumulative();
+      const anchor = pendingMoveCenterRef.current === null ? captureVirtualScrollAnchor() : null;
+      syncSpacerHeights(windowRangeRef.current, anchor);
       // If there's a pending navigation correction, trigger the layout effect that will re-scroll
       if (postNavCorrectionRef.current) {
         setCorrectionTick(t => t + 1);
       }
     }
-  }, [blocks.length, windowRange.start, windowRange.end, spacerH.top, spacerH.bot, rebuildCumulative]);
+  }, [captureVirtualScrollAnchor, rebuildCumulative, syncSpacerHeights]);
+
+  // Measure rendered block heights after each render pass
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    measureVirtualItemElements(container.querySelectorAll<HTMLElement>('[data-vitem]'));
+  }, [blocks.length, windowRange.start, windowRange.end, measureVirtualItemElements]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    let frame = 0;
+    const pendingEntries = new Set<HTMLElement>();
+    const observer = new ResizeObserver((entries) => {
+      entries.forEach((entry) => {
+        const target = entry.target;
+        if (target instanceof HTMLElement && target.hasAttribute("data-vitem")) {
+          pendingEntries.add(target);
+        }
+      });
+      if (frame !== 0) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const elements = Array.from(pendingEntries);
+        pendingEntries.clear();
+        measureVirtualItemElements(elements);
+      });
+    });
+    container.querySelectorAll<HTMLElement>("[data-vitem]").forEach((el) => observer.observe(el));
+    return () => {
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [blocks.length, windowRange.start, windowRange.end, measureVirtualItemElements]);
 
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
     const centerTarget = pendingMoveCenterRef.current;
     if (centerTarget === null) return;
+    pendingVirtualScrollAnchorRef.current = null;
+    postNavCorrectionRef.current = null;
     if (blocks.length === 0) {
       pendingMoveCenterRef.current = null;
       return;
@@ -7604,17 +7780,27 @@ export default function ScriptEditor({
     const currentRange = windowRangeRef.current;
     const rangeChanged = currentRange.start !== nextRange.start || currentRange.end !== nextRange.end;
     pendingNavigateRef.current = { kind: "block", id: centerTarget, align: "center" };
-    applyWindowRange(nextRange, true);
+    applyWindowRange(nextRange, true, false, true);
     if (!rangeChanged) {
       const el = document.getElementById(`block-${centerTarget}`);
       const scrollEl = getBlockScrollElement(centerTarget);
       if (scrollEl || el) {
         pendingNavigateRef.current = null;
+        rebuildCumulative();
+        syncSpacerHeights(windowRangeRef.current);
         markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
         (scrollEl ?? el)?.scrollIntoView({ behavior: "instant", block: "center" });
       }
     }
-  }, [blocks, applyWindowRange, getBlockScrollElement]);
+  }, [blocks, applyWindowRange, getBlockScrollElement, rebuildCumulative, syncSpacerHeights]);
+
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    const anchor = pendingVirtualScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingVirtualScrollAnchorRef.current = null;
+    restoreVirtualScrollAnchor(anchor);
+  }, [windowRange, spacerH.top, spacerH.bot, restoreVirtualScrollAnchor]);
 
   // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
   useLayoutEffect(() => {
@@ -7629,14 +7815,7 @@ export default function ScriptEditor({
     if (!el) return;
     // Measurements are now fresh — rebuild and re-correct spacers before scrollIntoView
     rebuildCumulative();
-    const cum = cumulativeHRef.current;
-    const n = blocksRef.current.length;
-    const range = clampWindowRange(windowRange, n);
-    const newTop = cum[range.start] ?? range.start * DEFAULT_BLOCK_H;
-    const total  = cum[n] ?? n * DEFAULT_BLOCK_H;
-    const newBot = Math.max(0, total - (cum[range.end] ?? range.end * DEFAULT_BLOCK_H));
-    if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
-    if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
+    syncSpacerHeights(windowRange);
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
     el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
     setScrollLocked(false);
@@ -7647,7 +7826,7 @@ export default function ScriptEditor({
   // windowRange is intentionally in deps — ensures this captures the post-recomputeWindow value;
   // postNavCorrectionRef going null after the first correction prevents repeated firing.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [correctionTick, windowRange, clampWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
+  }, [correctionTick, windowRange, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
 
   // After each window-changing render, execute any pending navigation (fires before paint)
   useLayoutEffect(() => {
@@ -7660,17 +7839,8 @@ export default function ScriptEditor({
     if (!el) return;
     pendingNavigateRef.current = null;
 
-    // The spacerH state hasn't re-rendered yet — the spacer divs still hold the old window's
-    // heights. Correct them synchronously in the DOM so scrollIntoView lands at the right place.
     rebuildCumulative();
-    const cum = cumulativeHRef.current;
-    const n = blocksRef.current.length;
-    const range = clampWindowRange(windowRange, n);
-    const newTop = cum[range.start] ?? range.start * DEFAULT_BLOCK_H;
-    const total  = cum[n] ?? n * DEFAULT_BLOCK_H;
-    const newBot = Math.max(0, total - (cum[range.end] ?? range.end * DEFAULT_BLOCK_H));
-    if (topSpacerRef.current) topSpacerRef.current.style.height = `${newTop}px`;
-    if (botSpacerRef.current) botSpacerRef.current.style.height = `${newBot}px`;
+    syncSpacerHeights(windowRange);
 
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
     el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
@@ -7682,43 +7852,38 @@ export default function ScriptEditor({
       updateActiveSceneFromScroll();
       window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
     });
-  }, [windowRange, clampWindowRange, rebuildCumulative, getBlockScrollElement, updateActiveSceneFromScroll]);
+  }, [windowRange, rebuildCumulative, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
 
   // Update spacer heights from cumulative cache after each render (safe: layoutEffect, not render)
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
-    const cum = cumulativeHRef.current;
-    const n = blocks.length;
-    const safeStart = n === 0 ? 0 : Math.min(windowRange.start, Math.max(0, n - 1));
-    const safeEnd = Math.min(Math.max(windowRange.end, safeStart), n);
-    const top = cum[safeStart] ?? safeStart * DEFAULT_BLOCK_H;
-    const total = cum[n] ?? n * DEFAULT_BLOCK_H;
-    const bot = Math.max(0, total - (cum[safeEnd] ?? safeEnd * DEFAULT_BLOCK_H));
-    setSpacerH(prev => prev.top === top && prev.bot === bot ? prev : { top, bot });
-  }, [windowRange, blocks.length]);
+    syncSpacerHeights(windowRange);
+  }, [windowRange, blocks.length, syncSpacerHeights]);
 
   // Teleport to a block: load target window, then instant-jump in the layout effect.
   const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = 'center') => {
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
-    // If already rendered, jump immediately
-    const el = getBlockScrollElement(block.id);
-    if (el) {
+    pendingNavigateRef.current = { kind: 'block', id: block.id, align };
+    const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
+    let start = Math.max(0, idx - Math.floor(windowSize / 2));
+    const end = Math.min(blocksRef.current.length, start + windowSize);
+    start = Math.max(0, end - windowSize);
+    const nextRange = { start, end };
+    const currentRange = windowRangeRef.current;
+    const rangeChanged = currentRange.start !== nextRange.start || currentRange.end !== nextRange.end;
+    applyWindowRange(nextRange, true, false, true);
+    if (!rangeChanged) {
+      const el = getBlockScrollElement(block.id);
+      if (!el) return;
+      pendingNavigateRef.current = null;
       markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
       el.scrollIntoView({ behavior: 'instant', block: align });
       requestAnimationFrame(() => {
         updateActiveSceneFromScroll();
         window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
-      return;
     }
-    // Otherwise shift the window and let useLayoutEffect land us there
-    pendingNavigateRef.current = { kind: 'block', id: block.id, align };
-    const nextRange = {
-      start: Math.max(0, idx - VSCROLL_BUFFER),
-      end: Math.min(blocksRef.current.length, idx + VSCROLL_BUFFER + 1),
-    };
-    applyWindowRange(nextRange, true);
   }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
 
   const scrollToScene = useCallback((sceneId: string) => {
@@ -7899,10 +8064,10 @@ export default function ScriptEditor({
     setMigrationProgress(null);
     const placeholderBlock = makeBlock();
     measuredHeightsRef.current.clear();
+    measuredHeightTotalRef.current = 0;
     cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
     setBlocks([placeholderBlock]);
     applyWindowRange({ start: 0, end: 1 }, true);
-    setSpacerH({ top: 0, bot: 0 });
     setCharacters([]);
     setScenes([]);
     setSceneDetails([]);
@@ -7943,6 +8108,7 @@ export default function ScriptEditor({
           const normalized = normalizeScriptMarkerInvariants(expandedBlocks, state.scenes);
           const initialWindowEnd = Math.min(INITIAL_WINDOW_SIZE, normalized.blocks.length);
           measuredHeightsRef.current.clear();
+          measuredHeightTotalRef.current = 0;
           cumulativeHRef.current = new Array(normalized.blocks.length + 1);
           cumulativeHRef.current[0] = 0;
           for (let i = 0; i < normalized.blocks.length; i++) {
@@ -7951,10 +8117,7 @@ export default function ScriptEditor({
           blocksRef.current = normalized.blocks;
           blockIndexByIdRef.current = new Map(normalized.blocks.map((block, index) => [block.id, index]));
           applyWindowRange({ start: 0, end: initialWindowEnd }, true);
-          setSpacerH({
-            top: 0,
-            bot: Math.max(0, (normalized.blocks.length - initialWindowEnd) * DEFAULT_BLOCK_H),
-          });
+          syncSpacerHeights({ start: 0, end: initialWindowEnd });
           setBlocks(normalized.blocks);
           setCharacters(state.characters);
           setScenes(normalized.scenes);
@@ -8010,7 +8173,7 @@ export default function ScriptEditor({
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange]);
+  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange, syncSpacerHeights]);
 
   useEffect(() => {
     if (!productionId || !activeVersionId || loadState !== "ready") return;
@@ -9491,6 +9654,9 @@ export default function ScriptEditor({
     requestLargeSelectionOperation("move", moving.length, () => {
       saveSnapshot();
       markOwnershipDirty("full");
+      pendingVirtualScrollAnchorRef.current = null;
+      pendingNavigateRef.current = null;
+      postNavCorrectionRef.current = null;
       pendingMoveCenterRef.current = moving[0].id;
       if (movingHasMarker) {
         const nextScenes = normalizeSceneRowsForMarkers(scenesRef.current, normalizedNext);
@@ -11056,16 +11222,22 @@ export default function ScriptEditor({
                 </div>
               ) : null;
               if (!markerEl) return [];
-              return bIdx > 0
-                ? [
-                    canEditText && !isProtectedChapterSceneGap
-                      ? <InsertZone key={`iz-${bIdx}`} lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} />
-                      : showSceneEndGap
-                        ? <BlockGap key={`iz-${bIdx}`} />
-                      : null,
-                    markerEl,
-                  ]
-                : [markerEl];
+              const preBlockGap = bIdx > 0
+                ? canEditText && !isProtectedChapterSceneGap
+                  ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} />
+                  : showSceneEndGap
+                    ? <BlockGap />
+                    : null
+                : null;
+              return [
+                <div
+                  key={`vi-${block.id}`}
+                  data-vitem={block.id}
+                >
+                  {preBlockGap}
+                  {markerEl}
+                </div>,
+              ];
             }
             const ownedBlock = ownedBlocks[bIdx] ?? block;
             const ownedPrev = bIdx > 0 ? ownedBlocks[bIdx - 1] ?? null : null;
@@ -11372,15 +11544,21 @@ export default function ScriptEditor({
                 />
               </div>
             );
-            return bIdx > 0
-              ? [
-                  canEditText && !isProtectedChapterSceneGap ? <InsertZone key={`iz-${bIdx}`} lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
-                    showSceneEndGap ? <BlockGap key={`iz-${bIdx}`} /> :
-                    isLockedMode && showCharacterGap ? <BlockGap key={`iz-${bIdx}`} /> :
-                    null,
-                  blockEl,
-                ]
-              : [blockEl];
+            const preBlockGap = bIdx > 0
+              ? canEditText && !isProtectedChapterSceneGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
+                showSceneEndGap ? <BlockGap /> :
+                isLockedMode && showCharacterGap ? <BlockGap /> :
+                null
+              : null;
+            return [
+              <div
+                key={`vi-${block.id}`}
+                data-vitem={block.id}
+              >
+                {preBlockGap}
+                {blockEl}
+              </div>,
+            ];
               }),
               <div
                 key="__vbot"
