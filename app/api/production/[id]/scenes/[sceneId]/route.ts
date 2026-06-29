@@ -63,6 +63,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
   const metaFields: Record<string, string> = {};
   for (const key of METADATA_KEYS) {
+    if (marker.type === "chapter_marker" && key === "expectedDuration") continue;
     if (key in body && typeof body[key] === "string") metaFields[key] = body[key];
   }
   Object.assign(markerMeta, metaFields);

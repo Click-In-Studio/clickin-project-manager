@@ -8,6 +8,7 @@ import MountPointAssets from "./assets/MountPointAssets";
 import type { SceneDetail, Version } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
+import { getChapterDurationDisplay } from "@/lib/scene-duration";
 import { withGeneratedSceneNumbers } from "@/lib/script-generated-labels";
 import { FIXED_INITIAL_CHAPTER_BLOCK_ID } from "@/lib/script-fixed-markers";
 
@@ -92,6 +93,7 @@ function SceneEditRow({
   scene,
   indent,
   marks,
+  childScenes,
   canEdit,
   canDelete,
   productionId,
@@ -104,6 +106,7 @@ function SceneEditRow({
   scene: SceneDetail;
   indent: boolean;
   marks: string[];
+  childScenes?: SceneDetail[];
   canEdit: boolean;
   canDelete: boolean;
   productionId: string;
@@ -120,6 +123,9 @@ function SceneEditRow({
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(initialExpanded ?? false);
   const rowRef = useRef<HTMLTableRowElement>(null);
+  const chapterDurationDisplay = expanded && childScenes
+    ? getChapterDurationDisplay(childScenes)
+    : null;
 
   useEffect(() => {
     if (initialExpanded && rowRef.current) {
@@ -231,15 +237,23 @@ function SceneEditRow({
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
               <div className="space-y-1">
                 <label className="text-[10px] font-semibold tracking-widest text-zinc-400 uppercase">预期时长</label>
-                <DurationInput
-                  value={parseDuration(scene.expectedDuration)}
-                  canEdit={canEdit}
-                  onSave={async (seconds) => {
-                    await onPatchMeta({ 
-                      expectedDuration: seconds != null ? seconds.toString() : "" 
-                    });
-                  }}
-                />
+                {chapterDurationDisplay ? (
+                  <p className="min-h-[1.25rem] rounded border border-transparent px-2 py-1 text-xs text-zinc-600">
+                    {chapterDurationDisplay.hasMissingDuration && !canEdit
+                      ? <span className="italic text-zinc-300">—</span>
+                      : chapterDurationDisplay.text || <span className="italic text-zinc-300">—</span>}
+                  </p>
+                ) : (
+                  <DurationInput
+                    value={parseDuration(scene.expectedDuration)}
+                    canEdit={canEdit}
+                    onSave={async (seconds) => {
+                      await onPatchMeta({
+                        expectedDuration: seconds != null ? seconds.toString() : ""
+                      });
+                    }}
+                  />
+                )}
               </div>
               <div />
               <MetaField
@@ -521,6 +535,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         scene={act}
                         indent={false}
                         marks={actMarkList}
+                        childScenes={children}
                         canEdit={effectiveCanEdit}
                         canDelete={act.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID}
                         productionId={productionId}

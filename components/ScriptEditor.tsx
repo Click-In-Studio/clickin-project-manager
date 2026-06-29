@@ -22,6 +22,7 @@ import BlockMountAssets from "@/components/assets/BlockMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/DurationInput";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
+import { getChapterDurationDisplay } from "@/lib/scene-duration";
 import { diffState, type TagEntry } from "@/lib/script-ops";
 import { COMPACT_TEXT_SIDE_WIDTH_REM, PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
 import type { EstimatedPageMapCache, PageConfig } from "@/lib/script-page";
@@ -1168,6 +1169,7 @@ function ScriptSceneMetaField({
 
 function ScriptSceneDetailRail({
   scene,
+  scenes,
   productionId,
   versionId,
   canEdit,
@@ -1177,6 +1179,7 @@ function ScriptSceneDetailRail({
   onPatchMeta,
 }: {
   scene: SceneDetail | null;
+  scenes: SceneDetail[];
   productionId: string;
   versionId: string | null;
   canEdit: boolean;
@@ -1190,12 +1193,23 @@ function ScriptSceneDetailRail({
   const [editMode, setEditMode] = useState(false);
   const railRef = useRef<HTMLDivElement | null>(null);
   const sectionCanEdit = canEdit && editMode;
+  const chapterDurationDisplay = useMemo(
+    () => scene?.parentId === null
+      ? getChapterDurationDisplay(scenes.filter((child) => child.parentId === scene.id))
+      : null,
+    [scene?.id, scene?.parentId, scenes]
+  );
   const expectedDuration = scene?.expectedDuration ?? "";
   const expectedDurationSeconds = useMemo(
     () => expectedDuration ? parseDuration(expectedDuration) : null,
     [expectedDuration]
   );
-  const durationText = scene ? formatDuration(expectedDurationSeconds) || "—" : "—";
+  const chapterDurationHasMissing = chapterDurationDisplay?.hasMissingDuration ?? false;
+  const durationText = scene
+    ? (chapterDurationHasMissing && !sectionCanEdit
+      ? "—"
+      : chapterDurationDisplay?.text ?? (formatDuration(expectedDurationSeconds) || "—"))
+    : "—";
   const sceneCaptionNumber = scene ? scene.number.trim() || "—" : "";
   const sceneCaptionName = scene ? scene.name.trim() || "未命名" : "";
   const sceneCaptionText = scene
@@ -1237,12 +1251,20 @@ function ScriptSceneDetailRail({
     return (
       <div className="group space-y-1.5">
         <label className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase transition-colors group-hover:text-zinc-600">预期时长</label>
-        <DurationInput
-          value={expectedDurationSeconds}
-          canEdit={sectionCanEdit}
-          onSave={(seconds) => onPatchMeta(scene.id, { expectedDuration: seconds != null ? String(seconds) : "" })}
-          className="!min-h-[1.75rem] !rounded-lg !border !border-zinc-200 !bg-transparent !px-2.5 !py-2 !text-xs !text-zinc-700 hover:!border-zinc-300 hover:!bg-transparent hover:!text-zinc-950"
-        />
+        {chapterDurationDisplay ? (
+          <p className="min-h-[1.75rem] whitespace-pre-wrap rounded-lg border border-zinc-200 bg-transparent px-2.5 py-2 text-xs leading-relaxed text-zinc-700 transition-colors group-hover:border-zinc-300 group-hover:text-zinc-950">
+            {chapterDurationHasMissing && !sectionCanEdit
+              ? <span className="italic text-zinc-400">—</span>
+              : chapterDurationDisplay.text || <span className="italic text-zinc-400">—</span>}
+          </p>
+        ) : (
+          <DurationInput
+            value={expectedDurationSeconds}
+            canEdit={sectionCanEdit}
+            onSave={(seconds) => onPatchMeta(scene.id, { expectedDuration: seconds != null ? String(seconds) : "" })}
+            className="!min-h-[1.75rem] !rounded-lg !border !border-zinc-200 !bg-transparent !px-2.5 !py-2 !text-xs !text-zinc-700 hover:!border-zinc-300 hover:!bg-transparent hover:!text-zinc-950"
+          />
+        )}
       </div>
     );
   };
@@ -10995,6 +11017,7 @@ export default function ScriptEditor({
             <div className="min-h-0 flex-[2_1_67%]">
               <ScriptSceneDetailRail
                 scene={activeSceneDetail}
+                scenes={sceneDetails}
                 productionId={productionId}
                 versionId={activeVersionId ?? null}
                 canEdit={canEditMetadata}
