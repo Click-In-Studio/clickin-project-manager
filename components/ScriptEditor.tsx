@@ -7299,6 +7299,7 @@ export default function ScriptEditor({
   const pendingWindowRangeRef = useRef<{ start: number; end: number } | null>(null);
   const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
   const pendingVirtualScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingVirtualWindowRefreshRef = useRef(false);
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
   const pendingNavigateRef = useRef<
     { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
@@ -7344,6 +7345,11 @@ export default function ScriptEditor({
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
     window.scrollBy({ top: delta, behavior: "instant" });
   }, []);
+
+  const requestVirtualWindowRefresh = useCallback(() => {
+    pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
+    pendingVirtualWindowRefreshRef.current = true;
+  }, [captureVirtualScrollAnchor]);
 
   const applyWindowRange = useCallback((next: { start: number; end: number }, sync = false, preserveAnchor = false, flushCommit = false) => {
     const targetRange = clampWindowRange(next);
@@ -7726,6 +7732,33 @@ export default function ScriptEditor({
     if (!container) return;
     measureVirtualItemElements(container.querySelectorAll<HTMLElement>('[data-vitem]'));
   }, [blocks.length, windowRange.start, windowRange.end, measureVirtualItemElements]);
+
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    if (!pendingVirtualWindowRefreshRef.current) return;
+    pendingVirtualWindowRefreshRef.current = false;
+    rebuildCumulative();
+    const anchor = pendingVirtualScrollAnchorRef.current;
+    if (anchor) {
+      const anchorIdx = blockIndexByIdRef.current.get(anchor.id) ?? -1;
+      const currentRange = windowRangeRef.current;
+      if (anchorIdx >= 0 && (anchorIdx < currentRange.start || anchorIdx >= currentRange.end)) {
+        const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
+        let start = Math.max(0, anchorIdx - Math.floor(windowSize / 2));
+        const end = Math.min(blocksRef.current.length, start + windowSize);
+        start = Math.max(0, end - windowSize);
+        applyWindowRange({ start, end }, true, false, true);
+        return;
+      }
+    }
+    const container = blocksContainerRef.current;
+    if (container) {
+      measureVirtualItemElements(container.querySelectorAll<HTMLElement>("[data-vitem]"));
+    }
+    pendingVirtualScrollAnchorRef.current = null;
+    syncSpacerHeights(windowRangeRef.current, anchor);
+    updateActiveSceneFromScroll();
+  }, [blocks, applyWindowRange, measureVirtualItemElements, rebuildCumulative, syncSpacerHeights, updateActiveSceneFromScroll]);
 
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
@@ -8305,6 +8338,7 @@ export default function ScriptEditor({
 
           const mergedBlocks = expandLegacyMarkersToBlocks(mergeServerBlocks(blocksRef.current, serverState.blocks, oldSynced), serverState.scenes);
           const normalized = normalizeScriptMarkerInvariants(mergedBlocks, serverState.scenes);
+          requestVirtualWindowRefresh();
           setBlocks(normalized.blocks);
           setCharacters(serverState.characters);
           setScenes(normalized.scenes);
@@ -8456,7 +8490,7 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, resetToolbarMeasurement, streamVisible]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, requestVirtualWindowRefresh, resetToolbarMeasurement, streamVisible]);
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
@@ -8753,10 +8787,11 @@ export default function ScriptEditor({
     if (!snapshot) return;
     redoStack.current.push(blocksRef.current);
     markOwnershipDirty("full");
+    requestVirtualWindowRefresh();
     setBlocks(snapshot);
     setCanUndo(undoStack.current.length > 0);
     setCanRedo(true);
-  }, [isLockedMode, markOwnershipDirty]);
+  }, [isLockedMode, markOwnershipDirty, requestVirtualWindowRefresh]);
 
   const redo = useCallback(() => {
     if (isLockedMode) return;
@@ -8766,10 +8801,11 @@ export default function ScriptEditor({
     if (!snapshot) return;
     undoStack.current.push(blocksRef.current);
     markOwnershipDirty("full");
+    requestVirtualWindowRefresh();
     setBlocks(snapshot);
     setCanUndo(true);
     setCanRedo(redoStack.current.length > 0);
-  }, [isLockedMode, markOwnershipDirty]);
+  }, [isLockedMode, markOwnershipDirty, requestVirtualWindowRefresh]);
 
   // ── Tag handlers ─────────────────────────────────────────────────────────────
   // Tag mutations are no longer sent via a dedicated block-tags PATCH.
