@@ -4661,12 +4661,27 @@ function previousAdjacentMarker(blocks: Block[], index: number): Block | null {
   return block && isMarkerBlock(block) ? block : null;
 }
 
+function markerSegmentHasScene(blocks: Block[], markerIndex: number): boolean {
+  for (let index = markerIndex + 1; index < blocks.length; index++) {
+    const block = blocks[index];
+    if (block.type === "chapter_marker") return false;
+    if (block.type === "scene_marker") return true;
+  }
+  return false;
+}
+
+function shouldRepairEmptyBlockAfterMarker(blocks: Block[], markerIndex: number): boolean {
+  const marker = blocks[markerIndex];
+  if (marker?.id === FIXED_INITIAL_CHAPTER_BLOCK_ID && !markerSegmentHasScene(blocks, markerIndex)) return false;
+  return shouldInsertEmptyBlockAfterMarker(blocks, markerIndex);
+}
+
 function insertMarkerWithEmptyBlockIfNeeded(blocks: Block[], marker: Block, insertIndex: number): Block[] {
   const next = [...blocks];
   const boundedIndex = Math.max(0, Math.min(next.length, insertIndex));
   const previousMarker = previousAdjacentMarker(blocks, boundedIndex);
   next.splice(boundedIndex, 0, marker);
-  if (shouldInsertEmptyBlockAfterMarker(next, boundedIndex)) {
+  if (shouldRepairEmptyBlockAfterMarker(next, boundedIndex)) {
     next.splice(boundedIndex + 1, 0, makeBlock());
   }
   const repaired = repairEmptyMarkerSegments(next, [previousMarker?.id, marker.id].filter((id): id is string => !!id));
@@ -4688,7 +4703,7 @@ function repairEmptyMarkerSegments(blocks: Block[], markerIds: Iterable<string>,
   let next = blocks;
   let changed = false;
   for (const markerIndex of markerIndexes) {
-    if (!shouldInsertEmptyBlockAfterMarker(next, markerIndex)) continue;
+    if (!shouldRepairEmptyBlockAfterMarker(next, markerIndex)) continue;
     if (!changed) next = [...blocks];
     next.splice(markerIndex + 1, 0, makeBlock());
     changed = true;
@@ -4703,6 +4718,7 @@ function repairEmptyMarkerSegments(blocks: Block[], markerIds: Iterable<string>,
     for (const markerIndex of terminalIndexes) {
       const marker = next[markerIndex];
       if (!marker || !isMarkerBlock(marker) || next[markerIndex + 1]) continue;
+      if (marker.id === FIXED_INITIAL_CHAPTER_BLOCK_ID) continue;
       if (!changed) next = [...blocks];
       next.splice(markerIndex + 1, 0, makeBlock());
       changed = true;
@@ -4796,6 +4812,7 @@ function isOnlyTextBlockInMarkerSegment(blocks: Block[], index: number): boolean
     if (isMarkerBlock(prev)) break;
     start--;
   }
+  if (blocks[start - 1]?.id === FIXED_INITIAL_CHAPTER_BLOCK_ID && !markerSegmentHasScene(blocks, start - 1)) return false;
 
   let textCount = 0;
   for (let cursor = start; cursor < blocks.length; cursor++) {
@@ -5225,6 +5242,7 @@ function ScriptBlock({
   onTagCopyClick,
   onTagPasteClick,
   onCharacterChangeFocus,
+  contentPlaceholder,
 }: {
   block: Block;
   characters: Character[];
@@ -5302,6 +5320,7 @@ function ScriptBlock({
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
   onCharacterChangeFocus?: () => void;
+  contentPlaceholder?: string;
 }) {
   const blockRootRef = useRef<HTMLDivElement | null>(null);
   const leftControlsRef = useRef<HTMLDivElement | null>(null);
@@ -6074,7 +6093,7 @@ function ScriptBlock({
                 if (block.type !== "stage") applyInlineStageStyling(divRef.current!, stageDelimOpen, stageDelimClose);
                 syncContent();
               }}
-              data-placeholder="在此输入台词…"
+              data-placeholder={contentPlaceholder ?? "在此输入台词…"}
               className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words text-left ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
                 block.lyric ? "font-lyric font-bold text-zinc-700 uppercase" : "font-script text-zinc-700"
               }`}
@@ -6159,7 +6178,7 @@ function ScriptBlock({
           if (block.type !== "stage") applyInlineStageStyling(divRef.current!, stageDelimOpen, stageDelimClose);
           syncContent();
         }}
-        data-placeholder={isStage ? "舞台提示…" : "在此输入台词…"}
+        data-placeholder={contentPlaceholder ?? (isStage ? "舞台提示…" : "在此输入台词…")}
         className={`w-full min-h-[1.75rem] ${isStage ? "pl-1" : ""} outline-none text-base leading-7 break-words ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
           isStage ? "font-stage italic text-zinc-400 text-left" :
           block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
@@ -6760,6 +6779,21 @@ export default function ScriptEditor({
     ownershipDirtyRef.current = null;
     return owned;
   }, [blocks]);
+  const openingChapterHasScenes = useMemo(() => {
+    const markerIndex = blocks.findIndex((block) => block.id === FIXED_INITIAL_CHAPTER_BLOCK_ID);
+    return markerIndex >= 0 && markerSegmentHasScene(blocks, markerIndex);
+  }, [blocks]);
+  const [showOpeningChapter, setShowOpeningChapter] = useState(true);
+  const openingChapterVisible = showOpeningChapter || openingChapterHasScenes;
+  const tocScenes = useMemo(
+    () => openingChapterVisible
+      ? scenes
+      : scenes.filter((scene) => scene.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID),
+    [openingChapterVisible, scenes]
+  );
+  useEffect(() => {
+    if (openingChapterHasScenes) setShowOpeningChapter(true);
+  }, [openingChapterHasScenes]);
   const pageMap = useMemo(() => {
     const cache = updateEstimatedPageMap(
       pageMapCacheRef.current,
@@ -7492,11 +7526,14 @@ export default function ScriptEditor({
     const arr = new Array(bl.length + 1);
     arr[0] = 0;
     for (let i = 0; i < bl.length; i++) {
-      arr[i + 1] = arr[i] + (measured.get(bl[i].id) ?? avgH);
+      arr[i + 1] = arr[i] + (
+        !openingChapterVisible && bl[i].id === FIXED_INITIAL_CHAPTER_BLOCK_ID
+          ? 0
+          : measured.get(bl[i].id) ?? avgH
+      );
     }
     cumulativeHRef.current = arr;
-  }, []);
-
+  }, [openingChapterVisible]);
   const syncSpacerHeights = useCallback((range: { start: number; end: number }, anchor: { id: string; top: number } | null = null) => {
     const cum = cumulativeHRef.current;
     const n = blocksRef.current.length;
@@ -7510,6 +7547,10 @@ export default function ScriptEditor({
     const next = { top, bot };
     setSpacerH((prev) => prev.top === top && prev.bot === bot ? prev : next);
   }, [clampWindowRange, restoreVirtualScrollAnchor]);
+  useEffect(() => {
+    rebuildCumulative();
+    syncSpacerHeights(windowRangeRef.current);
+  }, [openingChapterVisible, rebuildCumulative, syncSpacerHeights]);
 
   // Binary search: first block index whose top >= offset
   const blockAtOffset = useCallback((offset: number) => {
@@ -10224,7 +10265,7 @@ export default function ScriptEditor({
     : parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
   const scriptSideGutterWidth = Math.max(0, (effectiveViewportWidth - SCRIPT_EDITOR_MAX_WIDTH_PX) / 2);
   const scriptTocRailGapPx = SCRIPT_TOC_RAIL_GAP_REM * rootFontSizePx;
-  const scriptTocRailLayout = measureScriptTocRailLayout(scenes, rootFontSizePx);
+  const scriptTocRailLayout = measureScriptTocRailLayout(tocScenes, rootFontSizePx);
   const scriptTocRailFullWidthPx = scriptTocRailLayout.railWidthPx;
   const scriptTocRailCompactWidthPx =
     (SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
@@ -10348,6 +10389,22 @@ export default function ScriptEditor({
                       className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       关于
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (openingChapterHasScenes) return;
+                        setShowOpeningChapter((visible) => !visible);
+                      }}
+                      disabled={openingChapterHasScenes}
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                        openingChapterHasScenes ? "cursor-not-allowed text-zinc-300" : "text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                      title={openingChapterHasScenes ? "开场下已有段落，必须显示" : undefined}
+                    >
+                      <span>显示开场</span>
+                      <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
+                        openingChapterVisible ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
+                      }`}>✓</span>
                     </button>
                     <div className="my-1 border-t border-zinc-50" />
                     <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">段内舞台提示</p>
@@ -11099,7 +11156,7 @@ export default function ScriptEditor({
                 : undefined}
             >
               <TableOfContents
-                scenes={scenes}
+                scenes={tocScenes}
                 blocks={ownedBlocks}
                 onScrollToScene={scrollToScene}
                 activeSceneId={activeSceneId}
@@ -11149,7 +11206,7 @@ export default function ScriptEditor({
               </span>
             </>
           )}
-          <TableOfContents scenes={scenes} blocks={ownedBlocks} onScrollToScene={scrollToScene} />
+          <TableOfContents scenes={tocScenes} blocks={ownedBlocks} onScrollToScene={scrollToScene} />
           <div
             ref={blocksContainerRef}
             onDragOver={(e) => {
@@ -11233,6 +11290,7 @@ export default function ScriptEditor({
             );
             const showSceneEndGap = isLockedMode && shouldShowSceneEndGap(prev, block);
             if (isMarkerBlock(block)) {
+              if (!openingChapterVisible && block.id === FIXED_INITIAL_CHAPTER_BLOCK_ID) return [];
               const isFixedInitialChapter = block.id === FIXED_INITIAL_CHAPTER_BLOCK_ID;
               const markerScene = block.sceneId ? sceneById.get(block.sceneId) ?? null : null;
               const markerNode: ScriptMarkerNode | null =
@@ -11443,6 +11501,11 @@ export default function ScriptEditor({
               prev.lyric === block.lyric &&
               _sameCharacters(prev.characterIds, block.characterIds)
             );
+            const contentPlaceholder = ownedBlock.sceneId === FIXED_INITIAL_CHAPTER_BLOCK_ID
+              ? displayBlock.type === "stage"
+                ? "在此输入演出正式开始前的舞台提示…"
+                : "在此输入演出正式开始前的台词…"
+              : undefined;
 
             const blockEl = (
               <div
@@ -11475,6 +11538,7 @@ export default function ScriptEditor({
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
                   textLayoutMode={scriptConfig.textLayoutMode}
+                  contentPlaceholder={contentPlaceholder}
                   characters={characters}
                   scenes={scenes}
                   hideCharSelector={hideCharSelector}
