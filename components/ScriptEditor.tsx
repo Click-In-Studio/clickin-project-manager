@@ -279,25 +279,13 @@ function hasNonNameSceneDetails(
 
 function sceneDetailDeleteBlockedMessage(kind: MarkerDetailDeleteBlockedKind): string {
   const label = kind === "chapter" ? "章节" : "段落";
-  return `${label}详情不为空，不可删除当前${label}块。\n如需删除，请确保详情内容（包括${label}名称）均已转移或清空。`;
+  return `${label}详情不为空，不可删除当前${label}块。\n如需删除，请确保详情内容均已转移或清空。`;
 }
 
 function markerBlockDramaturgyDeleteBlockedKind(block: Block, detail?: SceneDetail | null): MarkerDetailDeleteBlockedKind | null {
   if (block.type !== "chapter_marker" && block.type !== "scene_marker") return null;
   const markerMeta = block.markerMeta ?? {};
-  const hasDetails =
-    hasTextValue(markerMeta.name) ||
-    hasTextValue(markerMeta.synopsis) ||
-    hasTextValue(markerMeta.actionLine) ||
-    hasTextValue(markerMeta.music) ||
-    hasTextValue(markerMeta.stageNotes) ||
-    hasTextValue(markerMeta.expectedDuration) ||
-    hasTextValue(detail?.name) ||
-    hasTextValue(detail?.synopsis) ||
-    hasTextValue(detail?.actionLine) ||
-    hasTextValue(detail?.music) ||
-    hasTextValue(detail?.stageNotes) ||
-    hasTextValue(detail?.expectedDuration);
+  const hasDetails = hasNonNameSceneDetails(detail, markerMeta, block.type === "chapter_marker");
   if (!hasDetails) return null;
   return block.type === "chapter_marker" ? "chapter" : "scene";
 }
