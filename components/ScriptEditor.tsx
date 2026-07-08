@@ -257,19 +257,23 @@ function hasTextValue(value: string | null | undefined): boolean {
 
 function hasNonNameSceneDetails(
   detail?: Partial<SceneMetaFields> | null,
-  markerMeta?: Partial<SceneMetaFields> | null
+  markerMeta?: Partial<SceneMetaFields> | null,
+  ignoreExpectedDuration = false
 ): boolean {
+  const hasExpectedDuration = !ignoreExpectedDuration && (
+    hasTextValue(markerMeta?.expectedDuration) ||
+    hasTextValue(detail?.expectedDuration)
+  );
   return (
     hasTextValue(markerMeta?.synopsis) ||
     hasTextValue(markerMeta?.actionLine) ||
     hasTextValue(markerMeta?.music) ||
     hasTextValue(markerMeta?.stageNotes) ||
-    hasTextValue(markerMeta?.expectedDuration) ||
     hasTextValue(detail?.synopsis) ||
     hasTextValue(detail?.actionLine) ||
     hasTextValue(detail?.music) ||
     hasTextValue(detail?.stageNotes) ||
-    hasTextValue(detail?.expectedDuration)
+    hasExpectedDuration
   );
 }
 
@@ -4919,7 +4923,7 @@ function analyzeEmptyScriptCleanup(
     const kind = scene.parentId === null ? "chapter" : "scene";
     const label = [scene.number.trim(), scene.name.trim()].filter(Boolean).join(" ") ||
       (kind === "chapter" ? "未命名章节" : "未命名段落");
-    const hasDetails = hasNonNameSceneDetails(sceneDetailById.get(scene.id), markerMeta);
+    const hasDetails = hasNonNameSceneDetails(sceneDetailById.get(scene.id), markerMeta, kind === "chapter");
     return {
       id: scene.id,
       key: `${kind}:${scene.id}`,
