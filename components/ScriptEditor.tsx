@@ -4711,6 +4711,81 @@ function repairEmptyMarkerSegments(blocks: Block[], markerIds: Iterable<string>,
   return changed ? normalizeScriptBlockStream(next) : blocks;
 }
 
+function buildEmptyScriptCleanupRemovalPlan(
+  currentBlocks: Block[],
+  selectedTargets: EmptyScriptCleanupTarget[],
+  options?: { includeEmptyTextBlocks?: boolean; repairDeletedRangeStarts?: boolean }
+) {
+  const selectedSceneIds = new Set(
+    selectedTargets
+      .filter((target) => target.kind === "chapter" || target.kind === "scene")
+      .map((target) => target.id)
+  );
+  const selectedRehearsalBlockIds = new Set(
+    selectedTargets
+      .filter((target) => target.kind === "rehearsal")
+      .map((target) => target.id)
+  );
+  const deleteBlockIds = new Set<string>();
+  const markersToRepair = new Set<string>();
+  let currentSectionSelected = false;
+  let currentRehearsalSelected = false;
+  let currentMarkerId: string | null = null;
+  for (const block of currentBlocks) {
+    if (block.type === "chapter_marker") {
+      currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
+      currentRehearsalSelected = false;
+      currentMarkerId = block.id;
+      if (
+        block.sceneId &&
+        selectedSceneIds.has(block.sceneId) &&
+        block.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID
+      ) {
+        deleteBlockIds.add(block.id);
+      }
+      continue;
+    }
+    if (block.type === "scene_marker") {
+      currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
+      currentRehearsalSelected = false;
+      currentMarkerId = block.id;
+      if (block.sceneId && selectedSceneIds.has(block.sceneId)) {
+        deleteBlockIds.add(block.id);
+      }
+      continue;
+    }
+    if (block.type === "rehearsal_marker") {
+      currentRehearsalSelected = currentSectionSelected || selectedRehearsalBlockIds.has(block.id);
+      if (currentRehearsalSelected) {
+        deleteBlockIds.add(block.id);
+        if (currentMarkerId) markersToRepair.add(currentMarkerId);
+      } else {
+        currentMarkerId = block.id;
+      }
+      continue;
+    }
+    if (currentSectionSelected || currentRehearsalSelected) {
+      deleteBlockIds.add(block.id);
+    } else if (options?.includeEmptyTextBlocks !== false && isEmptyTextBlock(block)) {
+      deleteBlockIds.add(block.id);
+      if (currentMarkerId) markersToRepair.add(currentMarkerId);
+    }
+  }
+
+  if (options?.repairDeletedRangeStarts) {
+    for (let index = 0; index < currentBlocks.length; index++) {
+      const block = currentBlocks[index];
+      if (!deleteBlockIds.has(block.id)) continue;
+      if (index > 0 && deleteBlockIds.has(currentBlocks[index - 1].id)) continue;
+
+      const previousMarker = previousAdjacentMarker(currentBlocks, index);
+      if (previousMarker && !deleteBlockIds.has(previousMarker.id)) markersToRepair.add(previousMarker.id);
+    }
+  }
+
+  return { deleteBlockIds, markersToRepair, selectedSceneIds };
+}
+
 function isOnlyTextBlockInMarkerSegment(blocks: Block[], index: number): boolean {
   const block = blocks[index];
   if (!block || isMarkerBlock(block)) return false;
@@ -9437,60 +9512,10 @@ export default function ScriptEditor({
       }
       return;
     }
-    const selectedSceneIds = new Set(
+    const { deleteBlockIds, markersToRepair, selectedSceneIds } = buildEmptyScriptCleanupRemovalPlan(
+      currentBlocks,
       selectedTargets
-        .filter((target) => target.kind === "chapter" || target.kind === "scene")
-        .map((target) => target.id)
     );
-    const selectedRehearsalBlockIds = new Set(
-      selectedTargets
-        .filter((target) => target.kind === "rehearsal")
-        .map((target) => target.id)
-    );
-    const deleteBlockIds = new Set<string>(emptyTextBlockIds);
-    const markersToRepair = new Set<string>();
-    let currentSectionSelected = false;
-    let currentRehearsalSelected = false;
-    let currentMarkerId: string | null = null;
-    for (const block of currentBlocks) {
-      if (block.type === "chapter_marker") {
-        currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
-        currentRehearsalSelected = false;
-        currentMarkerId = block.id;
-        if (
-          block.sceneId &&
-          selectedSceneIds.has(block.sceneId) &&
-          block.id !== FIXED_INITIAL_CHAPTER_BLOCK_ID
-        ) {
-          deleteBlockIds.add(block.id);
-        }
-        continue;
-      }
-      if (block.type === "scene_marker") {
-        currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
-        currentRehearsalSelected = false;
-        currentMarkerId = block.id;
-        if (block.sceneId && selectedSceneIds.has(block.sceneId)) {
-          deleteBlockIds.add(block.id);
-        }
-        continue;
-      }
-      if (block.type === "rehearsal_marker") {
-        currentRehearsalSelected = currentSectionSelected || selectedRehearsalBlockIds.has(block.id);
-        if (currentRehearsalSelected) {
-          deleteBlockIds.add(block.id);
-          if (currentMarkerId) markersToRepair.add(currentMarkerId);
-        } else {
-          currentMarkerId = block.id;
-        }
-        continue;
-      }
-      if (currentSectionSelected || currentRehearsalSelected) {
-        deleteBlockIds.add(block.id);
-      } else if (currentMarkerId && isEmptyTextBlock(block)) {
-        markersToRepair.add(currentMarkerId);
-      }
-    }
 
     const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
     const remainingScenes = scenesRef.current.filter((scene) => !selectedSceneIds.has(scene.id));
@@ -9512,6 +9537,79 @@ export default function ScriptEditor({
     ));
     showReorderNotice("已清除选中空白内容。");
   }, [canEditText, deleteBlocks, isLockedMode, markOwnershipDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, setEmptyScriptCleanupDialog, showReorderNotice]);
+
+  const getEmptyMarkerDeletePlan = useCallback((markerBlockId: string) => {
+    const currentBlocks = blocksRef.current;
+    const markerIndex = blockIndexByIdRef.current.get(markerBlockId);
+    const markerBlock = markerIndex === undefined ? undefined : currentBlocks[markerIndex];
+    const targetKey =
+      markerBlock?.type === "chapter_marker" && markerBlock.sceneId ? `chapter:${markerBlock.sceneId}` :
+      markerBlock?.type === "scene_marker" && markerBlock.sceneId ? `scene:${markerBlock.sceneId}` :
+      markerBlock?.type === "rehearsal_marker" ? `rehearsal:${markerBlock.id}` :
+      null;
+    if (!targetKey) return null;
+
+    const cleanupAnalysis = analyzeEmptyScriptCleanup(currentBlocks, scenesRef.current, sceneDetailById);
+    const rootTarget = cleanupAnalysis.targets.find((target) => target.key === targetKey) ?? null;
+    if (!rootTarget || rootTarget.disabledReason) return null;
+
+    const selectedTargets: EmptyScriptCleanupTarget[] = [];
+    const targetsByParentKey = new Map<string, EmptyScriptCleanupTarget[]>();
+    for (const target of cleanupAnalysis.targets) {
+      if (!target.parentKey) continue;
+      const siblings = targetsByParentKey.get(target.parentKey);
+      if (siblings) siblings.push(target);
+      else targetsByParentKey.set(target.parentKey, [target]);
+    }
+    const collectTarget = (target: EmptyScriptCleanupTarget) => {
+      if (target.disabledReason) return;
+      selectedTargets.push(target);
+      for (const child of targetsByParentKey.get(target.key) ?? []) collectTarget(child);
+    };
+    collectTarget(rootTarget);
+
+    const { deleteBlockIds, markersToRepair, selectedSceneIds } = buildEmptyScriptCleanupRemovalPlan(
+      currentBlocks,
+      selectedTargets,
+      { includeEmptyTextBlocks: false, repairDeletedRangeStarts: true }
+    );
+    if (deleteBlockIds.size === 0) return null;
+
+    return { currentBlocks, deleteBlockIds, markersToRepair, selectedSceneIds };
+  }, [sceneDetailById]);
+
+  const deleteMarkerOrEmptyTarget = useCallback((markerBlockId: string, fallbackDeleteIds: string[]) => {
+    if (isLockedMode) return;
+    if (!canEditText || fallbackDeleteIds.length !== 1 || fallbackDeleteIds[0] !== markerBlockId) {
+      deleteBlocks(fallbackDeleteIds);
+      return;
+    }
+
+    const plan = getEmptyMarkerDeletePlan(markerBlockId);
+    if (!plan) {
+      deleteBlocks(fallbackDeleteIds);
+      return;
+    }
+    const { currentBlocks, deleteBlockIds, markersToRepair, selectedSceneIds } = plan;
+
+    const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
+    const remainingScenes = scenesRef.current.filter((scene) => !selectedSceneIds.has(scene.id));
+    const repairedBlocks = repairEmptyMarkerSegments(remainingBlocks, markersToRepair, { includeTerminal: true });
+    const normalized = normalizeScriptMarkerInvariants(
+      repairedBlocks.length > 0 ? repairedBlocks : [makeBlock()],
+      remainingScenes
+    );
+
+    saveSnapshot();
+    markOwnershipDirty("full");
+    resetScriptInteractions();
+    setBlocks(normalized.blocks);
+    setScenes(normalized.scenes);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(
+      prev.filter((scene) => !selectedSceneIds.has(scene.id)),
+      normalized.scenes
+    ));
+  }, [canEditText, deleteBlocks, getEmptyMarkerDeletePlan, isLockedMode, markOwnershipDirty, resetScriptInteractions, saveSnapshot]);
 
   const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
     const index = blockIndexByIdRef.current.get(id);
@@ -9571,8 +9669,9 @@ export default function ScriptEditor({
       rangeSelectionActiveRef.current = false;
       setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
     }
-    setDeleteConfirmingBlockIds(new Set(ids));
-  }, [isLockedMode, selectedBlockIds, selectedBlockIdsArray]);
+    const plan = canEditText && ids.length === 1 ? getEmptyMarkerDeletePlan(id) : null;
+    setDeleteConfirmingBlockIds(plan?.deleteBlockIds ?? new Set(ids));
+  }, [canEditText, getEmptyMarkerDeletePlan, isLockedMode, selectedBlockIds, selectedBlockIdsArray]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -11165,7 +11264,7 @@ export default function ScriptEditor({
                     isFixed={isFixedInitialChapter}
                     isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
                     isTocHighlighted={tocHighlightedMarkerIds.has(block.id)}
-                    onRemove={() => deleteBlocks(markerDeleteIds)}
+                    onRemove={() => deleteMarkerOrEmptyTarget(block.id, markerDeleteIds)}
                     onRequestDelete={() => requestMarkerDelete(block.id)}
                     deleteCount={markerDeleteIds.length}
                     canAddChapterScene={!isFixedInitialChapter && canEditMetadata}
