@@ -1231,6 +1231,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           <p className="text-sm font-medium text-gray-700">类型映射</p>
           {typeValues.map(val => {
             const action = primaryTypeAction(typeTagMapping[val]);
+            const activeTags = tagActions(typeTagMapping[val]);
             return (
               <div key={val} className="flex items-center gap-2 flex-wrap">
                 <span className="w-28 text-sm font-medium truncate">{val || <span className="text-gray-400 italic">空白</span>}</span>
@@ -1241,6 +1242,33 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                   <option value="mapType">映射到类型</option><option value="ignore">忽略该行</option>
                 </select>
                 {action.action === "mapType" && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={(action as { action: "mapType"; blockType: string }).blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
+                {activeTags.map(ta => {
+                  const grp = tagGroups.find(g => g.id === ta.groupId);
+                  const opt = grp?.options.find(o => o.id === ta.optionId);
+                  if (!grp) return null;
+                  return (
+                    <span key={ta.groupId + ta.optionId} className="inline-flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs text-violet-700">
+                      {grp.name}{opt ? `/${opt.label}` : ""}
+                      <button type="button" onClick={() => void toggleRawTagInGroup(val, grp)} className="ml-0.5 hover:text-red-500 leading-none">×</button>
+                    </span>
+                  );
+                })}
+                {val && tagGroups.filter(g => !activeTags.some(ta => ta.groupId === g.id)).length > 0 && (
+                  <select
+                    className="rounded border border-dashed border-violet-300 bg-white px-1.5 py-0.5 text-xs text-violet-400"
+                    value=""
+                    onChange={e => {
+                      const grp = tagGroups.find(g => g.id === e.target.value);
+                      if (grp) void toggleRawTagInGroup(val, grp);
+                    }}
+                  >
+                    <option value="">+ Tag</option>
+                    {tagGroups
+                      .filter(g => !activeTags.some(ta => ta.groupId === g.id))
+                      .map(g => <option key={g.id} value={g.id}>{g.name}</option>)
+                    }
+                  </select>
+                )}
               </div>
             );
           })}
