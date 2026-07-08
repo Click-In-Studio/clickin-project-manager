@@ -13,7 +13,7 @@ const MAX_BROWSER_UPLOAD = 50 * 1024 * 1024 * 1024; // 50 GB
 // Chunk size is therefore chosen once at upload start and never changes mid-upload.
 // Available sizes (bytes); adaptive logic moves between these levels across uploads.
 const CHUNK_SIZES = [5, 16, 32, 64, 128].map(n => n << 20);
-const CHUNK_DEFAULT_IDX = 1; // 16 MB — safe starting point
+const CHUNK_DEFAULT_IDX = CHUNK_SIZES.length - 1; // 128 MB — start at max, downgrade on failure
 // Probe: run a 512 KB test upload to estimate bandwidth when the stored chunk
 // size is low and the file is large enough to benefit from a bigger chunk.
 const PROBE_BYTES             = 512 * 1024;
@@ -52,7 +52,9 @@ function chunkBytesDown(current: number): number {
 }
 
 async function runUploadProbe(presignUrl: string): Promise<number> {
-  const blob = new Blob([new Uint8Array(PROBE_BYTES)]);
+  const buf = new Uint8Array(PROBE_BYTES);
+  crypto.getRandomValues(buf);
+  const blob = new Blob([buf]);
   const t0 = performance.now();
   try {
     const res = await fetch(presignUrl, {
@@ -307,11 +309,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         const storedChunk = loadStoredChunkBytes();
         let chunkBytes = storedChunk;
         if (file.size >= PROBE_FILE_MIN && storedChunk < PROBE_STORED_MAX) {
-          const probePresignRes = await fetch(`${base}/presign`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileName: "__probe__", mimeType: "application/octet-stream" }),
-          });
+          const probePresignRes = await fetch(`${base}/presign-probe`);
           if (probePresignRes.ok) {
             const { uploadUrl } = await probePresignRes.json() as { uploadUrl: string };
             chunkBytes = await runUploadProbe(uploadUrl);
