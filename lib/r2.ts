@@ -331,3 +331,21 @@ export async function getR2Object(key: string): Promise<{ body: Buffer; contentT
   const body = Buffer.from(await res.arrayBuffer());
   return { body, contentType: res.headers.get("content-type") };
 }
+
+/**
+ * Stream an R2 object, optionally with a Range header for partial content.
+ * Returns the raw Response for piping — caller must not buffer the body.
+ * Returns null if the object does not exist (404).
+ */
+export async function getR2Stream(
+  key: string,
+  range?: string | null,
+): Promise<Response | null> {
+  const url = presignedGet(key, 3600);
+  const fetchHeaders: Record<string, string> = {};
+  if (range) fetchHeaders["Range"] = range;
+  const res = await fetch(url, { headers: fetchHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok && res.status !== 206) throw new Error(`R2 GET failed: ${res.status}`);
+  return res;
+}

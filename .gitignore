@@ -50,3 +50,4 @@ agent_bot.md
 
 # Local deployment config (contains sensitive server/credential info)
 docs/DEPLOY_LOCAL.md
+Trace-*.json
