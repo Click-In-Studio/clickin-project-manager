@@ -8,10 +8,71 @@ import { BASE_PATH } from "@/lib/base-path";
 const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 // Files above this should be transferred by other means (rsync, rclone, etc.)
 const MAX_BROWSER_UPLOAD = 50 * 1024 * 1024 * 1024; // 50 GB
+
 // S3/R2 multipart rule: ALL non-trailing parts MUST be exactly the same size.
-// Chunk size must therefore be fixed for the entire upload — only concurrency adapts.
-const MULTIPART_CHUNK_BYTES = 16 << 20; // 16 MB per part, fixed
-// Adaptive upload levels — only concurrency changes; chunk size is always MULTIPART_CHUNK_BYTES.
+// Chunk size is therefore chosen once at upload start and never changes mid-upload.
+// Available sizes (bytes); adaptive logic moves between these levels across uploads.
+const CHUNK_SIZES = [5, 16, 32, 64, 128].map(n => n << 20);
+const CHUNK_DEFAULT_IDX = 1; // 16 MB — safe starting point
+// Probe: run a 512 KB test upload to estimate bandwidth when the stored chunk
+// size is low and the file is large enough to benefit from a bigger chunk.
+const PROBE_BYTES             = 512 * 1024;
+const PROBE_FILE_MIN          = MULTIPART_THRESHOLD; // only probe for multipart files
+const PROBE_STORED_MAX        = 32 << 20;            // skip probe if stored >= 32 MB
+const PROBE_TARGET_SECONDS    = 15;                  // aim for ~15 s per chunk
+// localStorage key / TTL for persisted chunk size
+const CHUNK_LS_KEY  = "upload_chunk_bytes_v1";
+const CHUNK_LS_TTL  = 60 * 60 * 1000; // 1 hour
+// Failure thresholds — either triggers an abort + chunk-size downgrade
+const MAX_CONSECUTIVE_PART_FAILURES = 5;
+const MAX_TOTAL_RETRIES             = 20;
+
+function loadStoredChunkBytes(): number {
+  try {
+    const raw = localStorage.getItem(CHUNK_LS_KEY);
+    if (!raw) return CHUNK_SIZES[CHUNK_DEFAULT_IDX];
+    const { bytes, updatedAt } = JSON.parse(raw) as { bytes: number; updatedAt: number };
+    if (Date.now() - updatedAt > CHUNK_LS_TTL) return CHUNK_SIZES[CHUNK_DEFAULT_IDX];
+    return CHUNK_SIZES.includes(bytes) ? bytes : CHUNK_SIZES[CHUNK_DEFAULT_IDX];
+  } catch { return CHUNK_SIZES[CHUNK_DEFAULT_IDX]; }
+}
+
+function saveChunkBytes(bytes: number): void {
+  try { localStorage.setItem(CHUNK_LS_KEY, JSON.stringify({ bytes, updatedAt: Date.now() })); } catch { /* ignore */ }
+}
+
+function chunkBytesUp(current: number): number {
+  const idx = CHUNK_SIZES.indexOf(current);
+  return idx >= 0 && idx < CHUNK_SIZES.length - 1 ? CHUNK_SIZES[idx + 1] : current;
+}
+
+function chunkBytesDown(current: number): number {
+  const idx = CHUNK_SIZES.indexOf(current);
+  return idx > 0 ? CHUNK_SIZES[idx - 1] : current;
+}
+
+async function runUploadProbe(presignUrl: string): Promise<number> {
+  const blob = new Blob([new Uint8Array(PROBE_BYTES)]);
+  const t0 = performance.now();
+  try {
+    const res = await fetch(presignUrl, {
+      method: "PUT", body: blob,
+      headers: { "Content-Type": "application/octet-stream" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error("probe failed");
+    const bw = PROBE_BYTES / ((performance.now() - t0) / 1000); // bytes/s
+    const target = bw * PROBE_TARGET_SECONDS;
+    const idx = CHUNK_SIZES.reduce((best, sz, i) => sz <= target ? i : best, 0);
+    return CHUNK_SIZES[idx];
+  } catch { return CHUNK_SIZES[CHUNK_DEFAULT_IDX]; }
+}
+
+class ChunkSizeAbortError extends Error {
+  constructor() { super("ChunkSizeAbort"); }
+}
+
+// Adaptive upload levels — only concurrency changes; chunk size is fixed per upload.
 //
 // Direct path (client → R2): starts at level 0, promotes after PROMOTE_AFTER
 // consecutive fully-successful batches, demotes on any batch failure.
@@ -240,6 +301,23 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         const mp = await mpRes.json() as { uploadId: string; r2Key: string; fileId: string };
         r2Key = mp.r2Key; fileId = mp.fileId;
 
+        // ── Determine chunk size for this upload ────────────────────────────
+        // Chunk size is fixed once chosen — the S3/R2 InvalidPart rule requires
+        // all non-trailing parts to be exactly the same size.
+        const storedChunk = loadStoredChunkBytes();
+        let chunkBytes = storedChunk;
+        if (file.size >= PROBE_FILE_MIN && storedChunk < PROBE_STORED_MAX) {
+          const probePresignRes = await fetch(`${base}/presign`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileName: "__probe__", mimeType: "application/octet-stream" }),
+          });
+          if (probePresignRes.ok) {
+            const { uploadUrl } = await probePresignRes.json() as { uploadUrl: string };
+            chunkBytes = await runUploadProbe(uploadUrl);
+          }
+        }
+
         // ── Adaptive state ──────────────────────────────────────────────────
         // ETags are collected server-side via listMultipartParts — the browser
         // cannot read the ETag response header from cross-origin R2 requests
@@ -248,7 +326,9 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         let useRelay  = false;
         let directLvl = 0;
         let relayLvl  = 0;
-        let goodBatches = 0;   // consecutive fully-successful batches
+        let goodBatches = 0;            // consecutive fully-successful batches
+        let consecutivePartFailures = 0;
+        let totalRetries = 0;
         let nextOffset  = 0;
         let nextPart    = 1;
 
@@ -337,7 +417,6 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
           const { concurrency } = (useRelay ? RELAY_LEVELS : DIRECT_LEVELS)[
             useRelay ? relayLvl : directLvl
           ];
-          const chunkBytes = MULTIPART_CHUNK_BYTES; // fixed for the entire upload
 
           // Build batch segments starting from nextOffset
           const batch: { partNumber: number; offset: number }[] = [];
@@ -368,6 +447,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
           }
 
           if (!anyFailed) {
+            consecutivePartFailures = 0;
             // Full batch success — maybe promote
             goodBatches++;
             if (!useRelay && goodBatches >= PROMOTE_AFTER && directLvl < DIRECT_LEVELS.length - 1) {
@@ -376,6 +456,15 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
             }
           } else {
             goodBatches = 0;
+            consecutivePartFailures++;
+            totalRetries++;
+
+            // Abort if failures suggest the chunk size itself is the problem
+            if (consecutivePartFailures >= MAX_CONSECUTIVE_PART_FAILURES || totalRetries >= MAX_TOTAL_RETRIES) {
+              saveChunkBytes(chunkBytesDown(chunkBytes));
+              throw new ChunkSizeAbortError();
+            }
+
             const failErr = (results[nCommitted] as PromiseRejectedResult).reason as Error & { relay503?: boolean };
 
             if (useRelay && failErr?.relay503) {
@@ -383,7 +472,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
               await pause(RELAY_BUSY_MS);
             } else if (!useRelay) {
               if (directLvl > 0) {
-                directLvl--;            // shrink direct chunk/concurrency
+                directLvl--;            // shrink concurrency on direct path
                 await pause(RETRY_DELAY_MS);
               } else {
                 useRelay = true;        // direct exhausted → relay
@@ -391,7 +480,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
                 await pause(RETRY_DELAY_MS);
               }
             } else {
-              // Relay non-503 failure — shrink relay chunk
+              // Relay non-503 failure — shrink relay concurrency
               if (relayLvl < RELAY_LEVELS.length - 1) {
                 relayLvl++;
                 await pause(RETRY_DELAY_MS);
@@ -403,6 +492,8 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         }
 
         setProgress(100);
+        // Save chunk size learning: zero retries → try upgrading next time
+        saveChunkBytes(totalRetries === 0 ? chunkBytesUp(chunkBytes) : chunkBytes);
 
         const regRes = await fetch(base, {
           method: "POST",
@@ -425,7 +516,11 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
         onUploaded({ assetId: regJ.asset.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
       }
     } catch (e) {
-      setError(String(e));
+      if (e instanceof ChunkSizeAbortError) {
+        setError("网络环境不稳定，已自动降低分片大小，请重试");
+      } else {
+        setError(String(e));
+      }
     } finally {
       setLoading(false);
       setProgress(null);
