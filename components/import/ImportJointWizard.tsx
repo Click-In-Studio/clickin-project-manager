@@ -1235,13 +1235,17 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             return (
               <div key={val} className="flex items-center gap-2 flex-wrap">
                 <span className="w-28 text-sm font-medium truncate">{val || <span className="text-gray-400 italic">空白</span>}</span>
-                <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={action.action} onChange={e => {
-                  const a = e.target.value as TypeAction["action"];
-                  setRawPrimaryAction(val, a === "ignore" ? { action: "ignore" } : { action: "mapType", blockType: "dialogue" });
-                }}>
-                  <option value="mapType">映射到类型</option><option value="ignore">忽略该行</option>
+                <select className="border border-gray-300 rounded px-2 py-1 text-sm"
+                  value={activeTags.length > 0 ? "mapTag" : action.action}
+                  onChange={e => {
+                    const a = e.target.value as TypeAction["action"];
+                    if (a !== "mapTag") setRawPrimaryAction(val, a === "ignore" ? { action: "ignore" } : { action: "mapType", blockType: "dialogue" });
+                  }}>
+                  <option value="mapType">映射到类型</option>
+                  <option value="mapTag">映射到 Tag</option>
+                  <option value="ignore">忽略该行</option>
                 </select>
-                {action.action === "mapType" && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={(action as { action: "mapType"; blockType: string }).blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
+                {action.action === "mapType" && activeTags.length === 0 && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={(action as { action: "mapType"; blockType: string }).blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
                 {activeTags.map(ta => {
                   const grp = tagGroups.find(g => g.id === ta.groupId);
                   const opt = grp?.options.find(o => o.id === ta.optionId);
