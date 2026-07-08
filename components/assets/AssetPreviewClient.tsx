@@ -3,6 +3,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import AssetShareModal from "./AssetShareModal";
 
 const WaveformPlayer = lazy(() => import("./WaveformPlayer"));
 const VideoPlayer = lazy(() => import("./VideoPlayer"));
@@ -36,6 +37,7 @@ export default function AssetPreviewClient({
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const previewType = getPreviewType(mimeType);
 
@@ -103,6 +105,12 @@ export default function AssetPreviewClient({
               下载
             </a>
           )}
+          <button
+            onClick={() => setShareOpen(true)}
+            className="text-xs text-white/40 hover:text-white/70 transition-colors"
+          >
+            分享
+          </button>
           <a
             href={backHref}
             className="text-xs text-white/40 hover:text-white/70 transition-colors"
@@ -111,6 +119,15 @@ export default function AssetPreviewClient({
           </a>
         </div>
       </div>
+
+      {shareOpen && (
+        <AssetShareModal
+          productionId={productionId}
+          assetId={assetId}
+          assetName={fileName}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
 
       {/* Content */}
       <div className="flex-1 flex items-center justify-center p-4 min-h-0 overflow-auto">

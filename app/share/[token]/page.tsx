@@ -12,7 +12,7 @@ type AssetInfo = {
   assetType: string;
   storageType: string;
   expiresAt: string | null;
-  oneTime: boolean;
+  allowDownload: boolean;
 };
 
 function formatSize(bytes: number): string {
@@ -22,8 +22,7 @@ function formatSize(bytes: number): string {
 }
 
 function formatExpiry(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
+  return new Date(iso).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
 }
 
 function mediaKind(mimeType: string | null): "video" | "audio" | "pdf" | "other" {
@@ -70,19 +69,30 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
 
   const streamUrl = `${BASE_PATH}/api/share/${token}/stream`;
   const kind = mediaKind(info.mimeType);
+  const { allowDownload } = info;
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-white">
       {/* Header */}
-      <div className="border-b border-zinc-800 px-6 py-4">
-        <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 mb-0.5">Click-In 资产分享</p>
-        <h1 className="text-base font-semibold text-zinc-100 truncate">{info.name}</h1>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          {info.fileName}
-          {info.fileSize ? ` · ${formatSize(info.fileSize)}` : ""}
-          {info.expiresAt ? ` · 有效至 ${formatExpiry(info.expiresAt)}` : ""}
-          {info.oneTime ? " · 一次性链接" : ""}
-        </p>
+      <div className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 mb-0.5">Click-In 资产分享</p>
+          <h1 className="text-base font-semibold text-zinc-100 truncate">{info.name}</h1>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            {info.fileName}
+            {info.fileSize ? ` · ${formatSize(info.fileSize)}` : ""}
+            {info.expiresAt ? ` · 有效至 ${formatExpiry(info.expiresAt)}` : ""}
+          </p>
+        </div>
+        {allowDownload && (
+          <a
+            href={streamUrl}
+            download={info.fileName}
+            className="ml-4 shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            下载
+          </a>
+        )}
       </div>
 
       {/* Player / Viewer */}
@@ -91,8 +101,8 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
           <video
             src={streamUrl}
             controls
-            controlsList="nodownload nofullscreen"
-            disablePictureInPicture
+            controlsList={allowDownload ? undefined : "nodownload nofullscreen"}
+            disablePictureInPicture={!allowDownload}
             className="max-h-[80vh] max-w-full rounded-lg shadow-2xl"
             preload="metadata"
           />
@@ -109,7 +119,7 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
             <audio
               src={streamUrl}
               controls
-              controlsList="nodownload"
+              controlsList={allowDownload ? undefined : "nodownload"}
               className="w-full"
               preload="metadata"
             />
@@ -134,6 +144,15 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
             </div>
             <p className="text-zinc-400 text-sm">此文件类型不支持在线预览</p>
             <p className="text-zinc-600 text-xs">{info.fileName}</p>
+            {allowDownload && (
+              <a
+                href={streamUrl}
+                download={info.fileName}
+                className="inline-block rounded-lg bg-white/10 hover:bg-white/20 px-5 py-2.5 text-sm text-white transition-colors"
+              >
+                下载文件
+              </a>
+            )}
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import MountPointAssets from "./MountPointAssets";
+import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset, AssetMount, AssetType } from "@/lib/asset-db";
 
@@ -34,6 +35,7 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
   const [view, setView] = useState<View>("all");
   const [uploadTarget, setUploadTarget] = useState<Asset | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [shareTarget, setShareTarget] = useState<Asset | null>(null);
   const [filter, setFilter] = useState<"all" | "mine">("all");
   const [search, setSearch] = useState("");
 
@@ -246,6 +248,10 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
                         className="rounded-lg px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-50 transition-colors">
                         下载
                       </button>
+                      <button onClick={() => setShareTarget(a)}
+                        className="rounded-lg px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-50 transition-colors">
+                        分享
+                      </button>
                       {canEdit && (
                         <button
                           onClick={() => { setUploadTarget(a); setView("upload-new-version"); }}
@@ -300,6 +306,15 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
           </div>
         )}
       </div>
+
+      {shareTarget && (
+        <AssetShareModal
+          productionId={productionId}
+          assetId={shareTarget.id}
+          assetName={shareTarget.name ?? shareTarget.fileName}
+          onClose={() => setShareTarget(null)}
+        />
+      )}
     </div>
   );
 }
