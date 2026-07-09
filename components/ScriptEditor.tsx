@@ -6791,7 +6791,7 @@ export default function ScriptEditor({
   }, [blocks, scriptConfig.openingChapterMarkerId]);
   const openingChapterHasScenes = openingChapterState.hasScenes;
   const openingChapterSceneId = openingChapterState.sceneId;
-  const [showOpeningChapter, setShowOpeningChapter] = useState(true);
+  const [showOpeningChapter, setShowOpeningChapter] = useState(false);
   const openingChapterVisible = showOpeningChapter || openingChapterHasScenes;
   const tocScenes = useMemo(
     () => openingChapterVisible
@@ -8255,6 +8255,7 @@ export default function ScriptEditor({
     setCharacters([]);
     setScenes([]);
     setSceneDetails([]);
+    setShowOpeningChapter(false);
     syncedStateRef.current = null;
 
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
