@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
@@ -402,10 +402,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const stageDelimiter = getStageDelimiter(body.stageDelimiterPattern);
   const stageBlockDelimiterReplacements = buildStageDelimiterReplacements(stageDelimiter, STAGE_DELIMITER_PATTERNS);
 
-  const [existingChars, existingScenes, tagGroups] = await Promise.all([
+  const [existingChars, existingScenes, tagGroups, existingOpeningChapterId] = await Promise.all([
     listCharactersByVersion(versionId),
     listScenesByVersion(versionId),
     listTagGroups(productionId),
+    getVersionOpeningChapterId(versionId),
   ]);
   const replaceScenes = !!body.sceneOverrides;
 
@@ -646,7 +647,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
   }
 
-  const openingChapterMarkerId = randomUUID();
+  // Reuse the existing opening chapter UUID if the scene still exists, so incremental
+  // re-imports don't accumulate orphan opening chapter blocks.
+  const existingOpeningScene = existingOpeningChapterId
+    ? existingScenes.find(s => s.id === existingOpeningChapterId) ?? null
+    : null;
+  const openingChapterMarkerId = existingOpeningScene?.id ?? randomUUID();
   upsertScenesFromScript.unshift({
     id: openingChapterMarkerId,
     number: "",

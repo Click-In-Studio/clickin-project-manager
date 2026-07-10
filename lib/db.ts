@@ -34,7 +34,6 @@ const markerMigrationState: MarkerMigrationState = (
 markerMigrationState.estimatedTotalMs ??= null;
 
 const markerMigrationNeededChecks = new Map<string, Promise<boolean>>();
-let openingChapterConfigColumnReady: Promise<void> | null = null;
 
 export type MarkerMigrationProgress = {
   status: "ready" | "running" | "failed";
@@ -427,15 +426,7 @@ async function runScriptMarkerMigration(): Promise<void> {
   markerMigrationState.phase = "正在完成数据校验";
 }
 
-async function ensureOpeningChapterConfigColumn(): Promise<void> {
-  openingChapterConfigColumnReady ??= getPool()
-    .query(`ALTER TABLE version ADD COLUMN IF NOT EXISTS script_config JSONB NOT NULL DEFAULT '{}'`)
-    .then(() => undefined);
-  await openingChapterConfigColumnReady;
-}
-
 async function backfillOpeningChapterConfig(versionId: string): Promise<void> {
-  await ensureOpeningChapterConfigColumn();
   await getPool().query(
     `WITH target_version AS (
        SELECT id
@@ -669,6 +660,14 @@ export async function listVersions(productionId: string): Promise<Version[]> {
   return res.rows.map(rowToVersion);
 }
 
+export async function getVersionOpeningChapterId(versionId: string): Promise<string | null> {
+  const res = await getPool().query<{ id: string | null }>(
+    "SELECT script_config->>'openingChapterMarkerId' AS id FROM version WHERE id = $1",
+    [versionId]
+  );
+  return res.rows[0]?.id ?? null;
+}
+
 export async function getVersion(versionId: string): Promise<Version | null> {
   const res = await getPool().query<VersionRow>(
     "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE id = $1",
@@ -724,7 +723,6 @@ export async function createVersion(
   fromVersionId: string,
   name: string,
 ): Promise<Version> {
-  await ensureOpeningChapterConfigColumn();
   const newVersionId = genVersionId();
   const client = await getPool().connect();
   try {
@@ -750,12 +748,13 @@ export async function createVersion(
     const nowRes = await client.query<{ now: Date }>("SELECT now() AS now");
     const now = nowRes.rows[0].now;
 
-    await client.query(
+    const versionInsert = await client.query(
       `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config)
        SELECT $1, $2, $3, $4, 'editing', $5, COALESCE(script_config, '{}'::jsonb)
        FROM version WHERE id = $4`,
       [newVersionId, productionId, name, fromVersionId, now]
     );
+    if ((versionInsert.rowCount ?? 0) === 0) throw new Error("Failed to create version: source version not found");
 
     // Copy script blocks (same snapshots, new version entry)
     await client.query(
@@ -827,7 +826,6 @@ export async function rollbackToVersion(
   productionId: string,
   name: string,
 ): Promise<Version> {
-  await ensureOpeningChapterConfigColumn();
   const newVersionId = genVersionId();
   const client = await getPool().connect();
   try {
@@ -852,12 +850,13 @@ export async function rollbackToVersion(
     const nowRes = await client.query<{ now: Date }>("SELECT now() AS now");
     const now = nowRes.rows[0].now;
 
-    await client.query(
+    const rollbackInsert = await client.query(
       `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config)
        SELECT $1, $2, $3, $4, 'editing', $5, COALESCE(script_config, '{}'::jsonb)
        FROM version WHERE id = $6`,
       [newVersionId, productionId, name, currentVersionId, now, targetVersionId]
     );
+    if ((rollbackInsert.rowCount ?? 0) === 0) throw new Error("Failed to create rollback version: target version not found");
 
     // Copy content from targetVersionId (not currentVersionId)
     await client.query(
@@ -974,7 +973,6 @@ export type ProductionState = {
  * Returns null if the production doesn't exist.
  */
 export async function loadProduction(productionId: string, versionId: string): Promise<ProductionState | null> {
-  await ensureOpeningChapterConfigColumn();
   const pool = getPool();
 
   const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
@@ -1121,7 +1119,6 @@ export async function saveScriptConfig(productionId: string, versionId: string |
     }), productionId]
   );
   if (versionId) {
-    await ensureOpeningChapterConfigColumn();
     await pool.query(
       "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
       [JSON.stringify({ openingChapterMarkerId: config.openingChapterMarkerId }), versionId, productionId]
@@ -1134,7 +1131,6 @@ export async function saveOpeningChapterMarkerId(
   versionId: string,
   openingChapterMarkerId: string | null,
 ): Promise<void> {
-  await ensureOpeningChapterConfigColumn();
   await getPool().query(
     "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
     [JSON.stringify({ openingChapterMarkerId }), versionId, productionId]
