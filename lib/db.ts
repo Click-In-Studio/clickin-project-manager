@@ -1121,7 +1121,10 @@ export async function saveScriptConfig(productionId: string, versionId: string |
   if (versionId) {
     await pool.query(
       "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
-      [JSON.stringify({ openingChapterMarkerId: config.openingChapterMarkerId }), versionId, productionId]
+      [JSON.stringify({
+        openingChapterMarkerId: config.openingChapterMarkerId,
+        showOpeningChapter: config.showOpeningChapter,
+      }), versionId, productionId]
     );
   }
 }

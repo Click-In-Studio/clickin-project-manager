@@ -34,6 +34,7 @@ export type ScriptConfig = {
   pageLayout: PageLayout;
   textLayoutMode: ScriptTextLayoutMode;
   openingChapterMarkerId: string | null;
+  showOpeningChapter: boolean;
 };
 
 export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
@@ -42,6 +43,7 @@ export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
   pageLayout: "a4",
   textLayoutMode: "center",
   openingChapterMarkerId: null,
+  showOpeningChapter: false,
 };
 
 export type ScriptState = {

@@ -6792,24 +6792,29 @@ export default function ScriptEditor({
       ? blocks.findIndex((block) => block.id === openingChapterMarkerId)
       : -1;
     const marker = markerIndex >= 0 ? blocks[markerIndex] : null;
+    let mustBeVisible = false;
+    for (let index = markerIndex + 1; markerIndex >= 0 && index < blocks.length; index++) {
+      const block = blocks[index];
+      if (block.type === "chapter_marker") break;
+      if (block.type === "scene_marker" || block.type === "rehearsal_marker") {
+        mustBeVisible = true;
+        break;
+      }
+    }
     return {
-      hasScenes: markerIndex >= 0 && markerSegmentHasScene(blocks, markerIndex),
+      mustBeVisible,
       sceneId: marker?.type === "chapter_marker" ? marker.sceneId : null,
     };
   }, [blocks, scriptConfig.openingChapterMarkerId]);
-  const openingChapterHasScenes = openingChapterState.hasScenes;
   const openingChapterSceneId = openingChapterState.sceneId;
-  const [showOpeningChapter, setShowOpeningChapter] = useState(false);
-  const openingChapterVisible = showOpeningChapter || openingChapterHasScenes;
+  const openingChapterMustBeVisible = openingChapterState.mustBeVisible;
+  const openingChapterVisible = scriptConfig.showOpeningChapter || openingChapterMustBeVisible;
   const tocScenes = useMemo(
     () => openingChapterVisible
       ? scenes
       : scenes.filter((scene) => scene.id !== openingChapterSceneId),
     [openingChapterSceneId, openingChapterVisible, scenes]
   );
-  useEffect(() => {
-    if (openingChapterHasScenes) setShowOpeningChapter(true);
-  }, [openingChapterHasScenes]);
   const pageMap = useMemo(() => {
     const cache = updateEstimatedPageMap(
       pageMapCacheRef.current,
@@ -8263,7 +8268,6 @@ export default function ScriptEditor({
     setCharacters([]);
     setScenes([]);
     setSceneDetails([]);
-    setShowOpeningChapter(false);
     syncedStateRef.current = null;
 
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
@@ -10422,15 +10426,12 @@ export default function ScriptEditor({
                       关于
                     </button>
                     <button
-                      onClick={() => {
-                        if (openingChapterHasScenes) return;
-                        setShowOpeningChapter((visible) => !visible);
-                      }}
-                      disabled={openingChapterHasScenes}
+                      onClick={() => void saveScriptConfig({ showOpeningChapter: !scriptConfig.showOpeningChapter })}
+                      disabled={openingChapterMustBeVisible}
                       className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
-                        openingChapterHasScenes ? "cursor-not-allowed text-zinc-300" : "text-zinc-600 hover:bg-zinc-50"
+                        openingChapterMustBeVisible ? "cursor-not-allowed text-zinc-300" : "text-zinc-600 hover:bg-zinc-50"
                       }`}
-                      title={openingChapterHasScenes ? "开场下已有段落，必须显示" : undefined}
+                      title={openingChapterMustBeVisible ? "开场下已有段落或排练记号，必须显示" : undefined}
                     >
                       <span>显示开场</span>
                       <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
