@@ -1,0 +1,148 @@
+name: Issue Automation
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  # Add every new issue to the org project board. GITHUB_TOKEN has no access
+  # to org-level Projects v2, so this needs a classic PAT (scopes: repo,
+  # project) stored as the ADD_TO_PROJECT_PAT repo secret.
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v1
+        with:
+          project-url: https://github.com/orgs/Click-In-Studio/projects/1
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+  # Use OpenAI to suggest labels and an issue type (Task/Bug/Feature) based on
+  # the issue's title and description. Runs once on creation; never touches
+  # issues that already have labels or a type applied by a human.
+  classify-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        with:
+          script: |
+            const issue = context.payload.issue;
+
+            // Labels that need human triage history (prior reports, maintainer
+            // judgment) rather than something derivable from title+body alone.
+            const EXCLUDED_LABELS = new Set(['duplicate', 'wontfix', 'invalid']);
+            const ISSUE_TYPES = ['Task', 'Bug', 'Feature'];
+
+            const { data: repoLabels } = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const candidateLabels = repoLabels
+              .map(l => l.name)
+              .filter(name => !EXCLUDED_LABELS.has(name));
+
+            if (!process.env.OPENAI_API_KEY) {
+              console.log('OPENAI_API_KEY not set, skipping AI classification.');
+              return;
+            }
+
+            const classifyFunction = {
+              name: 'classify_issue',
+              description: 'Classify a GitHub issue with labels and an issue type.',
+              strict: true,
+              parameters: {
+                type: 'object',
+                properties: {
+                  labels: {
+                    type: 'array',
+                    description: 'Zero or more labels from the allowed list that clearly apply. Leave empty if none clearly apply — do not guess.',
+                    items: { type: 'string', enum: candidateLabels },
+                  },
+                  type: {
+                    type: 'string',
+                    description: 'The single most appropriate issue type.',
+                    enum: ISSUE_TYPES,
+                  },
+                },
+                required: ['labels', 'type'],
+                additionalProperties: false,
+              },
+            };
+
+            const body = issue.body ? issue.body.slice(0, 8000) : '(no description)';
+            const userMessage = `Title: ${issue.title}\n\nBody:\n${body}`;
+
+            let response;
+            try {
+              response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  'authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                },
+                body: JSON.stringify({
+                  model: 'gpt-4.1-mini',
+                  messages: [
+                    { role: 'system', content: 'You triage GitHub issues for a software project. Classify the issue using the classify_issue tool. Only pick labels that are clearly and directly supported by the title/body — when unsure, leave labels empty rather than guessing.' },
+                    { role: 'user', content: userMessage },
+                  ],
+                  tools: [{ type: 'function', function: classifyFunction }],
+                  tool_choice: { type: 'function', function: { name: 'classify_issue' } },
+                }),
+              });
+            } catch (err) {
+              console.log(`OpenAI API request failed: ${err.message}`);
+              return;
+            }
+
+            if (!response.ok) {
+              console.log(`OpenAI API returned ${response.status}: ${await response.text()}`);
+              return;
+            }
+
+            const result = await response.json();
+            const toolCall = (result.choices?.[0]?.message?.tool_calls || []).find(c => c.function?.name === 'classify_issue');
+            if (!toolCall) {
+              console.log('No classify_issue tool call in response, skipping.');
+              return;
+            }
+
+            let input;
+            try {
+              input = JSON.parse(toolCall.function.arguments);
+            } catch (err) {
+              console.log(`Failed to parse tool call arguments: ${err.message}`);
+              return;
+            }
+
+            const candidateSet = new Set(candidateLabels);
+            const labels = (input.labels || []).filter(l => candidateSet.has(l));
+            const type = ISSUE_TYPES.includes(input.type) ? input.type : null;
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels,
+              });
+            }
+
+            if (type) {
+              try {
+                await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  type,
+                });
+              } catch (err) {
+                console.log(`Failed to set issue type: ${err.message}`);
+              }
+            }
+
+            console.log(`Applied labels: ${labels.join(', ') || '(none)'}; type: ${type || '(none)'}`);
