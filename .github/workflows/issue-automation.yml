@@ -6,7 +6,9 @@ on:
 
 jobs:
   # Use OpenAI to suggest labels, an issue type (Task/Bug/Feature), and an
-  # effort estimate (S/M/L/XL) based on the issue's title and description.
+  # effort estimate (Low/Medium/High) based on the issue's title and description.
+  # Effort is written to the org-level native Effort issue field directly.
+  # Priority must be set manually — it requires human context.
   classify-issue:
     runs-on: ubuntu-latest
     permissions:
@@ -19,22 +21,21 @@ jobs:
           script: |
             const issue = context.payload.issue;
 
-            // Labels that need human triage history rather than derivation from title+body.
             const EXCLUDED_LABELS = new Set(['duplicate', 'wontfix', 'invalid']);
             const ISSUE_TYPES = ['Task', 'Bug', 'Feature'];
-            const EFFORT_VALUES = ['S', 'M', 'L', 'XL'];
-            // S=green  M=yellow  L=light-yellow  XL=red-orange
-            const EFFORT_COLORS = { S: '0e8a16', M: 'fbca04', L: 'e4e669', XL: 'd93f0b' };
+
+            // Org-level native Effort field (id: 44074429) option IDs.
+            const EFFORT_OPTION_IDS = { Low: 77134900, Medium: 77134899, High: 77134898 };
+            const EFFORT_FIELD_ID = 44074429;
 
             const { data: repoLabels } = await github.rest.issues.listLabelsForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               per_page: 100,
             });
-            // Keep effort: labels out of the AI candidate list — they're handled separately.
             const candidateLabels = repoLabels
               .map(l => l.name)
-              .filter(name => !EXCLUDED_LABELS.has(name) && !name.startsWith('effort:'));
+              .filter(name => !EXCLUDED_LABELS.has(name));
 
             if (!process.env.OPENAI_API_KEY) {
               console.log('OPENAI_API_KEY not set, skipping AI classification.');
@@ -60,8 +61,8 @@ jobs:
                   },
                   effort: {
                     type: 'string',
-                    description: 'Estimated implementation effort. S = a few hours, M = 1–2 days, L = up to a week, XL = more than a week.',
-                    enum: EFFORT_VALUES,
+                    description: 'Estimated implementation effort. Low = a few hours, Medium = 1–3 days, High = a week or more.',
+                    enum: ['Low', 'Medium', 'High'],
                   },
                 },
                 required: ['labels', 'type', 'effort'],
@@ -115,26 +116,9 @@ jobs:
               return;
             }
 
+            // Apply labels
             const candidateSet = new Set(candidateLabels);
             const labels = (input.labels || []).filter(l => candidateSet.has(l));
-
-            // Effort label: ensure it exists in the repo, then queue it for application.
-            const effort = EFFORT_VALUES.includes(input.effort) ? input.effort : null;
-            if (effort) {
-              const effortLabel = `effort:${effort}`;
-              try {
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: effortLabel,
-                  color: EFFORT_COLORS[effort],
-                });
-              } catch (_) {
-                // Label already exists — ignore.
-              }
-              labels.push(effortLabel);
-            }
-
             if (labels.length > 0) {
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
@@ -144,6 +128,7 @@ jobs:
               });
             }
 
+            // Apply issue type
             const type = ISSUE_TYPES.includes(input.type) ? input.type : null;
             if (type) {
               try {
@@ -155,6 +140,21 @@ jobs:
                 });
               } catch (err) {
                 console.log(`Failed to set issue type: ${err.message}`);
+              }
+            }
+
+            // Apply effort via org-level native issue field
+            const effort = input.effort in EFFORT_OPTION_IDS ? input.effort : null;
+            if (effort) {
+              try {
+                await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  issue_field_values: [{ issue_field_id: EFFORT_FIELD_ID, value: EFFORT_OPTION_IDS[effort] }],
+                });
+              } catch (err) {
+                console.log(`Failed to set effort: ${err.message}`);
               }
             }
 
