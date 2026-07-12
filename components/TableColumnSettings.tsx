@@ -66,9 +66,8 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
   };
 
   const handleReset = () => {
-    const defaultConfig = getDefaultViewConfig();
-    setLocalOrder(defaultConfig.columnOrder);
-    setLocalVisible(defaultConfig.visibleColumns);
+    onChange(getDefaultViewConfig());
+    onClose();
   };
 
   const columnsByOrder = localOrder.map(

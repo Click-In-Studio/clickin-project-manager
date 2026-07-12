@@ -52,6 +52,28 @@ export default function TableViewSelector({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const handleSaveView = async () => {
+    if (!activeViewId || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/scene-table-views/${activeViewId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config: currentConfig }),
+        }
+      );
+      if (!res.ok) throw new Error("保存失败");
+      onViewsChange(views.map((v) => v.id === activeViewId ? { ...v, config: currentConfig } : v));
+      setOpen(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCreateView = async () => {
     if (!newName.trim() || saving) return;
     setSaving(true);
@@ -185,7 +207,16 @@ export default function TableViewSelector({
             ))}
           </div>
 
-          <div className="border-t border-zinc-100 p-2">
+          <div className="border-t border-zinc-100 p-2 flex flex-col gap-0.5">
+            {activeViewId && (
+              <button
+                onClick={handleSaveView}
+                disabled={saving}
+                className="w-full text-left px-2 py-1 text-xs text-zinc-700 font-medium hover:bg-zinc-50 rounded disabled:opacity-50"
+              >
+                {saving ? "保存中…" : "↑ 保存到当前视图"}
+              </button>
+            )}
             {editingName ? (
               <div className="flex gap-2">
                 <input
@@ -213,7 +244,7 @@ export default function TableViewSelector({
                 onClick={() => setEditingName("new")}
                 className="w-full text-left px-2 py-1 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 rounded"
               >
-                + 保存当前视图
+                + 另存为新视图
               </button>
             )}
           </div>
