@@ -43,7 +43,7 @@ sudo -u postgres psql -f db/setup-agent-db.sql
 1. **添加应用能力** → 开启「机器人」
 2. **安全设置** → 添加 OAuth 重定向 URL：
    ```
-   http://127.0.0.1:3000/app/api/auth/feishu-code
+   http://127.0.0.1:3000/app/api/oath-callback
    ```
 3. **权限管理** → 申请以下权限（标注 `*Bot` 的仅在启用群机器人功能时需要）：
    - `contact:user.base:readonly`（读取用户信息）
@@ -78,7 +78,7 @@ sudo -u postgres psql -f db/setup-agent-db.sql
 # ── 核心（必填）──────────────────────────────────────────────────────────────
 FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxx
-FEISHU_REDIRECT_URI=http://127.0.0.1:3000/app/api/auth/feishu-code
+FEISHU_REDIRECT_URI=http://127.0.0.1:3000/app/api/oath-callback
 
 PGHOST=localhost
 PGDATABASE=script_editor
