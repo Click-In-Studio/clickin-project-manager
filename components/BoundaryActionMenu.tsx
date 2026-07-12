@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 
 export default function BoundaryActionMenu({
   conversionLabel,
+  onConvert,
   onDelete,
   deleting = false,
 }: {
   conversionLabel: "转为章节" | "转为段落";
+  onConvert: () => void;
   onDelete?: () => void;
   deleting?: boolean;
 }) {
@@ -47,7 +49,7 @@ export default function BoundaryActionMenu({
         </>
       ) : (
         <>
-          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup(null); }} className="inline-flex h-5 items-center whitespace-nowrap text-xs text-blue-600/80 transition-colors hover:text-blue-900/80">{conversionLabel}</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup(null); onConvert(); }} className="inline-flex h-5 items-center whitespace-nowrap text-xs text-blue-600/80 transition-colors hover:text-blue-900/80">{conversionLabel}</button>
           <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup(null); }} className="inline-flex h-5 items-center whitespace-nowrap text-xs text-zinc-400 hover:text-zinc-600">取消</button>
         </>
       )}

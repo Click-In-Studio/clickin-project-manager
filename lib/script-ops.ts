@@ -144,6 +144,36 @@ export function diffState(
   return { clientSeq, blockOps, charOps, sceneOps };
 }
 
+export function patchAffectsMarkerProjection(patch: ScriptPatch, prevState: ScriptState): boolean {
+  if (patch.sceneOps.length > 0) return true;
+  if (patch.blockOps.length === 0) return false;
+  const prevBlockById = new Map(prevState.blocks.map((block) => [block.id, block]));
+  for (const op of patch.blockOps) {
+    if (op.op === "insert" && isMarkerBlock(op.block)) return true;
+    if (op.op === "delete") {
+      const previous = prevBlockById.get(op.id);
+      if (previous && isMarkerBlock(previous)) return true;
+    }
+    if (op.op === "update") {
+      const previous = prevBlockById.get(op.block.id);
+      if (previous?.type !== op.block.type) {
+        if (isMarkerBlock(op.block) || !!previous && isMarkerBlock(previous)) return true;
+      } else if (op.block.type === "chapter_marker" || op.block.type === "scene_marker") {
+        return true;
+      }
+    }
+    if (op.op === "reorder") {
+      const previousOrder = prevState.blocks.filter(isMarkerBlock).map((block) => block.id);
+      const nextOrder = op.ids.filter((id) => {
+        const block = prevBlockById.get(id);
+        return !!block && isMarkerBlock(block);
+      });
+      if (previousOrder.join(",") !== nextOrder.join(",")) return true;
+    }
+  }
+  return false;
+}
+
 // ─── Permission classification ────────────────────────────────────────────────
 
 export type ScriptPermissions = {

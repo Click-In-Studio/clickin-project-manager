@@ -1,13 +1,19 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getActiveVersionId,
-  loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion,
+  getProductionMemberContext, getActiveVersionId, loadProduction, applyPatchToDB,
+  ensureScriptMarkerMigration, getVersion, listScenesByVersion,
 } from "@/lib/db";
-import { tickAndBroadcastSeq } from "@/lib/server-cache";
+import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/roles";
-import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker } from "@/lib/script-marker-blocks";
-import type { Block } from "@/lib/script-types";
+import { diffState } from "@/lib/script-ops";
+import {
+  convertMarker, executeMarkerDeletion, planMarkerDeletion, projectMarkers, resolveMarkerId,
+  updateMarkerMeta, type MarkerDeleteOperation, type MarkerKind,
+} from "@/lib/script-marker-domain";
+
+const createId = () => crypto.randomUUID();
+const META_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const;
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -20,162 +26,80 @@ async function resolveProductionVersion(productionId: string, requestedVersionId
   const versionId = ((typeof requestedVersionId === "string" && requestedVersionId) ? requestedVersionId : await getActiveVersionId(productionId)) ?? "";
   if (!versionId) return { error: Response.json({ error: "无可用版本" }, { status: 404 }) };
   const version = await getVersion(versionId);
-  if (!version || version.productionId !== productionId) {
-    return { error: Response.json({ error: "版本不存在" }, { status: 404 }) };
-  }
+  if (!version || version.productionId !== productionId) return { error: Response.json({ error: "版本不存在" }, { status: 404 }) };
   return { versionId };
 }
 
-const METADATA_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const;
-
-function markerSegmentHasScene(blocks: Block[], markerIndex: number): boolean {
-  for (let index = markerIndex + 1; index < blocks.length; index++) {
-    const block = blocks[index];
-    if (block.type === "chapter_marker") return false;
-    if (block.type === "scene_marker") return true;
+async function context(req: NextRequest, productionId: string, requestedVersionId: unknown) {
+  const auth = await getCtx(req, productionId);
+  if (!auth.session) return { error: Response.json({ error: "未登录" }, { status: 401 }) };
+  if (auth.isArchived) return { error: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
+  if (!hasPermission("script:metadata", auth.session.isAdmin, auth.memberRoles, auth.overrides)) {
+    return { error: Response.json({ error: "权限不足" }, { status: 403 }) };
   }
-  return false;
+  const resolved = await resolveProductionVersion(productionId, requestedVersionId);
+  if (resolved.error) return resolved;
+  const migration = await ensureScriptMarkerMigration(resolved.versionId);
+  if (migration.status === "running") return { error: Response.json({ status: "updating", migration }, { status: 202 }) };
+  const result = await loadProduction(productionId, resolved.versionId);
+  if (!result) return { error: Response.json({ error: "未找到版本" }, { status: 404 }) };
+  return { auth, result, versionId: resolved.versionId };
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes/[sceneId]">) {
   const { id, sceneId } = await ctx.params;
-  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
-  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
-    return Response.json({ error: "权限不足" }, { status: 403 });
-  }
-
   const body = await req.json();
-
-  const resolved = await resolveProductionVersion(id, body.versionId);
-  if (resolved.error) return resolved.error;
-  const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
+  const current = await context(req, id, body.versionId);
+  if ("error" in current) return current.error;
+  if (!resolveMarkerId(current.result.state, sceneId)) {
+    return Response.json({ error: "未找到章节" }, { status: 404 });
   }
-
-  const result = await loadProduction(id, versionId);
-  if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
-  const marker = result.state.blocks.find((block) => (
-    isMarkerBlock(block) &&
-    block.type !== "rehearsal_marker" &&
-    block.id === sceneId
-  ));
-  if (!marker) return Response.json({ error: "未找到章节" }, { status: 404 });
-
-  const markerMeta = { ...(marker.markerMeta ?? {}) };
-  if (typeof body.number === "string") markerMeta.number = body.number.trim();
-  if (typeof body.name === "string") markerMeta.name = body.name.trim();
-
-  const shouldIgnoreExpectedDuration =
-    marker.type === "chapter_marker" &&
-    "expectedDuration" in body &&
-    result.state.scenes.some((scene) => scene.parentId === sceneId);
-  const metaFields: Record<string, string> = {};
-  for (const key of METADATA_KEYS) {
-    if (shouldIgnoreExpectedDuration && key === "expectedDuration") continue;
-    if (key in body && typeof body[key] === "string") metaFields[key] = body[key];
+  let next = current.result.state;
+  if (body.kind === "chapter" || body.kind === "scene") {
+    next = convertMarker(next, sceneId, body.kind as MarkerKind, createId);
   }
-  Object.assign(markerMeta, metaFields);
-
-  if ("number" in body || "name" in body || Object.keys(metaFields).length > 0) {
-    await applyPatchToDB(id, versionId, {
-      clientSeq: 0,
-      blockOps: [{ op: "update", block: { ...marker, markerMeta } }],
-      charOps: [],
-      sceneOps: [],
-    });
-    tickAndBroadcastSeq(id, versionId);
+  const fields: Record<string, string> = {};
+  if (typeof body.number === "string") fields.number = body.number.trim();
+  if (typeof body.name === "string") fields.name = body.name.trim();
+  for (const key of META_KEYS) if (typeof body[key] === "string") fields[key] = body[key];
+  if (Object.keys(fields).length > 0) next = updateMarkerMeta(next, sceneId, fields);
+  const patch = diffState(current.result.state, next, 0);
+  if (patch.blockOps.length > 0 || patch.sceneOps.length > 0) {
+    await applyPatchToDB(id, current.versionId, patch);
+    const serverSeq = tickAndBroadcastSeq(id, current.versionId);
+    broadcastEvent(id, current.versionId, "markers", { seq: serverSeq });
   }
-
-  return Response.json({ ok: true });
+  const details = await listScenesByVersion(current.versionId);
+  return Response.json({ ok: true, scenes: projectMarkers(next, details) });
 }
 
-export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes/[sceneId]">) {
+export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes/[sceneId]">) {
   const { id, sceneId } = await ctx.params;
-  const { session, memberRoles, overrides, isArchived } = await getCtx(_req, id);
-  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  const body = await req.json().catch(() => ({}));
+  const current = await context(req, id, body.versionId);
+  if ("error" in current) return current.error;
+  if (!resolveMarkerId(current.result.state, sceneId)) {
+    return Response.json({ error: "未找到章节" }, { status: 404 });
   }
-  const body = _req.method === "DELETE" ? await _req.json().catch(() => ({})) : {};
-  const resolved = await resolveProductionVersion(id, body.versionId);
-  if (resolved.error) return resolved.error;
-  const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
+  const details = await listScenesByVersion(current.versionId);
+  const plan = planMarkerDeletion(current.result.state, sceneId, details);
+  if (plan.status === "blocked" || (plan.status === "choice" && !body.operation)) {
+    return Response.json({ ok: false, plan }, { status: plan.status === "blocked" ? 409 : 300 });
   }
-
-  const result = await loadProduction(id, versionId);
-  if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
-  const removedSceneIds = new Set([
-    sceneId,
-    ...result.state.scenes.filter((scene) => scene.parentId === sceneId).map((scene) => scene.id),
-  ]);
-  const deletedMarkerIds = new Set<string>();
-  const markersToRepair = new Set<string>();
-  const blocks = result.state.blocks;
-  for (let index = 0; index < blocks.length; index++) {
-    const block = blocks[index];
-    if (
-      !isMarkerBlock(block) ||
-      block.type === "rehearsal_marker" ||
-      block.sceneId === null ||
-      !removedSceneIds.has(block.sceneId)
-    ) {
-      continue;
-    }
-    deletedMarkerIds.add(block.id);
-    const previous = blocks[index - 1];
-    if (previous && isMarkerBlock(previous)) markersToRepair.add(previous.id);
+  const operation: MarkerDeleteOperation = plan.status === "ready"
+    ? plan.operation
+    : { type: body.operation === "whole" ? "whole" : "marker-only", markerId: sceneId };
+  if (operation.type === "whole" && !hasPermission(
+    "script:edit",
+    current.auth.session.isAdmin,
+    current.auth.memberRoles,
+    current.auth.overrides,
+  )) {
+    return Response.json({ error: "删除整段内容需要剧本编辑权限" }, { status: 403 });
   }
-  const blockOps: Array<{ op: "delete"; id: string } | { op: "insert"; block: Block; afterId: string | null }> = [
-    ...[...deletedMarkerIds].map((id) => ({ op: "delete" as const, id })),
-  ];
-  if (markersToRepair.size > 0) {
-    const remainingBlocks = blocks.filter((block) => !deletedMarkerIds.has(block.id));
-    const markerIndexById = new Map(remainingBlocks.map((block, index) => [block.id, index]));
-    const openingChapterMarkerId = result.state.config.openingChapterMarkerId;
-    const markerIndexes = [...markersToRepair]
-      .map((id) => markerIndexById.get(id) ?? -1)
-      .filter((index) => index >= 0)
-      .sort((a, b) => b - a);
-    for (const markerIndex of markerIndexes) {
-      const marker = remainingBlocks[markerIndex];
-      if (
-        openingChapterMarkerId &&
-        marker?.id === openingChapterMarkerId &&
-        !markerSegmentHasScene(remainingBlocks, markerIndex)
-      ) {
-        continue;
-      }
-      if (!shouldInsertEmptyBlockAfterMarker(remainingBlocks, markerIndex)) continue;
-      const emptyBlock: Block = {
-        id: crypto.randomUUID(),
-        type: "dialogue",
-        content: "",
-        characterIds: [],
-        characterAnnotations: {},
-        lyric: false,
-        sceneId: null,
-        rehearsalMark: null,
-        forceShowCharacterName: false,
-      };
-      blockOps.push({ op: "insert", block: emptyBlock, afterId: remainingBlocks[markerIndex].id });
-      remainingBlocks.splice(markerIndex + 1, 0, emptyBlock);
-    }
-  }
-
-  await applyPatchToDB(id, versionId, {
-    clientSeq: 0,
-    blockOps,
-    charOps: [],
-    sceneOps: [],
-  });
-  tickAndBroadcastSeq(id, versionId);
-  return Response.json({ ok: true });
+  const next = executeMarkerDeletion(current.result.state, operation, createId);
+  await applyPatchToDB(id, current.versionId, diffState(current.result.state, next, 0));
+  const serverSeq = tickAndBroadcastSeq(id, current.versionId);
+  broadcastEvent(id, current.versionId, "markers", { seq: serverSeq });
+  return Response.json({ ok: true, scenes: projectMarkers(next, details) });
 }

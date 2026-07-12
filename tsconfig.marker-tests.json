@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".marker-test-dist",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "esModuleInterop": true,
+    "incremental": false
+  },
+  "include": ["tests/marker-transitions.ts", "lib/script-marker-domain.ts", "lib/script-marker-blocks.ts", "lib/script-generated-labels.ts", "lib/script-fixed-markers.ts", "lib/script-types.ts"]
+}

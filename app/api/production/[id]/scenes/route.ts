@@ -1,62 +1,15 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, listScenesByVersion, listRehearsalMarksByVersion,
-  getActiveVersionId, loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion,
+  getProductionMemberContext, listScenesByVersion, getActiveVersionId,
+  loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion, listMarkerProjectionByVersion,
 } from "@/lib/db";
-import { tickAndBroadcastSeq } from "@/lib/server-cache";
+import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/roles";
-import { withGeneratedSceneNumbers } from "@/lib/script-generated-labels";
-import type { Block, BlockType } from "@/lib/script-types";
-import { shouldInsertEmptyBlockAfterMarker } from "@/lib/script-marker-blocks";
+import { diffState } from "@/lib/script-ops";
+import { insertMarker, projectMarkers } from "@/lib/script-marker-domain";
 
-function uid(prefix = "b") {
-  return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function makeBlock(content = "", type: BlockType = "dialogue"): Block {
-  return {
-    id: uid(),
-    type,
-    content,
-    characterIds: [],
-    characterAnnotations: {},
-    lyric: false,
-    sceneId: null,
-    rehearsalMark: null,
-    forceShowCharacterName: false,
-  };
-}
-
-function makeMarkerBlock(type: Extract<BlockType, "chapter_marker" | "scene_marker">, markerId: string, name: string, number: string, parentId: string | null): Block {
-  return {
-    ...makeBlock("", type),
-    id: markerId,
-    sceneId: markerId,
-    markerMeta: { name, number, parentMarkerId: parentId },
-  };
-}
-
-function markerSegmentHasScene(blocks: Block[], markerIndex: number): boolean {
-  for (let index = markerIndex + 1; index < blocks.length; index++) {
-    const block = blocks[index];
-    if (block.type === "chapter_marker") return false;
-    if (block.type === "scene_marker") return true;
-  }
-  return false;
-}
-
-function shouldRepairEmptyBlockAfterMarker(blocks: Block[], markerIndex: number, openingChapterMarkerId: string | null): boolean {
-  const marker = blocks[markerIndex];
-  if (
-    openingChapterMarkerId &&
-    marker?.id === openingChapterMarkerId &&
-    !markerSegmentHasScene(blocks, markerIndex)
-  ) {
-    return false;
-  }
-  return shouldInsertEmptyBlockAfterMarker(blocks, markerIndex);
-}
+const createId = () => crypto.randomUUID();
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -83,24 +36,13 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const resolved = await resolveProductionVersion(id, req.nextUrl.searchParams.get("versionId") ?? undefined);
-  if (resolved.error) {
-    return req.nextUrl.searchParams.has("versionId")
-      ? resolved.error
-      : req.nextUrl.searchParams.get("includeRehearsalMarks") === "1"
-      ? Response.json({ scenes: [], rehearsalMarks: {} })
-      : Response.json([]);
-  }
-  const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
-  const scenes = await listScenesByVersion(versionId);
-  if (req.nextUrl.searchParams.get("includeRehearsalMarks") === "1") {
-    const rehearsalMarks = await listRehearsalMarksByVersion(versionId);
-    return Response.json({ scenes, rehearsalMarks });
-  }
-  return Response.json(scenes);
+  if (resolved.error) return resolved.error;
+  const migration = await ensureScriptMarkerMigration(resolved.versionId);
+  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
+  const scenes = await listMarkerProjectionByVersion(id, resolved.versionId);
+  return req.nextUrl.searchParams.get("includeRehearsalMarks") === "1"
+    ? Response.json({ scenes, rehearsalMarks: Object.fromEntries(scenes.map((scene) => [scene.id, scene.rehearsalMarks])) })
+    : Response.json(scenes);
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes">) {
@@ -111,91 +53,25 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
-
   const body = await req.json();
-  const name     = typeof body.name     === "string" ? body.name.trim()     : "";
-  const parentId = typeof body.parentId === "string" ? body.parentId        : null;
-  const insertBeforeSceneId = typeof body.insertBeforeSceneId === "string" ? body.insertBeforeSceneId : null;
-  const insertAfterSceneId = typeof body.insertAfterSceneId === "string" ? body.insertAfterSceneId : null;
-
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
-  const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
+  const migration = await ensureScriptMarkerMigration(resolved.versionId);
+  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
+  const result = await loadProduction(id, resolved.versionId);
+  if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
 
-  // Load current marker-backed scene list and block stream to compute insertion position.
-  const result = await loadProduction(id, versionId);
-  const scenes = result ? [...result.state.scenes] : [];
-  const blocks = result ? [...result.state.blocks] : [];
-
-  const newScene = { id: uid("mk"), number: "", name, parentId };
-
-  const beforeSceneIndex = insertBeforeSceneId ? scenes.findIndex((s) => s.id === insertBeforeSceneId) : -1;
-  const afterSceneIndex = insertAfterSceneId ? scenes.findIndex((s) => s.id === insertAfterSceneId) : -1;
-  if (beforeSceneIndex >= 0) {
-    scenes.splice(beforeSceneIndex, 0, newScene);
-  } else if (afterSceneIndex >= 0) {
-    scenes.splice(afterSceneIndex + 1, 0, newScene);
-  } else if (parentId) {
-    let insertAfter = scenes.findIndex((s) => s.id === parentId);
-    for (let i = insertAfter + 1; i < scenes.length; i++) {
-      if (scenes[i].parentId === parentId) insertAfter = i;
-      else break;
-    }
-    scenes.splice(insertAfter + 1, 0, newScene);
-  } else {
-    scenes.push(newScene);
-  }
-
-  const numberedScenes = withGeneratedSceneNumbers(scenes);
-  const numberedNewScene = numberedScenes.find((scene) => scene.id === newScene.id) ?? newScene;
-  const marker = makeMarkerBlock(parentId ? "scene_marker" : "chapter_marker", newScene.id, name, numberedNewScene.number, parentId);
-  const targetSceneIndex = numberedScenes.findIndex((scene) => scene.id === newScene.id);
-  const insertBeforeScene = numberedScenes.slice(targetSceneIndex + 1).find((scene) => (
-    parentId ? scene.parentId === parentId || scene.parentId === null : scene.parentId === null
-  ));
-  let insertBeforeIndex = insertBeforeScene
-    ? blocks.findIndex((block) => (
-        (block.type === "chapter_marker" || block.type === "scene_marker") &&
-        block.sceneId === insertBeforeScene.id
-      ))
-    : -1;
-  if (insertBeforeIndex < 0 && parentId) {
-    const parentMarkerIndex = blocks.findIndex((block) => block.type === "chapter_marker" && block.sceneId === parentId);
-    const nextChapterIndex = blocks.findIndex((block, index) => index > parentMarkerIndex && block.type === "chapter_marker");
-    insertBeforeIndex = nextChapterIndex >= 0 ? nextChapterIndex : blocks.length;
-    if (parentMarkerIndex >= 0 && insertBeforeIndex <= parentMarkerIndex) insertBeforeIndex = parentMarkerIndex + 1;
-  }
-  if (insertBeforeIndex < 0) insertBeforeIndex = blocks.length;
-  const afterId = insertBeforeIndex > 0 ? blocks[insertBeforeIndex - 1]?.id ?? null : null;
-  const nextBlocks = [...blocks];
-  nextBlocks.splice(insertBeforeIndex, 0, marker);
-  const openingChapterMarkerId = result?.state.config.openingChapterMarkerId ?? null;
-  const needsEmptyBlockBeforeMarker = insertBeforeIndex > 0 && shouldRepairEmptyBlockAfterMarker(nextBlocks, insertBeforeIndex - 1, openingChapterMarkerId);
-  const needsEmptyBlockAfterMarker = shouldRepairEmptyBlockAfterMarker(nextBlocks, insertBeforeIndex, openingChapterMarkerId);
-  const blockOps: Array<{ op: "insert"; block: Block; afterId: string | null }> = [];
-  let markerAfterId = afterId;
-  if (needsEmptyBlockBeforeMarker) {
-    const emptyBlock = makeBlock();
-    blockOps.push({ op: "insert", block: emptyBlock, afterId });
-    markerAfterId = emptyBlock.id;
-  }
-  blockOps.push({ op: "insert", block: marker, afterId: markerAfterId });
-  if (needsEmptyBlockAfterMarker) {
-    blockOps.push({ op: "insert", block: makeBlock(), afterId: marker.id });
-  }
-
-  await applyPatchToDB(id, versionId, {
-    clientSeq: 0,
-    blockOps,
-    charOps: [],
-    sceneOps: [],
-  });
-  tickAndBroadcastSeq(id, versionId);
-
-  const sceneDetail = { ...numberedNewScene, synopsis: "", actionLine: "", music: "", stageNotes: "", expectedDuration: "" };
-  return Response.json({ ok: true, scene: sceneDetail }, { status: 201 });
+  const next = insertMarker(result.state, {
+    kind: body.kind === "scene" || body.parentId ? "scene" : "chapter",
+    name: typeof body.name === "string" ? body.name.trim() : "",
+    parentId: typeof body.parentId === "string" ? body.parentId : null,
+    beforeId: typeof body.insertBeforeSceneId === "string" ? body.insertBeforeSceneId : null,
+    afterId: typeof body.insertAfterSceneId === "string" ? body.insertAfterSceneId : null,
+  }, createId);
+  await applyPatchToDB(id, resolved.versionId, diffState(result.state, next, 0));
+  const serverSeq = tickAndBroadcastSeq(id, resolved.versionId);
+  broadcastEvent(id, resolved.versionId, "markers", { seq: serverSeq });
+  const details = await listScenesByVersion(resolved.versionId);
+  const scenes = projectMarkers(next, details);
+  return Response.json({ ok: true, scenes }, { status: 201 });
 }

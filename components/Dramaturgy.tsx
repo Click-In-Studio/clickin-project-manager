@@ -6,7 +6,8 @@ import ScenesManager from "./ScenesManager";
 import CharactersManager from "./CharactersManager";
 import VersionSelector from "./VersionSelector";
 import { BASE_PATH } from "@/lib/base-path";
-import type { SceneDetail, CharacterDetail, Version } from "@/lib/db";
+import type { CharacterDetail, Version } from "@/lib/db";
+import type { MarkerProjection } from "@/lib/script-marker-domain";
 
 type Tab = "scenes" | "characters";
 
@@ -15,8 +16,7 @@ type Props = {
   productionName: string;
   versions: Version[];
   versionId: string | null;
-  initialScenes: SceneDetail[];
-  rehearsalMarks: Record<string, string[]>;
+  initialScenes: MarkerProjection[];
   initialCharacters: CharacterDetail[];
   canEdit: boolean;
   canImport?: boolean;
@@ -34,7 +34,6 @@ export default function Dramaturgy({
   versions,
   versionId: initialVersionId,
   initialScenes,
-  rehearsalMarks: initialRehearsalMarks,
   initialCharacters,
   canEdit,
   canImport,
@@ -46,21 +45,19 @@ export default function Dramaturgy({
     initialCharacterId && !initialSceneId ? "characters" : "scenes"
   );
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(initialVersionId);
-  const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
-  const [rehearsalMarks, setRehearsalMarks] = useState<Record<string, string[]>>(initialRehearsalMarks);
+  const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
 
   const handleVersionChange = async (versionId: string) => {
     const [scenePayload, charsData] = await Promise.all([
-      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}&includeRehearsalMarks=1`).then(r => r.json()),
+      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}`).then(r => r.json()),
       fetch(`${BASE_PATH}/api/production/${productionId}/characters?versionId=${versionId}`).then(r => r.json()),
     ]);
     if (isUpdatingResponse(scenePayload) || isUpdatingResponse(charsData)) {
       return;
     }
-    setScenes(scenePayload.scenes);
+    setScenes(scenePayload);
     setCharacters(charsData);
-    setRehearsalMarks(scenePayload.rehearsalMarks);
     setCurrentVersionId(versionId);
   };
 
@@ -122,7 +119,6 @@ export default function Dramaturgy({
             productionId={productionId}
             productionName={productionName}
             initialScenes={scenes}
-            rehearsalMarks={rehearsalMarks}
             canEdit={effectiveCanEdit}
             versionId={currentVersionId}
             initialExpandedId={initialSceneId}

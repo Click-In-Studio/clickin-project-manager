@@ -10,7 +10,8 @@ import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap } from "./script-page";
 import { generatedRehearsalMarksByScene, withGeneratedSceneNumbers } from "./script-generated-labels";
-import { VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
+import { VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
+import { projectMarkers, type MarkerProjection } from "./script-marker-domain";
 
 type MarkerMigrationState = {
   status: "idle" | "running" | "failed";
@@ -2487,21 +2488,6 @@ export async function listCharactersByVersion(versionId: string): Promise<Charac
   }));
 }
 
-export async function listRehearsalMarksByVersion(versionId: string): Promise<Record<string, string[]>> {
-  const res = await getPool().query<{ scene_id: string | null; rehearsal_mark: string | null; type: string }>(
-    `${VERSION_OWNED_BLOCKS_CTE}
-     SELECT scene_id, rehearsal_mark, type
-     FROM owned_blocks
-     ORDER BY sort_key`,
-    [versionId]
-  );
-  return generatedRehearsalMarksByScene(res.rows.map((row) => ({
-    sceneId: row.scene_id,
-    rehearsalMark: row.rehearsal_mark,
-    type: row.type,
-  })));
-}
-
 export async function listProductionScenes(productionId: string): Promise<SceneDetail[]> {
   console.error(`[fallback] listProductionScenes called without versionId for production ${productionId} — caller should use listScenesByVersion directly`);
   const versionId = await getActiveVersionId(productionId);
@@ -2548,6 +2534,17 @@ export type SceneDetail = Scene & {
   stageNotes: string;
   expectedDuration: string;
 };
+
+export async function listMarkerProjectionByVersion(
+  productionId: string,
+  versionId: string,
+): Promise<MarkerProjection[]> {
+  const [result, details] = await Promise.all([
+    loadProduction(productionId, versionId),
+    listScenesByVersion(versionId),
+  ]);
+  return result ? projectMarkers(result.state, details) : [];
+}
 
 export async function getSceneById(
   sceneId: string, productionId: string, versionId?: string | null

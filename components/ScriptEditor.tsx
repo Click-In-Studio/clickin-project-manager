@@ -24,18 +24,17 @@ import DurationInput from "@/components/DurationInput";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
 import { diffState, type TagEntry } from "@/lib/script-ops";
+import { convertMarker, executeMarkerDeletion, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, type MarkerDeleteOperation } from "@/lib/script-marker-domain";
+import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import { COMPACT_TEXT_SIDE_WIDTH_REM, PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
 import type { EstimatedPageMapCache, PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { formatDuration, parseDuration } from "@/lib/duration";
-import { toAlphaLabel, withGeneratedSceneNumbers } from "@/lib/script-generated-labels";
+import { toAlphaLabel } from "@/lib/script-generated-labels";
 import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker } from "@/lib/script-marker-blocks";
 import { markerOwnershipRange, updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
-import {
-  FIXED_INITIAL_CHAPTER_NAME,
-} from "@/lib/script-fixed-markers";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -1522,8 +1521,11 @@ function ScenePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {scenes.map((s) => {
+                  {scenes.map((s, index) => {
                     const isSubScene = s.parentId !== null;
+                    const nextScene = scenes[index + 1];
+                    const isChapterEnd = !nextScene || nextScene.parentId === null;
+                    const chapterId = isSubScene ? s.parentId : s.id;
                     return (
                       <React.Fragment key={s.id}>
                         <SceneRow
@@ -1533,12 +1535,11 @@ function ScenePanel({
                           canRemove
                           indent={isSubScene}
                         />
-                        {/* After each act row, show an inline "add sub-scene" row */}
-                        {!isSubScene && (
+                        {isChapterEnd && chapterId && (
                           <tr>
                             <td colSpan={3} className="pt-0 pb-1 pl-5">
                               <button
-                                onClick={() => onAdd(s.id, { insertAfterSceneId: s.id })}
+                                onClick={() => onAdd(chapterId, nextScene ? { insertBeforeSceneId: nextScene.id } : undefined)}
                                 className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors"
                               >
                                 + 添加段落
@@ -4498,142 +4499,21 @@ function markerSegmentIsOpeningWithoutScene(blocks: Block[], markerIndex: number
 }
 
 function normalizeScriptMarkerInvariants(blocks: Block[], scenes: Scene[], config: ScriptConfig): { blocks: Block[]; scenes: Scene[]; config: ScriptConfig } {
-  let nextBlocks = normalizeScriptBlockStream(blocks);
-  let nextScenes = scenes;
-  let nextConfig = config;
-  let changed = nextBlocks !== blocks;
-
-  const firstBlock = nextBlocks[0];
-  if (!firstBlock || firstBlock.type !== "chapter_marker") {
-    const openingScene: Scene = { id: uid(), number: "", name: FIXED_INITIAL_CHAPTER_NAME, parentId: null };
-    const openingMarker = makeMarkerBlock("chapter_marker", { sceneId: openingScene.id });
-    openingMarker.markerMeta = {
-      name: FIXED_INITIAL_CHAPTER_NAME,
-      parentMarkerId: null,
-    };
-    nextScenes = [openingScene, ...nextScenes];
-    nextBlocks = [openingMarker, ...nextBlocks];
-    nextConfig = { ...nextConfig, openingChapterMarkerId: openingMarker.id };
-    changed = true;
-  } else if (nextConfig.openingChapterMarkerId !== firstBlock.id) {
-    nextConfig = { ...nextConfig, openingChapterMarkerId: firstBlock.id };
-  }
-
-  let scanIndex = 0;
-  while (scanIndex < nextBlocks.length) {
-    const chapterBlock = nextBlocks[scanIndex];
-    if (chapterBlock.type !== "chapter_marker" || !chapterBlock.sceneId) {
-      scanIndex++;
-      continue;
-    }
-
-    let nextChapterIndex = nextBlocks.length;
-    let hasSceneInChapter = false;
-    for (let i = scanIndex + 1; i < nextBlocks.length; i++) {
-      if (nextBlocks[i].type === "chapter_marker") {
-        nextChapterIndex = i;
-        break;
-      }
-      if (nextBlocks[i].type === "scene_marker") hasSceneInChapter = true;
-    }
-    const hasSceneImmediatelyAfterChapter = nextBlocks[scanIndex + 1]?.type === "scene_marker";
-
-    if (hasSceneInChapter && !hasSceneImmediatelyAfterChapter) {
-      const scene: Scene = { id: uid(), number: "", name: "", parentId: chapterBlock.sceneId };
-      nextScenes = [...nextScenes, scene];
-      nextBlocks = [
-        ...nextBlocks.slice(0, scanIndex + 1),
-        makeMarkerBlock("scene_marker", { sceneId: scene.id }),
-        ...nextBlocks.slice(scanIndex + 1),
-      ];
-      changed = true;
-      scanIndex += 2;
-      continue;
-    }
-
-    scanIndex = nextChapterIndex;
-  }
-
-  const rehearsalNormalizedBlocks = withLeadingRehearsalMarkersForMarkedSegments(nextBlocks);
-  if (rehearsalNormalizedBlocks !== nextBlocks) {
-    nextBlocks = rehearsalNormalizedBlocks;
-    changed = true;
-  }
-
-  const sceneIds = new Set(nextScenes.map((scene) => scene.id));
-  let currentChapterId: string | null = null;
-  for (const block of nextBlocks) {
-    if (!block.sceneId) continue;
-    if (block.type === "chapter_marker") {
-      currentChapterId = block.sceneId;
-      if (!sceneIds.has(block.sceneId)) {
-        nextScenes = [...nextScenes, { id: block.sceneId, number: "", name: "", parentId: null }];
-        sceneIds.add(block.sceneId);
-        changed = true;
-      }
-    } else if (block.type === "scene_marker" && !sceneIds.has(block.sceneId)) {
-      nextScenes = [...nextScenes, { id: block.sceneId, number: "", name: "", parentId: currentChapterId }];
-      sceneIds.add(block.sceneId);
-      changed = true;
-    }
-  }
-
-  const normalizedScenes = normalizeSceneRowsForMarkers(nextScenes, nextBlocks);
-  const scenesChanged = !sameSceneRows(normalizedScenes, scenes);
+  const normalized = normalizeMarkerState({
+    blocks: withLeadingRehearsalMarkersForMarkedSegments(normalizeScriptBlockStream(blocks)),
+    scenes,
+    characters: [],
+    config,
+  }, uid);
   return {
-    blocks: changed ? normalizeScriptBlockStream(nextBlocks) : nextBlocks,
-    scenes: scenesChanged ? normalizedScenes : nextScenes,
-    config: nextConfig,
+    blocks: sameBlocks(normalized.blocks, blocks) ? blocks : normalizeScriptBlockStream(normalized.blocks),
+    scenes: sameSceneRows(normalized.scenes, scenes) ? scenes : normalized.scenes,
+    config: normalized.config.openingChapterMarkerId === config.openingChapterMarkerId ? config : normalized.config,
   };
-}
-
-function orderSceneRowsByMarkers<T extends Scene>(rows: T[], markerBlocks: Block[]): T[] {
-  if (rows.length === 0) return rows;
-  const rowById = new Map(rows.map((row) => [row.id, row]));
-  const ordered: T[] = [];
-  const orderedIds = new Set<string>();
-  let currentChapterId: string | null = null;
-
-  const pushScene = (sceneId: string, parentId: string | null) => {
-    if (orderedIds.has(sceneId)) return;
-    const row = rowById.get(sceneId);
-    if (!row) return;
-    const nextParentId = parentId === sceneId ? null : parentId;
-    ordered.push({ ...row, parentId: nextParentId } as T);
-    orderedIds.add(sceneId);
-  };
-
-  for (const block of markerBlocks) {
-    if (!block.sceneId) continue;
-    const scene = rowById.get(block.sceneId);
-    if (!scene) continue;
-
-    if (block.type === "chapter_marker" || (!isMarkerBlock(block) && scene.parentId === null)) {
-      currentChapterId = scene.id;
-      pushScene(scene.id, null);
-      continue;
-    }
-
-    if (block.type === "scene_marker" || (!isMarkerBlock(block) && scene.parentId !== null)) {
-      const parentId = currentChapterId ?? scene.parentId ?? null;
-      pushScene(scene.id, parentId);
-    }
-  }
-
-  for (const row of rows) {
-    if (!orderedIds.has(row.id)) ordered.push(row);
-  }
-
-  return ordered.length === rows.length && ordered.every((row, index) => (
-    row.id === rows[index].id &&
-    row.parentId === rows[index].parentId
-  ))
-    ? rows
-    : ordered;
 }
 
 function normalizeSceneRowsForMarkers<T extends Scene>(rows: T[], markerBlocks: Block[]): T[] {
-  return withGeneratedSceneNumbers(orderSceneRowsByMarkers(rows, markerBlocks));
+  return projectMarkers({ blocks: markerBlocks, scenes: rows }, rows) as unknown as T[];
 }
 
 function previousAdjacentMarker(blocks: Block[], index: number): Block | null {
@@ -6675,6 +6555,8 @@ export default function ScriptEditor({
   const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
   const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
   const [markerDetailDeleteConfirmBlockId, setMarkerDetailDeleteConfirmBlockId] = useState<string | null>(null);
+  const [markerDeleteDialog, setMarkerDeleteDialog] = useState<(MarkerDeleteDialogState & { source: "local" | "server" }) | null>(null);
+  const [markerDeleteDialogBusy, setMarkerDeleteDialogBusy] = useState(false);
   const [dismissActionToken, setDismissActionToken] = useState(0);
   const [pendingLargeSelectionConfirmation, setPendingLargeSelectionConfirmation] =
     useState<PendingLargeSelectionConfirmation | null>(null);
@@ -8810,6 +8692,24 @@ export default function ScriptEditor({
       scenes: scenesRef.current,
     };
     await pushPatchRef.current(curr);
+    const remaining = diffState(syncedStateRef.current, curr, 0);
+    const stateSynced = remaining.blockOps.length === 0 && remaining.charOps.length === 0 && remaining.sceneOps.length === 0;
+    const currentTags = [...blockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const syncedTags = [...syncedBlockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return stateSynced &&
+      pendingTagInsertsRef.current.size === 0 &&
+      JSON.stringify(currentTags) === JSON.stringify(syncedTags);
+  }, []);
+
+  const persistMarkerState = useCallback(async (next: ScriptState) => {
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+    if (isSyncingRef.current) {
+      await new Promise<void>((resolve) => syncIdleWaitersRef.current.push(resolve));
+    }
+    await pushPatchRef.current(next);
   }, []);
 
   const undoStack = useRef<Block[][]>([]);
@@ -9252,45 +9152,47 @@ export default function ScriptEditor({
 
   const addChapterBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !canEditMetadata) return;
-    const scene: Scene = { id: uid(), number: "", name: "", parentId: null };
-    const marker = makeMarkerBlock("chapter_marker", { sceneId: scene.id });
-    saveSnapshot();
-    setScenes((prev) => normalizeSceneRowsForMarkers([...prev, scene], [...blocksRef.current, marker]));
-    setSceneDetails((prev) => {
-      const nextScenes = normalizeSceneRowsForMarkers([...scenesRef.current, scene], [...blocksRef.current, marker]);
-      return syncSceneDetailsWithScenes([...prev, toSceneDetail(scene)], nextScenes);
-    });
     const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
+    const next = insertMarker({
+      blocks: blocksRef.current,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, { kind: "chapter", name: "", beforeBlockId: blockId }, uid);
+    saveSnapshot();
     const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
     markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === blockId);
-      const insertIndex = idx === -1 ? prev.length : idx;
-      return insertMarkerWithEmptyBlockIfNeeded(prev, marker, insertIndex, scriptConfigRef.current.openingChapterMarkerId);
-    });
-  }, [canEditMetadata, isLockedMode, markOwnershipDirty, saveSnapshot]);
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    void persistMarkerState(next);
+  }, [canEditMetadata, isLockedMode, markOwnershipDirty, persistMarkerState, saveSnapshot]);
 
   const addSceneBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !canEditMetadata) return;
     const chapterId = findChapterIdForBlock(blockId);
-    const parentId = chapterId ?? null;
-    const scene: Scene = { id: uid(), number: "", name: "", parentId };
-    const marker = makeMarkerBlock(parentId ? "scene_marker" : "chapter_marker", { sceneId: scene.id });
-    saveSnapshot();
-    setScenes((prev) => normalizeSceneRowsForMarkers([...prev, scene], [...blocksRef.current, marker]));
-    setSceneDetails((prev) => {
-      const nextScenes = normalizeSceneRowsForMarkers([...scenesRef.current, scene], [...blocksRef.current, marker]);
-      return syncSceneDetailsWithScenes([...prev, toSceneDetail(scene)], nextScenes);
-    });
     const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
+    const next = insertMarker({
+      blocks: blocksRef.current,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, {
+      kind: chapterId ? "scene" : "chapter",
+      name: "",
+      parentId: chapterId,
+      beforeBlockId: blockId,
+    }, uid);
+    saveSnapshot();
     const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
     markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === blockId);
-      const insertIndex = idx === -1 ? prev.length : idx;
-      return insertMarkerWithEmptyBlockIfNeeded(prev, marker, insertIndex, scriptConfigRef.current.openingChapterMarkerId);
-    });
-  }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markOwnershipDirty, saveSnapshot]);
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    void persistMarkerState(next);
+  }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markOwnershipDirty, persistMarkerState, saveSnapshot]);
 
   const addRehearsalBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !effectiveCanEditRehearsalMark) return;
@@ -9314,44 +9216,24 @@ export default function ScriptEditor({
     if (!currentBlock) return;
     if (!isMarkerBlock(currentBlock)) return;
     if (currentBlock.type === nextType) return;
-
-    const sceneId = currentBlock.sceneId ?? uid();
-    const nextScene: Scene = {
-      id: sceneId,
-      number: "",
-      name: "",
-      parentId: nextType === "chapter_marker" ? null : findChapterIdForBlock(blockId),
-    };
-    const sceneExists = scenesRef.current.some((scene) => scene.id === nextScene.id);
-    const convertedBlocks = blocksRef.current.map((block) => (
-      block.id === blockId
-        ? { ...block, type: nextType, sceneId }
-        : block
-    ));
-    const previousMarker = previousAdjacentMarker(convertedBlocks, currentIdx);
-    const repairedBlocks = repairEmptyMarkerSegments(
-      convertedBlocks,
-      [previousMarker?.id, blockId].filter((id): id is string => !!id),
-      scriptConfigRef.current.openingChapterMarkerId
-    );
-    const nextBlocks = repairedBlocks === convertedBlocks ? normalizeScriptBlockStream(convertedBlocks) : repairedBlocks;
-    const nextScenes = normalizeSceneRowsForMarkers(
-      sceneExists ? scenesRef.current : [...scenesRef.current, nextScene],
-      nextBlocks
-    );
+    const next = convertMarker({
+      blocks: blocksRef.current,
+      scenes: scenesRef.current,
+      characters,
+      config: scriptConfigRef.current,
+    }, blockId, nextType === "chapter_marker" ? "chapter" : "scene", uid);
 
     saveSnapshot();
     markOwnershipDirty({ start: currentIdx, end: currentIdx + 1, affectsMarkers: true });
-    setBlocks(nextBlocks);
-    setScenes(nextScenes);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(
-      sceneExists ? prev : [...prev, toSceneDetail(nextScene)],
-      nextScenes
-    ));
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    void persistMarkerState(next);
     selectionAnchorBlockIdRef.current = blockId;
     rangeSelectionActiveRef.current = false;
     setSelectedBlockIds(new Set([blockId]));
-  }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markOwnershipDirty, saveSnapshot]);
+  }, [canEditMetadata, characters, isLockedMode, markOwnershipDirty, persistMarkerState, saveSnapshot]);
 
   const splitBlock = useCallback((id: string, before: string, after: string) => {
     if (isLockedMode) return;
@@ -9607,85 +9489,47 @@ export default function ScriptEditor({
     showReorderNotice("已清除选中空白内容。");
   }, [canEditText, deleteBlocks, isLockedMode, markOwnershipDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, setEmptyScriptCleanupDialog, showReorderNotice]);
 
-  const getEmptyMarkerDeletePlan = useCallback((markerBlockId: string) => {
-    const currentBlocks = blocksRef.current;
-    const markerIndex = blockIndexByIdRef.current.get(markerBlockId);
-    const markerBlock = markerIndex === undefined ? undefined : currentBlocks[markerIndex];
-    const targetKey =
-      markerBlock?.type === "chapter_marker" && markerBlock.sceneId ? `chapter:${markerBlock.sceneId}` :
-      markerBlock?.type === "scene_marker" && markerBlock.sceneId ? `scene:${markerBlock.sceneId}` :
-      markerBlock?.type === "rehearsal_marker" ? `rehearsal:${markerBlock.id}` :
-      null;
-    if (!targetKey) return null;
-
-    const cleanupAnalysis = analyzeEmptyScriptCleanup(
-      currentBlocks,
-      scenesRef.current,
-      sceneDetailById,
-      scriptConfigRef.current.openingChapterMarkerId,
-      { includeOpeningChapter: markerBlockId === scriptConfigRef.current.openingChapterMarkerId }
-    );
-    const rootTarget = cleanupAnalysis.targets.find((target) => target.key === targetKey) ?? null;
-    if (!rootTarget || rootTarget.disabledReason) return null;
-
-    const selectedTargets: EmptyScriptCleanupTarget[] = [];
-    const targetsByParentKey = new Map<string, EmptyScriptCleanupTarget[]>();
-    for (const target of cleanupAnalysis.targets) {
-      if (!target.parentKey) continue;
-      const siblings = targetsByParentKey.get(target.parentKey);
-      if (siblings) siblings.push(target);
-      else targetsByParentKey.set(target.parentKey, [target]);
-    }
-    const collectTarget = (target: EmptyScriptCleanupTarget) => {
-      if (target.disabledReason) return;
-      selectedTargets.push(target);
-      for (const child of targetsByParentKey.get(target.key) ?? []) collectTarget(child);
-    };
-    collectTarget(rootTarget);
-
-    const { deleteBlockIds, markersToRepair, selectedSceneIds } = buildEmptyScriptCleanupRemovalPlan(
-      currentBlocks,
-      selectedTargets,
-      { includeEmptyTextBlocks: false, repairDeletedRangeStarts: true }
-    );
-    if (deleteBlockIds.size === 0) return null;
-
-    return { currentBlocks, deleteBlockIds, markersToRepair, selectedSceneIds };
-  }, [sceneDetailById]);
-
-  const deleteMarkerOrEmptyTarget = useCallback((markerBlockId: string, fallbackDeleteIds: string[]) => {
-    if (isLockedMode) return;
-    if (!canEditText || fallbackDeleteIds.length !== 1 || fallbackDeleteIds[0] !== markerBlockId) {
-      deleteBlocks(fallbackDeleteIds);
-      return;
-    }
-
-    const plan = getEmptyMarkerDeletePlan(markerBlockId);
-    if (!plan) {
-      deleteBlocks(fallbackDeleteIds);
-      return;
-    }
-    const { currentBlocks, deleteBlockIds, markersToRepair, selectedSceneIds } = plan;
-
-    const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
-    const remainingScenes = scenesRef.current.filter((scene) => !selectedSceneIds.has(scene.id));
-    const repairedBlocks = repairEmptyMarkerSegments(remainingBlocks, markersToRepair, scriptConfigRef.current.openingChapterMarkerId, { includeTerminal: true });
-    const normalized = normalizeScriptMarkerInvariants(
-      repairedBlocks.length > 0 ? repairedBlocks : [makeBlock()],
-      remainingScenes,
-      scriptConfigRef.current
-    );
-
+  const applyMarkerDeleteOperation = useCallback((operation: MarkerDeleteOperation) => {
+    const next = executeMarkerDeletion({
+      blocks: blocksRef.current,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, operation, uid);
     saveSnapshot();
     markOwnershipDirty("full");
     resetScriptInteractions();
-    setBlocks(normalized.blocks);
-    setScenes(normalized.scenes);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(
-      prev.filter((scene) => !selectedSceneIds.has(scene.id)),
-      normalized.scenes
-    ));
-  }, [canEditText, deleteBlocks, getEmptyMarkerDeletePlan, isLockedMode, markOwnershipDirty, resetScriptInteractions, saveSnapshot]);
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    setMarkerDeleteDialog(null);
+    void persistMarkerState(next);
+  }, [markOwnershipDirty, persistMarkerState, resetScriptInteractions, saveSnapshot]);
+
+  const deleteMarkerOrEmptyTarget = useCallback((markerBlockId: string, fallbackDeleteIds: string[]) => {
+    if (isLockedMode) return;
+    const marker = blocksRef.current.find((block) => block.id === markerBlockId);
+    if (!marker || (marker.type !== "chapter_marker" && marker.type !== "scene_marker") || fallbackDeleteIds.length !== 1 || fallbackDeleteIds[0] !== markerBlockId) {
+      deleteBlocks(fallbackDeleteIds);
+      return;
+    }
+    const plan = planMarkerDeletion({
+      blocks: blocksRef.current,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, markerBlockId, sceneDetails);
+    if (plan.status === "blocked" || plan.status === "choice") {
+      setMarkerDeleteDialog({ plan, source: "local" });
+      return;
+    }
+    if (plan.operation.type === "whole" && !canEditText) {
+      setMarkerDeleteDialog({ plan: null, message: "删除整段空白剧本需要剧本编辑权限。", source: "local" });
+      return;
+    }
+    applyMarkerDeleteOperation(plan.operation);
+  }, [applyMarkerDeleteOperation, canEditText, deleteBlocks, isLockedMode, sceneDetails]);
 
   const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
     const index = blockIndexByIdRef.current.get(id);
@@ -9745,9 +9589,21 @@ export default function ScriptEditor({
       rangeSelectionActiveRef.current = false;
       setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
     }
-    const plan = canEditText && ids.length === 1 ? getEmptyMarkerDeletePlan(id) : null;
-    setDeleteConfirmingBlockIds(plan?.deleteBlockIds ?? new Set(ids));
-  }, [canEditText, getEmptyMarkerDeletePlan, isLockedMode, selectedBlockIds, selectedBlockIdsArray]);
+    if (ids.length === 1) {
+      const marker = blocksRef.current.find((block) => block.id === id);
+      if (marker?.type === "chapter_marker" || marker?.type === "scene_marker") {
+        const plan = planMarkerDeletion({
+          blocks: blocksRef.current,
+          scenes: scenesRef.current,
+          characters: charactersRef.current,
+          config: scriptConfigRef.current,
+        }, id, sceneDetails);
+        setDeleteConfirmingBlockIds(new Set(plan.status === "blocked" ? [id] : plan.previewBlockIds));
+        return;
+      }
+    }
+    setDeleteConfirmingBlockIds(new Set(ids));
+  }, [isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -9890,6 +9746,7 @@ export default function ScriptEditor({
       pendingVirtualScrollAnchorRef.current = null;
       pendingNavigateRef.current = null;
       postNavCorrectionRef.current = null;
+      requestVirtualWindowRefresh();
       pendingMoveCenterRef.current = moving[0].id;
       if (movingHasMarker) {
         const nextScenes = normalizeSceneRowsForMarkers(scenesRef.current, normalizedNext);
@@ -9924,7 +9781,7 @@ export default function ScriptEditor({
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, requestLargeSelectionOperation, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -10081,8 +9938,9 @@ export default function ScriptEditor({
 
   const runSceneMenuMutation = async (request: () => Promise<Response>, failureMessage: string) => {
     try {
-      await flushPendingPatch();
-      const response = await request();
+      if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
+      let response = await request();
+      if (response.status === 202) response = await request();
       if (!response.ok || response.status === 202) throw new Error(failureMessage);
       await reloadScriptState();
     } catch (error) {
@@ -10122,14 +9980,53 @@ export default function ScriptEditor({
 
   const removeScene = async (id: string) => {
     if (isLockedMode || !productionId || !canEditMetadata) return;
-    await runSceneMenuMutation(
-      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+    try {
+      if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
+      const request = (operation?: MarkerDeleteOperation["type"]) => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activeVersionId ? { versionId: activeVersionId } : {}),
-      }),
-      "删除章节失败，请稍后重试。"
-    );
+        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) }),
+      });
+      let response = await request();
+      if (response.status === 202) response = await request();
+      const data = await response.json().catch(() => ({}));
+      if ((response.status === 300 && data.plan?.status === "choice") || (response.status === 409 && data.plan?.status === "blocked")) {
+        setMarkerDeleteDialog({ plan: data.plan, source: "server" });
+        return;
+      }
+      if (!response.ok || response.status === 202) {
+        setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
+        return;
+      }
+      await reloadScriptState();
+    } catch (error) {
+      setMarkerDeleteDialog({
+        plan: null,
+        message: error instanceof Error ? error.message : "删除章节失败，请稍后重试。",
+        source: "server",
+      });
+    }
+  };
+
+  const applyServerMarkerDeleteOperation = async (operation: MarkerDeleteOperation) => {
+    if (!productionId) return;
+    setMarkerDeleteDialogBusy(true);
+    try {
+      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${operation.markerId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || response.status === 202) {
+        setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
+        return;
+      }
+      await reloadScriptState();
+      setMarkerDeleteDialog(null);
+    } finally {
+      setMarkerDeleteDialogBusy(false);
+    }
   };
 
   const patchSceneMeta = async (id: string, fields: Partial<SceneMetaFields>) => {
@@ -10344,7 +10241,10 @@ export default function ScriptEditor({
   };
   const sceneIdForBlockId = (blockId: string | null | undefined): string | null => {
     if (!blockId) return null;
-    const blockIndex = blockIndexByIdRef.current.get(blockId) ?? -1;
+    const cachedIndex = blockIndexByIdRef.current.get(blockId) ?? -1;
+    const blockIndex = blocks[cachedIndex]?.id === blockId
+      ? cachedIndex
+      : blocks.findIndex((block) => block.id === blockId);
     return blockIndex >= 0 ? sceneIdForBlockAtIndex(blocks[blockIndex], blockIndex) : null;
   };
   const selectedDetailSceneId = selectedBlockIds.size === 1
@@ -10563,7 +10463,7 @@ export default function ScriptEditor({
                   <ScenePanel
                     scenes={scenes}
                     productionId={productionId ?? ""}
-                    onAdd={(parentId) => addScene(parentId)}
+                    onAdd={(parentId, target) => addScene(parentId, target)}
                     onUpdate={updateScene}
                     onRemove={removeScene}
                     open={openMenu === "scene"}
@@ -11332,7 +11232,7 @@ export default function ScriptEditor({
                     : block.type === "rehearsal_marker"
                       ? { kind: "rehearsal", id: block.id, mark: block.rehearsalMark ?? "" }
                       : null;
-              const markerDeleteIds = selectedBlockIds.has(block.id) ? selectedBlockIdsArray : [block.id];
+              const markerDeleteIds = [block.id];
               const markerEl = markerNode ? (
                 <div
                   key={block.id}
@@ -12005,6 +11905,25 @@ export default function ScriptEditor({
           </div>
         );
       })()}
+
+      {markerDeleteDialog && (
+        <MarkerDeleteDialog
+          state={markerDeleteDialog}
+          busy={markerDeleteDialogBusy}
+          onClose={() => setMarkerDeleteDialog(null)}
+          onChoose={(operation) => {
+            if (markerDeleteDialog.source === "server") {
+              void applyServerMarkerDeleteOperation(operation);
+              return;
+            }
+            if (operation.type === "whole" && !canEditText) {
+              setMarkerDeleteDialog({ plan: null, message: "删除整章及空段落需要剧本编辑权限。", source: "local" });
+              return;
+            }
+            applyMarkerDeleteOperation(operation);
+          }}
+        />
+      )}
 
       {markerDetailDeleteBlockedKind && (
         <div
