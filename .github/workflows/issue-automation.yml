@@ -24,8 +24,8 @@ jobs:
             const EXCLUDED_LABELS = new Set(['duplicate', 'wontfix', 'invalid']);
             const ISSUE_TYPES = ['Task', 'Bug', 'Feature'];
 
-            // Org-level native Effort field (id: 44074429) option IDs.
-            const EFFORT_OPTION_IDS = { Low: 77134900, Medium: 77134899, High: 77134898 };
+            // Org-level native Effort field (id: 44074429).
+            // The API expects field_id + value as the option name string (not a numeric ID).
             const EFFORT_FIELD_ID = 44074429;
 
             const { data: repoLabels } = await github.rest.issues.listLabelsForRepo({
@@ -144,14 +144,14 @@ jobs:
             }
 
             // Apply effort via org-level native issue field
-            const effort = input.effort in EFFORT_OPTION_IDS ? input.effort : null;
+            const effort = ['Low', 'Medium', 'High'].includes(input.effort) ? input.effort : null;
             if (effort) {
               try {
                 await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issue.number,
-                  issue_field_values: [{ issue_field_id: EFFORT_FIELD_ID, value: EFFORT_OPTION_IDS[effort] }],
+                  issue_field_values: [{ field_id: EFFORT_FIELD_ID, value: effort }],
                 });
               } catch (err) {
                 console.log(`Failed to set effort: ${err.message}`);
