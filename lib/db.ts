@@ -1367,6 +1367,14 @@ export async function flushToDBVersioned(
            AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
         [deleteSnapshotIds, versionId]
       );
+      // Clean up asset_mounts for snapshots that were actually GC'd
+      await client.query(
+        `DELETE FROM asset_mount
+         WHERE mount_type = 'block_snapshot'
+           AND mount_id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script WHERE id = asset_mount.mount_id)`,
+        [deleteSnapshotIds]
+      );
     }
 
     // Version-scoped deletes: remove from versioned tables only; keep scene/character
@@ -2801,6 +2809,7 @@ export async function updateCue(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
     const refRes = await client.query<{ count: string }>(
       "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [id]
     );
@@ -2859,6 +2868,17 @@ export async function updateCue(
            AND version_id IN (SELECT id FROM descendants)`,
         [versionId, newId, id]
       );
+      // Copy cue_revision asset mounts to the new revision (mirrors cowCue behaviour)
+      await client.query(
+        `INSERT INTO asset_mount
+           (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+            folder_path, mount_mode, version_resolved, created_by)
+         SELECT 'am_' || substr(md5(id || $1), 1, 16),
+           asset_id, production_id, 'cue_revision', $1, mount_aux_id,
+           folder_path, mount_mode, version_resolved, created_by
+         FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
+        [newId, id]
+      );
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -2896,6 +2916,9 @@ export async function deleteCue(id: string, cueListId: string, versionId?: strin
     );
     if (parseInt(refRes.rows[0].count, 10) === 0) {
       await client.query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
+      await client.query(
+        "DELETE FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $1", [id]
+      );
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -3011,6 +3034,9 @@ async function removeCueFromVersion(
   );
   if (parseInt(refRes.rows[0].count, 10) <= 1) {
     await client.query("DELETE FROM cue WHERE id = $1", [revisionId]);
+    await client.query(
+      "DELETE FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $1", [revisionId]
+    );
   } else {
     await client.query(
       `WITH RECURSIVE descendants AS (
@@ -4164,6 +4190,13 @@ export async function applyPatchToDB(
              WHERE s.id IN (SELECT snapshot_id FROM removed)
                AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
             [cur.snapshotId, versionId]
+          );
+          // Clean up asset_mount for the GC'd block_snapshot if it was actually deleted
+          await client.query(
+            `DELETE FROM asset_mount
+             WHERE mount_type = 'block_snapshot' AND mount_id = $1
+               AND NOT EXISTS (SELECT 1 FROM script WHERE id = $1)`,
+            [cur.snapshotId]
           );
 
           // Clean up block_tag rows keyed by logical block_id.
