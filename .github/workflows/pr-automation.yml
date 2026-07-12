@@ -77,25 +77,27 @@ jobs:
               .map(f => `sudo -u postgres psql -d script_editor -f ${f}\necho "${f.split('/').pop()}" >> /var/www/production-manager/shared/db-applied.txt`)
               .join('\n');
 
-            const body = `${MARKER}
-## ⚠️ 此 PR 包含数据库 Migration 文件
-
-以下文件将在合并后由 CD **自动执行**：
-${fileList}
-
-**Reviewer 检查项：**
-- [ ] Migration 使用 \`IF NOT EXISTS\`，可安全重复执行
-- [ ] 没有破坏性 schema 变更（删列、改非空类型等）导致当前线上代码 crash
-- [ ] 合并部署后，在服务器确认 migration 已执行：
-  \`\`\`bash
-  ${verifyLines}
-  \`\`\`
-
-**如果 CD 未自动执行，手动补跑：**
-\`\`\`bash
-${applyLines}
-\`\`\`
-`;
+            const body = [
+              MARKER,
+              '## ⚠️ 此 PR 包含数据库 Migration 文件',
+              '',
+              '以下文件将在合并后由 CD **自动执行**：',
+              fileList,
+              '',
+              '**Reviewer 检查项：**',
+              '- [ ] Migration 使用 `IF NOT EXISTS`，可安全重复执行',
+              '- [ ] 没有破坏性 schema 变更（删列、改非空类型等）导致当前线上代码 crash',
+              '- [ ] 合并部署后，在服务器确认 migration 已执行：',
+              '  ```bash',
+              '  ' + verifyLines,
+              '  ```',
+              '',
+              '**如果 CD 未自动执行，手动补跑：**',
+              '```bash',
+              applyLines,
+              '```',
+              '',
+            ].join('\n');
 
             if (existing) {
               await github.rest.issues.updateComment({
