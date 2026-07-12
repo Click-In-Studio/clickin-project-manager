@@ -18,7 +18,7 @@ config({ path: ".env.local" });
 import { Pool } from "pg";
 
 const SEED_URL =
-  process.env.SEED_DATA_URL ?? "https://seed.click-in.studio/seed-data/demo.sql";
+  process.env.SEED_DATA_URL ?? "https://pub-50e9ef6dfe944ca8aa2288e45f20ba7c.r2.dev/seed-data/demo.sql";
 
 const pool = new Pool({
   database: process.env.PGDATABASE ?? "script_editor",
