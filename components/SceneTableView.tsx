@@ -78,8 +78,9 @@ function MetaCell({
   const commit = async () => {
     if (draft === value) { setEditing(false); return; }
     setSaving(true);
-    try { await onSave(draft); }
-    finally { setSaving(false); setEditing(false); }
+    try { await onSave(draft); setEditing(false); }
+    catch { /* keep editing open so user can retry */ }
+    finally { setSaving(false); }
   };
 
   if (editing) {
@@ -183,8 +184,9 @@ function DurationCell({
     const origSeconds = parseDuration(value);
     if (seconds === origSeconds) { setEditing(false); return; }
     setSaving(true);
-    try { await onSave(seconds); }
-    finally { setSaving(false); setEditing(false); }
+    try { await onSave(seconds); setEditing(false); }
+    catch { /* keep editing open so user can retry */ }
+    finally { setSaving(false); }
   };
 
   if (editing) {
@@ -241,8 +243,9 @@ function SceneNameCell({
     const trimmed = draft.trim();
     if (trimmed === (scene.name ?? "")) { setEditing(false); return; }
     setSaving(true);
-    try { await onUpdate(trimmed); }
-    finally { setSaving(false); setEditing(false); }
+    try { await onUpdate(trimmed); setEditing(false); }
+    catch { /* keep editing open so user can retry */ }
+    finally { setSaving(false); }
   };
 
   if (editing) {
@@ -291,7 +294,12 @@ export default function SceneTableView({
   const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
   const [collapsedChapters, setCollapsedChapters] = useState<Set<string>>(new Set());
   const resizingRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+
+  useEffect(() => {
+    return () => { resizeCleanupRef.current?.(); };
+  }, []);
 
   const visibleColumns = useMemo(() => {
     return viewConfig.columnOrder
@@ -337,12 +345,15 @@ export default function SceneTableView({
       });
     };
 
-    const handleUp = () => {
+    const cleanup = () => {
       resizingRef.current = null;
+      resizeCleanupRef.current = null;
       document.removeEventListener("mousemove", handleMove);
       document.removeEventListener("mouseup", handleUp);
     };
+    const handleUp = () => cleanup();
 
+    resizeCleanupRef.current = cleanup;
     document.addEventListener("mousemove", handleMove);
     document.addEventListener("mouseup", handleUp);
   };
