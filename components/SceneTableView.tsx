@@ -16,15 +16,15 @@ export type TableColumnDef = {
 };
 
 export const DEFAULT_COLUMNS: TableColumnDef[] = [
-  { key: "number",      label: "编号",     defaultWidth: 80  },
-  { key: "name",        label: "名称",     defaultWidth: 160, editable: true },
-  { key: "synopsis",    label: "简介",     defaultWidth: 240, editable: true, multiline: true },
-  { key: "actionLine",  label: "行动线",   defaultWidth: 240, editable: true, multiline: true },
-  { key: "music",       label: "音乐",     defaultWidth: 160, editable: true, multiline: true },
-  { key: "stageNotes",  label: "舞台呈现", defaultWidth: 200, editable: true, multiline: true },
-  { key: "duration",    label: "预期时长", defaultWidth: 100 },
+  { key: "number",      label: "编号",     defaultWidth: 96  },
+  { key: "name",        label: "名称",     defaultWidth: 120, editable: true },
+  { key: "synopsis",    label: "简介",     defaultWidth: 400, editable: true, multiline: true },
+  { key: "actionLine",  label: "行动线",   defaultWidth: 460, editable: true, multiline: true },
+  { key: "music",       label: "音乐",     defaultWidth: 276, editable: true, multiline: true },
+  { key: "stageNotes",  label: "舞台呈现", defaultWidth: 256, editable: true, multiline: true },
+  { key: "duration",    label: "预期时长", defaultWidth: 80  },
   { key: "marks",       label: "排练记号", defaultWidth: 140 },
-  { key: "assets",      label: "附件",     defaultWidth: 80  },
+  { key: "assets",      label: "附件",     defaultWidth: 76  },
 ];
 
 export type TableViewConfigData = {
@@ -498,10 +498,11 @@ export default function SceneTableView({
               {renderCell(scene, col.key, isChapter, children)}
             </td>
           ))}
+          <td />
         </tr>
         {isExpanded && (
           <tr className="border-b border-zinc-100 bg-zinc-50/30">
-            <td colSpan={visibleColumns.length} className="px-4 py-3">
+            <td colSpan={visibleColumns.length + 1} className="px-4 py-3">
               <MountPointAssets
                 productionId={productionId}
                 mountType="scene"
@@ -526,7 +527,7 @@ export default function SceneTableView({
     <div className="overflow-x-auto rounded-2xl bg-white shadow-sm">
       <table
         ref={tableRef}
-        className="border-collapse text-left"
+        className="border-collapse text-left w-full table-fixed"
         style={{ minWidth: totalWidth }}
       >
         <thead className="sticky top-0 z-10 bg-white">
@@ -545,6 +546,7 @@ export default function SceneTableView({
                 />
               </th>
             ))}
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -560,7 +562,7 @@ export default function SceneTableView({
           })}
           {acts.length === 0 && (
             <tr>
-              <td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-sm text-zinc-300">
+              <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-sm text-zinc-300">
                 暂无章节
               </td>
             </tr>
