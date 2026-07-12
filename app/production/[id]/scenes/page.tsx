@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "场景" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listProductionScenes, listRehearsalMarksByScene, listVersions, listScenesByVersion, listRehearsalMarksByVersion, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionMemberContext, getProductionName, listVersions, listScenesByVersion, listRehearsalMarksByVersion, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import ScenesManager from "@/components/ScenesManager";
 
@@ -42,7 +42,7 @@ export default async function ScenesPage({
         if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
         return Promise.all([listScenesByVersion(resolvedVersionId), listRehearsalMarksByVersion(resolvedVersionId)]);
       })()
-    : await Promise.all([listProductionScenes(id), listRehearsalMarksByScene(id)]);
+    : [[], {}] as const;
 
   return (
     <ScenesManager

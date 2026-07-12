@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listScenesByVersion, listSceneVersionsByVersion, listProductionScenes, flushToDB, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionMemberContext, listScenesByVersion, listSceneVersionsByVersion, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import type { SceneColMap, ParsedSceneNum, SceneConflict, ImportScenePreview } from "@/lib/import/types";
@@ -55,8 +55,7 @@ async function resolveImportVersionId(req: NextRequest, productionId: string): P
   return versionIdParam;
 }
 
-async function listExistingScenesForImport(versionId: string | null, productionId: string) {
-  if (!versionId) return { scenes: await listProductionScenes(productionId), markerBacked: false };
+async function listExistingScenesForImport(versionId: string, productionId: string) {
   const markerScenes = await listScenesByVersion(versionId);
   if (markerScenes.length > 0) {
     return { scenes: markerScenes, markerBacked: true };
@@ -170,11 +169,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const resolvedVersionId = await resolveImportVersionId(req, productionId);
   if (resolvedVersionId instanceof Response) return resolvedVersionId;
-  if (resolvedVersionId) {
-    const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
+  if (!resolvedVersionId) {
+    return Response.json({ error: "演出没有可用版本，无法导入构作" }, { status: 400 });
+  }
+  const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
   }
   const { scenes: existing, markerBacked } = await listExistingScenesForImport(resolvedVersionId, productionId);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
@@ -223,11 +223,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const resolvedVersionId = await resolveImportVersionId(req, productionId);
   if (resolvedVersionId instanceof Response) return resolvedVersionId;
-  if (resolvedVersionId) {
-    const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
+  if (!resolvedVersionId) {
+    return Response.json({ error: "演出没有可用版本，无法导入构作" }, { status: 400 });
+  }
+  const migration = await ensureScriptMarkerMigration(resolvedVersionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
   }
   const { scenes: existing, markerBacked } = await listExistingScenesForImport(resolvedVersionId, productionId);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
@@ -246,7 +247,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   // Assign sortOrders for existing scenes using their current position
   let newSortOrder = existing.length + 1;
-  const upsertScenes: Parameters<typeof flushToDB>[1]["upsertScenes"] = [];
+  const upsertScenes: Parameters<typeof flushToDBVersioned>[2]["upsertScenes"] = [];
 
   for (const [num, entry] of sceneMap) {
     const ex = existingByNum.get(num);
@@ -278,25 +279,17 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (entry) metadataUpdates.push({ id: entry.id, row });
   }
 
-  if (resolvedVersionId) {
-    await flushToDBVersioned(productionId, resolvedVersionId, {
-      upsertScenes,
-      deleteSceneIds,
-      upsertBlocks: [],
-      deleteSnapshotIds: [],
-      upsertChars: [],
-      deleteCharIds: [],
-    });
-  } else {
-    await flushToDB(productionId, {
-      upsertScenes,
-      deleteSceneIds,
-      upsertBlocks: [],
-      deleteBlockIds: [],
-      upsertChars: [],
-      deleteCharIds: [],
-    });
+  if (!resolvedVersionId) {
+    return Response.json({ error: "演出没有可用版本，无法导入构作" }, { status: 400 });
   }
+  await flushToDBVersioned(productionId, resolvedVersionId, {
+    upsertScenes,
+    deleteSceneIds,
+    upsertBlocks: [],
+    deleteSnapshotIds: [],
+    upsertChars: [],
+    deleteCharIds: [],
+  });
   if (resolvedVersionId) {
     await Promise.all(metadataUpdates.map(({ id, row }) =>
       updateSceneMetadata(productionId, id, resolvedVersionId, {
