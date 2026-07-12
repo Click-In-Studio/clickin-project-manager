@@ -7,7 +7,7 @@ import {
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/roles";
 import { diffState } from "@/lib/script-ops";
-import { insertMarker, projectMarkers } from "@/lib/script-marker-domain";
+import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";
 
 const createId = () => crypto.randomUUID();
 
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const result = await loadProduction(id, resolved.versionId);
   if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
 
-  const next = insertMarker(result.state, {
+  const next = insertHierarchyMarker(result.state, {
     kind: body.kind === "scene" || body.parentId ? "scene" : "chapter",
     name: typeof body.name === "string" ? body.name.trim() : "",
     parentId: typeof body.parentId === "string" ? body.parentId : null,

@@ -261,6 +261,26 @@ export function insertMarker(state: ScriptState, input: MarkerInsert, createId: 
   return normalizeMarkerState({ ...state, blocks }, createId);
 }
 
+export function insertHierarchyMarker(state: ScriptState, input: MarkerInsert, createId: IdFactory): ScriptState {
+  const parentId = input.kind === "scene" && input.parentId ? resolveMarkerId(state, input.parentId) : null;
+  const parentIndex = parentId ? state.blocks.findIndex((block) => block.id === parentId && block.type === "chapter_marker") : -1;
+  if (parentIndex >= 0) {
+    const nextChapterIndex = state.blocks.findIndex((block, index) => index > parentIndex && block.type === "chapter_marker");
+    const chapterEnd = nextChapterIndex < 0 ? state.blocks.length : nextChapterIndex;
+    const hasScene = state.blocks.slice(parentIndex + 1, chapterEnd).some((block) => block.type === "scene_marker");
+    if (!hasScene) {
+      return insertMarker(state, {
+        ...input,
+        beforeId: null,
+        afterId: null,
+        beforeBlockId: null,
+        afterBlockId: parentId,
+      }, createId);
+    }
+  }
+  return insertMarker(state, input, createId);
+}
+
 export function convertMarker(state: ScriptState, id: string, kind: MarkerKind, createId: IdFactory): ScriptState {
   const index = markerIndex(state, id);
   if (index < 0) return state;

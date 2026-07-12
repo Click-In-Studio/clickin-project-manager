@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  convertMarker, executeMarkerDeletion, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
+  convertMarker, executeMarkerDeletion, insertHierarchyMarker, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
 } from "../lib/script-marker-domain";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../lib/script-types";
 import { patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
@@ -155,6 +155,46 @@ assert.equal(
   sceneAtChapterEnd.blocks.findIndex((item) => item.id === sceneAtChapterEndId) + 2,
   sceneAtChapterEnd.blocks.findIndex((item) => item.id === "c2"),
 );
+
+const firstHierarchySceneWithText = insertHierarchyMarker(state([
+  block("c0", "chapter_marker"),
+  block("chapter-text", "dialogue", "chapter text", null),
+  block("c1", "chapter_marker"),
+  block("s11", "scene_marker"),
+]), { kind: "scene", parentId: "c0", beforeId: "c1", name: "first scene" }, createId);
+const firstHierarchySceneWithTextProjection = projectMarkers(firstHierarchySceneWithText);
+const firstHierarchySceneWithTextId = firstHierarchySceneWithTextProjection.find((item) => item.name === "first scene")?.id;
+assert.ok(firstHierarchySceneWithTextId);
+assert.equal(firstHierarchySceneWithTextProjection.filter((item) => item.kind === "scene" && item.parentId === "c0").length, 1);
+assert.equal(firstHierarchySceneWithText.blocks.findIndex((item) => item.id === firstHierarchySceneWithTextId), 1);
+
+const firstHierarchySceneWithEmptyBlock = insertHierarchyMarker(state([
+  block("c0", "chapter_marker"),
+  block("chapter-empty", "dialogue", "", null),
+  block("c1", "chapter_marker"),
+  block("s11", "scene_marker"),
+]), { kind: "scene", parentId: "c0", beforeId: "c1", name: "first empty scene" }, createId);
+assert.equal(projectMarkers(firstHierarchySceneWithEmptyBlock).filter((item) => item.kind === "scene" && item.parentId === "c0").length, 1);
+
+const existingHierarchyScene = insertHierarchyMarker(
+  baseline,
+  { kind: "scene", parentId: "c1", beforeId: "c2", name: "existing chapter scene" },
+  createId,
+);
+const existingHierarchySceneId = projectMarkers(existingHierarchyScene).find((item) => item.name === "existing chapter scene")?.id;
+assert.ok(existingHierarchySceneId);
+assert.equal(
+  existingHierarchyScene.blocks.findIndex((item) => item.id === existingHierarchySceneId) + 2,
+  existingHierarchyScene.blocks.findIndex((item) => item.id === "c2"),
+);
+
+const directFirstSceneInsertion = insertMarker(state([
+  block("c0", "chapter_marker"),
+  block("chapter-text", "dialogue", "chapter text", null),
+  block("c1", "chapter_marker"),
+  block("s11", "scene_marker"),
+]), { kind: "scene", parentId: "c0", beforeId: "c1", name: "direct insertion" }, createId);
+assert.equal(projectMarkers(directFirstSceneInsertion).filter((item) => item.kind === "scene" && item.parentId === "c0").length, 2);
 
 const addedOpening = insertMarker(baseline, { kind: "chapter", name: "", beforeId: "c0" }, createId);
 const addedOpeningMarker = projectMarkers(addedOpening)[0];
