@@ -5,20 +5,8 @@ on:
     types: [opened]
 
 jobs:
-  # Add every new issue to the org project board. GITHUB_TOKEN has no access
-  # to org-level Projects v2, so this needs a classic PAT (scopes: repo,
-  # project) stored as the ADD_TO_PROJECT_PAT repo secret.
-  add-to-project:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/add-to-project@v1
-        with:
-          project-url: https://github.com/orgs/Click-In-Studio/projects/1
-          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
-
-  # Use OpenAI to suggest labels and an issue type (Task/Bug/Feature) based on
-  # the issue's title and description. Runs once on creation; never touches
-  # issues that already have labels or a type applied by a human.
+  # Use OpenAI to suggest labels, an issue type (Task/Bug/Feature), and an
+  # effort estimate (S/M/L/XL) based on the issue's title and description.
   classify-issue:
     runs-on: ubuntu-latest
     permissions:
@@ -31,19 +19,22 @@ jobs:
           script: |
             const issue = context.payload.issue;
 
-            // Labels that need human triage history (prior reports, maintainer
-            // judgment) rather than something derivable from title+body alone.
+            // Labels that need human triage history rather than derivation from title+body.
             const EXCLUDED_LABELS = new Set(['duplicate', 'wontfix', 'invalid']);
             const ISSUE_TYPES = ['Task', 'Bug', 'Feature'];
+            const EFFORT_VALUES = ['S', 'M', 'L', 'XL'];
+            // S=green  M=yellow  L=light-yellow  XL=red-orange
+            const EFFORT_COLORS = { S: '0e8a16', M: 'fbca04', L: 'e4e669', XL: 'd93f0b' };
 
             const { data: repoLabels } = await github.rest.issues.listLabelsForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               per_page: 100,
             });
+            // Keep effort: labels out of the AI candidate list — they're handled separately.
             const candidateLabels = repoLabels
               .map(l => l.name)
-              .filter(name => !EXCLUDED_LABELS.has(name));
+              .filter(name => !EXCLUDED_LABELS.has(name) && !name.startsWith('effort:'));
 
             if (!process.env.OPENAI_API_KEY) {
               console.log('OPENAI_API_KEY not set, skipping AI classification.');
@@ -52,7 +43,7 @@ jobs:
 
             const classifyFunction = {
               name: 'classify_issue',
-              description: 'Classify a GitHub issue with labels and an issue type.',
+              description: 'Classify a GitHub issue with labels, an issue type, and an effort estimate.',
               strict: true,
               parameters: {
                 type: 'object',
@@ -60,15 +51,20 @@ jobs:
                   labels: {
                     type: 'array',
                     description: 'Zero or more labels from the allowed list that clearly apply. Leave empty if none clearly apply — do not guess.',
-                    items: { type: 'string', enum: candidateLabels },
+                    items: { type: 'string', enum: candidateLabels.length ? candidateLabels : [''] },
                   },
                   type: {
                     type: 'string',
                     description: 'The single most appropriate issue type.',
                     enum: ISSUE_TYPES,
                   },
+                  effort: {
+                    type: 'string',
+                    description: 'Estimated implementation effort. S = a few hours, M = 1–2 days, L = up to a week, XL = more than a week.',
+                    enum: EFFORT_VALUES,
+                  },
                 },
-                required: ['labels', 'type'],
+                required: ['labels', 'type', 'effort'],
                 additionalProperties: false,
               },
             };
@@ -121,7 +117,23 @@ jobs:
 
             const candidateSet = new Set(candidateLabels);
             const labels = (input.labels || []).filter(l => candidateSet.has(l));
-            const type = ISSUE_TYPES.includes(input.type) ? input.type : null;
+
+            // Effort label: ensure it exists in the repo, then queue it for application.
+            const effort = EFFORT_VALUES.includes(input.effort) ? input.effort : null;
+            if (effort) {
+              const effortLabel = `effort:${effort}`;
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: effortLabel,
+                  color: EFFORT_COLORS[effort],
+                });
+              } catch (_) {
+                // Label already exists — ignore.
+              }
+              labels.push(effortLabel);
+            }
 
             if (labels.length > 0) {
               await github.rest.issues.addLabels({
@@ -132,6 +144,7 @@ jobs:
               });
             }
 
+            const type = ISSUE_TYPES.includes(input.type) ? input.type : null;
             if (type) {
               try {
                 await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
@@ -145,4 +158,4 @@ jobs:
               }
             }
 
-            console.log(`Applied labels: ${labels.join(', ') || '(none)'}; type: ${type || '(none)'}`);
+            console.log(`Applied labels: ${labels.join(', ') || '(none)'}; type: ${type || '(none)'}; effort: ${effort || '(none)'}`);
