@@ -46,13 +46,14 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
   const [sortSaving, setSortSaving] = useState(false);
 
   const create = async () => {
-    if (!newName.trim()) return;
+    if (!newName.trim() || creating) return;
     setCreating(true);
     setError("");
+    const idempotencyKey = crypto.randomUUID();
     try {
       const res = await fetch(`${BASE_PATH}/api/productions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({ name: newName.trim() }),
       });
       const data = await res.json();
