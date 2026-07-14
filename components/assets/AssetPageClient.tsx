@@ -23,9 +23,10 @@ interface Props {
   versionId: string | null;
   myOpenId: string;
   isAdmin: boolean;
+  userName: string;
 }
 
-export default function AssetPageClient({ productionId, versionId, myOpenId, isAdmin }: Props) {
+export default function AssetPageClient({ productionId, versionId, myOpenId, isAdmin, userName }: Props) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -312,6 +313,7 @@ export default function AssetPageClient({ productionId, versionId, myOpenId, isA
           productionId={productionId}
           assetId={shareTarget.id}
           assetName={shareTarget.name ?? shareTarget.fileName}
+          userName={userName}
           onClose={() => setShareTarget(null)}
         />
       )}

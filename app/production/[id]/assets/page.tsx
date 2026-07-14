@@ -24,6 +24,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
       versionId={versionId}
       myOpenId={session.openId}
       isAdmin={session.isAdmin}
+      userName={session.name}
     />
   );
 }
