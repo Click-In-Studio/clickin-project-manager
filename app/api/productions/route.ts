@@ -7,6 +7,27 @@ function uid(): string {
   return `${Date.now().toString(36)}${(++_seq).toString(36)}`;
 }
 
+// Idempotency cache for production creation — prevents duplicate rows on network retry.
+// Module-level state is process-scoped; sufficient for single-process deployments.
+const _idemCache = new Map<string, { id: string; ts: number }>();
+const IDEM_TTL_MS = 60_000;
+function checkIdem(key: string): string | null {
+  const entry = _idemCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > IDEM_TTL_MS) { _idemCache.delete(key); return null; }
+  return entry.id;
+}
+function storeIdem(key: string, id: string) {
+  _idemCache.set(key, { id, ts: Date.now() });
+  // Evict stale entries opportunistically
+  if (_idemCache.size > 1000) {
+    const now = Date.now();
+    for (const [k, v] of _idemCache) {
+      if (now - v.ts > IDEM_TTL_MS) _idemCache.delete(k);
+    }
+  }
+}
+
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
@@ -25,12 +46,19 @@ export async function POST(req: NextRequest) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
 
+  const ikey = req.headers.get("Idempotency-Key");
+  if (ikey) {
+    const cached = checkIdem(ikey);
+    if (cached) return Response.json({ id: cached }, { status: 201 });
+  }
+
   const { name } = (await req.json()) as { name?: string };
   if (!name?.trim()) return Response.json({ error: "剧名不能为空" }, { status: 400 });
 
   const id = uid();
   try {
     await createProduction(id, name.trim());
+    if (ikey) storeIdem(ikey, id);
     return Response.json({ id }, { status: 201 });
   } catch (err) {
     console.error("[productions] create error:", err);
