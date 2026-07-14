@@ -45,6 +45,7 @@ export default async function AssetPreviewPage({
       mimeType={asset.mimeType}
       storageType={asset.storageType}
       feishuUrl={asset.feishuUrl}
+      userName={session.name}
     />
   );
 }
