@@ -1,6 +1,5 @@
 import { getPool } from "./pg";
-import type { PoolClient } from "pg";
-import { readFile } from "fs/promises";
+import type { Pool, PoolClient } from "pg";
 import type { Block, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import type { Permission, PermissionOverrides } from "./roles";
@@ -9,61 +8,35 @@ import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap } from "./script-page";
-import { generatedRehearsalMarksByScene, withGeneratedSceneNumbers } from "./script-generated-labels";
-import { VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
+import { generatedRehearsalLabels, withGeneratedSceneNumbers } from "./script-generated-labels";
+import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { projectMarkers, type MarkerProjection } from "./script-marker-domain";
+import { withMarkerOwnership } from "./script-marker-blocks";
+import { migrateLegacyRehearsalMentions } from "./mention-types";
 
 type MarkerMigrationState = {
-  status: "idle" | "running" | "failed";
-  error: string | null;
-  startedAt: number | null;
+  error?: string;
+  startedAt: number;
   progress: number;
   phase: string;
-  estimatedTotalMs: number | null;
 };
 
-const markerMigrationState: MarkerMigrationState = (
-  globalThis as typeof globalThis & { __scriptMarkerMigrationState?: MarkerMigrationState }
-).__scriptMarkerMigrationState ??= {
-  status: "idle",
-  error: null,
-  startedAt: null,
-  progress: 0,
-  phase: "",
-  estimatedTotalMs: null,
+const markerMigrationGlobals = globalThis as typeof globalThis & {
+  __scriptMarkerMigrations?: Map<string, "ready" | MarkerMigrationState | Promise<MarkerMigrationProgress>>;
 };
-markerMigrationState.estimatedTotalMs ??= null;
+const markerMigrations = markerMigrationGlobals.__scriptMarkerMigrations ??= new Map();
 
-const markerMigrationNeededChecks = new Map<string, Promise<boolean>>();
+type MarkerMigrationProgress =
+  | { status: "ready" }
+  | { status: "running"; progress: number; phase: string; startedAt: number };
 
-export type MarkerMigrationProgress = {
-  status: "ready" | "running" | "failed";
-  progress: number;
-  phase: string;
-  startedAt: number | null;
-  elapsedMs: number;
-  estimatedTotalMs: number | null;
-  estimatedRemainingMs: number | null;
-};
-
-function markerMigrationProgress(status: "ready" | "running" | "failed" = markerMigrationState.status === "running" ? "running" : markerMigrationState.status === "failed" ? "failed" : "ready"): MarkerMigrationProgress {
-  const startedAt = markerMigrationState.startedAt;
-  const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt) : 0;
-  const progress = status === "ready"
-    ? 100
-    : Math.max(1, Math.min(99, markerMigrationState.progress || 1));
-  const estimatedTotalMs = markerMigrationState.estimatedTotalMs;
-  const estimatedRemainingMs = status === "running" && estimatedTotalMs !== null
-    ? Math.max(1000, estimatedTotalMs - elapsedMs)
-    : null;
+function markerMigrationProgress(state?: MarkerMigrationState): MarkerMigrationProgress {
+  if (!state) return { status: "ready" };
   return {
-    status,
-    progress,
-    phase: status === "ready" ? "更新完成" : markerMigrationState.phase || "准备更新数据",
-    startedAt,
-    elapsedMs,
-    estimatedTotalMs,
-    estimatedRemainingMs,
+    status: "running",
+    progress: state.progress,
+    phase: state.phase,
+    startedAt: state.startedAt,
   };
 }
 
@@ -84,7 +57,7 @@ export type Version = {
 
 // ─── Exported types ───────────────────────────────────────────────────────────
 
-export type DbBlock = Block & { orderKey: number; lexKey: string };
+export type DbBlock = Block & { lexKey: string };
 // For versioned flush: block + its current snapshot_id (for CoW detection)
 export type VersionedDbBlock = DbBlock & { snapshotId: string };
 export type DbScene = Scene & { sortOrder: number };
@@ -262,233 +235,346 @@ function markerMetaJson(block: Block): string {
   return JSON.stringify(cleanMarkerMeta(block.markerMeta));
 }
 
-async function scriptMarkerMigrationNeeded(versionId: string): Promise<boolean> {
-  const res = await getPool().query<{ needed: boolean }>(
-    `WITH marker_rows AS (
-       SELECT
-         sv.version_id,
-         sv.block_id AS marker_block_id,
-         s.id AS marker_snapshot_id,
-         s.scene_id AS legacy_scene_id,
-         s.marker_meta,
-         s.type::text AS marker_type
-       FROM script_version sv
-       JOIN script s ON s.id = sv.snapshot_id
-       WHERE sv.version_id = $1
-         AND s.type IN ('chapter_marker', 'scene_marker')
-     ),
-     counts AS (
-       SELECT
-         COUNT(*) - COUNT(DISTINCT (sv.version_id, sv.block_id)) AS duplicate_version_block_count,
-         COUNT(*) FILTER (
-           WHERE s.type IN ('chapter_marker', 'scene_marker', 'rehearsal_marker')
-         ) AS marker_count,
-         COUNT(*) FILTER (
-           WHERE s.type NOT IN ('chapter_marker', 'scene_marker', 'rehearsal_marker')
-             AND (s.scene_id IS NOT NULL OR s.rehearsal_mark IS NOT NULL)
-         ) AS legacy_owned_count
-       FROM script_version sv
-       JOIN script s ON s.id = sv.snapshot_id
-       WHERE sv.version_id = $1
-     ),
-     orphan_scene_versions AS (
-       SELECT COUNT(*) AS cnt
-       FROM scene_version scene_v
-       LEFT JOIN marker_rows marker
-         ON marker.version_id = scene_v.version_id
-        AND scene_v.scene_id IN (marker.marker_block_id, marker.legacy_scene_id)
-       WHERE scene_v.version_id = $1
-         AND marker.marker_block_id IS NULL
-         AND COALESCE(
-           NULLIF(scene_v.name, ''),
-           NULLIF(scene_v.synopsis, ''),
-           NULLIF(scene_v.action_line, ''),
-           NULLIF(scene_v.music, ''),
-           NULLIF(scene_v.stage_notes, ''),
-           NULLIF(scene_v.expected_duration, '')
-         ) IS NOT NULL
-     ),
-     unsynced_marker_meta AS (
-       SELECT COUNT(*) AS cnt
-       FROM marker_rows marker
-       JOIN scene_version scene_v
-         ON scene_v.version_id = marker.version_id
-        AND scene_v.scene_id IN (marker.marker_block_id, marker.legacy_scene_id)
-       WHERE marker.version_id = $1
-         AND (
-           (NULLIF(scene_v.num, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'number', '') IS NULL)
-           OR (NULLIF(scene_v.name, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'name', '') IS NULL)
-           OR (NULLIF(scene_v.synopsis, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'synopsis', '') IS NULL)
-           OR (NULLIF(scene_v.action_line, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'actionLine', '') IS NULL)
-           OR (NULLIF(scene_v.music, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'music', '') IS NULL)
-           OR (NULLIF(scene_v.stage_notes, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'stageNotes', '') IS NULL)
-           OR (NULLIF(scene_v.expected_duration, '') IS NOT NULL AND NULLIF(marker.marker_meta->>'expectedDuration', '') IS NULL)
-         )
-     ),
-     marker_counts AS (
-       SELECT
-         COUNT(*) FILTER (WHERE marker_type = 'chapter_marker') AS chapter_count,
-         COUNT(*) FILTER (WHERE marker_type = 'scene_marker') AS scene_count
-       FROM marker_rows
-     ),
-     legacy_scene_marker_mismatch AS (
-       SELECT COUNT(*) AS cnt
-       FROM marker_rows marker
-       JOIN scene_version scene_v
-         ON scene_v.version_id = marker.version_id
-        AND scene_v.scene_id IN (marker.marker_block_id, marker.legacy_scene_id)
-       WHERE marker.version_id = $1
-         AND marker.marker_type = 'chapter_marker'
-         AND marker.marker_block_id <> '__fixed_initial_chapter_marker'
-         AND (SELECT chapter_count > 1 FROM marker_counts)
-         AND btrim(scene_v.num) ~ '^[0-9]+\\s*-\\s*[0-9]+'
-         AND COALESCE(
-           NULLIF(scene_v.num, ''),
-           NULLIF(scene_v.name, ''),
-           NULLIF(scene_v.synopsis, ''),
-           NULLIF(scene_v.action_line, ''),
-           NULLIF(scene_v.music, ''),
-           NULLIF(scene_v.stage_notes, ''),
-           NULLIF(scene_v.expected_duration, '')
-         ) IS NOT NULL
-     ),
-     marker_meta_scene_mismatch AS (
-       SELECT COUNT(*) AS cnt
-       FROM marker_rows marker
-       WHERE marker.version_id = $1
-         AND marker.marker_type = 'chapter_marker'
-         AND marker.marker_block_id <> '__fixed_initial_chapter_marker'
-         AND (SELECT chapter_count > 1 FROM marker_counts)
-         AND btrim(marker.marker_meta->>'number') ~ '^[0-9]+\\s*-\\s*[0-9]+'
-     ),
-     empty_generated_marker_placeholders AS (
-       SELECT COUNT(*) AS cnt
-       FROM script_version sv
-       JOIN script s ON s.id = sv.snapshot_id
-       LEFT JOIN scene_version source_sv
-         ON source_sv.version_id = sv.version_id
-        AND source_sv.scene_id = sv.block_id
-       WHERE sv.version_id = $1
-         AND sv.snapshot_id LIKE 'sn_orphan_marker_%'
-         AND s.type IN ('chapter_marker', 'scene_marker')
-         AND COALESCE(
-           NULLIF(source_sv.name, ''),
-           NULLIF(source_sv.synopsis, ''),
-           NULLIF(source_sv.action_line, ''),
-           NULLIF(source_sv.music, ''),
-           NULLIF(source_sv.stage_notes, ''),
-           NULLIF(source_sv.expected_duration, ''),
-           NULLIF(s.marker_meta->>'name', ''),
-           NULLIF(s.marker_meta->>'synopsis', ''),
-           NULLIF(s.marker_meta->>'actionLine', ''),
-           NULLIF(s.marker_meta->>'music', ''),
-           NULLIF(s.marker_meta->>'stageNotes', ''),
-           NULLIF(s.marker_meta->>'expectedDuration', '')
-         ) IS NULL
-     )
-     SELECT (
-       (SELECT duplicate_version_block_count > 0 FROM counts)
-       OR (SELECT marker_count = 0 AND legacy_owned_count > 0 FROM counts)
-       OR (SELECT cnt > 0 FROM orphan_scene_versions)
-       OR (SELECT cnt > 0 FROM unsynced_marker_meta)
-       OR (SELECT cnt > 0 FROM legacy_scene_marker_mismatch)
-       OR (SELECT cnt > 0 FROM marker_meta_scene_mismatch)
-       OR (SELECT cnt > 0 FROM empty_generated_marker_placeholders)
-     ) AS needed`,
-    [versionId]
-  );
-  return res.rows[0]?.needed ?? false;
-}
+const REHEARSAL_MARK_OWNERSHIP_CTE = `WITH version_blocks AS (
+  SELECT sv.snapshot_id, sv.block_id, sv.sort_key, s.type::text AS type,
+         s.scene_id AS current_scene_id,
+         s.rehearsal_mark AS current_mark,
+         s.marker_meta AS current_meta,
+         COUNT(*) FILTER (WHERE s.type IN ('chapter_marker', 'scene_marker'))
+           OVER (ORDER BY sv.sort_key) AS scene_seq
+  FROM script_version sv
+  JOIN script s ON s.id = sv.snapshot_id
+  WHERE sv.version_id = $1
+), sequenced AS (
+  SELECT *,
+         MAX(CASE WHEN type IN ('chapter_marker', 'scene_marker') THEN block_id END)
+           OVER (PARTITION BY scene_seq) AS active_parent_id,
+         COUNT(*) FILTER (WHERE type = 'rehearsal_marker')
+           OVER (PARTITION BY scene_seq ORDER BY sort_key) AS rehearsal_seq
+  FROM version_blocks
+), owned AS (
+  SELECT *, MAX(CASE WHEN type = 'rehearsal_marker' THEN block_id END)
+    OVER (PARTITION BY scene_seq, rehearsal_seq) AS active_marker_id
+  FROM sequenced
+)`;
 
-async function scriptMarkerMigrationNeededOnce(versionId: string): Promise<boolean> {
-  const existing = markerMigrationNeededChecks.get(versionId);
-  if (existing) return existing;
-  const check = scriptMarkerMigrationNeeded(versionId).finally(() => {
-    markerMigrationNeededChecks.delete(versionId);
+const EXPECTED_REHEARSAL_MARK_SQL = `CASE
+  WHEN type IN ('chapter_marker', 'scene_marker', 'rehearsal_marker') THEN NULL
+  ELSE active_marker_id
+END`;
+
+const EXPECTED_REHEARSAL_SCENE_SQL = `CASE
+  WHEN type = 'rehearsal_marker' THEN NULL
+  ELSE current_scene_id
+END`;
+
+const EXPECTED_REHEARSAL_META_SQL = `CASE
+  WHEN type = 'rehearsal_marker'
+    THEN current_meta || jsonb_build_object('parentMarkerId', active_parent_id)
+  ELSE current_meta
+END`;
+
+const STALE_REHEARSAL_OWNERSHIP_SQL = `current_mark IS DISTINCT FROM ${EXPECTED_REHEARSAL_MARK_SQL}
+  OR current_scene_id IS DISTINCT FROM ${EXPECTED_REHEARSAL_SCENE_SQL}
+  OR current_meta IS DISTINCT FROM ${EXPECTED_REHEARSAL_META_SQL}`;
+
+const LEGACY_MENTION_TEXT_TARGETS = {
+  production_event: { table: "production_event", column: "description" },
+  event_schedule_item: { table: "event_schedule_item", column: "notes" },
+  event_call_time: { table: "event_call_time", column: "notes" },
+  event_tech_req: { table: "event_tech_req", column: "description" },
+  event_report: { table: "event_report", column: "body" },
+  event_report_note: { table: "event_report_note", column: "content" },
+  event_report_reply: { table: "event_report_reply", column: "content" },
+} as const;
+
+type LegacyMentionTextSource = keyof typeof LEGACY_MENTION_TEXT_TARGETS;
+
+type LegacyMentionTextRow = {
+  source: LegacyMentionTextSource;
+  id: string;
+  content: string;
+  include_unversioned: boolean;
+};
+
+async function rehearsalMentionMappings(versionId: string, db: Pool | PoolClient) {
+  const { rows } = await db.query<{
+    id: string;
+    type: Block["type"];
+    marker_meta: MarkerMeta | null;
+    legacy_scene_id: string | null;
+  }>(
+    VERSION_MARKER_LABEL_ROWS_SQL,
+    [versionId],
+  );
+  const labels = generatedRehearsalLabels(rows.map((row) => ({
+    ...row,
+    markerMeta: cleanMarkerMeta(row.marker_meta),
+  })));
+  const legacySceneIdByParentId = new Map(
+    rows.flatMap((row) => row.legacy_scene_id ? [[row.id, row.legacy_scene_id] as const] : []),
+  );
+  return [...labels.labelByMarkerId].flatMap(([markerId, label]) => {
+    const parentId = labels.parentIdByMarkerId.get(markerId);
+    const sceneId = parentId ? legacySceneIdByParentId.get(parentId) : null;
+    return sceneId ? [{ sceneId, label, markerId }] : [];
   });
-  markerMigrationNeededChecks.set(versionId, check);
-  return check;
 }
 
-async function runScriptMarkerMigration(): Promise<void> {
-  markerMigrationState.phase = "正在统计剧本数据量，耗时取决于数据库大小";
-  markerMigrationState.progress = 5;
-  const rawSql = await readFile(`${process.cwd()}/db/migrate-script-marker-blocks.sql`, "utf8");
-  markerMigrationState.progress = 15;
-  markerMigrationState.phase = "正在更新旧格式数据，耗时取决于数据库大小";
-  const appSafeSql = rawSql
-    .replace(/ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'chapter_marker';/g, "")
-    .replace(/ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'scene_marker';/g, "")
-    .replace(/ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'rehearsal_marker';/g, "")
-    .replace(/ALTER TABLE script ADD COLUMN IF NOT EXISTS marker_meta JSONB NOT NULL DEFAULT '\{\}';/g, "")
-    .replace(/CREATE UNIQUE INDEX IF NOT EXISTS script_version_version_block_uidx\s+ON script_version\(version_id, block_id\);/g, "");
-  await getPool().query(appSafeSql);
-  markerMigrationState.progress = 95;
-  markerMigrationState.phase = "正在完成数据校验";
-}
-
-async function backfillOpeningChapterConfig(versionId: string): Promise<void> {
-  await getPool().query(
-    `WITH target_version AS (
-       SELECT id
-       FROM version
-       WHERE id = $1
-         AND NOT (COALESCE(script_config, '{}'::jsonb) ? 'openingChapterMarkerId')
-     ),
-     first_chapter AS (
-       SELECT sv.block_id
-       FROM script_version sv
-       JOIN script s ON s.id = sv.snapshot_id
-       JOIN target_version tv ON tv.id = sv.version_id
-       WHERE sv.version_id = $1
-         AND s.type = 'chapter_marker'
-       ORDER BY sv.sort_key
-       LIMIT 1
+async function legacyRehearsalMentionRows(versionId: string, db: Pool | PoolClient): Promise<LegacyMentionTextRow[]> {
+  const { rows } = await db.query<LegacyMentionTextRow>(
+    `WITH context AS (
+       SELECT v.production_id, p.active_version_id = v.id AS is_active
+       FROM version v
+       JOIN production p ON p.id = v.production_id
+       WHERE v.id = $1
+     ), event_text AS (
+       SELECT 'production_event'::text AS source, pe.id, pe.description AS content,
+              COALESCE(pe.version_id = $1, context.is_active) AS include_unversioned
+       FROM production_event pe, context
+       WHERE pe.production_id = context.production_id AND pe.description LIKE '%rehearsal:%'
+       UNION ALL
+       SELECT 'event_schedule_item', item.id, item.notes,
+              COALESCE(pe.version_id = $1, context.is_active)
+       FROM event_schedule_item item
+       JOIN production_event pe ON pe.id = item.event_id
+       JOIN context ON context.production_id = pe.production_id
+       WHERE item.notes LIKE '%rehearsal:%'
+       UNION ALL
+       SELECT 'event_call_time', call.id, call.notes,
+              COALESCE(pe.version_id = $1, context.is_active)
+       FROM event_call_time call
+       JOIN production_event pe ON pe.id = call.event_id
+       JOIN context ON context.production_id = pe.production_id
+       WHERE call.notes LIKE '%rehearsal:%'
+       UNION ALL
+       SELECT 'event_tech_req', req.id, req.description,
+              COALESCE(pe.version_id = $1, context.is_active)
+       FROM event_tech_req req
+       JOIN production_event pe ON pe.id = req.event_id
+       JOIN context ON context.production_id = pe.production_id
+       WHERE req.description LIKE '%rehearsal:%'
+       UNION ALL
+       SELECT 'event_report', report.id, report.body,
+              COALESCE(pe.version_id = $1, context.is_active)
+       FROM event_report report
+       JOIN production_event pe ON pe.id = report.event_id
+       JOIN context ON context.production_id = pe.production_id
+       WHERE report.body LIKE '%rehearsal:%'
+       UNION ALL
+       SELECT 'event_report_note', note.id, note.content,
+              COALESCE(pe.version_id = $1, context.is_active)
+       FROM event_report_note note
+       JOIN event_report report ON report.id = note.report_id
+       JOIN production_event pe ON pe.id = report.event_id
+       JOIN context ON context.production_id = pe.production_id
+       WHERE note.content LIKE '%rehearsal:%'
+       UNION ALL
+       SELECT 'event_report_reply', reply.id, reply.content,
+              COALESCE(pe.version_id = $1, context.is_active)
+       FROM event_report_reply reply
+       JOIN event_report report ON report.id = reply.report_id
+       JOIN production_event pe ON pe.id = report.event_id
+       JOIN context ON context.production_id = pe.production_id
+       WHERE reply.content LIKE '%rehearsal:%'
      )
-     UPDATE version v
-     SET script_config = COALESCE(v.script_config, '{}'::jsonb)
-       || jsonb_build_object('openingChapterMarkerId', first_chapter.block_id)
-     FROM first_chapter
-     WHERE v.id = $1`,
-    [versionId]
+     SELECT source, id, content, include_unversioned FROM event_text`,
+    [versionId],
   );
+  return rows;
 }
 
-export async function ensureScriptMarkerMigration(versionId: string): Promise<MarkerMigrationProgress> {
-  if (markerMigrationState.status === "running") return markerMigrationProgress("running");
-  if (markerMigrationState.status === "failed" && markerMigrationState.error) {
-    return markerMigrationProgress("failed");
-  }
-  const needed = await scriptMarkerMigrationNeededOnce(versionId);
-  if (!needed) {
-    await backfillOpeningChapterConfig(versionId);
-    return markerMigrationProgress("ready");
-  }
+async function legacyRehearsalMentionUpdates(versionId: string, db: Pool | PoolClient) {
+  const rows = await legacyRehearsalMentionRows(versionId, db);
+  if (rows.length === 0) return [];
+  const mappings = await rehearsalMentionMappings(versionId, db);
+  if (mappings.length === 0) return [];
+  return rows.flatMap((row) => {
+    const content = migrateLegacyRehearsalMentions(
+      row.content,
+      versionId,
+      mappings,
+      row.include_unversioned,
+    );
+    return content === row.content ? [] : [{ ...row, content }];
+  });
+}
 
-  markerMigrationState.status = "running";
-  markerMigrationState.error = null;
-  markerMigrationState.startedAt = Date.now();
-  markerMigrationState.progress = 2;
-  markerMigrationState.phase = "正在统计剧本数据量，耗时取决于数据库大小";
-  markerMigrationState.estimatedTotalMs = null;
-  void runScriptMarkerMigration()
-    .then(() => {
-      markerMigrationState.status = "idle";
-      markerMigrationState.error = null;
-      markerMigrationState.startedAt = null;
-      markerMigrationState.progress = 100;
-      markerMigrationState.phase = "更新完成";
-      markerMigrationState.estimatedTotalMs = null;
-    })
-    .catch((err) => {
-      markerMigrationState.status = "failed";
-      markerMigrationState.error = err instanceof Error ? err.message : String(err);
-      markerMigrationState.progress = Math.max(markerMigrationState.progress, 1);
-      markerMigrationState.phase = "更新失败";
-      markerMigrationState.estimatedTotalMs = null;
-      console.error("[marker migration] failed:", err);
-    });
-  return markerMigrationProgress("running");
+async function scriptMarkerCacheMigrationStatus(versionId: string, db: Pool | PoolClient) {
+  const { rows } = await db.query<{ has_markers: boolean; needed: boolean }>(
+    `${REHEARSAL_MARK_OWNERSHIP_CTE}
+     SELECT COUNT(*) FILTER (WHERE type = 'rehearsal_marker') > 0 AS has_markers,
+            COUNT(*) FILTER (WHERE type = 'rehearsal_marker') > 0
+              AND COALESCE(bool_or(${STALE_REHEARSAL_OWNERSHIP_SQL}), false) AS needed
+     FROM owned`,
+    [versionId],
+  );
+  return rows[0];
+}
+
+async function scriptMarkerMigrationNeeded(versionId: string, db: Pool | PoolClient): Promise<boolean> {
+  const cache = await scriptMarkerCacheMigrationStatus(versionId, db);
+  return cache.needed
+    || cache.has_markers && (await legacyRehearsalMentionUpdates(versionId, db)).length > 0;
+}
+
+async function migrateLegacyRehearsalMentionRowsInTx(client: PoolClient, versionId: string): Promise<void> {
+  const updates = await legacyRehearsalMentionUpdates(versionId, client);
+  for (const source of Object.keys(LEGACY_MENTION_TEXT_TARGETS) as LegacyMentionTextSource[]) {
+    const sourceUpdates = updates.filter((update) => update.source === source);
+    if (sourceUpdates.length === 0) continue;
+    const { table, column } = LEGACY_MENTION_TEXT_TARGETS[source];
+    await client.query(
+      `UPDATE ${table} target
+       SET ${column} = updates.content
+       FROM unnest($1::text[], $2::text[]) AS updates(id, content)
+       WHERE target.id = updates.id`,
+      [sourceUpdates.map((update) => update.id), sourceUpdates.map((update) => update.content)],
+    );
+  }
+}
+
+async function normalizeRehearsalMarkOwnershipInTx(
+  client: PoolClient,
+  versionId: string,
+  state?: MarkerMigrationState,
+): Promise<void> {
+  const { rows: stale } = await client.query<{
+    snapshot_id: string;
+    expected_scene_id: string | null;
+    expected_mark: string | null;
+    expected_meta: MarkerMeta;
+    ref_count: number;
+  }>(
+    `${REHEARSAL_MARK_OWNERSHIP_CTE}
+     SELECT snapshot_id,
+            (SELECT COUNT(*)::int FROM script_version refs WHERE refs.snapshot_id = owned.snapshot_id) AS ref_count,
+            ${EXPECTED_REHEARSAL_SCENE_SQL} AS expected_scene_id,
+            ${EXPECTED_REHEARSAL_MARK_SQL} AS expected_mark,
+            ${EXPECTED_REHEARSAL_META_SQL} AS expected_meta
+     FROM owned
+     WHERE ${STALE_REHEARSAL_OWNERSHIP_SQL}`,
+    [versionId],
+  );
+  if (state) {
+    state.progress = 15;
+    state.phase = "正在更新当前版本的排练记号缓存";
+  }
+  if (stale.length === 0) return;
+  const exclusive = stale.filter((row) => row.ref_count <= 1);
+  if (exclusive.length > 0) {
+    await client.query(
+      `UPDATE script s
+       SET scene_id = updates.expected_scene_id,
+           rehearsal_mark = updates.expected_mark,
+           marker_meta = updates.expected_meta
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::jsonb[])
+         AS updates(snapshot_id, expected_scene_id, expected_mark, expected_meta)
+       WHERE s.id = updates.snapshot_id`,
+      [
+        exclusive.map((row) => row.snapshot_id),
+        exclusive.map((row) => row.expected_scene_id),
+        exclusive.map((row) => row.expected_mark),
+        exclusive.map((row) => JSON.stringify(row.expected_meta)),
+      ],
+    );
+  }
+  const shared = stale.filter((row) => row.ref_count > 1);
+  if (state) state.progress = 60;
+  for (let index = 0; index < shared.length; index++) {
+    const row = shared[index];
+    const newSnapshotId = genSnapshotId();
+    await client.query(
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+       SELECT $1, block_id, production_id, sort_key, $2, $3, type, content, stage_comment, $4::jsonb, force_show_character_name
+       FROM script WHERE id = $5`,
+      [newSnapshotId, row.expected_scene_id, row.expected_mark, JSON.stringify(row.expected_meta), row.snapshot_id],
+    );
+    await client.query(
+      `INSERT INTO script_character (script_id, character_id, position, annotation)
+       SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
+      [newSnapshotId, row.snapshot_id],
+    );
+    await client.query(
+      `INSERT INTO asset_mount
+         (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+          folder_path, mount_mode, version_resolved, created_by)
+       SELECT 'am_' || substr(md5(id || $1), 1, 16), asset_id, production_id,
+              'block_snapshot', $1, mount_aux_id, folder_path, mount_mode,
+              version_resolved, created_by
+       FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
+      [newSnapshotId, row.snapshot_id],
+    );
+    await client.query(
+      "UPDATE script_version SET snapshot_id = $1 WHERE version_id = $2 AND snapshot_id = $3",
+      [newSnapshotId, versionId, row.snapshot_id],
+    );
+    if (state) state.progress = 60 + Math.floor(((index + 1) / shared.length) * 30);
+  }
+  if (state) {
+    state.progress = 92;
+    state.phase = "正在校验更新结果";
+  }
+  if ((await scriptMarkerCacheMigrationStatus(versionId, client)).needed) {
+    throw new Error("排练记号缓存校验失败");
+  }
+}
+
+async function runScriptMarkerMigration(versionId: string, state: MarkerMigrationState, pool: Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
+    await normalizeRehearsalMarkOwnershipInTx(client, versionId, state);
+    await migrateLegacyRehearsalMentionRowsInTx(client, versionId);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function ensureScriptMarkerMigration(
+  versionId: string,
+  pool: Pool = getPool(),
+): Promise<MarkerMigrationProgress> {
+  const current = markerMigrations.get(versionId);
+  if (current === "ready") return markerMigrationProgress();
+  if (current instanceof Promise) return current;
+  if (current?.error !== undefined) {
+    throw new Error(`剧本数据更新失败：${current.error}`);
+  }
+  if (current) return markerMigrationProgress(current);
+
+  const check = (async () => {
+    if (!await scriptMarkerMigrationNeeded(versionId, pool)) {
+      markerMigrations.set(versionId, "ready");
+      return markerMigrationProgress();
+    }
+
+    const state: MarkerMigrationState = {
+      startedAt: Date.now(),
+      progress: 5,
+      phase: "正在统计剧本数据量，耗时取决于数据库大小",
+    };
+    markerMigrations.set(versionId, state);
+    void runScriptMarkerMigration(versionId, state, pool)
+      .then(() => {
+        markerMigrations.set(versionId, "ready");
+      })
+      .catch((err) => {
+        state.error = err instanceof Error ? err.message : String(err);
+        console.error(`[marker migration] failed for version ${versionId}:`, err);
+      });
+    return markerMigrationProgress(state);
+  })().catch((error) => {
+    markerMigrations.delete(versionId);
+    throw error;
+  });
+  markerMigrations.set(versionId, check);
+  return check;
 }
 
 async function syncSceneVersionsFromMarkersInTx(
@@ -619,6 +705,10 @@ async function syncSceneVersionsFromMarkersInTx(
 
 function isChapterSceneMarkerType(type: string | null | undefined): boolean {
   return type === "chapter_marker" || type === "scene_marker";
+}
+
+function isMarkerBlockType(type: string | null | undefined): boolean {
+  return isChapterSceneMarkerType(type) || type === "rehearsal_marker";
 }
 
 
@@ -1626,7 +1716,8 @@ export async function importScriptToVersion(
     deleteSceneIds?: string[];
   },
 ): Promise<void> {
-  const { upsertBlocks, deleteSceneIds = [] } = payload;
+  const upsertBlocks = withMarkerOwnership(payload.upsertBlocks);
+  const { deleteSceneIds = [] } = payload;
   const seenCharIds = new Set<string>();
   const upsertChars = payload.upsertChars.filter((char) => {
     if (seenCharIds.has(char.id)) return false;
@@ -2393,22 +2484,6 @@ export async function patchCharacterMeta(
     `UPDATE character_version SET ${sets.join(", ")} WHERE character_id = $1 AND version_id = $2`,
     vals
   );
-}
-
-/** Returns ordered rehearsal marks grouped by scene_id. */
-export async function listRehearsalMarksByScene(productionId: string): Promise<Record<string, string[]>> {
-  const res = await getPool().query<{ scene_id: string | null; rehearsal_mark: string | null; type: string }>(
-    `SELECT scene_id, rehearsal_mark, type::text AS type
-     FROM script
-     WHERE production_id = $1
-     ORDER BY sort_key`,
-    [productionId]
-  );
-  return generatedRehearsalMarksByScene(res.rows.map((row) => ({
-    sceneId: row.scene_id,
-    rehearsalMark: row.rehearsal_mark,
-    type: row.type,
-  })));
 }
 
 export async function listScenesByVersion(versionId: string): Promise<SceneDetail[]> {
@@ -4009,7 +4084,7 @@ export async function applyPatchToDB(
   if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
 
   // Local working-state types
-  type TxBlock = { blockId: string; snapshotId: string; lexKey: string; type: string };
+  type TxBlock = { blockId: string; snapshotId: string; lexKey: string; type: string; rehearsalMark: string | null };
   type TxScene = Scene & { sortOrder: number };
   type TxChar  = Character & { sortOrder: number };
 
@@ -4032,8 +4107,8 @@ export async function applyPatchToDB(
     }
 
     // ── Load current version state (within the lock) ─────────────────────────
-    const blockRows = await client.query<{ block_id: string; snapshot_id: string; sort_key: string; type: string }>(
-      `SELECT sv.block_id, sv.snapshot_id, sv.sort_key, s.type::text AS type
+    const blockRows = await client.query<{ block_id: string; snapshot_id: string; sort_key: string; type: string; rehearsal_mark: string | null }>(
+      `SELECT sv.block_id, sv.snapshot_id, sv.sort_key, s.type::text AS type, s.rehearsal_mark
        FROM script_version sv
        JOIN script s ON s.id = sv.snapshot_id
        WHERE sv.version_id = $1
@@ -4051,10 +4126,11 @@ export async function applyPatchToDB(
 
     // Working ordered block list (mutated as ops are applied)
     const txBlocks: TxBlock[] = blockRows.rows.map(r => ({
-      blockId: r.block_id, snapshotId: r.snapshot_id, lexKey: r.sort_key, type: r.type,
+      blockId: r.block_id, snapshotId: r.snapshot_id, lexKey: r.sort_key, type: r.type, rehearsalMark: r.rehearsal_mark,
     }));
     const txBlockMap = new Map<string, TxBlock>(txBlocks.map(b => [b.blockId, b]));
     let shouldSyncSceneVersions = patch.sceneOps.length > 0;
+    let shouldNormalizeRehearsalOwnership = false;
 
     // Working scene / char lists
     const txScenes: TxScene[] = sceneRows.rows.map(r => ({
@@ -4220,6 +4296,12 @@ export async function applyPatchToDB(
           }
 
           const insertType = toDbType(insertBlock);
+          const previousBlock = txBlocks[insertAt - 1];
+          const insertRehearsalMark = isMarkerBlockType(insertType)
+            ? null
+            : previousBlock?.type === "rehearsal_marker"
+              ? previousBlock.blockId
+              : previousBlock?.rehearsalMark ?? null;
           if (isChapterSceneMarkerType(insertType) && insertBlock.sceneId) {
             await client.query(
               `INSERT INTO scene (id, production_id) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
@@ -4231,7 +4313,7 @@ export async function applyPatchToDB(
             `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
              VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
             [snapshotId, insertBlock.id, productionId, lexKey,
-             insertBlock.sceneId ?? null, insertBlock.rehearsalMark ?? null,
+             insertBlock.sceneId ?? null, insertRehearsalMark,
              insertType, insertBlock.content,
              insertBlock.stageComment?.trim() || null, markerMetaJson(insertBlock), insertBlock.forceShowCharacterName ?? false]
           );
@@ -4257,9 +4339,12 @@ export async function applyPatchToDB(
 
           if (isChapterSceneMarkerType(toDbType(insertBlock))) shouldSyncSceneVersions = true;
 
-          const newTxBlock: TxBlock = { blockId: op.block.id, snapshotId, lexKey, type: toDbType(insertBlock) };
+          const newTxBlock: TxBlock = {
+            blockId: op.block.id, snapshotId, lexKey, type: insertType, rehearsalMark: insertRehearsalMark,
+          };
           txBlocks.splice(insertAt, 0, newTxBlock);
           txBlockMap.set(op.block.id, newTxBlock);
+          shouldNormalizeRehearsalOwnership ||= isMarkerBlockType(insertType);
           break;
         }
 
@@ -4277,6 +4362,7 @@ export async function applyPatchToDB(
             }
           }
           const nextType = toDbType(updateBlock);
+          if (nextType !== cur.type) shouldNormalizeRehearsalOwnership = true;
           if (isChapterSceneMarkerType(cur.type) || isChapterSceneMarkerType(nextType)) {
             shouldSyncSceneVersions = true;
           }
@@ -4294,7 +4380,7 @@ export async function applyPatchToDB(
                SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
                    content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7
                WHERE id = $8`,
-              [updateBlock.sceneId ?? null, updateBlock.rehearsalMark ?? null,
+              [updateBlock.sceneId ?? null, cur.rehearsalMark,
                nextType, updateBlock.content,
                updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock),
                updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
@@ -4326,7 +4412,7 @@ export async function applyPatchToDB(
               `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
                VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
               [newSnapshotId, updateBlock.id, productionId, cur.lexKey,
-               updateBlock.sceneId ?? null, updateBlock.rehearsalMark ?? null,
+               updateBlock.sceneId ?? null, cur.rehearsalMark,
                nextType, updateBlock.content,
                updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock), updateBlock.forceShowCharacterName ?? false]
             );
@@ -4380,6 +4466,7 @@ export async function applyPatchToDB(
           const cur = txBlockMap.get(op.id);
           if (!cur) break; // already gone — skip silently
           if (isChapterSceneMarkerType(cur.type)) shouldSyncSceneVersions = true;
+          if (isMarkerBlockType(cur.type)) shouldNormalizeRehearsalOwnership = true;
 
           // Remove from version; GC orphan snapshot if no other version references it
           await client.query(
@@ -4419,6 +4506,23 @@ export async function applyPatchToDB(
             .map(id => txBlockMap.get(id))
             .filter((b): b is TxBlock => !!b);
           if (!ordered.length) break;
+          if (!shouldNormalizeRehearsalOwnership) {
+            let activeRehearsalMark: string | null = null;
+            for (const block of ordered) {
+              let expectedRehearsalMark = activeRehearsalMark;
+              if (isChapterSceneMarkerType(block.type)) {
+                activeRehearsalMark = null;
+                expectedRehearsalMark = null;
+              } else if (block.type === "rehearsal_marker") {
+                activeRehearsalMark = block.blockId;
+                expectedRehearsalMark = null;
+              }
+              if (block.rehearsalMark !== expectedRehearsalMark) {
+                shouldNormalizeRehearsalOwnership = true;
+                break;
+              }
+            }
+          }
           const oldMarkerOrder = txBlocks
             .filter((block) => isChapterSceneMarkerType(block.type))
             .map((block) => block.blockId)
@@ -4428,6 +4532,15 @@ export async function applyPatchToDB(
             .map((block) => block.blockId)
             .join(",");
           if (oldMarkerOrder !== nextMarkerOrder) shouldSyncSceneVersions = true;
+          const oldOwnershipMarkerOrder = txBlocks
+            .filter((block) => isMarkerBlockType(block.type))
+            .map((block) => block.blockId)
+            .join(",");
+          const nextOwnershipMarkerOrder = ordered
+            .filter((block) => isMarkerBlockType(block.type))
+            .map((block) => block.blockId)
+            .join(",");
+          if (oldOwnershipMarkerOrder !== nextOwnershipMarkerOrder) shouldNormalizeRehearsalOwnership = true;
 
           // Assign fresh evenly-distributed keys; update only the rows that changed.
           const newKeys = initialKeys(ordered.length);
@@ -4450,6 +4563,9 @@ export async function applyPatchToDB(
 
     if (shouldSyncSceneVersions) {
       await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
+    }
+    if (shouldNormalizeRehearsalOwnership) {
+      await normalizeRehearsalMarkOwnershipInTx(client, versionId);
     }
 
     await client.query("COMMIT");

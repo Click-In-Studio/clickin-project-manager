@@ -4,6 +4,9 @@ import {
 } from "../lib/script-marker-domain";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../lib/script-types";
 import { patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
+import { withMarkerOwnership } from "../lib/script-marker-blocks";
+import { generatedRehearsalLabels } from "../lib/script-generated-labels";
+import { migrateLegacyRehearsalMentions } from "../lib/mention-types";
 
 let id = 0;
 const createId = () => `generated-${++id}`;
@@ -286,5 +289,94 @@ assert.equal(patchAffectsMarkerProjection(patch([
 assert.equal(patchAffectsMarkerProjection(patch([
   { op: "reorder", ids: baseline.blocks.map((item) => item.id) },
 ]), baseline), false);
+
+const ownedRehearsalBlocks = withMarkerOwnership([
+  block("scene", "scene_marker"),
+  block("mark-a", "rehearsal_marker"),
+  block("text-a", "dialogue", "one", null),
+  block("mark-b", "rehearsal_marker"),
+  block("text-b", "dialogue", "two", null),
+]);
+assert.equal(ownedRehearsalBlocks.find((item) => item.id === "text-b")?.rehearsalMark, "mark-b");
+assert.equal(ownedRehearsalBlocks.find((item) => item.id === "mark-b")?.markerMeta?.parentMarkerId, "scene");
+assert.equal(generatedRehearsalLabels(ownedRehearsalBlocks).labelByMarkerId.get("mark-b"), "B");
+
+const insertedRehearsalBlocks = withMarkerOwnership([
+  ...ownedRehearsalBlocks.slice(0, 3),
+  block("mark-new", "rehearsal_marker"),
+  block("text-new", "dialogue", "new", null),
+  ...ownedRehearsalBlocks.slice(3),
+]);
+const insertedLabels = generatedRehearsalLabels(insertedRehearsalBlocks).labelByMarkerId;
+assert.equal(insertedLabels.get("mark-new"), "B");
+assert.equal(insertedLabels.get("mark-b"), "C");
+assert.equal(insertedRehearsalBlocks.find((item) => item.id === "text-b")?.rehearsalMark, "mark-b");
+
+const staleRehearsalCache = [
+  block("scene-1", "scene_marker"),
+  { ...block("mark-1", "rehearsal_marker"), rehearsalMark: "A" },
+  { ...block("text-1", "dialogue", "one", null), rehearsalMark: "A" },
+  block("scene-2", "scene_marker"),
+  block("mark-2", "rehearsal_marker"),
+  block("text-2", "dialogue", "two", null),
+];
+const normalizedRehearsalCache = withMarkerOwnership(staleRehearsalCache);
+assert.deepEqual(
+  normalizedRehearsalCache.map(({ id, sceneId, rehearsalMark, markerMeta }) => ({
+    id, sceneId, rehearsalMark, parentId: markerMeta?.parentMarkerId,
+  })),
+  [
+    { id: "scene-1", sceneId: "scene-1", rehearsalMark: null, parentId: undefined },
+    { id: "mark-1", sceneId: null, rehearsalMark: null, parentId: "scene-1" },
+    { id: "text-1", sceneId: "scene-1", rehearsalMark: "mark-1", parentId: undefined },
+    { id: "scene-2", sceneId: "scene-2", rehearsalMark: null, parentId: undefined },
+    { id: "mark-2", sceneId: null, rehearsalMark: null, parentId: "scene-2" },
+    { id: "text-2", sceneId: "scene-2", rehearsalMark: "mark-2", parentId: undefined },
+  ],
+);
+const normalizedLabels = generatedRehearsalLabels(normalizedRehearsalCache);
+assert.equal(normalizedLabels.labelByMarkerId.get("mark-1"), "A");
+assert.equal(normalizedLabels.labelByMarkerId.get("mark-2"), "A");
+
+const legacyMentionMappings = [{ sceneId: "scene-1", label: "A", markerId: "mark-1" }];
+assert.equal(
+  migrateLegacyRehearsalMentions(
+    "before [#rehearsal:scene-1:A] after",
+    "version-1",
+    legacyMentionMappings,
+    true,
+  ),
+  "before [#rehearsal:mark-1] after",
+);
+assert.equal(
+  migrateLegacyRehearsalMentions(
+    "[#A](/__cm__rehearsal:scene-1?v=version-1:A)",
+    "version-1",
+    legacyMentionMappings,
+    false,
+  ),
+  "[#A](/__cm__rehearsal:mark-1?v=version-1)",
+);
+assert.equal(
+  migrateLegacyRehearsalMentions(
+    "[#rehearsal:scene-1:A]",
+    "version-1",
+    legacyMentionMappings,
+    false,
+  ),
+  "[#rehearsal:scene-1:A]",
+);
+assert.equal(
+  migrateLegacyRehearsalMentions(
+    "[#AA](/__cm__rehearsal:scene-1:AA)",
+    "version-1",
+    [
+      ...legacyMentionMappings,
+      { sceneId: "scene-1", label: "AA", markerId: "mark-27" },
+    ],
+    true,
+  ),
+  "[#AA](/__cm__rehearsal:mark-27)",
+);
 
 console.log("marker transition fixtures passed");

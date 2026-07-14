@@ -1,4 +1,4 @@
-import type { Scene } from "./script-types";
+import type { Block, Scene } from "./script-types";
 
 export function toAlphaLabel(index: number): string {
   let n = index + 1;
@@ -40,45 +40,24 @@ export function withGeneratedSceneNumbers<T extends Scene>(scenes: T[]): T[] {
   return changed ? next : scenes;
 }
 
-export function generatedRehearsalMarksByScene(
-  rows: Array<{ sceneId: string | null; rehearsalMark: string | null; type?: string }>
-): Record<string, string[]> {
-  const map: Record<string, string[]> = {};
-  let currentSceneId: string | null = null;
-  let currentSourceMark: string | null | undefined = undefined;
-  let rehearsalIndex = 0;
+export function generatedRehearsalLabels(
+  blocks: Array<Pick<Block, "id" | "type" | "markerMeta">>,
+) {
+  const labelByMarkerId = new Map<string, string>();
+  const markerIdByParentAndLabel = new Map<string, string>();
+  const parentIdByMarkerId = new Map<string, string>();
+  const rehearsalCountByParentId = new Map<string, number>();
 
-  for (const row of rows) {
-    if (row.sceneId && row.sceneId !== currentSceneId) {
-      currentSceneId = row.sceneId;
-      currentSourceMark = undefined;
-      rehearsalIndex = 0;
-    }
-
-    if (row.type === "rehearsal_marker") {
-      if (!currentSceneId || !row.rehearsalMark) continue;
-      if (row.rehearsalMark === currentSourceMark) continue;
-      currentSourceMark = row.rehearsalMark;
-      const label = toAlphaLabel(rehearsalIndex);
-      rehearsalIndex++;
-      if (!map[currentSceneId]) map[currentSceneId] = [];
-      map[currentSceneId].push(label);
-      continue;
-    }
-
-    if (!row.sceneId) continue;
-    if (!row.rehearsalMark) {
-      currentSourceMark = null;
-      continue;
-    }
-
-    if (row.rehearsalMark === currentSourceMark) continue;
-    currentSourceMark = row.rehearsalMark;
+  for (const block of blocks) {
+    const parentId = block.markerMeta?.parentMarkerId;
+    if (block.type !== "rehearsal_marker" || !parentId) continue;
+    const rehearsalIndex = rehearsalCountByParentId.get(parentId) ?? 0;
+    rehearsalCountByParentId.set(parentId, rehearsalIndex + 1);
     const label = toAlphaLabel(rehearsalIndex);
-    rehearsalIndex++;
-    if (!map[row.sceneId]) map[row.sceneId] = [];
-    map[row.sceneId].push(label);
+    labelByMarkerId.set(block.id, label);
+    markerIdByParentAndLabel.set(`${parentId}\u0000${label}`, block.id);
+    parentIdByMarkerId.set(block.id, parentId);
   }
 
-  return map;
+  return { labelByMarkerId, markerIdByParentAndLabel, parentIdByMarkerId };
 }

@@ -1,5 +1,4 @@
 import type { Block } from "./script-types";
-import { toAlphaLabel } from "./script-generated-labels";
 import { withMarkerOwnership } from "./script-marker-blocks";
 
 export type MarkerOwnershipRange = {
@@ -12,8 +11,8 @@ export type MarkerOwnershipDirty = "full" | MarkerOwnershipRange | MarkerOwnersh
 
 type OwnershipContext = {
   sceneId: string | null;
+  parentMarkerId: string | null;
   rehearsalMark: string | null;
-  rehearsalIndex: number;
 };
 type MarkerOwnership = Pick<Block, "sceneId" | "rehearsalMark">;
 
@@ -55,14 +54,15 @@ function normalizeRanges(dirty: MarkerOwnershipDirty, length: number): MarkerOwn
 
 function readContextBefore(blocks: Block[], index: number): OwnershipContext {
   let sceneId: string | null = null;
+  let parentMarkerId: string | null = null;
   let rehearsalMark: string | null = null;
-  let rehearsalIndex = 0;
   let boundary = 0;
 
   for (let i = index - 1; i >= 0; i--) {
     const block = blocks[i];
     if (block.type === "chapter_marker" || block.type === "scene_marker") {
       sceneId = block.sceneId;
+      parentMarkerId = block.id;
       boundary = i + 1;
       break;
     }
@@ -71,12 +71,11 @@ function readContextBefore(blocks: Block[], index: number): OwnershipContext {
   for (let i = boundary; i < index; i++) {
     const block = blocks[i];
     if (block.type === "rehearsal_marker") {
-      rehearsalMark = toAlphaLabel(rehearsalIndex);
-      rehearsalIndex += 1;
+      rehearsalMark = block.id;
     }
   }
 
-  return { sceneId, rehearsalMark, rehearsalIndex };
+  return { sceneId, parentMarkerId, rehearsalMark };
 }
 
 function findNextSceneBoundary(blocks: Block[], index: number): number {
@@ -88,19 +87,21 @@ function findNextSceneBoundary(blocks: Block[], index: number): number {
 }
 
 function applyRangeOwnership(target: Block[], blocks: Block[], start: number, end: number): void {
-  let { sceneId, rehearsalMark, rehearsalIndex } = readContextBefore(blocks, start);
+  let { sceneId, parentMarkerId, rehearsalMark } = readContextBefore(blocks, start);
 
   for (let i = start; i < end; i++) {
     const block = blocks[i];
     if (block.type === "chapter_marker" || block.type === "scene_marker") {
       sceneId = block.sceneId;
+      parentMarkerId = block.id;
       rehearsalMark = null;
-      rehearsalIndex = 0;
-      target[i] = block;
+      target[i] = withOwnership(block, sceneId, null);
     } else if (block.type === "rehearsal_marker") {
-      rehearsalMark = toAlphaLabel(rehearsalIndex);
-      rehearsalIndex += 1;
-      target[i] = withOwnership(block, block.sceneId, rehearsalMark);
+      rehearsalMark = block.id;
+      const owned = withOwnership(block, null, null);
+      target[i] = owned.markerMeta?.parentMarkerId === parentMarkerId
+        ? owned
+        : { ...owned, markerMeta: { ...owned.markerMeta, parentMarkerId } };
     } else {
       target[i] = withOwnership(block, sceneId, rehearsalMark);
     }
@@ -132,7 +133,7 @@ function carryPreviousOwnership(prevOwned: Block[], nextBlocks: Block[]): Block[
 export function markerOwnershipRange(blocks: Block[], start: number, end: number): MarkerOwnership[] {
   const safeStart = Math.max(0, Math.min(blocks.length, start));
   const safeEnd = Math.max(safeStart, Math.min(blocks.length, end));
-  let { sceneId, rehearsalMark, rehearsalIndex } = readContextBefore(blocks, safeStart);
+  let { sceneId, rehearsalMark } = readContextBefore(blocks, safeStart);
   const ownership: MarkerOwnership[] = [];
 
   for (let i = safeStart; i < safeEnd; i++) {
@@ -140,12 +141,10 @@ export function markerOwnershipRange(blocks: Block[], start: number, end: number
     if (block.type === "chapter_marker" || block.type === "scene_marker") {
       sceneId = block.sceneId;
       rehearsalMark = null;
-      rehearsalIndex = 0;
       ownership.push({ sceneId, rehearsalMark });
     } else if (block.type === "rehearsal_marker") {
-      rehearsalMark = toAlphaLabel(rehearsalIndex);
-      rehearsalIndex += 1;
-      ownership.push({ sceneId: block.sceneId, rehearsalMark });
+      rehearsalMark = block.id;
+      ownership.push({ sceneId: null, rehearsalMark: null });
     } else {
       ownership.push({ sceneId, rehearsalMark });
     }

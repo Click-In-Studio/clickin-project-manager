@@ -15,11 +15,12 @@ import {
   validateSchema,
   getAllRecords,
   toScriptState,
-  extractSortKeys,
 } from "@/lib/feishu-bitable";
 import { createProduction, flushToDB, savePageMap } from "@/lib/db";
 import { computePageMap, PAGE_CONFIGS } from "@/lib/script-page";
 import { initialKeys } from "@/lib/lex-order";
+import { withMarkerOwnership } from "@/lib/script-marker-blocks";
+import type { Block } from "@/lib/script-types";
 
 let _seq = 0;
 function uid(): string {
@@ -52,40 +53,23 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "表格结构不匹配", details: validation.errors }, { status: 400 });
   }
 
-  const sortField = fields.find(f => f.field_name === "排序");
   const records = await getAllRecords(appToken, tableId, token);
-  const state = toScriptState(validation.fieldMap, records, sortField?.field_name);
-  const sortKeys = sortField ? extractSortKeys(records, sortField.field_name) : new Map<string, string>();
+  const state = toScriptState(validation.fieldMap, records, fields.find((field) => field.field_name === "排序")?.field_name);
+
+  const seenSceneIds = new Set<string>();
+  let previousSourceSceneId: string | null = null;
+  for (const block of state.blocks) {
+    if (block.sceneId === previousSourceSceneId) continue;
+    if (block.sceneId && seenSceneIds.has(block.sceneId)) {
+      return Response.json({ error: "同一段落的剧本行必须连续排列" }, { status: 400 });
+    }
+    if (block.sceneId) seenSceneIds.add(block.sceneId);
+    previousSourceSceneId = block.sceneId;
+  }
 
   // Remap Feishu option-name IDs → fresh UIDs (scenes and characters are global tables)
   const sceneIdMap = new Map<string, string>(state.scenes.map(s => [s.id, uid()]));
   const charIdMap  = new Map<string, string>(state.characters.map(c => [c.id, uid()]));
-
-  // Assign lex keys: prefer existing Feishu sort keys, otherwise generate
-  const blockKeys = state.blocks.map(b => sortKeys.get(b.id) ?? null);
-  const hasAnyKey = blockKeys.some(k => k !== null);
-  const lexKeyArr = hasAnyKey
-    ? blockKeys.map((k, i) => k ?? `fallback_${i}`) // placeholder; assignLexKeys is in server-cache
-    : initialKeys(state.blocks.length);
-
-  // If we had some sort keys, fill gaps (simple sequential fallback)
-  if (hasAnyKey) {
-    let prev = 0;
-    for (let i = 0; i < lexKeyArr.length; i++) {
-      if (blockKeys[i] !== null) { prev = i; continue; }
-      // Find next known
-      let next: number | null = null;
-      for (let j = i + 1; j < lexKeyArr.length; j++) {
-        if (blockKeys[j] !== null) { next = j; break; }
-      }
-      const loKey  = blockKeys[prev] ?? null;
-      const hiKey  = next !== null ? blockKeys[next] : null;
-      // Simple interpolation using initialKeys for the gap
-      const gapLen = (next ?? lexKeyArr.length) - prev;
-      const gapKeys = initialKeys(gapLen + 1); // +1 so endpoints are not used
-      lexKeyArr[i] = gapKeys[i - prev];
-    }
-  }
 
   const productionId = uid();
   await createProduction(productionId, name.trim());
@@ -102,15 +86,58 @@ export async function POST(req: NextRequest) {
     sortOrder: i,
   }));
 
-  const dbBlocks = state.blocks.map((b, i) => ({
-    ...b,
-    id: uid(),
-    sceneId: b.sceneId ? sceneIdMap.get(b.sceneId) ?? null : null,
-    characterIds: b.characterIds
-      .map(cid => charIdMap.get(cid))
-      .filter((x): x is string => x !== undefined),
-    orderKey: (i + 1) * 65536,
-    lexKey: lexKeyArr[i],
+  const sceneMarkers = new Map(dbScenes.map((scene) => [scene.id, {
+    id: scene.id,
+    type: "chapter_marker",
+    content: "",
+    lyric: false,
+    characterIds: [],
+    characterAnnotations: {},
+    sceneId: scene.id,
+    rehearsalMark: null,
+    markerMeta: { number: scene.number, name: scene.name },
+  } satisfies Block] as const));
+  const expandedBlocks: Block[] = [];
+  const usedSceneIds = new Set<string>();
+  let previousSceneId: string | null = null;
+  let previousRehearsalMark: string | null = null;
+  for (const sourceBlock of state.blocks) {
+    const block = {
+      ...sourceBlock,
+      id: uid(),
+      sceneId: sourceBlock.sceneId ? sceneIdMap.get(sourceBlock.sceneId) ?? null : null,
+      characterIds: sourceBlock.characterIds
+        .map((characterId) => charIdMap.get(characterId))
+        .filter((characterId): characterId is string => characterId !== undefined),
+    };
+    const sceneChanged = block.sceneId !== previousSceneId;
+    if (sceneChanged && block.sceneId) {
+      expandedBlocks.push(sceneMarkers.get(block.sceneId)!);
+      usedSceneIds.add(block.sceneId);
+    }
+    if (block.rehearsalMark && (sceneChanged || block.rehearsalMark !== previousRehearsalMark)) {
+      expandedBlocks.push({
+        id: uid(),
+        type: "rehearsal_marker",
+        content: "",
+        lyric: false,
+        characterIds: [],
+        characterAnnotations: {},
+        sceneId: null,
+        rehearsalMark: null,
+      });
+    }
+    expandedBlocks.push({ ...block, sceneId: null, rehearsalMark: null });
+    previousSceneId = block.sceneId;
+    previousRehearsalMark = block.rehearsalMark;
+  }
+  for (const scene of dbScenes) {
+    if (!usedSceneIds.has(scene.id)) expandedBlocks.push(sceneMarkers.get(scene.id)!);
+  }
+  const lexKeys = initialKeys(expandedBlocks.length);
+  const dbBlocks = withMarkerOwnership(expandedBlocks).map((block, index) => ({
+    ...block,
+    lexKey: lexKeys[index],
   }));
 
   await flushToDB(productionId, {
@@ -123,13 +150,12 @@ export async function POST(req: NextRequest) {
   });
 
   // Save page map for all layouts so the cue page has accurate data immediately after import
-  const importedBlocks = dbBlocks.map(({ orderKey: _ok, lexKey: _lk, ...b }) => b);
   await savePageMap(
     productionId,
     Object.fromEntries(
       (Object.keys(PAGE_CONFIGS) as (keyof typeof PAGE_CONFIGS)[]).map(layout => [
         layout,
-        computePageMap(importedBlocks, layout),
+        computePageMap(dbBlocks, layout),
       ])
     ),
   );

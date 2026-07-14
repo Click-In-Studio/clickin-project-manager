@@ -1,6 +1,7 @@
 import { getScriptEditorPool } from "./db";
-import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "../lib/script-marker-sql";
-import { withGeneratedSceneNumbers } from "../lib/script-generated-labels";
+import { MARKER_TYPES_SQL, VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE } from "../lib/script-marker-sql";
+import { generatedRehearsalLabels, withGeneratedSceneNumbers } from "../lib/script-generated-labels";
+import { ensureScriptMarkerMigration } from "../lib/db";
 
 export type ScriptBlockRow = {
   id:            string;
@@ -157,6 +158,15 @@ async function getActiveVersionId(productionId: string): Promise<string | null> 
   return res.rows[0]?.active_version_id ?? null;
 }
 
+async function getMigratedActiveVersionId(productionId: string): Promise<string | null> {
+  const versionId = await getActiveVersionId(productionId);
+  if (versionId) {
+    const migration = await ensureScriptMarkerMigration(versionId, getScriptEditorPool());
+    if (migration.status === "running") throw new Error("剧本数据正在更新，请稍后重试");
+  }
+  return versionId;
+}
+
 function versionedBlocksCTE(): string {
   return `${VERSION_OWNED_BLOCKS_CTE},
   version_snapshots AS (
@@ -237,16 +247,20 @@ const legacyJoinClause = `LEFT JOIN scene scene_anchor ON scene_anchor.id = o.sc
   LEFT JOIN production p ON p.id = scene_anchor.production_id
   LEFT JOIN scene_version sc ON sc.scene_id = scene_anchor.id AND sc.version_id = p.active_version_id`;
 
-async function getGeneratedSceneNumberMap(
-  productionId: string,
-  resolvedVersionId: string | null,
-): Promise<Map<string, string>> {
-  const scenes = await getGeneratedSceneRows(productionId, resolvedVersionId);
-  return sceneNumberMap(scenes);
-}
-
 function sceneNumberMap(scenes: Array<{ id: string; number: string }>): Map<string, string> {
   return new Map(scenes.map((scene) => [scene.id, scene.number]));
+}
+
+async function getRehearsalLabels(versionId: string) {
+  const res = await getScriptEditorPool().query<{
+    id: string;
+    type: "chapter_marker" | "scene_marker" | "rehearsal_marker";
+    marker_meta: { parentMarkerId?: string | null } | null;
+  }>(
+    VERSION_MARKER_LABEL_ROWS_SQL,
+    [versionId],
+  );
+  return generatedRehearsalLabels(res.rows.map((row) => ({ ...row, markerMeta: row.marker_meta })));
 }
 
 async function getGeneratedSceneRows(
@@ -281,25 +295,24 @@ async function applyGeneratedSceneNumbers(
   rows: BlockRowWithSceneId[],
   resolvedVersionId: string | null,
   numberMap?: Map<string, string>,
+  precomputedRehearsalLabels?: ReturnType<typeof generatedRehearsalLabels>,
 ): Promise<BlockRowWithSnapshot[]> {
   if (rows.length === 0) return [];
-  if (!rows.some((row) => row.sceneId)) {
-    return rows.map((row) => ({
-      id: row.id,
-      snapshotId: row.snapshotId,
-      lineNum: row.lineNum,
-      pageNum: row.pageNum,
-      type: row.type,
-      content: row.content,
-      rehearsalMark: row.rehearsalMark,
-      sceneName: row.sceneName,
-      sceneNumber: row.sceneNumber,
-    }));
-  }
-  const generatedNumbers = numberMap ?? await getGeneratedSceneNumberMap(productionId, resolvedVersionId);
+  const rehearsalLabels = precomputedRehearsalLabels
+    ?? (resolvedVersionId && rows.some((row) => row.rehearsalMark)
+      ? await getRehearsalLabels(resolvedVersionId)
+      : null);
+  const generatedNumbers = rows.some((row) => row.sceneId)
+    ? numberMap ?? sceneNumberMap(await getGeneratedSceneRows(productionId, resolvedVersionId))
+    : null;
   return rows.map(({ sceneId, ...row }) => ({
     ...row,
-    sceneNumber: sceneId ? (generatedNumbers.get(sceneId) ?? row.sceneNumber) : row.sceneNumber,
+    rehearsalMark: row.rehearsalMark && rehearsalLabels
+      ? rehearsalLabels.labelByMarkerId.get(row.rehearsalMark) ?? null
+      : row.rehearsalMark,
+    sceneNumber: sceneId && generatedNumbers
+      ? generatedNumbers.get(sceneId) ?? row.sceneNumber
+      : row.sceneNumber,
   }));
 }
 
@@ -308,7 +321,7 @@ export async function getBlockById(
   blockId:      string,
 ): Promise<ScriptBlockRow | null> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getActiveVersionId(productionId);
+  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
     resolvedVersionId
       ? `${versionedBlocksCTE()}
@@ -330,7 +343,7 @@ export async function getBlockByLine(
   lineNum:      number,
 ): Promise<ScriptBlockRow | null> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getActiveVersionId(productionId);
+  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
     resolvedVersionId
       ? `${versionedBlocksCTE()}
@@ -354,7 +367,7 @@ export async function searchBlocks(
   limit         = 20,
 ): Promise<ScriptBlockRow[]> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getActiveVersionId(productionId);
+  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
     resolvedVersionId
       ? `${versionedBlocksCTE()}
@@ -411,7 +424,7 @@ export async function queryBlocks(
 ): Promise<ScriptBlockRow[]> {
   const pool = getScriptEditorPool();
   const { page, type, scene, rehearsalMark, limit = 30 } = filter;
-  const resolvedVersionId = await getActiveVersionId(productionId);
+  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
 
   const params: unknown[] = [resolvedVersionId ?? productionId];
   const conditions: string[] = [];
@@ -423,6 +436,7 @@ export async function queryBlocks(
   }
   const sceneFilter = scene?.toLocaleLowerCase() ?? null;
   let precomputedSceneNumberMap: Map<string, string> | undefined;
+  let precomputedRehearsalLabels: ReturnType<typeof generatedRehearsalLabels> | undefined;
   if (sceneFilter) {
     const generatedScenes = await getGeneratedSceneRows(productionId, resolvedVersionId);
     precomputedSceneNumberMap = sceneNumberMap(generatedScenes);
@@ -437,8 +451,18 @@ export async function queryBlocks(
     conditions.push(`o.scene_id = ANY($${params.length}::text[])`);
   }
   if (rehearsalMark) {
-    params.push(`%${rehearsalMark}%`);
-    conditions.push(`o.rehearsal_mark ILIKE $${params.length}`);
+    if (resolvedVersionId) {
+      precomputedRehearsalLabels = await getRehearsalLabels(resolvedVersionId);
+      const markerIds = [...precomputedRehearsalLabels.labelByMarkerId]
+        .filter(([, label]) => label.includes(rehearsalMark.toUpperCase()))
+        .map(([markerId]) => markerId);
+      if (markerIds.length === 0) return [];
+      params.push(markerIds);
+      conditions.push(`o.rehearsal_mark = ANY($${params.length}::text[])`);
+    } else {
+      params.push(`%${rehearsalMark}%`);
+      conditions.push(`o.rehearsal_mark ILIKE $${params.length}`);
+    }
   }
 
   const whereExtra = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
@@ -463,6 +487,7 @@ export async function queryBlocks(
     res.rows.map(toBlockRow),
     resolvedVersionId,
     precomputedSceneNumberMap,
+    precomputedRehearsalLabels,
   );
   const rows = await attachCharacters(pool, numberedRows);
   if (page == null) return rows.slice(0, limit);

@@ -32,8 +32,8 @@ import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { formatDuration, parseDuration } from "@/lib/duration";
-import { toAlphaLabel } from "@/lib/script-generated-labels";
-import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker } from "@/lib/script-marker-blocks";
+import { generatedRehearsalLabels } from "@/lib/script-generated-labels";
+import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { markerOwnershipRange, updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 
 let _seq = 0;
@@ -288,8 +288,8 @@ function markerBlockDramaturgyDeleteBlockedKind(block: Block, detail?: SceneDeta
   return block.type === "chapter_marker" ? "chapter" : "scene";
 }
 
-function markerBlockDisplayName(block: Block, scene?: Scene | null): string {
-  if (block.type === "rehearsal_marker") return `排练记号 ${block.rehearsalMark ?? ""}`.trim();
+function markerBlockDisplayName(block: Block, scene?: Scene | null, rehearsalLabel?: string): string {
+  if (block.type === "rehearsal_marker") return `排练记号 ${rehearsalLabel ?? ""}`.trim();
   const kind = block.type === "chapter_marker" ? "章节" : "段落";
   const title = [scene?.number, scene?.name].filter(Boolean).join(" ");
   return title ? `${kind} ${title}` : kind;
@@ -416,11 +416,10 @@ const isTextBlock = (block: Block) => !isMarkerBlock(block);
 
 const makeMarkerBlock = (
   type: Extract<BlockType, "chapter_marker" | "scene_marker" | "rehearsal_marker">,
-  fields: Pick<Partial<Block>, "sceneId" | "rehearsalMark"> = {}
+  fields: Pick<Partial<Block>, "sceneId"> = {}
 ): Block => ({
   ...makeBlock("", [], type),
   sceneId: fields.sceneId ?? null,
-  rehearsalMark: fields.rehearsalMark ?? null,
 });
 
 const isBlockEmptyForDelete = (block: Block) =>
@@ -4350,7 +4349,7 @@ function expandLegacyMarkersToBlocks(blocks: Block[], scenes: Scene[] = []): Blo
     }
 
     if (block.rehearsalMark && block.rehearsalMark !== previousRehearsalMark) {
-      next.push(makeMarkerBlock("rehearsal_marker", { rehearsalMark: block.rehearsalMark }));
+      next.push(makeMarkerBlock("rehearsal_marker"));
       changed = true;
     }
 
@@ -4367,29 +4366,8 @@ function expandLegacyMarkersToBlocks(blocks: Block[], scenes: Scene[] = []): Blo
   return changed ? normalizeScriptBlockStream(next) : blocks;
 }
 
-function withGeneratedMarkerRehearsalMarks(blocks: Block[]): Block[] {
-  let changed = false;
-  let rehearsalIndex = 0;
-  const next = blocks.map((block) => {
-    if (block.type === "chapter_marker" || block.type === "scene_marker") rehearsalIndex = 0;
-    if (block.type !== "rehearsal_marker") {
-      if (isTextBlock(block) && (block.sceneId || block.rehearsalMark)) {
-        changed = true;
-        return { ...block, sceneId: null, rehearsalMark: null };
-      }
-      return block;
-    }
-    const generatedMark = toAlphaLabel(rehearsalIndex);
-    rehearsalIndex++;
-    if (block.rehearsalMark === generatedMark) return block;
-    changed = true;
-    return { ...block, rehearsalMark: generatedMark };
-  });
-  return changed ? next : blocks;
-}
-
 function normalizeScriptBlockStream(blocks: Block[]): Block[] {
-  return withGeneratedMarkerRehearsalMarks(blocks);
+  return withMarkerOwnership(blocks);
 }
 
 function withLeadingRehearsalMarkersForMarkedSegments(blocks: Block[]): Block[] {
@@ -4444,7 +4422,7 @@ function withLeadingRehearsalMarkersForMarkedSegments(blocks: Block[]): Block[] 
 
     next.push(boundary);
     if (hasRehearsalInSegment && blocks[index + 1]?.type !== "rehearsal_marker") {
-      next.push(makeMarkerBlock("rehearsal_marker", { rehearsalMark: `__auto_rehearsal_${uid()}` }));
+      next.push(makeMarkerBlock("rehearsal_marker"));
     }
     next.push(...blocks.slice(index + 1, nextBoundaryIndex));
     index = nextBoundaryIndex;
@@ -4693,6 +4671,7 @@ function analyzeEmptyScriptCleanup(
   const textCountsByRehearsalBlockId = new Map<string, number>();
   const rehearsalTargetById = new Map<string, EmptyScriptCleanupTarget>();
   const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const rehearsalLabelByMarkerId = generatedRehearsalLabels(blocks).labelByMarkerId;
   const chapterMarkerBlocks: Block[] = [];
   const sceneMarkerBlocks: Block[] = [];
   let hasEmptyTextBlock = false;
@@ -4720,7 +4699,7 @@ function analyzeEmptyScriptCleanup(
         const parentKey = `${parentKind}:${currentSceneId}`;
         const rehearsalLabel = [
           parentScene?.number.trim(),
-          block.rehearsalMark?.trim(),
+          rehearsalLabelByMarkerId.get(block.id),
         ].filter(Boolean).join("-");
         rehearsalTargetById.set(block.id, {
           id: block.id,
@@ -6668,6 +6647,7 @@ export default function ScriptEditor({
     ownershipDirtyRef.current = null;
     return owned;
   }, [blocks]);
+  const rehearsalLabels = useMemo(() => generatedRehearsalLabels(blocks), [blocks]);
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
     const markerIndex = openingChapterMarkerId
@@ -7613,9 +7593,6 @@ export default function ScriptEditor({
     progress?: number;
     phase?: string;
     startedAt?: number | null;
-    elapsedMs?: number;
-    estimatedTotalMs?: number | null;
-    estimatedRemainingMs?: number | null;
   };
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string>("");
@@ -7627,13 +7604,6 @@ export default function ScriptEditor({
     if (seconds < 60) return `已用时 ${seconds} 秒`;
     return `已用时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
   };
-  const formatMigrationRemaining = (ms: number | null | undefined): string | null => {
-    if (!ms || ms <= 0) return null;
-    const seconds = Math.ceil(ms / 1000);
-    if (seconds < 60) return `预计剩余约 ${seconds} 秒`;
-    return `预计剩余约 ${Math.ceil(seconds / 60)} 分钟`;
-  };
-
   useEffect(() => {
     if (loadState !== "updating") return;
     setMigrationNow(Date.now());
@@ -9196,7 +9166,7 @@ export default function ScriptEditor({
 
   const addRehearsalBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !effectiveCanEditRehearsalMark) return;
-    const marker = makeMarkerBlock("rehearsal_marker", { rehearsalMark: `__auto_rehearsal_${uid()}` });
+    const marker = makeMarkerBlock("rehearsal_marker");
     saveSnapshot();
     const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
     const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
@@ -9775,13 +9745,15 @@ export default function ScriptEditor({
         const sceneLabel = scene
           ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
           : "（无章节）";
-        const markLabel = firstMovedTextOwned?.rehearsalMark?.trim() || "(空)";
+        const markLabel = firstMovedTextOwned?.rehearsalMark
+          ? rehearsalLabels.labelByMarkerId.get(firstMovedTextOwned.rehearsalMark) ?? "(空)"
+          : "(空)";
         showSelectionChangeNotice(`当前 ${movedTextCount} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
       }
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, rehearsalLabels.labelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -10104,17 +10076,9 @@ export default function ScriptEditor({
   if (loadState === "loading" || loadState === "updating") {
     const localElapsedMs = migrationProgress?.startedAt
       ? Math.max(0, migrationNow - migrationProgress.startedAt)
-      : migrationProgress?.elapsedMs ?? 0;
-    const baseProgress = Math.max(1, Math.min(99, Math.round(migrationProgress?.progress ?? 8)));
-    const estimatedProgress = migrationProgress?.estimatedTotalMs
-      ? Math.min(94, Math.max(baseProgress, Math.round((localElapsedMs / migrationProgress.estimatedTotalMs) * 94)))
-      : baseProgress;
-    const progress = Math.max(1, Math.min(99, estimatedProgress));
-    const localRemainingMs = migrationProgress?.estimatedTotalMs
-      ? Math.max(1000, migrationProgress.estimatedTotalMs - localElapsedMs)
-      : migrationProgress?.estimatedRemainingMs ?? null;
+      : 0;
+    const progress = Math.max(1, Math.min(99, Math.round(migrationProgress?.progress ?? 8)));
     const elapsedText = formatMigrationElapsed(localElapsedMs);
-    const remainingText = formatMigrationRemaining(localRemainingMs);
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-100">
         {loadState === "updating" ? (
@@ -10129,10 +10093,7 @@ export default function ScriptEditor({
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-zinc-400">
-              <span className="truncate">{migrationProgress?.phase ?? "正在更新数据"}</span>
-              {remainingText ? <span className="shrink-0">{remainingText}</span> : null}
-            </div>
+            <div className="mt-3 truncate text-xs text-zinc-400">{migrationProgress?.phase ?? "正在更新数据"}</div>
             <div className="mt-1 text-xs text-zinc-400">{elapsedText}</div>
           </div>
         ) : (
@@ -11230,7 +11191,7 @@ export default function ScriptEditor({
                   : block.type === "scene_marker" && markerScene
                     ? { kind: "scene", id: block.id, scene: markerScene }
                     : block.type === "rehearsal_marker"
-                      ? { kind: "rehearsal", id: block.id, mark: block.rehearsalMark ?? "" }
+                      ? { kind: "rehearsal", id: block.id, mark: rehearsalLabels.labelByMarkerId.get(block.id) ?? "" }
                       : null;
               const markerDeleteIds = [block.id];
               const markerEl = markerNode ? (
@@ -11387,9 +11348,12 @@ export default function ScriptEditor({
             }
             const ownedBlock = ownedBlocks[bIdx] ?? block;
             const ownedPrev = bIdx > 0 ? ownedBlocks[bIdx - 1] ?? null : null;
-            const displayBlock = block.sceneId === ownedBlock.sceneId && block.rehearsalMark === ownedBlock.rehearsalMark
+            const displayRehearsalMark = ownedBlock.rehearsalMark
+              ? rehearsalLabels.labelByMarkerId.get(ownedBlock.rehearsalMark) ?? null
+              : null;
+            const displayBlock = block.sceneId === ownedBlock.sceneId && block.rehearsalMark === displayRehearsalMark
               ? block
-              : { ...block, sceneId: ownedBlock.sceneId, rehearsalMark: ownedBlock.rehearsalMark };
+              : { ...block, sceneId: ownedBlock.sceneId, rehearsalMark: displayRehearsalMark };
 
             const sceneStart = ownedBlock.sceneId !== null && ownedBlock.sceneId !== ownedPrev?.sceneId;
             const isMarkStart = !!ownedBlock.rehearsalMark && ownedBlock.rehearsalMark !== (ownedPrev?.rehearsalMark ?? null);
@@ -11962,7 +11926,11 @@ export default function ScriptEditor({
             if (!block) return null;
             return {
               id: marker.id,
-              label: markerBlockDisplayName(block, block.sceneId ? sceneById.get(block.sceneId) ?? null : null),
+              label: markerBlockDisplayName(
+                block,
+                block.sceneId ? sceneById.get(block.sceneId) ?? null : null,
+                rehearsalLabels.labelByMarkerId.get(block.id),
+              ),
             };
           })
           .filter((item): item is { id: string; label: string } => item !== null);

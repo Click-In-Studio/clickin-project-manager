@@ -1,5 +1,4 @@
 import type { Block } from "./script-types";
-import { toAlphaLabel } from "./script-generated-labels";
 
 export function isMarkerBlock(block: Block): boolean {
   return block.type === "chapter_marker" || block.type === "scene_marker" || block.type === "rehearsal_marker";
@@ -20,26 +19,36 @@ export function shouldInsertEmptyBlockAfterMarker(blocks: Block[], markerIndex: 
   return markerRank !== null && nextRank !== null && nextRank <= markerRank;
 }
 
-export function withMarkerOwnership(blocks: Block[]): Block[] {
+export function withMarkerOwnership<T extends Pick<Block, "id" | "type" | "sceneId" | "rehearsalMark" | "markerMeta">>(blocks: T[]): T[] {
   let currentSceneId: string | null = null;
+  let currentParentMarkerId: string | null = null;
   let currentRehearsalMark: string | null = null;
-  let rehearsalIndex = 0;
   let changed = false;
 
   const next = blocks.map((block) => {
     if (block.type === "chapter_marker" || block.type === "scene_marker") {
       currentSceneId = block.sceneId;
+      currentParentMarkerId = block.id;
       currentRehearsalMark = null;
-      rehearsalIndex = 0;
-      return block;
+      if (block.rehearsalMark === null) return block;
+      changed = true;
+      return { ...block, rehearsalMark: null };
     }
 
     if (block.type === "rehearsal_marker") {
-      currentRehearsalMark = toAlphaLabel(rehearsalIndex);
-      rehearsalIndex++;
-      if (block.rehearsalMark === currentRehearsalMark) return block;
+      currentRehearsalMark = block.id;
+      if (
+        block.sceneId === null &&
+        block.rehearsalMark === null &&
+        block.markerMeta?.parentMarkerId === currentParentMarkerId
+      ) return block;
       changed = true;
-      return { ...block, rehearsalMark: currentRehearsalMark };
+      return {
+        ...block,
+        sceneId: null,
+        rehearsalMark: null,
+        markerMeta: { ...block.markerMeta, parentMarkerId: currentParentMarkerId },
+      };
     }
 
     if (block.sceneId === currentSceneId && block.rehearsalMark === currentRehearsalMark) return block;

@@ -1,5 +1,15 @@
 export const MARKER_TYPES_SQL = "'chapter_marker', 'scene_marker', 'rehearsal_marker'";
 
+export const VERSION_MARKER_LABEL_ROWS_SQL = `
+  SELECT sv.block_id AS id, s.type::text AS type, s.marker_meta,
+         CASE WHEN s.type IN ('chapter_marker', 'scene_marker')
+           THEN COALESCE(s.scene_id, sv.block_id)
+         END AS legacy_scene_id
+  FROM script_version sv
+  JOIN script s ON s.id = sv.snapshot_id
+  WHERE sv.version_id = $1 AND s.type IN ('chapter_marker', 'scene_marker', 'rehearsal_marker')
+  ORDER BY sv.sort_key`;
+
 export const VERSION_SCENES_FROM_MARKERS_CTE = `
 	  WITH marker_rows AS (
 	    SELECT
@@ -76,7 +86,7 @@ export const VERSION_OWNED_BLOCKS_CTE = `
              MAX(CASE WHEN type IN ('chapter_marker', 'scene_marker') THEN block_id END) OVER (PARTITION BY scene_seq),
              scene_id
            ) AS owned_scene_id,
-           COUNT(*) FILTER (WHERE type = 'rehearsal_marker' AND rehearsal_mark IS NOT NULL)
+           COUNT(*) FILTER (WHERE type = 'rehearsal_marker')
              OVER (PARTITION BY scene_seq ORDER BY sort_key) AS rehearsal_seq
     FROM (
       SELECT *,
@@ -88,7 +98,7 @@ export const VERSION_OWNED_BLOCKS_CTE = `
   rehearsal_owned AS (
     SELECT *,
            COALESCE(
-             MAX(CASE WHEN type = 'rehearsal_marker' THEN rehearsal_mark END) OVER (PARTITION BY scene_seq, rehearsal_seq),
+             MAX(CASE WHEN type = 'rehearsal_marker' THEN block_id END) OVER (PARTITION BY scene_seq, rehearsal_seq),
              rehearsal_mark
            ) AS owned_rehearsal_mark
     FROM scene_owned

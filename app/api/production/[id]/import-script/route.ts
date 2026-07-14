@@ -2,13 +2,12 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
 import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
-import { toAlphaLabel } from "@/lib/script-generated-labels";
 import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script-fixed-markers";
 import type { BlockType } from "@/lib/script-types";
 import type { MarkerMeta } from "@/lib/script-types";
@@ -73,7 +72,7 @@ type ImportBlock = {
   blockId?: string;
   type: BlockType;
   content: string;
-  stageComment: string | null;
+  stageComment?: string | null;
   lyric: boolean;
   characterIds: string[];
   characterAnnotations: Record<string, string>;
@@ -394,10 +393,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const versionId = await resolveImportVersionId(req, productionId);
   if (versionId instanceof Response) return versionId;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows } = parseRows(rawRows, body);
@@ -711,14 +706,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const chapterIdsWithScriptBlocks = new Set<string>();
   let currentChapterId: string | null = null;
   let currentSceneId: string | null = null;
-  let currentRehearsalIndex = 0;
 
   upsertBlocksWithoutKeys.push({
     id: randomUUID(),
     blockId: openingChapterMarkerId,
     type: "chapter_marker",
     content: "",
-    stageComment: null,
     lyric: false,
     characterIds: [],
     characterAnnotations: {},
@@ -742,7 +735,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       blockId: markerId,
       type,
       content: "",
-      stageComment: null,
       lyric: false,
       characterIds: [],
       characterAnnotations: {},
@@ -760,20 +752,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       },
     });
   };
-  const pushRehearsalMarkerBlock = (rehearsalMark: string) => {
-    upsertBlocksWithoutKeys.push({
-      id: randomUUID(),
-      type: "rehearsal_marker",
-      content: "",
-      stageComment: null,
-      lyric: false,
-      characterIds: [],
-      characterAnnotations: {},
-      sceneId: null,
-      rehearsalMark,
-    });
-  };
-
   const pushScriptBlock = (spec: BlockSpec) => {
     const blockId = randomUUID();
     upsertBlocksWithoutKeys.push({
@@ -796,8 +774,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       spec.rehearsalMark !== previousSpec?.rehearsalMark ||
       spec.sceneId !== previousSpec?.sceneId
     )) {
-      pushRehearsalMarkerBlock(toAlphaLabel(currentRehearsalIndex));
-      currentRehearsalIndex++;
+      upsertBlocksWithoutKeys.push({
+        id: randomUUID(),
+        type: "rehearsal_marker",
+        content: "",
+        lyric: false,
+        characterIds: [],
+        characterAnnotations: {},
+        sceneId: null,
+        rehearsalMark: null,
+      });
     }
     pushScriptBlock(spec);
   };
@@ -823,17 +809,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           pushSceneMarkerBlock("chapter_marker", scene.id);
         }
         currentChapterId = scene.id;
-        currentRehearsalIndex = 0;
       } else {
         if (currentChapterId !== scene.parentId) {
           if (scene.parentId !== openingChapterMarkerId) {
             pushSceneMarkerBlock("chapter_marker", scene.parentId);
           }
           currentChapterId = scene.parentId;
-          currentRehearsalIndex = 0;
         }
         pushSceneMarkerBlock("scene_marker", scene.id);
-        currentRehearsalIndex = 0;
       }
       const sceneSpecs = specsBySceneId.get(scene.id) ?? [];
       for (const spec of sceneSpecs) {
@@ -853,7 +836,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
           currentChapterId = scene.id;
           currentSceneId = null;
-          currentRehearsalIndex = 0;
         }
       } else {
         chapterIdsWithScriptBlocks.add(scene.parentId);
@@ -863,12 +845,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
           currentChapterId = scene.parentId;
           currentSceneId = null;
-          currentRehearsalIndex = 0;
         }
         if (currentSceneId !== scene.id) {
           pushSceneMarkerBlock("scene_marker", scene.id);
           currentSceneId = scene.id;
-          currentRehearsalIndex = 0;
         }
       }
     }
