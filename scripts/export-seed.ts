@@ -178,8 +178,9 @@ async function main() {
     await add("script_character",   `script_id IN (SELECT id FROM script WHERE production_id IN (${pidList}))`);
     await add("script_version",     vSub);
     await add("block_tag",          `block_id IN (SELECT DISTINCT block_id FROM script WHERE production_id IN (${pidList}))`);
-    await add("cue",                `cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN (${pidList}))`);
-    await add("cue_version",        vSub);
+    const cueSub = `cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN (${pidList}))`;
+    await add("cue",         cueSub);
+    await add("cue_version", `${vSub} AND revision_id IN (SELECT id FROM cue WHERE ${cueSub})`);
 
     // idList uses literal quoted values — safe for embedding in the seed SQL file
     const idList = pids.map((id) => `'${id}'`).join(", ");
