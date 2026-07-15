@@ -1356,16 +1356,19 @@ export async function flushToDBVersioned(
       }
     }
 
-    // Deletes: remove from version relation; garbage-collect orphan snapshots
+    // Deletes: remove from version relation; garbage-collect orphan snapshots.
+    // Two separate statements — CTE and its main query share one snapshot and
+    // cannot see each other's writes, so split into sequential statements.
     if (deleteSnapshotIds.length > 0) {
       await client.query(
-        `WITH removed AS (
-           DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2 RETURNING snapshot_id
-         )
-         DELETE FROM script s
-         WHERE s.id IN (SELECT snapshot_id FROM removed)
-           AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+        "DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2",
         [deleteSnapshotIds, versionId]
+      );
+      await client.query(
+        `DELETE FROM script s
+         WHERE s.id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = s.id)`,
+        [deleteSnapshotIds]
       );
       // Clean up asset_mounts for snapshots that were actually GC'd
       await client.query(
@@ -4204,15 +4207,18 @@ export async function applyPatchToDB(
           if (!cur) break; // already gone — skip silently
           if (isChapterSceneMarkerType(cur.type)) shouldSyncSceneVersions = true;
 
-          // Remove from version; GC orphan snapshot if no other version references it
+          // Remove from version; GC orphan snapshot if no other version references it.
+          // Two separate statements so the second sees the effect of the first
+          // (CTE and its main query share one snapshot and cannot see each other's writes).
           await client.query(
-            `WITH removed AS (
-               DELETE FROM script_version WHERE snapshot_id = $1 AND version_id = $2 RETURNING snapshot_id
-             )
-             DELETE FROM script s
-             WHERE s.id IN (SELECT snapshot_id FROM removed)
-               AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+            "DELETE FROM script_version WHERE snapshot_id = $1 AND version_id = $2",
             [cur.snapshotId, versionId]
+          );
+          await client.query(
+            `DELETE FROM script
+             WHERE id = $1
+               AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = $1)`,
+            [cur.snapshotId]
           );
           // Clean up asset_mount for the GC'd block_snapshot if it was actually deleted
           await client.query(
