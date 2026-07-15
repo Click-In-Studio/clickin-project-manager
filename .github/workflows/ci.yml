@@ -128,3 +128,7 @@ jobs:
           NULL_COUNT=$(psql -t -A -c "SELECT COUNT(*) FROM production WHERE id IN ('mod1uc2dg','mon0jcm82') AND active_version_id IS NULL")
           [ "$NULL_COUNT" -eq 0 ] && echo "OK  active_version_id restored" || { echo "FAIL  ${NULL_COUNT} production(s) have NULL active_version_id"; FAIL=1; }
           exit $FAIL
+
+      # ── Step 2: Unit tests ────────────────────────────────────────────────────
+      - name: Run unit tests
+        run: npm test

@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(psql -d script_editor -c \"\\\\dt\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(git checkout *)",
+      "Bash(git rebase *)",
+      "Bash(git push *)"
     ]
   }
 }
