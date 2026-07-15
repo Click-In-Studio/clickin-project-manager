@@ -135,9 +135,11 @@ async function exportTable(
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const names = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const ciMode = args.includes("--ci");
+  const names = args.filter((a) => !a.startsWith("--"));
   if (names.length === 0) {
-    console.error('Usage: npm run seed:export -- "名称1" "名称2"');
+    console.error('Usage: npm run seed:export -- [--ci] "名称1" "名称2"');
     process.exit(1);
   }
 
@@ -153,7 +155,7 @@ async function main() {
 
     const pids = pidRes.rows.map((r) => r.id);
     const pidList = pids.map((_, i) => `$${i + 1}`).join(", ");
-    console.log(`Exporting: ${pidRes.rows.map((r) => `${r.name} (${r.id})`).join(", ")}`);
+    console.log(`Exporting${ciMode ? " [CI mode]" : ""}: ${pidRes.rows.map((r) => `${r.name} (${r.id})`).join(", ")}`);
 
     const vSub = `version_id IN (SELECT id FROM version WHERE production_id IN (${pidList}))`;
     const sections: string[] = [];
@@ -182,8 +184,39 @@ async function main() {
     // idList uses literal quoted values — safe for embedding in the seed SQL file
     const idList = pids.map((id) => `'${id}'`).join(", ");
     const vSubLit = `version_id IN (SELECT id FROM version WHERE production_id IN (${idList}))`;
+
+    // ── CI mode: anonymize feishu_user rows referenced by this seed ──────────
+    let feishuSection = "";
+    let feishuDelete = "";
+    let sectionsStr = sections.join("\n");
+
+    if (ciMode) {
+      const createdByRes = await client.query<{ created_by: string }>(
+        `SELECT DISTINCT created_by FROM cue_list WHERE production_id = ANY($1) AND created_by IS NOT NULL`,
+        [pids]
+      );
+      const openIdMap = new Map<string, string>();
+      createdByRes.rows.forEach((r, i) => openIdMap.set(r.created_by, `seed-user-${i + 1}`));
+
+      // Remap real open_ids → fake IDs across all sections before building the file
+      for (const [realId, fakeId] of openIdMap) {
+        sectionsStr = sectionsStr.replaceAll(realId, fakeId);
+      }
+
+      const fuLines = [`-- feishu_user (${openIdMap.size} rows, anonymized)`];
+      for (const [, fakeId] of openIdMap) {
+        const n = fakeId.split("-").pop();
+        fuLines.push(
+          `INSERT INTO "feishu_user" ("open_id", "name", "avatar_url", "is_super_admin", "created_at", "updated_at", "email", "phone") ` +
+          `VALUES ('${fakeId}', '演示用户${n}', NULL, FALSE, NOW(), NOW(), NULL, NULL) ON CONFLICT DO NOTHING;`
+        );
+      }
+      feishuSection = fuLines.join("\n") + "\n";
+      feishuDelete = `DELETE FROM feishu_user WHERE open_id LIKE 'seed-user-%';\n`;
+    }
+
     const header = [
-      `-- Demo seed data`,
+      `-- ${ciMode ? "CI test" : "Demo"} seed data`,
       `-- Productions: ${pidRes.rows.map((r) => r.name).join(", ")}`,
       `-- Generated: ${new Date().toISOString()}`,
       `-- Re-running seed:demo replaces only these productions; other local data is untouched.`,
@@ -198,6 +231,7 @@ async function main() {
       `DELETE FROM script WHERE production_id IN (${idList});`,
       `DELETE FROM cue WHERE cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN (${idList}));`,
       `DELETE FROM cue_list WHERE production_id IN (${idList});`,
+      feishuDelete,
       `DELETE FROM tag_option WHERE group_id IN (SELECT id FROM tag_group WHERE production_id IN (${idList}));`,
       `DELETE FROM tag_group WHERE production_id IN (${idList});`,
       `DELETE FROM character_aggregate WHERE aggregate_id IN (SELECT id FROM character WHERE production_id IN (${idList}));`,
@@ -231,12 +265,13 @@ async function main() {
       ? `\n-- Restore circular FK columns (deferred to after dependent tables are inserted)\n${restoreLines.join("\n")}\n`
       : "";
 
-    const sql = header + sections.join("\n") + footer;
+    const allSections = feishuSection ? feishuSection + "\n" + sectionsStr : sectionsStr;
+    const sql = header + allSections + footer;
     const buf = Buffer.from(sql, "utf-8");
-    const R2_KEY = "seed-data/demo.sql";
+    const R2_KEY = ciMode ? "seed-data/ci.sql" : "seed-data/demo.sql";
     console.log(`Uploading to R2 bucket "${process.env.SEED_R2_BUCKET}": ${R2_KEY} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)…`);
     await uploadSeed(R2_KEY, buf);
-    console.log("Done. Testers can now run: npm run seed:demo");
+    console.log(`Done. ${ciMode ? "CI can now use SEED_URL pointing to ci.sql" : "Testers can now run: npm run seed:demo"}`);
   } finally {
     client.release();
     await pool.end();

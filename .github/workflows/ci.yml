@@ -30,7 +30,7 @@ jobs:
   unit-test:
     runs-on: ubuntu-latest
     env:
-      SEED_URL: https://pub-50e9ef6dfe944ca8aa2288e45f20ba7c.r2.dev/seed-data/demo.sql
+      SEED_URL: https://pub-50e9ef6dfe944ca8aa2288e45f20ba7c.r2.dev/seed-data/ci.sql
       PGHOST: localhost
       PGPORT: 5432
       PGDATABASE: script_editor_test
