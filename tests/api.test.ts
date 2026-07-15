@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { deleteProduction, createProduction, archiveProduction, addProductionMember } from "@/lib/db";
+import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId } from "@/lib/db";
 import { deleteProductionEvent } from "@/lib/event-db";
 import { TEST_USER, PROD_PLANET } from "./helpers";
 
@@ -30,12 +30,17 @@ import {
   DELETE as unarchiveProdHandler,
 } from "@/app/api/production/[id]/archive/route";
 import {
+  GET as loadProdHandler,
   PATCH as renameProdHandler,
 } from "@/app/api/production/[id]/route";
 import {
   GET as listVersionsHandler,
   POST as createVersionHandler,
 } from "@/app/api/production/[id]/versions/route";
+import {
+  GET as getScriptHandler,
+  PATCH as patchScriptHandler,
+} from "@/app/api/script/[id]/route";
 import {
   GET as listMembersHandler,
   POST as addMemberHandler,
@@ -700,5 +705,125 @@ describe("DELETE /api/production/[id]/members — auth guard", () => {
       ctx({ id: PROD_PLANET }),
     );
     expect(res.status).toBe(403);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/production/[id] — script state loader
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("GET /api/production/[id] — auth guard", () => {
+  it("no cookie → 401", async () => {
+    const res = await loadProdHandler(
+      req(`/api/production/${PROD_PLANET}`),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("non-member non-admin → 403", async () => {
+    const res = await loadProdHandler(
+      req(`/api/production/${PROD_PLANET}`, { session: userSession() }),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /api/production/[id] — happy path", () => {
+  it("admin → 200 with state, versionId, versions", async () => {
+    const res = await loadProdHandler(
+      req(`/api/production/${PROD_PLANET}`, { session: adminSession() }),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { state: { blocks: unknown[] }; versionId: string; versions: unknown[] };
+    expect(Array.isArray(body.state.blocks)).toBe(true);
+    expect(body.state.blocks.length).toBeGreaterThan(0);
+    expect(body.versionId).toBeTruthy();
+    expect(Array.isArray(body.versions)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/script/[id]
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("GET /api/script/[id] — auth guard", () => {
+  it("no cookie → 401", async () => {
+    const res = await getScriptHandler(
+      req(`/api/script/${PROD_PLANET}`),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("non-member non-admin → 403", async () => {
+    const res = await getScriptHandler(
+      req(`/api/script/${PROD_PLANET}`, { session: userSession() }),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/script/[id] — auth guard + adminBypass:false enforcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PATCH /api/script/[id] — auth guard", () => {
+  it("no cookie → 401", async () => {
+    const res = await patchScriptHandler(
+      req(`/api/script/${PROD_PLANET}`, { method: "PATCH" }),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("non-member non-admin → 403", async () => {
+    const res = await patchScriptHandler(
+      req(`/api/script/${PROD_PLANET}`, { method: "PATCH", body: "{}", session: userSession() }),
+      ctx({ id: PROD_PLANET }),
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
+  // script:edit has adminBypass:false — even admin needs "编剧" or "制作人" role.
+  // This test verifies a plain member (no qualifying role) gets 403 on a block insert.
+  const SCRIPT_PERM_PROD = "test-api-script-perm";
+  let scriptPermVersionId = "";
+
+  beforeAll(async () => {
+    await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
+    await addProductionMember(SCRIPT_PERM_PROD, TEST_USER); // no 编剧 / 制作人 role
+    scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
+  });
+
+  afterAll(async () => {
+    await deleteProduction(SCRIPT_PERM_PROD).catch(() => {});
+  });
+
+  it("member without 编剧/制作人 role → 403 on block insert", async () => {
+    const patch = JSON.stringify({
+      clientSeq: 1,
+      blockOps: [{
+        op: "insert",
+        block: { id: "test-perm-blk", type: "stage", content: "", characterIds: [], characterAnnotations: {}, lyric: false, sceneId: null, rehearsalMark: null },
+        afterId: null,
+      }],
+      charOps: [],
+      sceneOps: [],
+    });
+    const res = await patchScriptHandler(
+      req(`/api/script/${SCRIPT_PERM_PROD}?v=${scriptPermVersionId}`, {
+        method: "PATCH", body: patch, session: userSession(),
+      }),
+      ctx({ id: SCRIPT_PERM_PROD }),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/script:edit/);
   });
 });
