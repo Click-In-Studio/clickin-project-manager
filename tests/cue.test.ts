@@ -3,37 +3,37 @@ import {
   listCueLists, createCueList, getCueList, updateCueList, deleteCueList,
   createCue, getCue, listCues, updateCue, deleteCue,
 } from "@/lib/db";
-import { PROD_HOSHINO, TEST_USER } from "./helpers";
+import { PROD_PLANET, TEST_USER } from "./helpers";
 
 const CL_ID  = "test-cl-unit";
 const CUE_ID = "test-cue-unit";
 
 afterAll(async () => {
   await deleteCue(CUE_ID, CL_ID).catch(() => {});
-  await deleteCueList(CL_ID, PROD_HOSHINO).catch(() => {});
+  await deleteCueList(CL_ID, PROD_PLANET).catch(() => {});
 });
 
 describe("cue lists (seed data)", () => {
   it("listCueLists returns at least one cue list for 我们的星星", async () => {
-    expect((await listCueLists(PROD_HOSHINO)).length).toBeGreaterThanOrEqual(1);
+    expect((await listCueLists(PROD_PLANET)).length).toBeGreaterThanOrEqual(1);
   });
 });
 
 describe("cue list CRUD", () => {
   it("createCueList creates a new cue list", async () => {
     await createCueList({
-      id: CL_ID, productionId: PROD_HOSHINO,
+      id: CL_ID, productionId: PROD_PLANET,
       name: "单元测试走位表", notes: "", abbr: null,
       template: null, defaultEditRoles: [], createdBy: TEST_USER,
     });
-    const cl = await getCueList(CL_ID, PROD_HOSHINO);
+    const cl = await getCueList(CL_ID, PROD_PLANET);
     expect(cl).not.toBeNull();
     expect(cl!.name).toBe("单元测试走位表");
   });
 
   it("updateCueList renames it", async () => {
-    await updateCueList(CL_ID, PROD_HOSHINO, { name: "单元测试走位表（改名）" });
-    expect((await getCueList(CL_ID, PROD_HOSHINO))!.name).toBe("单元测试走位表（改名）");
+    await updateCueList(CL_ID, PROD_PLANET, { name: "单元测试走位表（改名）" });
+    expect((await getCueList(CL_ID, PROD_PLANET))!.name).toBe("单元测试走位表（改名）");
   });
 
   it("getCueList returns null for wrong production", async () => {
