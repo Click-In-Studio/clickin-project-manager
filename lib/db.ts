@@ -1653,6 +1653,21 @@ export async function importScriptToVersion(
       );
     }
 
+    // Clear cue bindings for this version; GC cue revision rows sole-referenced by it.
+    // Anchors are soft references (no FK), so deleted snapshots leave no FK constraint.
+    const removedCV = await client.query<{ revision_id: string }>(
+      "DELETE FROM cue_version WHERE version_id = $1 RETURNING revision_id",
+      [versionId]
+    );
+    const removedCueRevisionIds = removedCV.rows.map(r => r.revision_id);
+    if (removedCueRevisionIds.length > 0) {
+      await client.query(
+        `DELETE FROM cue WHERE id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = cue.id)`,
+        [removedCueRevisionIds]
+      );
+    }
+
     // Import is a full replacement of script + dramaturgy for this version.
     // scene_version is only a compatibility cache; rebuild it from markers below.
     await client.query("DELETE FROM scene_version WHERE version_id = $1", [versionId]);

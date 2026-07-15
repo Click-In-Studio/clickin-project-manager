@@ -4,12 +4,15 @@
  *   B. flushToDBVersioned scene-only path — add / delete / upsert
  *   C. parseSceneNum — pure function (various formats)
  *   D. buildSceneRows / buildSceneMap — pure function (tabular data → structured entries)
+ *   E. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   createProduction,
   importScriptToVersion, flushToDBVersioned,
-  getActiveVersionId,
+  getActiveVersionId, createVersion,
+  createCueList, createCue, updateCue,
+  applyPatchToDB,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { initialKeys } from "@/lib/lex-order";
@@ -94,6 +97,38 @@ async function forceDeleteProduction(prodId: string): Promise<void> {
     [prodId],
   );
   await getPool().query("DELETE FROM production WHERE id = $1", [prodId]);
+}
+
+async function physicalSnapshotExists(snapshotId: string): Promise<boolean> {
+  const r = await getPool().query<{ id: string }>(
+    "SELECT id FROM script WHERE id = $1",
+    [snapshotId],
+  );
+  return r.rows.length > 0;
+}
+
+async function countCueVersion(versionId: string): Promise<number> {
+  const r = await getPool().query<{ count: string }>(
+    "SELECT COUNT(*)::text AS count FROM cue_version WHERE version_id = $1",
+    [versionId],
+  );
+  return parseInt(r.rows[0].count);
+}
+
+async function physicalCueExists(revisionId: string): Promise<boolean> {
+  const r = await getPool().query<{ id: string }>(
+    "SELECT id FROM cue WHERE id = $1",
+    [revisionId],
+  );
+  return r.rows.length > 0;
+}
+
+async function cueRevisionIdForVersion(versionId: string, logicalCueId: string): Promise<string | null> {
+  const r = await getPool().query<{ revision_id: string }>(
+    "SELECT revision_id FROM cue_version WHERE version_id = $1 AND cue_id = $2",
+    [versionId, logicalCueId],
+  );
+  return r.rows[0]?.revision_id ?? null;
 }
 
 // ── Group A: importScriptToVersion ────────────────────────────────────────────
@@ -460,5 +495,138 @@ describe("D: buildSceneMap", () => {
     const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
     const map = buildSceneMap(sceneRows, new Map(), 1);
     expect(map.get("1")?.name).toBe("幕名");
+  });
+});
+
+// ── Group E: version-import hybrid ───────────────────────────────────────────
+//
+// Scenario:
+//   v1: B1, B2, B3 (imported) + cue CQ_rev1
+//   v2 (fork of v1): inherits B1, B2, B3 + CQ_rev1
+//     → CoW B2 in v2: new snapshot snap-b2-v2 (sole in v2); snap-b2-orig now sole in v1
+//     → CoW CQ in v2: new revision CQ_rev2 (sole in v2); CQ_rev1 now sole in v1
+//   Import [B4] to v2 (full replacement)
+//
+// Key assertions:
+//   - snap-b2-v2 GC'd (v2 sole → deleted)
+//   - snap-b1, snap-b3 survive (shared → v1 still holds them)
+//   - snap-b2-orig survives (v1 sole → untouched)
+//   - v2.cue_version cleared; CQ_rev2 GC'd (v2 sole cue)
+//   - v1.cue_version + CQ_rev1 intact
+
+const PROD_E    = "test-import-e";
+const CL_E_ID   = "test-imp-cl-e";
+const CUE_E_ID  = "test-imp-cue-e";
+
+describe("E: version-import hybrid — CoW block/cue isolation and GC", () => {
+  let v1Id: string;
+  let v2Id: string;
+  let snapB2InV2:  string;
+  let cueRev2Id:   string;
+
+  beforeAll(async () => {
+    await forceDeleteProduction(PROD_E).catch(() => {});
+    // clean up cue_list if leftover (cue_list has FK to production which cascades, but
+    // forceDeleteProduction handles that — just ensure no stale rows before recreating)
+    await getPool().query("DELETE FROM cue_list WHERE id = $1", [CL_E_ID]).catch(() => {});
+
+    await createProduction(PROD_E, "混合测试演出");
+    v1Id = (await getActiveVersionId(PROD_E))!;
+
+    // ── Step 1: import B1, B2, B3 into v1 ─────────────────────────────────────
+    const [k1, k2, k3] = initialKeys(3);
+    await importScriptToVersion(PROD_E, v1Id, {
+      upsertBlocks: [
+        { id: "e-snap-b1", blockId: "e-b1", type: "dialogue", content: "B1内容", lyric: false, characterIds: [], characterAnnotations: {}, sceneId: null, rehearsalMark: null, lexKey: k1 },
+        { id: "e-snap-b2", blockId: "e-b2", type: "dialogue", content: "B2内容", lyric: false, characterIds: [], characterAnnotations: {}, sceneId: null, rehearsalMark: null, lexKey: k2 },
+        { id: "e-snap-b3", blockId: "e-b3", type: "dialogue", content: "B3内容", lyric: false, characterIds: [], characterAnnotations: {}, sceneId: null, rehearsalMark: null, lexKey: k3 },
+      ],
+      upsertChars: [],
+      upsertScenes: [],
+    });
+
+    // ── Step 2: create cue list + cue (revision CUE_E_ID) bound to v1 ─────────
+    const gap = { kind: "gap" as const, afterBlockId: null };
+    await createCueList({ id: CL_E_ID, productionId: PROD_E, name: "混合测试走位表", notes: "", abbr: null, template: null, defaultEditRoles: [], createdBy: "test-sys-user" });
+    await createCue({ id: CUE_E_ID, cueListId: CL_E_ID, number: "Q1", name: "混合测试Q", content: "", start: gap, end: gap, versionId: v1Id });
+
+    // ── Step 3: fork v2 from v1 (inherits script_version + cue_version) ────────
+    const v2 = await createVersion(PROD_E, v1Id, "v2分支");
+    v2Id = v2.id;
+
+    // ── Step 4: CoW B2 in v2 — new snapshot sole-owned by v2 ──────────────────
+    await applyPatchToDB(PROD_E, v2Id, {
+      clientSeq: 1,
+      blockOps: [{ op: "update", block: { id: "e-b2", type: "dialogue", content: "B2-v2修改", characterIds: [], characterAnnotations: {}, lyric: false, sceneId: null, rehearsalMark: null } }],
+      charOps: [],
+      sceneOps: [],
+    });
+    snapB2InV2 = (await snapshotIdForBlock(v2Id, "e-b2"))!;
+
+    // ── Step 5: CoW cue in v2 — new revision sole-owned by v2 ─────────────────
+    // refCount of CUE_E_ID is now 2 (v1 + v2), so updateCue triggers CoW
+    await updateCue(CUE_E_ID, CL_E_ID, { name: "Q1-v2改名" }, v2Id);
+    cueRev2Id = (await cueRevisionIdForVersion(v2Id, CUE_E_ID))!;
+
+    // ── Step 6: import [B4] to v2 — full replacement ───────────────────────────
+    const [k4] = initialKeys(1);
+    await importScriptToVersion(PROD_E, v2Id, {
+      upsertBlocks: [
+        { id: "e-snap-b4", blockId: "e-b4", type: "dialogue", content: "B4新内容", lyric: false, characterIds: [], characterAnnotations: {}, sceneId: null, rehearsalMark: null, lexKey: k4 },
+      ],
+      upsertChars: [],
+      upsertScenes: [],
+    });
+  });
+
+  afterAll(async () => {
+    await forceDeleteProduction(PROD_E).catch(() => {});
+  });
+
+  it("E1: v2 has only the newly imported block", async () => {
+    expect(await countScriptVersion(v2Id)).toBe(1);
+    expect(await snapshotIdForBlock(v2Id, "e-b4")).not.toBeNull();
+  });
+
+  it("E2: v1 blocks are completely untouched after v2 import", async () => {
+    expect(await countScriptVersion(v1Id)).toBe(3);
+    expect(await snapshotContent(await snapshotIdForBlock(v1Id, "e-b1") as string)).toBe("B1内容");
+    expect(await snapshotContent(await snapshotIdForBlock(v1Id, "e-b2") as string)).toBe("B2内容");
+    expect(await snapshotContent(await snapshotIdForBlock(v1Id, "e-b3") as string)).toBe("B3内容");
+  });
+
+  it("E3: v2-sole snapshot (B2 after CoW) is GC'd", async () => {
+    expect(await physicalSnapshotExists(snapB2InV2)).toBe(false);
+  });
+
+  it("E4: shared snapshots (B1, B3) survive — v1 still references them", async () => {
+    const snapB1V1 = (await snapshotIdForBlock(v1Id, "e-b1"))!;
+    const snapB3V1 = (await snapshotIdForBlock(v1Id, "e-b3"))!;
+    expect(await physicalSnapshotExists(snapB1V1)).toBe(true);
+    expect(await physicalSnapshotExists(snapB3V1)).toBe(true);
+  });
+
+  it("E5: v1-sole snapshot (original B2 before v2 CoW) survives", async () => {
+    // v2 had already diverged from this snapshot before the import, so it was never
+    // an orphan from import's perspective — v1 is the sole remaining reference.
+    const snapB2V1 = (await snapshotIdForBlock(v1Id, "e-b2"))!;
+    expect(await physicalSnapshotExists(snapB2V1)).toBe(true);
+  });
+
+  it("E6: v2 cue_version is empty after import", async () => {
+    expect(await countCueVersion(v2Id)).toBe(0);
+  });
+
+  it("E7: v1 cue_version is untouched — still holds the original revision", async () => {
+    expect(await cueRevisionIdForVersion(v1Id, CUE_E_ID)).toBe(CUE_E_ID);
+  });
+
+  it("E8: v2-sole cue revision (after CoW) is GC'd", async () => {
+    expect(cueRev2Id).not.toBe(CUE_E_ID); // sanity: CoW did create a new row
+    expect(await physicalCueExists(cueRev2Id)).toBe(false);
+  });
+
+  it("E9: v1's original cue revision still exists in cue table", async () => {
+    expect(await physicalCueExists(CUE_E_ID)).toBe(true);
   });
 });
