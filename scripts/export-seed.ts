@@ -106,13 +106,15 @@ async function exportTable(
   where: string,
   params: unknown[],
   nullCols: string[] = [],
+  skipCols: string[] = [],
 ): Promise<string> {
   const colRes = await client.query<ColInfo>(
     `SELECT column_name, data_type FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
     [table]
   );
-  const cols = colRes.rows;
+  const skipSet = new Set(skipCols);
+  const cols = colRes.rows.filter((c) => !skipSet.has(c.column_name));
   if (cols.length === 0) return `-- (table ${table} not found)\n`;
 
   const rowRes = await client.query(`SELECT * FROM "${table}" WHERE ${where}`, params);
@@ -155,14 +157,14 @@ async function main() {
 
     const vSub = `version_id IN (SELECT id FROM version WHERE production_id IN (${pidList}))`;
     const sections: string[] = [];
-    const add = async (table: string, where: string, nullCols?: string[]) =>
-      sections.push(await exportTable(client, table, where, pids, nullCols));
+    const add = async (table: string, where: string, nullCols?: string[], skipCols?: string[]) =>
+      sections.push(await exportTable(client, table, where, pids, nullCols, skipCols));
 
     // Insert production with active_version_id = NULL to avoid circular FK with version
     await add("production",         `id IN (${pidList})`, ["active_version_id"]);
     await add("version",            `production_id IN (${pidList})`);
-    await add("scene",              `production_id IN (${pidList})`);
-    await add("character",          `production_id IN (${pidList})`);
+    await add("scene",              `production_id IN (${pidList})`, [], ["archived"]);
+    await add("character",          `production_id IN (${pidList})`, [], ["archived"]);
     await add("character_aggregate",`aggregate_id IN (SELECT id FROM character WHERE production_id IN (${pidList}))`);
     // Insert tag_group with circular FK cols NULLed; restored after tag_option inserts
     await add("tag_group",          `production_id IN (${pidList})`, ["default_option_id", "lyric_split_after_option_id"]);
