@@ -119,6 +119,7 @@ describe("createVersion — 继承与 guard", () => {
   let v2: Awaited<ReturnType<typeof createVersion>>;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "VCS 继承测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
@@ -170,6 +171,7 @@ describe("block CoW — applyPatchToDB 编辑路径", () => {
   let origSnap: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Block CoW 测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk1", "原始内容")));
@@ -221,6 +223,7 @@ describe("block CoW — 版本本地 remap，不级联子孙", () => {
   let origSnap: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Block 不级联测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk2", "初始内容")));
@@ -256,13 +259,18 @@ describe("block GC — 删除时 NOT EXISTS 守护", () => {
   let v1Id: string;
   let v2Id: string;
   let sharedSnap: string;
+  let v2OnlySnap: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Block GC 测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bgc1", "GC 测试块")));
     sharedSnap = (await snapshotId(v1Id, "bgc1"))!;
     v2Id = (await createVersion(PROD, v1Id, "V2")).id;
+    // V2 专属 block：fork 之后插入，V1 不持有
+    await applyPatchToDB(PROD, v2Id, ins(mkBlock("bgc2", "V2 专属块")));
+    v2OnlySnap = (await snapshotId(v2Id, "bgc2"))!;
   });
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
@@ -277,6 +285,12 @@ describe("block GC — 删除时 NOT EXISTS 守护", () => {
     await applyPatchToDB(PROD, v1Id, del("bgc1"));
     expect(await physicalSnapshotExists(sharedSnap)).toBe(false);
   });
+
+  it("V2 专属 block（fork 后新插入，V1 不持有）被删除后物理行被 GC", async () => {
+    expect(await snapshotRefCount(v2OnlySnap)).toBe(1);      // sole owner
+    await applyPatchToDB(PROD, v2Id, del("bgc2"));
+    expect(await physicalSnapshotExists(v2OnlySnap)).toBe(false);
+  });
 });
 
 // ─── G4: Cue CoW (updateCue) ─────────────────────────────────────────────────
@@ -289,6 +303,7 @@ describe("cue CoW — updateCue refCount 分支", () => {
   let origRev: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Cue CoW 测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
@@ -329,18 +344,21 @@ describe("cue CoW — DESCENDANTS_CTE 级联 vs 独立分叉隔离", () => {
   let v2Id: string;
   let v3Id: string;           // child of v2  — 应该被级联
   let v3sibId: string;        // child of v1  — 不应该被级联
+  let v4Id: string;           // child of v3  — 深链，也应该被级联
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Cue 级联测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("casc-cue1", CL, "初始", v1Id);
-    // V1 → V2 → V3（线性链）
+    // V1 → V2 → V3 → V4（线性链）
     v2Id = (await createVersion(PROD, v1Id, "V2")).id;
     v3Id = (await createVersion(PROD, v2Id, "V3")).id;
-    // V1 → V3-sibling（独立分叉，V1 已 committed，不会二次提交）
+    v4Id = (await createVersion(PROD, v3Id, "V4")).id;
+    // V1 → V3-sibling（独立分叉）
     v3sibId = (await createVersion(PROD, v1Id, "V3-sibling")).id;
-    // 此时 casc-cue1 被 v1/v2/v3/v3sib 共用，refCount = 4
+    // 此时 casc-cue1 被 v1/v2/v3/v4/v3sib 共用，refCount = 5
     // 从 v2 触发 CoW
     const rev = (await cueRevisionId(v2Id, "casc-cue1"))!;
     await updateCue(rev, CL, { name: "V2 改" }, v2Id);
@@ -357,6 +375,13 @@ describe("cue CoW — DESCENDANTS_CTE 级联 vs 独立分叉隔离", () => {
     const r3 = await cueRevisionId(v3Id, "casc-cue1");
     expect(r3).toBe(r2);                                     // cascaded
     expect(await cueName(r3!)).toBe("V2 改");
+  });
+
+  it("V4（V3 的子版本，四层深链）被 DESCENDANTS_CTE 级联更新", async () => {
+    const r2 = await cueRevisionId(v2Id, "casc-cue1");
+    const r4 = await cueRevisionId(v4Id, "casc-cue1");
+    expect(r4).toBe(r2);                                     // cascaded through V3
+    expect(await cueName(r4!)).toBe("V2 改");
   });
 
   it("V1（祖先）不受影响", async () => {
@@ -378,6 +403,7 @@ describe("cue GC — deleteCue 引用计数守护", () => {
   let origRevId: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Cue GC 测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
@@ -414,6 +440,7 @@ describe("cowBlockSnapshotForMount — version_only 与 tracking 模式", () => 
   let snapTr: string;      // shared by v1/v2/v3 → tracking test
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "cowBlockSnapshotForMount 测试");
     v1Id = (await getActiveVersionId(PROD))!;
     // Insert blocks that will be shared across all three versions
@@ -454,6 +481,8 @@ describe("cowBlockSnapshotForMount — version_only 与 tracking 模式", () => 
     expect(await snapshotId(v1Id, "cm-tr")).toBe(newSnap);
     expect(await snapshotId(v2Id, "cm-tr")).toBe(newSnap);
     expect(await snapshotId(v3Id, "cm-tr")).toBe(newSnap);
+    // New snapshot is referenced by all three versions
+    expect(await snapshotRefCount(newSnap)).toBe(3);
     // Old snapshot no longer referenced by anyone
     expect(await snapshotRefCount(snapTr)).toBe(0);
   });
@@ -462,20 +491,28 @@ describe("cowBlockSnapshotForMount — version_only 与 tracking 模式", () => 
 // ─── G7: rollbackToVersion ────────────────────────────────────────────────────
 
 describe("rollbackToVersion — 内容来自 target，血统指向 current", () => {
-  const PROD = "test-vcs-rollback";
+  const PROD   = "test-vcs-rollback";
+  const CL_RB  = "vcs-cl-rb";
   let v1Id: string;
   let v2Id: string;
   let rbId: string;
   let v1Snap: string;
+  let v1CueRevId: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "Rollback 测试");
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("rb1", "V1 初始内容")));
     v1Snap = (await snapshotId(v1Id, "rb1"))!;
+    // Cue in V1 — will be CoW'd in V2, rollback should inherit V1's revision
+    await mkCueList(PROD, CL_RB);
+    await mkCue("rb-cue1", CL_RB, "V1 cue 名", v1Id);
+    v1CueRevId = (await cueRevisionId(v1Id, "rb-cue1"))!;
     v2Id = (await createVersion(PROD, v1Id, "V2")).id;
-    // V2 diverges from V1
+    // V2 diverges from V1 (block and cue)
     await applyPatchToDB(PROD, v2Id, upd(mkBlock("rb1", "V2 编辑后内容")));
+    await updateCue(v1CueRevId, CL_RB, { name: "V2 cue 名" }, v2Id);
     // Rollback: content from V1 target, lineage from V2 current
     const rb = await rollbackToVersion(v2Id, v1Id, PROD, "回滚版本");
     rbId = rb.id;
@@ -503,6 +540,13 @@ describe("rollbackToVersion — 内容来自 target，血统指向 current", () 
     expect(await snapshotId(v1Id, "rb1")).toBe(v1Snap);
     expect(await snapshotContent(v1Snap)).toBe("V1 初始内容");
   });
+
+  it("rollback 版本继承 TARGET（V1）的 cue_version，而非 current（V2）的", async () => {
+    const rbRev = await cueRevisionId(rbId, "rb-cue1");
+    // rollbackToVersion copies cue_version from target (v1), not current (v2)
+    expect(rbRev).toBe(v1CueRevId);
+    expect(await cueName(rbRev!)).toBe("V1 cue 名");
+  });
 });
 
 // ─── G8: 并发安全 — advisory lock 串行化 ─────────────────────────────────────
@@ -513,6 +557,7 @@ describe("并发安全 — pg_advisory_xact_lock 串行化", () => {
   let vId: string;
 
   beforeAll(async () => {
+    await deleteProduction(PROD).catch(() => {});
     await createProduction(PROD, "并发安全测试");
     vId = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, vId, ins(mkBlock("cc1", "并发块1")));
