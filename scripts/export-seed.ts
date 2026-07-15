@@ -15,6 +15,8 @@ config({ path: ".env.local" });
 
 import { Pool, PoolClient } from "pg";
 import crypto from "crypto";
+import { readFileSync } from "fs";
+import path from "path";
 
 const pool = new Pool({
   database: process.env.PGDATABASE ?? "script_editor",
@@ -216,10 +218,14 @@ async function main() {
       feishuDelete = `DELETE FROM feishu_user WHERE open_id LIKE 'seed-user-%';\n`;
     }
 
+    const schemaContent = readFileSync(path.join(process.cwd(), "db/schema.sql"));
+    const schemaHash = crypto.createHash("sha256").update(schemaContent).digest("hex");
+
     const header = [
       `-- ${ciMode ? "CI test" : "Demo"} seed data`,
       `-- Productions: ${pidRes.rows.map((r) => r.name).join(", ")}`,
       `-- Generated: ${new Date().toISOString()}`,
+      ...(ciMode ? [`-- schema-hash: ${schemaHash}`] : []),
       `-- Re-running seed:demo replaces only these productions; other local data is untouched.`,
       ``,
       `-- Delete in reverse-dependency order to avoid FK violations`,

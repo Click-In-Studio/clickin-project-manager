@@ -55,7 +55,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4.2.2
 
-      - name: Apply schema
+      # Fetch the base branch tip so we can detect new migration files and
+      # restore the pre-migration schema for the migration test path.
+      - name: Fetch base branch
+        run: git fetch --depth=1 origin $GITHUB_BASE_REF
+
+      # Detect db/add-*.sql or db/migrate-*.sql files that are NEW in this PR
+      # (not yet on the base branch). These are static migrations that will be
+      # applied to existing production data at deploy time.
+      - name: Detect DDL migration files in this PR
+        id: migrations
+        run: |
+          FILES=$(git diff origin/$GITHUB_BASE_REF...HEAD --name-only -- 'db/add-*.sql' 'db/migrate-*.sql')
+          if [ -n "$FILES" ]; then
+            echo "has_migrations=true" >> $GITHUB_OUTPUT
+            printf 'files<<EOF\n%s\nEOF\n' "$FILES" >> $GITHUB_OUTPUT
+            echo "Migration files detected:"
+            echo "$FILES"
+          else
+            echo "has_migrations=false" >> $GITHUB_OUTPUT
+            echo "No new migration files in this PR."
+          fi
+
+      # ── Schema application (two paths) ──────────────────────────────────────
+      #
+      # MIGRATION PATH: Apply the base-branch schema so we can test that the
+      # migration files work correctly on real pre-migration data.
+      - name: Apply base schema (migration path)
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: git show origin/$GITHUB_BASE_REF:db/schema.sql | psql
+
+      # NORMAL PATH: Fresh install from the current schema (no new migrations).
+      - name: Apply current schema (normal path)
+        if: steps.migrations.outputs.has_migrations != 'true'
         run: psql -f db/schema.sql
 
       - uses: actions/setup-node@v4.4.0
@@ -84,6 +116,37 @@ jobs:
           echo "Downloaded ${SIZE} bytes"
           [ "$SIZE" -ge 1000000 ] || { echo "FAIL: file too small"; exit 1; }
 
+          # Verify seed schema hash.
+          # The seed embeds "-- schema-hash: <sha256>" written by seed:ci-export.
+          #
+          # MIGRATION PATH: the seed must match the BASE schema (it was exported
+          # before this PR's DDL changes). We derive the expected hash from the
+          # base branch's schema.sql rather than from the current commit's, so the
+          # check is stable across rebases and does not depend on commit SHAs.
+          #
+          # NORMAL PATH: the seed must match the CURRENT schema.
+          if [ "${{ steps.migrations.outputs.has_migrations }}" = "true" ]; then
+            EXPECTED_HASH=$(git show origin/$GITHUB_BASE_REF:db/schema.sql | sha256sum | awk '{print $1}')
+            HASH_CONTEXT="base schema (pre-migration)"
+          else
+            EXPECTED_HASH=$(sha256sum db/schema.sql | awk '{print $1}')
+            HASH_CONTEXT="current schema"
+          fi
+
+          SEED_HASH=$(grep -m1 '^-- schema-hash: ' demo.sql | awk '{print $3}')
+          if [ -z "$SEED_HASH" ]; then
+            echo "FAIL: seed has no schema-hash header — re-run: npm run seed:ci-export"
+            exit 1
+          fi
+          if [ "$EXPECTED_HASH" != "$SEED_HASH" ]; then
+            echo "FAIL: seed schema hash mismatch (seed is stale, expected $HASH_CONTEXT)"
+            echo "  expected: $EXPECTED_HASH"
+            echo "  seed has: $SEED_HASH"
+            echo "  Re-run: npm run seed:ci-export -- \"供养2.0\" \"我们的星星\""
+            exit 1
+          fi
+          echo "OK  schema hash ($HASH_CONTEXT): $EXPECTED_HASH"
+
           FAIL=0
           for NAME in "供养2.0" "我们的星星"; do
             grep -qF "$NAME" demo.sql && echo "OK  $NAME" || { echo "FAIL  $NAME missing"; FAIL=1; }
@@ -109,6 +172,52 @@ jobs:
 
       - name: Import seed data into test DB
         run: npm run seed:demo
+
+      # MIGRATION PATH: Apply the new migration files to the imported pre-migration
+      # data. This is the same sequence that will run on production at deploy time.
+      - name: Apply PR migration files
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          echo '${{ steps.migrations.outputs.files }}' | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "Applying $f ..."
+            psql -f "$f"
+          done
+
+      # MIGRATION PATH: Verify that the migration left the data in a consistent
+      # state: no orphan FK references and key row counts preserved.
+      - name: Verify post-migration data integrity
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          FAIL=0
+          chk() {
+            TABLE=$1; WHERE=$2; MIN=$3
+            N=$(psql -t -A -c "SELECT COUNT(*) FROM \"${TABLE}\" WHERE ${WHERE}")
+            [ "$N" -ge "$MIN" ] && echo "OK  ${TABLE}: ${N}" || { echo "FAIL  ${TABLE}: ${N} < ${MIN}"; FAIL=1; }
+          }
+          chk production "id IN ('mod1uc2dg','mon0jcm82')"                                                             2
+          chk version    "production_id = 'mod1uc2dg'"                                                                 2
+          chk scene      "production_id IN ('mod1uc2dg','mon0jcm82')"                                                 100
+          chk script     "production_id IN ('mod1uc2dg','mon0jcm82')"                                                5000
+
+          # Check that no FK references are dangling (every child has a parent).
+          FK_ORPHANS=$(psql -t -A <<'EOSQL'
+            SELECT COUNT(*) FROM (
+              SELECT c.conname, c.conrelid::regclass AS child_table
+              FROM pg_constraint c
+              JOIN pg_class p ON p.oid = c.confrelid
+              WHERE c.contype = 'f'
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_inherits i
+                  WHERE i.inhrelid = c.conrelid
+                )
+                AND c.convalidated = false
+            ) orphans
+          EOSQL
+          )
+          [ "${FK_ORPHANS:-0}" -eq 0 ] && echo "OK  no dangling FK constraints" || { echo "FAIL  ${FK_ORPHANS} unvalidated FK constraints after migration"; FAIL=1; }
+          exit $FAIL
 
       - name: Verify seeded DB
         run: |

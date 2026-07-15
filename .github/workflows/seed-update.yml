@@ -1,0 +1,161 @@
+name: Auto-update CI seed after migration merge
+
+# Triggers when a migration file is merged to main.
+# Applies the migration to the previous CI seed and re-exports
+# the result as the new seed, so future PR CIs always have an
+# up-to-date pre-migration baseline without manual re-exports.
+#
+# Requires four secrets: SEED_R2_ACCOUNT_ID, SEED_R2_ACCESS_KEY_ID,
+# SEED_R2_SECRET_ACCESS_KEY, SEED_R2_BUCKET (write-only R2 key; separate
+# from the main asset bucket credentials used by the application).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'db/add-*.sql'
+      - 'db/migrate-*.sql'
+
+jobs:
+  update-seed:
+    runs-on: ubuntu-latest
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: script_editor_test
+      PGUSER: script_editor
+      PGPASSWORD: testpassword
+      SEED_URL: https://pub-50e9ef6dfe944ca8aa2288e45f20ba7c.r2.dev/seed-data/ci.sql
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: script_editor
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: script_editor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 2  # Need HEAD~1 to get the pre-migration schema
+
+      # Find migration files that are NEW in this push (not pre-existing).
+      # --diff-filter=A: Added files only; editing existing migrations is wrong.
+      - name: Detect new migration files in this push
+        id: migrations
+        run: |
+          FILES=$(git diff HEAD~1 HEAD --name-only --diff-filter=A -- 'db/add-*.sql' 'db/migrate-*.sql')
+          if [ -z "$FILES" ]; then
+            echo "No new migration files detected; nothing to do."
+            echo "has_migrations=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_migrations=true" >> $GITHUB_OUTPUT
+            printf 'files<<EOF\n%s\nEOF\n' "$FILES" >> $GITHUB_OUTPUT
+            echo "New migration files:"
+            echo "$FILES"
+          fi
+
+      # Apply the schema as it was BEFORE this push so that the old seed
+      # (which was exported against that schema) can be imported cleanly.
+      - name: Apply pre-migration schema
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: git show HEAD~1:db/schema.sql | psql
+
+      - uses: actions/setup-node@v4.4.0
+        if: steps.migrations.outputs.has_migrations == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: npm ci
+
+      - name: Write .env.local
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          cat > .env.local <<'EOF'
+          PGHOST=localhost
+          PGPORT=5432
+          PGDATABASE=script_editor_test
+          PGUSER=script_editor
+          PGPASSWORD=testpassword
+          EOF
+
+      # Download the current CI seed and verify that it matches the
+      # pre-migration schema hash (schema-hash header embedded by seed:ci-export).
+      - name: Download and validate CI seed
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          curl -fsSL "$SEED_URL" -o ci.sql
+          EXPECTED=$(git show HEAD~1:db/schema.sql | sha256sum | awk '{print $1}')
+          SEED_HASH=$(grep -m1 '^-- schema-hash: ' ci.sql | awk '{print $3}')
+          if [ -z "$SEED_HASH" ]; then
+            echo "FAIL: seed has no schema-hash header"
+            echo "The seed predates versioning; re-run: npm run seed:ci-export -- \"供养2.0\" \"我们的星星\""
+            exit 1
+          fi
+          if [ "$EXPECTED" != "$SEED_HASH" ]; then
+            echo "FAIL: seed schema hash mismatch"
+            echo "  expected (HEAD~1 schema): $EXPECTED"
+            echo "  seed has:                 $SEED_HASH"
+            echo "The seed is already out of sync before this migration — check git log."
+            exit 1
+          fi
+          echo "OK  seed matches pre-migration schema: $EXPECTED"
+
+      # Import the pre-migration seed data into the test DB.
+      - name: Import pre-migration seed
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: psql -1 -f ci.sql
+
+      # Apply the new migration files — identical to what will run on production.
+      - name: Apply new migration files
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          echo '${{ steps.migrations.outputs.files }}' | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "Applying $f ..."
+            psql -f "$f"
+          done
+
+      # Sanity-check that the migration did not destroy data.
+      - name: Verify post-migration data integrity
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          FAIL=0
+          chk() {
+            TABLE=$1; WHERE=$2; MIN=$3
+            N=$(psql -t -A -c "SELECT COUNT(*) FROM \"${TABLE}\" WHERE ${WHERE}")
+            [ "$N" -ge "$MIN" ] && echo "OK  ${TABLE}: ${N}" || { echo "FAIL  ${TABLE}: ${N} < ${MIN}"; FAIL=1; }
+          }
+          chk production "id IN ('mod1uc2dg','mon0jcm82')"                                                             2
+          chk version    "production_id = 'mod1uc2dg'"                                                                 2
+          chk scene      "production_id IN ('mod1uc2dg','mon0jcm82')"                                                 100
+          chk script     "production_id IN ('mod1uc2dg','mon0jcm82')"                                                5000
+          chk cue        "cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN ('mod1uc2dg','mon0jcm82'))"    10
+
+          NULL_COUNT=$(psql -t -A -c "SELECT COUNT(*) FROM production WHERE id IN ('mod1uc2dg','mon0jcm82') AND active_version_id IS NULL")
+          [ "$NULL_COUNT" -eq 0 ] && echo "OK  active_version_id intact" || { echo "FAIL  ${NULL_COUNT} production(s) have NULL active_version_id"; FAIL=1; }
+          exit $FAIL
+
+      # Export the migrated test DB as the new CI seed and upload to R2.
+      # seed:ci-export reads PGDATABASE=script_editor_test (the test DB we just
+      # migrated) and embeds the schema hash from the current db/schema.sql,
+      # so future PR CIs can validate the seed against the post-migration schema.
+      - name: Export and upload updated CI seed
+        if: steps.migrations.outputs.has_migrations == 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.SEED_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.SEED_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.SEED_R2_SECRET_ACCESS_KEY }}
+          SEED_R2_BUCKET: ${{ secrets.SEED_R2_BUCKET }}
+        run: npm run seed:ci-export -- "供养2.0" "我们的星星"
