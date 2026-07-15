@@ -100,7 +100,13 @@ function lit(val: unknown, dataType: string): string {
 
 type ColInfo = { column_name: string; data_type: string };
 
-async function exportTable(client: PoolClient, table: string, where: string, params: unknown[]): Promise<string> {
+async function exportTable(
+  client: PoolClient,
+  table: string,
+  where: string,
+  params: unknown[],
+  nullCols: string[] = [],
+): Promise<string> {
   const colRes = await client.query<ColInfo>(
     `SELECT column_name, data_type FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
@@ -112,10 +118,13 @@ async function exportTable(client: PoolClient, table: string, where: string, par
   const rowRes = await client.query(`SELECT * FROM "${table}" WHERE ${where}`, params);
   if (rowRes.rows.length === 0) return `-- ${table}: 0 rows\n`;
 
+  const nullSet = new Set(nullCols);
   const colNames = cols.map((c) => `"${c.column_name}"`).join(", ");
   const lines = [`-- ${table} (${rowRes.rows.length} rows)`];
   for (const row of rowRes.rows) {
-    const values = cols.map((c) => lit(row[c.column_name], c.data_type)).join(", ");
+    const values = cols.map((c) =>
+      nullSet.has(c.column_name) ? "NULL" : lit(row[c.column_name], c.data_type)
+    ).join(", ");
     lines.push(`INSERT INTO "${table}" (${colNames}) VALUES (${values}) ON CONFLICT DO NOTHING;`);
   }
   return lines.join("\n") + "\n";
@@ -146,15 +155,17 @@ async function main() {
 
     const vSub = `version_id IN (SELECT id FROM version WHERE production_id IN (${pidList}))`;
     const sections: string[] = [];
-    const add = async (table: string, where: string) =>
-      sections.push(await exportTable(client, table, where, pids));
+    const add = async (table: string, where: string, nullCols?: string[]) =>
+      sections.push(await exportTable(client, table, where, pids, nullCols));
 
-    await add("production",         `id IN (${pidList})`);
+    // Insert production with active_version_id = NULL to avoid circular FK with version
+    await add("production",         `id IN (${pidList})`, ["active_version_id"]);
     await add("version",            `production_id IN (${pidList})`);
     await add("scene",              `production_id IN (${pidList})`);
     await add("character",          `production_id IN (${pidList})`);
     await add("character_aggregate",`aggregate_id IN (SELECT id FROM character WHERE production_id IN (${pidList}))`);
-    await add("tag_group",          `production_id IN (${pidList})`);
+    // Insert tag_group with circular FK cols NULLed; restored after tag_option inserts
+    await add("tag_group",          `production_id IN (${pidList})`, ["default_option_id", "lyric_split_after_option_id"]);
     await add("tag_option",         `group_id IN (SELECT id FROM tag_group WHERE production_id IN (${pidList}))`);
     await add("cue_list",           `production_id IN (${pidList})`);
     await add("scene_version",      vSub);
@@ -166,17 +177,59 @@ async function main() {
     await add("cue",                `cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN (${pidList}))`);
     await add("cue_version",        vSub);
 
+    // idList uses literal quoted values — safe for embedding in the seed SQL file
+    const idList = pids.map((id) => `'${id}'`).join(", ");
+    const vSubLit = `version_id IN (SELECT id FROM version WHERE production_id IN (${idList}))`;
     const header = [
       `-- Demo seed data`,
       `-- Productions: ${pidRes.rows.map((r) => r.name).join(", ")}`,
       `-- Generated: ${new Date().toISOString()}`,
       `-- Re-running seed:demo replaces only these productions; other local data is untouched.`,
       ``,
-      `DELETE FROM production WHERE id IN (${pids.map((id) => `'${id}'`).join(", ")});`,
+      `-- Delete in reverse-dependency order to avoid FK violations`,
+      `DELETE FROM cue_version WHERE ${vSubLit};`,
+      `DELETE FROM script_version WHERE ${vSubLit};`,
+      `DELETE FROM character_version WHERE ${vSubLit};`,
+      `DELETE FROM scene_version WHERE ${vSubLit};`,
+      `DELETE FROM block_tag WHERE block_id IN (SELECT DISTINCT block_id FROM script WHERE production_id IN (${idList}));`,
+      `DELETE FROM script_character WHERE script_id IN (SELECT id FROM script WHERE production_id IN (${idList}));`,
+      `DELETE FROM script WHERE production_id IN (${idList});`,
+      `DELETE FROM cue WHERE cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN (${idList}));`,
+      `DELETE FROM cue_list WHERE production_id IN (${idList});`,
+      `DELETE FROM tag_option WHERE group_id IN (SELECT id FROM tag_group WHERE production_id IN (${idList}));`,
+      `DELETE FROM tag_group WHERE production_id IN (${idList});`,
+      `DELETE FROM character_aggregate WHERE aggregate_id IN (SELECT id FROM character WHERE production_id IN (${idList}));`,
+      `DELETE FROM character WHERE production_id IN (${idList});`,
+      `DELETE FROM scene WHERE production_id IN (${idList});`,
+      `UPDATE production SET active_version_id = NULL WHERE id IN (${idList});`,
+      `DELETE FROM version WHERE production_id IN (${idList});`,
+      `DELETE FROM production WHERE id IN (${idList});`,
       ``,
     ].join("\n");
 
-    const sql = header + sections.join("\n");
+    // Restore circular FK columns after all rows are inserted
+    const prodRows = await client.query<{ id: string; active_version_id: string | null }>(
+      `SELECT id, active_version_id FROM production WHERE id = ANY($1)`, [pids]
+    );
+    const tgRows = await client.query<{ id: string; default_option_id: string | null; lyric_split_after_option_id: string | null }>(
+      `SELECT id, default_option_id, lyric_split_after_option_id FROM tag_group WHERE production_id = ANY($1)`, [pids]
+    );
+    const restoreLines: string[] = [];
+    for (const r of prodRows.rows) {
+      if (r.active_version_id)
+        restoreLines.push(`UPDATE production SET active_version_id = '${r.active_version_id}' WHERE id = '${r.id}';`);
+    }
+    for (const r of tgRows.rows) {
+      const sets: string[] = [];
+      if (r.default_option_id) sets.push(`default_option_id = '${r.default_option_id}'`);
+      if (r.lyric_split_after_option_id) sets.push(`lyric_split_after_option_id = '${r.lyric_split_after_option_id}'`);
+      if (sets.length) restoreLines.push(`UPDATE tag_group SET ${sets.join(", ")} WHERE id = '${r.id}';`);
+    }
+    const footer = restoreLines.length
+      ? `\n-- Restore circular FK columns (deferred to after dependent tables are inserted)\n${restoreLines.join("\n")}\n`
+      : "";
+
+    const sql = header + sections.join("\n") + footer;
     const buf = Buffer.from(sql, "utf-8");
     const R2_KEY = "seed-data/demo.sql";
     console.log(`Uploading to R2 bucket "${process.env.SEED_R2_BUCKET}": ${R2_KEY} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)…`);
