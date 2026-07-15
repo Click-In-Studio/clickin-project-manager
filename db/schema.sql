@@ -331,8 +331,9 @@ CREATE TABLE IF NOT EXISTS cue (
   warning           BOOLEAN NOT NULL DEFAULT false,
   cue_id            TEXT,             -- logical cue identity (no FK)
   start_snapshot_id TEXT,             -- script.id snapshot when anchor was set (no FK)
-  end_snapshot_id   TEXT,             -- script.id snapshot when anchor was set (no FK)
-  UNIQUE (cue_list_id, number)
+  end_snapshot_id   TEXT             -- script.id snapshot when anchor was set (no FK)
+  -- no UNIQUE (cue_list_id, number): cue is a revision table; the same logical
+  -- cue number can have multiple rows across different versions
 );
 
 CREATE INDEX IF NOT EXISTS cue_list_idx ON cue(cue_list_id);

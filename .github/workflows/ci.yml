@@ -26,3 +26,105 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+  unit-test:
+    runs-on: ubuntu-latest
+    env:
+      SEED_URL: https://pub-50e9ef6dfe944ca8aa2288e45f20ba7c.r2.dev/seed-data/ci.sql
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: script_editor_test
+      PGUSER: script_editor
+      PGPASSWORD: testpassword
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: script_editor
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: script_editor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Apply schema
+        run: psql -f db/schema.sql
+
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write test .env.local
+        run: |
+          cat > .env.local <<'EOF'
+          PGHOST=localhost
+          PGPORT=5432
+          PGDATABASE=script_editor_test
+          PGUSER=script_editor
+          PGPASSWORD=testpassword
+          EOF
+
+      # ── Step 1: Seed data — static validation + DB import ─────────────────
+      - name: Validate seed SQL (static)
+        run: |
+          curl -fsSL "$SEED_URL" -o demo.sql
+          SIZE=$(wc -c < demo.sql)
+          echo "Downloaded ${SIZE} bytes"
+          [ "$SIZE" -ge 1000000 ] || { echo "FAIL: file too small"; exit 1; }
+
+          FAIL=0
+          for NAME in "供养2.0" "我们的星星"; do
+            grep -qF "$NAME" demo.sql && echo "OK  $NAME" || { echo "FAIL  $NAME missing"; FAIL=1; }
+          done
+          for ID in mod1uc2dg mon0jcm82; do
+            grep -qF "'${ID}'" demo.sql && echo "OK  $ID" || { echo "FAIL  $ID missing"; FAIL=1; }
+          done
+
+          check_inserts() {
+            COUNT=$(grep -c "^INSERT INTO \"$1\"" demo.sql || true)
+            [ "$COUNT" -ge "$2" ] && echo "OK  $1: ${COUNT}" || { echo "FAIL  $1: ${COUNT} < $2"; FAIL=1; }
+          }
+          check_inserts production 2
+          check_inserts version    4
+          check_inserts scene      100
+          check_inserts script     5000
+          check_inserts cue        10
+
+          grep -qP '\$[0-9]+' demo.sql && { echo "FAIL: \$N placeholders in SQL"; exit 1; } || echo "OK  no placeholders"
+          grep -q "UPDATE production SET active_version_id" demo.sql && echo "OK  active_version_id restore" || { echo "FAIL  missing restore"; FAIL=1; }
+          grep -q "UPDATE tag_group SET" demo.sql                     && echo "OK  tag_group restore"        || { echo "FAIL  missing restore"; FAIL=1; }
+          exit $FAIL
+
+      - name: Import seed data into test DB
+        run: npm run seed:demo
+
+      - name: Verify seeded DB
+        run: |
+          FAIL=0
+          chk() {
+            TABLE=$1; WHERE=$2; MIN=$3
+            N=$(psql -t -A -c "SELECT COUNT(*) FROM \"${TABLE}\" WHERE ${WHERE}")
+            [ "$N" -ge "$MIN" ] && echo "OK  ${TABLE}: ${N}" || { echo "FAIL  ${TABLE}: ${N} < ${MIN}"; FAIL=1; }
+          }
+          chk production "id IN ('mod1uc2dg','mon0jcm82')"                                                              2
+          chk version    "production_id = 'mod1uc2dg'"                                                                  2
+          chk scene      "production_id IN ('mod1uc2dg','mon0jcm82')"                                                  100
+          chk scene_version "version_id IN (SELECT id FROM version WHERE production_id IN ('mod1uc2dg','mon0jcm82'))"   50
+          chk script     "production_id IN ('mod1uc2dg','mon0jcm82')"                                                 5000
+          chk cue        "cue_list_id IN (SELECT id FROM cue_list WHERE production_id IN ('mod1uc2dg','mon0jcm82'))"    10
+
+          NULL_COUNT=$(psql -t -A -c "SELECT COUNT(*) FROM production WHERE id IN ('mod1uc2dg','mon0jcm82') AND active_version_id IS NULL")
+          [ "$NULL_COUNT" -eq 0 ] && echo "OK  active_version_id restored" || { echo "FAIL  ${NULL_COUNT} production(s) have NULL active_version_id"; FAIL=1; }
+          exit $FAIL
