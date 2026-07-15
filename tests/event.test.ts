@@ -4,36 +4,36 @@ import {
   updateProductionEvent, deleteProductionEvent,
   createScheduleItem, listScheduleItems, updateScheduleItem, deleteScheduleItem,
 } from "@/lib/event-db";
-import { PROD_HOSHINO, TEST_USER } from "./helpers";
+import { PROD_PLANET, TEST_USER } from "./helpers";
 
 const EVENT_ID = "test-event-unit";
 const ITEM_ID  = "test-item-unit";
 
-afterAll(() => deleteProductionEvent(EVENT_ID, PROD_HOSHINO).catch(() => {}));
+afterAll(() => deleteProductionEvent(EVENT_ID, PROD_PLANET).catch(() => {}));
 
 describe("event CRUD", () => {
   it("createProductionEvent creates an event", async () => {
     await createProductionEvent({
-      id: EVENT_ID, productionId: PROD_HOSHINO,
+      id: EVENT_ID, productionId: PROD_PLANET,
       title: "单元测试排练", eventType: "rehearsal",
       location: "排练室A", startTime: "2026-08-01T10:00:00Z",
       endTime: "2026-08-01T13:00:00Z", description: "",
       createdBy: TEST_USER,
     });
-    const event = await getProductionEvent(EVENT_ID, PROD_HOSHINO);
+    const event = await getProductionEvent(EVENT_ID, PROD_PLANET);
     expect(event).not.toBeNull();
     expect(event!.title).toBe("单元测试排练");
     expect(event!.location).toBe("排练室A");
   });
 
   it("listProductionEvents includes the created event", async () => {
-    const events = await listProductionEvents(PROD_HOSHINO);
+    const events = await listProductionEvents(PROD_PLANET);
     expect(events.some((e) => e.id === EVENT_ID)).toBe(true);
   });
 
   it("updateProductionEvent changes the title", async () => {
-    await updateProductionEvent(EVENT_ID, PROD_HOSHINO, { title: "单元测试排练（改名）" });
-    const event = await getProductionEvent(EVENT_ID, PROD_HOSHINO);
+    await updateProductionEvent(EVENT_ID, PROD_PLANET, { title: "单元测试排练（改名）" });
+    const event = await getProductionEvent(EVENT_ID, PROD_PLANET);
     expect(event!.title).toBe("单元测试排练（改名）");
   });
 
@@ -67,7 +67,7 @@ describe("schedule item CRUD", () => {
   });
 
   it("deleteProductionEvent cascades", async () => {
-    await deleteProductionEvent(EVENT_ID, PROD_HOSHINO);
-    expect(await getProductionEvent(EVENT_ID, PROD_HOSHINO)).toBeNull();
+    await deleteProductionEvent(EVENT_ID, PROD_PLANET);
+    expect(await getProductionEvent(EVENT_ID, PROD_PLANET)).toBeNull();
   });
 });

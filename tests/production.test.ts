@@ -9,7 +9,7 @@ import {
   unarchiveProduction,
   deleteProduction,
 } from "@/lib/db";
-import { TEST_USER, PROD_HOSHINO, PROD_SUPPLY } from "./helpers";
+import { TEST_USER, PROD_PLANET, PROD_CULTURE } from "./helpers";
 
 const TEST_PROD_ID = "test-prod-unit";
 
@@ -19,8 +19,8 @@ describe("listProductions", () => {
   it("admin sees all seeded productions", async () => {
     const list = await listProductions({ openId: TEST_USER, isAdmin: true });
     const ids = list.map((p) => p.id);
-    expect(ids).toContain(PROD_HOSHINO);
-    expect(ids).toContain(PROD_SUPPLY);
+    expect(ids).toContain(PROD_PLANET);
+    expect(ids).toContain(PROD_CULTURE);
   });
 
   it("non-member sees no productions when not admin", async () => {
