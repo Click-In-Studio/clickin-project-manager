@@ -2,9 +2,9 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, listScenesByVersion, listSceneVersionsByVersion, listProductionScenes, flushToDB, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import { parseSceneNum } from "@/lib/import/parse-scene-num";
-import type { SceneColMap, ParsedSceneNum, SceneConflict, ImportScenePreview } from "@/lib/import/types";
-import { randomUUID } from "node:crypto";
+import type { SceneColMap, SceneConflict, ImportScenePreview } from "@/lib/import/types";
+import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
+import type { SceneRow } from "@/lib/import/scene-builder";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 
@@ -28,20 +28,6 @@ type ImportScenesBody = {
   replaceExisting?: boolean;
 };
 
-type SceneRow = {
-  rawNum: string;
-  parsed: ParsedSceneNum;
-  /** Name for the scene this row represents (child if present, else parent). NOT the parent act's name. */
-  name: string | null;
-  /** Name for the implied parent act from this row (only when childNum is set). */
-  impliedParentName: string | null;
-  intro: string | null;
-  actionLine: string | null;
-  music: string | null;
-  stagePres: string | null;
-  duration: string | null;
-};
-
 async function resolveImportVersionId(req: NextRequest, productionId: string): Promise<string | null | Response> {
   const versionIdParam = req.nextUrl.searchParams.get("v");
   if (!versionIdParam) return getActiveVersionId(productionId);
@@ -62,97 +48,6 @@ async function listExistingScenesForImport(versionId: string | null, productionI
     return { scenes: markerScenes, markerBacked: true };
   }
   return { scenes: await listSceneVersionsByVersion(versionId), markerBacked: false };
-}
-
-function buildSceneRows(rows: (string | null)[][], colMap: SceneColMap, headerRowIncluded?: boolean): SceneRow[] {
-  const headerIndex = headerRowIncluded ? rows.findIndex(row => row.some(cell => cell?.trim())) : -1;
-  const dataRows = headerRowIncluded && headerIndex >= 0
-    ? rows.filter((_, index) => index !== headerIndex)
-    : rows;
-  const results: SceneRow[] = [];
-
-  for (const row of dataRows) {
-    const rawNum = row[colMap.sceneNum]?.trim();
-    if (!rawNum) continue;
-
-    const parsed = parseSceneNum(rawNum);
-    if (!parsed) continue;
-
-    // Name for the scene itself (child if present, else the parent act)
-    let name: string | null = colMap.sceneName != null ? row[colMap.sceneName]?.trim() || null : null;
-    if (!name) {
-      // Only use the portion that belongs to this scene's level
-      name = parsed.childNum ? parsed.childName : parsed.parentName;
-    }
-
-    // Name the parent act inherits when this row encodes "1选择-1" → act name "选择"
-    const impliedParentName = parsed.childNum ? parsed.parentName : null;
-
-    results.push({
-      rawNum,
-      parsed,
-      name,
-      impliedParentName,
-      intro: colMap.intro != null ? row[colMap.intro]?.trim() || null : null,
-      actionLine: colMap.actionLine != null ? row[colMap.actionLine]?.trim() || null : null,
-      music: colMap.music != null ? row[colMap.music]?.trim() || null : null,
-      stagePres: colMap.stagePres != null ? row[colMap.stagePres]?.trim() || null : null,
-      duration: colMap.duration != null ? row[colMap.duration]?.trim() || null : null,
-    });
-  }
-  return results;
-}
-
-/**
- * Build a deduplicated Map<sceneNumber, entry> from sceneRows.
- * Parent acts come from:
- *   - rows where childNum is null (explicit act rows)
- *   - rows where childNum is set and parentNum is present (implied acts)
- * Child scenes only appear once.
- */
-function buildSceneMap(
-  sceneRows: SceneRow[],
-  existingByNum: Map<string, { id: string; number: string; name: string }>,
-  initialSortOrder: number,
-) {
-  type Entry = { id: string; num: string; name: string; parentNum: string | null; sortOrder: number };
-  const map = new Map<string, Entry>();
-  let sortOrder = initialSortOrder;
-
-  function getOrCreateScene(num: string, name: string | null, parentNum: string | null): Entry {
-    if (map.has(num)) {
-      const e = map.get(num)!;
-      // Upgrade name if we now have a better one
-      if (name && !e.name) map.set(num, { ...e, name });
-      return map.get(num)!;
-    }
-    const ex = existingByNum.get(num);
-    const entry: Entry = {
-      id: ex?.id ?? randomUUID(),
-      num,
-      name: name ?? ex?.name ?? "",
-      parentNum,
-      sortOrder: ex ? -1 : sortOrder++, // -1 = preserve existing order
-    };
-    map.set(num, entry);
-    return entry;
-  }
-
-  for (const row of sceneRows) {
-    const { parsed, name, impliedParentName } = row;
-
-    if (parsed.childNum && parsed.parentNum) {
-      // Create parent act first (implied by this row)
-      getOrCreateScene(parsed.parentNum, impliedParentName, null);
-      // Then create child scene
-      getOrCreateScene(parsed.childNum, name, parsed.parentNum);
-    } else if (parsed.parentNum) {
-      // Pure top-level row (no childNum)
-      getOrCreateScene(parsed.parentNum, name, null);
-    }
-  }
-
-  return map;
 }
 
 /** POST: preview (dry-run) */

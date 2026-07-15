@@ -1628,22 +1628,30 @@ export async function importScriptToVersion(
   try {
     await client.query("BEGIN");
 
-    // Clear all blocks from this version; GC snapshots no longer referenced by any version
-    await client.query(
-      `WITH removed AS (
-         DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id, block_id
-       ),
-       deleted_orphan_tags AS (
-         DELETE FROM block_tag bt
-         WHERE bt.block_id IN (SELECT block_id FROM removed)
-           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.block_id = bt.block_id)
-         RETURNING 1
-       )
-       DELETE FROM script s
-       WHERE s.id IN (SELECT snapshot_id FROM removed)
-         AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+    // Clear all blocks from this version; GC snapshots no longer referenced by any version.
+    // Split into three separate statements to avoid PostgreSQL CTE snapshot isolation:
+    // a single statement's NOT EXISTS would see the pre-deletion state of the CTE rows.
+    const removedSV = await client.query<{ snapshot_id: string; block_id: string }>(
+      "DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id, block_id",
       [versionId]
     );
+    const removedSnapshotIds = removedSV.rows.map(r => r.snapshot_id);
+    const removedBlockIds    = removedSV.rows.map(r => r.block_id);
+
+    if (removedBlockIds.length > 0) {
+      await client.query(
+        `DELETE FROM block_tag WHERE block_id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.block_id = block_tag.block_id)`,
+        [removedBlockIds]
+      );
+    }
+    if (removedSnapshotIds.length > 0) {
+      await client.query(
+        `DELETE FROM script WHERE id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = script.id)`,
+        [removedSnapshotIds]
+      );
+    }
 
     // Import is a full replacement of script + dramaturgy for this version.
     // scene_version is only a compatibility cache; rebuild it from markers below.
