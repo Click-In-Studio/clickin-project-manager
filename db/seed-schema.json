@@ -151,60 +151,6 @@
       "default": "now()"
     }
   ],
-  "asset_share_token": [
-    {
-      "column": "token",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "asset_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "production_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_by",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
-      "column": "label",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "expires_at",
-      "type": "timestamp with time zone",
-      "nullable": true
-    },
-    {
-      "column": "one_time",
-      "type": "boolean",
-      "nullable": false,
-      "default": "false"
-    },
-    {
-      "column": "used_at",
-      "type": "timestamp with time zone",
-      "nullable": true
-    },
-    {
-      "column": "revoked_at",
-      "type": "timestamp with time zone",
-      "nullable": true
-    }
-  ],
   "asset_version_rel": [
     {
       "column": "asset_id",
@@ -220,51 +166,6 @@
       "column": "asset_file_id",
       "type": "text",
       "nullable": false
-    }
-  ],
-  "block_comment": [
-    {
-      "column": "id",
-      "type": "text",
-      "nullable": false,
-      "default": "md5(((random())::text || (clock_timestamp())::text))"
-    },
-    {
-      "column": "production_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "block_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "open_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "author_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "content",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
-      "column": "updated_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
     }
   ],
   "block_tag": [

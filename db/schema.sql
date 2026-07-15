@@ -249,21 +249,6 @@ CREATE INDEX IF NOT EXISTS block_tag_group_idx ON block_tag(group_id);
 
 -- ── Comments ──────────────────────────────────────────────────────────────────
 
--- Legacy per-block comments (used by early versions of the script editor).
-CREATE TABLE IF NOT EXISTS block_comment (
-  id            TEXT PRIMARY KEY DEFAULT md5(random()::text || clock_timestamp()::text),
-  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  block_id      TEXT NOT NULL,
-  open_id       TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
-  author_name   TEXT NOT NULL,
-  content       TEXT NOT NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS block_comment_production_id_idx ON block_comment(production_id);
-CREATE INDEX IF NOT EXISTS block_comment_production_id_block_id_idx ON block_comment(production_id, block_id);
-
 -- Unified comment system: threaded, multi-context (block, event, report, etc.).
 CREATE TABLE IF NOT EXISTS comment (
   id            TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
@@ -616,20 +601,3 @@ CREATE TABLE IF NOT EXISTS asset_version_rel (
 CREATE INDEX IF NOT EXISTS asset_version_rel_version_idx ON asset_version_rel(version_id);
 CREATE INDEX IF NOT EXISTS asset_version_rel_file_idx ON asset_version_rel(asset_file_id);
 
--- Share tokens for public (unauthenticated) asset preview.
--- one_time=true: token is consumed on first access, but streaming continues for 4h (grace period).
--- expires_at=null + one_time=false: permanent token (discouraged; prefer long-expiry time_limited).
-CREATE TABLE IF NOT EXISTS asset_share_token (
-  token         TEXT        PRIMARY KEY,
-  asset_id      TEXT        NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  created_by    TEXT        NOT NULL REFERENCES feishu_user(open_id),
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  label         TEXT,
-  expires_at    TIMESTAMPTZ,
-  one_time      BOOLEAN     NOT NULL DEFAULT FALSE,
-  used_at       TIMESTAMPTZ,
-  revoked_at    TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS asset_share_token_asset_idx ON asset_share_token(asset_id);
