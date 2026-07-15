@@ -10,6 +10,7 @@
     "seed:export": "tsx scripts/export-seed.ts",
     "seed:ci-export": "tsx scripts/export-seed.ts --ci",
     "seed:demo": "tsx scripts/seed-demo.ts",
+    "seed:schema": "tsx scripts/gen-seed-schema.ts > db/seed-schema.json",
     "test": "vitest run"
   },
   "dependencies": {
