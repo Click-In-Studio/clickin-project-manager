@@ -52,15 +52,27 @@ export async function POST(req: NextRequest) {
     if (cached) return Response.json({ id: cached }, { status: 201 });
   }
 
-  const { name } = (await req.json()) as { name?: string };
+  const { name } = (await req.json()) as { name?: string };  // async gap
   if (!name?.trim()) return Response.json({ error: "剧名不能为空" }, { status: 400 });
 
+  // Re-check after the async body parse: a concurrent request with the same key
+  // may have reserved an id while we were awaiting req.json().
+  if (ikey) {
+    const cached = checkIdem(ikey);
+    if (cached) return Response.json({ id: cached }, { status: 201 });
+  }
+
   const id = uid();
+  // Reserve synchronously before any await. No other JS can run between here
+  // and the next await, so this closes the concurrent-request race window.
+  if (ikey) storeIdem(ikey, id);
+
   try {
     await createProduction(id, name.trim());
-    if (ikey) storeIdem(ikey, id);
     return Response.json({ id }, { status: 201 });
   } catch (err) {
+    // Remove reservation so the client can retry with a fresh key.
+    if (ikey) _idemCache.delete(ikey);
     console.error("[productions] create error:", err);
     return Response.json({ error: "创建失败" }, { status: 500 });
   }
