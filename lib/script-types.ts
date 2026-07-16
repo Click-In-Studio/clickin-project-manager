@@ -20,6 +20,7 @@ export type Block = {
   characterAnnotations: Record<string, string>;
   forceShowCharacterName?: boolean;
   lyric: boolean;
+  ownerMarkerId?: string | null;
   sceneId: string | null;
   rehearsalMark: string | null;
   markerMeta?: MarkerMeta | null;

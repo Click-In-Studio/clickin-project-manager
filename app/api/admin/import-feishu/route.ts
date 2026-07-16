@@ -19,7 +19,6 @@ import {
 import { createProduction, flushToDB, savePageMap } from "@/lib/db";
 import { computePageMap, PAGE_CONFIGS } from "@/lib/script-page";
 import { initialKeys } from "@/lib/lex-order";
-import { withMarkerOwnership } from "@/lib/script-marker-blocks";
 import type { Block } from "@/lib/script-types";
 
 let _seq = 0;
@@ -135,7 +134,7 @@ export async function POST(req: NextRequest) {
     if (!usedSceneIds.has(scene.id)) expandedBlocks.push(sceneMarkers.get(scene.id)!);
   }
   const lexKeys = initialKeys(expandedBlocks.length);
-  const dbBlocks = withMarkerOwnership(expandedBlocks).map((block, index) => ({
+  const dbBlocks = expandedBlocks.map((block, index) => ({
     ...block,
     lexKey: lexKeys[index],
   }));

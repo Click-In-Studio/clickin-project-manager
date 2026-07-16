@@ -1,5 +1,15 @@
 import type { Block, Scene } from "./script-types";
 
+export function localMarkerNumber(number: string, kind: "chapter" | "scene"): string {
+  const parts = number.trim().split("-").map((part) => part.trim()).filter(Boolean);
+  if (kind === "chapter") return parts[0] ?? "";
+  return [...parts].reverse().find((part) => /^\d+$/.test(part)) ?? parts.at(-1) ?? "";
+}
+
+export function localSceneNumber(number: string, parentId: string | null): string {
+  return localMarkerNumber(number, parentId === null ? "chapter" : "scene");
+}
+
 export function toAlphaLabel(index: number): string {
   let n = index + 1;
   let label = "";

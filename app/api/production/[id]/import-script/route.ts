@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureEmptyScriptBlocksForEmptyScenes, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
@@ -338,6 +338,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
   const previewVersionId = await resolveImportVersionId(req, productionId);
   if (previewVersionId instanceof Response) return previewVersionId;
+  const migration = await ensureScriptMarkerMigration(previewVersionId);
+  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
   const rawRows = body.rows ?? await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows, warningMarks } = parseRows(rawRows, body);
   const markerConflicts = validateProvidedMarkers(markerRows, parsed);
@@ -393,6 +395,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const versionId = await resolveImportVersionId(req, productionId);
   if (versionId instanceof Response) return versionId;
+  const migration = await ensureScriptMarkerMigration(versionId);
+  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
 
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows } = parseRows(rawRows, body);

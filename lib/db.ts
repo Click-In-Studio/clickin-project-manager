@@ -8,10 +8,10 @@ import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap } from "./script-page";
-import { generatedRehearsalLabels, withGeneratedSceneNumbers } from "./script-generated-labels";
+import { generatedRehearsalLabels, localMarkerNumber, localSceneNumber, withGeneratedSceneNumbers } from "./script-generated-labels";
 import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { projectMarkers, type MarkerProjection } from "./script-marker-domain";
-import { withMarkerOwnership } from "./script-marker-blocks";
+import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
 import { migrateLegacyRehearsalMentions } from "./mention-types";
 
 type MarkerMigrationState = {
@@ -206,6 +206,7 @@ type BlockRow = {
   sort_key: string;
   scene_id: string | null;
   rehearsal_mark: string | null;
+  owner_marker_id: string | null;
   marker_meta: MarkerMeta | null;
   type: DbBlockType;
   content: string;
@@ -231,15 +232,30 @@ function cleanMarkerMeta(meta: MarkerMeta | null | undefined): MarkerMeta {
   };
 }
 
-function markerMetaJson(block: Block): string {
-  return JSON.stringify(cleanMarkerMeta(block.markerMeta));
+function markerMetaJson(block: Pick<Block, "type" | "markerMeta">): string {
+  const meta = cleanMarkerMeta(block.markerMeta);
+  if (typeof meta.number === "string" && (block.type === "chapter_marker" || block.type === "scene_marker")) {
+    meta.number = localMarkerNumber(meta.number, block.type === "scene_marker" ? "scene" : "chapter");
+  }
+  return JSON.stringify(meta);
+}
+
+function localSceneNumberSql(value: string): string {
+  return `CASE
+    WHEN ${value} ~ '^[^-]+-[^-]+-[^-]+$' THEN regexp_replace(${value}, '^[^-]+-([^-]+)-[^-]+$', '\\1')
+    WHEN ${value} ~ '^[^-]+-[^0-9-]+$' THEN regexp_replace(${value}, '-[^-]+$', '')
+    ELSE regexp_replace(${value}, '^.*-', '')
+  END`;
 }
 
 const REHEARSAL_MARK_OWNERSHIP_CTE = `WITH version_blocks AS (
   SELECT sv.snapshot_id, sv.block_id, sv.sort_key, s.type::text AS type,
          s.scene_id AS current_scene_id,
          s.rehearsal_mark AS current_mark,
+         s.owner_marker_id AS current_owner_marker_id,
          s.marker_meta AS current_meta,
+         COUNT(*) FILTER (WHERE s.type = 'chapter_marker')
+           OVER (ORDER BY sv.sort_key) AS chapter_seq,
          COUNT(*) FILTER (WHERE s.type IN ('chapter_marker', 'scene_marker'))
            OVER (ORDER BY sv.sort_key) AS scene_seq
   FROM script_version sv
@@ -247,6 +263,8 @@ const REHEARSAL_MARK_OWNERSHIP_CTE = `WITH version_blocks AS (
   WHERE sv.version_id = $1
 ), sequenced AS (
   SELECT *,
+         MAX(CASE WHEN type = 'chapter_marker' THEN block_id END)
+           OVER (PARTITION BY chapter_seq) AS active_chapter_id,
          MAX(CASE WHEN type IN ('chapter_marker', 'scene_marker') THEN block_id END)
            OVER (PARTITION BY scene_seq) AS active_parent_id,
          COUNT(*) FILTER (WHERE type = 'rehearsal_marker')
@@ -263,12 +281,30 @@ const EXPECTED_REHEARSAL_MARK_SQL = `CASE
   ELSE active_marker_id
 END`;
 
+const EXPECTED_OWNER_MARKER_SQL = `CASE
+  WHEN type IN ('chapter_marker', 'scene_marker', 'rehearsal_marker') THEN NULL
+  ELSE COALESCE(active_marker_id, active_parent_id)
+END`;
+
 const EXPECTED_REHEARSAL_SCENE_SQL = `CASE
   WHEN type = 'rehearsal_marker' THEN NULL
-  ELSE current_scene_id
+  WHEN type IN ('chapter_marker', 'scene_marker') THEN block_id
+  ELSE active_parent_id
+END`;
+
+const EXPECTED_LOCAL_MARKER_META_SQL = `CASE
+  WHEN type = 'chapter_marker' AND current_meta ? 'number'
+    THEN current_meta || jsonb_build_object('number', regexp_replace(current_meta->>'number', '-.*$', ''))
+  WHEN type = 'scene_marker' AND current_meta ? 'number'
+    THEN current_meta || jsonb_build_object('number', ${localSceneNumberSql("current_meta->>'number'")})
+  ELSE current_meta
 END`;
 
 const EXPECTED_REHEARSAL_META_SQL = `CASE
+  WHEN type = 'chapter_marker'
+    THEN (${EXPECTED_LOCAL_MARKER_META_SQL}) || jsonb_build_object('parentMarkerId', NULL)
+  WHEN type = 'scene_marker'
+    THEN (${EXPECTED_LOCAL_MARKER_META_SQL}) || jsonb_build_object('parentMarkerId', active_chapter_id)
   WHEN type = 'rehearsal_marker'
     THEN current_meta || jsonb_build_object('parentMarkerId', active_parent_id)
   ELSE current_meta
@@ -276,6 +312,7 @@ END`;
 
 const STALE_REHEARSAL_OWNERSHIP_SQL = `current_mark IS DISTINCT FROM ${EXPECTED_REHEARSAL_MARK_SQL}
   OR current_scene_id IS DISTINCT FROM ${EXPECTED_REHEARSAL_SCENE_SQL}
+  OR current_owner_marker_id IS DISTINCT FROM ${EXPECTED_OWNER_MARKER_SQL}
   OR current_meta IS DISTINCT FROM ${EXPECTED_REHEARSAL_META_SQL}`;
 
 const LEGACY_MENTION_TEXT_TARGETS = {
@@ -404,8 +441,16 @@ async function scriptMarkerCacheMigrationStatus(versionId: string, db: Pool | Po
   const { rows } = await db.query<{ has_markers: boolean; needed: boolean }>(
     `${REHEARSAL_MARK_OWNERSHIP_CTE}
      SELECT COUNT(*) FILTER (WHERE type = 'rehearsal_marker') > 0 AS has_markers,
-            COUNT(*) FILTER (WHERE type = 'rehearsal_marker') > 0
-              AND COALESCE(bool_or(${STALE_REHEARSAL_OWNERSHIP_SQL}), false) AS needed
+            COALESCE(bool_or(${STALE_REHEARSAL_OWNERSHIP_SQL}), false)
+              OR EXISTS (
+                SELECT 1
+                FROM scene_version
+                WHERE version_id = $1
+                  AND num IS DISTINCT FROM CASE
+                    WHEN parent_id IS NULL THEN regexp_replace(num, '-.*$', '')
+                    ELSE ${localSceneNumberSql("num")}
+                  END
+              ) AS needed
      FROM owned`,
     [versionId],
   );
@@ -434,6 +479,22 @@ async function migrateLegacyRehearsalMentionRowsInTx(client: PoolClient, version
   }
 }
 
+async function normalizeSceneVersionNumbersInTx(client: PoolClient, versionId: string): Promise<void> {
+  await client.query(
+    `UPDATE scene_version
+     SET num = CASE
+       WHEN parent_id IS NULL THEN regexp_replace(num, '-.*$', '')
+       ELSE ${localSceneNumberSql("num")}
+       END
+     WHERE version_id = $1
+       AND num IS DISTINCT FROM CASE
+         WHEN parent_id IS NULL THEN regexp_replace(num, '-.*$', '')
+         ELSE ${localSceneNumberSql("num")}
+       END`,
+    [versionId],
+  );
+}
+
 async function normalizeRehearsalMarkOwnershipInTx(
   client: PoolClient,
   versionId: string,
@@ -443,6 +504,7 @@ async function normalizeRehearsalMarkOwnershipInTx(
     snapshot_id: string;
     expected_scene_id: string | null;
     expected_mark: string | null;
+    expected_owner_marker_id: string | null;
     expected_meta: MarkerMeta;
     ref_count: number;
   }>(
@@ -451,6 +513,7 @@ async function normalizeRehearsalMarkOwnershipInTx(
             (SELECT COUNT(*)::int FROM script_version refs WHERE refs.snapshot_id = owned.snapshot_id) AS ref_count,
             ${EXPECTED_REHEARSAL_SCENE_SQL} AS expected_scene_id,
             ${EXPECTED_REHEARSAL_MARK_SQL} AS expected_mark,
+            ${EXPECTED_OWNER_MARKER_SQL} AS expected_owner_marker_id,
             ${EXPECTED_REHEARSAL_META_SQL} AS expected_meta
      FROM owned
      WHERE ${STALE_REHEARSAL_OWNERSHIP_SQL}`,
@@ -467,14 +530,16 @@ async function normalizeRehearsalMarkOwnershipInTx(
       `UPDATE script s
        SET scene_id = updates.expected_scene_id,
            rehearsal_mark = updates.expected_mark,
+           owner_marker_id = updates.expected_owner_marker_id,
            marker_meta = updates.expected_meta
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::jsonb[])
-         AS updates(snapshot_id, expected_scene_id, expected_mark, expected_meta)
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::jsonb[])
+         AS updates(snapshot_id, expected_scene_id, expected_mark, expected_owner_marker_id, expected_meta)
        WHERE s.id = updates.snapshot_id`,
       [
         exclusive.map((row) => row.snapshot_id),
         exclusive.map((row) => row.expected_scene_id),
         exclusive.map((row) => row.expected_mark),
+        exclusive.map((row) => row.expected_owner_marker_id),
         exclusive.map((row) => JSON.stringify(row.expected_meta)),
       ],
     );
@@ -485,10 +550,10 @@ async function normalizeRehearsalMarkOwnershipInTx(
     const row = shared[index];
     const newSnapshotId = genSnapshotId();
     await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-       SELECT $1, block_id, production_id, sort_key, $2, $3, type, content, stage_comment, $4::jsonb, force_show_character_name
-       FROM script WHERE id = $5`,
-      [newSnapshotId, row.expected_scene_id, row.expected_mark, JSON.stringify(row.expected_meta), row.snapshot_id],
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+       SELECT $1, block_id, production_id, sort_key, $2, $3, $4, type, content, stage_comment, $5::jsonb, force_show_character_name
+       FROM script WHERE id = $6`,
+      [newSnapshotId, row.expected_scene_id, row.expected_mark, row.expected_owner_marker_id, JSON.stringify(row.expected_meta), row.snapshot_id],
     );
     await client.query(
       `INSERT INTO script_character (script_id, character_id, position, annotation)
@@ -525,6 +590,7 @@ async function runScriptMarkerMigration(versionId: string, state: MarkerMigratio
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
+    await normalizeSceneVersionNumbersInTx(client, versionId);
     await normalizeRehearsalMarkOwnershipInTx(client, versionId, state);
     await migrateLegacyRehearsalMentionRowsInTx(client, versionId);
     await client.query("COMMIT");
@@ -658,7 +724,10 @@ async function syncSceneVersionsFromMarkersInTx(
        SELECT
          ms.scene_id,
          $1,
-         COALESCE(ms.marker_meta->>'number', ''),
+         CASE
+           WHEN ms.parent_id IS NULL THEN regexp_replace(COALESCE(ms.marker_meta->>'number', ''), '-.*$', '')
+           ELSE ${localSceneNumberSql("COALESCE(ms.marker_meta->>'number', '')")}
+         END,
          COALESCE(ms.marker_meta->>'name', ''),
          ms.sort_order,
          ms.parent_id,
@@ -1070,6 +1139,7 @@ export async function loadProduction(productionId: string, versionId: string): P
 	           sv.sort_key,
 	           s.scene_id,
 	           s.rehearsal_mark,
+	           s.owner_marker_id,
 	           s.marker_meta,
 	           s.type,
 	           s.content,
@@ -1152,6 +1222,7 @@ export async function loadProduction(productionId: string, versionId: string): P
           forceShowCharacterName: row.force_show_character_name,
           sceneId: isChapterSceneMarkerType(row.type) ? row.block_id : row.scene_id,
           rehearsalMark: row.rehearsal_mark,
+          ownerMarkerId: isMarkerBlockType(row.type) ? undefined : row.owner_marker_id,
           markerMeta: cleanMarkerMeta(row.marker_meta),
           characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
           characterAnnotations: annotationsBySnapshot.get(row.snapshot_id) ?? {},
@@ -1273,7 +1344,8 @@ export async function flushToDBVersioned(
   versionId: string,
   payload: VersionedFlushPayload,
 ): Promise<VersionedFlushResult> {
-  const { upsertBlocks, deleteSnapshotIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
+  const { upsertBlocks: rawUpsertBlocks, deleteSnapshotIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
+  const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(rawUpsertBlocks));
   const newSnapshotIds = new Map<string, string>();
 
   if (!upsertBlocks.length && !deleteSnapshotIds.length && !upsertChars.length &&
@@ -1327,7 +1399,7 @@ export async function flushToDBVersioned(
            SET num = EXCLUDED.num, name = EXCLUDED.name,
                sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
         [upsertScenes.map(s => s.id), versionId,
-         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
+         upsertScenes.map(s => localSceneNumber(s.number, s.parentId)), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
          upsertScenes.map(s => s.parentId ?? null)]
       );
     }
@@ -1359,10 +1431,10 @@ export async function flushToDBVersioned(
         // Brand new block: insert snapshot + relation
         const snapshotId = genSnapshotId();
         await client.query(
-          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
+          `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
           [snapshotId, block.id, productionId, block.lexKey,
-           block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
+           block.sceneId ?? null, block.rehearsalMark ?? null, block.ownerMarkerId ?? null, toDbType(block), block.content,
            block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false]
         );
         await client.query(
@@ -1391,8 +1463,8 @@ export async function flushToDBVersioned(
         if (refCount <= 1) {
           // Sole reference: update in-place
           await client.query(
-            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type, content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7 WHERE id = $8`,
-            [block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
+            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, owner_marker_id = $3, type = $4::block_type, content = $5, stage_comment = $6, marker_meta = $7::jsonb, force_show_character_name = $8 WHERE id = $9`,
+            [block.sceneId ?? null, block.rehearsalMark ?? null, block.ownerMarkerId ?? null, toDbType(block), block.content,
              block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false, block.snapshotId]
           );
           // Update sort_key in relation table
@@ -1418,10 +1490,10 @@ export async function flushToDBVersioned(
           // Multi-referenced: copy-on-write
           const newSnapshotId = genSnapshotId();
           await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
+            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
             [newSnapshotId, block.id, productionId, block.lexKey,
-             block.sceneId ?? null, block.rehearsalMark ?? null, toDbType(block), block.content,
+             block.sceneId ?? null, block.rehearsalMark ?? null, block.ownerMarkerId ?? null, toDbType(block), block.content,
              block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false]
           );
           // Remap relation for this version to the new snapshot
@@ -1514,7 +1586,8 @@ export async function flushToDBVersioned(
 /** Legacy flush used by management pages (import-script, import-scenes).
  *  Operates on the active editing version; no CoW for blocks. */
 export async function flushToDB(productionId: string, payload: FlushPayload): Promise<void> {
-  const { upsertBlocks, deleteBlockIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
+  const { upsertBlocks: rawUpsertBlocks, deleteBlockIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
+  const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(rawUpsertBlocks));
   if (!upsertBlocks.length && !deleteBlockIds.length && !upsertChars.length &&
       !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) return;
 
@@ -1566,7 +1639,7 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
              SET num = EXCLUDED.num, name = EXCLUDED.name,
                  sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
           [upsertScenes.map(s => s.id), versionId,
-           upsertScenes.map(s => s.number), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
+           upsertScenes.map(s => localSceneNumber(s.number, s.parentId)), upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
            upsertScenes.map(s => s.parentId ?? null)]
         );
       } else {
@@ -1599,13 +1672,14 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
     if (upsertBlocks.length > 0) {
       // Full upsert into script (using block id as snapshot id — legacy mode)
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name, owner_marker_id)
          SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]),
                 unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]), unnest($8::text[]),
-                unnest($9::jsonb[]), unnest($10::bool[])
+                unnest($9::jsonb[]), unnest($10::bool[]), unnest($11::text[])
          ON CONFLICT (id) DO UPDATE SET
            block_id = EXCLUDED.block_id, sort_key = EXCLUDED.sort_key, scene_id = EXCLUDED.scene_id,
-           rehearsal_mark = EXCLUDED.rehearsal_mark, type = EXCLUDED.type, content = EXCLUDED.content,
+           rehearsal_mark = EXCLUDED.rehearsal_mark, owner_marker_id = EXCLUDED.owner_marker_id,
+           type = EXCLUDED.type, content = EXCLUDED.content,
            stage_comment = EXCLUDED.stage_comment, marker_meta = EXCLUDED.marker_meta,
            force_show_character_name = EXCLUDED.force_show_character_name`,
         [
@@ -1616,6 +1690,7 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
           upsertBlocks.map(b => b.stageComment?.trim() || null),
           upsertBlocks.map(b => markerMetaJson(b)),
           upsertBlocks.map(b => b.forceShowCharacterName ?? false),
+          upsertBlocks.map(b => b.ownerMarkerId ?? null),
         ]
       );
 
@@ -1706,6 +1781,7 @@ export async function importScriptToVersion(
       lyric: boolean;
       characterIds: string[];
       characterAnnotations: Record<string, string>;
+      ownerMarkerId?: string | null;
       sceneId: string | null;
       rehearsalMark: string | null;
       markerMeta?: MarkerMeta | null;
@@ -1716,7 +1792,7 @@ export async function importScriptToVersion(
     deleteSceneIds?: string[];
   },
 ): Promise<void> {
-  const upsertBlocks = withMarkerOwnership(payload.upsertBlocks);
+  const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(payload.upsertBlocks));
   const { deleteSceneIds = [] } = payload;
   const seenCharIds = new Set<string>();
   const upsertChars = payload.upsertChars.filter((char) => {
@@ -1771,7 +1847,7 @@ export async function importScriptToVersion(
            SET num = EXCLUDED.num, name = EXCLUDED.name,
                sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
         [upsertScenes.map(s => s.id), versionId,
-         upsertScenes.map(s => s.number), upsertScenes.map(s => s.name),
+          upsertScenes.map(s => localSceneNumber(s.number, s.parentId)), upsertScenes.map(s => s.name),
          upsertScenes.map(s => s.sortOrder), upsertScenes.map(s => s.parentId ?? null)]
       );
     }
@@ -1802,10 +1878,10 @@ export async function importScriptToVersion(
 
     if (upsertBlocks.length > 0) {
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta)
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
          SELECT unnest($1::text[]), unnest($10::text[]), $2::text, unnest($3::text[]),
                 unnest($4::text[]), unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]),
-                unnest($8::text[]), unnest($9::bool[]), unnest($11::jsonb[])`,
+                unnest($8::text[]), unnest($9::bool[]), unnest($11::jsonb[]), unnest($12::text[])`,
         [
           upsertBlocks.map(b => b.id), productionId,
           upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
@@ -1815,7 +1891,8 @@ export async function importScriptToVersion(
           upsertBlocks.map(b => b.stageComment?.trim() || null),
           upsertBlocks.map(() => false),
           upsertBlocks.map(b => b.blockId ?? b.id),
-          upsertBlocks.map(b => JSON.stringify(cleanMarkerMeta(b.markerMeta))),
+          upsertBlocks.map(b => markerMetaJson(b)),
+          upsertBlocks.map(b => b.ownerMarkerId ?? null),
         ]
       );
       await client.query(
@@ -1912,9 +1989,9 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
       const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
       const lexKey = keyBetween(row.sort_key, nextSortKey);
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta)
-         VALUES ($1, $2, $3, $4, NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb)`,
-        [snapshotId, blockId, productionId, lexKey],
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
+         VALUES ($1, $2, $3, $4, NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb, $5)`,
+        [snapshotId, blockId, productionId, lexKey, row.block_id],
       );
       await client.query(
         "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
@@ -2529,7 +2606,7 @@ export async function listSceneVersionsByVersion(versionId: string): Promise<Sce
      ORDER BY sort_order, scene_id`,
     [versionId]
   );
-  return res.rows.map((r) => ({
+  return withGeneratedSceneNumbers(res.rows.map((r) => ({
     id: r.id,
     number: r.num,
     name: r.name,
@@ -2539,7 +2616,7 @@ export async function listSceneVersionsByVersion(versionId: string): Promise<Sce
     music: r.music ?? "",
     stageNotes: r.stage_notes ?? "",
     expectedDuration: r.expected_duration ?? "",
-  }));
+  })));
 }
 
 export async function listCharactersByVersion(versionId: string): Promise<CharacterDetail[]> {
@@ -2765,8 +2842,8 @@ export async function updateSceneMetadata(
     } else {
       const newSnapshotId = genSnapshotId();
       await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-         SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment,
+        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+         SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment,
                 COALESCE(marker_meta, '{}'::jsonb) || $2::jsonb, force_show_character_name
          FROM script
          WHERE id = $3`,
@@ -3824,8 +3901,8 @@ export async function cowBlockSnapshotForMount(
     const newSnapshotId = genSnapshotId();
 
     await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name
        FROM script WHERE id = $2`,
       [newSnapshotId, snapshotId]
     );
@@ -4084,7 +4161,7 @@ export async function applyPatchToDB(
   if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
 
   // Local working-state types
-  type TxBlock = { blockId: string; snapshotId: string; lexKey: string; type: string; rehearsalMark: string | null };
+  type TxBlock = { blockId: string; snapshotId: string; lexKey: string; type: string; rehearsalMark: string | null; ownerMarkerId: string | null };
   type TxScene = Scene & { sortOrder: number };
   type TxChar  = Character & { sortOrder: number };
 
@@ -4107,8 +4184,8 @@ export async function applyPatchToDB(
     }
 
     // ── Load current version state (within the lock) ─────────────────────────
-    const blockRows = await client.query<{ block_id: string; snapshot_id: string; sort_key: string; type: string; rehearsal_mark: string | null }>(
-      `SELECT sv.block_id, sv.snapshot_id, sv.sort_key, s.type::text AS type, s.rehearsal_mark
+    const blockRows = await client.query<{ block_id: string; snapshot_id: string; sort_key: string; type: string; rehearsal_mark: string | null; owner_marker_id: string | null }>(
+      `SELECT sv.block_id, sv.snapshot_id, sv.sort_key, s.type::text AS type, s.rehearsal_mark, s.owner_marker_id
        FROM script_version sv
        JOIN script s ON s.id = sv.snapshot_id
        WHERE sv.version_id = $1
@@ -4126,7 +4203,8 @@ export async function applyPatchToDB(
 
     // Working ordered block list (mutated as ops are applied)
     const txBlocks: TxBlock[] = blockRows.rows.map(r => ({
-      blockId: r.block_id, snapshotId: r.snapshot_id, lexKey: r.sort_key, type: r.type, rehearsalMark: r.rehearsal_mark,
+      blockId: r.block_id, snapshotId: r.snapshot_id, lexKey: r.sort_key, type: r.type,
+      rehearsalMark: r.rehearsal_mark, ownerMarkerId: r.owner_marker_id,
     }));
     const txBlockMap = new Map<string, TxBlock>(txBlocks.map(b => [b.blockId, b]));
     let shouldSyncSceneVersions = patch.sceneOps.length > 0;
@@ -4215,7 +4293,7 @@ export async function applyPatchToDB(
            SET num = EXCLUDED.num, name = EXCLUDED.name,
                sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
         [toWrite.map(s => s.id), versionId,
-         toWrite.map(s => s.number), toWrite.map(s => s.name),
+         toWrite.map(s => localSceneNumber(s.number, s.parentId)), toWrite.map(s => s.name),
          toWrite.map(s => s.sortOrder), toWrite.map(s => s.parentId ?? null)]
       );
     }
@@ -4302,6 +4380,11 @@ export async function applyPatchToDB(
             : previousBlock?.type === "rehearsal_marker"
               ? previousBlock.blockId
               : previousBlock?.rehearsalMark ?? null;
+          const insertOwnerMarkerId = isMarkerBlockType(insertType)
+            ? null
+            : previousBlock && isMarkerBlockType(previousBlock.type)
+              ? previousBlock.blockId
+              : previousBlock?.ownerMarkerId ?? null;
           if (isChapterSceneMarkerType(insertType) && insertBlock.sceneId) {
             await client.query(
               `INSERT INTO scene (id, production_id) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
@@ -4310,10 +4393,10 @@ export async function applyPatchToDB(
           }
 
           await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
+            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
             [snapshotId, insertBlock.id, productionId, lexKey,
-             insertBlock.sceneId ?? null, insertRehearsalMark,
+             insertBlock.sceneId ?? null, insertRehearsalMark, insertOwnerMarkerId,
              insertType, insertBlock.content,
              insertBlock.stageComment?.trim() || null, markerMetaJson(insertBlock), insertBlock.forceShowCharacterName ?? false]
           );
@@ -4340,7 +4423,8 @@ export async function applyPatchToDB(
           if (isChapterSceneMarkerType(toDbType(insertBlock))) shouldSyncSceneVersions = true;
 
           const newTxBlock: TxBlock = {
-            blockId: op.block.id, snapshotId, lexKey, type: insertType, rehearsalMark: insertRehearsalMark,
+            blockId: op.block.id, snapshotId, lexKey, type: insertType,
+            rehearsalMark: insertRehearsalMark, ownerMarkerId: insertOwnerMarkerId,
           };
           txBlocks.splice(insertAt, 0, newTxBlock);
           txBlockMap.set(op.block.id, newTxBlock);
@@ -4380,8 +4464,7 @@ export async function applyPatchToDB(
                SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
                    content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7
                WHERE id = $8`,
-              [updateBlock.sceneId ?? null, cur.rehearsalMark,
-               nextType, updateBlock.content,
+              [updateBlock.sceneId ?? null, cur.rehearsalMark, nextType, updateBlock.content,
                updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock),
                updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
             );
@@ -4409,10 +4492,10 @@ export async function applyPatchToDB(
             const newSnapshotId = genSnapshotId();
 
             await client.query(
-              `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::block_type, $8, $9, $10::jsonb, $11)`,
+              `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
               [newSnapshotId, updateBlock.id, productionId, cur.lexKey,
-               updateBlock.sceneId ?? null, cur.rehearsalMark,
+               updateBlock.sceneId ?? null, cur.rehearsalMark, cur.ownerMarkerId,
                nextType, updateBlock.content,
                updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock), updateBlock.forceShowCharacterName ?? false]
             );
@@ -4508,16 +4591,25 @@ export async function applyPatchToDB(
           if (!ordered.length) break;
           if (!shouldNormalizeRehearsalOwnership) {
             let activeRehearsalMark: string | null = null;
+            let activeOwnerMarkerId: string | null = null;
             for (const block of ordered) {
               let expectedRehearsalMark = activeRehearsalMark;
+              let expectedOwnerMarkerId = activeOwnerMarkerId;
               if (isChapterSceneMarkerType(block.type)) {
                 activeRehearsalMark = null;
+                activeOwnerMarkerId = block.blockId;
                 expectedRehearsalMark = null;
+                expectedOwnerMarkerId = null;
               } else if (block.type === "rehearsal_marker") {
                 activeRehearsalMark = block.blockId;
+                activeOwnerMarkerId = block.blockId;
                 expectedRehearsalMark = null;
+                expectedOwnerMarkerId = null;
               }
-              if (block.rehearsalMark !== expectedRehearsalMark) {
+              if (
+                block.rehearsalMark !== expectedRehearsalMark ||
+                block.ownerMarkerId !== expectedOwnerMarkerId
+              ) {
                 shouldNormalizeRehearsalOwnership = true;
                 break;
               }

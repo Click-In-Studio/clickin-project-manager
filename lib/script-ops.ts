@@ -1,5 +1,5 @@
 import type { Block, Character, Scene, ScriptState } from "./script-types";
-import { isMarkerBlock } from "./script-marker-blocks";
+import { isMarkerBlock, withLegacyOwnershipProjection } from "./script-marker-blocks";
 
 // ─── Op types ─────────────────────────────────────────────────────────────────
 
@@ -42,11 +42,12 @@ export function diffState(
   const blockOps: BlockOp[] = [];
   const charOps: CharOp[] = [];
   const sceneOps: SceneOp[] = [];
+  const projectedCurrBlocks = withLegacyOwnershipProjection(curr.blocks);
 
   if (prev === null) {
     // Full sync: treat everything as inserts / upserts
     let afterId: string | null = null;
-    for (const block of curr.blocks) {
+    for (const block of projectedCurrBlocks) {
       blockOps.push({ op: "insert", block, afterId });
       afterId = block.id;
     }
@@ -58,6 +59,8 @@ export function diffState(
     }
     return { clientSeq, blockOps, charOps, sceneOps };
   }
+
+  const projectedPrevBlocks = withLegacyOwnershipProjection(prev.blocks);
 
   // ── Characters ──────────────────────────────────────────────────────────────
   const prevCharMap = new Map(prev.characters.map((c) => [c.id, c]));
@@ -101,28 +104,28 @@ export function diffState(
   }
 
   // ── Blocks ───────────────────────────────────────────────────────────────────
-  const prevBlockMap = new Map(prev.blocks.map((b) => [b.id, b]));
-  const currBlockMap = new Map(curr.blocks.map((b) => [b.id, b]));
-  const currBlockIds = new Set(curr.blocks.map((b) => b.id));
+  const prevBlockMap = new Map(projectedPrevBlocks.map((b) => [b.id, b]));
+  const currBlockMap = new Map(projectedCurrBlocks.map((b) => [b.id, b]));
+  const currBlockIds = new Set(projectedCurrBlocks.map((b) => b.id));
 
   // Deletes
-  for (const block of prev.blocks) {
+  for (const block of projectedPrevBlocks) {
     if (!currBlockIds.has(block.id)) {
       blockOps.push({ op: "delete", id: block.id });
     }
   }
 
   // Inserts
-  for (let i = 0; i < curr.blocks.length; i++) {
-    const block = curr.blocks[i];
+  for (let i = 0; i < projectedCurrBlocks.length; i++) {
+    const block = projectedCurrBlocks[i];
     if (!prevBlockMap.has(block.id)) {
-      const afterId = i > 0 ? curr.blocks[i - 1].id : null;
+      const afterId = i > 0 ? projectedCurrBlocks[i - 1].id : null;
       blockOps.push({ op: "insert", block, afterId });
     }
   }
 
   // Updates (content/field changes on retained blocks)
-  for (const block of curr.blocks) {
+  for (const block of projectedCurrBlocks) {
     const old = prevBlockMap.get(block.id);
     if (old && JSON.stringify(old) !== JSON.stringify(block)) {
       blockOps.push({ op: "update", block });

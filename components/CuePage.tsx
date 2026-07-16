@@ -16,7 +16,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
-import { textBlocksWithMarkerOwnership } from "@/lib/script-marker-blocks";
+import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwnershipProjection } from "@/lib/script-marker-blocks";
 import { generatedRehearsalLabels } from "@/lib/script-generated-labels";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
@@ -850,7 +850,10 @@ export default function CuePage({
   versions = [], versionId, versionStatus, canManageVersions = false,
 }: Props) {
   const router = useRouter();
-  const blocks = useMemo(() => textBlocksWithMarkerOwnership(rawBlocks), [rawBlocks]);
+  const blocks = useMemo(() => withLegacyOwnershipProjection(
+    textBlocksWithMarkerOwnership(rawBlocks),
+    buildMarkerContextById(rawBlocks),
+  ), [rawBlocks]);
   const rehearsalLabelByMarkerId = useMemo(
     () => generatedRehearsalLabels(rawBlocks).labelByMarkerId,
     [rawBlocks],

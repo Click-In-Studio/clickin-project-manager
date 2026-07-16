@@ -3,10 +3,11 @@ import {
   convertMarker, executeMarkerDeletion, insertHierarchyMarker, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
 } from "../lib/script-marker-domain";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../lib/script-types";
-import { patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
-import { withMarkerOwnership } from "../lib/script-marker-blocks";
-import { generatedRehearsalLabels } from "../lib/script-generated-labels";
+import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
+import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "../lib/script-marker-blocks";
+import { generatedRehearsalLabels, localMarkerNumber, localSceneNumber } from "../lib/script-generated-labels";
 import { migrateLegacyRehearsalMentions } from "../lib/mention-types";
+import { updateMarkerOwnership } from "../lib/script-marker-ownership-cache";
 
 let id = 0;
 const createId = () => `generated-${++id}`;
@@ -41,6 +42,25 @@ const baseline = state([
   block("s21", "scene_marker", "", "legacy-s21"),
   block("t21", "dialogue", "chapter two", null),
 ]);
+
+assert.equal(localMarkerNumber("2", "chapter"), "2");
+assert.equal(localMarkerNumber("2-3", "scene"), "3");
+assert.equal(localMarkerNumber("3-A", "scene"), "3");
+assert.equal(localMarkerNumber("2-3-A", "scene"), "3");
+assert.equal(localSceneNumber("2", null), "2");
+assert.equal(localSceneNumber("2-3", "chapter"), "3");
+const localMarkerState = normalizeMarkerState(state([
+  { ...block("chapter-numbered", "chapter_marker"), markerMeta: { number: "2" } },
+  { ...block("scene-numbered", "scene_marker"), markerMeta: { number: "2-3", parentMarkerId: "chapter-numbered" } },
+]), createId);
+assert.equal(localMarkerState.blocks.find((item) => item.id === "chapter-numbered")?.markerMeta?.number, "2");
+assert.equal(localMarkerState.blocks.find((item) => item.id === "scene-numbered")?.markerMeta?.number, "3");
+const generatedLocalMarkerState = normalizeMarkerState(state([
+  block("chapter-generated", "chapter_marker"),
+  block("scene-generated", "scene_marker"),
+]), createId);
+assert.equal(generatedLocalMarkerState.blocks.find((item) => item.id === "chapter-generated")?.markerMeta?.number, "0");
+assert.equal(generatedLocalMarkerState.blocks.find((item) => item.id === "scene-generated")?.markerMeta?.number, "1");
 
 assert.equal(resolveMarkerId(baseline, "legacy-s11"), "s11");
 assert.deepEqual(projectMarkers(baseline).map(({ id, kind, parentId }) => ({ id, kind, parentId })), [
@@ -297,9 +317,41 @@ const ownedRehearsalBlocks = withMarkerOwnership([
   block("mark-b", "rehearsal_marker"),
   block("text-b", "dialogue", "two", null),
 ]);
-assert.equal(ownedRehearsalBlocks.find((item) => item.id === "text-b")?.rehearsalMark, "mark-b");
+assert.equal(ownedRehearsalBlocks.find((item) => item.id === "text-b")?.rehearsalMark, null);
+assert.equal(ownedRehearsalBlocks.find((item) => item.id === "text-b")?.ownerMarkerId, "mark-b");
+assert.equal(ownedRehearsalBlocks.find((item) => item.id === "mark-b")?.ownerMarkerId, undefined);
 assert.equal(ownedRehearsalBlocks.find((item) => item.id === "mark-b")?.markerMeta?.parentMarkerId, "scene");
 assert.equal(generatedRehearsalLabels(ownedRehearsalBlocks).labelByMarkerId.get("mark-b"), "B");
+
+const contextBlocks = withMarkerOwnership([
+  block("chapter", "chapter_marker"),
+  block("scene-context", "scene_marker"),
+  block("mark-context", "rehearsal_marker"),
+  block("mark-text", "dialogue", "marked", null),
+]);
+const markerContextById = buildMarkerContextById(contextBlocks);
+assert.deepEqual(markerContextById.get("chapter"), {
+  chapterId: "chapter", sceneId: "chapter", rehearsalId: null,
+});
+assert.deepEqual(markerContextById.get("mark-context"), {
+  chapterId: "chapter", sceneId: "scene-context", rehearsalId: "mark-context",
+});
+const serializedOwnershipPatch = diffState(null, state(contextBlocks), 1);
+const serializedMarkText = serializedOwnershipPatch.blockOps.find(
+  (op) => op.op === "insert" && op.block.id === "mark-text",
+);
+assert.equal(
+  serializedMarkText?.op === "insert" ? serializedMarkText.block.ownerMarkerId : null,
+  "mark-context",
+);
+assert.equal(serializedMarkText?.op === "insert" ? serializedMarkText.block.sceneId : null, "scene-context");
+assert.equal(serializedMarkText?.op === "insert" ? serializedMarkText.block.rehearsalMark : null, "mark-context");
+const insertedText = block("inserted-text", "dialogue", "inserted", null);
+const incrementallyOwned = updateMarkerOwnership(
+  [...contextBlocks, insertedText],
+  { start: contextBlocks.length, end: contextBlocks.length + 1 },
+);
+assert.equal(incrementallyOwned.at(-1)?.ownerMarkerId, "mark-context");
 
 const insertedRehearsalBlocks = withMarkerOwnership([
   ...ownedRehearsalBlocks.slice(0, 3),
@@ -310,7 +362,7 @@ const insertedRehearsalBlocks = withMarkerOwnership([
 const insertedLabels = generatedRehearsalLabels(insertedRehearsalBlocks).labelByMarkerId;
 assert.equal(insertedLabels.get("mark-new"), "B");
 assert.equal(insertedLabels.get("mark-b"), "C");
-assert.equal(insertedRehearsalBlocks.find((item) => item.id === "text-b")?.rehearsalMark, "mark-b");
+assert.equal(insertedRehearsalBlocks.find((item) => item.id === "text-b")?.ownerMarkerId, "mark-b");
 
 const staleRehearsalCache = [
   block("scene-1", "scene_marker"),
@@ -320,16 +372,21 @@ const staleRehearsalCache = [
   block("mark-2", "rehearsal_marker"),
   block("text-2", "dialogue", "two", null),
 ];
-const normalizedRehearsalCache = withMarkerOwnership(staleRehearsalCache);
+const derivedRehearsalCache = withMarkerOwnership(staleRehearsalCache);
+assert.equal(derivedRehearsalCache.find((item) => item.id === "text-1")?.ownerMarkerId, "mark-1");
+assert.equal(derivedRehearsalCache.find((item) => item.id === "text-1")?.rehearsalMark, "A");
+assert.equal(derivedRehearsalCache.find((item) => item.id === "mark-1")?.ownerMarkerId, undefined);
+assert.equal(derivedRehearsalCache.find((item) => item.id === "mark-1")?.rehearsalMark, "A");
+const normalizedRehearsalCache = withLegacyOwnershipProjection(derivedRehearsalCache);
 assert.deepEqual(
   normalizedRehearsalCache.map(({ id, sceneId, rehearsalMark, markerMeta }) => ({
     id, sceneId, rehearsalMark, parentId: markerMeta?.parentMarkerId,
   })),
   [
-    { id: "scene-1", sceneId: "scene-1", rehearsalMark: null, parentId: undefined },
+    { id: "scene-1", sceneId: "scene-1", rehearsalMark: null, parentId: null },
     { id: "mark-1", sceneId: null, rehearsalMark: null, parentId: "scene-1" },
     { id: "text-1", sceneId: "scene-1", rehearsalMark: "mark-1", parentId: undefined },
-    { id: "scene-2", sceneId: "scene-2", rehearsalMark: null, parentId: undefined },
+    { id: "scene-2", sceneId: "scene-2", rehearsalMark: null, parentId: null },
     { id: "mark-2", sceneId: null, rehearsalMark: null, parentId: "scene-2" },
     { id: "text-2", sceneId: "scene-2", rehearsalMark: "mark-2", parentId: undefined },
   ],

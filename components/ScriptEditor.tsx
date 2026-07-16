@@ -33,8 +33,8 @@ import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { generatedRehearsalLabels } from "@/lib/script-generated-labels";
-import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withMarkerOwnership } from "@/lib/script-marker-blocks";
-import { markerOwnershipRange, updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
+import { buildMarkerContextById, isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -6619,7 +6619,6 @@ export default function ScriptEditor({
   }, [scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
 
   // ── Page map (computed client-side, deterministic) ──────────────────────────
-  const ownershipCacheRef = useRef<{ blocks: Block[]; owned: Block[] } | null>(null);
   const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
   const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
   const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
@@ -6641,12 +6640,15 @@ export default function ScriptEditor({
     pageMapDirtyRef.current = [...currentRanges, ...nextRanges];
   }, []);
   const ownedBlocks = useMemo(() => {
-    const cache = ownershipCacheRef.current;
-    const owned = updateMarkerOwnership(cache?.blocks ?? null, blocks, cache?.owned ?? null, ownershipDirtyRef.current);
-    ownershipCacheRef.current = { blocks, owned };
+    const owned = updateMarkerOwnership(blocks, ownershipDirtyRef.current);
     ownershipDirtyRef.current = null;
     return owned;
   }, [blocks]);
+  const markerContextById = useMemo(() => buildMarkerContextById(ownedBlocks), [ownedBlocks]);
+  const legacyProjectedBlocks = useMemo(
+    () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
+    [markerContextById, ownedBlocks],
+  );
   const rehearsalLabels = useMemo(() => generatedRehearsalLabels(blocks), [blocks]);
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
@@ -9122,7 +9124,6 @@ export default function ScriptEditor({
 
   const addChapterBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !canEditMetadata) return;
-    const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
     const next = insertMarker({
       blocks: blocksRef.current,
       scenes: scenesRef.current,
@@ -9130,8 +9131,7 @@ export default function ScriptEditor({
       config: scriptConfigRef.current,
     }, { kind: "chapter", name: "", beforeBlockId: blockId }, uid);
     saveSnapshot();
-    const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
-    markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
+    markOwnershipDirty("full");
     setBlocks(next.blocks);
     setScenes(next.scenes);
     setScriptConfig(next.config);
@@ -9142,7 +9142,6 @@ export default function ScriptEditor({
   const addSceneBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !canEditMetadata) return;
     const chapterId = findChapterIdForBlock(blockId);
-    const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
     const next = insertMarker({
       blocks: blocksRef.current,
       scenes: scenesRef.current,
@@ -9155,8 +9154,7 @@ export default function ScriptEditor({
       beforeBlockId: blockId,
     }, uid);
     saveSnapshot();
-    const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
-    markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
+    markOwnershipDirty("full");
     setBlocks(next.blocks);
     setScenes(next.scenes);
     setScriptConfig(next.config);
@@ -9168,9 +9166,7 @@ export default function ScriptEditor({
     if (isLockedMode || !effectiveCanEditRehearsalMark) return;
     const marker = makeMarkerBlock("rehearsal_marker");
     saveSnapshot();
-    const currentIdx = blocksRef.current.findIndex((block) => block.id === blockId);
-    const insertIdx = currentIdx === -1 ? blocksRef.current.length : currentIdx;
-    markOwnershipDirty({ start: insertIdx, end: insertIdx + 1, affectsMarkers: true });
+    markOwnershipDirty("full");
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === blockId);
       const insertIndex = idx === -1 ? prev.length : idx;
@@ -9194,7 +9190,7 @@ export default function ScriptEditor({
     }, blockId, nextType === "chapter_marker" ? "chapter" : "scene", uid);
 
     saveSnapshot();
-    markOwnershipDirty({ start: currentIdx, end: currentIdx + 1, affectsMarkers: true });
+    markOwnershipDirty("full");
     setBlocks(next.blocks);
     setScenes(next.scenes);
     setScriptConfig(next.config);
@@ -9215,7 +9211,7 @@ export default function ScriptEditor({
     // from the block actually committed to state (from the 1st call).
     const nextBlockId = uid();
     const currentIdx = blocksRef.current.findIndex((block) => block.id === id);
-    if (currentIdx !== -1) markOwnershipDirty({ start: currentIdx, end: currentIdx + 2, affectsMarkers: true });
+    if (currentIdx !== -1) markOwnershipDirty({ start: currentIdx, end: currentIdx + 2 });
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx === -1) return prev;
@@ -9242,7 +9238,7 @@ export default function ScriptEditor({
     if (isLockedMode) return;
     saveSnapshot();
     const currentIdx = blocksRef.current.findIndex((block) => block.id === id);
-    if (currentIdx !== -1) markOwnershipDirty({ start: Math.max(0, currentIdx - 1), end: currentIdx + 1, affectsMarkers: true });
+    if (currentIdx !== -1) markOwnershipDirty({ start: Math.max(0, currentIdx - 1), end: currentIdx + 1 });
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx === 0) {
@@ -9303,7 +9299,7 @@ export default function ScriptEditor({
     saveSnapshot();
     const emptyBlockId2 = uid(); // pre-generated for the case where all blocks are deleted
     const firstDeletedIdx = blocksRef.current.findIndex((block) => deleteIds.has(block.id));
-    if (firstDeletedIdx !== -1) markOwnershipDirty({ start: firstDeletedIdx, end: firstDeletedIdx + 1, affectsMarkers: true });
+    if (firstDeletedIdx !== -1) markOwnershipDirty("full");
     setBlocks((prev) => {
       const remaining: Block[] = [];
       const markersToRepair = new Set<string>();
@@ -9690,25 +9686,13 @@ export default function ScriptEditor({
     const repairedNext = repairEmptyMarkerSegments(next, markersToRepair, scriptConfigRef.current.openingChapterMarkerId);
     const normalizedNext = repairedNext === next ? normalizeScriptBlockStream(next) : repairedNext;
     const movedStartIndex = normalizedNext.findIndex((block) => movingIds.has(block.id));
-    let movingHasMarker = false;
-    let movedTextCount = 0;
-    for (const block of moving) {
-      if (isMarkerBlock(block)) movingHasMarker = true;
-      else movedTextCount += 1;
-    }
-    let movedTextOwnershipChanged = false;
-    let firstMovedTextOwned: Pick<Block, "sceneId" | "rehearsalMark"> | undefined;
-    if (!movingHasMarker && movedTextCount > 0 && movedStartIndex >= 0) {
-      const movedOwnership = markerOwnershipRange(normalizedNext, movedStartIndex, movedStartIndex + moving.length);
-      movedTextOwnershipChanged = moving.some((block, offset) => {
-        if (isMarkerBlock(block)) return false;
-        firstMovedTextOwned ??= movedOwnership[offset];
-        const beforeIdx = blockIndexByIdRef.current.get(block.id);
-        const before = beforeIdx === undefined ? null : ownedBlocksRef.current[beforeIdx];
-        const after = movedOwnership[offset];
-        return before?.sceneId !== after?.sceneId || before?.rehearsalMark !== after?.rehearsalMark;
-      });
-    }
+    const movingHasMarker = moving.some(isMarkerBlock);
+    const firstMovedOwnerMarkerId = normalizedNext[movedStartIndex].ownerMarkerId ?? null;
+    const movedTextOwnershipChanged = !movingHasMarker && moving.some((block, offset) => {
+      const beforeIdx = blockIndexByIdRef.current.get(block.id);
+      const before = beforeIdx === undefined ? null : ownedBlocksRef.current[beforeIdx];
+      return (before?.ownerMarkerId ?? null) !== (normalizedNext[movedStartIndex + offset]?.ownerMarkerId ?? null);
+    });
 
     requestLargeSelectionOperation("move", moving.length, () => {
       saveSnapshot();
@@ -9741,19 +9725,22 @@ export default function ScriptEditor({
       if (movingHasMarker) {
         showSelectionChangeNotice("章节标记/段落标记/排练记号已更新。");
       } else if (movedTextOwnershipChanged) {
-        const scene = firstMovedTextOwned?.sceneId ? sceneById.get(firstMovedTextOwned.sceneId) : null;
+        const context = firstMovedOwnerMarkerId
+          ? markerContextById.get(firstMovedOwnerMarkerId) ?? null
+          : null;
+        const scene = context?.sceneId ? sceneById.get(context.sceneId) : null;
         const sceneLabel = scene
           ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
           : "（无章节）";
-        const markLabel = firstMovedTextOwned?.rehearsalMark
-          ? rehearsalLabels.labelByMarkerId.get(firstMovedTextOwned.rehearsalMark) ?? "(空)"
+        const markLabel = context?.rehearsalId
+          ? rehearsalLabels.labelByMarkerId.get(context.rehearsalId) ?? "(空)"
           : "(空)";
-        showSelectionChangeNotice(`当前 ${movedTextCount} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
+        showSelectionChangeNotice(`当前 ${moving.length} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
       }
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, rehearsalLabels.labelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, markerContextById, rehearsalLabels.labelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -9869,7 +9856,7 @@ export default function ScriptEditor({
     const newBlockId = uid();
     // refId must also be determined outside the updater; read it from blocksRef.
     const refId = index > 0 ? (blocksRef.current[index - 1]?.id ?? null) : null;
-    markOwnershipDirty({ start: index, end: index + 1, affectsMarkers: true });
+    markOwnershipDirty({ start: index, end: index + 1 });
     setBlocks((prev) => {
       const newBlock: Block = {
         ...makeBlock(),
@@ -10059,7 +10046,7 @@ export default function ScriptEditor({
   if (printPreview) {
     return (
       <PrintPreview
-        blocks={ownedBlocks}
+        blocks={legacyProjectedBlocks}
         characters={characters}
         scenes={scenes}
         pageLayout={scriptConfig.pageLayout}
@@ -10195,10 +10182,8 @@ export default function ScriptEditor({
     ? Math.max(0, scriptContentsMenuRightPx - 0.875 * rootFontSizePx - scriptSideGutterWidth)
     : 0;
   const sceneIdForBlockAtIndex = (block: Block, index: number): string | null => {
-    if ((block.type === "chapter_marker" || block.type === "scene_marker") && block.sceneId) {
-      return block.sceneId;
-    }
-    return ownedBlocks[index]?.sceneId ?? block.sceneId ?? null;
+    const markerId = isMarkerBlock(block) ? block.id : (ownedBlocks[index] ?? block).ownerMarkerId;
+    return markerId ? markerContextById.get(markerId)?.sceneId ?? null : null;
   };
   const sceneIdForBlockId = (blockId: string | null | undefined): string | null => {
     if (!blockId) return null;
@@ -11021,7 +11006,7 @@ export default function ScriptEditor({
 
       {printPageMapMeasureEnabled && display.pageBreaks && (
         <PrintPaginationMeasure
-          blocks={ownedBlocks}
+          blocks={legacyProjectedBlocks}
           characters={characters}
           scenes={scenes}
           pageLayout={scriptConfig.pageLayout}
@@ -11050,7 +11035,7 @@ export default function ScriptEditor({
             >
               <TableOfContents
                 scenes={tocScenes}
-                blocks={ownedBlocks}
+                blocks={legacyProjectedBlocks}
                 onScrollToScene={scrollToScene}
                 activeSceneId={activeSceneId}
                 placement={scriptTocRailMode === "compact" ? "rail-compact" : "rail"}
@@ -11099,7 +11084,7 @@ export default function ScriptEditor({
               </span>
             </>
           )}
-          <TableOfContents scenes={tocScenes} blocks={ownedBlocks} onScrollToScene={scrollToScene} />
+          <TableOfContents scenes={tocScenes} blocks={legacyProjectedBlocks} onScrollToScene={scrollToScene} />
           <div
             ref={blocksContainerRef}
             onDragOver={(e) => {
@@ -11346,17 +11331,19 @@ export default function ScriptEditor({
                 </div>,
               ];
             }
-            const ownedBlock = ownedBlocks[bIdx] ?? block;
-            const ownedPrev = bIdx > 0 ? ownedBlocks[bIdx - 1] ?? null : null;
-            const displayRehearsalMark = ownedBlock.rehearsalMark
-              ? rehearsalLabels.labelByMarkerId.get(ownedBlock.rehearsalMark) ?? null
+            const projectedOwnedBlock = legacyProjectedBlocks[bIdx] ?? block;
+            const projectedOwnedPrev = bIdx > 0 ? legacyProjectedBlocks[bIdx - 1] ?? null : null;
+            const ownedSceneId = projectedOwnedBlock.sceneId;
+            const ownedRehearsalId = projectedOwnedBlock.rehearsalMark;
+            const displayRehearsalMark = ownedRehearsalId
+              ? rehearsalLabels.labelByMarkerId.get(ownedRehearsalId) ?? null
               : null;
-            const displayBlock = block.sceneId === ownedBlock.sceneId && block.rehearsalMark === displayRehearsalMark
+            const displayBlock = block.sceneId === ownedSceneId && block.rehearsalMark === displayRehearsalMark
               ? block
-              : { ...block, sceneId: ownedBlock.sceneId, rehearsalMark: displayRehearsalMark };
+              : { ...block, sceneId: ownedSceneId, rehearsalMark: displayRehearsalMark };
 
-            const sceneStart = ownedBlock.sceneId !== null && ownedBlock.sceneId !== ownedPrev?.sceneId;
-            const isMarkStart = !!ownedBlock.rehearsalMark && ownedBlock.rehearsalMark !== (ownedPrev?.rehearsalMark ?? null);
+            const sceneStart = ownedSceneId !== null && ownedSceneId !== projectedOwnedPrev?.sceneId;
+            const isMarkStart = !!ownedRehearsalId && ownedRehearsalId !== (projectedOwnedPrev?.rehearsalMark ?? null);
             const dividerPage = printDividerPageMap?.[block.id];
             const prevDividerPage = prev ? printDividerPageMap?.[prev.id] : undefined;
             const pageBreak = !!(
@@ -11368,8 +11355,8 @@ export default function ScriptEditor({
             );
             const isBlockFocused = !isLockedMode && focusedId === block.id;
             const hideCharSelector =
-              isBlockFocused || pageBreak ? false : shouldHideCharacterLabel(ownedPrev, ownedBlock);
-            const showCharacterGap = isLockedMode && shouldShowCharacterGap(ownedPrev, ownedBlock, hideCharSelector);
+              isBlockFocused || pageBreak ? false : shouldHideCharacterLabel(projectedOwnedPrev, projectedOwnedBlock);
+            const showCharacterGap = isLockedMode && shouldShowCharacterGap(projectedOwnedPrev, projectedOwnedBlock, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
               matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
@@ -11395,7 +11382,7 @@ export default function ScriptEditor({
               prev.lyric === block.lyric &&
               _sameCharacters(prev.characterIds, block.characterIds)
             );
-            const contentPlaceholder = ownedBlock.sceneId === openingChapterSceneId
+            const contentPlaceholder = ownedSceneId === openingChapterSceneId
               ? displayBlock.type === "stage"
                 ? "在此输入演出正式开始前的舞台提示…"
                 : "在此输入演出正式开始前的台词…"
@@ -11406,11 +11393,11 @@ export default function ScriptEditor({
                 key={block.id}
                 id={`block-${block.id}`}
                 data-bwrap={block.id}
-                data-scene-anchor={sceneStart ? ownedBlock.sceneId ?? undefined : undefined}
+                data-scene-anchor={sceneStart ? ownedSceneId ?? undefined : undefined}
                 className={`min-w-0 scroll-mt-20 transition-[outline] duration-150${highlightedBlockId === block.id ? " outline outline-2 outline-amber-400 rounded-lg" : ""}`}
               >
                 {/* Scene anchor for TableOfContents links */}
-                {sceneStart && ownedBlock.sceneId && <span id={`scene-block-${ownedBlock.sceneId}`} className="pointer-events-none absolute" />}
+                {sceneStart && ownedSceneId && <span id={`scene-block-${ownedSceneId}`} className="pointer-events-none absolute" />}
                 {pageBreak && (
                   <div className="relative my-2 flex items-center gap-2 px-6 select-none">
                     <div className="flex-1 border-t border-dashed border-zinc-200" />
@@ -11428,7 +11415,7 @@ export default function ScriptEditor({
                   isSearchHighlight={searchHighlight}
                   showRehearsalMark={display.rehearsalMarks}
                   readOnlyRehearsalMode={isLockedMode}
-                  readOnlyScene={isLockedMode && display.rehearsalBlockScenes && ownedBlock.sceneId ? sceneById.get(ownedBlock.sceneId) ?? null : null}
+                  readOnlyScene={isLockedMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
                   textLayoutMode={scriptConfig.textLayoutMode}

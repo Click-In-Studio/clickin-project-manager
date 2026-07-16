@@ -1,5 +1,11 @@
 import type { Block } from "./script-types";
 
+type MarkerContext = {
+  chapterId: string;
+  sceneId: string;
+  rehearsalId: string | null;
+};
+
 export function isMarkerBlock(block: Block): boolean {
   return block.type === "chapter_marker" || block.type === "scene_marker" || block.type === "rehearsal_marker";
 }
@@ -19,41 +25,102 @@ export function shouldInsertEmptyBlockAfterMarker(blocks: Block[], markerIndex: 
   return markerRank !== null && nextRank !== null && nextRank <= markerRank;
 }
 
-export function withMarkerOwnership<T extends Pick<Block, "id" | "type" | "sceneId" | "rehearsalMark" | "markerMeta">>(blocks: T[]): T[] {
-  let currentSceneId: string | null = null;
+export function buildMarkerContextById(
+  blocks: Array<Pick<Block, "id" | "type" | "markerMeta">>,
+): ReadonlyMap<string, MarkerContext> {
+  const markerContextById = new Map<string, MarkerContext>();
+
+  for (const block of blocks) {
+    if (block.type === "chapter_marker") {
+      markerContextById.set(block.id, { chapterId: block.id, sceneId: block.id, rehearsalId: null });
+    } else if (block.type === "scene_marker") {
+      markerContextById.set(block.id, { chapterId: block.markerMeta?.parentMarkerId ?? block.id, sceneId: block.id, rehearsalId: null });
+    } else if (block.type === "rehearsal_marker") {
+      const parentId = block.markerMeta?.parentMarkerId;
+      const parent = parentId ? markerContextById.get(parentId) : null;
+      if (parent) {
+        markerContextById.set(block.id, { chapterId: parent.chapterId, sceneId: parent.sceneId, rehearsalId: block.id });
+      }
+    }
+  }
+
+  return markerContextById;
+}
+
+export function withLegacyOwnershipProjection<T extends Block>(
+  blocks: T[],
+  markerContextById: ReadonlyMap<string, MarkerContext> = buildMarkerContextById(blocks),
+): T[] {
+  let changed = false;
+  const projected = blocks.map((block) => {
+    let sceneId: string | null;
+    let rehearsalMark: string | null;
+    if (block.type === "chapter_marker" || block.type === "scene_marker") {
+      sceneId = block.id;
+      rehearsalMark = null;
+    } else if (block.type === "rehearsal_marker") {
+      sceneId = null;
+      rehearsalMark = null;
+    } else {
+      const context = block.ownerMarkerId ? markerContextById.get(block.ownerMarkerId) : undefined;
+      sceneId = context?.sceneId ?? null;
+      rehearsalMark = context?.rehearsalId ?? null;
+    }
+    if (block.sceneId === sceneId && block.rehearsalMark === rehearsalMark) return block;
+    changed = true;
+    return { ...block, sceneId, rehearsalMark };
+  });
+  return changed ? projected : blocks;
+}
+
+function withoutOwnerMarkerId<T extends Pick<Block, "ownerMarkerId">>(block: T): T {
+  if (!("ownerMarkerId" in block)) return block;
+  const rest = { ...block };
+  delete rest.ownerMarkerId;
+  return rest;
+}
+
+export function withMarkerOwnership<T extends Pick<Block, "id" | "type" | "ownerMarkerId" | "markerMeta">>(blocks: T[]): T[] {
+  let currentChapterId: string | null = null;
   let currentParentMarkerId: string | null = null;
-  let currentRehearsalMark: string | null = null;
+  let currentOwnerMarkerId: string | null = null;
   let changed = false;
 
   const next = blocks.map((block) => {
-    if (block.type === "chapter_marker" || block.type === "scene_marker") {
-      currentSceneId = block.sceneId;
+    if (block.type === "chapter_marker") {
+      currentChapterId = block.id;
       currentParentMarkerId = block.id;
-      currentRehearsalMark = null;
-      if (block.rehearsalMark === null) return block;
+      currentOwnerMarkerId = block.id;
+      if (block.markerMeta?.parentMarkerId === null && !("ownerMarkerId" in block)) return block;
       changed = true;
-      return { ...block, rehearsalMark: null };
+      return { ...withoutOwnerMarkerId(block), markerMeta: { ...block.markerMeta, parentMarkerId: null } };
+    }
+
+    if (block.type === "scene_marker") {
+      const parentMarkerId = currentChapterId;
+      currentParentMarkerId = block.id;
+      currentOwnerMarkerId = block.id;
+      if (block.markerMeta?.parentMarkerId === parentMarkerId && !("ownerMarkerId" in block)) return block;
+      changed = true;
+      return { ...withoutOwnerMarkerId(block), markerMeta: { ...block.markerMeta, parentMarkerId } };
     }
 
     if (block.type === "rehearsal_marker") {
-      currentRehearsalMark = block.id;
+      currentOwnerMarkerId = block.id;
       if (
-        block.sceneId === null &&
-        block.rehearsalMark === null &&
-        block.markerMeta?.parentMarkerId === currentParentMarkerId
+        block.markerMeta?.parentMarkerId === currentParentMarkerId &&
+        !("ownerMarkerId" in block)
       ) return block;
       changed = true;
       return {
-        ...block,
-        sceneId: null,
-        rehearsalMark: null,
+        ...withoutOwnerMarkerId(block),
         markerMeta: { ...block.markerMeta, parentMarkerId: currentParentMarkerId },
       };
     }
 
-    if (block.sceneId === currentSceneId && block.rehearsalMark === currentRehearsalMark) return block;
+    if (block.ownerMarkerId === currentOwnerMarkerId) return block;
     changed = true;
-    return { ...block, sceneId: currentSceneId, rehearsalMark: currentRehearsalMark };
+    return { ...block, ownerMarkerId: currentOwnerMarkerId };
   });
 
   return changed ? next : blocks;

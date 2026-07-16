@@ -1,6 +1,10 @@
 import type { Block } from "./script-types";
 import type { PageLayout, ScriptTextLayoutMode } from "./script-types";
-import { isMarkerBlock, textBlocksWithMarkerOwnership, withMarkerOwnership } from "./script-marker-blocks";
+import {
+  isMarkerBlock,
+  withLegacyOwnershipProjection,
+  withMarkerOwnership,
+} from "./script-marker-blocks";
 import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "./script-marker-ownership-cache";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
@@ -135,12 +139,16 @@ export type EstimatedPageMapCache = {
   pageMap: Record<string, number>;
 };
 
-function textBlockEntries(blocks: Block[], blocksHaveMarkerOwnership: boolean): TextBlockEntry[] {
+function textBlockEntries(
+  blocks: Block[],
+  blocksHaveMarkerOwnership: boolean,
+): TextBlockEntry[] {
   const ownedBlocks = blocksHaveMarkerOwnership ? blocks : withMarkerOwnership(blocks);
+  const projectedBlocks = withLegacyOwnershipProjection(ownedBlocks);
   const entries: TextBlockEntry[] = [];
-  for (let i = 0; i < ownedBlocks.length; i++) {
-    if (!isMarkerBlock(ownedBlocks[i])) {
-      entries.push({ block: ownedBlocks[i], sourceIndex: i });
+  for (let i = 0; i < projectedBlocks.length; i++) {
+    if (!isMarkerBlock(projectedBlocks[i])) {
+      entries.push({ block: projectedBlocks[i], sourceIndex: i });
     }
   }
   return entries;
@@ -195,10 +203,10 @@ export function computePageMap(
   let hasBlockOnPage = false;
   let prevTextBlock: Block | null = null;
 
-  const textBlocks = blocksHaveMarkerOwnership ? blocks : textBlocksWithMarkerOwnership(blocks);
+  const ownedBlocks = blocksHaveMarkerOwnership ? blocks : withMarkerOwnership(blocks);
+  const textBlocks = withLegacyOwnershipProjection(ownedBlocks).filter((block) => !isMarkerBlock(block));
   for (let i = 0; i < textBlocks.length; i++) {
     const block = textBlocks[i];
-    if (blocksHaveMarkerOwnership && isMarkerBlock(block)) continue;
     const prev = prevTextBlock;
 
     if (block.sceneId && block.sceneId !== prev?.sceneId) {
