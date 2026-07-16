@@ -7,7 +7,9 @@
  * - archive idempotency
  * - cascade delete verification
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import { NextRequest } from "next/server";
 import {
   createProduction, deleteProduction, getProductionName,
   createCueList, deleteCueList, getCueList,
@@ -15,7 +17,8 @@ import {
   archiveProduction, unarchiveProduction, isProductionArchived,
 } from "@/lib/db";
 import { listProductionEvents } from "@/lib/event-db";
-import { PROD_PLANET, TEST_USER } from "./helpers";
+import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { TEST_USER } from "./helpers";
 
 const BASE_PROD = "test-res-prod";
 const BASE_CL   = "test-res-cl";
@@ -193,5 +196,79 @@ describe("cascade delete", () => {
     await deleteProduction(CAS_PROD);
     // If cascade is set, the cue is gone too
     expect(await getCue(CAS_CUE, CAS_CL)).toBeNull();
+  });
+});
+
+// ---------- API-level idempotency (POST /api/productions + Idempotency-Key) ----------
+
+import { POST as createProductionHandler } from "@/app/api/productions/route";
+
+const idemCreatedIds: string[] = [];
+afterAll(async () => {
+  for (const id of idemCreatedIds) await deleteProduction(id).catch(() => {});
+});
+
+function adminReq(idemKey?: string): NextRequest {
+  const token = createSession({ openId: TEST_USER, name: "管理员", avatarUrl: null, isAdmin: true });
+  const headers = new Headers({ cookie: `${SESSION_COOKIE}=${token}` });
+  if (idemKey) headers.set("Idempotency-Key", idemKey);
+  return new NextRequest("http://localhost/api/productions", {
+    method: "POST",
+    body: JSON.stringify({ name: "幂等测试演出" }),
+    headers,
+  });
+}
+
+describe("POST /api/productions — Idempotency-Key", () => {
+  it("same key twice → same id, single DB row", async () => {
+    const key = randomUUID();
+    const r1 = await createProductionHandler(adminReq(key));
+    const { id } = await r1.json();
+    idemCreatedIds.push(id);
+
+    const r2 = await createProductionHandler(adminReq(key));
+    expect(r2.status).toBe(201);
+    expect((await r2.json()).id).toBe(id);
+
+    const { getPool } = await import("@/lib/pg");
+    const { rows } = await getPool().query("SELECT COUNT(*) AS n FROM production WHERE id = $1", [id]);
+    expect(Number(rows[0].n)).toBe(1);
+  });
+
+  it("concurrent requests with same key → same id, single DB row (TOCTOU regression)", async () => {
+    const key = randomUUID();
+    const [r1, r2] = await Promise.all([
+      createProductionHandler(adminReq(key)),
+      createProductionHandler(adminReq(key)),
+    ]);
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+    const { id: id1 } = await r1.json();
+    const { id: id2 } = await r2.json();
+    idemCreatedIds.push(id1);
+    expect(id1).toBe(id2);
+
+    const { getPool } = await import("@/lib/pg");
+    const { rows } = await getPool().query("SELECT COUNT(*) AS n FROM production WHERE id = $1", [id1]);
+    expect(Number(rows[0].n)).toBe(1);
+  });
+
+  it("key expired after TTL → next request creates a new row", async () => {
+    const key = randomUUID();
+    const r1 = await createProductionHandler(adminReq(key));
+    const { id: id1 } = await r1.json();
+    idemCreatedIds.push(id1);
+
+    vi.useFakeTimers();
+    try {
+      vi.advanceTimersByTime(61_000); // past IDEM_TTL_MS = 60_000
+      const r2 = await createProductionHandler(adminReq(key));
+      expect(r2.status).toBe(201);
+      const { id: id2 } = await r2.json();
+      idemCreatedIds.push(id2);
+      expect(id2).not.toBe(id1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
