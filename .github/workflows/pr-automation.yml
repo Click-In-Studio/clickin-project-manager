@@ -181,19 +181,34 @@ jobs:
             const MAX_TOTAL_CHARS = 12000;
 
             let diffText = '';
+            let shownFiles = 0;
+            let cutMidFile = false;
             for (const f of relevant) {
               if (diffText.length >= MAX_TOTAL_CHARS) break;
               const patch = f.patch ?? '(binary or no textual diff)';
               const lines = patch.split('\n');
               const truncated = lines.length > MAX_PATCH_LINES
-                ? lines.slice(0, MAX_PATCH_LINES).join('\n') + `\n… (${lines.length - MAX_PATCH_LINES} more lines truncated)`
+                ? lines.slice(0, MAX_PATCH_LINES).join('\n') + `\n… (+${lines.length - MAX_PATCH_LINES} lines not shown)`
                 : patch;
               const entry = `### ${f.filename}  [${f.status}  +${f.additions}/-${f.deletions}]\n${truncated}\n`;
-              diffText += entry.slice(0, MAX_TOTAL_CHARS - diffText.length);
+              const remaining = MAX_TOTAL_CHARS - diffText.length;
+              if (entry.length > remaining) {
+                diffText += entry.slice(0, remaining) + '\n… (cut here — total diff size limit reached)';
+                cutMidFile = true;
+                shownFiles++;
+                break;
+              }
+              diffText += entry;
+              shownFiles++;
             }
 
-            const skippedCount = files.length - relevant.length;
-            const footer = skippedCount > 0 ? `\n(${skippedCount} binary/lock files omitted)` : '';
+            const skippedByBinary = files.length - relevant.length;
+            const skippedByLimit = relevant.length - shownFiles;
+            const footerParts = [];
+            if (skippedByBinary > 0) footerParts.push(`${skippedByBinary} binary/lock file(s) omitted`);
+            if (cutMidFile) footerParts.push('last file shown partially');
+            if (skippedByLimit > 0) footerParts.push(`${skippedByLimit} file(s) not shown — diff too large`);
+            const footer = footerParts.length > 0 ? `\n_(${footerParts.join('; ')})_` : '';
 
             // ── Call Claude ────────────────────────────────────────────────────
             const systemPrompt = [
@@ -210,6 +225,7 @@ jobs:
               '- GC queries must use separate statements, not CTEs (CTE snapshot isolation prevents NOT EXISTS from seeing same-transaction deletes).',
               '',
               'Review ONLY what is visible in the diff. Do not speculate about files not shown.',
+              'If the diff ends with "cut here" or lists files as "not shown", that is a size limit — do not flag it as a finding.',
               'Be concise. Skip trivial style issues. Focus on correctness, safety, and convention violations.',
             ].join('\n');
 
@@ -252,6 +268,7 @@ jobs:
 
             // ── Post or update comment ─────────────────────────────────────────
             const now = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+            const actionsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/pr-automation.yml`;
             const body = [
               MARKER,
               '## 🤖 AI Code Review',
@@ -259,7 +276,7 @@ jobs:
               aiResponse,
               '',
               `---`,
-              `_claude-sonnet-5 · ${now} · [重新触发](../../actions/workflows/pr-automation.yml)_`,
+              `_claude-sonnet-5 · ${now} · 重新触发: [Actions → Run workflow](${actionsUrl}) (pr\\_number=${prNumber})_`,
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
