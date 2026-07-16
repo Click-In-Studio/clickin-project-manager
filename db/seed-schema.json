@@ -1235,8 +1235,7 @@
     {
       "column": "id",
       "type": "text",
-      "nullable": false,
-      "default": "(gen_random_uuid())::text"
+      "nullable": false
     },
     {
       "column": "open_id",

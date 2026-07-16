@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
+import { getCtx } from "./ctx";
 
 type ViewConfig = {
   columnOrder: string[];
@@ -23,13 +22,6 @@ type ViewRow = {
 
 function uid(): string {
   return `stv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-}
-
-async function getCtx(req: NextRequest, productionId: string) {
-  const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map() };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides };
 }
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scene-table-views">) {

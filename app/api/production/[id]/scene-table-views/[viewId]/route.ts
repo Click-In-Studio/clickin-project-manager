@@ -1,15 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-
-async function getCtx(req: NextRequest, productionId: string) {
-  const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map() };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides };
-}
+import { getCtx } from "../ctx";
 
 export async function PATCH(
   req: NextRequest,

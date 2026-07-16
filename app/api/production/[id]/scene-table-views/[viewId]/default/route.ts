@@ -1,15 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-
-async function getCtx(req: NextRequest, productionId: string) {
-  const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map() };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides };
-}
+import { getCtx } from "../../ctx";
 
 export async function PATCH(
   req: NextRequest,
@@ -25,18 +17,21 @@ export async function PATCH(
   const pool = getPool();
   const client = await pool.connect();
   try {
+    await client.query("BEGIN");
+
     const existing = await client.query<{ open_id: string }>(
-      `SELECT open_id FROM scene_table_view_config WHERE id = $1 AND production_id = $2`,
+      `SELECT open_id FROM scene_table_view_config WHERE id = $1 AND production_id = $2 FOR UPDATE`,
       [viewId, id]
     );
     if (existing.rowCount === 0) {
+      await client.query("ROLLBACK");
       return Response.json({ error: "视图不存在" }, { status: 404 });
     }
     if (existing.rows[0].open_id !== session.openId) {
+      await client.query("ROLLBACK");
       return Response.json({ error: "无权修改他人视图" }, { status: 403 });
     }
 
-    await client.query("BEGIN");
     await client.query(
       `UPDATE scene_table_view_config
        SET is_default = false, updated_at = NOW()
