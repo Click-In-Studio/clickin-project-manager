@@ -239,8 +239,7 @@ jobs:
               diffText + footer,
             ].join('\n');
 
-            let aiResponse;
-            try {
+            const callClaude = async () => {
               const res = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -255,12 +254,21 @@ jobs:
                   messages: [{ role: 'user', content: userPrompt }],
                 }),
               });
-              if (!res.ok) {
-                console.log(`Anthropic API returned ${res.status}: ${await res.text()}`);
-                return;
-              }
+              if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
               const data = await res.json();
-              aiResponse = data.content?.[0]?.text ?? '(empty response)';
+              const text = (data.content ?? []).find(b => b.type === 'text')?.text;
+              if (!text) console.log(`Empty content. stop_reason=${data.stop_reason} content_types=${JSON.stringify((data.content ?? []).map(b => b.type))}`);
+              return text ?? null;
+            };
+
+            let aiResponse;
+            try {
+              aiResponse = await callClaude();
+              if (!aiResponse) {
+                console.log('Retrying after empty response…');
+                aiResponse = await callClaude();
+              }
+              aiResponse = aiResponse ?? '(empty response)';
             } catch (err) {
               console.log(`Anthropic API request failed: ${err.message}`);
               return;
