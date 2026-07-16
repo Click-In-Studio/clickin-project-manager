@@ -9,7 +9,8 @@ export type MarkerOwnershipRange = {
 export type MarkerOwnershipDirty = "full" | MarkerOwnershipRange | MarkerOwnershipRange[] | null;
 
 function normalizeRanges(dirty: MarkerOwnershipDirty, length: number): MarkerOwnershipRange[] | null {
-  if (!dirty || dirty === "full") return null;
+  if (dirty === "full") return null;
+  if (!dirty) return [];
   const ranges = Array.isArray(dirty) ? dirty : [dirty];
   const normalized = ranges
     .map((range) => ({

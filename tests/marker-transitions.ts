@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import type { Pool } from "pg";
 import {
   convertMarker, executeMarkerDeletion, insertHierarchyMarker, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
 } from "../lib/script-marker-domain";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../lib/script-types";
 import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "../lib/script-marker-blocks";
-import { generatedRehearsalLabels, localMarkerNumber, localSceneNumber } from "../lib/script-generated-labels";
+import { buildMarkerLabelIndex } from "../lib/script-generated-labels";
 import { migrateLegacyRehearsalMentions } from "../lib/mention-types";
 import { updateMarkerOwnership } from "../lib/script-marker-ownership-cache";
+import { getMarkerLabelIndex } from "../lib/db";
 
 let id = 0;
 const createId = () => `generated-${++id}`;
@@ -43,24 +45,28 @@ const baseline = state([
   block("t21", "dialogue", "chapter two", null),
 ]);
 
-assert.equal(localMarkerNumber("2", "chapter"), "2");
-assert.equal(localMarkerNumber("2-3", "scene"), "3");
-assert.equal(localMarkerNumber("3-A", "scene"), "3");
-assert.equal(localMarkerNumber("2-3-A", "scene"), "3");
-assert.equal(localSceneNumber("2", null), "2");
-assert.equal(localSceneNumber("2-3", "chapter"), "3");
-const localMarkerState = normalizeMarkerState(state([
-  { ...block("chapter-numbered", "chapter_marker"), markerMeta: { number: "2" } },
-  { ...block("scene-numbered", "scene_marker"), markerMeta: { number: "2-3", parentMarkerId: "chapter-numbered" } },
-]), createId);
-assert.equal(localMarkerState.blocks.find((item) => item.id === "chapter-numbered")?.markerMeta?.number, "2");
-assert.equal(localMarkerState.blocks.find((item) => item.id === "scene-numbered")?.markerMeta?.number, "3");
+const baselineLabels = buildMarkerLabelIndex(withMarkerOwnership([
+  ...baseline.blocks,
+  block("r11a", "rehearsal_marker"),
+]));
+assert.equal(baselineLabels.labelByMarkerId.get("c0"), "0");
+assert.equal(baselineLabels.labelByMarkerId.get("s11"), "1-1");
+assert.equal(baselineLabels.labelByMarkerId.get("r11a"), "2-1-A");
+assert.equal(baselineLabels.rehearsalLabelByMarkerId.get("r11a"), "A");
+assert.equal(baselineLabels.markerIdByParentAndLabel.get("s21\u0000A"), "r11a");
+
+const wideChapterLabels = buildMarkerLabelIndex(Array.from({ length: 11 }, (_, index) =>
+  block(`wide-${index}`, "chapter_marker")
+));
+assert.equal(wideChapterLabels.labelByMarkerId.get("wide-0"), "00");
+assert.equal(wideChapterLabels.labelByMarkerId.get("wide-10"), "10");
+
 const generatedLocalMarkerState = normalizeMarkerState(state([
   block("chapter-generated", "chapter_marker"),
   block("scene-generated", "scene_marker"),
 ]), createId);
-assert.equal(generatedLocalMarkerState.blocks.find((item) => item.id === "chapter-generated")?.markerMeta?.number, "0");
-assert.equal(generatedLocalMarkerState.blocks.find((item) => item.id === "scene-generated")?.markerMeta?.number, "1");
+assert.equal(projectMarkers(generatedLocalMarkerState)[0]?.number, "0");
+assert.equal(projectMarkers(generatedLocalMarkerState)[1]?.number, "0-1");
 
 assert.equal(resolveMarkerId(baseline, "legacy-s11"), "s11");
 assert.deepEqual(projectMarkers(baseline).map(({ id, kind, parentId }) => ({ id, kind, parentId })), [
@@ -282,6 +288,7 @@ const reparentSource = state([
 const reparented = executeMarkerDeletion(reparentSource, { type: "marker-only", markerId: "c1" }, createId);
 assert.ok(reparented.blocks.some((item) => item.id === "text-2"));
 assert.equal(projectMarkers(reparented).find((item) => item.id === "s11")?.parentId, "c0");
+assert.equal(buildMarkerLabelIndex(reparented.blocks).labelByMarkerId.get("s11"), "0-2");
 
 const chapterDuration = updateMarkerMeta(baseline, "c1", { expectedDuration: "120" });
 assert.equal(chapterDuration.blocks.find((item) => item.id === "c1")?.markerMeta?.expectedDuration, undefined);
@@ -321,7 +328,7 @@ assert.equal(ownedRehearsalBlocks.find((item) => item.id === "text-b")?.rehearsa
 assert.equal(ownedRehearsalBlocks.find((item) => item.id === "text-b")?.ownerMarkerId, "mark-b");
 assert.equal(ownedRehearsalBlocks.find((item) => item.id === "mark-b")?.ownerMarkerId, undefined);
 assert.equal(ownedRehearsalBlocks.find((item) => item.id === "mark-b")?.markerMeta?.parentMarkerId, "scene");
-assert.equal(generatedRehearsalLabels(ownedRehearsalBlocks).labelByMarkerId.get("mark-b"), "B");
+assert.equal(buildMarkerLabelIndex(ownedRehearsalBlocks).rehearsalLabelByMarkerId.get("mark-b"), "B");
 
 const contextBlocks = withMarkerOwnership([
   block("chapter", "chapter_marker"),
@@ -330,6 +337,7 @@ const contextBlocks = withMarkerOwnership([
   block("mark-text", "dialogue", "marked", null),
 ]);
 const markerContextById = buildMarkerContextById(contextBlocks);
+assert.equal(updateMarkerOwnership(contextBlocks, null), contextBlocks);
 assert.deepEqual(markerContextById.get("chapter"), {
   chapterId: "chapter", sceneId: "chapter", rehearsalId: null,
 });
@@ -359,9 +367,12 @@ const insertedRehearsalBlocks = withMarkerOwnership([
   block("text-new", "dialogue", "new", null),
   ...ownedRehearsalBlocks.slice(3),
 ]);
-const insertedLabels = generatedRehearsalLabels(insertedRehearsalBlocks).labelByMarkerId;
+const insertedLabelIndex = buildMarkerLabelIndex(insertedRehearsalBlocks);
+const insertedLabels = insertedLabelIndex.rehearsalLabelByMarkerId;
 assert.equal(insertedLabels.get("mark-new"), "B");
 assert.equal(insertedLabels.get("mark-b"), "C");
+assert.equal(insertedLabelIndex.markerIdByParentAndLabel.get("scene\u0000B"), "mark-new");
+assert.equal(insertedLabelIndex.markerIdByParentAndLabel.get("scene\u0000C"), "mark-b");
 assert.equal(insertedRehearsalBlocks.find((item) => item.id === "text-b")?.ownerMarkerId, "mark-b");
 
 const staleRehearsalCache = [
@@ -391,9 +402,9 @@ assert.deepEqual(
     { id: "text-2", sceneId: "scene-2", rehearsalMark: "mark-2", parentId: undefined },
   ],
 );
-const normalizedLabels = generatedRehearsalLabels(normalizedRehearsalCache);
-assert.equal(normalizedLabels.labelByMarkerId.get("mark-1"), "A");
-assert.equal(normalizedLabels.labelByMarkerId.get("mark-2"), "A");
+const normalizedLabels = buildMarkerLabelIndex(normalizedRehearsalCache);
+assert.equal(normalizedLabels.rehearsalLabelByMarkerId.get("mark-1"), "A");
+assert.equal(normalizedLabels.rehearsalLabelByMarkerId.get("mark-2"), "A");
 
 const legacyMentionMappings = [{ sceneId: "scene-1", label: "A", markerId: "mark-1" }];
 assert.equal(
@@ -436,4 +447,100 @@ assert.equal(
   "[#AA](/__cm__rehearsal:mark-27)",
 );
 
-console.log("marker transition fixtures passed");
+type FakeMarker = {
+  id: string;
+  type: "chapter_marker" | "scene_marker" | "rehearsal_marker";
+  parentMarkerId: string | null;
+};
+
+class FakeMarkerPool {
+  readonly versions = new Map<string, { revision: string; markers: FakeMarker[] }>();
+  readonly markerLoads = new Map<string, number>();
+  delayedVersionId: string | null = null;
+
+  async query(sql: string, params: unknown[]) {
+    const versionId = params[0] as string;
+    const version = this.versions.get(versionId);
+    if (sql.includes("LEFT JOIN LATERAL")) {
+      this.markerLoads.set(versionId, (this.markerLoads.get(versionId) ?? 0) + 1);
+      if (this.delayedVersionId === versionId) await new Promise((resolve) => setTimeout(resolve, 0));
+      if (!version) return { rows: [] };
+      return {
+        rows: version.markers.length > 0
+          ? version.markers.map((marker) => ({
+              revision: version.revision,
+              id: marker.id,
+              type: marker.type,
+              parent_marker_id: marker.parentMarkerId,
+            }))
+          : [{ revision: version.revision, id: null, type: null, parent_marker_id: null }],
+      };
+    }
+    if (sql.includes("marker_structure_revision")) {
+      return { rows: version ? [{ revision: version.revision }] : [] };
+    }
+    throw new Error(`Unexpected query: ${sql}`);
+  }
+}
+
+async function verifyMarkerLabelCache() {
+  const fake = new FakeMarkerPool();
+  const pool = fake as unknown as Pool;
+  const versionId = "cache-version";
+  fake.versions.set(versionId, {
+    revision: "0",
+    markers: [
+      { id: "cache-chapter", type: "chapter_marker", parentMarkerId: null },
+      { id: "cache-scene", type: "scene_marker", parentMarkerId: "cache-chapter" },
+    ],
+  });
+
+  const first = await getMarkerLabelIndex(versionId, pool);
+  const second = await getMarkerLabelIndex(versionId, pool);
+  assert.equal(first, second);
+  assert.equal(fake.markerLoads.get(versionId), 1);
+
+  fake.versions.set(versionId, {
+    revision: "1",
+    markers: [
+      { id: "cache-chapter", type: "chapter_marker", parentMarkerId: null },
+      { id: "cache-scene", type: "scene_marker", parentMarkerId: "cache-chapter" },
+      { id: "cache-scene-2", type: "scene_marker", parentMarkerId: "cache-chapter" },
+    ],
+  });
+  const rebuilt = await getMarkerLabelIndex(versionId, pool);
+  assert.notEqual(rebuilt, first);
+  assert.equal(rebuilt.labelByMarkerId.get("cache-scene-2"), "0-2");
+  assert.equal(fake.markerLoads.get(versionId), 2);
+
+  const concurrentVersionId = "cache-concurrent";
+  fake.versions.set(concurrentVersionId, {
+    revision: "0",
+    markers: [{ id: "concurrent-chapter", type: "chapter_marker", parentMarkerId: null }],
+  });
+  fake.delayedVersionId = concurrentVersionId;
+  const [concurrentA, concurrentB] = await Promise.all([
+    getMarkerLabelIndex(concurrentVersionId, pool),
+    getMarkerLabelIndex(concurrentVersionId, pool),
+  ]);
+  assert.equal(concurrentA, concurrentB);
+  assert.equal(fake.markerLoads.get(concurrentVersionId), 1);
+
+  for (let index = 0; index <= 64; index++) {
+    const id = `cache-eviction-${index}`;
+    fake.versions.set(id, {
+      revision: "0",
+      markers: [{ id: `${id}-chapter`, type: "chapter_marker", parentMarkerId: null }],
+    });
+    await getMarkerLabelIndex(id, pool);
+  }
+  await getMarkerLabelIndex("cache-eviction-0", pool);
+  assert.equal(fake.markerLoads.get("cache-eviction-0"), 2);
+}
+
+verifyMarkerLabelCache()
+  .then(() => console.log("marker transition fixtures passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

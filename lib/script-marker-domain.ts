@@ -1,4 +1,4 @@
-import { localMarkerNumber, withGeneratedSceneNumbers, toAlphaLabel } from "./script-generated-labels";
+import { buildMarkerLabelIndex, type MarkerLabelIndex } from "./script-generated-labels";
 import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withMarkerOwnership } from "./script-marker-blocks";
 import { FIXED_INITIAL_CHAPTER_NAME } from "./script-fixed-markers";
 import type { Block, MarkerMeta, Scene, ScriptState } from "./script-types";
@@ -92,12 +92,12 @@ function detailValue(meta: MarkerMeta | null | undefined, key: keyof MarkerDetai
 export function projectMarkers(
   state: Pick<ScriptState, "blocks" | "scenes">,
   detailRows: Array<Scene & Partial<MarkerDetailFields>> = state.scenes,
+  labelIndex: MarkerLabelIndex = buildMarkerLabelIndex(state.blocks),
 ): MarkerProjection[] {
   const detailById = new Map(detailRows.map((row) => [row.id, row]));
   const raw: MarkerProjection[] = [];
   let currentChapterId: string | null = null;
   let currentMarker: MarkerProjection | null = null;
-  let rehearsalIndex = 0;
 
   for (const block of state.blocks) {
     if (block.type === "chapter_marker" || block.type === "scene_marker") {
@@ -108,7 +108,7 @@ export function projectMarkers(
       currentMarker = {
         id: block.id,
         kind,
-        number: meta?.number ?? fallback?.number ?? "",
+        number: "",
         name: meta?.name ?? fallback?.name ?? "",
         parentId: kind === "chapter" ? null : currentChapterId,
         synopsis: detailValue(meta, "synopsis") || fallback?.synopsis || "",
@@ -119,16 +119,18 @@ export function projectMarkers(
         rehearsalMarks: [],
       };
       raw.push(currentMarker);
-      rehearsalIndex = 0;
       continue;
     }
     if (block.type === "rehearsal_marker" && currentMarker) {
-      currentMarker.rehearsalMarks.push(toAlphaLabel(rehearsalIndex));
-      rehearsalIndex++;
+      const label = labelIndex.rehearsalLabelByMarkerId.get(block.id);
+      if (label) currentMarker.rehearsalMarks.push(label);
     }
   }
 
-  return withGeneratedSceneNumbers(raw);
+  return raw.map((marker) => ({
+    ...marker,
+    number: labelIndex.labelByMarkerId.get(marker.id) ?? "",
+  }));
 }
 
 function repairEmptySegments(blocks: Block[], openingMarkerId: string | null, createId: IdFactory): Block[] {
@@ -207,18 +209,6 @@ export function normalizeMarkerState(state: ScriptState, createId: IdFactory): S
   blocks = repairEmptySegments(blocks, openingMarkerId, createId);
   blocks = withMarkerOwnership(blocks);
   const projection = projectMarkers({ blocks, scenes: state.scenes }, state.scenes);
-  const numberByMarkerId = new Map(projection.map((marker) => [marker.id, marker.number]));
-  blocks = blocks.map((block) => {
-    if (block.type !== "chapter_marker" && block.type !== "scene_marker") return block;
-    const generatedNumber = numberByMarkerId.get(block.id);
-    if (generatedNumber === undefined) return block;
-    const kind = block.type === "scene_marker" ? "scene" : "chapter";
-    const number = typeof block.markerMeta?.number === "string" && block.markerMeta.number.trim()
-      ? localMarkerNumber(block.markerMeta.number, kind)
-      : localMarkerNumber(generatedNumber, kind);
-    if (block.markerMeta?.number === number) return block;
-    return { ...block, markerMeta: { ...block.markerMeta, number } };
-  });
   const scenes = projection.map(({ id, number, name, parentId }) => ({ id, number, name, parentId }));
   return {
     ...state,

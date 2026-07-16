@@ -25,7 +25,7 @@ async function resolveProductionVersion(productionId: string, requestedVersionId
   if (!version || version.productionId !== productionId) {
     return { error: Response.json({ error: "版本不存在" }, { status: 404 }) };
   }
-  return { versionId };
+  return { versionId, version };
 }
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes">) {
@@ -56,6 +56,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const body = await req.json();
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
+  if (resolved.version.status !== "editing") {
+    return Response.json({ error: "该版本不可编辑" }, { status: 403 });
+  }
   const migration = await ensureScriptMarkerMigration(resolved.versionId);
   if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
   const result = await loadProduction(id, resolved.versionId);

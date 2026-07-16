@@ -27,7 +27,7 @@ async function resolveProductionVersion(productionId: string, requestedVersionId
   if (!versionId) return { error: Response.json({ error: "无可用版本" }, { status: 404 }) };
   const version = await getVersion(versionId);
   if (!version || version.productionId !== productionId) return { error: Response.json({ error: "版本不存在" }, { status: 404 }) };
-  return { versionId };
+  return { versionId, version };
 }
 
 async function context(req: NextRequest, productionId: string, requestedVersionId: unknown) {
@@ -39,6 +39,9 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   }
   const resolved = await resolveProductionVersion(productionId, requestedVersionId);
   if (resolved.error) return resolved;
+  if (resolved.version.status !== "editing") {
+    return { error: Response.json({ error: "该版本不可编辑" }, { status: 403 }) };
+  }
   const migration = await ensureScriptMarkerMigration(resolved.versionId);
   if (migration.status === "running") return { error: Response.json({ status: "updating", migration }, { status: 202 }) };
   const result = await loadProduction(productionId, resolved.versionId);
@@ -59,7 +62,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     next = convertMarker(next, sceneId, body.kind as MarkerKind, createId);
   }
   const fields: Record<string, string> = {};
-  if (typeof body.number === "string") fields.number = body.number.trim();
   if (typeof body.name === "string") fields.name = body.name.trim();
   for (const key of META_KEYS) if (typeof body[key] === "string") fields[key] = body[key];
   if (Object.keys(fields).length > 0) next = updateMarkerMeta(next, sceneId, fields);

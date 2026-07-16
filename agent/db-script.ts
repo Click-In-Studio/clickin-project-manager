@@ -1,7 +1,7 @@
 import { getScriptEditorPool } from "./db";
-import { MARKER_TYPES_SQL, VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE } from "../lib/script-marker-sql";
-import { generatedRehearsalLabels, withGeneratedSceneNumbers } from "../lib/script-generated-labels";
-import { ensureScriptMarkerMigration } from "../lib/db";
+import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "../lib/script-marker-sql";
+import { withMarkerSceneLabels, type MarkerLabelIndex } from "../lib/script-generated-labels";
+import { ensureScriptMarkerMigration, getMarkerLabelIndex } from "../lib/db";
 
 export type ScriptBlockRow = {
   id:            string;
@@ -241,7 +241,7 @@ function toBlockRow(r: RawBlockRow): BlockRowWithSceneId {
 }
 
 const selectCols = `o.id, o.snapshot_id, o.line_num, o.type, o.content, o.rehearsal_mark,
-  o.scene_id, sc.name AS scene_name, sc.num AS scene_number`;
+  o.scene_id, sc.name AS scene_name, NULL::text AS scene_number`;
 const versionedJoinClause = `LEFT JOIN scene_version sc ON sc.scene_id = o.scene_id AND sc.version_id = $1`;
 const legacyJoinClause = `LEFT JOIN scene scene_anchor ON scene_anchor.id = o.scene_id
   LEFT JOIN production p ON p.id = scene_anchor.production_id
@@ -251,16 +251,8 @@ function sceneNumberMap(scenes: Array<{ id: string; number: string }>): Map<stri
   return new Map(scenes.map((scene) => [scene.id, scene.number]));
 }
 
-async function getRehearsalLabels(versionId: string) {
-  const res = await getScriptEditorPool().query<{
-    id: string;
-    type: "chapter_marker" | "scene_marker" | "rehearsal_marker";
-    marker_meta: { parentMarkerId?: string | null } | null;
-  }>(
-    VERSION_MARKER_LABEL_ROWS_SQL,
-    [versionId],
-  );
-  return generatedRehearsalLabels(res.rows.map((row) => ({ ...row, markerMeta: row.marker_meta })));
+async function getMarkerLabels(versionId: string) {
+  return getMarkerLabelIndex(versionId, getScriptEditorPool());
 }
 
 async function getGeneratedSceneRows(
@@ -268,23 +260,31 @@ async function getGeneratedSceneRows(
   resolvedVersionId: string | null,
 ): Promise<Array<{ id: string; number: string; name: string; parentId: string | null }>> {
   const pool = getScriptEditorPool();
-  const res = await pool.query<{ id: string; num: string; name: string | null; parent_id: string | null }>(
+  const [res, labels] = await Promise.all([pool.query<{ id: string; name: string | null; parent_id: string | null }>(
     resolvedVersionId
-      ? `SELECT scene_id AS id, num, name, parent_id
+      ? `SELECT scene_id AS id, name, parent_id
          FROM scene_version
          WHERE version_id = $1
          ORDER BY sort_order`
-      : `SELECT sc.id, COALESCE(sv.num, '') AS num, COALESCE(sv.name, '') AS name, sv.parent_id
+      : `SELECT sc.id, COALESCE(sv.name, '') AS name, sv.parent_id
          FROM scene sc
          LEFT JOIN production p ON p.id = sc.production_id
          LEFT JOIN scene_version sv ON sv.scene_id = sc.id AND sv.version_id = p.active_version_id
          WHERE sc.production_id = $1
          ORDER BY COALESCE(sv.sort_order, 0), sc.id`,
     [resolvedVersionId ?? productionId],
-  );
-  return withGeneratedSceneNumbers(res.rows.map((r) => ({
+  ), resolvedVersionId ? getMarkerLabels(resolvedVersionId) : null]);
+  if (labels) {
+    return res.rows.map((r) => ({
+      id: r.id,
+      number: labels.labelByMarkerId.get(r.id) ?? "",
+      name: r.name ?? "",
+      parentId: r.parent_id,
+    }));
+  }
+  return withMarkerSceneLabels(res.rows.map((r) => ({
     id: r.id,
-    number: r.num,
+    number: "",
     name: r.name ?? "",
     parentId: r.parent_id,
   })));
@@ -295,12 +295,12 @@ async function applyGeneratedSceneNumbers(
   rows: BlockRowWithSceneId[],
   resolvedVersionId: string | null,
   numberMap?: Map<string, string>,
-  precomputedRehearsalLabels?: ReturnType<typeof generatedRehearsalLabels>,
+  precomputedRehearsalLabels?: MarkerLabelIndex,
 ): Promise<BlockRowWithSnapshot[]> {
   if (rows.length === 0) return [];
   const rehearsalLabels = precomputedRehearsalLabels
     ?? (resolvedVersionId && rows.some((row) => row.rehearsalMark)
-      ? await getRehearsalLabels(resolvedVersionId)
+      ? await getMarkerLabels(resolvedVersionId)
       : null);
   const generatedNumbers = rows.some((row) => row.sceneId)
     ? numberMap ?? sceneNumberMap(await getGeneratedSceneRows(productionId, resolvedVersionId))
@@ -308,7 +308,7 @@ async function applyGeneratedSceneNumbers(
   return rows.map(({ sceneId, ...row }) => ({
     ...row,
     rehearsalMark: row.rehearsalMark && rehearsalLabels
-      ? rehearsalLabels.labelByMarkerId.get(row.rehearsalMark) ?? null
+      ? rehearsalLabels.rehearsalLabelByMarkerId.get(row.rehearsalMark) ?? null
       : row.rehearsalMark,
     sceneNumber: sceneId && generatedNumbers
       ? generatedNumbers.get(sceneId) ?? row.sceneNumber
@@ -436,7 +436,7 @@ export async function queryBlocks(
   }
   const sceneFilter = scene?.toLocaleLowerCase() ?? null;
   let precomputedSceneNumberMap: Map<string, string> | undefined;
-  let precomputedRehearsalLabels: ReturnType<typeof generatedRehearsalLabels> | undefined;
+  let precomputedRehearsalLabels: MarkerLabelIndex | undefined;
   if (sceneFilter) {
     const generatedScenes = await getGeneratedSceneRows(productionId, resolvedVersionId);
     precomputedSceneNumberMap = sceneNumberMap(generatedScenes);
@@ -452,8 +452,8 @@ export async function queryBlocks(
   }
   if (rehearsalMark) {
     if (resolvedVersionId) {
-      precomputedRehearsalLabels = await getRehearsalLabels(resolvedVersionId);
-      const markerIds = [...precomputedRehearsalLabels.labelByMarkerId]
+      precomputedRehearsalLabels = await getMarkerLabels(resolvedVersionId);
+      const markerIds = [...precomputedRehearsalLabels.rehearsalLabelByMarkerId]
         .filter(([, label]) => label.includes(rehearsalMark.toUpperCase()))
         .map(([markerId]) => markerId);
       if (markerIds.length === 0) return [];
@@ -587,9 +587,9 @@ export type SceneRow = {
 
 export async function getScenesForProduction(productionId: string): Promise<SceneRow[]> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getActiveVersionId(productionId);
-  const res = await pool.query<{
-    id: string; num: string; name: string | null; parent_id: string | null;
+  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
+  const [res, labels] = await Promise.all([pool.query<{
+    id: string; name: string | null; parent_id: string | null;
     synopsis: string | null; action_line: string | null; music: string | null;
     stage_notes: string | null; expected_duration: number | null; block_count: string;
   }>(
@@ -601,14 +601,14 @@ export async function getScenesForProduction(productionId: string): Promise<Scen
            WHERE type NOT IN (${MARKER_TYPES_SQL})
            GROUP BY scene_id
          )
-         SELECT sc.scene_id AS id, sc.num, sc.name, sc.parent_id,
+         SELECT sc.scene_id AS id, sc.name, sc.parent_id,
                 sc.synopsis, sc.action_line, sc.music, sc.stage_notes, sc.expected_duration,
                 COALESCE(tbc.block_count, '0') AS block_count
          FROM scene_version sc
          LEFT JOIN text_block_counts tbc ON tbc.scene_id = sc.scene_id
          WHERE sc.version_id = $1
          ORDER BY sc.sort_order`
-      : `SELECT sc.id, COALESCE(sv.num, '') AS num, sv.name, sv.parent_id,
+      : `SELECT sc.id, sv.name, sv.parent_id,
                 sv.synopsis, sv.action_line, sv.music, sv.stage_notes, sv.expected_duration,
                 COUNT(s.id) FILTER (WHERE s.type::text NOT IN (${MARKER_TYPES_SQL}))::text AS block_count
          FROM scene sc
@@ -616,14 +616,14 @@ export async function getScenesForProduction(productionId: string): Promise<Scen
          LEFT JOIN scene_version sv ON sv.scene_id = sc.id AND sv.version_id = p.active_version_id
          LEFT JOIN script s ON s.scene_id = sc.id AND s.production_id = $1
          WHERE sc.production_id = $1
-         GROUP BY sc.id, sv.num, sv.name, sv.parent_id, sv.synopsis, sv.action_line,
+         GROUP BY sc.id, sv.name, sv.parent_id, sv.synopsis, sv.action_line,
                   sv.music, sv.stage_notes, sv.expected_duration, sv.sort_order
          ORDER BY COALESCE(sv.sort_order, 0), sc.id`,
     [resolvedVersionId ?? productionId],
-  );
+  ), resolvedVersionId ? getMarkerLabels(resolvedVersionId) : null]);
   const rows: SceneRow[] = res.rows.map(r => ({
     id:               r.id,
-    number:           r.num,
+    number:           labels?.labelByMarkerId.get(r.id) ?? "",
     name:             r.name,
     parentId:         r.parent_id,
     synopsis:         r.synopsis,
@@ -633,7 +633,8 @@ export async function getScenesForProduction(productionId: string): Promise<Scen
     expectedDuration: r.expected_duration,
     blockCount:       parseInt(r.block_count, 10),
   }));
-  const numbered = withGeneratedSceneNumbers(rows.map((r) => ({
+  if (labels) return rows;
+  const numbered = withMarkerSceneLabels(rows.map((r) => ({
     id: r.id,
     number: r.number,
     name: r.name ?? "",

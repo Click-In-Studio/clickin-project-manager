@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     characterAnnotations: {},
     sceneId: scene.id,
     rehearsalMark: null,
-    markerMeta: { number: scene.number, name: scene.name },
+    markerMeta: { name: scene.name },
   } satisfies Block] as const));
   const expandedBlocks: Block[] = [];
   const usedSceneIds = new Set<string>();

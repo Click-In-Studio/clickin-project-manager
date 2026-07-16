@@ -17,7 +17,7 @@ import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwnershipProjection } from "@/lib/script-marker-blocks";
-import { generatedRehearsalLabels } from "@/lib/script-generated-labels";
+import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
 
@@ -855,7 +855,7 @@ export default function CuePage({
     buildMarkerContextById(rawBlocks),
   ), [rawBlocks]);
   const rehearsalLabelByMarkerId = useMemo(
-    () => generatedRehearsalLabels(rawBlocks).labelByMarkerId,
+    () => buildMarkerLabelIndex(rawBlocks).rehearsalLabelByMarkerId,
     [rawBlocks],
   );
   const versionIdRef = useRef(versionId);

@@ -745,7 +745,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       sceneId: markerId,
       rehearsalMark: null,
       markerMeta: {
-        number: scene?.number ?? "",
         name: scene?.name ?? "",
         parentMarkerId,
         synopsis: scene?.synopsis ?? "",

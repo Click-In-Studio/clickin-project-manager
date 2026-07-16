@@ -1,19 +1,20 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
+import { getProductionMemberContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getMarkerLabelIndex, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getPool } from "@/lib/pg";
 import { computePageMap } from "@/lib/script-page";
-import { MARKER_TYPES_SQL, VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
+import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
+import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import type { MentionSearchResult } from "@/lib/mention-types";
 import type { Block, BlockType } from "@/lib/script-types";
-import { generatedRehearsalLabels } from "@/lib/script-generated-labels";
 
 export type { MentionSearchResult as ScriptBlockSearchResult };
 
 type Ctx = { params: Promise<{ id: string }> };
 type BlockRow = { id: string; type: string; content: string };
 type SceneRow = { id: string; num: string; name: string };
+const SCENE_REHEARSAL_LABEL_RE = /^(\d(?:[\d.\-]*\d)?)-?([A-Za-z]+)$/;
 type PageMapBlockRow = {
   id: string;
   snapshot_id: string;
@@ -70,14 +71,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const pool = getPool();
   const results: MentionSearchResult[] = [];
-  let rehearsalLabelsPromise: Promise<ReturnType<typeof generatedRehearsalLabels>> | null = null;
+  let rehearsalLabelsPromise: ReturnType<typeof getMarkerLabelIndex> | null = null;
   function loadRehearsalLabels() {
     return rehearsalLabelsPromise ??= resolvedVersionId
-      ? pool.query<{ id: string; type: BlockType; marker_meta: Block["markerMeta"] }>(
-          VERSION_MARKER_LABEL_ROWS_SQL,
-          [resolvedVersionId],
-        ).then(({ rows }) => generatedRehearsalLabels(rows.map((row) => ({ ...row, markerMeta: row.marker_meta }))))
-      : Promise.resolve(generatedRehearsalLabels([]));
+      ? getMarkerLabelIndex(resolvedVersionId)
+      : Promise.resolve(buildMarkerLabelIndex([]));
   }
   const dedup = (r: MentionSearchResult[]) => {
     const seen = new Set<string>();
@@ -404,13 +402,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     // Scene+mark: 1-1A (mounts on the scene itself, no separate rehearsal mount type)
-    const markM = mountQuery.match(/^(\d[\d.\-]*)([A-Za-z]+)$/);
+    const markM = mountQuery.match(SCENE_REHEARSAL_LABEL_RE);
     if (markM) {
       const [, sceneNum, mark] = markM;
       const scenes = await queryScenes(`${sceneNum}`, 1);
       if (!scenes[0]) return [];
       return queryAssetsByMount(["scene", "scene_snapshot"], scenes[0].id, namePrefix,
-        `${scenes[0].num}${mark.toUpperCase()}`);
+        `${scenes[0].num}-${mark.toUpperCase()}`);
     }
 
     // Scene: 1-1
@@ -480,7 +478,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return Response.json({ results: [] });
     }
 
-    const spmDrill = base.match(/^(\d[\d.\-]*)([A-Za-z]+)$/);
+    const spmDrill = base.match(SCENE_REHEARSAL_LABEL_RE);
     if (spmDrill) {
       const [, sceneQuery, mark] = spmDrill;
       const sceneRows = await queryScenes(`${sceneQuery}%`, 1);
@@ -490,7 +488,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (mfb) {
           const endKey = await nextMarkSortKey(scene.id, mfb.markerId, mfb.sortKey);
           const rows = await blocksInSceneRange(scene.id, mfb.sortKey, endKey);
-          const prefix = `${scene.num}${mark.toUpperCase()}`;
+          const labels = await loadRehearsalLabels();
+          const prefix = labels.labelByMarkerId.get(mfb.markerId);
+          if (!prefix) return Response.json({ results: [] });
           return Response.json({ results: rows.map((r, i) => withVer({
             kind: "block", displayMode: "rehearsal",
             id: r.id, displayLabel: `#${prefix}-${i + 1}`, description: blockDesc(r),
@@ -534,16 +534,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   // ─── Scene+mark: digits + letters, e.g. "1-1A" ───────────────────────────
 
-  const scenePlusMark = mentionQuery.match(/^(\d[\d.\-]*)([A-Za-z]+)$/);
+  const scenePlusMark = mentionQuery.match(SCENE_REHEARSAL_LABEL_RE);
   if (scenePlusMark) {
     const [, sceneQuery, mark] = scenePlusMark;
     const sceneRows = await queryScenes(`${sceneQuery}%`, 4);
+    const labels = await loadRehearsalLabels();
     for (const scene of sceneRows) {
       const mfb = await markFirstBlock(scene.id, mark);
       if (mfb) {
+        const displayLabel = labels.labelByMarkerId.get(mfb.markerId);
+        if (!displayLabel) continue;
         results.push(withVer({
           kind: "rehearsal", id: mfb.markerId,
-          displayLabel: `#${scene.num}${mark.toUpperCase()}`, description: scene.name || undefined,
+          displayLabel: `#${displayLabel}`, description: scene.name || undefined,
         }));
       }
     }
@@ -555,15 +558,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const sceneOnly = mentionQuery.match(/^[\d.\-]+$/);
   if (sceneOnly) {
     const sceneRows = await queryScenesText(`${mentionQuery}%`, 5);
+    const labels = await loadRehearsalLabels();
     for (const scene of sceneRows) {
       results.push(withVer({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined }));
 
-      const labels = await loadRehearsalLabels();
-      for (const [markerId, label] of labels.labelByMarkerId) {
+      for (const markerId of labels.rehearsalLabelByMarkerId.keys()) {
         if (labels.parentIdByMarkerId.get(markerId) !== scene.id) continue;
+        const displayLabel = labels.labelByMarkerId.get(markerId);
+        if (!displayLabel) continue;
         results.push(withVer({
           kind: "rehearsal", id: markerId,
-          displayLabel: `#${scene.num}${label}`, description: scene.name || undefined,
+          displayLabel: `#${displayLabel}`, description: scene.name || undefined,
         }));
         if (results.length >= 8) break;
       }

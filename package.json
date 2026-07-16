@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:markers": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/marker-transitions.js"
+    "test:markers": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/marker-transitions.js",
+    "test:markers:db": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/marker-db-integration.js"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",

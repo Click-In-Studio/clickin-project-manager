@@ -32,7 +32,7 @@ import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { formatDuration, parseDuration } from "@/lib/duration";
-import { generatedRehearsalLabels } from "@/lib/script-generated-labels";
+import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 
@@ -4454,8 +4454,7 @@ function sameBlocks(a: Block[], b: Block[]): boolean {
 function sameMarkerMeta(a: Block["markerMeta"], b: Block["markerMeta"]): boolean {
   const aMeta = a ?? {};
   const bMeta = b ?? {};
-  return (aMeta.number ?? undefined) === (bMeta.number ?? undefined) &&
-    (aMeta.name ?? undefined) === (bMeta.name ?? undefined) &&
+  return (aMeta.name ?? undefined) === (bMeta.name ?? undefined) &&
     (aMeta.parentMarkerId ?? undefined) === (bMeta.parentMarkerId ?? undefined) &&
     (aMeta.synopsis ?? undefined) === (bMeta.synopsis ?? undefined) &&
     (aMeta.actionLine ?? undefined) === (bMeta.actionLine ?? undefined) &&
@@ -4671,7 +4670,7 @@ function analyzeEmptyScriptCleanup(
   const textCountsByRehearsalBlockId = new Map<string, number>();
   const rehearsalTargetById = new Map<string, EmptyScriptCleanupTarget>();
   const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
-  const rehearsalLabelByMarkerId = generatedRehearsalLabels(blocks).labelByMarkerId;
+  const rehearsalLabelByMarkerId = buildMarkerLabelIndex(blocks).rehearsalLabelByMarkerId;
   const chapterMarkerBlocks: Block[] = [];
   const sceneMarkerBlocks: Block[] = [];
   let hasEmptyTextBlock = false;
@@ -6468,6 +6467,16 @@ function CommentsPanel({
 
 // ─── ScriptEditor ─────────────────────────────────────────────────────────────
 
+function mergeDirtyRanges(
+  current: MarkerOwnershipDirty,
+  dirty: Exclude<MarkerOwnershipDirty, null>,
+): Exclude<MarkerOwnershipDirty, null> {
+  if (current === "full" || dirty === "full") return "full";
+  const currentRanges = current ? (Array.isArray(current) ? current : [current]) : [];
+  const nextRanges = Array.isArray(dirty) ? dirty : [dirty];
+  return [...currentRanges, ...nextRanges];
+}
+
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
@@ -6622,23 +6631,13 @@ export default function ScriptEditor({
   const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
   const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
   const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
-  const markOwnershipDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
-    const currentOwnership = ownershipDirtyRef.current;
-    const currentPageMap = pageMapDirtyRef.current;
-    if (currentOwnership === "full" || dirty === "full") ownershipDirtyRef.current = "full";
-    else {
-      const currentRanges = currentOwnership ? (Array.isArray(currentOwnership) ? currentOwnership : [currentOwnership]) : [];
-      const nextRanges = Array.isArray(dirty) ? dirty : [dirty];
-      ownershipDirtyRef.current = [...currentRanges, ...nextRanges];
-    }
-    if (currentPageMap === "full" || dirty === "full") {
-      pageMapDirtyRef.current = "full";
-      return;
-    }
-    const currentRanges = currentPageMap ? (Array.isArray(currentPageMap) ? currentPageMap : [currentPageMap]) : [];
-    const nextRanges = Array.isArray(dirty) ? dirty : [dirty];
-    pageMapDirtyRef.current = [...currentRanges, ...nextRanges];
+  const markPageMapDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
+    pageMapDirtyRef.current = mergeDirtyRanges(pageMapDirtyRef.current, dirty);
   }, []);
+  const markOwnershipDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
+    ownershipDirtyRef.current = mergeDirtyRanges(ownershipDirtyRef.current, dirty);
+    markPageMapDirty(dirty);
+  }, [markPageMapDirty]);
   const ownedBlocks = useMemo(() => {
     const owned = updateMarkerOwnership(blocks, ownershipDirtyRef.current);
     ownershipDirtyRef.current = null;
@@ -6649,7 +6648,7 @@ export default function ScriptEditor({
     () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
     [markerContextById, ownedBlocks],
   );
-  const rehearsalLabels = useMemo(() => generatedRehearsalLabels(blocks), [blocks]);
+  const rehearsalLabels = useMemo(() => buildMarkerLabelIndex(blocks), [blocks]);
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
     const markerIndex = openingChapterMarkerId
@@ -7066,16 +7065,16 @@ export default function ScriptEditor({
     sceneIdSetRef.current = new Set(scenes.map((scene) => scene.id));
   }, [scenes]);
   useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
-  const markBlockOwnershipDirty = useCallback((id: string) => {
+  const markBlockPageMapDirty = useCallback((id: string) => {
     const idx = blockIndexByIdRef.current.get(id);
-    if (idx !== undefined) markOwnershipDirty({ start: idx, end: idx + 1 });
-  }, [markOwnershipDirty]);
-  const markBlockIdsOwnershipDirty = useCallback((ids: Set<string>) => {
-    markOwnershipDirty(Array.from(ids, (id) => {
+    if (idx !== undefined) markPageMapDirty({ start: idx, end: idx + 1 });
+  }, [markPageMapDirty]);
+  const markBlockIdsPageMapDirty = useCallback((ids: Set<string>) => {
+    markPageMapDirty(Array.from(ids, (id) => {
       const index = blockIndexByIdRef.current.get(id);
       return index === undefined ? null : { start: index, end: index + 1 };
     }).filter((range): range is MarkerOwnershipRange => range !== null));
-  }, [markOwnershipDirty]);
+  }, [markPageMapDirty]);
   useEffect(() => () => {
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
@@ -8770,13 +8769,13 @@ export default function ScriptEditor({
       });
       if (nextBlocks.some((block, index) => block !== blocksRef.current[index])) {
         saveSnapshot();
-        markOwnershipDirty("full");
+        markPageMapDirty("full");
         setBlocks(nextBlocks);
       }
     }
     await saveScriptConfig({ stageDelimOpen: pending.open, stageDelimClose: pending.close });
   }, [
-    markOwnershipDirty,
+    markPageMapDirty,
     pendingStageDelimiterChange,
     saveScriptConfig,
     saveSnapshot,
@@ -8880,11 +8879,11 @@ export default function ScriptEditor({
             (g.options.find(o => o.id === tag.optionId)?.sortOrder ?? Infinity) <= sp.sortOrder;
         });
         const newLyric = groupIsLyric || otherGroupsLyric;
-        markBlockOwnershipDirty(blockId);
+        markBlockPageMapDirty(blockId);
         setBlocks(bs => bs.map(b => b.id === blockId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
       }
     }
-  }, [blockTagMapRef, markBlockOwnershipDirty, tagGroups, isLockedMode]);
+  }, [blockTagMapRef, markBlockPageMapDirty, tagGroups, isLockedMode]);
 
   const handleTagCopy = useCallback((blockId: string) => {
     tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
@@ -8915,11 +8914,11 @@ export default function ScriptEditor({
     // Apply the lyric mapping rule immediately so the new block's display is correct.
     const newLyric = computeLyricFromTags(inherited, tagGroups);
     if (newLyric !== null) {
-      markBlockOwnershipDirty(toId);
+      markBlockPageMapDirty(toId);
       setBlocks(bs => bs.map(b => b.id === toId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
     }
     // Tags (and the corrected lyric) are synced atomically via the debounced block op PATCH.
-  }, [blockTagMap, markBlockOwnershipDirty, tagGroups]);
+  }, [blockTagMap, markBlockPageMapDirty, tagGroups]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -8997,14 +8996,14 @@ export default function ScriptEditor({
   const toggleBlockType = useCallback((id: string) => {
     if (isLockedMode) return;
     saveSnapshot();
-    markBlockOwnershipDirty(id);
+    markBlockPageMapDirty(id);
     setBlocks((prev) => prev.map((b) =>
       b.id === id
         ? { ...b, type: b.type === "dialogue" ? "stage" : "dialogue", characterIds: [] }
         : b
     ));
     glowAndFocusBlocks([id]);
-  }, [glowAndFocusBlocks, markBlockOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [glowAndFocusBlocks, markBlockPageMapDirty, saveSnapshot, isLockedMode]);
 
   const toggleStageCueToFocused = useCallback(() => {
     const id = focusedIdRef.current;
@@ -9034,19 +9033,19 @@ export default function ScriptEditor({
   const toggleBlockLyric = useCallback((id: string) => {
     if (isLockedMode) return;
     saveSnapshot();
-    markBlockOwnershipDirty(id);
+    markBlockPageMapDirty(id);
     setBlocks((prev) => prev.map((b) =>
       b.id === id ? { ...b, lyric: !b.lyric } : b
     ));
     glowAndFocusBlocks([id]);
-  }, [glowAndFocusBlocks, markBlockOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [glowAndFocusBlocks, markBlockPageMapDirty, saveSnapshot, isLockedMode]);
 
   const setBlocksType = useCallback((ids: string[], type: BlockType) => {
     if (isLockedMode) return;
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
-    markBlockIdsOwnershipDirty(targetIds);
+    markBlockIdsPageMapDirty(targetIds);
     setBlocks((prev) => prev.map((b) =>
       targetIds.has(b.id)
         ? { ...b, type, characterIds: type === "stage" ? [] : b.characterIds }
@@ -9054,14 +9053,14 @@ export default function ScriptEditor({
     ));
     glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-  }, [glowAndFocusBlocks, markBlockIdsOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [glowAndFocusBlocks, markBlockIdsPageMapDirty, saveSnapshot, isLockedMode]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
     if (isLockedMode) return;
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
-    markBlockIdsOwnershipDirty(targetIds);
+    markBlockIdsPageMapDirty(targetIds);
     setBlocks((prev) => prev.map((b) =>
       targetIds.has(b.id) && b.type !== "stage"
         ? { ...b, lyric }
@@ -9069,7 +9068,7 @@ export default function ScriptEditor({
     ));
     glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-  }, [glowAndFocusBlocks, markBlockIdsOwnershipDirty, saveSnapshot, isLockedMode]);
+  }, [glowAndFocusBlocks, markBlockIdsPageMapDirty, saveSnapshot, isLockedMode]);
 
   // Apply pending focus on every render until resolved
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -9099,10 +9098,10 @@ export default function ScriptEditor({
     (id: string, changes: Partial<Block>) => {
       if (isLockedMode) return;
       startTypingSession();
-      markBlockOwnershipDirty(id);
+      markBlockPageMapDirty(id);
       setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
     },
-    [markBlockOwnershipDirty, startTypingSession, isLockedMode]
+    [markBlockPageMapDirty, startTypingSession, isLockedMode]
   );
 
   const findChapterIdForBlock = useCallback((blockId: string): string | null => {
@@ -9733,14 +9732,14 @@ export default function ScriptEditor({
           ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
           : "（无章节）";
         const markLabel = context?.rehearsalId
-          ? rehearsalLabels.labelByMarkerId.get(context.rehearsalId) ?? "(空)"
+          ? rehearsalLabels.rehearsalLabelByMarkerId.get(context.rehearsalId) ?? "(空)"
           : "(空)";
         showSelectionChangeNotice(`当前 ${moving.length} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
       }
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, markerContextById, rehearsalLabels.labelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, markerContextById, rehearsalLabels.rehearsalLabelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -9880,7 +9879,7 @@ export default function ScriptEditor({
   const removeChar = (charId: string) => {
     if (isLockedMode) return;
     setCharacters((prev) => prev.filter((c) => c.id !== charId));
-    markOwnershipDirty("full");
+    markPageMapDirty("full");
     setBlocks((prev) =>
       prev.map((b) => {
         const restAnnotations = { ...b.characterAnnotations };
@@ -11176,7 +11175,7 @@ export default function ScriptEditor({
                   : block.type === "scene_marker" && markerScene
                     ? { kind: "scene", id: block.id, scene: markerScene }
                     : block.type === "rehearsal_marker"
-                      ? { kind: "rehearsal", id: block.id, mark: rehearsalLabels.labelByMarkerId.get(block.id) ?? "" }
+                      ? { kind: "rehearsal", id: block.id, mark: rehearsalLabels.rehearsalLabelByMarkerId.get(block.id) ?? "" }
                       : null;
               const markerDeleteIds = [block.id];
               const markerEl = markerNode ? (
@@ -11336,7 +11335,7 @@ export default function ScriptEditor({
             const ownedSceneId = projectedOwnedBlock.sceneId;
             const ownedRehearsalId = projectedOwnedBlock.rehearsalMark;
             const displayRehearsalMark = ownedRehearsalId
-              ? rehearsalLabels.labelByMarkerId.get(ownedRehearsalId) ?? null
+              ? rehearsalLabels.rehearsalLabelByMarkerId.get(ownedRehearsalId) ?? null
               : null;
             const displayBlock = block.sceneId === ownedSceneId && block.rehearsalMark === displayRehearsalMark
               ? block
@@ -11916,7 +11915,7 @@ export default function ScriptEditor({
               label: markerBlockDisplayName(
                 block,
                 block.sceneId ? sceneById.get(block.sceneId) ?? null : null,
-                rehearsalLabels.labelByMarkerId.get(block.id),
+                rehearsalLabels.rehearsalLabelByMarkerId.get(block.id),
               ),
             };
           })

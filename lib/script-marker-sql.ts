@@ -42,7 +42,6 @@ export const VERSION_SCENES_FROM_MARKERS_CTE = `
 	        block_id,
 	        CASE WHEN COALESCE(
 	          NULLIF(marker_meta->>'name', ''),
-	          NULLIF(marker_meta->>'number', ''),
 	          NULLIF(marker_meta->>'synopsis', ''),
 	          NULLIF(marker_meta->>'actionLine', ''),
 	          NULLIF(marker_meta->>'music', ''),

@@ -2,7 +2,6 @@ export type Character = { id: string; name: string; isAggregate: boolean; member
 export type Scene = { id: string; number: string; name: string; parentId: string | null };
 export type BlockType = "dialogue" | "stage" | "chapter_marker" | "scene_marker" | "rehearsal_marker";
 export type MarkerMeta = {
-  number?: string;
   name?: string;
   parentMarkerId?: string | null;
   synopsis?: string;
