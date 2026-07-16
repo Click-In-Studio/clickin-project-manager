@@ -72,7 +72,7 @@ jobs:
       # (exported against that schema) can be imported cleanly.
       - name: Apply pre-migration schema
         if: steps.migrations.outputs.has_migrations == 'true'
-        run: git show ${{ github.event.before }}:db/schema.sql | psql
+        run: git show ${{ github.event.before }}:db/schema.sql | psql -v ON_ERROR_STOP=1
 
       - uses: actions/setup-node@v4.4.0
         if: steps.migrations.outputs.has_migrations == 'true'
@@ -120,7 +120,7 @@ jobs:
       # Import the pre-migration seed data into the test DB.
       - name: Import pre-migration seed
         if: steps.migrations.outputs.has_migrations == 'true'
-        run: psql -1 -f ci.sql
+        run: psql -v ON_ERROR_STOP=1 -1 -f ci.sql
 
       # Apply the new migration files — identical to what will run on production.
       - name: Apply new migration files
@@ -129,7 +129,7 @@ jobs:
           echo '${{ steps.migrations.outputs.files }}' | while IFS= read -r f; do
             [ -z "$f" ] && continue
             echo "Applying $f ..."
-            psql -f "$f"
+            psql -v ON_ERROR_STOP=1 -f "$f"
           done
 
       # Sanity-check that the migration did not destroy data.

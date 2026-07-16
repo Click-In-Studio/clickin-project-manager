@@ -83,12 +83,12 @@ jobs:
       # migration files work correctly on real pre-migration data.
       - name: Apply base schema (migration path)
         if: steps.migrations.outputs.has_migrations == 'true'
-        run: git show origin/$GITHUB_BASE_REF:db/schema.sql | psql
+        run: git show origin/$GITHUB_BASE_REF:db/schema.sql | psql -v ON_ERROR_STOP=1
 
       # NORMAL PATH: Fresh install from the current schema (no new migrations).
       - name: Apply current schema (normal path)
         if: steps.migrations.outputs.has_migrations != 'true'
-        run: psql -f db/schema.sql
+        run: psql -v ON_ERROR_STOP=1 -f db/schema.sql
 
       - uses: actions/setup-node@v4.4.0
         with:
@@ -181,7 +181,7 @@ jobs:
           echo '${{ steps.migrations.outputs.files }}' | while IFS= read -r f; do
             [ -z "$f" ] && continue
             echo "Applying $f ..."
-            psql -f "$f"
+            psql -v ON_ERROR_STOP=1 -f "$f"
           done
 
       # MIGRATION PATH: Verify that the migration left the data in a consistent
