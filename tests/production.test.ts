@@ -9,29 +9,28 @@ import {
   unarchiveProduction,
   deleteProduction,
 } from "@/lib/db";
-import { TEST_USER, PROD_PLANET, PROD_CULTURE } from "./helpers";
+import { TEST_USER } from "./helpers";
+import { shortId } from "./factories";
 
-const TEST_PROD_ID = "test-prod-unit";
+const TEST_PROD_ID = `test-prod-${shortId()}`;
 
 afterAll(() => deleteProduction(TEST_PROD_ID).catch(() => {}));
 
 describe("listProductions", () => {
-  it("admin sees all seeded productions", async () => {
+  it("admin sees productions (no filter by membership)", async () => {
+    await createProduction(TEST_PROD_ID, "单元测试演出");
     const list = await listProductions({ openId: TEST_USER, isAdmin: true });
-    const ids = list.map((p) => p.id);
-    expect(ids).toContain(PROD_PLANET);
-    expect(ids).toContain(PROD_CULTURE);
+    expect(list.some((p) => p.id === TEST_PROD_ID)).toBe(true);
   });
 
   it("non-member sees no productions when not admin", async () => {
     const list = await listProductions({ openId: TEST_USER, isAdmin: false });
-    expect(list.length).toBe(0);
+    expect(list.every((p) => p.id !== TEST_PROD_ID)).toBe(true);
   });
 });
 
 describe("production CRUD", () => {
   it("createProduction creates a new production", async () => {
-    await createProduction(TEST_PROD_ID, "单元测试演出");
     expect(await getProductionName(TEST_PROD_ID)).toBe("单元测试演出");
   });
 

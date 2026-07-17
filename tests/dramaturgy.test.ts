@@ -1,63 +1,63 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { listScenesByVersion, getSceneById, listProductionCharacters, getCharacterById, getActiveVersionId } from "@/lib/db";
-import { getPool } from "@/lib/pg";
-import { PROD_PLANET, PROD_CULTURE } from "./helpers";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { listScenesByVersion, getSceneById, listProductionCharacters, getCharacterById } from "@/lib/db";
+import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "./factories";
 
-let planetVersionId: string;
-let cultureVersionId: string;
+let prodId: string;
+let versionId: string;
+let sceneId: string;
+let charId: string;
 
 beforeAll(async () => {
-  planetVersionId = (await getActiveVersionId(PROD_PLANET))!;
-  cultureVersionId = (await getActiveVersionId(PROD_CULTURE))!;
+  ({ prodId, versionId } = await makeProduction());
+  sceneId = await makeScene(prodId, versionId);
+  charId = await makeCharacter(prodId, versionId);
+});
+
+afterAll(async () => {
+  await cleanupProduction(prodId).catch(() => {});
 });
 
 describe("scenes", () => {
-  it("listScenesByVersion returns scenes for 我们的星星", async () => {
-    const scenes = await listScenesByVersion(planetVersionId);
-    expect(scenes.length).toBeGreaterThan(0);
-  });
-
-  it("listScenesByVersion returns scenes for 供养2.0", async () => {
-    const scenes = await listScenesByVersion(cultureVersionId);
-    expect(scenes.length).toBeGreaterThan(0);
-  });
-
-  it("scene table has 100+ rows across both productions", async () => {
-    const res = await getPool().query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM scene WHERE production_id = ANY($1)`,
-      [[PROD_PLANET, PROD_CULTURE]]
-    );
-    expect(parseInt(res.rows[0].count)).toBeGreaterThanOrEqual(100);
+  it("listScenesByVersion returns the created scene", async () => {
+    const scenes = await listScenesByVersion(versionId);
+    expect(scenes.some((s) => s.id === sceneId)).toBe(true);
   });
 
   it("getSceneById returns the correct scene", async () => {
-    const scenes = await listScenesByVersion(planetVersionId);
-    const first = scenes[0];
-    const scene = await getSceneById(first.id, PROD_PLANET);
+    const scene = await getSceneById(sceneId, prodId);
     expect(scene).not.toBeNull();
-    expect(scene!.id).toBe(first.id);
+    expect(scene!.id).toBe(sceneId);
   });
 
   it("getSceneById returns null for non-existent scene", async () => {
-    expect(await getSceneById("no-such-scene", PROD_PLANET)).toBeNull();
+    expect(await getSceneById("no-such-scene", prodId)).toBeNull();
+  });
+
+  it("getSceneById returns null for correct scene id with wrong production", async () => {
+    const other = await makeProduction();
+    const otherSceneId = await makeScene(other.prodId, other.versionId);
+    const result = await getSceneById(otherSceneId, prodId);
+    await cleanupProduction(other.prodId).catch(() => {});
+    expect(result).toBeNull();
   });
 });
 
 describe("characters", () => {
-  it("listProductionCharacters returns characters for 我们的星星", async () => {
-    const chars = await listProductionCharacters(PROD_PLANET);
-    expect(chars.length).toBeGreaterThan(0);
+  it("listProductionCharacters returns the created character", async () => {
+    const chars = await listProductionCharacters(prodId);
+    expect(chars.some((c) => c.id === charId)).toBe(true);
   });
 
   it("getCharacterById returns the correct character", async () => {
-    const chars = await listProductionCharacters(PROD_PLANET);
-    const char = await getCharacterById(chars[0].id, PROD_PLANET);
+    const char = await getCharacterById(charId, prodId);
     expect(char).not.toBeNull();
-    expect(char!.id).toBe(chars[0].id);
+    expect(char!.id).toBe(charId);
   });
 
   it("getCharacterById returns null for wrong production", async () => {
-    const chars = await listProductionCharacters(PROD_PLANET);
-    expect(await getCharacterById(chars[0].id, PROD_CULTURE)).toBeNull();
+    const other = await makeProduction();
+    const result = await getCharacterById(charId, other.prodId);
+    await cleanupProduction(other.prodId).catch(() => {});
+    expect(result).toBeNull();
   });
 });

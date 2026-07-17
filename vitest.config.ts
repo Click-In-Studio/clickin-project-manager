@@ -10,6 +10,7 @@ export default defineConfig({
     environment: "node",
     testTimeout: 15000,
     globalSetup: "./tests/global-setup.ts",
+    setupFiles: ["./tests/setup.ts"],
     // All test files share one DB — parallel execution causes cross-file membership pollution
     fileParallelism: false,
   },
