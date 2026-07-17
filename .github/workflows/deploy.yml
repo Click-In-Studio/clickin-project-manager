@@ -91,7 +91,8 @@ jobs:
             BACKUP="pre_migration_${{ github.run_number }}_$(date +%Y%m%d_%H%M%S).pgdump"
             ssh prod "
               mkdir -p $SHARED/backups &&
-              sudo -u postgres pg_dump -d script_editor --format=custom --compress=9 -f $SHARED/backups/$BACKUP &&
+              sudo -u postgres pg_dump -d script_editor --format=custom --compress=9 -f /tmp/$BACKUP &&
+              mv /tmp/$BACKUP $SHARED/backups/$BACKUP &&
               ls -lh $SHARED/backups/$BACKUP &&
               ls -1t $SHARED/backups/*.pgdump 2>/dev/null | tail -n +6 | xargs -r rm -f
             "
