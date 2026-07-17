@@ -392,19 +392,22 @@ ssh click-in "cd /var/www/production-manager && npm install && npm run build && 
 
 两者同样重要——数据完整性排在前面，是因为一旦破坏几乎不可逆；安全性问题原则上可以在不损失数据的前提下修补。
 
-测试运行器为 **Vitest**，直接连接测试数据库（与 CI 环境相同的 `script_editor` 库，seed 数据来自 `seed-data/ci.sql`）。
+测试运行器为 **Vitest**，直接连接测试数据库（CI 中为临时创建的空库，测试数据全部由工厂函数在运行时生成）。
 
 ```bash
-npm test           # 跑全部测试（vitest run）
-npm test -- --reporter=verbose  # 显示每条测试名称
+npm test                             # 跑全部测试（vitest run）
+npm test -- --reporter=verbose       # 显示每条测试名称
+TEST_SEED=1234567890 npm test        # 用固定 seed 复现 CI 失败
 ```
 
 ### 10.2 测试文件结构
 
 ```
 tests/
-├── global-setup.ts      # 所有测试共用的 DB 生命周期（setup / teardown）
-├── helpers.ts           # 常量：PROD_PLANET、PROD_CULTURE、TEST_USER
+├── global-setup.ts      # DB 生命周期（setup / teardown）+ TEST_SEED 初始化
+├── setup.ts             # 每个 worker 的 faker 种子初始化
+├── factories.ts         # 工厂函数：makeProduction / makeScene / makeBlocks 等
+├── helpers.ts           # 常量：TEST_USER
 ├── production.test.ts   # DB 层：production CRUD
 ├── dramaturgy.test.ts   # DB 层：场景、角色
 ├── script.test.ts       # DB 层：版本、脚本加载
@@ -417,12 +420,10 @@ tests/
 └── conventions.test.ts  # 开发规约自动化（见 10.5 节）
 ```
 
-`tests/helpers.ts` 中定义了两个真实 seed 演出和一个测试用系统账号：
+`tests/helpers.ts` 中只有一个常量：
 
 ```typescript
-export const PROD_PLANET  = "mod1uc2dg";   // 我们的星星
-export const PROD_CULTURE = "mon0jcm82";   // 供养2.0
-export const TEST_USER    = "test-sys-user";
+export const TEST_USER = "test-sys-user";
 ```
 
 `TEST_USER` 在 `global-setup.ts` 的 `setup()` 阶段插入 `feishu_user`，`teardown()` 时删除。所有测试文件共用这一账号，**不要在单个测试文件里重复创建或删除它**。
@@ -431,39 +432,67 @@ export const TEST_USER    = "test-sys-user";
 
 DB 层测试直接调用 `lib/db.ts` / `lib/event-db.ts` 中的函数，不经过 HTTP 层。
 
-#### 测试 ID 命名
+#### 工厂模式（必须遵守）
 
-测试中创建的资源 ID 必须以 `test-` 开头，例如 `test-prod-unit`、`test-cl-unit`。`seed-schema.json` 的结构比对会自动排除 `table_name LIKE 'test-%'` 的行，但 **ID 前缀是保证测试数据不污染 fingerprint 查询的关键**。
-
-#### 清理规则
-
-每个创建资源的测试文件必须在 `afterAll` 里清理自己创建的资源，且要加 `.catch(() => {})` 防止前序测试失败导致级联错误：
+每个测试文件在 `beforeAll` 中创建自己需要的数据，在 `afterAll` 中清理，不依赖任何预存的演出数据：
 
 ```typescript
+import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "./factories";
+
+let prodId: string;
+let versionId: string;
+let sceneId: string;
+
+beforeAll(async () => {
+  ({ prodId, versionId } = await makeProduction());
+  sceneId = await makeScene(prodId, versionId);
+});
+
 afterAll(async () => {
-  await deleteCue(CUE_ID, CL_ID).catch(() => {});
-  await deleteCueList(CL_ID, PROD_ID).catch(() => {});
-  await deleteProduction(PROD_ID).catch(() => {});
+  await cleanupProduction(prodId).catch(() => {});
 });
 ```
 
-级联删除（如删除 production 时子资源自动删除）是允许的，不需要逐一删除子资源。
+`cleanupProduction` 会先删除 `scene_version` / `character_version`（这两张表的 FK 没有 `ON DELETE CASCADE`），再删除演出（其余子资源通过 CASCADE 自动删除）。
 
-#### 不要修改种子演出的核心数据
+#### 可用的工厂函数
 
-`PROD_PLANET` 和 `PROD_CULTURE` 是 seed 演出，其剧本、场景、角色等核心数据**只读**。可以在这两个演出上创建新的走位表或排练事件（并在 afterAll 清理），但不可修改其已有数据。如果测试需要可写的演出，用 `createProduction` 创建专属测试演出。
+| 函数 | 说明 |
+|------|------|
+| `makeProduction()` | 创建演出 + 初始 version，返回 `{ prodId, versionId }` |
+| `cleanupProduction(prodId)` | 安全删除演出及其所有数据 |
+| `makeScene(prodId, versionId)` | 累加式添加场景，返回 sceneId（UUID）|
+| `makeCharacter(prodId, versionId)` | 累加式添加角色，返回 charId（UUID）|
+| `makeBlocks(prodId, versionId, count)` | 累加式插入 dialogue 块，返回 `string[]` |
+| `shortId()` | 生成 `t` 前缀的确定性随机 7 位 ID，用于 hardcoded 资源 ID |
 
-#### 断言 vs 脆弱断言
+**禁止**：不要在工厂函数或测试中使用 `importScriptToVersion`——它会清除该 version 的所有 blocks，破坏其他测试的累加数据。
 
-对 seed 数据的读操作使用宽松断言（`toBeGreaterThan`、`toBeTruthy`、`toContain`），避免对具体行数或内容使用精确相等，因为 seed 数据未来可能更新：
+#### 确定性随机
+
+`faker` 通过 `process.env.TEST_SEED` 初始化，`global-setup.ts` 在每次 `npm test` 时随机生成一个 seed 并打印：
+
+```
+Test seed: 2847291034  (reproduce: TEST_SEED=2847291034 npm test)
+```
+
+CI 失败后可用这个命令在本地精确复现。
+
+#### 清理规则
+
+`afterAll` 里必须加 `.catch(() => {})` 防止前序测试失败时级联报错。
+
+#### 测试断言
+
+测试只断言自己创建的数据，**不对数据库总行数作任何假设**：
 
 ```typescript
-// ✅ 推荐
-expect(scenes.length).toBeGreaterThan(0);
-expect(ids).toContain(PROD_PLANET);
+// ✅ 推荐：只检查工厂创建的那条记录
+const scenes = await listScenesByVersion(versionId);
+expect(scenes.some((s) => s.id === sceneId)).toBe(true);
 
-// ❌ 避免（seed 更新后会误报）
-expect(scenes.length).toBe(34);
+// ❌ 禁止：断言总行数（依赖 DB 状态，脆弱）
+expect(scenes.length).toBeGreaterThanOrEqual(50);
 ```
 
 ### 10.4 API 层测试规范
@@ -498,10 +527,10 @@ function ctx(params: Record<string, string>): any {
   return { params: Promise.resolve(params) };
 }
 
-// 调用示例
+// 调用示例（PROD_ID 由工厂函数在 beforeAll 中创建）
 const res = await listCueListsHandler(
-  req(`/api/production/${PROD_PLANET}/cuelists`, { session: adminSession() }),
-  ctx({ id: PROD_PLANET }),
+  req(`/api/production/${PROD_ID}/cuelists`, { session: adminSession() }),
+  ctx({ id: PROD_ID }),
 );
 ```
 
@@ -533,26 +562,37 @@ await setMemberRoles(PROD_ID, TEST_USER, ["制作人"]);
 
 对每个运行时 migration 函数（目前仅 `ensureScriptMarkerMigration`），验证：
 
-- 对已 seed 的 DB 调用后立即返回 `{ status: "ready" }`（seed 数据已是迁移后状态）
+- 对**空 version**（无任何 blocks）调用后立即返回 `{ status: "ready" }`（无数据可迁移）
 - 调用两次，`script_version` 行数不变
 
 **新增运行时 migration 的规则**：每当在应用代码中新增一个运行时 migration 函数，必须在 `conventions.test.ts` 中同步添加对应的幂等性测试，否则 PR 不应被合并。
 
-典型模式：
+典型模式（使用工厂演出）：
 
 ```typescript
-it("ensureNewFeatureMigration: seeded data returns ready immediately", async () => {
-  const versionId = await getActiveVersionId(PROD_PLANET);
-  const result = await ensureNewFeatureMigration(versionId!);
+import { makeProduction, cleanupProduction } from "./factories";
+
+let versionId: string;
+let prodId: string;
+
+beforeAll(async () => {
+  ({ prodId, versionId } = await makeProduction());
+});
+
+afterAll(async () => {
+  await cleanupProduction(prodId).catch(() => {});
+});
+
+it("ensureNewFeatureMigration: fresh version returns ready immediately", async () => {
+  const result = await ensureNewFeatureMigration(versionId);
   expect(result.status).toBe("ready");
 });
 
-it("ensureNewFeatureMigration: idempotent", async () => {
-  const versionId = await getActiveVersionId(PROD_PLANET);
+it("ensureNewFeatureMigration: idempotent — row count unchanged", async () => {
   const before = await getPool().query<{ count: string }>(
     "SELECT COUNT(*) AS count FROM relevant_table WHERE version_id = $1", [versionId]
   );
-  await ensureNewFeatureMigration(versionId!);
+  await ensureNewFeatureMigration(versionId);
   const after = await getPool().query<{ count: string }>(
     "SELECT COUNT(*) AS count FROM relevant_table WHERE version_id = $1", [versionId]
   );
@@ -564,19 +604,16 @@ it("ensureNewFeatureMigration: idempotent", async () => {
 
 CI 每次跑测试时，将当前 DB 的列结构与 `db/seed-schema.json` 做精确比对。
 
-**触发时机**：当 `db/add-*.sql` 或 `db/schema.sql` 变更后，fingerprint 和 seed 都需要同步更新：
+**触发时机**：当 `db/add-*.sql` 或 `db/schema.sql` 变更后，需要同步更新 fingerprint：
 
 ```bash
-# 1. 在本地 apply 新 migration
+# 1. 在本地 apply 新 DDL 文件
 psql -d script_editor -f db/add-new-feature.sql
 
-# 2. 更新 fingerprint（见下方关键注意事项）
+# 2. 在干净 DB 上重新生成 fingerprint
 npm run seed:schema     # 写入 db/seed-schema.json
 
-# 3. 重新导出 CI seed（需连接生产/staging DB，或在已迁移的本地 DB 上导出）
-npm run seed:ci-export  # 写入 R2 seed-data/ci.sql
-
-# 4. 提交 db/seed-schema.json（ci.sql 已上传 R2，不在 git 里）
+# 3. 提交
 git add db/seed-schema.json
 ```
 
@@ -598,8 +635,7 @@ fingerprint 比对失败时，CI 会给出明确提示：
 
 ```
 Schema has drifted from db/seed-schema.json.
-Run "npm run seed:schema" and commit db/seed-schema.json,
-then re-export the seed with "npm run seed:ci-export".
+Run "npm run seed:schema" and commit db/seed-schema.json.
 
   production.new_col: COLUMN ADDED (re-export seed)
   notification_job: TABLE DROPPED   ← 说明 fingerprint 包含了未合并 feature 表，需在干净 DB 上重新生成
@@ -618,7 +654,7 @@ then re-export the seed with "npm run seed:ci-export".
 | **P1** | 新增跨 production 的读写操作 | **必须**在 `security.test.ts` 中加"错误 productionId → null / no-op"验证 |
 | — | 新增读操作 DB 函数 | 建议加 happy path + 不存在时返回 null 的测试 |
 | — | 新增运行时 migration | **必须**在 `conventions.test.ts` 中加幂等性测试 |
-| — | Schema 变更（`db/add-*.sql`） | **必须**在干净 DB 上更新 `db/seed-schema.json`（`npm run seed:schema`）并重新导出 seed |
+| — | Schema 变更（`db/add-*.sql`） | **必须**在干净 DB 上更新 `db/seed-schema.json`（`npm run seed:schema`）并提交 |
 | — | 破坏性 Schema Migration | **必须**提供 `tests/<name>.migration.test.ts`，含 invariance 测试（见 §10.7）|
 | — | 流式路由（SSE）、R2、飞书 Bot | 暂不强制（依赖外部服务，需独立策略） |
 

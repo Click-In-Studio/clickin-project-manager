@@ -5,125 +5,115 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  createProduction, deleteProduction,
   createCueList, deleteCueList, getCueList, updateCueList,
   createCue, getCue, deleteCue,
-  listScenesByVersion, getSceneById, getActiveVersionId,
+  listScenesByVersion, getSceneById,
   listProductionCharacters, getCharacterById,
   listCueLists,
 } from "@/lib/db";
 import { createProductionEvent, getProductionEvent, deleteProductionEvent } from "@/lib/event-db";
-import { PROD_PLANET, PROD_CULTURE, TEST_USER } from "./helpers";
+import { TEST_USER } from "./helpers";
+import { makeProduction, makeScene, makeCharacter, cleanupProduction, shortId } from "./factories";
 
-// A production that owns none of the test resources
-const OTHER_PROD = "test-other-prod";
-const CL_ID      = "test-sec-cl";
-const CUE_ID     = "test-sec-cue";
-const EVENT_ID   = "test-sec-event";
+// PROD_A owns all the test resources; PROD_B is empty (no scenes/chars/cuelists)
+let prodA: { prodId: string; versionId: string };
+let prodB: { prodId: string; versionId: string };
 
-let planetVersionId: string;
-let cultureVersionId: string;
-let otherVersionId: string;
+const CL_ID    = `sec-cl-${shortId()}`;
+const CUE_ID   = `sec-cue-${shortId()}`;
+const EVENT_ID = `sec-evt-${shortId()}`;
+
+let sceneAId: string;
+let charAId: string;
 
 beforeAll(async () => {
-  planetVersionId = (await getActiveVersionId(PROD_PLANET))!;
-  cultureVersionId = (await getActiveVersionId(PROD_CULTURE))!;
-  await createProduction(OTHER_PROD, "隔离测试演出");
-  otherVersionId = (await getActiveVersionId(OTHER_PROD))!;
+  [prodA, prodB] = await Promise.all([makeProduction(), makeProduction()]);
+  [sceneAId, charAId] = await Promise.all([
+    makeScene(prodA.prodId, prodA.versionId),
+    makeCharacter(prodA.prodId, prodA.versionId),
+  ]);
+  const anchor = { kind: "gap" as const, afterBlockId: null };
   await createCueList({
-    id: CL_ID, productionId: PROD_PLANET, name: "安全测试走位表",
+    id: CL_ID, productionId: prodA.prodId, name: "安全测试走位表",
     notes: "", abbr: null, template: null, defaultEditRoles: [], createdBy: TEST_USER,
   });
-  const anchor = { kind: "gap" as const, afterBlockId: null };
   await createCue({ id: CUE_ID, cueListId: CL_ID, number: "S1", name: "安全测试Q", content: "", start: anchor, end: anchor });
   await createProductionEvent({
-    id: EVENT_ID, productionId: PROD_PLANET, title: "安全测试排练", eventType: "custom",
+    id: EVENT_ID, productionId: prodA.prodId, title: "安全测试排练", eventType: "custom",
     location: "", startTime: null, endTime: null, description: "", createdBy: TEST_USER,
   });
 });
 
 afterAll(async () => {
+  // cue_list and production_event cascade-delete with the production,
+  // but explicit cleanup is safer for parallel test suites
   await deleteCue(CUE_ID, CL_ID).catch(() => {});
-  await deleteCueList(CL_ID, PROD_PLANET).catch(() => {});
-  await deleteProductionEvent(EVENT_ID, PROD_PLANET).catch(() => {});
-  await deleteProduction(OTHER_PROD).catch(() => {});
+  await deleteCueList(CL_ID, prodA.prodId).catch(() => {});
+  await deleteProductionEvent(EVENT_ID, prodA.prodId).catch(() => {});
+  await cleanupProduction(prodA.prodId).catch(() => {});
+  await cleanupProduction(prodB.prodId).catch(() => {});
 });
 
 describe("production isolation — reads", () => {
-  it("listScenesByVersion for OTHER_PROD cannot see PROD_PLANET scenes", async () => {
-    const ours   = await listScenesByVersion(planetVersionId);
-    const theirs = await listScenesByVersion(otherVersionId);
+  it("listScenesByVersion for PROD_B cannot see PROD_A scenes", async () => {
+    const ours   = await listScenesByVersion(prodA.versionId);
+    const theirs = await listScenesByVersion(prodB.versionId);
     const ourIds = new Set(ours.map((s) => s.id));
     expect(theirs.every((s) => !ourIds.has(s.id))).toBe(true);
   });
 
-  it("listProductionCharacters for OTHER_PROD cannot see PROD_PLANET characters", async () => {
-    const ours   = await listProductionCharacters(PROD_PLANET);
-    const theirs = await listProductionCharacters(OTHER_PROD);
+  it("listProductionCharacters for PROD_B cannot see PROD_A characters", async () => {
+    const ours   = await listProductionCharacters(prodA.prodId);
+    const theirs = await listProductionCharacters(prodB.prodId);
     const ourIds = new Set(ours.map((c) => c.id));
     expect(theirs.every((c) => !ourIds.has(c.id))).toBe(true);
   });
 
   it("getSceneById rejects correct id + wrong production", async () => {
-    const scenes = await listScenesByVersion(planetVersionId);
-    const result = await getSceneById(scenes[0].id, OTHER_PROD);
-    expect(result).toBeNull();
+    expect(await getSceneById(sceneAId, prodB.prodId)).toBeNull();
   });
 
   it("getCharacterById rejects correct id + wrong production", async () => {
-    const chars = await listProductionCharacters(PROD_PLANET);
-    const result = await getCharacterById(chars[0].id, OTHER_PROD);
-    expect(result).toBeNull();
+    expect(await getCharacterById(charAId, prodB.prodId)).toBeNull();
   });
 
   it("getCueList rejects correct id + wrong production", async () => {
-    expect(await getCueList(CL_ID, OTHER_PROD)).toBeNull();
+    expect(await getCueList(CL_ID, prodB.prodId)).toBeNull();
   });
 
-  it("listCueLists for OTHER_PROD returns empty (no cue lists created for it)", async () => {
-    const lists = await listCueLists(OTHER_PROD);
+  it("listCueLists for PROD_B returns empty (no cue lists created for it)", async () => {
+    const lists = await listCueLists(prodB.prodId);
     expect(lists.every((l) => l.id !== CL_ID)).toBe(true);
   });
 
   it("getProductionEvent rejects correct id + wrong production", async () => {
-    expect(await getProductionEvent(EVENT_ID, OTHER_PROD)).toBeNull();
+    expect(await getProductionEvent(EVENT_ID, prodB.prodId)).toBeNull();
   });
 });
 
 describe("production isolation — writes blocked by parent scope", () => {
   it("updateCueList with wrong production does nothing", async () => {
-    await updateCueList(CL_ID, OTHER_PROD, { name: "越权改名" });
-    const cl = await getCueList(CL_ID, PROD_PLANET);
+    await updateCueList(CL_ID, prodB.prodId, { name: "越权改名" });
+    const cl = await getCueList(CL_ID, prodA.prodId);
     expect(cl!.name).not.toBe("越权改名");
   });
 
   it("deleteCue with wrong cue list id does not delete", async () => {
-    const fakeCLId = "no-such-cl";
+    const fakeCLId = `no-such-${shortId()}`;
     await deleteCue(CUE_ID, fakeCLId);
     expect(await getCue(CUE_ID, CL_ID)).not.toBeNull();
   });
 });
 
-describe("PROD_CULTURE cannot access PROD_PLANET resources by ID", () => {
-  it("getSceneById with PROD_PLANET scene id returns null for PROD_CULTURE", async () => {
-    // Scene marker IDs can overlap (same content-derived IDs); isolation is
-    // proved by `getSceneById` scoping the lookup through the correct version.
-    // Pick an ID from PROD_PLANET that is NOT in PROD_CULTURE's active scene set.
-    const planet  = await listScenesByVersion(planetVersionId);
-    const culture = await listScenesByVersion(cultureVersionId);
-    const cultureIds = new Set(culture.map((s) => s.id));
-    const exclusive = planet.find((s) => !cultureIds.has(s.id));
-    if (!exclusive) {
-      // All scene IDs happen to appear in both productions (shared markers); skip.
-      return;
-    }
-    expect(await getSceneById(exclusive.id, PROD_CULTURE)).toBeNull();
+describe("two separate productions cannot access each other's resources by ID", () => {
+  it("getSceneById with PROD_A scene id returns null for PROD_B", async () => {
+    expect(await getSceneById(sceneAId, prodB.prodId)).toBeNull();
   });
 
-  it("cue list created in PROD_PLANET is not visible via PROD_CULTURE", async () => {
-    const planet  = await listCueLists(PROD_PLANET);
-    const culture = await listCueLists(PROD_CULTURE);
-    const cultureIds = new Set(culture.map((l) => l.id));
-    expect(planet.every((l) => !cultureIds.has(l.id))).toBe(true);
+  it("cue list created in PROD_A is not visible via PROD_B", async () => {
+    const a = await listCueLists(prodA.prodId);
+    const b = await listCueLists(prodB.prodId);
+    const bIds = new Set(b.map((l) => l.id));
+    expect(a.every((l) => !bIds.has(l.id))).toBe(true);
   });
 });

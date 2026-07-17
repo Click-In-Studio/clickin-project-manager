@@ -9,7 +9,8 @@ import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId } from "@/lib/db";
 import { deleteProductionEvent } from "@/lib/event-db";
-import { TEST_USER, PROD_PLANET } from "./helpers";
+import { TEST_USER } from "./helpers";
+import { makeProduction, makeBlocks, cleanupProduction } from "./factories";
 
 // ── Route handlers under test ──────────────────────────────────────────────────
 import {
@@ -77,6 +78,16 @@ function ctx(params: Record<string, string>): any {
   return { params: Promise.resolve(params) };
 }
 
+// ── Factory production shared across auth/authz tests ─────────────────────────
+
+let AP_PROD = "";
+let apVersionId = "";
+
+beforeAll(async () => {
+  ({ prodId: AP_PROD, versionId: apVersionId } = await makeProduction());
+  await makeBlocks(AP_PROD, apVersionId, 3);
+});
+
 // ── Cleanup state ──────────────────────────────────────────────────────────────
 
 const created: { type: "production" | "event"; id: string; prodId?: string }[] = [];
@@ -89,6 +100,7 @@ afterAll(async () => {
       await deleteProduction(item.id).catch(() => {});
     }
   }
+  await cleanupProduction(AP_PROD).catch(() => {});
 });
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
@@ -168,14 +180,14 @@ describe("POST /api/productions — input validation", () => {
 // ── GET /api/productions — happy path ─────────────────────────────────────────
 
 describe("GET /api/productions", () => {
-  it("admin gets list including seeded productions", async () => {
+  it("admin gets list including factory production", async () => {
     const res = await listProductionsHandler(
       req("/api/productions", { session: adminSession() }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { productions: { id: string }[] };
     expect(Array.isArray(body.productions)).toBe(true);
-    expect(body.productions.some((p) => p.id === PROD_PLANET)).toBe(true);
+    expect(body.productions.some((p) => p.id === AP_PROD)).toBe(true);
   });
 
   it("non-admin non-member gets empty list", async () => {
@@ -211,16 +223,16 @@ describe("POST /api/productions — happy path", () => {
 describe("GET /api/production/[id]/cuelists — authorization", () => {
   it("non-member non-admin → 403", async () => {
     const res = await listCueListsHandler(
-      req(`/api/production/${PROD_PLANET}/cuelists`, { session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/cuelists`, { session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
 
   it("admin → 200 with array", async () => {
     const res = await listCueListsHandler(
-      req(`/api/production/${PROD_PLANET}/cuelists`, { session: adminSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/cuelists`, { session: adminSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
     expect(Array.isArray(await res.json())).toBe(true);
@@ -232,12 +244,12 @@ describe("GET /api/production/[id]/cuelists — authorization", () => {
 describe("POST /api/production/[id]/cuelists — validation", () => {
   it("admin, empty name → 400", async () => {
     const res = await createCueListHandler(
-      req(`/api/production/${PROD_PLANET}/cuelists`, {
+      req(`/api/production/${AP_PROD}/cuelists`, {
         method: "POST",
         body: JSON.stringify({ name: "" }),
         session: adminSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(400);
   });
@@ -282,16 +294,16 @@ describe("POST /api/production/[id]/cuelists — archived guard", () => {
 describe("GET /api/production/[id]/events — authorization", () => {
   it("non-member → 403", async () => {
     const res = await listEventsHandler(
-      req(`/api/production/${PROD_PLANET}/events`, { session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/events`, { session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
 
   it("admin → 200 with events array", async () => {
     const res = await listEventsHandler(
-      req(`/api/production/${PROD_PLANET}/events`, { session: adminSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/events`, { session: adminSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { events: unknown[] };
@@ -304,24 +316,24 @@ describe("GET /api/production/[id]/events — authorization", () => {
 describe("POST /api/production/[id]/events — validation", () => {
   it("empty title → 400", async () => {
     const res = await createEventHandler(
-      req(`/api/production/${PROD_PLANET}/events`, {
+      req(`/api/production/${AP_PROD}/events`, {
         method: "POST",
         body: JSON.stringify({ title: "  " }),
         session: adminSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(400);
   });
 
   it("non-member non-admin → 403", async () => {
     const res = await createEventHandler(
-      req(`/api/production/${PROD_PLANET}/events`, {
+      req(`/api/production/${AP_PROD}/events`, {
         method: "POST",
         body: JSON.stringify({ title: "不应创建的排练" }),
         session: userSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -330,18 +342,18 @@ describe("POST /api/production/[id]/events — validation", () => {
 describe("POST /api/production/[id]/events — happy path", () => {
   it("admin creates event, response includes event with id", async () => {
     const res = await createEventHandler(
-      req(`/api/production/${PROD_PLANET}/events`, {
+      req(`/api/production/${AP_PROD}/events`, {
         method: "POST",
         body: JSON.stringify({ title: "API测试排练", eventType: "rehearsal" }),
         session: adminSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as { event: { id: string; title: string } };
     expect(body.event.id).toBeTruthy();
     expect(body.event.title).toBe("API测试排练");
-    created.push({ type: "event", id: body.event.id, prodId: PROD_PLANET });
+    created.push({ type: "event", id: body.event.id, prodId: AP_PROD });
   });
 });
 
@@ -359,7 +371,7 @@ describe("DELETE /api/productions — auth guard", () => {
 
   it("non-admin → 403", async () => {
     const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: PROD_PLANET }), session: userSession() }),
+      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: AP_PROD }), session: userSession() }),
     );
     expect(res.status).toBe(403);
   });
@@ -402,8 +414,8 @@ describe("DELETE /api/productions — happy path", () => {
 describe("PATCH /api/production/[id] — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await renameProdHandler(
-      req(`/api/production/${PROD_PLANET}`, { method: "PATCH" }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}`, { method: "PATCH" }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
@@ -412,10 +424,10 @@ describe("PATCH /api/production/[id] — auth guard", () => {
 describe("PATCH /api/production/[id] — authorization", () => {
   it("non-member non-admin → 403", async () => {
     const res = await renameProdHandler(
-      req(`/api/production/${PROD_PLANET}`, {
+      req(`/api/production/${AP_PROD}`, {
         method: "PATCH", body: JSON.stringify({ name: "越权改名" }), session: userSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -447,10 +459,10 @@ describe("PATCH /api/production/[id] — member without manage_permissions → 4
 describe("PATCH /api/production/[id] — input validation", () => {
   it("admin, empty name → 400", async () => {
     const res = await renameProdHandler(
-      req(`/api/production/${PROD_PLANET}`, {
+      req(`/api/production/${AP_PROD}`, {
         method: "PATCH", body: JSON.stringify({ name: "  " }), session: adminSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(400);
   });
@@ -486,16 +498,16 @@ describe("PATCH /api/production/[id] — happy path", () => {
 describe("GET /api/production/[id]/versions — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await listVersionsHandler(
-      req(`/api/production/${PROD_PLANET}/versions`),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/versions`),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-member non-admin → 403", async () => {
     const res = await listVersionsHandler(
-      req(`/api/production/${PROD_PLANET}/versions`, { session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/versions`, { session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -504,8 +516,8 @@ describe("GET /api/production/[id]/versions — auth guard", () => {
 describe("GET /api/production/[id]/versions — happy path", () => {
   it("admin → 200 with versions array", async () => {
     const res = await listVersionsHandler(
-      req(`/api/production/${PROD_PLANET}/versions`, { session: adminSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/versions`, { session: adminSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { versions: { id: string }[] };
@@ -521,18 +533,18 @@ describe("GET /api/production/[id]/versions — happy path", () => {
 describe("POST /api/production/[id]/versions — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await createVersionHandler(
-      req(`/api/production/${PROD_PLANET}/versions`, { method: "POST", body: JSON.stringify({}) }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/versions`, { method: "POST", body: JSON.stringify({}) }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-member non-admin → 403", async () => {
     const res = await createVersionHandler(
-      req(`/api/production/${PROD_PLANET}/versions`, {
+      req(`/api/production/${AP_PROD}/versions`, {
         method: "POST", body: JSON.stringify({}), session: userSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -570,24 +582,24 @@ describe("POST /api/production/[id]/versions — happy path", () => {
 describe("GET /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await listMembersHandler(
-      req(`/api/production/${PROD_PLANET}/members`),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/members`),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-admin → 403", async () => {
     const res = await listMembersHandler(
-      req(`/api/production/${PROD_PLANET}/members`, { session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/members`, { session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
 
   it("admin → 200 with members array", async () => {
     const res = await listMembersHandler(
-      req(`/api/production/${PROD_PLANET}/members`, { session: adminSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/members`, { session: adminSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { members: unknown[] };
@@ -602,18 +614,18 @@ describe("GET /api/production/[id]/members — auth guard", () => {
 describe("POST /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await addMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, { method: "POST", body: JSON.stringify({ userId: TEST_USER }) }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}/members`, { method: "POST", body: JSON.stringify({ userId: TEST_USER }) }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-admin → 403", async () => {
     const res = await addMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, {
+      req(`/api/production/${AP_PROD}/members`, {
         method: "POST", body: JSON.stringify({ userId: TEST_USER }), session: userSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -622,10 +634,10 @@ describe("POST /api/production/[id]/members — auth guard", () => {
 describe("POST /api/production/[id]/members — input validation", () => {
   it("missing userId → 400", async () => {
     const res = await addMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, {
+      req(`/api/production/${AP_PROD}/members`, {
         method: "POST", body: JSON.stringify({}), session: adminSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(400);
   });
@@ -661,22 +673,22 @@ describe("POST /api/production/[id]/members — happy path", () => {
 describe("PATCH /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await updateMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, {
+      req(`/api/production/${AP_PROD}/members`, {
         method: "PATCH", body: JSON.stringify({ userId: TEST_USER, email: "x@example.com" }),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-admin updating another user → 403", async () => {
     const res = await updateMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, {
+      req(`/api/production/${AP_PROD}/members`, {
         method: "PATCH",
         body: JSON.stringify({ userId: "some-other-user-id", email: "x@example.com" }),
         session: userSession(), // session.userId = TEST_USER ≠ body.userId
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -689,20 +701,20 @@ describe("PATCH /api/production/[id]/members — auth guard", () => {
 describe("DELETE /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await removeMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, {
+      req(`/api/production/${AP_PROD}/members`, {
         method: "DELETE", body: JSON.stringify({ userId: TEST_USER }),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-admin → 403", async () => {
     const res = await removeMemberHandler(
-      req(`/api/production/${PROD_PLANET}/members`, {
+      req(`/api/production/${AP_PROD}/members`, {
         method: "DELETE", body: JSON.stringify({ userId: TEST_USER }), session: userSession(),
       }),
-      ctx({ id: PROD_PLANET }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -715,16 +727,16 @@ describe("DELETE /api/production/[id]/members — auth guard", () => {
 describe("GET /api/production/[id] — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await loadProdHandler(
-      req(`/api/production/${PROD_PLANET}`),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}`),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-member non-admin → 403", async () => {
     const res = await loadProdHandler(
-      req(`/api/production/${PROD_PLANET}`, { session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}`, { session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -733,8 +745,8 @@ describe("GET /api/production/[id] — auth guard", () => {
 describe("GET /api/production/[id] — happy path", () => {
   it("admin → 200 with state, versionId, versions", async () => {
     const res = await loadProdHandler(
-      req(`/api/production/${PROD_PLANET}`, { session: adminSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/production/${AP_PROD}`, { session: adminSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { state: { blocks: unknown[] }; versionId: string; versions: unknown[] };
@@ -752,16 +764,16 @@ describe("GET /api/production/[id] — happy path", () => {
 describe("GET /api/script/[id] — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await getScriptHandler(
-      req(`/api/script/${PROD_PLANET}`),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/script/${AP_PROD}`),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-member non-admin → 403", async () => {
     const res = await getScriptHandler(
-      req(`/api/script/${PROD_PLANET}`, { session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/script/${AP_PROD}`, { session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });
@@ -774,16 +786,16 @@ describe("GET /api/script/[id] — auth guard", () => {
 describe("PATCH /api/script/[id] — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await patchScriptHandler(
-      req(`/api/script/${PROD_PLANET}`, { method: "PATCH" }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/script/${AP_PROD}`, { method: "PATCH" }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
   });
 
   it("non-member non-admin → 403", async () => {
     const res = await patchScriptHandler(
-      req(`/api/script/${PROD_PLANET}`, { method: "PATCH", body: "{}", session: userSession() }),
-      ctx({ id: PROD_PLANET }),
+      req(`/api/script/${AP_PROD}`, { method: "PATCH", body: "{}", session: userSession() }),
+      ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(403);
   });

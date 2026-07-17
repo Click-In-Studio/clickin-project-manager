@@ -7,12 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed:export": "tsx scripts/export-seed.ts",
-    "seed:ci-export": "tsx scripts/export-seed.ts --ci",
-    "seed:demo": "tsx scripts/seed-demo.ts",
     "seed:schema": "tsx scripts/gen-seed-schema.ts > db/seed-schema.json",
-    "test": "vitest run",
-    "test:migration": "vitest run --config vitest.migration.config.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
@@ -33,6 +29,7 @@
     "wavesurfer.js": "^7.12.7"
   },
   "devDependencies": {
+    "@faker-js/faker": "^10.5.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
