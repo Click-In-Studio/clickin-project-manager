@@ -172,6 +172,7 @@ async function main() {
     // In new schema, also capture user_id (UUID FK) so we can emit correct feishu_user rows.
     type UserRow = { open_id: string; name: string; user_id?: string };
     let openIdMap = new Map<string, string>();    // real open_id → fake open_id
+    let nameToFakeId = new Map<string, string>(); // real name → fake open_id (for JSONB repair)
     let userIdByOpenId = new Map<string, string>(); // real open_id → app_user UUID
     if (ciMode) {
       const cols = hasAppUser ? "open_id, name, user_id" : "open_id, name";
@@ -181,6 +182,7 @@ async function main() {
       allUsers.rows.forEach((r, i) => {
         const fakeId = `seed-user-${i + 1}`;
         openIdMap.set(r.open_id, fakeId);
+        if (r.name) nameToFakeId.set(r.name, fakeId);
         if (r.user_id) userIdByOpenId.set(r.open_id, r.user_id);
       });
     }
@@ -400,12 +402,27 @@ async function main() {
 
     // ── Assemble SQL ─────────────────────────────────────────────────────────
 
-    // In CI mode: global replace of all real open_ids with fake counterparts.
-    // Covers every column and JSONB field without needing per-column logic.
+    // In CI mode: two-pass anonymization.
+    // Pass 1: replace every real open_id (ou_xxx) with its fake seed-user-N.
+    //         Covers all columns and JSONB fields uniformly.
+    // Pass 2: fix JSONB "openId" keys whose value is a display name rather than
+    //         a proper open_id (data quality bug where the app stored the name
+    //         instead of the id). The global pass won't catch these because they
+    //         are not in ou_xxx format.
     let sectionsStr = sections.join("\n");
     if (ciMode) {
       for (const [realId, fakeId] of openIdMap) {
         sectionsStr = sectionsStr.replaceAll(realId, fakeId);
+      }
+      // Pass 2: replace "openId":"<real name>" → "openId":"<seed-user-N>"
+      // Only targets the JSON key pattern to avoid accidentally replacing
+      // name values in other contexts (e.g. the "name" column itself).
+      for (const [realName, fakeId] of nameToFakeId) {
+        const escaped = realName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        sectionsStr = sectionsStr.replace(
+          new RegExp(`("openId"\\s*:\\s*")${escaped}(")`,"g"),
+          `$1${fakeId}$2`
+        );
       }
     }
 
