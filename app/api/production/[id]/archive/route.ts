@@ -8,7 +8,7 @@ type Ctx = { params: Promise<{ id: string }> };
 async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides))
     return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { deny: null };

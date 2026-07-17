@@ -100,7 +100,7 @@ export type CueList = {
 };
 
 export type CueListPermissionRow = {
-  openId: string;
+  userId: string;
   canEdit: boolean;
 };
 
@@ -117,7 +117,7 @@ export function canEditCueList(
   if (!userRoles) return false;
   if (cueList.createdBy === userId) return true;
   if (userRoles.includes("制作人")) return true;
-  const override = permissions.find((p) => p.openId === userId);
+  const override = permissions.find((p) => p.userId === userId);
   if (override !== undefined) return override.canEdit;
   return userRoles.some((r) => cueList.defaultEditRoles.includes(r));
 }

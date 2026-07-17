@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantAccessToken, getBotOpenId } from "@/lib/feishu-auth";
 import { getUserName } from "@/lib/feishu-webhook";
 import { upsertContactUser } from "@/lib/db";
+import { resolveUserId } from "@/agent/db";
 import { processMessage as agentProcessMessage, processButtonClick } from "@/agent/index";
 import type { BotContext, HistoryMessage } from "@/agent/types";
 
@@ -223,6 +224,13 @@ async function processMessage(body: Record<string, unknown>) {
   const chatId   = message.chat_id;
   const chatType = message.chat_type;
 
+  // Resolve internal userId; drop messages from users not registered in the system
+  const userId = await resolveUserId(senderId);
+  if (!userId) {
+    console.log(`[feishu-webhook] unknown sender ${senderId}, ignoring`);
+    return;
+  }
+
   const [token, botOpenId] = await Promise.all([
     getTenantAccessToken(),
     getBotOpenId(),
@@ -298,6 +306,7 @@ async function processMessage(body: Record<string, unknown>) {
       chatId,
       chatType,
       senderId,
+      userId,
       senderName,
       text:         cleanText,
       rawText,

@@ -47,7 +47,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const { memberRoles, overrides } = await getProductionMemberContext(
-    session.openId, session.isAdmin, productionId
+    session.userId, session.isAdmin, productionId
   );
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });

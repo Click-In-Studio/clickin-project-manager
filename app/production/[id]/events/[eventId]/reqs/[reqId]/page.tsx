@@ -27,7 +27,7 @@ export default async function ReqDetailPage({ params }: Ctx) {
   if (!session) redirect("/login");
 
   const { memberRoles, overrides } = await getProductionMemberContext(
-    session.openId, session.isAdmin, productionId
+    session.userId, session.isAdmin, productionId
   );
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     redirect("/");
@@ -45,10 +45,10 @@ export default async function ReqDetailPage({ params }: Ctx) {
 
   const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
   const pocDeptIds = departments
-    .filter(d => d.pocOpenIds.includes(session.openId))
+    .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);
   const isPocOfDept = req.departmentId ? pocDeptIds.includes(req.departmentId) : false;
-  const isAssignee = req.assignees.some(a => a.openId === session.openId);
+  const isAssignee = req.assignees.some(a => a.userId === session.userId);
 
   if (!canViewFull && !isPocOfDept && !isAssignee)
     redirect(`/production/${productionId}/events/${eventId}/reqs`);
@@ -56,11 +56,11 @@ export default async function ReqDetailPage({ params }: Ctx) {
   const dept = departments.find(d => d.id === req.departmentId);
   const deptPeople = dept
     ? productionMembers
-        .filter(m => new Set([...dept.memberOpenIds, ...dept.pocOpenIds]).has(m.openId))
-        .map(m => ({ openId: m.openId, name: m.name }))
+        .filter(m => new Set([...dept.memberUserIds, ...dept.pocUserIds]).has(m.userId))
+        .map(m => ({ userId: m.userId, name: m.name }))
     : [];
 
-  const allPeople = productionMembers.map(m => ({ openId: m.openId, name: m.name }));
+  const allPeople = productionMembers.map(m => ({ userId: m.userId, name: m.name }));
 
   return (
     <ReqDetailClient

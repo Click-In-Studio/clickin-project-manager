@@ -11,7 +11,7 @@ const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, isArchived: false };
-  const { memberRoles, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   return { session, memberRoles, isArchived };
 }
 
@@ -52,7 +52,7 @@ export async function POST(
     listCueListPermissions(cueListId),
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions))
+  if (!canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));

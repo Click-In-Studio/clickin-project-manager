@@ -31,7 +31,7 @@ type JointImportBody = {
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (isArchived) return { session, deny: Response.json({ error: "已归档" }, { status: 403 }) };
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
     return { session, deny: Response.json({ error: "仅制作人可导入数据" }, { status: 403 }) };

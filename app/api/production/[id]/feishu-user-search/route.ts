@@ -8,7 +8,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!session.isAdmin) {
     const { id } = await ctx.params;
-    const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+    const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
     if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides))
       return Response.json({ error: "权限不足" }, { status: 403 });
   }

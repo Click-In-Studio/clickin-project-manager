@@ -6,7 +6,7 @@ import { hasPermission } from "@/lib/roles";
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
     return { session, memberRoles, overrides, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }

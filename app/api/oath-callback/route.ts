@@ -32,10 +32,10 @@ export async function GET(req: NextRequest) {
   }
 
   const isAdmin = await checkIsTenantManager(userInfo.openId);
-  await upsertFeishuUser(userInfo.openId, userInfo.name, userInfo.avatarUrl, isAdmin);
+  const { userId } = await upsertFeishuUser(userInfo.openId, userInfo.name, userInfo.avatarUrl, isAdmin);
 
   const sessionId = createSession({
-    openId: userInfo.openId,
+    userId,
     name: userInfo.name,
     avatarUrl: userInfo.avatarUrl,
     isAdmin,

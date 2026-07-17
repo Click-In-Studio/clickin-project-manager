@@ -19,10 +19,10 @@ export async function POST(req: NextRequest) {
   if (!userInfo) return Response.json({ error: "user info failed" }, { status: 502 });
 
   const isAdmin = await checkIsTenantManager(userInfo.openId);
-  await upsertFeishuUser(userInfo.openId, userInfo.name, userInfo.avatarUrl, isAdmin);
+  const { userId } = await upsertFeishuUser(userInfo.openId, userInfo.name, userInfo.avatarUrl, isAdmin);
 
   const sessionId = createSession({
-    openId: userInfo.openId,
+    userId,
     name: userInfo.name,
     avatarUrl: userInfo.avatarUrl,
     isAdmin,

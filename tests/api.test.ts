@@ -52,10 +52,10 @@ import {
 // ── Session helpers ────────────────────────────────────────────────────────────
 
 function adminSession() {
-  return createSession({ openId: TEST_USER, name: "测试管理员", avatarUrl: null, isAdmin: true });
+  return createSession({ userId: TEST_USER, name: "测试管理员", avatarUrl: null, isAdmin: true });
 }
 function userSession() {
-  return createSession({ openId: TEST_USER, name: "测试普通用户", avatarUrl: null, isAdmin: false });
+  return createSession({ userId: TEST_USER, name: "测试普通用户", avatarUrl: null, isAdmin: false });
 }
 
 function req(
@@ -614,7 +614,7 @@ describe("GET /api/production/[id]/members — auth guard", () => {
 describe("POST /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await addMemberHandler(
-      req(`/api/production/${AP_PROD}/members`, { method: "POST", body: JSON.stringify({ openId: TEST_USER }) }),
+      req(`/api/production/${AP_PROD}/members`, { method: "POST", body: JSON.stringify({ userId: TEST_USER }) }),
       ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(401);
@@ -623,7 +623,7 @@ describe("POST /api/production/[id]/members — auth guard", () => {
   it("non-admin → 403", async () => {
     const res = await addMemberHandler(
       req(`/api/production/${AP_PROD}/members`, {
-        method: "POST", body: JSON.stringify({ openId: TEST_USER }), session: userSession(),
+        method: "POST", body: JSON.stringify({ userId: TEST_USER }), session: userSession(),
       }),
       ctx({ id: AP_PROD }),
     );
@@ -632,7 +632,7 @@ describe("POST /api/production/[id]/members — auth guard", () => {
 });
 
 describe("POST /api/production/[id]/members — input validation", () => {
-  it("missing openId → 400", async () => {
+  it("missing userId → 400", async () => {
     const res = await addMemberHandler(
       req(`/api/production/${AP_PROD}/members`, {
         method: "POST", body: JSON.stringify({}), session: adminSession(),
@@ -657,7 +657,7 @@ describe("POST /api/production/[id]/members — happy path", () => {
   it("admin adds member → 200", async () => {
     const res = await addMemberHandler(
       req(`/api/production/${MBR_PROD}/members`, {
-        method: "POST", body: JSON.stringify({ openId: TEST_USER, name: "测试成员" }), session: adminSession(),
+        method: "POST", body: JSON.stringify({ userId: TEST_USER, name: "测试成员" }), session: adminSession(),
       }),
       ctx({ id: MBR_PROD }),
     );
@@ -674,7 +674,7 @@ describe("PATCH /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await updateMemberHandler(
       req(`/api/production/${AP_PROD}/members`, {
-        method: "PATCH", body: JSON.stringify({ openId: TEST_USER, email: "x@example.com" }),
+        method: "PATCH", body: JSON.stringify({ userId: TEST_USER, email: "x@example.com" }),
       }),
       ctx({ id: AP_PROD }),
     );
@@ -685,8 +685,8 @@ describe("PATCH /api/production/[id]/members — auth guard", () => {
     const res = await updateMemberHandler(
       req(`/api/production/${AP_PROD}/members`, {
         method: "PATCH",
-        body: JSON.stringify({ openId: "some-other-open-id", email: "x@example.com" }),
-        session: userSession(), // session.openId = TEST_USER ≠ body.openId
+        body: JSON.stringify({ userId: "some-other-user-id", email: "x@example.com" }),
+        session: userSession(), // session.userId = TEST_USER ≠ body.userId
       }),
       ctx({ id: AP_PROD }),
     );
@@ -702,7 +702,7 @@ describe("DELETE /api/production/[id]/members — auth guard", () => {
   it("no cookie → 401", async () => {
     const res = await removeMemberHandler(
       req(`/api/production/${AP_PROD}/members`, {
-        method: "DELETE", body: JSON.stringify({ openId: TEST_USER }),
+        method: "DELETE", body: JSON.stringify({ userId: TEST_USER }),
       }),
       ctx({ id: AP_PROD }),
     );
@@ -712,7 +712,7 @@ describe("DELETE /api/production/[id]/members — auth guard", () => {
   it("non-admin → 403", async () => {
     const res = await removeMemberHandler(
       req(`/api/production/${AP_PROD}/members`, {
-        method: "DELETE", body: JSON.stringify({ openId: TEST_USER }), session: userSession(),
+        method: "DELETE", body: JSON.stringify({ userId: TEST_USER }), session: userSession(),
       }),
       ctx({ id: AP_PROD }),
     );

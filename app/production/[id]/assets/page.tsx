@@ -13,7 +13,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
   if (!ok) redirect("/");
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -22,7 +22,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
     <AssetPageClient
       productionId={id}
       versionId={versionId}
-      myOpenId={session.openId}
+      myUserId={session.userId}
       isAdmin={session.isAdmin}
       userName={session.name}
     />

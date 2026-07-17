@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("event:create", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -37,21 +37,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as { action: "create" | "bind"; chatId?: string };
 
   const memberIds = await getEventChatTargets(eventId);
-  const allIds = [...new Set([session.openId, ...memberIds])];
+  const allIds = [...new Set([session.userId, ...memberIds])];
 
   let chatId: string;
 
   if (body.action === "create") {
     const productionName = await getProductionName(productionId);
     const chatName = `${productionName ?? "项目"} - ${event.title}`;
-    const created = await createChat(chatName, session.openId, allIds);
+    const created = await createChat(chatName, session.userId, allIds);
     if (!created) return Response.json({ error: "飞书建群失败" }, { status: 502 });
     chatId = created;
   } else if (body.action === "bind") {
     if (!body.chatId) return Response.json({ error: "缺少 chatId" }, { status: 400 });
 
     const [inChat, deptChatIds] = await Promise.all([
-      isUserInChat(body.chatId, session.openId),
+      isUserInChat(body.chatId, session.userId),
       getProductionDeptChatIds(productionId),
     ]);
     if (!inChat) return Response.json({ error: "你不在该群中" }, { status: 403 });
@@ -72,7 +72,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("event:create", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
 

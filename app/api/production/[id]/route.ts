@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   const { id } = await ctx.params;
 
   if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.openId, id);
+    const ok = await canUserAccessProduction(session.userId, id);
     if (!ok) return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
 
@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "无权修改" }, { status: 403 });
   }

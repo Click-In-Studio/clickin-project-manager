@@ -37,18 +37,18 @@ export default async function ProductionDashboard({
   if (!session) redirect("/login");
 
   if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.openId, id);
+    const ok = await canUserAccessProduction(session.userId, id);
     if (!ok) redirect("/");
   }
 
   const [name, cueLists, { memberRoles, overrides, isArchived }, callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
     getProductionName(id),
     listCueLists(id),
-    getProductionMemberContext(session.openId, session.isAdmin, id),
-    listMyUpcomingCallTimes(session.openId, id),
-    listMyPendingTechReqs(session.openId, id),
-    listMyPocAwaitingReqs(session.openId, id),
-    listUnreadFollowedReports(session.openId, id),
+    getProductionMemberContext(session.userId, session.isAdmin, id),
+    listMyUpcomingCallTimes(session.userId, id),
+    listMyPendingTechReqs(session.userId, id),
+    listMyPocAwaitingReqs(session.userId, id),
+    listUnreadFollowedReports(session.userId, id),
   ]);
   const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
   const isProjectMember = memberRoles !== null;
@@ -58,7 +58,7 @@ export default async function ProductionDashboard({
   await Promise.all(
     cueLists.map(async (cl) => {
       const perms = await listCueListPermissions(cl.id);
-      if (canEditCueList(session.openId, memberRoles, session.isAdmin, cl, perms))
+      if (canEditCueList(session.userId, memberRoles, session.isAdmin, cl, perms))
         editableListIds.push(cl.id);
     })
   );
@@ -99,7 +99,7 @@ export default async function ProductionDashboard({
           </Link>
           <ProductionMemberGuardLink
             productionId={id}
-            currentOpenId={session.openId}
+            currentUserId={session.userId}
             href={`/production/${id}/dramaturgy`}
             title="戏剧构作"
             subtitle="Dramaturgy"
@@ -110,7 +110,7 @@ export default async function ProductionDashboard({
           </ProductionMemberGuardLink>
           <ProductionMemberGuardLink
             productionId={id}
-            currentOpenId={session.openId}
+            currentUserId={session.userId}
             href={`/production/${id}/script`}
             title="剧本"
             subtitle="Script"
@@ -121,7 +121,7 @@ export default async function ProductionDashboard({
           </ProductionMemberGuardLink>
           <ProductionMemberGuardLink
             productionId={id}
-            currentOpenId={session.openId}
+            currentUserId={session.userId}
             href={`/production/${id}/cues`}
             title="Cue视图"
             subtitle="Cue"

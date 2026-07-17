@@ -14,7 +14,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
   const { memberRoles, overrides, isArchived } = await getProductionMemberContext(
-    session.openId, session.isAdmin, productionId
+    session.userId, session.isAdmin, productionId
   );
   if (!hasPermission("dept:manage", session.isAdmin, memberRoles, overrides))
     return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };

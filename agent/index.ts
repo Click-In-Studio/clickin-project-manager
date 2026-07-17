@@ -123,6 +123,7 @@ function ctxSnapshot(ctx: BotContext): CtxSnapshot {
     chatId:     ctx.trigger.chatId,
     chatType:   ctx.trigger.chatType,
     senderId:   ctx.trigger.senderId,
+    userId:     ctx.trigger.userId,
     senderName: ctx.trigger.senderName,
     chatName:   ctx.chat.name,
   };
@@ -135,6 +136,7 @@ function snapshotToCtx(snap: CtxSnapshot): BotContext {
       chatId:     snap.chatId,
       chatType:   snap.chatType,
       senderId:   snap.senderId,
+      userId:     snap.userId,
       senderName: snap.senderName,
       text:       "",
       rawText:    "",
@@ -376,7 +378,7 @@ async function runLoop(ctx: BotContext, initialMessages: Message[], cancelToken?
       const finalMessages = [...messages, { role: "assistant" as const, content: raw }];
       compactAndSave(
         ctx.trigger.chatId,
-        ctx.trigger.senderId,
+        ctx.trigger.userId,
         ctx.trigger.senderName,
         finalMessages,
       ).catch(e => console.error("[agent] compactAndSave error:", e));
@@ -491,7 +493,7 @@ export async function processMessage(ctx: BotContext): Promise<void> {
     loopToken = token;
 
     const [mem, prodCtx, historyDigest, anchor] = await Promise.all([
-      loadMemory(ctx.trigger.chatId, ctx.trigger.senderId),
+      loadMemory(ctx.trigger.chatId, ctx.trigger.userId),
       getChatProductionContext(ctx.trigger.chatId),
       digestHistory(ctx.history),
       getTaskAnchor(ctx.trigger.chatId),

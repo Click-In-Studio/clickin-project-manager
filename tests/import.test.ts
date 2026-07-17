@@ -15,6 +15,7 @@ import {
   applyPatchToDB,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
+import { TEST_USER } from "./helpers";
 import { initialKeys } from "@/lib/lex-order";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
@@ -547,7 +548,7 @@ describe("E: version-import hybrid — CoW block/cue isolation and GC", () => {
 
     // ── Step 2: create cue list + cue (revision CUE_E_ID) bound to v1 ─────────
     const gap = { kind: "gap" as const, afterBlockId: null };
-    await createCueList({ id: CL_E_ID, productionId: PROD_E, name: "混合测试走位表", notes: "", abbr: null, template: null, defaultEditRoles: [], createdBy: "test-sys-user" });
+    await createCueList({ id: CL_E_ID, productionId: PROD_E, name: "混合测试走位表", notes: "", abbr: null, template: null, defaultEditRoles: [], createdBy: TEST_USER });
     await createCue({ id: CUE_E_ID, cueListId: CL_E_ID, number: "Q1", name: "混合测试Q", content: "", start: gap, end: gap, versionId: v1Id });
 
     // ── Step 3: fork v2 from v1 (inherits script_version + cue_version) ────────

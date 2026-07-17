@@ -4,7 +4,7 @@ import { useState, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 
-export type MentionMember = { openId: string; name: string };
+export type MentionMember = { userId: string; name: string };
 
 function computeDropStyle(ta: HTMLTextAreaElement): React.CSSProperties {
   const rect = ta.getBoundingClientRect();
@@ -69,7 +69,7 @@ export default function MentionTextarea({
     const after = value.slice(drop.atPos + 1 + drop.filter.length);
     const next = `${before}@${m.name} ${after}`;
     onChange(next);
-    onMentionsChange([...mentions.filter(x => x.openId !== m.openId), m]);
+    onMentionsChange([...mentions.filter(x => x.userId !== m.userId), m]);
     setDrop(d => ({ ...d, active: false }));
     requestAnimationFrame(() => {
       ta.focus();
@@ -134,7 +134,7 @@ export default function MentionTextarea({
           className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1">
           {filtered.map((m, i) => (
             <button
-              key={m.openId}
+              key={m.userId}
               onMouseDown={e => { e.preventDefault(); pickMember(m); }}
               className={`w-full text-left px-3 py-2 text-sm ${
                 i === drop.idx ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"

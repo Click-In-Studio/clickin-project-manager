@@ -18,7 +18,7 @@ export default async function VersionsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
   if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) redirect(`/production/${id}`);
 
   const [name, versions] = await Promise.all([

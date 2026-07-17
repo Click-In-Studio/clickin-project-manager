@@ -12,7 +12,7 @@ export default async function NotificationsPage() {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const prefs = await getUserPrefs(session.openId);
+  const prefs = await getUserPrefs(session.userId);
 
   return <NotificationsClient prefs={prefs} />;
 }

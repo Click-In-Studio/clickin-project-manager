@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
   if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const assets = await listAssets(id);
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       }
 
       const { asset, file } = await createAsset({
-        productionId: id, uploaderOpenId: session.openId,
+        productionId: id, uploaderUserId: session.userId,
         assetType: body.assetType ?? "reference", name: body.name ?? null,
         fileName: body.fileName, mimeType, isUniversal: body.isUniversal ?? true,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       }
 
       const { asset, file } = await createAsset({
-        productionId: id, uploaderOpenId: session.openId,
+        productionId: id, uploaderUserId: session.userId,
         assetType: body.assetType ?? "reference", name: body.name ?? null,
         fileName: body.fileName, mimeType, isUniversal: body.isUniversal ?? true,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
 
     const { asset, file } = await createAsset({
-      productionId: id, uploaderOpenId: session.openId,
+      productionId: id, uploaderUserId: session.userId,
       assetType: body.assetType ?? "reference", name: body.name ?? null,
       fileName: body.fileName, mimeType: null, isUniversal: body.isUniversal ?? true,
       storageType: "feishu_link", feishuUrl: body.feishuUrl,

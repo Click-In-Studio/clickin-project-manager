@@ -19,7 +19,7 @@ export default async function CueListsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
   if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const [name, cueLists] = await Promise.all([
@@ -38,7 +38,7 @@ export default async function CueListsPage({
       initialCueLists={cueLists}
       canCreate={canCreate}
       availableTemplates={availableTemplates}
-      myOpenId={session.openId}
+      myUserId={session.userId}
     />
   );
 }

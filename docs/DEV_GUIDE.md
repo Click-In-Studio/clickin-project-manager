@@ -655,6 +655,215 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
 | — | 新增读操作 DB 函数 | 建议加 happy path + 不存在时返回 null 的测试 |
 | — | 新增运行时 migration | **必须**在 `conventions.test.ts` 中加幂等性测试 |
 | — | Schema 变更（`db/add-*.sql`） | **必须**在干净 DB 上更新 `db/seed-schema.json`（`npm run seed:schema`）并提交 |
+| — | 破坏性 Schema Migration | **必须**提供 `tests/<name>.migration.test.ts`，含 invariance 测试（见 §10.7）|
 | — | 流式路由（SSE）、R2、飞书 Bot | 暂不强制（依赖外部服务，需独立策略） |
 
 > **合并阻断条件**：`npm test` 全部通过，且上表标注"**必须**"的覆盖项不能留白。
+
+### 10.7 破坏性 Schema Migration 测试
+
+#### 什么是"破坏性 Migration"
+
+删除列、重命名列、将 TEXT 外键改为 UUID 等操作统称为破坏性 migration（区别于只新增列/表的增量 migration）。破坏性 migration 具有两个特殊性：
+
+1. **不可 git-revert 数据**：`git revert` 只回滚代码，DB 里被删除的列和被转换的值无法自动恢复。回滚必须依赖 DB 备份。
+2. **PR-specific 生命周期**：migration 测试对应特定版本的数据转换，与被合并的代码一起生效一次，之后不再需要。但文件保留在仓库中作为历史记录。
+
+#### 三层测试结构
+
+每个破坏性 migration 测试文件应按以下三层组织，缺一不可：
+
+| 层级 | describe 名称 | 作用 | 危险度 |
+|------|-------------|------|--------|
+| **Schema 验证** | `schema verification` | 列类型、NOT NULL、列是否存在/消失 | 低 — 不会遗漏数据问题 |
+| **完整性验证** | `integrity verification` | FK 无孤儿行、UNIQUE 无重复、JSONB 无残留旧 key | 中 — 能发现引用断裂，但不能发现错误映射 |
+| **Invariance 验证** | `invariance verification` | 逐行对比迁移前后 FK 映射，确认 ID 没有错误对应 | **高** — 这是唯一能捕获静默数据腐化的测试 |
+
+> **Schema/Integrity 检查不够**：即使所有 FK 都合法、所有行数都对，数据仍可能因为 JOIN 顺序错误、条件遗漏等原因被映射到错误的 ID。Invariance 测试才是关键防线。
+
+#### Invariance 测试模式
+
+在 migration 执行**之前**，快照每个迁移表中的原始 FK 值（旧 open_id、TEXT 等）。执行迁移**之后**，通过新 FK（user_id）反查身份表（feishu_user 等），验证映射回来的旧 ID 与快照一致。
+
+```typescript
+// 快照格式（migration 执行前捕获）
+type FkRow = { key: string; openId: string };
+let snapshot: { counts: Record<string, number>; rows: { someTable: FkRow[] } } | null;
+
+// 验证模式
+it.skipIf(!snapshot)("someTable: every user_id resolves to original open_id", async () => {
+  const expected = new Map(snapshot!.rows.someTable.map((r) => [r.key, r.openId]));
+  const { rows } = await getPool().query("SELECT id, user_id FROM some_table");
+  const mismatches: string[] = [];
+  for (const row of rows) {
+    const resolved = await resolveUserIdToOpenId(row.user_id); // via identity bridge table
+    if (resolved !== expected.get(row.id)) {
+      mismatches.push(`id=${row.id}: expected ${expected.get(row.id)}, got ${resolved}`);
+    }
+  }
+  expect(mismatches).toEqual([]);
+});
+```
+
+`it.skipIf(!snapshot)` 保证：有快照时强制跑（CI migration job），没有快照时自动跳过（本地已迁移环境）。
+
+#### CI Workflow（实际实现）
+
+Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成，通过条件步骤区分两条路径：
+
+```
+检测：git diff origin/$GITHUB_BASE_REF HEAD --diff-filter=A -- 'db/add-*.sql' 'db/migrate-*.sql'
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                        CI: unit-test job                                   │
+│                                                                            │
+│  ① 检测 PR 是否含新 migration 文件                                           │
+│                                                                            │
+│  ┌─ MIGRATION PATH (has_migrations = true) ────────────────────────────┐  │
+│  │  ② Apply BASE branch schema.sql（旧结构）                             │  │
+│  │  ③ Download ci.sql；                                                  │  │
+│  │     验证 schema-hash == sha256(base schema.sql)                      │  │
+│  │  ④ Import seed 到 test DB                                            │  │
+│  │  ⑤ npm run test:migration                                            │  │
+│  │     beforeAll: 快照旧 FK 值 → 执行 migration SQL                      │  │
+│  │     schema verification / integrity verification                    │  │
+│  │     invariance verification ← 最关键                                 │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─ NORMAL PATH (has_migrations = false) ──────────────────────────────┐  │
+│  │  ② Apply CURRENT schema.sql                                          │  │
+│  │  ③ Download ci.sql；                                                  │  │
+│  │     验证 schema-hash == sha256(current schema.sql)                   │  │
+│  │  ④ Import seed 到 test DB                                            │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ⑥ npm test（两条路径都跑）                                                  │
+│                                                                            │
+│  ⑦ [仅 MIGRATION PATH] 所有测试全部通过后：                                  │
+│     npm run seed:schema                 ← 更新 fingerprint               │
+│     npm run seed:ci-export -- "演出A"…  ← 上传新 ci.sql                  │
+│     新 ci.sql 的 schema-hash = sha256(current schema.sql)                │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+命令：
+```bash
+# Migration 专用测试（migration.test.ts 自己执行 snapshot + SQL + verify）
+npm run test:migration          # → vitest.migration.config.ts
+
+# 常规单元测试（已迁移 DB，global-setup.ts 跳过 migration）
+npm test
+```
+
+#### 旧 Seed 不需要手动导出
+
+R2 中只有一份 `seed-data/ci.sql`，它始终代表 **main 分支当前的 schema 状态**。其 `-- schema-hash:` 头即为此份 seed 对应的 schema 版本。
+
+Migration PR 被测试时：
+- CI 检测到 migration 文件 → 与 **base branch** schema hash 比对（而非当前分支）
+- 现有 `ci.sql` 是 base schema 导出的，hash 自然匹配，无需额外准备
+- 测试全部通过后，CI 自动上传新的 `ci.sql`（含新 schema hash）
+
+因此，**开发者在发 migration PR 前不需要手动预导出旧 seed**。
+
+#### 本地开发说明
+
+本地 DB 已迁移后，`tests/migration.test.ts` 无法运行 invariance 测试（快照从未生成）。这是预期行为。本地只运行 schema + integrity 验证，完整 invariance 测试依赖 CI 在旧 seed 上执行。
+
+如需本地重新验证 invariance，需在全新的本地 DB 上从头安装当前 R2 `ci.sql`（与 main 同步），再运行 `npm run test:migration`。
+
+### 10.8 CI Seed 管理规约
+
+#### Seed 的本质
+
+`seed-data/ci.sql`（存储于 Cloudflare R2）是**唯一的 CI 种子数据库**。它表示 main 分支某个 schema 版本下的匿名演示数据，所有测试都基于它运行。
+
+文件头部包含一行：
+```sql
+-- schema-hash: <sha256 of db/schema.sql>
+```
+
+CI 用此 hash 验证 seed 与当前被测 schema 是否一致（migration path 对比 base schema hash，normal path 对比当前 schema hash）。Hash 不匹配 → CI 报错，要求重新导出。
+
+#### 脱敏规则（两遍）
+
+Seed 导出由 `npm run seed:ci-export` 调用 `scripts/export-seed.ts` 完成，必须满足：
+
+| 数据类型 | 处理方式 |
+|---------|---------|
+| `feishu_user.open_id`（`ou_xxx` 格式） | 替换为 `seed-user-N`（pass-1） |
+| JSONB 字段中 `"openId": "<名字>"` 的值 | 替换为 `seed-user-N`（pass-2） |
+| `feishu_user.name`（显示名） | 替换为 `演示用户N`（不是 ID，不影响引用） |
+| 其他业务数据（剧本、场景、台词等） | 保留原样（无个人隐私） |
+
+> **为什么需要 pass-2**：飞书 mention 的 `openId` 字段有时存储的是显示名（而非真实 open_id），pass-1 只匹配 `ou_xxx` 格式会遗漏这种情况，导致 JSONB 里残留真实人名。pass-2 用 `nameToFakeId` map 补全。
+
+**禁止**在没有 pass-2 的情况下导出包含 JSONB mentions 数据的 seed。
+
+#### 何时必须重新导出
+
+| 场景 | 是否需要重新导出 | 命令 |
+|------|--------------|------|
+| 新增 migration 文件（PR 合并后） | **是**（CI 自动处理） | 无需手动 |
+| 修改 `db/schema.sql` 但无 migration | **是**（schema hash 变了） | `npm run seed:ci-export` |
+| 添加新演出数据（业务数据变化） | **是** | `npm run seed:ci-export -- "演出A" "演出B"` |
+| 纯代码变更（无 schema/数据变化） | 否 | — |
+
+#### Migration PR 导出时的 Schema Swap
+
+Migration PR 分支的 `db/schema.sql` 已是迁移后的新结构，但 R2 上的旧 seed 对应的是 base schema。CI 自动处理这个差异（见 §10.7 schema-hash 对比逻辑），**不需要开发者手动操作**。
+
+仅在需要本地修复旧 seed 内容（例如修正脱敏遗漏）时，才需要 schema swap 技巧：
+
+```bash
+# 临时恢复 base schema
+git show origin/main:db/schema.sql > /tmp/schema-backup.sql
+cp /tmp/schema-backup.sql db/schema.sql
+
+# 在已连接生产 DB 或包含旧结构数据的本地 DB 上导出
+npm run seed:ci-export -- "我们的星星" "供养2.0"
+
+# 恢复当前分支的 schema
+git checkout -- db/schema.sql
+```
+
+#### 上传时机规则
+
+**严禁在所有测试通过之前上传 seed**。如果 migration 测试通过但 unit tests 失败，此时的 DB 状态是迁移后但验证不完整的，上传这份 seed 会导致后续所有 PR 的 CI hash 校验失败。
+
+CI 实现中，`Upload post-migration CI seed` 步骤紧跟在 `Run unit tests` 之后，且仅在 `npm test` 成功的前提下执行（GitHub Actions 默认行为：前序步骤失败则跳过）。
+
+#### CD 是 Seed 的权威来源
+
+CD pipeline（`deploy.yml`）在编译之前也会完整执行一遍 migration 测试流程，并上传新 seed。**这一步是解决"并发 PR 种子竞态"问题的关键**：
+
+- PR A 和 PR B 都含 migration，各自通过了 CI（基于不同时间点的旧 seed）
+- A 先合并到 main，CD 上传了 A 的新 seed
+- B 后合并，CD 基于最新 main（含 A 的 schema）重新验证并上传 B 的新 seed
+- 最终 seed 始终是 main 当前状态下的 CD 验证结果，不会有遗漏
+
+### 10.9 Migration PR 完整检查清单
+
+提交 migration PR 前，逐项确认：
+
+#### 文件层面
+
+- [ ] `db/migrate-<name>.sql`：完整的 migration SQL，包含回滚说明注释
+- [ ] `db/schema.sql`：更新为迁移后的最终状态（完整快照）
+- [ ] `db/seed-schema.json`：在干净 DB 上重新生成（`npm run seed:schema`）
+- [ ] `tests/<name>.migration.test.ts`：包含三层测试（schema / integrity / invariance）
+- [ ] `vitest.migration.config.ts` 或等效配置：确保 `npm run test:migration` 能找到测试文件
+
+#### 测试层面
+
+- [ ] `npm run test:migration` 本地通过（至少 schema + integrity 层，invariance 需旧 seed 环境）
+- [ ] `npm test` 本地通过（unit tests）
+- [ ] 对 seed 数据中 count 类断言（`toBeGreaterThanOrEqual(N)`）进行确认：threshold 与新 seed 数据量匹配
+
+#### 不可做的事
+
+- ❌ **不要在 `.github/workflows/ci.yml` 里硬编码 migration SQL**：CI 通过 `npm run test:migration` 调用测试文件，所有 migration 逻辑属于测试文件，不属于 workflow
+- ❌ **不要在测试通过之前手动上传 seed**：CI 自动处理，手动上传可能带入损坏状态
+- ❌ **不要在 migration path 下上传时使用当前分支的 schema.sql 计算旧 hash**：需通过 `git show origin/$GITHUB_BASE_REF:db/schema.sql` 获取 base schema
+- ❌ **不要跳过 invariance 测试**：`it.skipIf(!snapshot)` 是正确模式，不要将 invariance 测试改为无条件 skip 或 todo
+- ❌ **不要将新 migration 文件修改已有 migration 文件**：每个 migration 文件一旦 commit 不可实质修改（见"Migration 文件的修改规则"）

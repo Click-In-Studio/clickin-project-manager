@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getCueList, listCueListPermissions, updateCue, deleteCue,
-         getCue, listProductionMembersWithRoles, getProductionName, getVersion } from "@/lib/db";
+         getCue, listProductionMembersWithRoles, getProductionName, getVersion, batchGetFeishuOpenIds } from "@/lib/db";
 import { canEditCueList } from "@/lib/cue-list-types";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
@@ -12,7 +12,7 @@ import { getOptedOutUsers } from "@/lib/notification-prefs";
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, isArchived: false };
-  const { memberRoles, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   return { session, memberRoles, isArchived };
 }
 
@@ -25,7 +25,7 @@ async function checkEdit(req: NextRequest, id: string, cueListId: string) {
     listCueListPermissions(cueListId),
   ]);
   if (!cueList) return { ok: false, session, memberRoles, isArchived, status: 404 as const };
-  if (!canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions))
+  if (!canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions))
     return { ok: false, session, memberRoles, isArchived, status: 403 as const };
   return { ok: true, session, memberRoles, isArchived, status: 200 as const };
 }
@@ -102,8 +102,8 @@ async function notifyCueWarning(
   ]);
   if (!cueList) return;
 
-  // Build explicit deny set (canEdit=false override → no notification)
-  const denied = new Set(permissions.filter(p => !p.canEdit).map(p => p.openId));
+  // Build explicit deny set by userId (canEdit=false override → no notification)
+  const denied = new Set(permissions.filter(p => !p.canEdit).map(p => p.userId));
 
   const recipients = new Set<string>();
 
@@ -112,28 +112,34 @@ async function notifyCueWarning(
 
   // 2. Personal overrides with canEdit=true
   for (const p of permissions) {
-    if (p.canEdit) recipients.add(p.openId);
+    if (p.canEdit) recipients.add(p.userId);
   }
 
   // 3. Members whose roles match defaultEditRoles
   if (cueList.defaultEditRoles.length > 0) {
     for (const m of members) {
-      if (denied.has(m.openId)) continue;
+      if (denied.has(m.userId)) continue;
       if (m.roles.some(r => cueList.defaultEditRoles.includes(r))) {
-        recipients.add(m.openId);
+        recipients.add(m.userId);
       }
     }
   }
 
   if (recipients.size === 0) return;
 
-  const [optedOut, appId] = [await getOptedOutUsers("cue_warning"), process.env.FEISHU_APP_ID ?? ""];
+  const [optedOut, appId, openIdMap] = await Promise.all([
+    getOptedOutUsers("cue_warning"),
+    Promise.resolve(process.env.FEISHU_APP_ID ?? ""),
+    batchGetFeishuOpenIds([...recipients]),
+  ]);
   const cuePath = `${BASE_PATH}/production/${productionId}/cuelists/${cueListId}`;
   const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(cuePath)}`;
   const card = buildCueWarningCard(productionName ?? "制作", cueList.name, cueNumber, cueName, url);
 
-  for (const openId of recipients) {
-    if (optedOut.has(openId)) continue;
+  for (const userId of recipients) {
+    if (optedOut.has(userId)) continue;
+    const openId = openIdMap.get(userId);
+    if (!openId) continue;
     sendCard(openId, card).catch(e =>
       console.error(`[cue-warning] dm failed for ${openId}:`, (e as Error).message)
     );

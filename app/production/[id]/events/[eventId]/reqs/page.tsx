@@ -24,7 +24,7 @@ export default async function ReqsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
@@ -37,14 +37,14 @@ export default async function ReqsPage({
     redirect(`/production/${productionId}/events`);
 
   const [isAssignee, departments, productionMembers] = await Promise.all([
-    isUserEventTechAssignee(eventId, session.openId),
+    isUserEventTechAssignee(eventId, session.userId),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
   ]);
 
   // POC of any dept in this production can access to see their awaiting reqs
   const pocDeptIds = departments
-    .filter(d => d.pocOpenIds.includes(session.openId))
+    .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);
 
   if (!canViewFull && !isAssignee && pocDeptIds.length === 0)
@@ -66,8 +66,8 @@ export default async function ReqsPage({
       event={event}
       techReqs={techReqs}
       departments={departments}
-      currentUserOpenId={session.openId}
-      productionMembers={productionMembers.map(m => ({ openId: m.openId, name: m.name }))}
+      currentUserId={session.userId}
+      productionMembers={productionMembers.map(m => ({ userId: m.userId, name: m.name }))}
       canViewFull={canViewFull}
     />
   );

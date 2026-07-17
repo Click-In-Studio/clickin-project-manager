@@ -24,6 +24,14 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ── Users ─────────────────────────────────────────────────────────────────────
+-- app_user is the internal identity anchor (UUID PK).
+-- feishu_user retains open_id as PK for Feishu-layer calls (bot, webhook, DMs).
+-- All application tables reference app_user.id, not feishu_user.open_id.
+
+CREATE TABLE IF NOT EXISTS app_user (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS feishu_user (
   open_id        TEXT PRIMARY KEY,
@@ -33,7 +41,8 @@ CREATE TABLE IF NOT EXISTS feishu_user (
   phone          TEXT,
   is_super_admin BOOLEAN NOT NULL DEFAULT false,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id        UUID NOT NULL UNIQUE REFERENCES app_user(id) ON DELETE CASCADE
 );
 
 -- ── Productions ───────────────────────────────────────────────────────────────
@@ -77,19 +86,19 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS production_member (
   production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  open_id       TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   roles         TEXT[] NOT NULL DEFAULT '{}',
   photo_url     TEXT,
   added_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (production_id, open_id)
+  PRIMARY KEY (production_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS production_member_permission (
   production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  open_id       TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   permission    TEXT NOT NULL,
   granted       BOOLEAN NOT NULL,
-  PRIMARY KEY (production_id, open_id, permission)
+  PRIMARY KEY (production_id, user_id, permission)
 );
 
 -- ── Scenes ────────────────────────────────────────────────────────────────────
@@ -256,7 +265,7 @@ CREATE TABLE IF NOT EXISTS comment (
   context_type  TEXT NOT NULL DEFAULT 'block',
   context_id    TEXT NOT NULL,
   parent_id     TEXT REFERENCES comment(id) ON DELETE CASCADE,
-  open_id       TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   author_name   TEXT NOT NULL,
   body          TEXT NOT NULL,
   mentions      JSONB NOT NULL DEFAULT '[]',
@@ -278,7 +287,7 @@ CREATE TABLE IF NOT EXISTS cue_list (
   notes              TEXT NOT NULL DEFAULT '',
   template           TEXT,
   default_edit_roles TEXT[] NOT NULL DEFAULT '{}',
-  created_by         TEXT NOT NULL REFERENCES feishu_user(open_id),
+  created_by         UUID NOT NULL REFERENCES app_user(id),
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -288,9 +297,9 @@ CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, cr
 
 CREATE TABLE IF NOT EXISTS cue_list_permission (
   cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
-  open_id     TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   can_edit    BOOLEAN NOT NULL,
-  PRIMARY KEY (cue_list_id, open_id)
+  PRIMARY KEY (cue_list_id, user_id)
 );
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
@@ -346,7 +355,7 @@ CREATE TABLE IF NOT EXISTS production_event (
   end_time      TIMESTAMPTZ,
   status        TEXT NOT NULL DEFAULT 'draft',
   description   TEXT NOT NULL DEFAULT '',
-  created_by    TEXT NOT NULL REFERENCES feishu_user(open_id),
+  created_by    UUID NOT NULL REFERENCES app_user(id),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   chat_id       TEXT,
@@ -370,17 +379,17 @@ CREATE INDEX IF NOT EXISTS event_department_production_idx ON event_department(p
 
 CREATE TABLE IF NOT EXISTS event_department_member (
   department_id TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
-  open_id       TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   is_poc        BOOLEAN NOT NULL DEFAULT false,
   is_member     BOOLEAN NOT NULL DEFAULT true,
-  PRIMARY KEY (department_id, open_id)
+  PRIMARY KEY (department_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS event_stage_manager (
   event_id TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
-  open_id  TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id  UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name     TEXT NOT NULL,
-  PRIMARY KEY (event_id, open_id)
+  PRIMARY KEY (event_id, user_id)
 );
 
 CREATE INDEX IF NOT EXISTS event_stage_manager_event_idx ON event_stage_manager(event_id);
@@ -388,11 +397,11 @@ CREATE INDEX IF NOT EXISTS event_stage_manager_event_idx ON event_stage_manager(
 CREATE TABLE IF NOT EXISTS event_participant (
   id            TEXT PRIMARY KEY,
   event_id      TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
-  open_id       TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   department_id TEXT REFERENCES event_department(id) ON DELETE SET NULL,
   role          TEXT NOT NULL DEFAULT 'participant',
-  UNIQUE (event_id, open_id)
+  UNIQUE (event_id, user_id)
 );
 
 CREATE INDEX IF NOT EXISTS event_participant_event_idx ON event_participant(event_id);
@@ -421,9 +430,9 @@ CREATE TABLE IF NOT EXISTS schedule_item_department (
 
 CREATE TABLE IF NOT EXISTS schedule_item_participant (
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
-  open_id TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name    TEXT NOT NULL,
-  PRIMARY KEY (item_id, open_id)
+  PRIMARY KEY (item_id, user_id)
 );
 
 CREATE INDEX IF NOT EXISTS schedule_item_participant_item_idx ON schedule_item_participant(item_id);
@@ -431,7 +440,7 @@ CREATE INDEX IF NOT EXISTS schedule_item_participant_item_idx ON schedule_item_p
 CREATE TABLE IF NOT EXISTS event_call_time (
   id               TEXT PRIMARY KEY,
   event_id         TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
-  open_id          TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id          UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name             TEXT NOT NULL,
   department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
   call_at          TIMESTAMPTZ NOT NULL,
@@ -466,9 +475,9 @@ CREATE INDEX IF NOT EXISTS event_tech_req_item_req_idx ON event_tech_req_item(re
 
 CREATE TABLE IF NOT EXISTS event_tech_assignee (
   req_id  TEXT NOT NULL REFERENCES event_tech_req(id) ON DELETE CASCADE,
-  open_id TEXT NOT NULL REFERENCES feishu_user(open_id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name    TEXT NOT NULL,
-  PRIMARY KEY (req_id, open_id)
+  PRIMARY KEY (req_id, user_id)
 );
 
 -- ── Reports ───────────────────────────────────────────────────────────────────
@@ -479,7 +488,7 @@ CREATE TABLE IF NOT EXISTS event_report (
   report_type  TEXT NOT NULL DEFAULT 'rehearsal',
   title        TEXT NOT NULL,
   body         TEXT NOT NULL DEFAULT '',
-  created_by   TEXT NOT NULL REFERENCES feishu_user(open_id),
+  created_by   UUID NOT NULL REFERENCES app_user(id),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   published_at TIMESTAMPTZ,
@@ -493,7 +502,7 @@ CREATE TABLE IF NOT EXISTS event_report_note (
   report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
   department_id  TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
   content        TEXT NOT NULL,
-  author_open_id TEXT NOT NULL REFERENCES feishu_user(open_id),
+  author_user_id UUID NOT NULL REFERENCES app_user(id),
   author_name    TEXT NOT NULL,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -504,18 +513,18 @@ CREATE INDEX IF NOT EXISTS event_report_note_report_idx ON event_report_note(rep
 
 CREATE TABLE IF NOT EXISTS event_report_read (
   report_id TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  open_id   TEXT NOT NULL,
+  user_id   UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   read_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (report_id, open_id)
+  PRIMARY KEY (report_id, user_id)
 );
 
--- open_id and parent_id have no FK — replies may reference either a report or a note.
+-- user_id and parent_id have no FK on user_id — replies may reference either a report or a note.
 CREATE TABLE IF NOT EXISTS event_report_reply (
   id          TEXT PRIMARY KEY,
   report_id   TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
   parent_type TEXT NOT NULL,
   parent_id   TEXT NOT NULL,
-  open_id     TEXT NOT NULL,
+  user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   author_name TEXT NOT NULL,
   content     TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -527,14 +536,16 @@ CREATE INDEX IF NOT EXISTS idx_event_report_reply_report_id ON event_report_repl
 -- ── Notifications ─────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS notification_subscription (
-  open_id           TEXT NOT NULL,
+  user_id           UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   notification_type TEXT NOT NULL,
   enabled           BOOLEAN NOT NULL,
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (open_id, notification_type)
+  PRIMARY KEY (user_id, notification_type)
 );
 
 -- ── Bot testers ───────────────────────────────────────────────────────────────
+-- Intentionally uses open_id: this is a Feishu-layer control table used for
+-- bot feature flags and webhook matching; not part of the internal user ID system.
 
 CREATE TABLE IF NOT EXISTS bot_testers (
   open_id  TEXT PRIMARY KEY,
@@ -545,21 +556,21 @@ CREATE TABLE IF NOT EXISTS bot_testers (
 -- ── Assets ────────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS asset (
-  id               TEXT PRIMARY KEY,
-  production_id    TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  uploader_open_id TEXT NOT NULL REFERENCES feishu_user(open_id),
-  asset_type       TEXT NOT NULL DEFAULT 'reference',
-  file_name        TEXT NOT NULL,
-  mime_type        TEXT,
-  is_universal     BOOLEAN NOT NULL DEFAULT true,
-  storage_type     TEXT NOT NULL DEFAULT 'r2',
-  feishu_url       TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  name             TEXT
+  id                TEXT PRIMARY KEY,
+  production_id     TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  uploader_user_id  UUID NOT NULL REFERENCES app_user(id),
+  asset_type        TEXT NOT NULL DEFAULT 'reference',
+  file_name         TEXT NOT NULL,
+  mime_type         TEXT,
+  is_universal      BOOLEAN NOT NULL DEFAULT true,
+  storage_type      TEXT NOT NULL DEFAULT 'r2',
+  feishu_url        TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  name              TEXT
 );
 
 CREATE INDEX IF NOT EXISTS asset_production_idx ON asset(production_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS asset_uploader_idx ON asset(uploader_open_id);
+CREATE INDEX IF NOT EXISTS asset_uploader_idx ON asset(uploader_user_id);
 
 CREATE TABLE IF NOT EXISTS asset_file (
   id               TEXT PRIMARY KEY,
@@ -582,7 +593,7 @@ CREATE TABLE IF NOT EXISTS asset_mount (
   folder_path      TEXT,
   mount_mode       TEXT,
   version_resolved BOOLEAN,
-  created_by       TEXT NOT NULL REFERENCES feishu_user(open_id),
+  created_by       UUID NOT NULL REFERENCES app_user(id),
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -600,4 +611,3 @@ CREATE TABLE IF NOT EXISTS asset_version_rel (
 
 CREATE INDEX IF NOT EXISTS asset_version_rel_version_idx ON asset_version_rel(version_id);
 CREATE INDEX IF NOT EXISTS asset_version_rel_file_idx ON asset_version_rel(asset_file_id);
-

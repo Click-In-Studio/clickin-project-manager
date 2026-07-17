@@ -209,7 +209,7 @@ afterAll(async () => {
 });
 
 function adminReq(idemKey?: string): NextRequest {
-  const token = createSession({ openId: TEST_USER, name: "管理员", avatarUrl: null, isAdmin: true });
+  const token = createSession({ userId: TEST_USER, name: "管理员", avatarUrl: null, isAdmin: true });
   const headers = new Headers({ cookie: `${SESSION_COOKIE}=${token}` });
   if (idemKey) headers.set("Idempotency-Key", idemKey);
   return new NextRequest("http://localhost/api/productions", {

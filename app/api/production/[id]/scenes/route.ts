@@ -61,7 +61,7 @@ function shouldRepairEmptyBlockAfterMarker(blocks: Block[], markerIndex: number,
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   return { session, memberRoles, overrides, isArchived };
 }
 
