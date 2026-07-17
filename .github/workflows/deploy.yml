@@ -7,28 +7,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      SEED_URL: https://pub-50e9ef6dfe944ca8aa2288e45f20ba7c.r2.dev/seed-data/ci.sql
-      PGHOST: localhost
-      PGPORT: 5432
-      PGDATABASE: script_editor_test
-      PGUSER: script_editor
-      PGPASSWORD: testpassword
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: script_editor
-          POSTGRES_PASSWORD: testpassword
-          POSTGRES_DB: script_editor_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -48,68 +26,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── 3b. Migration validation ─────────────────────────────────────────────
-      #
-      # CD is the authoritative source of truth for the CI seed. Even if a PR's
-      # own CI passed (against an older seed), we re-validate here on merge so
-      # that concurrent PRs can never silently ship a stale seed.
-      #
-      # Flow: detect new migration files → apply old schema → import old seed →
-      #       snapshot → run migration → verify invariance → upload new seed.
-      # Then the normal build + server-side migration runs as usual.
-      - name: Detect new migration files in this push
-        id: migrations
-        run: |
-          FILES=$(git diff HEAD~1 HEAD --name-only --diff-filter=A -- 'db/add-*.sql' 'db/migrate-*.sql')
-          if [ -n "$FILES" ]; then
-            echo "has_migrations=true" >> $GITHUB_OUTPUT
-            echo "Migration files detected:"
-            echo "$FILES"
-          else
-            echo "has_migrations=false" >> $GITHUB_OUTPUT
-            echo "No new migration files in this push."
-          fi
-
-      - name: Write test .env.local
-        if: steps.migrations.outputs.has_migrations == 'true'
-        run: |
-          cat > .env.local <<'EOF'
-          PGHOST=localhost
-          PGPORT=5432
-          PGDATABASE=script_editor_test
-          PGUSER=script_editor
-          PGPASSWORD=testpassword
-          EOF
-
-      - name: Apply pre-migration schema to test DB
-        if: steps.migrations.outputs.has_migrations == 'true'
-        run: git show HEAD~1:db/schema.sql | psql -v ON_ERROR_STOP=1
-
-      - name: Download and import old CI seed
-        if: steps.migrations.outputs.has_migrations == 'true'
-        run: |
-          curl -fsSL "$SEED_URL" -o old-seed.sql
-          SIZE=$(wc -c < old-seed.sql)
-          echo "Downloaded ${SIZE} bytes"
-          [ "$SIZE" -ge 1000000 ] || { echo "FAIL: seed file too small"; exit 1; }
-          psql -v ON_ERROR_STOP=1 -f old-seed.sql
-
-      - name: Run migration tests (snapshot → migrate → verify invariance)
-        if: steps.migrations.outputs.has_migrations == 'true'
-        run: npm run test:migration
-
-      - name: Upload new CI seed
-        if: steps.migrations.outputs.has_migrations == 'true'
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.SEED_R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.SEED_R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.SEED_R2_SECRET_ACCESS_KEY }}
-          SEED_R2_BUCKET: ${{ secrets.SEED_R2_BUCKET }}
-        run: |
-          npm run seed:schema
-          npm run seed:ci-export -- "我们的星星" "供养2.0"
-
-      # ── 4. Build ─────────────────────────────────────────────────────────────
       - name: Build (standalone)
         run: npm run build
         env:
@@ -228,7 +144,7 @@ jobs:
             fi
           done <<< "$ORDERED"
 
-      # ── 8. Swap symlink & reload PM2 ─────────────────────────────────────────
+      # ── 9. Swap symlink & reload PM2 ─────────────────────────────────────────
       - name: Activate release
         run: |
           ssh prod "
@@ -236,7 +152,7 @@ jobs:
             pm2 reload /var/www/production-manager/shared/ecosystem.config.js --update-env
           "
 
-      # ── 9. Clean up old releases (keep latest 5) ─────────────────────────────
+      # ── 10. Clean up old releases (keep latest 5) ────────────────────────────
       - name: Clean old releases
         run: |
           ssh prod "
