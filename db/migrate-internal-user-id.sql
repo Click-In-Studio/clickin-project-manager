@@ -382,7 +382,7 @@ SET mentions = (
         ELSE t.elem
       END
       ORDER BY t.ord
-    ),
+    ) FILTER (WHERE NOT (t.elem ? 'openId') OR fu.user_id IS NOT NULL),
     '[]'::jsonb
   )
   FROM jsonb_array_elements(c.mentions) WITH ORDINALITY AS t(elem, ord)
@@ -408,7 +408,7 @@ SET mentions = (
         ELSE t.elem
       END
       ORDER BY t.ord
-    ),
+    ) FILTER (WHERE NOT (t.elem ? 'openId') OR fu.user_id IS NOT NULL),
     '[]'::jsonb
   )
   FROM jsonb_array_elements(r.mentions) WITH ORDINALITY AS t(elem, ord)
@@ -434,7 +434,7 @@ SET mentions = (
         ELSE t.elem
       END
       ORDER BY t.ord
-    ),
+    ) FILTER (WHERE NOT (t.elem ? 'openId') OR fu.user_id IS NOT NULL),
     '[]'::jsonb
   )
   FROM jsonb_array_elements(n.mentions) WITH ORDINALITY AS t(elem, ord)
@@ -460,7 +460,7 @@ SET mentions = (
         ELSE t.elem
       END
       ORDER BY t.ord
-    ),
+    ) FILTER (WHERE NOT (t.elem ? 'openId') OR fu.user_id IS NOT NULL),
     '[]'::jsonb
   )
   FROM jsonb_array_elements(rp.mentions) WITH ORDINALITY AS t(elem, ord)
