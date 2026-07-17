@@ -11,7 +11,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, id);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (isArchived) return Response.json({ error: "已归档" }, { status: 403 });
   if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "无权修改剧本设置" }, { status: 403 });

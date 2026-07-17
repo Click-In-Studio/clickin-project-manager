@@ -15,7 +15,7 @@ type Props = {
   members: MemberWithRoles[];
   canEdit: boolean;
   canManage: boolean;
-  myUserId: string;
+  myOpenId: string;
 };
 
 function MetaField({
@@ -103,10 +103,10 @@ function MetaField({
 type PermState = "allow" | "deny" | "default";
 
 function memberPermState(
-  userId: string,
+  openId: string,
   permissions: CueListPermissionRow[],
 ): PermState {
-  const row = permissions.find((p) => p.userId === userId);
+  const row = permissions.find((p) => p.openId === openId);
   if (!row) return "default";
   return row.canEdit ? "allow" : "deny";
 }
@@ -136,7 +136,7 @@ function PermissionRow({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: member.userId, canEdit }),
+          body: JSON.stringify({ openId: member.openId, canEdit }),
         }
       );
       if (res.ok) {
@@ -232,7 +232,7 @@ export default function CueListDetail({
     }
   };
 
-  const editableMembers = members.filter((m) => m.userId !== cueList.createdBy);
+  const editableMembers = members.filter((m) => m.openId !== cueList.createdBy);
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-zinc-100 px-4 py-8">
@@ -302,9 +302,9 @@ export default function CueListDetail({
               <div>
                 {editableMembers.map((m) => (
                   <PermissionRow
-                    key={m.userId}
+                    key={m.openId}
                     member={m}
-                    state={memberPermState(m.userId, permissions)}
+                    state={memberPermState(m.openId, permissions)}
                     cueList={cueList}
                     productionId={productionId}
                     onUpdated={setPermissions}

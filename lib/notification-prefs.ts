@@ -31,10 +31,10 @@ export type NotifPref = {
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
 /** All prefs for one user, with defaults filled in for unset types. */
-export async function getUserPrefs(userId: string): Promise<NotifPref[]> {
+export async function getUserPrefs(openId: string): Promise<NotifPref[]> {
   const res = await getPool().query<{ notification_type: string; enabled: boolean }>(
-    `SELECT notification_type, enabled FROM notification_subscription WHERE user_id = $1`,
-    [userId],
+    `SELECT notification_type, enabled FROM notification_subscription WHERE open_id = $1`,
+    [openId],
   );
   const stored = new Map(res.rows.map((r) => [r.notification_type, r.enabled]));
   return ALL_NOTIFICATION_TYPES.map((type) => {
@@ -45,22 +45,22 @@ export async function getUserPrefs(userId: string): Promise<NotifPref[]> {
 
 /** Set one pref. When value matches the default, the row is deleted (keep the table sparse). */
 export async function setUserPref(
-  userId: string,
+  openId: string,
   type: NotificationType,
   enabled: boolean,
 ): Promise<void> {
   if (enabled === NOTIFICATION_CONFIG[type].defaultEnabled) {
     await getPool().query(
-      `DELETE FROM notification_subscription WHERE user_id = $1 AND notification_type = $2`,
-      [userId, type],
+      `DELETE FROM notification_subscription WHERE open_id = $1 AND notification_type = $2`,
+      [openId, type],
     );
   } else {
     await getPool().query(
-      `INSERT INTO notification_subscription (user_id, notification_type, enabled, updated_at)
+      `INSERT INTO notification_subscription (open_id, notification_type, enabled, updated_at)
        VALUES ($1, $2, $3, now())
-       ON CONFLICT (user_id, notification_type)
+       ON CONFLICT (open_id, notification_type)
        DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()`,
-      [userId, type, enabled],
+      [openId, type, enabled],
     );
   }
 }
@@ -69,28 +69,34 @@ export async function setUserPref(
  * Batch: set of open_ids that have OPTED OUT of a DM-type notification.
  * Use before a dispatch loop to skip users who don't want this notification.
  */
-/** Returns user_ids (UUID) of users who opted out — compare against user_id from event tables. */
 export async function getOptedOutUsers(type: NotificationType): Promise<Set<string>> {
-  const res = await getPool().query<{ user_id: string }>(
-    `SELECT user_id FROM notification_subscription WHERE notification_type = $1 AND enabled = false`,
+  const res = await getPool().query<{ open_id: string }>(
+    `SELECT open_id FROM notification_subscription WHERE notification_type = $1 AND enabled = false`,
     [type],
   );
-  return new Set(res.rows.map((r) => r.user_id));
+  return new Set(res.rows.map((r) => r.open_id));
 }
 
-/** Returns user_ids (UUID) of users who opted in to a group-type extra DM. */
+/**
+ * Batch: set of open_ids that have OPTED IN to a group-type notification extra DM.
+ * Use after sending a group chat notification to also send personal DMs.
+ */
 export async function getOptedInUsers(type: NotificationType): Promise<Set<string>> {
-  const res = await getPool().query<{ user_id: string }>(
-    `SELECT user_id FROM notification_subscription WHERE notification_type = $1 AND enabled = true`,
+  const res = await getPool().query<{ open_id: string }>(
+    `SELECT open_id FROM notification_subscription WHERE notification_type = $1 AND enabled = true`,
     [type],
   );
-  return new Set(res.rows.map((r) => r.user_id));
+  return new Set(res.rows.map((r) => r.open_id));
 }
 
-export async function isNotifEnabled(userId: string, type: NotificationType): Promise<boolean> {
+/**
+ * Single-user check. Prefer the batch variants in dispatch loops.
+ * Used in hot-path per-mention checks.
+ */
+export async function isNotifEnabled(openId: string, type: NotificationType): Promise<boolean> {
   const res = await getPool().query<{ enabled: boolean }>(
-    `SELECT enabled FROM notification_subscription WHERE user_id = $1 AND notification_type = $2`,
-    [userId, type],
+    `SELECT enabled FROM notification_subscription WHERE open_id = $1 AND notification_type = $2`,
+    [openId, type],
   );
   return res.rows.length > 0 ? res.rows[0].enabled : NOTIFICATION_CONFIG[type].defaultEnabled;
 }

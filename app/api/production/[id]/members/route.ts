@@ -7,6 +7,7 @@ import {
   setMemberRoles,
   updateUserContact,
   setMemberPhoto,
+  upsertContactUser,
   isProductionArchived,
 } from "@/lib/db";
 
@@ -30,10 +31,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (auth instanceof Response) return auth;
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  const { userId, roles } = (await req.json()) as { userId?: string; roles?: string[] };
-  if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
-  await addProductionMember(id, userId);
-  if (roles?.length) await setMemberRoles(id, userId, roles);
+  const { openId, name, avatarUrl, email, phone, roles } = (await req.json()) as {
+    openId?: string;
+    name?: string;
+    avatarUrl?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    roles?: string[];
+  };
+  if (!openId) return Response.json({ error: "缺少 openId" }, { status: 400 });
+  // Upsert user info so the feishu_user row exists and contact info is current
+  if (name) await upsertContactUser(openId, name, avatarUrl ?? null, email ?? null, phone ?? null);
+  await addProductionMember(id, openId);
+  if (roles?.length) await setMemberRoles(id, openId, roles);
   return Response.json({ ok: true });
 }
 
@@ -43,27 +53,27 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, email, phone, photoUrl } = (await req.json()) as {
-    userId?: string;
+  const { openId, roles, email, phone, photoUrl } = (await req.json()) as {
+    openId?: string;
     roles?: string[];
     email?: string | null;
     phone?: string | null;
     photoUrl?: string | null;
   };
-  if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
+  if (!openId) return Response.json({ error: "缺少 openId" }, { status: 400 });
 
-  const isSelf = session.userId === userId;
+  const isSelf = session.openId === openId;
   if (!session.isAdmin && !isSelf) return Response.json({ error: "权限不足" }, { status: 403 });
 
   if (roles !== undefined) {
     if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
-    await setMemberRoles(id, userId, roles);
+    await setMemberRoles(id, openId, roles);
   }
   if (email !== undefined || phone !== undefined) {
-    await updateUserContact(userId, email ?? null, phone ?? null);
+    await updateUserContact(openId, email ?? null, phone ?? null);
   }
   if (photoUrl !== undefined) {
-    await setMemberPhoto(id, userId, photoUrl);
+    await setMemberPhoto(id, openId, photoUrl);
   }
   return Response.json({ ok: true });
 }
@@ -73,8 +83,8 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   if (auth instanceof Response) return auth;
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  const { userId } = (await req.json()) as { userId?: string };
-  if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
-  await removeProductionMember(id, userId);
+  const { openId } = (await req.json()) as { openId?: string };
+  if (!openId) return Response.json({ error: "缺少 openId" }, { status: 400 });
+  await removeProductionMember(id, openId);
   return Response.json({ ok: true });
 }

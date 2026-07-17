@@ -26,7 +26,8 @@ function renderReq(req: MyTechReqEntry): string {
 export const getMyTechReqsSkill: SkillModule<Record<string, never>> = {
   config,
   async run(ctx: BotContext): Promise<string> {
-    const reqs = await getMyTechReqs(ctx.trigger.userId);
+    const openId = ctx.trigger.senderId;
+    const reqs = await getMyTechReqs(openId);
 
     if (!reqs.length) {
       return "✅ 当前没有待处理的技术需求。";

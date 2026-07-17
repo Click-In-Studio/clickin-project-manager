@@ -6,7 +6,7 @@ import type { NotificationType } from "@/lib/notification-prefs";
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const prefs = await getUserPrefs(session.userId);
+  const prefs = await getUserPrefs(session.openId);
   return Response.json({ prefs });
 }
 
@@ -22,6 +22,6 @@ export async function PATCH(req: NextRequest) {
   if (!(type in NOTIFICATION_CONFIG))
     return Response.json({ error: "未知通知类型" }, { status: 400 });
 
-  await setUserPref(session.userId, type as NotificationType, enabled);
+  await setUserPref(session.openId, type as NotificationType, enabled);
   return Response.json({ ok: true });
 }

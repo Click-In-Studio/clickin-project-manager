@@ -9,13 +9,13 @@ export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const memberProductions = await listMemberProductions(session.userId);
+  const memberProductions = await listMemberProductions(session.openId);
 
   const productions = await Promise.all(
     memberProductions.map(async (p) => {
       const [roles, overrides] = await Promise.all([
-        getProductionMemberRoles(session.userId, p.id),
-        getPermissionOverrides(p.id, session.userId),
+        getProductionMemberRoles(session.openId, p.id),
+        getPermissionOverrides(p.id, session.openId),
       ]);
 
       const effectiveRoles = roles ?? [];

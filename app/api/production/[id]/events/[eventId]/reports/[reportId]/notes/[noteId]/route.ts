@@ -10,7 +10,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId, noteId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -22,7 +22,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!note) return Response.json({ error: "Note 不存在" }, { status: 404 });
 
   const isModerator = canModerateNotes(session.isAdmin, memberRoles);
-  if (!isModerator && note.authorUserId !== session.userId)
+  if (!isModerator && note.authorOpenId !== session.openId)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { content?: string; mentions?: Mention[] };
@@ -38,7 +38,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId, noteId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -47,7 +47,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!report) return Response.json({ error: "记录不存在" }, { status: 404 });
 
   const isModerator = canModerateNotes(session.isAdmin, memberRoles);
-  const deleted = await deleteReportNote(noteId, reportId, session.userId, isModerator || session.isAdmin);
+  const deleted = await deleteReportNote(noteId, reportId, session.openId, isModerator || session.isAdmin);
   if (!deleted) return Response.json({ error: "无权删除或 Note 不存在" }, { status: 403 });
   return Response.json({ ok: true });
 }

@@ -32,7 +32,7 @@ export async function POST(
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return new Response("飞书登录已过期，请重新登录", { status: 401 });
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, productionId));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, productionId));
   if (!ok) return new Response("权限不足", { status: 403 });
 
   const body = (await req.json()) as { cueListIds?: string[]; wikiUrl?: string };

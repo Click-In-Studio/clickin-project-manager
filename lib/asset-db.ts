@@ -23,7 +23,7 @@ export type MountMode = "inherit" | "tracking" | "version_only";
 export type Asset = {
   id: string;
   productionId: string;
-  uploaderUserId: string;
+  uploaderOpenId: string;
   assetType: AssetType;
   name: string | null;
   fileName: string;
@@ -60,14 +60,14 @@ export type AssetMount = {
 // ─── Row mappers ──────────────────────────────────────────────────────────────
 
 type AssetRow = {
-  id: string; production_id: string; uploader_user_id: string;
+  id: string; production_id: string; uploader_open_id: string;
   asset_type: string; name: string | null; file_name: string; mime_type: string | null;
   is_universal: boolean; storage_type: string; feishu_url: string | null;
   created_at: Date;
 };
 function rowToAsset(r: AssetRow): Asset {
   return {
-    id: r.id, productionId: r.production_id, uploaderUserId: r.uploader_user_id,
+    id: r.id, productionId: r.production_id, uploaderOpenId: r.uploader_open_id,
     assetType: r.asset_type as AssetType, name: r.name, fileName: r.file_name, mimeType: r.mime_type,
     isUniversal: r.is_universal, storageType: r.storage_type as StorageType,
     feishuUrl: r.feishu_url, createdAt: r.created_at.toISOString(),
@@ -106,7 +106,7 @@ function rowToMount(r: AssetMountRow): AssetMount {
 
 export async function createAsset(params: {
   productionId: string;
-  uploaderUserId: string;
+  uploaderOpenId: string;
   assetType: AssetType;
   name?: string | null;
   fileName: string;
@@ -125,10 +125,10 @@ export async function createAsset(params: {
   try {
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO asset (id, production_id, uploader_user_id, asset_type, name, file_name, mime_type,
+      `INSERT INTO asset (id, production_id, uploader_open_id, asset_type, name, file_name, mime_type,
          is_universal, storage_type, feishu_url)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [assetId, params.productionId, params.uploaderUserId, params.assetType, params.name ?? null,
+      [assetId, params.productionId, params.uploaderOpenId, params.assetType, params.name ?? null,
        params.fileName, params.mimeType, params.isUniversal, params.storageType, params.feishuUrl ?? null]
     );
     const fileRes = await client.query<AssetFileRow>(

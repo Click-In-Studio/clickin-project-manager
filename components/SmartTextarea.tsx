@@ -21,7 +21,7 @@ import {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export type MentionMember = { userId: string; name: string; avatarUrl?: string | null };
+export type MentionMember = { openId: string; name: string; avatarUrl?: string | null };
 
 export type DropItem = { id: string; label: string; secondary?: string; data?: unknown };
 
@@ -51,11 +51,11 @@ export function memberDropPlugin(
         : members.filter(m =>
             m.name.includes(query) || pinyinMatch(m.name, query.toLowerCase()) != null
           ).slice(0, 6);
-      return list.map(m => ({ id: m.userId, label: m.name }));
+      return list.map(m => ({ id: m.openId, label: m.name }));
     },
     renderItem: (item) => <span className="text-sm">{item.label}</span>,
     format: (item) => `@${item.label}`,
-    onPick: opts?.onPick ? (item) => opts.onPick!({ userId: item.id, name: item.label }) : undefined,
+    onPick: opts?.onPick ? (item) => opts.onPick!({ openId: item.id, name: item.label }) : undefined,
     toNode: (item) => ({ id: item.id, label: item.label }),
   };
 }
@@ -529,7 +529,7 @@ export default function SmartTextarea({
         function traverse(node: any) {
           if ((node.type === "atMention" || node.type === "mention") && node.attrs?.id && !seen.has(node.attrs.id)) {
             seen.add(node.attrs.id);
-            mentioned.push({ userId: node.attrs.id, name: node.attrs.label ?? node.attrs.id });
+            mentioned.push({ openId: node.attrs.id, name: node.attrs.label ?? node.attrs.id });
           }
           node.content?.forEach(traverse);
         }

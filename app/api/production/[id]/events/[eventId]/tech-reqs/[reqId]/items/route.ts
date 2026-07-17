@@ -11,7 +11,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reqId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -19,7 +19,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const existing = await getEventTechReq(reqId, eventId);
   if (!existing) return Response.json({ error: "技术需求不存在" }, { status: 404 });
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const permCtx = await loadEventPermContext(session.openId, eventId);
   if (!canEditTechReq(session.isAdmin, memberRoles, overrides, permCtx, existing.departmentId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 

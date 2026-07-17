@@ -14,7 +14,7 @@ export default async function ImportScenesPage({ params }: { params: Promise<{ i
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) redirect(`/production/${id}`);
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;

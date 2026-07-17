@@ -34,7 +34,7 @@ function ReqLinkCard({ req }: { req: MyTechReqFullEntry }) {
         {req.assignees.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {req.assignees.map(a => (
-              <span key={a.userId} className="text-[10px] bg-zinc-50 text-zinc-500 rounded px-1.5 py-0.5">
+              <span key={a.openId} className="text-[10px] bg-zinc-50 text-zinc-500 rounded px-1.5 py-0.5">
                 {a.name}
               </span>
             ))}
@@ -50,7 +50,7 @@ function ReqLinkCard({ req }: { req: MyTechReqFullEntry }) {
 
 type Props = {
   reqs: MyTechReqFullEntry[];
-  currentUserId: string;
+  currentUserOpenId: string;
 };
 
 export default function MyReqsClient({ reqs }: Props) {

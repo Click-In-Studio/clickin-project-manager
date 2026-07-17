@@ -131,10 +131,10 @@ export async function digestHistory(history: HistoryMessage[]): Promise<string> 
   ).catch(() => "（历史记录摘要失败）");
 }
 
-export async function loadMemory(chatId: string, userId: string): Promise<MemoryContext> {
+export async function loadMemory(chatId: string, senderId: string): Promise<MemoryContext> {
   const [chatRaw, userRaw] = await Promise.all([
     getChatMemory(chatId).catch(() => null),
-    getUserMemory(userId).catch(() => null),
+    getUserMemory(senderId).catch(() => null),
   ]);
   return {
     chatMemory: formatForPrompt(chatRaw ? (parseMemory(chatRaw) ?? EMPTY_MEMORY) : EMPTY_MEMORY),
@@ -200,7 +200,7 @@ function formatSessionTranscript(messages: Message[]): string {
 
 export async function compactAndSave(
   chatId:     string,
-  userId:     string,
+  senderId:   string,
   senderName: string,
   messages:   Message[],
 ): Promise<void> {
@@ -209,7 +209,7 @@ export async function compactAndSave(
 
   const [existingChatRaw, existingUserRaw] = await Promise.all([
     getChatMemory(chatId).catch(() => null),
-    getUserMemory(userId).catch(() => null),
+    getUserMemory(senderId).catch(() => null),
   ]);
 
   // Pass existing as JSON string so the LLM can merge it; fall back to empty structure
@@ -248,11 +248,11 @@ export async function compactAndSave(
           return;
         }
         if (isEmptyData(parsed)) {
-          console.log(`[memory] user compact skipped (all empty) userId=${userId}`);
+          console.log(`[memory] user compact skipped (all empty) senderId=${senderId}`);
           return;
         }
-        return saveUserMemory(userId, JSON.stringify(parsed)).then(() => {
-          console.log(`[memory] user compact saved (userId=${userId}):`, parsed);
+        return saveUserMemory(senderId, JSON.stringify(parsed)).then(() => {
+          console.log(`[memory] user compact saved (senderId=${senderId}):`, parsed);
         });
       })
       .catch(e => console.error("[memory] user compact error:", e)),

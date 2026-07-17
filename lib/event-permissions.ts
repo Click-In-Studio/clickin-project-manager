@@ -33,23 +33,23 @@ export type EventPermContext = {
 };
 
 export async function loadEventPermContext(
-  userId: string,
+  openId: string,
   eventId: string,
 ): Promise<EventPermContext> {
   const pool = getPool();
   const [callRes, followerRes, participantRes, pocRes, memberRes] = await Promise.all([
     pool.query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM event_call_time WHERE event_id = $1 AND user_id = $2) AS exists`,
-      [eventId, userId]
+      `SELECT EXISTS(SELECT 1 FROM event_call_time WHERE event_id = $1 AND open_id = $2) AS exists`,
+      [eventId, openId]
     ),
     pool.query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM event_participant WHERE event_id = $1 AND user_id = $2) AS exists`,
-      [eventId, userId]
+      `SELECT EXISTS(SELECT 1 FROM event_participant WHERE event_id = $1 AND open_id = $2) AS exists`,
+      [eventId, openId]
     ),
     pool.query<{ department_id: string }>(
       `SELECT department_id FROM event_participant
-       WHERE event_id = $1 AND user_id = $2 AND department_id IS NOT NULL`,
-      [eventId, userId]
+       WHERE event_id = $1 AND open_id = $2 AND department_id IS NOT NULL`,
+      [eventId, openId]
     ),
     // POC membership is production-wide
     pool.query<{ department_id: string }>(
@@ -57,8 +57,8 @@ export async function loadEventPermContext(
        FROM event_department_member edm
        JOIN event_department ed ON ed.id = edm.department_id
        JOIN production_event pe ON pe.production_id = ed.production_id
-       WHERE pe.id = $1 AND edm.user_id = $2 AND edm.is_poc = true`,
-      [eventId, userId]
+       WHERE pe.id = $1 AND edm.open_id = $2 AND edm.is_poc = true`,
+      [eventId, openId]
     ),
     // All production-wide dept membership for this event's production
     pool.query<{ department_id: string }>(
@@ -66,8 +66,8 @@ export async function loadEventPermContext(
        FROM event_department_member edm
        JOIN event_department ed ON ed.id = edm.department_id
        JOIN production_event pe ON pe.production_id = ed.production_id
-       WHERE pe.id = $1 AND edm.user_id = $2`,
-      [eventId, userId]
+       WHERE pe.id = $1 AND edm.open_id = $2`,
+      [eventId, openId]
     ),
   ]);
   return {

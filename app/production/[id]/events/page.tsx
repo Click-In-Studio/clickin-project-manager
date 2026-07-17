@@ -15,7 +15,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
@@ -24,7 +24,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   const [name, allEvents, myParticipations, departments] = await Promise.all([
     getProductionName(id),
     listProductionEvents(id),
-    listUserEventParticipations(session.userId, id),
+    listUserEventParticipations(session.openId, id),
     listEventDepartments(id),
   ]);
   if (!name) redirect("/");
@@ -42,7 +42,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
       canCreate={canCreate}
       canViewFull={canViewFull}
       myParticipations={myParticipations}
-      currentUserId={session.userId}
+      currentUserOpenId={session.openId}
       departments={canCreate ? departments : []}
     />
   );

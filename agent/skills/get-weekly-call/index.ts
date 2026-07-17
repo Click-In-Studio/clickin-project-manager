@@ -47,7 +47,8 @@ function renderEntry(entry: UserCallEntry): string[] {
 export const getWeeklyCallSkill: SkillModule<Record<string, never>> = {
   config,
   async run(ctx: BotContext): Promise<string> {
-    const entries = await getWeeklyCallForUser(ctx.trigger.userId);
+    const openId = ctx.trigger.senderId;
+    const entries = await getWeeklyCallForUser(openId);
 
     if (!entries.length) {
       return "📅 未来 7 天没有集合时间安排。";

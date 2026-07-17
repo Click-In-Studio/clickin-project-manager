@@ -8,13 +8,13 @@ type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };
 
 /**
  * PUT — replace the participant list for a schedule item.
- * Body: { participants: { userId: string; name: string }[] }
+ * Body: { participants: { openId: string; name: string }[] }
  */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, itemId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("event:assign_people", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -30,13 +30,13 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     body.participants.some(
       (x) =>
         typeof x !== "object" || x === null ||
-        typeof (x as Record<string, unknown>).userId !== "string" ||
+        typeof (x as Record<string, unknown>).openId !== "string" ||
         typeof (x as Record<string, unknown>).name !== "string"
     )
   ) {
-    return Response.json({ error: "participants 必须是 { userId: string; name: string }[]" }, { status: 400 });
+    return Response.json({ error: "participants 必须是 { openId: string; name: string }[]" }, { status: 400 });
   }
 
-  await setScheduleItemParticipants(itemId, body.participants as { userId: string; name: string }[]);
+  await setScheduleItemParticipants(itemId, body.participants as { openId: string; name: string }[]);
   return Response.json({ ok: true });
 }

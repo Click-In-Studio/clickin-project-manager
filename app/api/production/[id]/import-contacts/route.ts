@@ -14,8 +14,6 @@ import {
   upsertContactUser,
   upsertProductionMemberWithRoles,
   getProductionMemberContext,
-  getFeishuOpenId,
-  updateUserContact,
 } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { ALL_ROLES, hasPermission } from "@/lib/roles";
@@ -25,7 +23,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("import_contacts", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -69,32 +67,30 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const stats = { matched: 0, created: 0, notFound: [] as string[] };
 
   for (const row of rows) {
-    // ── Step 1: resolve user (Feishu open_id or existing internal userId) ────
-    let feishuOpenId: string | null = null;
-    let existingUserId: string | null = null;
+    // ── Step 1: resolve open_id ───────────────────────────────────────────────
+    let openId: string | null = null;
     let isNew = false;
 
     if (row.feishuOpenId) {
-      feishuOpenId = row.feishuOpenId;
+      // Person column present and filled — use directly, no search needed.
+      openId = row.feishuOpenId;
       const alreadyKnown = await findUserByName(row.name);
-      if (alreadyKnown) existingUserId = alreadyKnown.userId;
-      else isNew = true;
+      isNew = !alreadyKnown;
     } else {
       const existing = await findUserByName(row.name);
       if (existing) {
-        existingUserId = existing.userId;
-        // Need open_id for contact info supplement below
-        feishuOpenId = await getFeishuOpenId(existingUserId);
+        openId = existing.openId;
       } else {
+        // Search Feishu directory by name.
         try {
           const candidates = await searchUsersByName(row.name);
           const match = candidates.find((u) => u.name === row.name);
-          if (match) { feishuOpenId = match.openId; isNew = true; }
+          if (match) { openId = match.openId; isNew = true; }
         } catch { /* fall through to notFound */ }
       }
     }
 
-    if (!feishuOpenId && !existingUserId) {
+    if (!openId) {
       stats.notFound.push(row.name);
       continue;
     }
@@ -103,23 +99,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     let { email, phone } = row;
     let avatarUrl: string | null = null;
 
-    if (feishuOpenId && (!email || !phone)) {
-      const info = await getUserContactInfo(feishuOpenId);
+    if (!email || !phone) {
+      const info = await getUserContactInfo(openId);
       email ??= info.email;
       phone ??= info.phone;
       avatarUrl = info.avatarUrl;
     }
 
     // ── Step 3: persist ───────────────────────────────────────────────────────
-    let userId: string;
-    if (feishuOpenId) {
-      const result = await upsertContactUser(feishuOpenId, row.name, avatarUrl, email, phone);
-      userId = result.userId;
-    } else {
-      userId = existingUserId!;
-      await updateUserContact(userId, email ?? null, phone ?? null);
-    }
-    await upsertProductionMemberWithRoles(productionId, userId, row.roles, row.photoUrl);
+    await upsertContactUser(openId, row.name, avatarUrl, email, phone);
+    await upsertProductionMemberWithRoles(productionId, openId, row.roles, row.photoUrl);
 
     if (isNew) stats.created++; else stats.matched++;
   }

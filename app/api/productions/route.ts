@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   try {
-    const productions = await listProductions({ userId: session.userId, isAdmin: session.isAdmin });
+    const productions = await listProductions({ openId: session.openId, isAdmin: session.isAdmin });
     return Response.json({ productions });
   } catch (err) {
     console.error("[productions] list error:", err);

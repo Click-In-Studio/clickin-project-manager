@@ -19,12 +19,12 @@ afterAll(() => deleteProduction(TEST_PROD_ID).catch(() => {}));
 describe("listProductions", () => {
   it("admin sees productions (no filter by membership)", async () => {
     await createProduction(TEST_PROD_ID, "单元测试演出");
-    const list = await listProductions({ userId: TEST_USER, isAdmin: true });
+    const list = await listProductions({ openId: TEST_USER, isAdmin: true });
     expect(list.some((p) => p.id === TEST_PROD_ID)).toBe(true);
   });
 
   it("non-member sees no productions when not admin", async () => {
-    const list = await listProductions({ userId: TEST_USER, isAdmin: false });
+    const list = await listProductions({ openId: TEST_USER, isAdmin: false });
     expect(list.every((p) => p.id !== TEST_PROD_ID)).toBe(true);
   });
 });

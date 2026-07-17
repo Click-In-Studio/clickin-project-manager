@@ -115,7 +115,7 @@ export default function CallSheetClient({
                   {item.participants.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {item.participants.map(p => (
-                        <span key={p.userId} className="text-[10px] bg-zinc-50 text-zinc-400 rounded px-1.5 py-0.5">
+                        <span key={p.openId} className="text-[10px] bg-zinc-50 text-zinc-400 rounded px-1.5 py-0.5">
                           {p.name}
                         </span>
                       ))}

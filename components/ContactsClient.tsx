@@ -8,7 +8,6 @@ import type { EventDepartment } from "@/lib/event-db";
 import { ROLE_GROUPS, PERMISSION_GROUPS, PERMISSION_LABELS, roleBasedPermission, type Permission } from "@/lib/roles";
 // Search result returned by feishu-user-search API (local DB, includes raw contact info)
 type SearchResult = {
-  userId: string;
   openId: string;
   name: string;
   avatarUrl: string | null;
@@ -135,7 +134,7 @@ function PermissionsPanel({
       await fetch(`${BASE_PATH}/api/production/${productionId}/permissions`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: member.userId, permission: perm, granted }),
+        body: JSON.stringify({ openId: member.openId, permission: perm, granted }),
       });
       onOverrideChange(perm, granted);
     } finally {
@@ -248,7 +247,7 @@ function EditInfoPanel({
   const handleSave = async () => {
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { userId: member.userId };
+      const body: Record<string, unknown> = { openId: member.openId };
       if (canManage) body.roles = selectedRoles;
       body.email = email.trim() || null;
       body.phone = phone.trim() || null;
@@ -280,7 +279,7 @@ function EditInfoPanel({
       await fetch(`${BASE_PATH}/api/production/${productionId}/members`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: member.userId }),
+        body: JSON.stringify({ openId: member.openId }),
       });
       onDeleted();
       onClose();
@@ -396,12 +395,12 @@ function EditInfoPanel({
 
 function AddMemberPanel({
   productionId,
-  existingUserIds,
+  existingOpenIds,
   onClose,
   onAdded,
 }: {
   productionId: string;
-  existingUserIds: Set<string>;
+  existingOpenIds: Set<string>;
   onClose: () => void;
   onAdded: (member: MemberWithRoles) => void;
 }) {
@@ -471,7 +470,7 @@ function AddMemberPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: selected.userId,
+          openId: selected.openId,
           name: selected.name,
           avatarUrl: selected.avatarUrl,
           email: selected.email ?? null,
@@ -482,7 +481,6 @@ function AddMemberPanel({
       const data = await res.json();
       if (!data.ok) { setError(data.error ?? "添加失败"); return; }
       onAdded({
-        userId: selected.userId,
         openId: selected.openId,
         name: selected.name,
         avatarUrl: selected.avatarUrl,
@@ -544,10 +542,10 @@ function AddMemberPanel({
               )}
               {!searching && !syncing && error && <p className="text-xs text-red-500">{error}</p>}
               {!searching && !syncing && results.map((u) => {
-                const alreadyAdded = existingUserIds.has(u.userId);
+                const alreadyAdded = existingOpenIds.has(u.openId);
                 return (
                   <button
-                    key={u.userId}
+                    key={u.openId}
                     disabled={alreadyAdded}
                     onClick={() => { setSelected(u); setError(null); }}
                     className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
@@ -831,7 +829,7 @@ function DepartmentPanel({
     if (editingId === id) setEditingId(null);
   };
 
-  const saveDeptMembers = async (dept: EventDepartment, newEntries: { userId: string; isMember: boolean; isPoc: boolean }[]) => {
+  const saveDeptMembers = async (dept: EventDepartment, newEntries: { openId: string; isMember: boolean; isPoc: boolean }[]) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/departments/${dept.id}/members`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -844,34 +842,34 @@ function DepartmentPanel({
   };
 
   function buildEntries(dept: EventDepartment) {
-    const allIds = new Set([...dept.memberUserIds, ...dept.pocUserIds]);
+    const allIds = new Set([...dept.memberOpenIds, ...dept.pocOpenIds]);
     return new Map([...allIds].map(id => [id, {
-      userId: id,
-      isMember: dept.memberUserIds.includes(id),
-      isPoc: dept.pocUserIds.includes(id),
+      openId: id,
+      isMember: dept.memberOpenIds.includes(id),
+      isPoc: dept.pocOpenIds.includes(id),
     }]));
   }
 
-  const handleToggleMember = (dept: EventDepartment, userId: string) => {
+  const handleToggleMember = (dept: EventDepartment, openId: string) => {
     const entries = buildEntries(dept);
-    const isMember = dept.memberUserIds.includes(userId);
+    const isMember = dept.memberOpenIds.includes(openId);
     if (isMember) {
-      entries.delete(userId);
+      entries.delete(openId);
     } else {
-      entries.set(userId, { userId, isMember: true, isPoc: false });
+      entries.set(openId, { openId, isMember: true, isPoc: false });
     }
     saveDeptMembers(dept, [...entries.values()]);
   };
 
-  const handleTogglePoc = (dept: EventDepartment, userId: string) => {
+  const handleTogglePoc = (dept: EventDepartment, openId: string) => {
     const entries = buildEntries(dept);
-    const isPoc = dept.pocUserIds.includes(userId);
-    const current = entries.get(userId) ?? { userId, isMember: false, isPoc: false };
+    const isPoc = dept.pocOpenIds.includes(openId);
+    const current = entries.get(openId) ?? { openId, isMember: false, isPoc: false };
     const newIsPoc = !isPoc;
     if (!newIsPoc && !current.isMember) {
-      entries.delete(userId);
+      entries.delete(openId);
     } else {
-      entries.set(userId, { ...current, isPoc: newIsPoc });
+      entries.set(openId, { ...current, isPoc: newIsPoc });
     }
     saveDeptMembers(dept, [...entries.values()]);
   };
@@ -879,8 +877,8 @@ function DepartmentPanel({
   const renderRow = (dept: EventDepartment) => {
     const isExpanded = expandedId === dept.id;
     const isEditing = editingId === dept.id;
-    const summary = dept.memberUserIds.length > 0
-      ? `${dept.memberUserIds.length} 位成员${dept.pocUserIds.length > 0 ? `，${dept.pocUserIds.length} 位 POC` : ""}`
+    const summary = dept.memberOpenIds.length > 0
+      ? `${dept.memberOpenIds.length} 位成员${dept.pocOpenIds.length > 0 ? `，${dept.pocOpenIds.length} 位 POC` : ""}`
       : "";
     const filtered = search
       ? members.filter((m) => m.name.includes(search) || m.roles.some((r) => r.includes(search)))
@@ -970,11 +968,11 @@ function DepartmentPanel({
 
             <div className="space-y-0.5 max-h-52 overflow-y-auto mt-1">
               {filtered.map((m) => {
-                const isMember = dept.memberUserIds.includes(m.userId);
-                const isPoc = dept.pocUserIds.includes(m.userId);
+                const isMember = dept.memberOpenIds.includes(m.openId);
+                const isPoc = dept.pocOpenIds.includes(m.openId);
                 return (
                   <div
-                    key={m.userId}
+                    key={m.openId}
                     className={`flex items-center gap-2 rounded-lg px-2.5 py-2 transition-colors ${
                       isMember ? "bg-zinc-50" : ""
                     }`}
@@ -984,7 +982,7 @@ function DepartmentPanel({
                       <span className="text-[11px] text-zinc-400 shrink-0 mr-1">{m.roles[0]}</span>
                     )}
                     <button
-                      onClick={() => handleToggleMember(dept, m.userId)}
+                      onClick={() => handleToggleMember(dept, m.openId)}
                       className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
                         isMember ? "bg-zinc-700" : "bg-zinc-200 hover:bg-zinc-300"
                       }`}
@@ -995,7 +993,7 @@ function DepartmentPanel({
                       }`} />
                     </button>
                     <button
-                      onClick={() => handleTogglePoc(dept, m.userId)}
+                      onClick={() => handleTogglePoc(dept, m.openId)}
                       className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
                         isPoc ? "bg-amber-500" : "bg-zinc-200 hover:bg-zinc-300"
                       }`}
@@ -1095,7 +1093,7 @@ type Props = {
   initialMembers: MemberWithRoles[];
   canImport: boolean;
   canManage: boolean;
-  myUserId: string;
+  myOpenId: string;
   initialOverrides: Record<string, Record<string, boolean>>;
   canManageDepts: boolean;
   initialDepartments: EventDepartment[];
@@ -1107,15 +1105,15 @@ export default function ContactsClient({
   initialMembers,
   canImport,
   canManage,
-  myUserId,
+  myOpenId,
   initialOverrides,
   canManageDepts,
   initialDepartments,
 }: Props) {
   const [members, setMembers] = useState<MemberWithRoles[]>(initialMembers);
   const [overrides, setOverrides] = useState<Record<string, Record<string, boolean>>>(initialOverrides);
-  const [managingUserId, setManagingOpenId] = useState<string | null>(null);
-  const [editingUserId, setEditingOpenId] = useState<string | null>(null);
+  const [managingOpenId, setManagingOpenId] = useState<string | null>(null);
+  const [editingOpenId, setEditingOpenId] = useState<string | null>(null);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -1136,28 +1134,28 @@ export default function ContactsClient({
   };
 
   const sorted = sortByFirstRole(members);
-  const managingMember = managingUserId ? members.find((m) => m.userId === managingUserId) ?? null : null;
-  const editingMember = editingUserId ? members.find((m) => m.userId === editingUserId) ?? null : null;
-  const existingUserIds = new Set(members.map((m) => m.userId));
+  const managingMember = managingOpenId ? members.find((m) => m.openId === managingOpenId) ?? null : null;
+  const editingMember = editingOpenId ? members.find((m) => m.openId === editingOpenId) ?? null : null;
+  const existingOpenIds = new Set(members.map((m) => m.openId));
 
-  const handleOverrideChange = (userId: string, perm: Permission, granted: boolean | null) => {
+  const handleOverrideChange = (openId: string, perm: Permission, granted: boolean | null) => {
     setOverrides((prev) => {
-      const next = { ...prev, [userId]: { ...prev[userId] } };
+      const next = { ...prev, [openId]: { ...prev[openId] } };
       if (granted === null) {
-        delete next[userId][perm];
+        delete next[openId][perm];
       } else {
-        next[userId][perm] = granted;
+        next[openId][perm] = granted;
       }
       return next;
     });
   };
 
-  const handleMemberSaved = (userId: string, updated: Partial<MemberWithRoles>) => {
-    setMembers((prev) => prev.map((m) => (m.userId === userId ? { ...m, ...updated } : m)));
+  const handleMemberSaved = (openId: string, updated: Partial<MemberWithRoles>) => {
+    setMembers((prev) => prev.map((m) => (m.openId === openId ? { ...m, ...updated } : m)));
   };
 
-  const handleMemberDeleted = (userId: string) => {
-    setMembers((prev) => prev.filter((m) => m.userId !== userId));
+  const handleMemberDeleted = (openId: string) => {
+    setMembers((prev) => prev.filter((m) => m.openId !== openId));
   };
 
   const handleMemberAdded = (member: MemberWithRoles) => {
@@ -1216,12 +1214,12 @@ export default function ContactsClient({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {sorted.map((m) => (
               <MemberCard
-                key={m.userId}
+                key={m.openId}
                 member={m}
                 canManage={canManage}
-                isSelf={m.userId === myUserId}
-                onManage={() => setManagingOpenId(m.userId)}
-                onEdit={() => setEditingOpenId(m.userId)}
+                isSelf={m.openId === myOpenId}
+                onManage={() => setManagingOpenId(m.openId)}
+                onEdit={() => setEditingOpenId(m.openId)}
               />
             ))}
           </div>
@@ -1232,9 +1230,9 @@ export default function ContactsClient({
         <PermissionsPanel
           productionId={productionId}
           member={managingMember}
-          overrides={overrides[managingMember.userId] ?? {}}
+          overrides={overrides[managingMember.openId] ?? {}}
           onClose={() => setManagingOpenId(null)}
-          onOverrideChange={(perm, granted) => handleOverrideChange(managingMember.userId, perm, granted)}
+          onOverrideChange={(perm, granted) => handleOverrideChange(managingMember.openId, perm, granted)}
         />
       )}
 
@@ -1244,15 +1242,15 @@ export default function ContactsClient({
           member={editingMember}
           canManage={canManage}
           onClose={() => setEditingOpenId(null)}
-          onSaved={(updated) => handleMemberSaved(editingMember.userId, updated)}
-          onDeleted={() => handleMemberDeleted(editingMember.userId)}
+          onSaved={(updated) => handleMemberSaved(editingMember.openId, updated)}
+          onDeleted={() => handleMemberDeleted(editingMember.openId)}
         />
       )}
 
       {showAddPanel && (
         <AddMemberPanel
           productionId={productionId}
-          existingUserIds={existingUserIds}
+          existingOpenIds={existingOpenIds}
           onClose={() => setShowAddPanel(false)}
           onAdded={handleMemberAdded}
         />

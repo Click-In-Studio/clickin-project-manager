@@ -9,7 +9,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params;
 
   if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.userId, id);
+    const ok = await canUserAccessProduction(session.openId, id);
     if (!ok) return Response.json({ error: "无权访问" }, { status: 403 });
   }
 

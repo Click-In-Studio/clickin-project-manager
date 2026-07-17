@@ -24,7 +24,7 @@ export type MyTechReqEntry = {
 };
 
 /** Call times for a specific user on a given date (YYYY-MM-DD CST, default today). */
-export async function getDailyCallForUser(userId: string, dateStr?: string): Promise<UserCallEntry[]> {
+export async function getDailyCallForUser(openId: string, dateStr?: string): Promise<UserCallEntry[]> {
   const pool = getScriptEditorPool();
   const d = dateStr ?? (() => {
     const nowCst = new Date(Date.now() + 8 * 3_600_000);
@@ -42,9 +42,9 @@ export async function getDailyCallForUser(userId: string, dateStr?: string): Pro
        FROM event_call_time ect
        JOIN production_event pe ON pe.id = ect.event_id
        JOIN production p ON p.id = pe.production_id
-       WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+       WHERE ect.open_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
        ORDER BY ect.call_at`,
-      [userId, `${d}T00:00:00+08:00`, `${d}T23:59:59.999+08:00`],
+      [openId, `${d}T00:00:00+08:00`, `${d}T23:59:59.999+08:00`],
     ),
   ]);
 
@@ -74,7 +74,7 @@ export async function getDailyCallForUser(userId: string, dateStr?: string): Pro
 }
 
 /** Call times for a specific user over the next 7 days (CST). */
-export async function getWeeklyCallForUser(userId: string): Promise<UserCallEntry[]> {
+export async function getWeeklyCallForUser(openId: string): Promise<UserCallEntry[]> {
   const pool = getScriptEditorPool();
   const nowCst = new Date(Date.now() + 8 * 3_600_000);
   const todayStr = `${nowCst.getUTCFullYear()}-${String(nowCst.getUTCMonth() + 1).padStart(2, "0")}-${String(nowCst.getUTCDate()).padStart(2, "0")}`;
@@ -93,9 +93,9 @@ export async function getWeeklyCallForUser(userId: string): Promise<UserCallEntr
      FROM event_call_time ect
      JOIN production_event pe ON pe.id = ect.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+     WHERE ect.open_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
      ORDER BY ect.call_at`,
-    [userId, weekStart, weekEnd],
+    [openId, weekStart, weekEnd],
   );
 
   if (!callsRes.rows.length) return [];
@@ -124,7 +124,7 @@ export async function getWeeklyCallForUser(userId: string): Promise<UserCallEntr
 }
 
 /** Unfinished tech reqs where the user is assignee (non-done) or dept POC (awaiting). */
-export async function getMyTechReqs(userId: string): Promise<MyTechReqEntry[]> {
+export async function getMyTechReqs(openId: string): Promise<MyTechReqEntry[]> {
   const pool = getScriptEditorPool();
   const res = await pool.query<{
     id: string; title: string; status: string; role: string;
@@ -135,7 +135,7 @@ export async function getMyTechReqs(userId: string): Promise<MyTechReqEntry[]> {
             pe.id AS event_id, pe.title AS event_title,
             p.name AS production_name, ed.name AS department_name
      FROM event_tech_req etr
-     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
+     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.open_id = $1
      JOIN production_event pe ON pe.id = etr.event_id
      JOIN production p ON p.id = pe.production_id
      LEFT JOIN event_department ed ON ed.id = etr.department_id
@@ -148,13 +148,13 @@ export async function getMyTechReqs(userId: string): Promise<MyTechReqEntry[]> {
      FROM event_tech_req etr
      JOIN event_department ed ON ed.id = etr.department_id
      JOIN event_department_member edm
-       ON edm.department_id = etr.department_id AND edm.user_id = $1 AND edm.is_poc = true
+       ON edm.department_id = etr.department_id AND edm.open_id = $1 AND edm.is_poc = true
      JOIN production_event pe ON pe.id = etr.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE etr.status = 'awaiting'
        AND pe.status NOT IN ('completed', 'cancelled')
      ORDER BY event_title, title`,
-    [userId],
+    [openId],
   );
   return res.rows.map(r => ({
     id: r.id, title: r.title, status: r.status,
@@ -268,7 +268,7 @@ export type EventDetail = {
   endTime: Date | null;
   status: string;
   description: string;
-  stageManagers: { name: string }[];
+  stageManagers: { name: string; openId: string }[];
   scheduleItems: {
     id: string;
     title: string;
@@ -322,12 +322,12 @@ export async function getEventDetail(
     pool.query<{
       id: string; title: string; event_type: string; location: string;
       start_time: Date | null; end_time: Date | null; status: string; description: string;
-      stage_managers: { name: string }[] | null;
+      stage_managers: { name: string; open_id: string }[] | null;
     }>(
       `SELECT pe.id, pe.title, pe.event_type, pe.location, pe.start_time, pe.end_time,
               pe.status, pe.description,
-              json_agg(json_build_object('name', esm.name))
-                FILTER (WHERE esm.user_id IS NOT NULL) AS stage_managers
+              json_agg(json_build_object('name', esm.name, 'open_id', esm.open_id))
+                FILTER (WHERE esm.open_id IS NOT NULL) AS stage_managers
        FROM production_event pe
        LEFT JOIN event_stage_manager esm ON esm.event_id = pe.id
        WHERE pe.id = $1 AND pe.production_id = $2
@@ -345,7 +345,7 @@ export async function getEventDetail(
       `SELECT esi.id, esi.title, esi.item_type, esi.start_time, esi.end_time,
               esi.location, esi.notes, s.name AS scene_name,
               json_agg(json_build_object('name', sip.name))
-                FILTER (WHERE sip.user_id IS NOT NULL) AS participants
+                FILTER (WHERE sip.open_id IS NOT NULL) AS participants
        FROM event_schedule_item esi
        LEFT JOIN scene s ON s.id = esi.target_scene_id
        LEFT JOIN schedule_item_participant sip ON sip.item_id = esi.id
@@ -370,10 +370,10 @@ export async function getEventDetail(
               ) FILTER (WHERE ect.id IS NOT NULL) AS call_times
        FROM event_participant ep
        LEFT JOIN event_department ed ON ed.id = ep.department_id
-       LEFT JOIN event_call_time ect ON ect.event_id = $1 AND ect.user_id = ep.user_id
+       LEFT JOIN event_call_time ect ON ect.event_id = $1 AND ect.open_id = ep.open_id
        LEFT JOIN event_schedule_item esi ON esi.id = ect.schedule_item_id
        WHERE ep.event_id = $1
-       GROUP BY ep.user_id, ep.name, ep.role, ed.name
+       GROUP BY ep.open_id, ep.name, ep.role, ed.name
        ORDER BY ep.name`,
       [eventId],
     ),
@@ -443,7 +443,7 @@ export async function getEventDetail(
   return {
     id: ev.id, title: ev.title, eventType: ev.event_type, location: ev.location,
     startTime: ev.start_time, endTime: ev.end_time, status: ev.status, description: ev.description,
-    stageManagers: (ev.stage_managers ?? []).map(sm => ({ name: sm.name })),
+    stageManagers: (ev.stage_managers ?? []).map(sm => ({ name: sm.name, openId: sm.open_id })),
     scheduleItems: schedRes.rows.map(r => ({
       id: r.id, title: r.title, itemType: r.item_type,
       startTime: r.start_time, endTime: r.end_time,

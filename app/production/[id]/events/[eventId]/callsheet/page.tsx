@@ -29,14 +29,14 @@ export default async function CallSheetPage({
   if (!event) redirect("/");
 
   // Check access: event:view_full (production member) OR in the call
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const permCtx = await loadEventPermContext(session.openId, eventId);
   if (!canViewFull && !permCtx.isInCall) redirect(`/production/${productionId}/events/${eventId}/view`);
 
   const [scheduleItems, callTimes, departments] = await Promise.all([

@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 export type CardTokenScope = "daily-call" | "weekly-call" | `report:${string}`;
 
 export type CardTokenData = {
-  userId: string;
+  openId: string;
   scope: CardTokenScope;
   exp: number;
 };
@@ -16,8 +16,8 @@ function sign(payload: string): string {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
-export function createCardToken(userId: string, scope: CardTokenScope, exp: Date): string {
-  const data: CardTokenData = { userId, scope, exp: exp.getTime() };
+export function createCardToken(openId: string, scope: CardTokenScope, exp: Date): string {
+  const data: CardTokenData = { openId, scope, exp: exp.getTime() };
   const payload = Buffer.from(JSON.stringify(data)).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }

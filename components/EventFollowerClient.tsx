@@ -449,9 +449,9 @@ function FollowerScheduleTableView({
           }
           const showAll = coveredDeptIds.length === 0 || coveredDeptIds.length === cols.length;
           const deptMemberSet = showAll ? null : new Set(
-            coveredDeptIds.flatMap(id => departments.find(d => d.id === id)?.memberUserIds ?? [])
+            coveredDeptIds.flatMap(id => departments.find(d => d.id === id)?.memberOpenIds ?? [])
           );
-          const relevant = showAll ? cell.item.participants : cell.item.participants.filter(p => deptMemberSet!.has(p.userId));
+          const relevant = showAll ? cell.item.participants : cell.item.participants.filter(p => deptMemberSet!.has(p.openId));
           const displayParticipants = relevant.length > 0 ? relevant : cell.item.participants;
 
           return (

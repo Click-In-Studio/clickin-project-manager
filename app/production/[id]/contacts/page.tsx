@@ -24,7 +24,7 @@ export default async function ContactsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("view_contacts", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
@@ -46,7 +46,7 @@ export default async function ContactsPage({
       initialMembers={members}
       canImport={canImport}
       canManage={canManage}
-      myUserId={session.userId}
+      myOpenId={session.openId}
       initialOverrides={allOverrides}
       canManageDepts={canManageDepts}
       initialDepartments={departments}

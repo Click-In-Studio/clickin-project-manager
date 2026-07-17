@@ -1,7 +1,7 @@
 import type { SkillModule } from "../_types";
 import type { BotContext } from "../../types";
 import { sendMessage, getChatMemberOpenIds } from "../../feishu";
-import { getProductionsVisibleToAll, batchResolveUserIds } from "../../db";
+import { getProductionsVisibleToAll } from "../../db";
 import { config } from "./config";
 
 type FocusProductionArgs = {
@@ -22,15 +22,10 @@ export const focusProductionSkill: SkillModule<FocusProductionArgs> = {
     if (names.length === 0) return;
 
     // Resolve real IDs from DB — never trust LLM-provided IDs
-    let userIds: string[];
-    if (ctx.trigger.chatType === "group") {
-      const { openIds } = await getChatMemberOpenIds(ctx.trigger.chatId);
-      const openIdToUserId = await batchResolveUserIds(openIds);
-      userIds = openIds.map(id => openIdToUserId.get(id)).filter(Boolean) as string[];
-    } else {
-      userIds = [ctx.trigger.userId];
-    }
-    const allProductions = await getProductionsVisibleToAll(userIds);
+    const openIds = ctx.trigger.chatType === "group"
+      ? (await getChatMemberOpenIds(ctx.trigger.chatId)).openIds
+      : [ctx.trigger.senderId];
+    const allProductions = await getProductionsVisibleToAll(openIds);
 
     // Match candidate names (case-insensitive, partial) against visible productions
     const lowerNames = names.map(n => n.toLowerCase());

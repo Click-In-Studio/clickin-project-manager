@@ -11,18 +11,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  await selfFollowEvent(eventId, session.userId, session.name);
-  const role = await getSelfParticipantRole(eventId, session.userId);
+  await selfFollowEvent(eventId, session.openId, session.name);
+  const role = await getSelfParticipantRole(eventId, session.openId);
 
   if (event.chatId) {
-    addChatMembers(event.chatId, [session.userId]).catch(console.error);
+    addChatMembers(event.chatId, [session.openId]).catch(console.error);
   }
 
   return Response.json({ role });
@@ -32,13 +32,13 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  await selfUnfollowEvent(eventId, session.userId);
+  await selfUnfollowEvent(eventId, session.openId);
   return Response.json({ role: null });
 }

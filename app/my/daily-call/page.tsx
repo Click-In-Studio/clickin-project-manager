@@ -49,13 +49,13 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
 
   const { date: dateParam, t: tokenParam } = await searchParams;
 
-  let userId: string;
+  let openId: string;
   if (session) {
-    userId = session.userId;
+    openId = session.openId;
   } else {
     const tokenData = tokenParam ? verifyCardToken(tokenParam, "daily-call") : null;
     if (!tokenData) redirect("/login");
-    userId = tokenData.userId;
+    openId = tokenData.openId;
   }
   const isTokenMode = !session;
   const dateStr = (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) ? dateParam : tomorrowCSTStr();
@@ -75,9 +75,9 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
      FROM event_call_time ect
      JOIN production_event pe ON pe.id = ect.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+     WHERE ect.open_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
      ORDER BY pe.title`,
-    [userId, start.toISOString(), end.toISOString()],
+    [openId, start.toISOString(), end.toISOString()],
   );
 
   const eventIds = eventsRes.rows.map(r => r.event_id);
@@ -99,9 +99,9 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
   }
 
   // Call times for each event (all participants, not just current user)
-  type CallRow = { event_id: string; user_id: string; name: string; call_at: string; notes: string; department_id: string | null };
+  type CallRow = { event_id: string; open_id: string; name: string; call_at: string; notes: string; department_id: string | null };
   const allCallsRes = await pool.query<CallRow>(
-    `SELECT event_id, user_id, name, call_at, notes, department_id
+    `SELECT event_id, open_id, name, call_at, notes, department_id
      FROM event_call_time WHERE event_id = ANY($1) ORDER BY call_at, name`,
     [eventIds],
   );
@@ -155,7 +155,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
 
         <div className="flex flex-col gap-5">
           {eventsRes.rows.map(ev => {
-            const myCalls = (callsByEvent.get(ev.event_id) ?? []).filter(c => c.user_id === userId);
+            const myCalls = (callsByEvent.get(ev.event_id) ?? []).filter(c => c.open_id === openId);
             const allCalls = (callsByEvent.get(ev.event_id) ?? []);
             const schedItems = (schedsByEvent.get(ev.event_id) ?? []).sort((a, b) => {
               if (!a.start_time && !b.start_time) return a.order_index - b.order_index;
@@ -232,7 +232,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
                       {allCalls.map((c, i) => (
                         <div key={i} className="flex items-baseline gap-2">
                           <span className="shrink-0 font-mono text-xs text-zinc-500 w-10">{fmtTime(c.call_at)}</span>
-                          <span className={`text-sm ${c.user_id === userId ? "font-semibold text-zinc-800" : "text-zinc-600"}`}>
+                          <span className={`text-sm ${c.open_id === openId ? "font-semibold text-zinc-800" : "text-zinc-600"}`}>
                             {c.name}
                           </span>
                           {c.notes && <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-300" />}

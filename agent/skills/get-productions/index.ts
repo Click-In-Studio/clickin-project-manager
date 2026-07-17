@@ -1,7 +1,7 @@
 import type { SkillModule } from "../_types";
 import type { BotContext } from "../../types";
 import { getChatMemberOpenIds } from "../../feishu";
-import { getProductionsVisibleToAll, getMemberRolesInProductions, batchResolveUserIds } from "../../db";
+import { getProductionsVisibleToAll, getMemberRolesInProductions } from "../../db";
 import type { ProductionInfo } from "../../db";
 import { config } from "./config";
 
@@ -10,21 +10,20 @@ export const getProductionsSkill: SkillModule = {
   async run(ctx: BotContext): Promise<string> {
     const isGroup = ctx.trigger.chatType === "group";
 
-    let userIds: string[];
+    let openIds: string[];
     let hasMoreMembers = false;
 
     if (isGroup) {
       const result = await getChatMemberOpenIds(ctx.trigger.chatId);
+      openIds = result.openIds;
       hasMoreMembers = result.hasMore;
-      const openIdToUserId = await batchResolveUserIds(result.openIds);
-      userIds = result.openIds.map(id => openIdToUserId.get(id)).filter(Boolean) as string[];
       // Always include the sender in case they aren't in the member list yet
-      if (!userIds.includes(ctx.trigger.userId)) userIds.push(ctx.trigger.userId);
+      if (!openIds.includes(ctx.trigger.senderId)) openIds.push(ctx.trigger.senderId);
     } else {
-      userIds = [ctx.trigger.userId];
+      openIds = [ctx.trigger.senderId];
     }
 
-    const productions = await getProductionsVisibleToAll(userIds);
+    const productions = await getProductionsVisibleToAll(openIds);
 
     if (productions.length === 0) {
       const note = isGroup ? "（基于当前群组成员权限交集）" : "";
@@ -32,7 +31,7 @@ export const getProductionsSkill: SkillModule = {
     }
 
     const roleMap = await getMemberRolesInProductions(
-      ctx.trigger.userId,
+      ctx.trigger.senderId,
       productions.map(p => p.id),
     );
 
@@ -41,7 +40,7 @@ export const getProductionsSkill: SkillModule = {
     if (isGroup) {
       const memberNote = hasMoreMembers
         ? `（群成员 >100 人，仅取前 100 人的权限交集）`
-        : `（基于当前群组 ${userIds.length} 名成员的权限交集）`;
+        : `（基于当前群组 ${openIds.length} 名成员的权限交集）`;
       lines.push(memberNote);
     }
 

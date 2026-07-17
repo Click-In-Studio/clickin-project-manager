@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const report = await getEventReport(reportId, eventId);
   if (!report) return Response.json({ error: "记录不存在" }, { status: 404 });
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const permCtx = await loadEventPermContext(session.openId, eventId);
   if (!canWriteNote(session.isAdmin, memberRoles, permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     reportId,
     departmentId: body.departmentId,
     content: body.content.trim(),
-    authorUserId: session.userId,
+    authorOpenId: session.openId,
     authorName: session.name,
     mentions: body.mentions ?? [],
   });

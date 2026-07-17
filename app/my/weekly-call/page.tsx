@@ -45,13 +45,13 @@ export default async function WeeklyCallPage({ searchParams }: Ctx) {
 
   const { t: tokenParam } = await searchParams;
 
-  let userId: string;
+  let openId: string;
   if (session) {
-    userId = session.userId;
+    openId = session.openId;
   } else {
     const tokenData = tokenParam ? verifyCardToken(tokenParam, "weekly-call") : null;
     if (!tokenData) redirect("/login");
-    userId = tokenData.userId;
+    openId = tokenData.openId;
   }
   const isTokenMode = !session;
 
@@ -81,29 +81,29 @@ export default async function WeeklyCallPage({ searchParams }: Ctx) {
        FROM event_call_time ect
        JOIN production_event pe ON pe.id = ect.event_id
        JOIN production p ON p.id = pe.production_id
-       WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+       WHERE ect.open_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
        ORDER BY ect.call_at`,
-      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+      [openId, weekStart.toISOString(), weekEnd.toISOString()],
     ),
     pool.query<SchedRow>(
       `SELECT esi.event_id, esi.title, esi.start_time, esi.order_index
        FROM event_schedule_item esi
        WHERE esi.event_id IN (
          SELECT DISTINCT event_id FROM event_call_time
-         WHERE user_id = $1 AND call_at >= $2 AND call_at < $3
+         WHERE open_id = $1 AND call_at >= $2 AND call_at < $3
        )
        ORDER BY esi.event_id, esi.order_index`,
-      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+      [openId, weekStart.toISOString(), weekEnd.toISOString()],
     ),
     pool.query<ReqRow>(
       `SELECT etr.event_id, etr.title, etr.status
        FROM event_tech_req etr
-       JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
+       JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.open_id = $1
        WHERE etr.event_id IN (
          SELECT DISTINCT event_id FROM event_call_time
-         WHERE user_id = $1 AND call_at >= $2 AND call_at < $3
+         WHERE open_id = $1 AND call_at >= $2 AND call_at < $3
        ) AND etr.status != 'done'`,
-      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+      [openId, weekStart.toISOString(), weekEnd.toISOString()],
     ),
   ]);
 

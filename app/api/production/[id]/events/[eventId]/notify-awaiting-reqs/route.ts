@@ -8,7 +8,7 @@
 
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
 import { sendChatCard, sendCard, buildUrgeReqCard } from "@/lib/feishu-bot";
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("event:create", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
@@ -44,10 +44,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   for (const [deptId, reqs] of byDept) {
     const dept = await getEventDepartment(deptId, productionId);
-    if (!dept?.chatId || !dept.pocUserIds.length) continue;
-
-    const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
-    const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
+    if (!dept?.chatId || !dept.pocOpenIds.length) continue;
 
     // Link to the event's reqs tab
     const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs`;
@@ -55,7 +52,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const card = buildUrgeReqCard(
       event.title, dept.name,
       reqs.map(r => r.title),
-      pocOpenIds,
+      dept.pocOpenIds,
       url,
     );
     await sendChatCard(dept.chatId, card).catch(e =>
@@ -63,10 +60,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     );
     // Extra personal DM for POCs who opted in to tech_req_poc
     getOptedInUsers("tech_req_poc").then((optedIn) => {
-      for (const userId of dept.pocUserIds) {
-        if (!optedIn.has(userId)) continue;
-        const openId = userIdToOpenId.get(userId);
-        if (openId) sendCard(openId, card).catch(e => console.error("[notify-awaiting] personal dm failed:", e));
+      for (const pocId of dept.pocOpenIds) {
+        if (optedIn.has(pocId)) sendCard(pocId, card).catch(e => console.error("[notify-awaiting] personal dm failed:", e));
       }
     }).catch(() => {});
     notified++;

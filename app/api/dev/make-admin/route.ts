@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   const newToken = createSession({ ...session, isAdmin: true });
 
-  const res = NextResponse.json({ ok: true, userId: session.userId, name: session.name });
+  const res = NextResponse.json({ ok: true, openId: session.openId, name: session.name });
   res.cookies.set(SESSION_COOKIE, newToken, SESSION_COOKIE_OPTS);
   return res;
 }

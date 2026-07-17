@@ -19,7 +19,7 @@ async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
   const { memberRoles, overrides, isArchived } = await getProductionMemberContext(
-    session.userId, session.isAdmin, productionId
+    session.openId, session.isAdmin, productionId
   );
   return { session, memberRoles, overrides, isArchived };
 }
@@ -73,8 +73,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         getBossOpenIds(id),
       ]);
       const chatName = `${productionName ?? "项目"} - ${name}`;
-      const memberIds = [...new Set([session.userId, ...bossIds])];
-      const chatId = await createChat(chatName, session.userId, memberIds, "only_owner_and_administrator");
+      const memberIds = [...new Set([session.openId, ...bossIds])];
+      const chatId = await createChat(chatName, session.openId, memberIds, "only_owner_and_administrator");
       if (chatId) await setDepartmentChatId(dept.id, chatId);
     } catch (e) {
       console.error("[dept/chat] auto-create failed:", e);

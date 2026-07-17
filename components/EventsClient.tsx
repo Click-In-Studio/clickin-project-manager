@@ -302,7 +302,7 @@ type Props = {
   canCreate: boolean;
   canViewFull: boolean;
   myParticipations: { eventId: string; role: "participant" | "follower" }[];
-  currentUserId: string;
+  currentUserOpenId: string;
   departments: EventDepartment[];
 };
 

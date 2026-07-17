@@ -13,7 +13,7 @@ export default async function AssetUploadPage({ params }: { params: Promise<{ id
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
   if (!ok) redirect("/");
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;

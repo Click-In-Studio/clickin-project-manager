@@ -6,7 +6,7 @@ export const OAUTH_STATE_COOKIE = "oauth_state";
 const SESSION_TTL_S = 7 * 24 * 60 * 60;
 
 export type SessionData = {
-  userId: string;  // app_user.id (UUID)
+  openId: string;
   name: string;
   avatarUrl: string | null;
   isAdmin: boolean;

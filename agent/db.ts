@@ -22,8 +22,7 @@ export function getPool(): Pool {
 export type CtxSnapshot = {
   chatId:     string;
   chatType:   "p2p" | "group";
-  senderId:   string;   // Feishu open_id — for p2p reply and context key
-  userId:     string;   // internal app_user UUID — for DB queries
+  senderId:   string;
   senderName: string;
   chatName:   string;
 };
@@ -130,27 +129,6 @@ export function getScriptEditorPool(): Pool {
   return gSE.__scriptEditorPool;
 }
 
-/** Resolve Feishu open_ids → internal app_user UUIDs. Returns only those found. */
-export async function batchResolveUserIds(openIds: string[]): Promise<Map<string, string>> {
-  if (openIds.length === 0) return new Map();
-  const pool = getScriptEditorPool();
-  const res = await pool.query<{ open_id: string; user_id: string }>(
-    `SELECT open_id, user_id::text FROM feishu_user WHERE open_id = ANY($1)`,
-    [openIds],
-  );
-  return new Map(res.rows.map(r => [r.open_id, r.user_id]));
-}
-
-/** Resolve a single Feishu open_id → internal app_user UUID, or null if not found. */
-export async function resolveUserId(openId: string): Promise<string | null> {
-  const pool = getScriptEditorPool();
-  const res = await pool.query<{ user_id: string }>(
-    `SELECT user_id::text FROM feishu_user WHERE open_id = $1`,
-    [openId],
-  );
-  return res.rows[0]?.user_id ?? null;
-}
-
 export type ProductionInfo = {
   id:          string;
   name:        string;
@@ -158,11 +136,11 @@ export type ProductionInfo = {
   memberCount: number;
 };
 
-// Productions visible to all the given internal userIds.
-// A production is included only when every userId either is a super_admin or has a production_member row.
-// Unknown userIds (not in app_user) are ignored.
-export async function getProductionsVisibleToAll(userIds: string[]): Promise<ProductionInfo[]> {
-  if (userIds.length === 0) return [];
+// Productions where every open_id in the list that is known to our system
+// has access (is in production_member OR is a super_admin).
+// Unknown open_ids (not in feishu_user) are ignored.
+export async function getProductionsVisibleToAll(openIds: string[]): Promise<ProductionInfo[]> {
+  if (openIds.length === 0) return [];
   const pool = getScriptEditorPool();
   const res = await pool.query<{
     id: string; name: string; created_at: Date; member_count: string;
@@ -172,18 +150,18 @@ export async function getProductionsVisibleToAll(userIds: string[]): Promise<Pro
      FROM production p
      WHERE NOT EXISTS (
        SELECT 1
-       FROM unnest($1::uuid[]) AS t(uid)
-       JOIN feishu_user fu ON fu.user_id = t.uid
+       FROM unnest($1::text[]) AS t(uid)
+       JOIN feishu_user fu ON fu.open_id = t.uid
        WHERE NOT (
          fu.is_super_admin = true
          OR EXISTS (
            SELECT 1 FROM production_member pm
-           WHERE pm.production_id = p.id AND pm.user_id = t.uid
+           WHERE pm.production_id = p.id AND pm.open_id = t.uid
          )
        )
      )
      ORDER BY p.created_at DESC`,
-    [userIds],
+    [openIds],
   );
   return res.rows.map(r => ({
     id:          r.id,
@@ -195,15 +173,15 @@ export async function getProductionsVisibleToAll(userIds: string[]): Promise<Pro
 
 // Sender's roles in each of the given productions.
 export async function getMemberRolesInProductions(
-  userId:        string,
+  openId:        string,
   productionIds: string[],
 ): Promise<Map<string, string[]>> {
   if (productionIds.length === 0) return new Map();
   const pool = getScriptEditorPool();
   const res = await pool.query<{ production_id: string; roles: string[] }>(
     `SELECT production_id, roles FROM production_member
-     WHERE user_id = $1 AND production_id = ANY($2::text[])`,
-    [userId, productionIds],
+     WHERE open_id = $1 AND production_id = ANY($2::text[])`,
+    [openId, productionIds],
   );
   const map = new Map<string, string[]>();
   for (const row of res.rows) map.set(row.production_id, row.roles);
@@ -252,11 +230,11 @@ export async function getChatMemory(chatId: string): Promise<string | null> {
   return res.rows[0]?.memory ?? null;
 }
 
-export async function getUserMemory(userId: string): Promise<string | null> {
+export async function getUserMemory(senderId: string): Promise<string | null> {
   const pool = getPool();
   const res = await pool.query<{ memory: string }>(
-    `SELECT memory FROM user_memories WHERE user_id = $1`,
-    [userId],
+    `SELECT memory FROM user_memories WHERE sender_id = $1`,
+    [senderId],
   );
   return res.rows[0]?.memory ?? null;
 }
@@ -270,12 +248,12 @@ export async function saveChatMemory(chatId: string, memory: string): Promise<vo
   );
 }
 
-export async function saveUserMemory(userId: string, memory: string): Promise<void> {
+export async function saveUserMemory(senderId: string, memory: string): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO user_memories (user_id, memory) VALUES ($1, $2)
-     ON CONFLICT (user_id) DO UPDATE SET memory = EXCLUDED.memory, updated_at = NOW()`,
-    [userId, memory],
+    `INSERT INTO user_memories (sender_id, memory) VALUES ($1, $2)
+     ON CONFLICT (sender_id) DO UPDATE SET memory = EXCLUDED.memory, updated_at = NOW()`,
+    [senderId, memory],
   );
 }
 

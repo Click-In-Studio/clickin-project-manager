@@ -11,7 +11,7 @@ type Props = {
   initialCueLists: CueList[];
   canCreate: boolean;
   availableTemplates: CueListTemplate[];
-  myUserId: string;
+  myOpenId: string;
 };
 
 function CreateForm({

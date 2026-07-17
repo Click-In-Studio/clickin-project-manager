@@ -33,11 +33,11 @@ import { POST as createProductionHandler } from "@/app/api/productions/route";
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function adminSession() {
-  return createSession({ userId: TEST_USER, name: "测试管理员", avatarUrl: null, isAdmin: true });
+  return createSession({ openId: TEST_USER, name: "测试管理员", avatarUrl: null, isAdmin: true });
 }
 /** Non-admin session for TEST_USER — relies on DB role membership for permissions. */
 function memberSession() {
-  return createSession({ userId: TEST_USER, name: "测试成员", avatarUrl: null, isAdmin: false });
+  return createSession({ openId: TEST_USER, name: "测试成员", avatarUrl: null, isAdmin: false });
 }
 
 function req(

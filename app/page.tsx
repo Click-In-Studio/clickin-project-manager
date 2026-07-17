@@ -14,11 +14,11 @@ export default async function Home() {
   if (!session) redirect("/login");
 
   const [productions, myCallTimes, myPendingReqs, myFollowedEvents, myUnreadReports] = await Promise.all([
-    listProductions({ userId: session.userId, isAdmin: session.isAdmin }),
-    listMyUpcomingCallTimes(session.userId),
-    listMyPendingTechReqs(session.userId),
-    listMyFollowedUpcomingEvents(session.userId),
-    listUnreadFollowedReports(session.userId),
+    listProductions({ openId: session.openId, isAdmin: session.isAdmin }),
+    listMyUpcomingCallTimes(session.openId),
+    listMyPendingTechReqs(session.openId),
+    listMyFollowedUpcomingEvents(session.openId),
+    listUnreadFollowedReports(session.openId),
   ]);
 
   return (

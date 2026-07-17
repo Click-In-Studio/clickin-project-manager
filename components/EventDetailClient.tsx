@@ -89,7 +89,7 @@ function InfoTab({
   const [startTime, setStartTime] = useState(toLocalInput(event.startTime));
   const [endTime, setEndTime] = useState(toLocalInput(event.endTime));
   const [description, setDescription] = useState(event.description);
-  const [stageManagers, setStageManagers] = useState<{ userId: string; name: string }[]>(event.stageManagers);
+  const [stageManagers, setStageManagers] = useState<{ openId: string; name: string }[]>(event.stageManagers);
   const [versionId, setVersionId] = useState<string | null>(event.versionId ?? null);
   const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -397,28 +397,28 @@ function ParticipantPicker({
   onDeptIdsChange?: (ids: string[]) => void;
 }) {
   const [search, setSearch] = useState("");
-  const selectedSet = new Set(selected.map(p => p.userId));
-  const memberMap = new Map(members.map(m => [m.userId, m]));
+  const selectedSet = new Set(selected.map(p => p.openId));
+  const memberMap = new Map(members.map(m => [m.openId, m]));
 
   // Build dept groups (each member shown in every dept they belong to)
   const deptGroups = departments
     .map(dept => ({
       dept,
-      members: dept.memberUserIds
+      members: dept.memberOpenIds
         .map(oid => memberMap.get(oid))
         .filter((m): m is MemberWithRoles => !!m),
     }))
     .filter(g => g.members.length > 0);
 
   // Role groups: members not in any dept
-  const inAnyDept = new Set(departments.flatMap(d => d.memberUserIds));
-  const nonDeptMembers = members.filter(m => !inAnyDept.has(m.userId));
+  const inAnyDept = new Set(departments.flatMap(d => d.memberOpenIds));
+  const nonDeptMembers = members.filter(m => !inAnyDept.has(m.openId));
 
   function toggle(m: MemberWithRoles) {
-    if (selectedSet.has(m.userId)) {
-      onChange(selected.filter(p => p.userId !== m.userId));
+    if (selectedSet.has(m.openId)) {
+      onChange(selected.filter(p => p.openId !== m.openId));
     } else {
-      onChange([...selected, { userId: m.userId, name: m.name }]);
+      onChange([...selected, { openId: m.openId, name: m.name }]);
     }
   }
 
@@ -430,8 +430,8 @@ function ParticipantPicker({
       // Attach dept and bulk-add all its members not yet selected
       onDeptIdsChange?.([...selectedDeptIds, dept.id]);
       const toAdd = deptMembers
-        .filter(m => !selectedSet.has(m.userId))
-        .map(m => ({ userId: m.userId, name: m.name }));
+        .filter(m => !selectedSet.has(m.openId))
+        .map(m => ({ openId: m.openId, name: m.name }));
       if (toAdd.length > 0) onChange([...selected, ...toAdd]);
     }
   }
@@ -478,7 +478,7 @@ function ParticipantPicker({
               </button>
               <div className="grid grid-cols-2 gap-1.5">
                 {gm.map(m => (
-                  <MemberCard key={m.userId} m={m} isSelected={selectedSet.has(m.userId)} onToggle={() => toggle(m)} />
+                  <MemberCard key={m.openId} m={m} isSelected={selectedSet.has(m.openId)} onToggle={() => toggle(m)} />
                 ))}
               </div>
             </div>
@@ -489,7 +489,7 @@ function ParticipantPicker({
             <p className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-1.5">{role}</p>
             <div className="grid grid-cols-2 gap-1.5">
               {gm.map(m => (
-                <MemberCard key={m.userId} m={m} isSelected={selectedSet.has(m.userId)} onToggle={() => toggle(m)} />
+                <MemberCard key={m.openId} m={m} isSelected={selectedSet.has(m.openId)} onToggle={() => toggle(m)} />
               ))}
             </div>
           </div>
@@ -1494,11 +1494,11 @@ function ScheduleTableView({
           }
           const showAllParticipants = coveredDeptIds.length === 0 || coveredDeptIds.length === cols.length;
           const deptMemberSet = showAllParticipants ? null : new Set(
-            coveredDeptIds.flatMap(id => departments.find(d => d.id === id)?.memberUserIds ?? [])
+            coveredDeptIds.flatMap(id => departments.find(d => d.id === id)?.memberOpenIds ?? [])
           );
           const relevantParticipants = showAllParticipants
             ? cell.item.participants
-            : (cell.item.participants.filter(p => deptMemberSet!.has(p.userId)) || cell.item.participants);
+            : (cell.item.participants.filter(p => deptMemberSet!.has(p.openId)) || cell.item.participants);
           const displayParticipants = relevantParticipants.length > 0 ? relevantParticipants : cell.item.participants;
 
           return (
@@ -1553,7 +1553,7 @@ function ScheduleTableView({
 // ─── CallTimeTab ──────────────────────────────────────────────────────────────
 
 function computeSuggestedCallAt(
-  userId: string,
+  openId: string,
   scheduleItems: EventScheduleItemWithParticipants[],
   techReqs: EventTechReq[],
   isStageManager: boolean,
@@ -1565,13 +1565,13 @@ function computeSuggestedCallAt(
   }
   const times: number[] = [];
   for (const item of scheduleItems) {
-    if (item.startTime && item.participants.some(p => p.userId === userId)) {
+    if (item.startTime && item.participants.some(p => p.openId === openId)) {
       times.push(new Date(item.startTime).getTime());
     }
   }
   for (const req of techReqs) {
     if (req.status === "awaiting") continue;
-    if (!req.assignees.some(a => a.userId === userId)) continue;
+    if (!req.assignees.some(a => a.openId === openId)) continue;
     if (req.presetMinutes == null) continue;
     for (const itemId of req.scheduleItemIds) {
       const item = scheduleItems.find(i => i.id === itemId);
@@ -1586,26 +1586,26 @@ function computeSuggestedCallAt(
 
 function CallTimeTab({
   eventId, productionId, callTimes, eventPeople, scheduleItems, techReqs, members,
-  stageManagerUserIds, canEdit, singleDay, eventDate,
+  stageManagerOpenIds, canEdit, singleDay, eventDate,
   onCallTimesChange, versionId,
 }: {
   eventId: string; productionId: string;
   callTimes: EventCallTime[];
-  eventPeople: { userId: string; name: string }[];
+  eventPeople: { openId: string; name: string }[];
   scheduleItems: EventScheduleItemWithParticipants[];
   techReqs: EventTechReq[];
   members: MemberWithRoles[];
-  stageManagerUserIds: Set<string>;
+  stageManagerOpenIds: Set<string>;
   canEdit: boolean;
   singleDay: boolean; eventDate: string;
   onCallTimesChange: (cts: EventCallTime[]) => void;
   versionId: string | null;
 }) {
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/call-times`;
-  const callTimeMap = new Map(callTimes.map(ct => [ct.userId, ct]));
+  const callTimeMap = new Map(callTimes.map(ct => [ct.openId, ct]));
 
-  async function saveCallTime(userId: string, name: string, callAt: string, notes: string) {
-    const existing = callTimeMap.get(userId);
+  async function saveCallTime(openId: string, name: string, callAt: string, notes: string) {
+    const existing = callTimeMap.get(openId);
     if (existing) {
       const res = await fetch(`${base}/${existing.id}`, {
         method: "PATCH",
@@ -1618,15 +1618,15 @@ function CallTimeTab({
       const res = await fetch(base, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, name, callAt: datetimeLocalToIso(callAt), notes }),
+        body: JSON.stringify({ openId, name, callAt: datetimeLocalToIso(callAt), notes }),
       });
       const data = await res.json();
       if (data.callTime) onCallTimesChange([...callTimes, data.callTime]);
     }
   }
 
-  async function deleteCallTime(userId: string) {
-    const existing = callTimeMap.get(userId);
+  async function deleteCallTime(openId: string) {
+    const existing = callTimeMap.get(openId);
     if (!existing) return;
     await fetch(`${base}/${existing.id}`, { method: "DELETE" });
     onCallTimesChange(callTimes.filter(ct => ct.id !== existing.id));
@@ -1636,11 +1636,11 @@ function CallTimeTab({
     return <p className="text-sm text-zinc-400 text-center py-6">先在流程项中添加参与人员</p>;
   }
 
-  const memberMap = new Map(members.map(m => [m.userId, m]));
+  const memberMap = new Map(members.map(m => [m.openId, m]));
   const roleOrder: string[] = [];
-  const roleGroups = new Map<string, { userId: string; name: string }[]>();
+  const roleGroups = new Map<string, { openId: string; name: string }[]>();
   for (const person of eventPeople) {
-    const role = memberMap.get(person.userId)?.roles[0] ?? "其他";
+    const role = memberMap.get(person.openId)?.roles[0] ?? "其他";
     if (!roleGroups.has(role)) { roleGroups.set(role, []); roleOrder.push(role); }
     roleGroups.get(role)!.push(person);
   }
@@ -1652,19 +1652,19 @@ function CallTimeTab({
           <p className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-2">{role}</p>
           <div className="flex flex-col gap-2">
             {roleGroups.get(role)!.map(person => {
-              const suggested = computeSuggestedCallAt(person.userId, scheduleItems, techReqs, stageManagerUserIds.has(person.userId));
+              const suggested = computeSuggestedCallAt(person.openId, scheduleItems, techReqs, stageManagerOpenIds.has(person.openId));
               return (
                 <PersonCallTimeRow
-                  key={person.userId}
+                  key={person.openId}
                   person={person}
-                  callTime={callTimeMap.get(person.userId) ?? null}
+                  callTime={callTimeMap.get(person.openId) ?? null}
                   suggestedCallAt={suggested}
                   canEdit={canEdit}
                   singleDay={singleDay} eventDate={eventDate}
                   productionId={productionId}
                   versionId={versionId}
-                  onSave={(callAt, notes) => saveCallTime(person.userId, person.name, callAt, notes)}
-                  onDelete={() => deleteCallTime(person.userId)}
+                  onSave={(callAt, notes) => saveCallTime(person.openId, person.name, callAt, notes)}
+                  onDelete={() => deleteCallTime(person.openId)}
                 />
               );
             })}
@@ -1678,7 +1678,7 @@ function CallTimeTab({
 function PersonCallTimeRow({
   person, callTime, suggestedCallAt, canEdit, singleDay, eventDate, productionId, versionId, onSave, onDelete,
 }: {
-  person: { userId: string; name: string };
+  person: { openId: string; name: string };
   callTime: EventCallTime | null;
   suggestedCallAt: string | null;
   canEdit: boolean;
@@ -1885,7 +1885,7 @@ function TechReqCard({
     if (data.techReq) onUpdate(data.techReq);
   }
 
-  async function handleAssigneesChange(assignees: { userId: string; name: string }[]) {
+  async function handleAssigneesChange(assignees: { openId: string; name: string }[]) {
     const res = await fetch(`${base}/${req.id}/assignees`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -2008,7 +2008,7 @@ function TechReqTab({
   const [newDesc, setNewDesc] = useState("");
   const [newDeptId, setNewDeptId] = useState("");
   const [newPreset, setNewPreset] = useState("");
-  const [newAssignees, setNewAssignees] = useState<{ userId: string; name: string }[]>([]);
+  const [newAssignees, setNewAssignees] = useState<{ openId: string; name: string }[]>([]);
   const [newItemIds, setNewItemIds] = useState<string[]>([]);
 
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/tech-reqs`;
@@ -2064,8 +2064,8 @@ function TechReqTab({
     if (!deptId) return members;
     const dept = departments.find(d => d.id === deptId);
     if (!dept) return members;
-    const set = new Set([...dept.memberUserIds, ...dept.pocUserIds]);
-    return members.filter(m => set.has(m.userId));
+    const set = new Set([...dept.memberOpenIds, ...dept.pocOpenIds]);
+    return members.filter(m => set.has(m.openId));
   }
 
   const isEventClosed = eventStatus === "completed" || eventStatus === "cancelled";
@@ -2130,8 +2130,8 @@ function TechReqTab({
                   setNewDeptId(next);
                   if (next) {
                     const dept = departments.find(d => d.id === next);
-                    const set = new Set(dept?.memberUserIds ?? []);
-                    setNewAssignees(prev => prev.filter(a => set.has(a.userId)));
+                    const set = new Set(dept?.memberOpenIds ?? []);
+                    setNewAssignees(prev => prev.filter(a => set.has(a.openId)));
                   }
                 }}
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
@@ -2184,12 +2184,12 @@ function AssigneeEditorInline({
 }: {
   members: MemberWithRoles[];
   allMembers?: MemberWithRoles[];
-  assignees: { userId: string; name: string }[];
-  onChange: (next: { userId: string; name: string }[]) => void;
+  assignees: { openId: string; name: string }[];
+  onChange: (next: { openId: string; name: string }[]) => void;
 }) {
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const selected = new Set(assignees.map(a => a.userId));
+  const selected = new Set(assignees.map(a => a.openId));
 
   const hasOutside = !!allMembers && allMembers.length > members.length;
   const pool = showAll && hasOutside ? allMembers! : members;
@@ -2198,9 +2198,9 @@ function AssigneeEditorInline({
     !search || m.name.includes(search) || m.roles.some(r => r.includes(search))
   );
   function toggle(m: MemberWithRoles) {
-    onChange(selected.has(m.userId)
-      ? assignees.filter(a => a.userId !== m.userId)
-      : [...assignees, { userId: m.userId, name: m.name }]);
+    onChange(selected.has(m.openId)
+      ? assignees.filter(a => a.openId !== m.openId)
+      : [...assignees, { openId: m.openId, name: m.name }]);
   }
   const groups = groupByRole(filtered);
   return (
@@ -2220,7 +2220,7 @@ function AssigneeEditorInline({
             <p className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-1.5">{role}</p>
             <div className="grid grid-cols-2 gap-1.5">
               {gm.map(m => (
-                <MemberCard key={m.userId} m={m} isSelected={selected.has(m.userId)} onToggle={() => toggle(m)} />
+                <MemberCard key={m.openId} m={m} isSelected={selected.has(m.openId)} onToggle={() => toggle(m)} />
               ))}
             </div>
           </div>
@@ -2235,20 +2235,20 @@ function AssigneeEditor({
 }: {
   req: EventTechReq; members: MemberWithRoles[];
   allMembers?: MemberWithRoles[];
-  canEdit: boolean; onSave: (assignees: { userId: string; name: string }[]) => void;
+  canEdit: boolean; onSave: (assignees: { openId: string; name: string }[]) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const assigneeSet = new Set(req.assignees.map(a => a.userId));
+  const assigneeSet = new Set(req.assignees.map(a => a.openId));
 
   const hasOutside = !!allMembers && allMembers.length > members.length;
   const pool = showAll && hasOutside ? allMembers! : members;
 
   function toggle(m: MemberWithRoles) {
-    const next = assigneeSet.has(m.userId)
-      ? req.assignees.filter(a => a.userId !== m.userId)
-      : [...req.assignees, { userId: m.userId, name: m.name }];
+    const next = assigneeSet.has(m.openId)
+      ? req.assignees.filter(a => a.openId !== m.openId)
+      : [...req.assignees, { openId: m.openId, name: m.name }];
     onSave(next);
   }
 
@@ -2285,7 +2285,7 @@ function AssigneeEditor({
                 <p className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-1.5">{role}</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {gm.map(m => (
-                    <MemberCard key={m.userId} m={m} isSelected={assigneeSet.has(m.userId)} onToggle={() => toggle(m)} />
+                    <MemberCard key={m.openId} m={m} isSelected={assigneeSet.has(m.openId)} onToggle={() => toggle(m)} />
                   ))}
                 </div>
               </div>
@@ -2301,13 +2301,13 @@ function AssigneeEditor({
 
 function ReportsTab({
   eventId, productionId, reports, departments, members, canWrite,
-  currentUserId, onReportsChange, versionId,
+  currentUserOpenId, onReportsChange, versionId,
 }: {
   eventId: string; productionId: string;
   reports: EventReport[]; departments: EventDepartment[];
   members: MentionMember[];
   canWrite: boolean;
-  currentUserId: string;
+  currentUserOpenId: string;
   onReportsChange: (rs: EventReport[]) => void;
   versionId: string | null;
 }) {
@@ -2425,7 +2425,7 @@ function ReportsTab({
               eventId={eventId} productionId={productionId}
               members={members}
               canWrite={canWrite}
-              currentUserId={currentUserId}
+              currentUserOpenId={currentUserOpenId}
               versionId={versionId}
               onUpdated={updated => onReportsChange(reports.map(r => r.id === updated.id ? updated : r))}
               onDelete={() => deleteReport(report.id)}
@@ -2467,14 +2467,14 @@ function ReportsTab({
 
 function ReportEditor({
   report, departments, eventId, productionId, members, canWrite,
-  currentUserId, versionId,
+  currentUserOpenId, versionId,
   onUpdated, onDelete,
 }: {
   report: EventReport; departments: EventDepartment[];
   eventId: string; productionId: string;
   members: MentionMember[];
   canWrite: boolean;
-  currentUserId: string;
+  currentUserOpenId: string;
   versionId: string | null;
   onUpdated: (r: EventReport) => void; onDelete: () => void;
 }) {
@@ -2569,7 +2569,7 @@ function ReportEditor({
         reportId={report.id} eventId={eventId} productionId={productionId}
         departments={departments.filter(d => d.kind === "dept")}
         members={members}
-        currentUserId={currentUserId}
+        currentUserOpenId={currentUserOpenId}
         isPublished={isPublished}
         versionId={versionId}
       />
@@ -2579,12 +2579,12 @@ function ReportEditor({
 
 function DeptNotesList({
   reportId, eventId, productionId, departments, members,
-  currentUserId, isPublished, versionId,
+  currentUserOpenId, isPublished, versionId,
 }: {
   reportId: string; eventId: string; productionId: string;
   departments: EventDepartment[];
   members: MentionMember[];
-  currentUserId: string;
+  currentUserOpenId: string;
   isPublished: boolean;
   versionId: string | null;
 }) {
@@ -2646,7 +2646,7 @@ function DeptNotesList({
       {notes.length === 0 && <p className="text-xs text-zinc-300 text-center py-2">暂无 Notes</p>}
       {notes.map(note => {
         const dept = departments.find(d => d.id === note.departmentId);
-        const isOwn = note.authorUserId === currentUserId;
+        const isOwn = note.authorOpenId === currentUserOpenId;
         return (
           <div key={note.id} className="rounded-lg bg-zinc-50 px-3 py-2.5">
             <div className="flex items-center justify-between gap-2 mb-1">
@@ -2863,7 +2863,7 @@ function PublishTab({
   event: ProductionEvent; productionId: string;
   scheduleItems: EventScheduleItemWithParticipants[];
   callTimes: EventCallTime[];
-  eventPeople: { userId: string; name: string }[];
+  eventPeople: { openId: string; name: string }[];
   techReqs: EventTechReq[];
   canEdit: boolean;
   onUpdated: (ev: ProductionEvent) => void;
@@ -3001,7 +3001,7 @@ type Props = {
   productionName: string;
   event: ProductionEvent;
   initialScheduleItems: EventScheduleItemWithParticipants[];
-  initialEventPeople: { userId: string; name: string }[];
+  initialEventPeople: { openId: string; name: string }[];
   initialCallTimes: EventCallTime[];
   initialTechReqs: EventTechReq[];
   initialReports: EventReport[];
@@ -3016,7 +3016,7 @@ type Props = {
   canWriteReport: boolean;
   canEditAnyTechReq: boolean;
   pocDeptIds: string[];
-  currentUserId: string;
+  currentUserOpenId: string;
   selfParticipantRole: "participant" | "follower" | null;
 };
 
@@ -3026,7 +3026,7 @@ export default function EventDetailClient({
   initialReports, departments, members, versions,
   canEdit, canScheduleEdit, canAssignPeople, canCallEdit,
   canTechReqDelete, canWriteReport, canEditAnyTechReq, pocDeptIds,
-  currentUserId,
+  currentUserOpenId,
   selfParticipantRole: initialSelfRole,
 }: Props) {
   const [tab, setTab] = useState<Tab>("info");
@@ -3049,15 +3049,15 @@ export default function EventDetailClient({
   // Derived: union of all schedule item participants + tech req assignees
   const eventPeople = useMemo(() => {
     const seen = new Set<string>();
-    const people: { userId: string; name: string }[] = [];
+    const people: { openId: string; name: string }[] = [];
     for (const item of scheduleItems) {
       for (const p of item.participants) {
-        if (!seen.has(p.userId)) { seen.add(p.userId); people.push(p); }
+        if (!seen.has(p.openId)) { seen.add(p.openId); people.push(p); }
       }
     }
     for (const tr of techReqs) {
       for (const a of tr.assignees) {
-        if (!seen.has(a.userId)) { seen.add(a.userId); people.push({ userId: a.userId, name: a.name }); }
+        if (!seen.has(a.openId)) { seen.add(a.openId); people.push({ openId: a.openId, name: a.name }); }
       }
     }
     return people.sort((a, b) => a.name.localeCompare(b.name, "zh"));
@@ -3209,7 +3209,7 @@ export default function EventDetailClient({
               callTimes={callTimes} eventPeople={eventPeople}
               scheduleItems={scheduleItems} techReqs={techReqs}
               members={members}
-              stageManagerUserIds={new Set(event.stageManagers.map(m => m.userId))}
+              stageManagerOpenIds={new Set(event.stageManagers.map(m => m.openId))}
               canEdit={canCallEdit}
               singleDay={isSingleDayEvent(event)}
               eventDate={toLocalDate(event.startTime)}
@@ -3282,9 +3282,9 @@ export default function EventDetailClient({
             <ReportsTab
               eventId={event.id} productionId={productionId}
               reports={reports} departments={departments}
-              members={members.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
+              members={members.map(m => ({ openId: m.openId, name: m.name }))}
               canWrite={canWriteReport}
-              currentUserId={currentUserId}
+              currentUserOpenId={currentUserOpenId}
               versionId={event.versionId ?? null}
               onReportsChange={setReports}
             />

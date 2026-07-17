@@ -21,12 +21,12 @@ type View = "all" | "upload-new-version";
 interface Props {
   productionId: string;
   versionId: string | null;
-  myUserId: string;
+  myOpenId: string;
   isAdmin: boolean;
   userName: string;
 }
 
-export default function AssetPageClient({ productionId, versionId, myUserId, isAdmin, userName }: Props) {
+export default function AssetPageClient({ productionId, versionId, myOpenId, isAdmin, userName }: Props) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +93,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
   }
 
   const displayedAssets = assets.filter(a => {
-    if (filter === "mine" && a.uploaderUserId !== myUserId) return false;
+    if (filter === "mine" && a.uploaderOpenId !== myOpenId) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!(a.name ?? a.fileName).toLowerCase().includes(q) && !ASSET_TYPE_LABELS[a.assetType].includes(q)) return false;
@@ -199,7 +199,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
         ) : (
           <div className="space-y-2">
             {displayedAssets.map(a => {
-              const isOwner = a.uploaderUserId === myUserId;
+              const isOwner = a.uploaderOpenId === myOpenId;
               const canEdit = isOwner || isAdmin;
               const isExp = expanded === a.id;
 

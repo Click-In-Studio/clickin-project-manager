@@ -26,7 +26,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reqId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
 
   const [event, techReq] = await Promise.all([
     getProductionEvent(eventId, productionId),
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (techReq.chatId) return Response.json({ error: "需求群已存在" }, { status: 409 });
 
   const isPoc = techReq.departmentId
-    ? await isUserDeptPoc(techReq.departmentId, session.userId)
+    ? await isUserDeptPoc(techReq.departmentId, session.openId)
     : false;
   const canManage = hasPermission("event:tech_req_delete", session.isAdmin, memberRoles, overrides) || isPoc;
   if (!canManage) return Response.json({ error: "权限不足" }, { status: 403 });
@@ -45,21 +45,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as { action: "create" | "bind"; chatId?: string };
 
   const memberIds = await getReqChatTargets(reqId);
-  const allIds = [...new Set([session.userId, ...memberIds])];
+  const allIds = [...new Set([session.openId, ...memberIds])];
 
   let chatId: string;
 
   if (body.action === "create") {
     const productionName = await getProductionName(productionId);
     const chatName = `${productionName ?? "项目"} - ${event.title} - ${techReq.title || "需求"}`;
-    const created = await createChat(chatName, session.userId, allIds);
+    const created = await createChat(chatName, session.openId, allIds);
     if (!created) return Response.json({ error: "飞书建群失败" }, { status: 502 });
     chatId = created;
   } else if (body.action === "bind") {
     if (!body.chatId) return Response.json({ error: "缺少 chatId" }, { status: 400 });
 
     const [inChat, deptChatIds] = await Promise.all([
-      isUserInChat(body.chatId, session.userId),
+      isUserInChat(body.chatId, session.openId),
       getProductionDeptChatIds(productionId),
     ]);
     if (!inChat) return Response.json({ error: "你不在该群中" }, { status: 403 });

@@ -33,7 +33,7 @@ export default async function EventViewPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
@@ -48,12 +48,12 @@ export default async function EventViewPage({
   const [scheduleItems, reports, isAssignee, selfRole, departments] = await Promise.all([
     listScheduleItemsWithParticipants(eventId),
     listEventReports(eventId),
-    isUserEventTechAssignee(eventId, session.userId),
-    getSelfParticipantRole(eventId, session.userId),
+    isUserEventTechAssignee(eventId, session.openId),
+    getSelfParticipantRole(eventId, session.openId),
     listEventDepartments(productionId),
   ]);
 
-  const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
+  const pocDeptIds = departments.filter(d => d.pocOpenIds.includes(session.openId));
   const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0;
 
   const isReportViewer = session.isAdmin || memberRoles?.some(r => REPORT_VIEWER_ROLES.has(r)) || false;

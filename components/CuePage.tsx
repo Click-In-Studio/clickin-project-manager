@@ -100,7 +100,7 @@ type Props = {
   cueLists: CueList[];
   initialCues: Cue[];
   editableListIds: string[];
-  myUserId: string;
+  myOpenId: string;
   isAdmin: boolean;
   pageMap: Record<string, number>;
   versions?: Version[];
@@ -131,7 +131,7 @@ type GuideLineData = {
 
 // ─── Comment types ───────────────────────────────────────────────────────────
 
-type Mention = { userId: string; name: string };
+type Mention = { openId: string; name: string };
 
 type Comment = {
   id: string;
@@ -139,7 +139,7 @@ type Comment = {
   contextType: string;
   contextId: string;
   parentId: string | null;
-  userId: string;
+  openId: string;
   authorName: string;
   body: string;
   mentions: Mention[];
@@ -183,11 +183,11 @@ function relativeTime(iso: string): string {
 // ─── CueCommentsPanel ─────────────────────────────────────────────────────────
 
 function CueCommentsPanel({
-  cueId, productionId, versionId, comments, currentUserId, isAdmin,
+  cueId, productionId, versionId, comments, currentOpenId, isAdmin,
   onAdd, onEdit, onDelete, onClose,
 }: {
   cueId: string; productionId: string; versionId?: string | null; comments: Comment[];
-  currentUserId: string; isAdmin: boolean;
+  currentOpenId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
 }) {
@@ -274,10 +274,10 @@ function CueCommentsPanel({
     if (res.ok) onDelete(id);
   };
 
-  const startReply = (parentId: string, authorUserId: string, authorName: string) => {
+  const startReply = (parentId: string, authorOpenId: string, authorName: string) => {
     setReplyingTo(parentId);
     setReplyText(`@${authorName} `);
-    setReplyMentions([{ userId: authorUserId, name: authorName }]);
+    setReplyMentions([{ openId: authorOpenId, name: authorName }]);
   };
 
   const taClass = "w-full resize-none rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-zinc-400";
@@ -291,13 +291,13 @@ function CueCommentsPanel({
         </span>
         {editingId !== c.id && (
           <>
-            {c.userId === currentUserId && (
+            {c.openId === currentOpenId && (
               <button onClick={() => { setEditingId(c.id); setEditText(c.body); }}
                 className="text-[11px] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-600">
                 编辑
               </button>
             )}
-            {(c.userId === currentUserId || isAdmin) && (
+            {(c.openId === currentOpenId || isAdmin) && (
               <button onClick={() => doDelete(c.id)}
                 className="text-[11px] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400">
                 删除
@@ -358,7 +358,7 @@ function CueCommentsPanel({
               {commentHeader(topC)}
               {commentBody(topC, {
                 label: replyingTo === topC.id ? "取消回复" : "回复",
-                onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.userId, topC.authorName),
+                onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.openId, topC.authorName),
               })}
               <MountPointAssets
                 productionId={productionId}
@@ -375,7 +375,7 @@ function CueCommentsPanel({
                 {commentHeader(r)}
                 {commentBody(r, {
                   label: "回复",
-                  onClick: () => startReply(topC.id, r.userId, r.authorName),
+                  onClick: () => startReply(topC.id, r.openId, r.authorName),
                 })}
                 <MountPointAssets
                   productionId={productionId}
@@ -845,7 +845,7 @@ function ExportModal({
 
 export default function CuePage({
   productionId, productionName, blocks: rawBlocks, characters, scenes,
-  cueLists, initialCues, editableListIds, myUserId, isAdmin, pageMap,
+  cueLists, initialCues, editableListIds, myOpenId, isAdmin, pageMap,
   versions = [], versionId, versionStatus, canManageVersions = false,
 }: Props) {
   const router = useRouter();
@@ -2394,7 +2394,7 @@ export default function CuePage({
           productionId={productionId}
           versionId={versionId}
           comments={comments}
-          currentUserId={myUserId}
+          currentOpenId={myOpenId}
           isAdmin={isAdmin}
           onAdd={c => setComments(prev => [...prev, c])}
           onEdit={c => setComments(prev => prev.map(x => x.id === c.id ? c : x))}

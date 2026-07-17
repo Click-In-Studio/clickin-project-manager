@@ -34,7 +34,7 @@ export default async function EventDetailPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
@@ -48,7 +48,7 @@ export default async function EventDetailPage({
   const name = await getProductionName(productionId);
   if (!name) redirect("/");
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const permCtx = await loadEventPermContext(session.openId, eventId);
 
   const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions] =
     await Promise.all([
@@ -59,7 +59,7 @@ export default async function EventDetailPage({
       listEventReports(eventId),
       listEventDepartments(productionId),
       listProductionMembersWithRoles(productionId),
-      getSelfParticipantRole(eventId, session.userId),
+      getSelfParticipantRole(eventId, session.openId),
       listVersions(productionId),
     ]);
 
@@ -69,7 +69,7 @@ export default async function EventDetailPage({
     const seq = `rpt${Date.now().toString(36)}`;
     const defaultReport = await createEventReport({
       id: seq, eventId, reportType: "rehearsal",
-      title: "排练记录", body: "", createdBy: session.userId,
+      title: "排练记录", body: "", createdBy: session.openId,
     });
     reports = [defaultReport];
   }
@@ -104,7 +104,7 @@ export default async function EventDetailPage({
       canWriteReport={userCanWriteReport}
       canEditAnyTechReq={canEditAnyTechReq}
       pocDeptIds={pocDeptIds}
-      currentUserId={session.userId}
+      currentUserOpenId={session.openId}
       selfParticipantRole={selfRole}
     />
   );

@@ -9,8 +9,8 @@ export type EventDepartment = {
   /** 'dept' = 部门 (can be mentioned in report notes); 'group' = 用户组 (call selection only) */
   kind: "dept" | "group";
   displayOrder: number;
-  memberUserIds: string[];
-  pocUserIds: string[];
+  memberOpenIds: string[];
+  pocOpenIds: string[];
   chatId: string | null;
   createdAt: string;
 };
@@ -25,7 +25,7 @@ export type ProductionEvent = {
   endTime: string | null;
   status: "draft" | "published" | "completed" | "cancelled";
   description: string;
-  stageManagers: { userId: string; name: string }[];
+  stageManagers: { openId: string; name: string }[];
   chatId: string | null;
   versionId: string | null;
   createdBy: string;
@@ -47,7 +47,7 @@ export type EventScheduleItem = {
   notes: string;
 };
 
-export type ScheduleItemParticipant = { userId: string; name: string };
+export type ScheduleItemParticipant = { openId: string; name: string };
 
 export type EventScheduleItemWithParticipants = EventScheduleItem & {
   participants: ScheduleItemParticipant[];
@@ -57,7 +57,7 @@ export type EventScheduleItemWithParticipants = EventScheduleItem & {
 export type EventParticipant = {
   id: string;
   eventId: string;
-  userId: string;
+  openId: string;
   name: string;
   departmentId: string | null;
   role: "participant" | "follower";
@@ -66,7 +66,7 @@ export type EventParticipant = {
 export type EventCallTime = {
   id: string;
   eventId: string;
-  userId: string;
+  openId: string;
   name: string;
   departmentId: string | null;
   callAt: string;
@@ -74,7 +74,7 @@ export type EventCallTime = {
   notes: string;
 };
 
-export type EventTechReqAssignee = { userId: string; name: string };
+export type EventTechReqAssignee = { openId: string; name: string };
 
 export type EventTechReq = {
   id: string;
@@ -90,7 +90,7 @@ export type EventTechReq = {
   createdAt: string;
 };
 
-export type Mention = { userId: string; name: string };
+export type Mention = { openId: string; name: string };
 
 export type EventReport = {
   id: string;
@@ -110,7 +110,7 @@ export type EventReportNote = {
   reportId: string;
   departmentId: string;
   content: string;
-  authorUserId: string;
+  authorOpenId: string;
   authorName: string;
   createdAt: string;
   updatedAt: string;
@@ -150,12 +150,12 @@ type ScheduleItemRow = {
 };
 
 type ParticipantRow = {
-  id: string; event_id: string; user_id: string; name: string;
+  id: string; event_id: string; open_id: string; name: string;
   department_id: string | null; role: string;
 };
 
 type CallTimeRow = {
-  id: string; event_id: string; user_id: string; name: string;
+  id: string; event_id: string; open_id: string; name: string;
   department_id: string | null; call_at: Date;
   schedule_item_id: string | null; notes: string;
 };
@@ -166,7 +166,7 @@ type TechReqRow = {
   department_id: string | null; status: string; chat_id: string | null; created_at: Date;
 };
 
-type TechAssigneeRow = { req_id: string; user_id: string; name: string };
+type TechAssigneeRow = { req_id: string; open_id: string; name: string };
 
 type ReportRow = {
   id: string; event_id: string; report_type: string; title: string;
@@ -176,22 +176,22 @@ type ReportRow = {
 
 type ReportNoteRow = {
   id: string; report_id: string; department_id: string; content: string;
-  author_user_id: string; author_name: string;
+  author_open_id: string; author_name: string;
   created_at: Date; updated_at: Date; mentions: Mention[];
 };
 
 // ─── Row converters ───────────────────────────────────────────────────────────
 
-function rowToDept(r: DeptRow, memberUserIds: string[], pocUserIds: string[]): EventDepartment {
+function rowToDept(r: DeptRow, memberOpenIds: string[], pocOpenIds: string[]): EventDepartment {
   return {
     id: r.id, productionId: r.production_id, name: r.name,
     kind: r.kind as EventDepartment["kind"], displayOrder: r.display_order,
-    memberUserIds, pocUserIds, chatId: r.chat_id ?? null,
+    memberOpenIds, pocOpenIds, chatId: r.chat_id ?? null,
     createdAt: r.created_at.toISOString(),
   };
 }
 
-function rowToEvent(r: EventRow, stageManagers: { userId: string; name: string }[] = []): ProductionEvent {
+function rowToEvent(r: EventRow, stageManagers: { openId: string; name: string }[] = []): ProductionEvent {
   return {
     id: r.id, productionId: r.production_id, title: r.title,
     eventType: r.event_type, location: r.location,
@@ -220,14 +220,14 @@ function rowToScheduleItem(r: ScheduleItemRow): EventScheduleItem {
 
 function rowToParticipant(r: ParticipantRow): EventParticipant {
   return {
-    id: r.id, eventId: r.event_id, userId: r.user_id, name: r.name,
+    id: r.id, eventId: r.event_id, openId: r.open_id, name: r.name,
     departmentId: r.department_id, role: r.role as EventParticipant["role"],
   };
 }
 
 function rowToCallTime(r: CallTimeRow): EventCallTime {
   return {
-    id: r.id, eventId: r.event_id, userId: r.user_id, name: r.name,
+    id: r.id, eventId: r.event_id, openId: r.open_id, name: r.name,
     departmentId: r.department_id, callAt: r.call_at.toISOString(),
     scheduleItemId: r.schedule_item_id, notes: r.notes,
   };
@@ -256,7 +256,7 @@ function rowToReport(r: ReportRow): EventReport {
 function rowToReportNote(r: ReportNoteRow): EventReportNote {
   return {
     id: r.id, reportId: r.report_id, departmentId: r.department_id,
-    content: r.content, authorUserId: r.author_user_id, authorName: r.author_name,
+    content: r.content, authorOpenId: r.author_open_id, authorName: r.author_name,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
     mentions: r.mentions ?? [],
   };
@@ -264,7 +264,7 @@ function rowToReportNote(r: ReportNoteRow): EventReportNote {
 
 // ─── Departments ──────────────────────────────────────────────────────────────
 
-type MemberRow = { department_id: string; user_id: string; is_member: boolean; is_poc: boolean };
+type MemberRow = { department_id: string; open_id: string; is_member: boolean; is_poc: boolean };
 
 export async function listEventDepartments(productionId: string): Promise<EventDepartment[]> {
   const pool = getPool();
@@ -275,7 +275,7 @@ export async function listEventDepartments(productionId: string): Promise<EventD
       [productionId]
     ),
     pool.query<MemberRow>(
-      `SELECT edm.department_id, edm.user_id, edm.is_member, edm.is_poc
+      `SELECT edm.department_id, edm.open_id, edm.is_member, edm.is_poc
        FROM event_department_member edm
        JOIN event_department ed ON ed.id = edm.department_id
        WHERE ed.production_id = $1`,
@@ -291,8 +291,8 @@ export async function listEventDepartments(productionId: string): Promise<EventD
     const rows = memberMap.get(r.id) ?? [];
     return rowToDept(
       r,
-      rows.filter(m => m.is_member).map(m => m.user_id),
-      rows.filter(m => m.is_poc).map(m => m.user_id),
+      rows.filter(m => m.is_member).map(m => m.open_id),
+      rows.filter(m => m.is_poc).map(m => m.open_id),
     );
   });
 }
@@ -305,16 +305,16 @@ export async function getEventDepartment(id: string, productionId: string): Prom
        FROM event_department WHERE id = $1 AND production_id = $2`,
       [id, productionId]
     ),
-    pool.query<{ user_id: string; is_member: boolean; is_poc: boolean }>(
-      "SELECT user_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
+    pool.query<{ open_id: string; is_member: boolean; is_poc: boolean }>(
+      "SELECT open_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
       [id]
     ),
   ]);
   if (!deptRes.rows[0]) return null;
   return rowToDept(
     deptRes.rows[0],
-    memberRes.rows.filter(r => r.is_member).map(r => r.user_id),
-    memberRes.rows.filter(r => r.is_poc).map(r => r.user_id),
+    memberRes.rows.filter(r => r.is_member).map(r => r.open_id),
+    memberRes.rows.filter(r => r.is_poc).map(r => r.open_id),
   );
 }
 
@@ -359,12 +359,12 @@ export async function deleteEventDepartment(id: string, productionId: string): P
  */
 export async function setDepartmentMembers(
   deptId: string,
-  members: { userId: string; isMember: boolean; isPoc: boolean }[],
+  members: { openId: string; isMember: boolean; isPoc: boolean }[],
 ): Promise<void> {
   const seen = new Set<string>();
   const unique = members.filter(m => {
-    if (seen.has(m.userId)) return false;
-    seen.add(m.userId);
+    if (seen.has(m.openId)) return false;
+    seen.add(m.openId);
     return m.isMember || m.isPoc;
   });
   const client = await getPool().connect();
@@ -373,8 +373,8 @@ export async function setDepartmentMembers(
     await client.query("DELETE FROM event_department_member WHERE department_id = $1", [deptId]);
     for (const m of unique) {
       await client.query(
-        "INSERT INTO event_department_member (department_id, user_id, is_member, is_poc) VALUES ($1,$2,$3,$4)",
-        [deptId, m.userId, m.isMember, m.isPoc],
+        "INSERT INTO event_department_member (department_id, open_id, is_member, is_poc) VALUES ($1,$2,$3,$4)",
+        [deptId, m.openId, m.isMember, m.isPoc],
       );
     }
     await client.query("COMMIT");
@@ -389,10 +389,10 @@ export async function setDepartmentMembers(
 /** Replace the full participant list for an event in one transaction. */
 export async function setEventParticipants(
   eventId: string,
-  participants: { userId: string; name: string; departmentId: string | null; role: "participant" | "follower" }[],
+  participants: { openId: string; name: string; departmentId: string | null; role: "participant" | "follower" }[],
 ): Promise<void> {
   const seen = new Set<string>();
-  const unique = participants.filter(p => { if (seen.has(p.userId)) return false; seen.add(p.userId); return true; });
+  const unique = participants.filter(p => { if (seen.has(p.openId)) return false; seen.add(p.openId); return true; });
   let _s = 0;
   const pid = () => `ep${Date.now().toString(36)}${(++_s).toString(36)}`;
   const client = await getPool().connect();
@@ -401,8 +401,8 @@ export async function setEventParticipants(
     await client.query("DELETE FROM event_participant WHERE event_id = $1", [eventId]);
     for (const p of unique) {
       await client.query(
-        "INSERT INTO event_participant (id, event_id, user_id, name, department_id, role) VALUES ($1,$2,$3,$4,$5,$6)",
-        [pid(), eventId, p.userId, p.name, p.departmentId, p.role],
+        "INSERT INTO event_participant (id, event_id, open_id, name, department_id, role) VALUES ($1,$2,$3,$4,$5,$6)",
+        [pid(), eventId, p.openId, p.name, p.departmentId, p.role],
       );
     }
     await client.query("COMMIT");
@@ -438,18 +438,18 @@ export async function listProductionEvents(productionId: string): Promise<Produc
        FROM production_event WHERE production_id = $1 ORDER BY start_time NULLS LAST, created_at`,
       [productionId]
     ),
-    pool.query<{ event_id: string; user_id: string; name: string }>(
-      `SELECT esm.event_id, esm.user_id, esm.name
+    pool.query<{ event_id: string; open_id: string; name: string }>(
+      `SELECT esm.event_id, esm.open_id, esm.name
        FROM event_stage_manager esm
        JOIN production_event pe ON pe.id = esm.event_id
        WHERE pe.production_id = $1`,
       [productionId]
     ),
   ]);
-  const smMap = new Map<string, { userId: string; name: string }[]>();
+  const smMap = new Map<string, { openId: string; name: string }[]>();
   for (const r of smRes.rows) {
     if (!smMap.has(r.event_id)) smMap.set(r.event_id, []);
-    smMap.get(r.event_id)!.push({ userId: r.user_id, name: r.name });
+    smMap.get(r.event_id)!.push({ openId: r.open_id, name: r.name });
   }
   const events = eventsRes.rows.map(r => rowToEvent(r, smMap.get(r.id) ?? []));
   return Promise.all(events.map(maybeAutoComplete));
@@ -465,30 +465,30 @@ export async function getProductionEvent(id: string, productionId: string): Prom
        FROM production_event WHERE id = $1 AND production_id = $2`,
       [id, productionId]
     ),
-    pool.query<{ user_id: string; name: string }>(
-      "SELECT user_id, name FROM event_stage_manager WHERE event_id = $1",
+    pool.query<{ open_id: string; name: string }>(
+      "SELECT open_id, name FROM event_stage_manager WHERE event_id = $1",
       [id]
     ),
   ]);
   if (!eventsRes.rows[0]) return null;
-  const event = rowToEvent(eventsRes.rows[0], smRes.rows.map(r => ({ userId: r.user_id, name: r.name })));
+  const event = rowToEvent(eventsRes.rows[0], smRes.rows.map(r => ({ openId: r.open_id, name: r.name })));
   return maybeAutoComplete(event);
 }
 
 export async function setEventStageManagers(
   eventId: string,
-  managers: { userId: string; name: string }[],
+  managers: { openId: string; name: string }[],
 ): Promise<void> {
   const seen = new Set<string>();
-  const unique = managers.filter(m => { if (seen.has(m.userId)) return false; seen.add(m.userId); return true; });
+  const unique = managers.filter(m => { if (seen.has(m.openId)) return false; seen.add(m.openId); return true; });
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     await client.query("DELETE FROM event_stage_manager WHERE event_id = $1", [eventId]);
     for (const m of unique) {
       await client.query(
-        "INSERT INTO event_stage_manager (event_id, user_id, name) VALUES ($1,$2,$3)",
-        [eventId, m.userId, m.name],
+        "INSERT INTO event_stage_manager (event_id, open_id, name) VALUES ($1,$2,$3)",
+        [eventId, m.openId, m.name],
       );
     }
     await client.query("COMMIT");
@@ -652,11 +652,11 @@ export async function reorderScheduleItems(
 // ─── Schedule item participants ───────────────────────────────────────────────
 
 export async function listScheduleItemParticipants(itemId: string): Promise<ScheduleItemParticipant[]> {
-  const res = await getPool().query<{ user_id: string; name: string }>(
-    "SELECT user_id, name FROM schedule_item_participant WHERE item_id = $1 ORDER BY name",
+  const res = await getPool().query<{ open_id: string; name: string }>(
+    "SELECT open_id, name FROM schedule_item_participant WHERE item_id = $1 ORDER BY name",
     [itemId]
   );
-  return res.rows.map(r => ({ userId: r.user_id, name: r.name }));
+  return res.rows.map(r => ({ openId: r.open_id, name: r.name }));
 }
 
 export async function setScheduleItemParticipants(
@@ -664,15 +664,15 @@ export async function setScheduleItemParticipants(
   participants: ScheduleItemParticipant[],
 ): Promise<void> {
   const seen = new Set<string>();
-  const unique = participants.filter(p => { if (seen.has(p.userId)) return false; seen.add(p.userId); return true; });
+  const unique = participants.filter(p => { if (seen.has(p.openId)) return false; seen.add(p.openId); return true; });
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     await client.query("DELETE FROM schedule_item_participant WHERE item_id = $1", [itemId]);
     for (const p of unique) {
       await client.query(
-        "INSERT INTO schedule_item_participant (item_id, user_id, name) VALUES ($1,$2,$3)",
-        [itemId, p.userId, p.name],
+        "INSERT INTO schedule_item_participant (item_id, open_id, name) VALUES ($1,$2,$3)",
+        [itemId, p.openId, p.name],
       );
     }
     await client.query("COMMIT");
@@ -696,8 +696,8 @@ export async function listScheduleItemsWithParticipants(
        FROM event_schedule_item WHERE event_id = $1 ORDER BY order_index`,
       [eventId]
     ),
-    pool.query<{ item_id: string; user_id: string; name: string }>(
-      `SELECT sip.item_id, sip.user_id, sip.name
+    pool.query<{ item_id: string; open_id: string; name: string }>(
+      `SELECT sip.item_id, sip.open_id, sip.name
        FROM schedule_item_participant sip
        JOIN event_schedule_item esi ON esi.id = sip.item_id
        WHERE esi.event_id = $1`,
@@ -714,7 +714,7 @@ export async function listScheduleItemsWithParticipants(
   const partMap = new Map<string, ScheduleItemParticipant[]>();
   for (const r of partRes.rows) {
     if (!partMap.has(r.item_id)) partMap.set(r.item_id, []);
-    partMap.get(r.item_id)!.push({ userId: r.user_id, name: r.name });
+    partMap.get(r.item_id)!.push({ openId: r.open_id, name: r.name });
   }
   const deptMap = new Map<string, string[]>();
   for (const r of deptRes.rows) {
@@ -753,28 +753,28 @@ export async function setScheduleItemDepartments(
 }
 
 /** Distinct people across all schedule items + tech req assignees for an event. */
-export async function listEventPeople(eventId: string): Promise<{ userId: string; name: string }[]> {
-  const res = await getPool().query<{ user_id: string; name: string }>(
-    `SELECT DISTINCT p.user_id, p.name
+export async function listEventPeople(eventId: string): Promise<{ openId: string; name: string }[]> {
+  const res = await getPool().query<{ open_id: string; name: string }>(
+    `SELECT DISTINCT p.open_id, p.name
      FROM schedule_item_participant p
      JOIN event_schedule_item esi ON esi.id = p.item_id
      WHERE esi.event_id = $1
      UNION
-     SELECT a.user_id, a.name
+     SELECT a.open_id, a.name
      FROM event_tech_assignee a
      JOIN event_tech_req tr ON tr.id = a.req_id
      WHERE tr.event_id = $1 AND tr.status != 'awaiting'
      ORDER BY name`,
     [eventId]
   );
-  return res.rows.map(r => ({ userId: r.user_id, name: r.name }));
+  return res.rows.map(r => ({ openId: r.open_id, name: r.name }));
 }
 
 // ─── Participants / Followers ─────────────────────────────────────────────────
 
 export async function listEventParticipants(eventId: string): Promise<EventParticipant[]> {
   const res = await getPool().query<ParticipantRow>(
-    `SELECT id, event_id, user_id, name, department_id, role
+    `SELECT id, event_id, open_id, name, department_id, role
      FROM event_participant WHERE event_id = $1 ORDER BY role, name`,
     [eventId]
   );
@@ -782,43 +782,43 @@ export async function listEventParticipants(eventId: string): Promise<EventParti
 }
 
 export async function upsertEventParticipant(data: {
-  id: string; eventId: string; userId: string; name: string;
+  id: string; eventId: string; openId: string; name: string;
   departmentId: string | null; role: "participant" | "follower";
 }): Promise<EventParticipant> {
   const res = await getPool().query<ParticipantRow>(
-    `INSERT INTO event_participant (id, event_id, user_id, name, department_id, role)
+    `INSERT INTO event_participant (id, event_id, open_id, name, department_id, role)
      VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (event_id, user_id) DO UPDATE
+     ON CONFLICT (event_id, open_id) DO UPDATE
        SET name = EXCLUDED.name, department_id = EXCLUDED.department_id, role = EXCLUDED.role
-     RETURNING id, event_id, user_id, name, department_id, role`,
-    [data.id, data.eventId, data.userId, data.name, data.departmentId, data.role]
+     RETURNING id, event_id, open_id, name, department_id, role`,
+    [data.id, data.eventId, data.openId, data.name, data.departmentId, data.role]
   );
   return rowToParticipant(res.rows[0]);
 }
 
-export async function removeEventParticipant(eventId: string, userId: string): Promise<void> {
+export async function removeEventParticipant(eventId: string, openId: string): Promise<void> {
   await getPool().query(
-    "DELETE FROM event_participant WHERE event_id = $1 AND user_id = $2",
-    [eventId, userId]
+    "DELETE FROM event_participant WHERE event_id = $1 AND open_id = $2",
+    [eventId, openId]
   );
 }
 
-export async function isEventFollower(eventId: string, userId: string): Promise<boolean> {
+export async function isEventFollower(eventId: string, openId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_participant WHERE event_id = $1 AND user_id = $2
+       SELECT 1 FROM event_participant WHERE event_id = $1 AND open_id = $2
      ) AS exists`,
-    [eventId, userId]
+    [eventId, openId]
   );
   return res.rows[0].exists;
 }
 
 // Returns the department_ids this user is assigned to as a participant in an event.
-export async function getParticipantDeptIds(eventId: string, userId: string): Promise<string[]> {
+export async function getParticipantDeptIds(eventId: string, openId: string): Promise<string[]> {
   const res = await getPool().query<{ department_id: string }>(
     `SELECT department_id FROM event_participant
-     WHERE event_id = $1 AND user_id = $2 AND department_id IS NOT NULL`,
-    [eventId, userId]
+     WHERE event_id = $1 AND open_id = $2 AND department_id IS NOT NULL`,
+    [eventId, openId]
   );
   return res.rows.map(r => r.department_id);
 }
@@ -827,7 +827,7 @@ export async function getParticipantDeptIds(eventId: string, userId: string): Pr
 
 export async function listEventCallTimes(eventId: string): Promise<EventCallTime[]> {
   const res = await getPool().query<CallTimeRow>(
-    `SELECT id, event_id, user_id, name, department_id, call_at, schedule_item_id, notes
+    `SELECT id, event_id, open_id, name, department_id, call_at, schedule_item_id, notes
      FROM event_call_time WHERE event_id = $1 ORDER BY call_at, name`,
     [eventId]
   );
@@ -835,16 +835,16 @@ export async function listEventCallTimes(eventId: string): Promise<EventCallTime
 }
 
 export async function createEventCallTime(data: {
-  id: string; eventId: string; userId: string; name: string;
+  id: string; eventId: string; openId: string; name: string;
   departmentId: string | null; callAt: string;
   scheduleItemId: string | null; notes: string;
 }): Promise<EventCallTime> {
   const res = await getPool().query<CallTimeRow>(
     `INSERT INTO event_call_time
-       (id, event_id, user_id, name, department_id, call_at, schedule_item_id, notes)
+       (id, event_id, open_id, name, department_id, call_at, schedule_item_id, notes)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING id, event_id, user_id, name, department_id, call_at, schedule_item_id, notes`,
-    [data.id, data.eventId, data.userId, data.name, data.departmentId,
+     RETURNING id, event_id, open_id, name, department_id, call_at, schedule_item_id, notes`,
+    [data.id, data.eventId, data.openId, data.name, data.departmentId,
      data.callAt, data.scheduleItemId, data.notes]
   );
   return rowToCallTime(res.rows[0]);
@@ -867,7 +867,7 @@ export async function updateEventCallTime(
   if (!sets.length) return null;
   const res = await getPool().query<CallTimeRow>(
     `UPDATE event_call_time SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
-     RETURNING id, event_id, user_id, name, department_id, call_at, schedule_item_id, notes`,
+     RETURNING id, event_id, open_id, name, department_id, call_at, schedule_item_id, notes`,
     vals
   );
   return res.rows[0] ? rowToCallTime(res.rows[0]) : null;
@@ -892,7 +892,7 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
       [eventId]
     ),
     pool.query<TechAssigneeRow>(
-      `SELECT eta.req_id, eta.user_id, eta.name
+      `SELECT eta.req_id, eta.open_id, eta.name
        FROM event_tech_assignee eta
        JOIN event_tech_req etr ON etr.id = eta.req_id
        WHERE etr.event_id = $1`,
@@ -909,7 +909,7 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
   const assigneeMap = new Map<string, EventTechReqAssignee[]>();
   for (const r of assigneeRes.rows) {
     if (!assigneeMap.has(r.req_id)) assigneeMap.set(r.req_id, []);
-    assigneeMap.get(r.req_id)!.push({ userId: r.user_id, name: r.name });
+    assigneeMap.get(r.req_id)!.push({ openId: r.open_id, name: r.name });
   }
   const itemMap = new Map<string, string[]>();
   for (const r of itemRes.rows) {
@@ -929,7 +929,7 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
       [id, eventId]
     ),
     pool.query<TechAssigneeRow>(
-      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1",
+      "SELECT req_id, open_id, name FROM event_tech_assignee WHERE req_id = $1",
       [id]
     ),
     pool.query<{ item_id: string }>(
@@ -940,7 +940,7 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
   if (!reqRes.rows[0]) return null;
   return rowToTechReq(
     reqRes.rows[0],
-    assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
+    assigneeRes.rows.map(r => ({ openId: r.open_id, name: r.name })),
     itemRes.rows.map(r => r.item_id),
   );
 }
@@ -991,8 +991,8 @@ export async function createEventTechReq(data: {
     }
     for (const a of data.assignees) {
       await client.query(
-        "INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1,$2,$3)",
-        [data.id, a.userId, a.name]
+        "INSERT INTO event_tech_assignee (req_id, open_id, name) VALUES ($1,$2,$3)",
+        [data.id, a.openId, a.name]
       );
     }
     await client.query("COMMIT");
@@ -1029,7 +1029,7 @@ export async function updateEventTechReq(
   if (!res.rows[0]) return null;
   const [assigneeRes, itemRes] = await Promise.all([
     getPool().query<TechAssigneeRow>(
-      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1", [id]
+      "SELECT req_id, open_id, name FROM event_tech_assignee WHERE req_id = $1", [id]
     ),
     getPool().query<{ item_id: string }>(
       "SELECT item_id FROM event_tech_req_item WHERE req_id = $1", [id]
@@ -1037,7 +1037,7 @@ export async function updateEventTechReq(
   ]);
   return rowToTechReq(
     res.rows[0],
-    assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
+    assigneeRes.rows.map(r => ({ openId: r.open_id, name: r.name })),
     itemRes.rows.map(r => r.item_id),
   );
 }
@@ -1117,8 +1117,8 @@ export async function setTechReqAssignees(
     await client.query("DELETE FROM event_tech_assignee WHERE req_id = $1", [reqId]);
     for (const a of assignees) {
       await client.query(
-        "INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1,$2,$3)",
-        [reqId, a.userId, a.name]
+        "INSERT INTO event_tech_assignee (req_id, open_id, name) VALUES ($1,$2,$3)",
+        [reqId, a.openId, a.name]
       );
     }
     await client.query("COMMIT");
@@ -1202,7 +1202,7 @@ export async function deleteEventReport(id: string, eventId: string): Promise<vo
 
 export async function listReportNotes(reportId: string): Promise<EventReportNote[]> {
   const res = await getPool().query<ReportNoteRow>(
-    `SELECT id, report_id, department_id, content, author_user_id, author_name,
+    `SELECT id, report_id, department_id, content, author_open_id, author_name,
             created_at, updated_at, mentions
      FROM event_report_note WHERE report_id = $1 ORDER BY created_at`,
     [reportId]
@@ -1212,16 +1212,16 @@ export async function listReportNotes(reportId: string): Promise<EventReportNote
 
 export async function createReportNote(data: {
   id: string; reportId: string; departmentId: string;
-  content: string; authorUserId: string; authorName: string;
+  content: string; authorOpenId: string; authorName: string;
   mentions?: Mention[];
 }): Promise<EventReportNote> {
   const res = await getPool().query<ReportNoteRow>(
     `INSERT INTO event_report_note
-       (id, report_id, department_id, content, author_user_id, author_name, mentions)
+       (id, report_id, department_id, content, author_open_id, author_name, mentions)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id, report_id, department_id, content, author_user_id, author_name,
+     RETURNING id, report_id, department_id, content, author_open_id, author_name,
                created_at, updated_at, mentions`,
-    [data.id, data.reportId, data.departmentId, data.content, data.authorUserId, data.authorName,
+    [data.id, data.reportId, data.departmentId, data.content, data.authorOpenId, data.authorName,
      JSON.stringify(data.mentions ?? [])]
   );
   return rowToReportNote(res.rows[0]);
@@ -1238,7 +1238,7 @@ export async function updateReportNote(
   const res = await getPool().query<ReportNoteRow>(
     `UPDATE event_report_note SET ${sets.join(", ")}
      WHERE id = $2 AND report_id = $3
-     RETURNING id, report_id, department_id, content, author_user_id, author_name,
+     RETURNING id, report_id, department_id, content, author_open_id, author_name,
                created_at, updated_at, mentions`,
     vals
   );
@@ -1246,7 +1246,7 @@ export async function updateReportNote(
 }
 
 export async function deleteReportNote(
-  id: string, reportId: string, userId: string, isAdmin: boolean
+  id: string, reportId: string, openId: string, isAdmin: boolean
 ): Promise<boolean> {
   const res = isAdmin
     ? await getPool().query(
@@ -1254,15 +1254,15 @@ export async function deleteReportNote(
         [id, reportId]
       )
     : await getPool().query(
-        "DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 AND author_user_id = $3 RETURNING id",
-        [id, reportId, userId]
+        "DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 AND author_open_id = $3 RETURNING id",
+        [id, reportId, openId]
       );
   return res.rows.length > 0;
 }
 
 export async function getReportNote(id: string, reportId: string): Promise<EventReportNote | null> {
   const res = await getPool().query<ReportNoteRow>(
-    `SELECT id, report_id, department_id, content, author_user_id, author_name,
+    `SELECT id, report_id, department_id, content, author_open_id, author_name,
             created_at, updated_at, mentions
      FROM event_report_note WHERE id = $1 AND report_id = $2`,
     [id, reportId]
@@ -1270,38 +1270,38 @@ export async function getReportNote(id: string, reportId: string): Promise<Event
   return res.rows[0] ? rowToReportNote(res.rows[0]) : null;
 }
 
-/** Collect all unique userIds mentioned across a report's body and all its notes (JSONB). */
-export async function listAllReportMentionedUserIds(reportId: string): Promise<string[]> {
+/** Collect all unique openIds mentioned across a report's body and all its notes. */
+export async function listAllReportMentionedOpenIds(reportId: string): Promise<string[]> {
   const pool = getPool();
   const [rptRes, noteRes] = await Promise.all([
-    pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(mentions)->>'userId' AS user_id FROM event_report WHERE id = $1`,
+    pool.query<{ open_id: string }>(
+      `SELECT jsonb_array_elements(mentions)->>'openId' AS open_id FROM event_report WHERE id = $1`,
       [reportId],
     ),
-    pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(mentions)->>'userId' AS user_id FROM event_report_note WHERE report_id = $1`,
+    pool.query<{ open_id: string }>(
+      `SELECT jsonb_array_elements(mentions)->>'openId' AS open_id FROM event_report_note WHERE report_id = $1`,
       [reportId],
     ),
   ]);
   const ids = new Set<string>();
-  for (const { user_id } of [...rptRes.rows, ...noteRes.rows]) {
-    if (user_id) ids.add(user_id);
+  for (const { open_id } of [...rptRes.rows, ...noteRes.rows]) {
+    if (open_id) ids.add(open_id);
   }
   return [...ids];
 }
 
 // ─── Report read receipts ─────────────────────────────────────────────────────
 
-export async function markReportRead(reportId: string, userId: string): Promise<void> {
+export async function markReportRead(reportId: string, openId: string): Promise<void> {
   await getPool().query(
-    `INSERT INTO event_report_read (report_id, user_id) VALUES ($1, $2)
+    `INSERT INTO event_report_read (report_id, open_id) VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-    [reportId, userId]
+    [reportId, openId]
   );
 }
 
-export async function listUnreadFollowedReports(userId: string, productionId?: string): Promise<UnreadReportEntry[]> {
-  const params: unknown[] = [userId];
+export async function listUnreadFollowedReports(openId: string, productionId?: string): Promise<UnreadReportEntry[]> {
+  const params: unknown[] = [openId];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     report_id: string; report_title: string; published_at: Date;
@@ -1313,13 +1313,13 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
      FROM event_report er
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
-     JOIN event_participant ep ON ep.event_id = pe.id AND ep.user_id = $1
+     JOIN event_participant ep ON ep.event_id = pe.id AND ep.open_id = $1
      WHERE er.published_at IS NOT NULL
        AND pe.status IN ('published', 'completed')
        ${prodFilter}
        AND NOT EXISTS (
          SELECT 1 FROM event_report_read err
-         WHERE err.report_id = er.id AND err.user_id = $1
+         WHERE err.report_id = er.id AND err.open_id = $1
        )
      ORDER BY er.published_at DESC
      LIMIT 20`,
@@ -1340,79 +1340,79 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
 
 /** Add self as follower. If already a participant (any role), leaves the record unchanged. */
 export async function selfFollowEvent(
-  eventId: string, userId: string, name: string,
+  eventId: string, openId: string, name: string,
 ): Promise<void> {
   const id = `ef${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   await getPool().query(
-    `INSERT INTO event_participant (id, event_id, user_id, name, role)
+    `INSERT INTO event_participant (id, event_id, open_id, name, role)
      VALUES ($1, $2, $3, $4, 'follower')
-     ON CONFLICT (event_id, user_id) DO NOTHING`,
-    [id, eventId, userId, name]
+     ON CONFLICT (event_id, open_id) DO NOTHING`,
+    [id, eventId, openId, name]
   );
 }
 
 /** Remove self as follower. Only deletes if role='follower'; leaves participants untouched. */
-export async function selfUnfollowEvent(eventId: string, userId: string): Promise<void> {
+export async function selfUnfollowEvent(eventId: string, openId: string): Promise<void> {
   await getPool().query(
     `DELETE FROM event_participant
-     WHERE event_id = $1 AND user_id = $2 AND role = 'follower'`,
-    [eventId, userId]
+     WHERE event_id = $1 AND open_id = $2 AND role = 'follower'`,
+    [eventId, openId]
   );
 }
 
 /** Returns the current user's participant role in an event, or null if not present. */
 export async function getSelfParticipantRole(
-  eventId: string, userId: string,
+  eventId: string, openId: string,
 ): Promise<"participant" | "follower" | null> {
   const res = await getPool().query<{ role: string }>(
-    "SELECT role FROM event_participant WHERE event_id = $1 AND user_id = $2",
-    [eventId, userId]
+    "SELECT role FROM event_participant WHERE event_id = $1 AND open_id = $2",
+    [eventId, openId]
   );
   return (res.rows[0]?.role as "participant" | "follower") ?? null;
 }
 
 /** All call times for a specific user in a specific event. */
-export async function listUserCallTimes(eventId: string, userId: string): Promise<EventCallTime[]> {
+export async function listUserCallTimes(eventId: string, openId: string): Promise<EventCallTime[]> {
   const res = await getPool().query<CallTimeRow>(
-    `SELECT id, event_id, user_id, name, department_id, call_at, schedule_item_id, notes
-     FROM event_call_time WHERE event_id = $1 AND user_id = $2 ORDER BY call_at`,
-    [eventId, userId]
+    `SELECT id, event_id, open_id, name, department_id, call_at, schedule_item_id, notes
+     FROM event_call_time WHERE event_id = $1 AND open_id = $2 ORDER BY call_at`,
+    [eventId, openId]
   );
   return res.rows.map(rowToCallTime);
 }
 
 /** True if the user is an assignee of at least one tech req in the event. */
-export async function isUserEventTechAssignee(eventId: string, userId: string): Promise<boolean> {
+export async function isUserEventTechAssignee(eventId: string, openId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
        SELECT 1 FROM event_tech_assignee eta
        JOIN event_tech_req etr ON etr.id = eta.req_id
-       WHERE etr.event_id = $1 AND eta.user_id = $2
+       WHERE etr.event_id = $1 AND eta.open_id = $2
      ) AS exists`,
-    [eventId, userId]
+    [eventId, openId]
   );
   return res.rows[0].exists;
 }
 
 /** True if the user is an assignee of a specific tech req. */
-export async function isUserReqAssignee(reqId: string, userId: string): Promise<boolean> {
+export async function isUserReqAssignee(reqId: string, openId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_tech_assignee WHERE req_id = $1 AND user_id = $2
+       SELECT 1 FROM event_tech_assignee WHERE req_id = $1 AND open_id = $2
      ) AS exists`,
-    [reqId, userId]
+    [reqId, openId]
   );
   return res.rows[0].exists;
 }
 
 /** True if the user is a POC of a specific department. */
-export async function isUserDeptPoc(deptId: string, userId: string): Promise<boolean> {
+export async function isUserDeptPoc(deptId: string, openId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
        SELECT 1 FROM event_department_member
-       WHERE department_id = $1 AND user_id = $2 AND is_poc = true
+       WHERE department_id = $1 AND open_id = $2 AND is_poc = true
      ) AS exists`,
-    [deptId, userId]
+    [deptId, openId]
   );
   return res.rows[0].exists;
 }
@@ -1428,39 +1428,40 @@ export type MyTechReqFullEntry = {
   eventTitle: string;
   productionId: string;
   productionName: string;
-  assignees: { userId: string; name: string }[];
-  deptPeople: { userId: string; name: string }[];
+  assignees: { openId: string; name: string }[];
+  deptPeople: { openId: string; name: string }[];
   amPoc: boolean;
 };
 
 /** All tech reqs relevant to the user as POC or assignee, with full details for the personal page. */
-export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullEntry[]> {
+export async function listMyTechReqsFull(openId: string): Promise<MyTechReqFullEntry[]> {
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
     department_id: string | null; department_name: string | null;
     event_id: string; event_title: string;
     production_id: string; production_name: string;
     am_poc: boolean;
-    assignees_json: { userId: string; name: string }[] | null;
-    dept_people_json: { userId: string; name: string }[] | null;
+    assignees_json: { openId: string; name: string }[] | null;
+    dept_people_json: { openId: string; name: string }[] | null;
   }>(
     `SELECT
        etr.id, etr.title, etr.description, etr.status, etr.department_id,
        ed.name AS department_name,
        pe.id AS event_id, pe.title AS event_title,
        pe.production_id, p.name AS production_name,
-       (edm_poc.user_id IS NOT NULL) AS am_poc,
+       (edm_poc.open_id IS NOT NULL) AS am_poc,
        (
-         SELECT json_agg(json_build_object('userId', eta2.user_id, 'name', eta2.name)
-                ORDER BY eta2.name)
+         SELECT json_agg(json_build_object('openId', eta2.open_id, 'name', fu2.name)
+                ORDER BY fu2.name)
          FROM event_tech_assignee eta2
+         JOIN feishu_user fu2 ON fu2.open_id = eta2.open_id
          WHERE eta2.req_id = etr.id
        ) AS assignees_json,
        (
-         SELECT json_agg(json_build_object('userId', edm2.user_id, 'name', fu3.name)
+         SELECT json_agg(json_build_object('openId', edm2.open_id, 'name', fu3.name)
                 ORDER BY fu3.name)
          FROM event_department_member edm2
-         JOIN feishu_user fu3 ON fu3.user_id = edm2.user_id
+         JOIN feishu_user fu3 ON fu3.open_id = edm2.open_id
          WHERE edm2.department_id = etr.department_id
            AND (edm2.is_member OR edm2.is_poc)
        ) AS dept_people_json
@@ -1470,16 +1471,16 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
      LEFT JOIN event_department ed ON ed.id = etr.department_id
      LEFT JOIN event_department_member edm_poc
        ON edm_poc.department_id = etr.department_id
-       AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
+       AND edm_poc.open_id = $1 AND edm_poc.is_poc = true
      LEFT JOIN event_tech_assignee eta
-       ON eta.req_id = etr.id AND eta.user_id = $1
+       ON eta.req_id = etr.id AND eta.open_id = $1
      WHERE pe.status != 'cancelled'
        AND (
-         (etr.status = 'awaiting' AND edm_poc.user_id IS NOT NULL)
-         OR (etr.status != 'awaiting' AND (eta.user_id IS NOT NULL OR edm_poc.user_id IS NOT NULL))
+         (etr.status = 'awaiting' AND edm_poc.open_id IS NOT NULL)
+         OR (etr.status != 'awaiting' AND (eta.open_id IS NOT NULL OR edm_poc.open_id IS NOT NULL))
        )
      ORDER BY pe.start_time NULLS LAST, etr.created_at`,
-    [userId]
+    [openId]
   );
   return res.rows.map(r => ({
     id: r.id,
@@ -1500,14 +1501,14 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
 
 /** Batch-load the current user's participant role across all events in a production. */
 export async function listUserEventParticipations(
-  userId: string, productionId: string,
+  openId: string, productionId: string,
 ): Promise<{ eventId: string; role: "participant" | "follower" }[]> {
   const res = await getPool().query<{ event_id: string; role: string }>(
     `SELECT ep.event_id, ep.role
      FROM event_participant ep
      JOIN production_event pe ON pe.id = ep.event_id
-     WHERE ep.user_id = $1 AND pe.production_id = $2`,
-    [userId, productionId]
+     WHERE ep.open_id = $1 AND pe.production_id = $2`,
+    [openId, productionId]
   );
   return res.rows.map(r => ({
     eventId: r.event_id,
@@ -1545,8 +1546,8 @@ export type MyPocAwaitingReqEntry = {
   departmentName: string | null;
 };
 
-export async function listMyPocAwaitingReqs(userId: string, productionId?: string): Promise<MyPocAwaitingReqEntry[]> {
-  const params: unknown[] = [userId];
+export async function listMyPocAwaitingReqs(openId: string, productionId?: string): Promise<MyPocAwaitingReqEntry[]> {
+  const params: unknown[] = [openId];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     id: string; event_id: string; event_title: string; department_name: string | null;
@@ -1557,7 +1558,7 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
      LEFT JOIN event_department ed ON ed.id = etr.department_id
      JOIN event_department_member edm_poc
        ON edm_poc.department_id = etr.department_id
-       AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
+       AND edm_poc.open_id = $1 AND edm_poc.is_poc = true
      WHERE etr.status = 'awaiting'
        AND pe.status != 'cancelled'
        ${prodFilter}
@@ -1572,8 +1573,8 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
   }));
 }
 
-export async function listMyUpcomingCallTimes(userId: string, productionId?: string): Promise<MyCallTimeEntry[]> {
-  const params: unknown[] = [userId];
+export async function listMyUpcomingCallTimes(openId: string, productionId?: string): Promise<MyCallTimeEntry[]> {
+  const params: unknown[] = [openId];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     id: string; call_at: Date; notes: string;
@@ -1586,7 +1587,7 @@ export async function listMyUpcomingCallTimes(userId: string, productionId?: str
      FROM event_call_time ect
      JOIN production_event pe ON pe.id = ect.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE ect.user_id = $1
+     WHERE ect.open_id = $1
        AND pe.status = 'published'
        AND ect.call_at >= now()
        AND ect.call_at <= now() + interval '7 days'
@@ -1616,7 +1617,7 @@ export type MyFollowedEventEntry = {
   productionName: string;
 };
 
-export async function listMyFollowedUpcomingEvents(userId: string): Promise<MyFollowedEventEntry[]> {
+export async function listMyFollowedUpcomingEvents(openId: string): Promise<MyFollowedEventEntry[]> {
   const res = await getPool().query<{
     event_id: string; event_title: string; event_type: string; event_location: string;
     start_time: Date | null; production_id: string; production_name: string;
@@ -1627,11 +1628,11 @@ export async function listMyFollowedUpcomingEvents(userId: string): Promise<MyFo
      FROM event_participant ep
      JOIN production_event pe ON pe.id = ep.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE ep.user_id = $1 AND ep.role = 'follower'
+     WHERE ep.open_id = $1 AND ep.role = 'follower'
        AND pe.status = 'published'
        AND (pe.start_time IS NULL OR pe.start_time >= now())
      ORDER BY pe.start_time NULLS LAST`,
-    [userId]
+    [openId]
   );
   return res.rows.map(r => ({
     eventId: r.event_id,
@@ -1644,8 +1645,8 @@ export async function listMyFollowedUpcomingEvents(userId: string): Promise<MyFo
   }));
 }
 
-export async function listMyPendingTechReqs(userId: string, productionId?: string): Promise<MyPendingTechReqEntry[]> {
-  const params: unknown[] = [userId];
+export async function listMyPendingTechReqs(openId: string, productionId?: string): Promise<MyPendingTechReqEntry[]> {
+  const params: unknown[] = [openId];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     id: string; title: string; status: string;
@@ -1656,7 +1657,7 @@ export async function listMyPendingTechReqs(userId: string, productionId?: strin
             pe.id AS event_id, pe.title AS event_title,
             pe.production_id, p.name AS production_name
      FROM event_tech_req etr
-     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
+     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.open_id = $1
      JOIN production_event pe ON pe.id = etr.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE etr.status NOT IN ('done', 'awaiting')
@@ -1682,7 +1683,7 @@ export type ReportReply = {
   reportId: string;
   parentType: "report" | "note" | "reply";
   parentId: string;
-  userId: string;
+  openId: string;
   authorName: string;
   content: string;
   mentions: Mention[];
@@ -1691,14 +1692,14 @@ export type ReportReply = {
 
 type ReplyRow = {
   id: string; report_id: string; parent_type: string; parent_id: string;
-  user_id: string; author_name: string; content: string; mentions: Mention[]; created_at: Date;
+  open_id: string; author_name: string; content: string; mentions: Mention[]; created_at: Date;
 };
 
 function rowToReply(r: ReplyRow): ReportReply {
   return {
     id: r.id, reportId: r.report_id,
     parentType: r.parent_type as ReportReply["parentType"],
-    parentId: r.parent_id, userId: r.user_id, authorName: r.author_name,
+    parentId: r.parent_id, openId: r.open_id, authorName: r.author_name,
     content: r.content, mentions: r.mentions ?? [],
     createdAt: r.created_at.toISOString(),
   };
@@ -1706,7 +1707,7 @@ function rowToReply(r: ReplyRow): ReportReply {
 
 export async function listReportReplies(reportId: string): Promise<ReportReply[]> {
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at
+    `SELECT id, report_id, parent_type, parent_id, open_id, author_name, content, mentions, created_at
      FROM event_report_reply WHERE report_id = $1 ORDER BY created_at ASC`,
     [reportId]
   );
@@ -1715,22 +1716,22 @@ export async function listReportReplies(reportId: string): Promise<ReportReply[]
 
 export async function createReportReply(params: {
   id: string; reportId: string; parentType: ReportReply["parentType"];
-  parentId: string; userId: string; authorName: string; content: string; mentions?: Mention[];
+  parentId: string; openId: string; authorName: string; content: string; mentions?: Mention[];
 }): Promise<ReportReply> {
   const res = await getPool().query<ReplyRow>(
     `INSERT INTO event_report_reply
-       (id, report_id, parent_type, parent_id, user_id, author_name, content, mentions)
+       (id, report_id, parent_type, parent_id, open_id, author_name, content, mentions)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at`,
+     RETURNING id, report_id, parent_type, parent_id, open_id, author_name, content, mentions, created_at`,
     [params.id, params.reportId, params.parentType, params.parentId,
-     params.userId, params.authorName, params.content, JSON.stringify(params.mentions ?? [])]
+     params.openId, params.authorName, params.content, JSON.stringify(params.mentions ?? [])]
   );
   return rowToReply(res.rows[0]);
 }
 
 export async function getReportReply(id: string, reportId: string): Promise<ReportReply | null> {
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at
+    `SELECT id, report_id, parent_type, parent_id, open_id, author_name, content, mentions, created_at
      FROM event_report_reply WHERE id = $1 AND report_id = $2`,
     [id, reportId]
   );
@@ -1787,47 +1788,50 @@ export async function getProductionDeptChatIds(productionId: string): Promise<Se
 /** Returns current dept member entries — used to compute diff for Feishu sync. */
 export async function getDepartmentCurrentEntries(
   deptId: string
-): Promise<{ userId: string; isMember: boolean; isPoc: boolean }[]> {
-  const res = await getPool().query<{ user_id: string; is_member: boolean; is_poc: boolean }>(
-    "SELECT user_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
+): Promise<{ openId: string; isMember: boolean; isPoc: boolean }[]> {
+  const res = await getPool().query<{ open_id: string; is_member: boolean; is_poc: boolean }>(
+    "SELECT open_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
     [deptId]
   );
-  return res.rows.map(r => ({ userId: r.user_id, isMember: r.is_member, isPoc: r.is_poc }));
+  return res.rows.map(r => ({ openId: r.open_id, isMember: r.is_member, isPoc: r.is_poc }));
 }
 
-/** Returns all Feishu open_ids for an event's group chat (participants + call-time people). */
+/** Returns all open IDs that should be in an event's group chat (participants + call-time people). */
 export async function getEventChatTargets(eventId: string): Promise<string[]> {
-  const res = await getPool().query<{ open_id: string }>(
-    `SELECT DISTINCT fu.open_id
-     FROM event_participant ep
-     JOIN feishu_user fu ON fu.user_id = ep.user_id
-     WHERE ep.event_id = $1
-     UNION
-     SELECT fu.open_id
-     FROM event_call_time ect
-     JOIN feishu_user fu ON fu.user_id = ect.user_id
-     WHERE ect.event_id = $1`,
-    [eventId]
-  );
-  return res.rows.map(r => r.open_id);
+  const [partRes, ctRes] = await Promise.all([
+    getPool().query<{ open_id: string }>(
+      "SELECT open_id FROM event_participant WHERE event_id = $1",
+      [eventId]
+    ),
+    getPool().query<{ open_id: string }>(
+      "SELECT DISTINCT open_id FROM event_call_time WHERE event_id = $1",
+      [eventId]
+    ),
+  ]);
+  const ids = new Set<string>();
+  for (const r of partRes.rows) ids.add(r.open_id);
+  for (const r of ctRes.rows) ids.add(r.open_id);
+  return [...ids];
 }
 
-/** Returns all Feishu open_ids for a req's group chat (assignees + dept POCs). */
+/** Returns all open IDs that should be in a req's group chat (assignees + dept POCs). */
 export async function getReqChatTargets(reqId: string): Promise<string[]> {
-  const res = await getPool().query<{ open_id: string }>(
-    `SELECT fu.open_id
-     FROM event_tech_assignee eta
-     JOIN feishu_user fu ON fu.user_id = eta.user_id
-     WHERE eta.req_id = $1
-     UNION
-     SELECT fu.open_id
-     FROM event_tech_req etr
-     JOIN event_department_member edm ON edm.department_id = etr.department_id AND edm.is_poc = true
-     JOIN feishu_user fu ON fu.user_id = edm.user_id
-     WHERE etr.id = $1`,
-    [reqId]
-  );
-  return res.rows.map(r => r.open_id);
+  const [assigneeRes, pocRes] = await Promise.all([
+    getPool().query<{ open_id: string }>(
+      "SELECT open_id FROM event_tech_assignee WHERE req_id = $1",
+      [reqId]
+    ),
+    getPool().query<{ open_id: string }>(
+      `SELECT edm.open_id FROM event_tech_req etr
+       JOIN event_department_member edm ON edm.department_id = etr.department_id AND edm.is_poc = true
+       WHERE etr.id = $1`,
+      [reqId]
+    ),
+  ]);
+  const ids = new Set<string>();
+  for (const r of assigneeRes.rows) ids.add(r.open_id);
+  for (const r of pocRes.rows) ids.add(r.open_id);
+  return [...ids];
 }
 
 /** Returns all tech reqs in a dept that have a chat_id (for POC-add sync). */

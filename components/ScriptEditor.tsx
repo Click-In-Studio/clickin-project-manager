@@ -3846,7 +3846,7 @@ type RemotePresence = {
 
 // ─── Comment types ────────────────────────────────────────────────────────────
 
-type Mention = { userId: string; name: string };
+type Mention = { openId: string; name: string };
 
 type Comment = {
   id: string;
@@ -3854,7 +3854,7 @@ type Comment = {
   contextType: string;
   contextId: string;
   parentId: string | null;
-  userId: string;
+  openId: string;
   authorName: string;
   body: string;
   mentions: Mention[];
@@ -6350,7 +6350,7 @@ function SideBlockPanel({
 // ─── CommentsPanel ────────────────────────────────────────────────────────────
 
 function CommentsPanel({
-  blockId, productionId, comments, currentUserId, isAdmin,
+  blockId, productionId, comments, currentOpenId, isAdmin,
   onAdd, onEdit, onDelete, onClose, onNavigate,
   hasGutterSpace,
   gutterWidth,
@@ -6359,7 +6359,7 @@ function CommentsPanel({
   navigation,
 }: {
   blockId: string; productionId: string; comments: Comment[];
-  currentUserId: string; isAdmin: boolean;
+  currentOpenId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
   onNavigate?: () => void;
@@ -6452,10 +6452,10 @@ function CommentsPanel({
     if (res.ok) onDelete(id);
   };
 
-  const startReply = (parentId: string, authorUserId: string, authorName: string) => {
+  const startReply = (parentId: string, authorOpenId: string, authorName: string) => {
     setReplyingTo(parentId);
     setReplyText(`@${authorName} `);
-    setReplyMentions([{ userId: authorUserId, name: authorName }]);
+    setReplyMentions([{ openId: authorOpenId, name: authorName }]);
   };
 
   const taClass = "w-full resize-none rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-zinc-400";
@@ -6473,13 +6473,13 @@ function CommentsPanel({
       <div className="flex items-center gap-2">
         {editingId !== c.id && (
           <>
-            {c.userId === currentUserId && (
+            {c.openId === currentOpenId && (
               <button onClick={() => { setEditingId(c.id); setEditText(c.body); }}
                 className="text-[11px] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-600">
                 编辑
               </button>
             )}
-            {(c.userId === currentUserId || isAdmin) && (
+            {(c.openId === currentOpenId || isAdmin) && (
               <button onClick={() => doDelete(c.id)}
                 className="text-[11px] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400">
                 删除
@@ -6533,7 +6533,7 @@ function CommentsPanel({
               {commentHeader(topC)}
               {commentBody(topC, {
                 label: replyingTo === topC.id ? "取消回复" : "回复",
-                onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.userId, topC.authorName),
+                onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.openId, topC.authorName),
               })}
               <MountPointAssets
                 productionId={productionId}
@@ -6552,7 +6552,7 @@ function CommentsPanel({
                 {commentHeader(r)}
                 {commentBody(r, {
                   label: "回复",
-                  onClick: () => startReply(topC.id, r.userId, r.authorName),
+                  onClick: () => startReply(topC.id, r.openId, r.authorName),
                 })}
                 <MountPointAssets
                   productionId={productionId}
@@ -8659,7 +8659,7 @@ export default function ScriptEditor({
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
   const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
-  const [meUserId, setMeUserId] = useState("");
+  const [meOpenId, setMeOpenId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(0);
 
@@ -8674,12 +8674,12 @@ export default function ScriptEditor({
   useEffect(() => {
     fetch(`${BASE_PATH}/api/me`)
       .then(r => r.json())
-      .then((data: { name: string | null; userId: string | null; isAdmin: boolean }) => {
+      .then((data: { name: string | null; openId: string | null; isAdmin: boolean }) => {
         if (data.name) {
           setUserName(data.name);
           localStorage.setItem("presence_name", data.name);
         }
-        if (data.userId) setMeUserId(data.userId);
+        if (data.openId) setMeOpenId(data.openId);
         setMeIsAdmin(data.isAdmin ?? false);
       })
       .catch(() => {});
@@ -11884,7 +11884,7 @@ export default function ScriptEditor({
           blockId={activeCommentBlockId}
           productionId={productionId}
           comments={commentsByBlockId.get(activeCommentBlockId) ?? EMPTY_COMMENTS}
-          currentUserId={meUserId}
+          currentOpenId={meOpenId}
           isAdmin={meIsAdmin}
           onAdd={c => setComments(prev => [...prev, c])}
           onEdit={c => setComments(prev => prev.map(x => x.id === c.id ? c : x))}

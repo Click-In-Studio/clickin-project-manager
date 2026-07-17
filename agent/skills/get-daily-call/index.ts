@@ -40,7 +40,7 @@ function renderEntry(entry: UserCallEntry): string[] {
 export const getDailyCallSkill: SkillModule<GetDailyCallArgs> = {
   config,
   async run(ctx: BotContext, args: GetDailyCallArgs): Promise<string> {
-    const userId = ctx.trigger.userId;
+    const openId = ctx.trigger.senderId;
     const date = args?.date?.trim();
 
     // Validate date format if provided
@@ -48,7 +48,7 @@ export const getDailyCallSkill: SkillModule<GetDailyCallArgs> = {
       return `❌ 日期格式无效："${date}"，请使用 YYYY-MM-DD 格式。`;
     }
 
-    const entries = await getDailyCallForUser(userId, date);
+    const entries = await getDailyCallForUser(openId, date);
 
     const dateLabel = date ?? (() => {
       const nowCst = new Date(Date.now() + 8 * 3_600_000);

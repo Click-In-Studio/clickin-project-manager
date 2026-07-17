@@ -12,12 +12,12 @@ export default async function MyReqsPage() {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const reqs = await listMyTechReqsFull(session.userId);
+  const reqs = await listMyTechReqsFull(session.openId);
 
   return (
     <MyReqsClient
       reqs={reqs}
-      currentUserId={session.userId}
+      currentUserOpenId={session.openId}
     />
   );
 }

@@ -24,12 +24,12 @@ type Props = {
   departments: EventDepartment[];
   canWriteNote: boolean;
   canModerateNotes: boolean;
-  currentUserId: string;
+  currentUserOpenId: string;
   isPublished: boolean;
   replies: ReportReply[];
   canReply: boolean;
   memberDeptIds: string[];
-  members: (MentionMember & { userId: string })[];
+  members: MentionMember[];
 };
 
 // ─── NoteCard ─────────────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ function collectThread(
 
 function ReplyThread({
   parentType, parentId, parentLabel, parentAuthor,
-  allReplies, canAdd, canModerate, currentUserId, replyBase, onRepliesChange, members, productionId,
+  allReplies, canAdd, canModerate, currentUserOpenId, replyBase, onRepliesChange, members, productionId,
 }: {
   parentType: "report" | "note" | "reply";
   parentId: string;
@@ -136,10 +136,10 @@ function ReplyThread({
   allReplies: ReportReply[];
   canAdd: boolean;
   canModerate: boolean;
-  currentUserId: string;
+  currentUserOpenId: string;
   replyBase: string;
   onRepliesChange: (updater: (prev: ReportReply[]) => ReportReply[]) => void;
-  members: (MentionMember & { userId: string })[];
+  members: MentionMember[];
   productionId: string;
 }) {
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
@@ -147,12 +147,8 @@ function ReplyThread({
 
   const thread = collectThread(parentType, parentId, allReplies);
 
-  const membersByUserId = new Map(members.map(m => [m.userId, m]));
-  const authorMap = new Map<string, { name: string; userId: string }>();
-  for (const r of allReplies) {
-    const m = membersByUserId.get(r.userId);
-    authorMap.set(r.id, { name: r.authorName, userId: m?.userId ?? "" });
-  }
+  const authorMap = new Map<string, { name: string; openId: string }>();
+  for (const r of allReplies) authorMap.set(r.id, { name: r.authorName, openId: r.openId });
 
   async function sendReply(
     replyParentType: "report" | "note" | "reply",
@@ -184,7 +180,7 @@ function ReplyThread({
     <div className="mt-2 border-l-2 border-zinc-100 pl-3 flex flex-col gap-1.5">
       {thread.map(reply => {
         const replyingTo = reply.parentType === "reply" ? authorMap.get(reply.parentId) : undefined;
-        const canDelete = canModerate || reply.userId === currentUserId;
+        const canDelete = canModerate || reply.openId === currentUserOpenId;
         const isReplying = replyingToId === reply.id;
 
         return (
@@ -218,7 +214,7 @@ function ReplyThread({
             {isReplying && (
               <ReplyForm
                 placeholder={`回复 ${reply.authorName}…`}
-                initialMentions={reply.userId !== currentUserId ? [{ userId: authorMap.get(reply.id)?.userId ?? "", name: reply.authorName }].filter(m => m.userId) : []}
+                initialMentions={reply.openId !== currentUserOpenId ? [{ openId: reply.openId, name: reply.authorName }] : []}
                 onSend={(content, mentions) => sendReply("reply", reply.id, content, mentions)}
                 onCancel={() => setReplyingToId(null)}
                 members={members}
@@ -233,7 +229,7 @@ function ReplyThread({
         addingTop ? (
           <ReplyForm
             placeholder={parentLabel ? `回复 ${parentLabel}…` : "写回复…"}
-            initialMentions={parentAuthor && parentAuthor.userId !== currentUserId ? [parentAuthor] : []}
+            initialMentions={parentAuthor && parentAuthor.openId !== currentUserOpenId ? [parentAuthor] : []}
             onSend={(content, mentions) => sendReply(parentType, parentId, content, mentions)}
             onCancel={() => setAddingTop(false)}
             members={members}
@@ -302,7 +298,7 @@ export default function ReportViewClient({
   productionId, eventId, event, report,
   notes: initialNotes, departments,
   canWriteNote, canModerateNotes,
-  currentUserId, isPublished,
+  currentUserOpenId, isPublished,
   replies: initialReplies, canReply, memberDeptIds,
   members,
 }: Props) {
@@ -361,7 +357,7 @@ export default function ReportViewClient({
     return canReply && memberDeptIds.includes(note.departmentId);
   }
 
-  const commonThreadProps = { canModerate: canModerateNotes, currentUserId, replyBase, onRepliesChange: setReplies, members, productionId };
+  const commonThreadProps = { canModerate: canModerateNotes, currentUserOpenId, replyBase, onRepliesChange: setReplies, members, productionId };
 
   return (
     <div className="min-h-screen bg-zinc-100">
@@ -410,7 +406,7 @@ export default function ReportViewClient({
           </div>
           <ReplyThread
             parentType="report" parentId={report.id}
-            parentAuthor={members.find(m => m.userId === report.createdBy)}
+            parentAuthor={members.find(m => m.openId === report.createdBy)}
             allReplies={replies} canAdd={canReply}
             {...commonThreadProps}
           />
@@ -433,13 +429,13 @@ export default function ReportViewClient({
                     <NoteCard
                       note={note} dept={undefined} noteNum={i + 1}
                       members={members} productionId={productionId}
-                      canEdit={!isPublished && (canModerateNotes || note.authorUserId === currentUserId)}
+                      canEdit={!isPublished && (canModerateNotes || note.authorOpenId === currentUserOpenId)}
                       onSave={(content, mentions) => saveNote(note.id, content, mentions)}
                       onDelete={() => deleteNote(note.id)}
                     />
                     <ReplyThread
                       parentType="note" parentId={note.id} parentLabel={note.authorName}
-                      parentAuthor={members.find(m => m.userId === note.authorUserId)}
+                      parentAuthor={{ openId: note.authorOpenId, name: note.authorName }}
                       allReplies={replies} canAdd={canReplyToNote(note)}
                       {...commonThreadProps}
                     />
@@ -454,13 +450,13 @@ export default function ReportViewClient({
               <NoteCard
                 note={note} dept={deptMap.get(note.departmentId)} noteNum={i + 1}
                 members={members} productionId={productionId}
-                canEdit={!isPublished && (canModerateNotes || note.authorUserId === currentUserId)}
+                canEdit={!isPublished && (canModerateNotes || note.authorOpenId === currentUserOpenId)}
                 onSave={(content, mentions) => saveNote(note.id, content, mentions)}
                 onDelete={() => deleteNote(note.id)}
               />
               <ReplyThread
                 parentType="note" parentId={note.id} parentLabel={note.authorName}
-                parentAuthor={members.find(m => m.userId === note.authorUserId)}
+                parentAuthor={{ openId: note.authorOpenId, name: note.authorName }}
                 allReplies={replies} canAdd={canReplyToNote(note)}
                 {...commonThreadProps}
               />

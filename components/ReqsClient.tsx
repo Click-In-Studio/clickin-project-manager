@@ -31,8 +31,8 @@ type Props = {
   event: ProductionEvent;
   techReqs: EventTechReq[];
   departments: EventDepartment[];
-  currentUserId: string;
-  productionMembers: { userId: string; name: string }[];
+  currentUserOpenId: string;
+  productionMembers: { openId: string; name: string }[];
   canViewFull?: boolean;
 };
 
@@ -144,7 +144,7 @@ function ReqCard({
         <div className="flex flex-wrap gap-1 mt-2">
           <span className="text-[10px] text-zinc-400 mr-1 self-center">负责人:</span>
           {req.assignees.map(a => (
-            <span key={a.userId} className="text-[10px] bg-zinc-50 text-zinc-500 rounded px-1.5 py-0.5">
+            <span key={a.openId} className="text-[10px] bg-zinc-50 text-zinc-500 rounded px-1.5 py-0.5">
               {a.name}
             </span>
           ))}
@@ -167,7 +167,7 @@ function ReqCard({
 
 export default function ReqsClient({
   productionId, eventId, event,
-  techReqs, departments, currentUserId, productionMembers, canViewFull,
+  techReqs, departments, currentUserOpenId, productionMembers, canViewFull,
 }: Props) {
   const [reqs, setReqs] = useState(techReqs);
 
@@ -175,22 +175,22 @@ export default function ReqsClient({
 
   // Depts where current user is POC
   const pocDeptIds = new Set(
-    departments.filter(d => d.pocUserIds.includes(currentUserId)).map(d => d.id)
+    departments.filter(d => d.pocOpenIds.includes(currentUserOpenId)).map(d => d.id)
   );
 
   // For each dept, compute eligible assignees (members + pocs of that dept)
-  function getDeptPeople(deptId: string | null): { userId: string; name: string }[] {
+  function getDeptPeople(deptId: string | null): { openId: string; name: string }[] {
     if (!deptId) return [];
     const dept = deptMap.get(deptId);
     if (!dept) return [];
-    const eligible = new Set([...dept.memberUserIds, ...dept.pocUserIds]);
-    return productionMembers.filter(m => eligible.has(m.userId));
+    const eligible = new Set([...dept.memberOpenIds, ...dept.pocOpenIds]);
+    return productionMembers.filter(m => eligible.has(m.openId));
   }
 
   function handleConfirmed(
     reqId: string, newStatus: string,
     title: string, description: string,
-    assignees: { userId: string; name: string }[],
+    assignees: { openId: string; name: string }[],
   ) {
     setReqs(prev => prev.map(r =>
       r.id === reqId ? { ...r, status: newStatus, title, description, assignees } : r
@@ -241,7 +241,7 @@ export default function ReqsClient({
                   key={req.id}
                   req={req}
                   deptName={deptName}
-                  isMyReq={req.assignees.some(a => a.userId === currentUserId)}
+                  isMyReq={req.assignees.some(a => a.openId === currentUserOpenId)}
                   isPocOfDept={isPocOfDept}
                   canViewFull={canViewFull}
                   productionId={productionId}

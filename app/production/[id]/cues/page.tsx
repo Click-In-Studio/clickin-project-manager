@@ -27,7 +27,7 @@ export default async function CuesPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
   if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const versions = await listVersions(id);
@@ -61,7 +61,7 @@ export default async function CuesPage({
   await Promise.all(
     cueLists.map(async (cl) => {
       const perms = await listCueListPermissions(cl.id);
-      if (canEditCueList(session.userId, memberRoles, session.isAdmin, cl, perms))
+      if (canEditCueList(session.openId, memberRoles, session.isAdmin, cl, perms))
         editableListIds.add(cl.id);
     })
   );
@@ -81,7 +81,7 @@ export default async function CuesPage({
       cueLists={cueLists}
       initialCues={allCues}
       editableListIds={[...editableListIds]}
-      myUserId={session.userId}
+      myOpenId={session.openId}
       isAdmin={session.isAdmin}
       pageMap={pageMap}
       versions={versions}

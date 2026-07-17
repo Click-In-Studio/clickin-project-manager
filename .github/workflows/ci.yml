@@ -107,10 +107,16 @@ jobs:
           PGPASSWORD=testpassword
           EOF
 
-      # MIGRATION PATH: global-setup.ts detects the old schema, inserts factory
-      # data for invariance testing, captures a snapshot, then applies the
-      # migration — so invariance tests have real data to verify against.
-      # (We do NOT apply migration files via psql here; the test harness does it.)
+      # MIGRATION PATH: Apply the new migration files to the base schema.
+      # This is the same sequence that will run on production at deploy time.
+      - name: Apply PR migration files
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          echo '${{ steps.migrations.outputs.files }}' | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "Applying $f ..."
+            psql -v ON_ERROR_STOP=1 -f "$f"
+          done
 
       # ── Unit tests ────────────────────────────────────────────────────────────
       - name: Run unit tests

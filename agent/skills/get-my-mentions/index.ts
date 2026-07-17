@@ -22,7 +22,8 @@ export const getMyMentionsSkill: SkillModule<Args> = {
     const productionId = ctx.productionContext?.productionId;
     if (!productionId) return "❌ 未设置当前 production，请先调用 focus_production。";
 
-    const mentions = await getMentionsToday(productionId, ctx.trigger.userId);
+    const openId = ctx.trigger.senderId;
+    const mentions = await getMentionsToday(productionId, openId);
     if (mentions.length === 0) return "今天还没有 @你 的评论。";
 
     const lines = [

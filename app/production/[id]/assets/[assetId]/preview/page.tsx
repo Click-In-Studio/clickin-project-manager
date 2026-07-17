@@ -30,7 +30,7 @@ export default async function AssetPreviewPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
   if (!ok) redirect("/");
 
   const asset = await getAsset(assetId);

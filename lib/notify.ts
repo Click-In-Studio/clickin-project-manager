@@ -8,8 +8,7 @@ import {
   sendCard, buildWeeklyCallCard, buildDailyCallCard, buildReportCard, buildMentionCard,
   type WeeklyCallEntry, type DailyCallScheduleItem,
 } from "./feishu-bot";
-import { listAllReportMentionedUserIds } from "./event-db";
-import { batchGetFeishuOpenIds } from "./db";
+import { listAllReportMentionedOpenIds } from "./event-db";
 import { createCardToken } from "./card-token";
 import { getOptedOutUsers } from "./notification-prefs";
 
@@ -43,12 +42,10 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
   weekStart.setUTCHours(0, 0, 0, 0);
   const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 3600_000);
 
-  // All distinct users with calls in the coming week (with Feishu open_id for sending)
-  const usersRes = await pool.query<{ user_id: string; open_id: string }>(
-    `SELECT DISTINCT ect.user_id, fu.open_id
-     FROM event_call_time ect
-     JOIN feishu_user fu ON fu.user_id = ect.user_id
-     WHERE ect.call_at >= $1 AND ect.call_at < $2`,
+  // All distinct users with calls in the coming week
+  const usersRes = await pool.query<{ open_id: string }>(
+    `SELECT DISTINCT open_id FROM event_call_time
+     WHERE call_at >= $1 AND call_at < $2`,
     [weekStart.toISOString(), weekEnd.toISOString()],
   );
   // Token valid for 8 days — covers the full week shown in the card
@@ -60,12 +57,12 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
 
   const weeklyOptedOut = await getOptedOutUsers("weekly_call");
 
-  for (const { user_id, open_id } of usersRes.rows) {
-    if (weeklyOptedOut.has(user_id)) continue;
+  for (const { open_id } of usersRes.rows) {
+    if (weeklyOptedOut.has(open_id)) continue;
     try {
-      const entries = await getWeeklyCallDataForUser(user_id, weekStart, weekEnd);
+      const entries = await getWeeklyCallDataForUser(open_id, weekStart, weekEnd);
       if (!entries.length) continue;
-      const token = createCardToken(user_id, "weekly-call", weeklyTokenExp);
+      const token = createCardToken(open_id, "weekly-call", weeklyTokenExp);
       const weeklyUrl = feishuCardUrl(`${BASE_PATH}/my/weekly-call/${token}`);
       console.log("[notify] weekly card url for", open_id, weeklyUrl);
       const card = buildWeeklyCallCard(entries, weeklyUrl);
@@ -87,12 +84,13 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
 }
 
 async function getWeeklyCallDataForUser(
-  userId: string,
+  openId: string,
   weekStart: Date,
   weekEnd: Date,
 ): Promise<WeeklyCallEntry[]> {
   const pool = getPool();
 
+  // Call times for this user in the window, with event info
   const callsRes = await pool.query<{
     call_at: string; call_notes: string;
     event_id: string; event_title: string; event_location: string; production_id: string;
@@ -102,27 +100,29 @@ async function getWeeklyCallDataForUser(
             pe.location AS event_location, pe.production_id
      FROM event_call_time ect
      JOIN production_event pe ON pe.id = ect.event_id
-     WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+     WHERE ect.open_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
      ORDER BY ect.call_at`,
-    [userId, weekStart.toISOString(), weekEnd.toISOString()],
+    [openId, weekStart.toISOString(), weekEnd.toISOString()],
   );
 
   if (!callsRes.rows.length) return [];
 
   const eventIds = [...new Set(callsRes.rows.map(r => r.event_id))];
 
+  // Schedule items for those events (ordered)
   const schedRes = await pool.query<{ event_id: string; title: string; start_time: string | null }>(
     `SELECT event_id, title, start_time FROM event_schedule_item
      WHERE event_id = ANY($1) ORDER BY event_id, order_index`,
     [eventIds],
   );
 
+  // Pending tech reqs assigned to this user in those events
   const reqsRes = await pool.query<{ event_id: string; title: string }>(
     `SELECT etr.event_id, etr.title
      FROM event_tech_req etr
-     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
+     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.open_id = $1
      WHERE etr.event_id = ANY($2) AND etr.status != 'done'`,
-    [userId, eventIds],
+    [openId, eventIds],
   );
 
   const schedByEvent = new Map<string, { title: string; startTime: string | null }[]>();
@@ -238,14 +238,11 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
   const event = eventRes.rows[0];
   if (!event || !event.start_time) return { sent: 0, errors: [] };
 
-  // All call times for this event, ordered (JOIN feishu_user for open_id)
+  // All call times for this event, ordered
   const callsRes = await pool.query<{
-    user_id: string; open_id: string; name: string; call_at: string; notes: string;
+    open_id: string; name: string; call_at: string; notes: string;
   }>(
-    `SELECT ect.user_id, fu.open_id, ect.name, ect.call_at, ect.notes
-     FROM event_call_time ect
-     JOIN feishu_user fu ON fu.user_id = ect.user_id
-     WHERE ect.event_id = $1 ORDER BY ect.call_at`,
+    `SELECT open_id, name, call_at, notes FROM event_call_time WHERE event_id = $1 ORDER BY call_at`,
     [eventId],
   );
   if (!callsRes.rows.length) return { sent: 0, errors: [] };
@@ -287,11 +284,11 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
   const dailyOptedOut = await getOptedOutUsers("daily_call");
   const seen = new Set<string>();
   for (const row of callsRes.rows) {
-    if (seen.has(row.user_id)) continue;
-    seen.add(row.user_id);
-    if (dailyOptedOut.has(row.user_id)) continue;
+    if (seen.has(row.open_id)) continue;
+    seen.add(row.open_id);
+    if (dailyOptedOut.has(row.open_id)) continue;
     try {
-      const token = createCardToken(row.user_id, "daily-call", dailyTokenExp);
+      const token = createCardToken(row.open_id, "daily-call", dailyTokenExp);
       const callsheetUrl = feishuCardUrl(`${BASE_PATH}/my/daily-call/${dateStr}/${token}`);
       console.log("[notify] daily card url for", row.open_id, callsheetUrl);
       const card = buildDailyCallCard(
@@ -356,15 +353,13 @@ export async function dispatchReportNotification(
   const eventTitle = evRes.rows[0]?.title ?? "";
   const notes = notesRes.rows.map(r => ({ deptName: r.dept_name, content: r.content }));
 
-  // Recipients: followers ∪ call-time participants, deduped by user_id; JOIN feishu_user for open_id
-  const recipRes = await pool.query<{ user_id: string; open_id: string }>(
-    `SELECT fu.open_id, sub.user_id
-     FROM (
-       SELECT user_id FROM event_participant WHERE event_id = $1
+  // Recipients: followers ∪ call-time participants, deduped
+  const recipRes = await pool.query<{ open_id: string }>(
+    `SELECT DISTINCT open_id FROM (
+       SELECT open_id FROM event_participant WHERE event_id = $1
        UNION
-       SELECT user_id FROM event_call_time WHERE event_id = $1
-     ) AS sub
-     JOIN feishu_user fu ON fu.user_id = sub.user_id`,
+       SELECT open_id FROM event_call_time WHERE event_id = $1
+     ) AS r`,
     [eventId],
   );
   if (!recipRes.rows.length) return { sent: 0, errors: [] };
@@ -378,10 +373,10 @@ export async function dispatchReportNotification(
 
   const reportOptedOut = await getOptedOutUsers("report_broadcast");
 
-  for (const { user_id, open_id } of recipRes.rows) {
-    if (reportOptedOut.has(user_id)) continue;
+  for (const { open_id } of recipRes.rows) {
+    if (reportOptedOut.has(open_id)) continue;
     try {
-      const token = createCardToken(user_id, `report:${reportId}`, reportTokenExp);
+      const token = createCardToken(open_id, `report:${reportId}`, reportTokenExp);
       const url = feishuCardUrl(`${reportBasePath}/${token}`);
       console.log("[notify] report card url for", open_id, url);
       const card = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, url);
@@ -414,15 +409,13 @@ export async function dispatchMentionNotifications(
   eventId: string,
   productionId: string,
 ): Promise<void> {
-  const mentionedUserIds = await listAllReportMentionedUserIds(reportId);
-  if (!mentionedUserIds.length) return;
+  const mentionedOpenIds = await listAllReportMentionedOpenIds(reportId);
+  if (!mentionedOpenIds.length) return;
 
   const pool = getPool();
-  const [rptRes, evRes, mentionOptedOut, userIdToOpenId] = await Promise.all([
+  const [rptRes, evRes] = await Promise.all([
     pool.query<{ title: string }>("SELECT title FROM event_report WHERE id = $1", [reportId]),
     pool.query<{ title: string }>("SELECT title FROM production_event WHERE id = $1", [eventId]),
-    getOptedOutUsers("report_mention"),
-    batchGetFeishuOpenIds(mentionedUserIds),
   ]);
   const reportTitle = rptRes.rows[0]?.title ?? "报告";
   const eventTitle = evRes.rows[0]?.title ?? "";
@@ -430,17 +423,17 @@ export async function dispatchMentionNotifications(
   const reportBasePath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}`;
   const tokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
-  for (const userId of mentionedUserIds) {
-    if (mentionOptedOut.has(userId)) continue;
-    const openId = userIdToOpenId.get(userId);
-    if (!openId) continue;
+  const mentionOptedOut = await getOptedOutUsers("report_mention");
+
+  for (const openId of mentionedOpenIds) {
+    if (mentionOptedOut.has(openId)) continue;
     try {
-      const token = createCardToken(userId, `report:${reportId}`, tokenExp);
+      const token = createCardToken(openId, `report:${reportId}`, tokenExp);
       const url = feishuCardUrl(`${reportBasePath}/${token}`);
       const card = buildMentionCard(reportTitle, eventTitle, url);
       await sendCard(openId, card);
     } catch (e) {
-      console.error("[notify] mention notification error for", userId, e);
+      console.error("[notify] mention notification error for", openId, e);
     }
   }
 }
