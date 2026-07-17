@@ -173,6 +173,36 @@ jobs:
       - name: Import seed data into test DB
         run: npm run seed:demo
 
+      # MIGRATION PATH: Snapshot user-ID mappings before the migration runs.
+      # Stores {table, pk, old_open_id, expected_user_id} so we can verify
+      # that every row was remapped to the correct UUID after migration.
+      - name: Pre-migration snapshot
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE _mig_pre AS
+            SELECT 'production_member'   AS tbl,
+                   production_id         AS pk1, NULL::text AS pk2,
+                   pm.open_id            AS old_id,
+                   fu.user_id            AS expected_uid
+            FROM production_member pm
+            JOIN feishu_user fu ON fu.open_id = pm.open_id
+          UNION ALL
+            SELECT 'comment', id, NULL, c.open_id, fu.user_id
+            FROM comment c JOIN feishu_user fu ON fu.open_id = c.open_id
+          UNION ALL
+            SELECT 'cue_list', id, NULL, cl.created_by, fu.user_id
+            FROM cue_list cl JOIN feishu_user fu ON fu.open_id = cl.created_by
+          UNION ALL
+            SELECT 'production_event', id, NULL, pe.created_by, fu.user_id
+            FROM production_event pe JOIN feishu_user fu ON fu.open_id = pe.created_by
+          UNION ALL
+            SELECT 'event_report', id, NULL, er.created_by, fu.user_id
+            FROM event_report er JOIN feishu_user fu ON fu.open_id = er.created_by;
+          SQL
+          COUNT=$(psql -t -A -c "SELECT COUNT(*) FROM _mig_pre")
+          echo "Snapshot: ${COUNT} rows captured across 5 tables"
+
       # MIGRATION PATH: Apply the new migration files to the imported pre-migration
       # data. This is the same sequence that will run on production at deploy time.
       - name: Apply PR migration files
@@ -184,8 +214,8 @@ jobs:
             psql -v ON_ERROR_STOP=1 -f "$f"
           done
 
-      # MIGRATION PATH: Verify that the migration left the data in a consistent
-      # state: no orphan FK references and key row counts preserved.
+      # MIGRATION PATH: Verify row counts, FK integrity, and — critically — that
+      # each row was mapped to the CORRECT user_id (not just any valid UUID).
       - name: Verify post-migration data integrity
         if: steps.migrations.outputs.has_migrations == 'true'
         run: |
@@ -199,7 +229,39 @@ jobs:
           chk version    "production_id = 'mod1uc2dg'"                                                                 2
           chk scene      "production_id IN ('mod1uc2dg','mon0jcm82')"                                                 100
           chk script     "production_id IN ('mod1uc2dg','mon0jcm82')"                                                5000
+          chk feishu_user "user_id IS NOT NULL"                                                                        1
+          chk production_member "user_id IS NOT NULL"                                                                  1
+
+          # Verify mapping correctness: each migrated row must have the user_id that
+          # the pre-migration snapshot predicted (not just any non-null UUID).
+          verify_mapping() {
+            TABLE=$1; PK_COL=$2; ACTUAL_COL=$3
+            BAD=$(psql -t -A -c "
+              SELECT COUNT(*) FROM \"${TABLE}\" t
+              JOIN _mig_pre s ON s.tbl = '${TABLE}' AND s.pk1 = t.${PK_COL}
+              WHERE t.${ACTUAL_COL} != s.expected_uid")
+            [ "$BAD" -eq 0 ] \
+              && echo "OK  ${TABLE}.${ACTUAL_COL} mapping correct" \
+              || { echo "FAIL  ${TABLE}: ${BAD} row(s) have wrong user_id"; FAIL=1; }
+          }
+          verify_mapping production_member production_id user_id
+          verify_mapping comment           id            user_id
+          verify_mapping cue_list          id            created_by
+          verify_mapping production_event  id            created_by
+          verify_mapping event_report      id            created_by
+
           exit $FAIL
+
+      # MIGRATION PATH: Export post-migration seed in new schema format and upload
+      # to R2 so future PRs start with data that matches the current schema.
+      - name: Upload post-migration CI seed
+        if: steps.migrations.outputs.has_migrations == 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.SEED_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.SEED_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.SEED_R2_SECRET_ACCESS_KEY }}
+          SEED_R2_BUCKET: ${{ secrets.SEED_R2_BUCKET }}
+        run: npm run seed:ci-export -- "我们的星星" "供养2.0"
 
       - name: Verify seeded DB
         run: |
