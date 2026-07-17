@@ -1,63 +1,42 @@
 /**
  * Migration tests for migrate-internal-user-id.sql.
  *
- * Two operating modes:
+ * Operating modes:
  *
- * 1. Normal dev / CI post-migration run  (vitest run)
- *    global-setup.ts already applied the migration (if needed) and wrote a
- *    pre-migration snapshot to SNAPSHOT_PATH. Schema + integrity tests always
- *    run. Invariance tests run only when the snapshot exists.
+ *   Migration path (CI: base schema applied, no migration yet):
+ *     global-setup.ts detects the old schema, inserts faker-seeded factory rows,
+ *     applies the migration, and writes a PreMigrationSnapshot to SNAPSHOT_PATH.
+ *     All three test layers run, including invariance.
  *
- * 2. CI migration job  (npm run test:migration)
- *    Uses a separate vitest config + global-setup-migration.ts that does NOT
- *    auto-apply the migration. The beforeAll here detects the old schema,
- *    captures the pre-migration snapshot, applies the migration, and runs the
- *    full suite including invariance tests.
+ *   Normal path (local dev, already-migrated DB):
+ *     global-setup.ts skips the migration. SNAPSHOT_PATH doesn't exist.
+ *     Schema and integrity tests always run; invariance tests skip (it.skipIf).
  *
- * Invariance tests are the critical part: schema/integrity checks cannot catch
- * silent data corruption (wrong ID mapped, rows dropped). Only a before/after
- * comparison can.
+ * Layer structure (same pattern for all future migration tests):
+ *   1. Schema    — column types, presence/absence
+ *   2. Integrity — FK orphan counts, JSONB cleanliness
+ *   3. Invariance — every factory row maps faithfully before → after
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { readFile, writeFile } from "fs/promises";
-import path from "path";
+import { readFile } from "fs/promises";
 import { getPool } from "@/lib/pg";
-import {
-  type PreMigrationSnapshot,
-  SNAPSHOT_PATH,
-  capturePreMigrationSnapshot,
-  isPreMigrationSchema,
-} from "./migration-snapshot";
+import { SNAPSHOT_PATH, type PreMigrationSnapshot } from "./migration-snapshot";
 
-const ROOT = path.resolve(process.cwd());
-
-// ── Pre-migration snapshot (may be null if migration was already applied) ─────
+// ── Snapshot ──────────────────────────────────────────────────────────────────
 
 let snapshot: PreMigrationSnapshot | null = null;
 
 beforeAll(async () => {
-  const pool = getPool();
-
-  if (await isPreMigrationSchema(pool)) {
-    // CI migration job: we're running on old seed — capture snapshot and migrate.
-    snapshot = await capturePreMigrationSnapshot(pool);
-    await writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot));
-    const sql = await readFile(
-      path.join(ROOT, "db/migrate-internal-user-id.sql"), "utf8"
-    );
-    await pool.query(sql);
-  } else {
-    // Normal run: migration already applied by global-setup.
-    // Try to load the snapshot it wrote (present only on first-ever run).
-    try {
-      snapshot = JSON.parse(await readFile(SNAPSHOT_PATH, "utf8"));
-    } catch {
-      snapshot = null;
-    }
+  // global-setup.ts creates factory data, applies migration, and writes the
+  // snapshot before any test file runs. We just read it here.
+  try {
+    snapshot = JSON.parse(await readFile(SNAPSHOT_PATH, "utf8")) as PreMigrationSnapshot;
+  } catch {
+    snapshot = null; // already-migrated DB: invariance tests will skip
   }
-}, 60_000);
+}, 30_000);
 
-// ── 1. Schema verification (always runs) ─────────────────────────────────────
+// ── 1. Schema verification ────────────────────────────────────────────────────
 
 describe("schema verification", () => {
   it("app_user table exists", async () => {
@@ -78,20 +57,34 @@ describe("schema verification", () => {
     expect(rows[0].is_nullable).toBe("NO");
   });
 
-  it("production_member: open_id gone, user_id UUID NOT NULL", async () => {
-    const { rows: old } = await getPool().query(`
+  it("feishu_user.user_id has UNIQUE constraint", async () => {
+    const { rows } = await getPool().query(`
+      SELECT 1 FROM information_schema.table_constraints tc
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name
+      WHERE tc.table_name = 'feishu_user'
+        AND tc.constraint_type = 'UNIQUE'
+        AND ccu.column_name = 'user_id'
+    `);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("production_member: open_id column is gone", async () => {
+    const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.columns
       WHERE table_name = 'production_member' AND column_name = 'open_id'
     `);
-    expect(old).toHaveLength(0);
+    expect(rows).toHaveLength(0);
+  });
 
-    const { rows: neo } = await getPool().query(`
+  it("production_member: user_id is UUID NOT NULL", async () => {
+    const { rows } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
       WHERE table_name = 'production_member' AND column_name = 'user_id'
     `);
-    expect(neo).toHaveLength(1);
-    expect(neo[0].data_type).toBe("uuid");
-    expect(neo[0].is_nullable).toBe("NO");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data_type).toBe("uuid");
+    expect(rows[0].is_nullable).toBe("NO");
   });
 
   it("cue_list.created_by is UUID NOT NULL", async () => {
@@ -104,41 +97,49 @@ describe("schema verification", () => {
     expect(rows[0].is_nullable).toBe("NO");
   });
 
-  it("production_event.created_by is UUID", async () => {
+  it("production_event.created_by is UUID NOT NULL", async () => {
     const { rows } = await getPool().query(`
-      SELECT data_type FROM information_schema.columns
+      SELECT data_type, is_nullable FROM information_schema.columns
       WHERE table_name = 'production_event' AND column_name = 'created_by'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("uuid");
+    expect(rows[0].is_nullable).toBe("NO");
   });
 
-  it("comment: open_id gone, user_id UUID", async () => {
-    const { rows: old } = await getPool().query(`
+  it("comment: open_id column is gone, user_id UUID NOT NULL", async () => {
+    const { rows: gone } = await getPool().query(`
       SELECT 1 FROM information_schema.columns
       WHERE table_name = 'comment' AND column_name = 'open_id'
     `);
-    expect(old).toHaveLength(0);
+    expect(gone).toHaveLength(0);
+
+    const { rows: neo } = await getPool().query(`
+      SELECT data_type, is_nullable FROM information_schema.columns
+      WHERE table_name = 'comment' AND column_name = 'user_id'
+    `);
+    expect(neo).toHaveLength(1);
+    expect(neo[0].data_type).toBe("uuid");
+    expect(neo[0].is_nullable).toBe("NO");
   });
 });
 
-// ── 2. Integrity verification (always runs) ───────────────────────────────────
+// ── 2. Integrity verification ─────────────────────────────────────────────────
 
 describe("integrity verification", () => {
-  it("every feishu_user row has a non-null user_id", async () => {
-    const { rows } = await getPool().query(
-      "SELECT COUNT(*)::int AS cnt FROM feishu_user WHERE user_id IS NULL"
+  it("every feishu_user row has a non-null user_id that points to app_user", async () => {
+    const { rows: nulls } = await getPool().query(
+      "SELECT COUNT(*)::int AS cnt FROM feishu_user WHERE user_id IS NULL",
     );
-    expect(rows[0].cnt).toBe(0);
-  });
+    expect(nulls[0].cnt).toBe(0);
 
-  it("feishu_user.user_id is UNIQUE", async () => {
-    const { rows } = await getPool().query(`
-      SELECT COUNT(*)::int AS cnt FROM (
-        SELECT user_id FROM feishu_user GROUP BY user_id HAVING COUNT(*) > 1
-      ) AS dupes
+    const { rows: orphans } = await getPool().query(`
+      SELECT COUNT(*)::int AS cnt
+      FROM feishu_user fu
+      LEFT JOIN app_user au ON au.id = fu.user_id
+      WHERE au.id IS NULL
     `);
-    expect(rows[0].cnt).toBe(0);
+    expect(orphans[0].cnt).toBe(0);
   });
 
   it("all production_member rows reference valid app_user", async () => {
@@ -161,7 +162,27 @@ describe("integrity verification", () => {
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("no JSONB mentions retain openId key", async () => {
+  it("all production_event rows reference valid app_user", async () => {
+    const { rows } = await getPool().query(`
+      SELECT COUNT(*)::int AS cnt
+      FROM production_event pe
+      LEFT JOIN app_user au ON au.id = pe.created_by
+      WHERE au.id IS NULL
+    `);
+    expect(rows[0].cnt).toBe(0);
+  });
+
+  it("all comment rows reference valid app_user", async () => {
+    const { rows } = await getPool().query(`
+      SELECT COUNT(*)::int AS cnt
+      FROM comment c
+      LEFT JOIN app_user au ON au.id = c.user_id
+      WHERE au.id IS NULL
+    `);
+    expect(rows[0].cnt).toBe(0);
+  });
+
+  it("no JSONB mentions retain the legacy openId key", async () => {
     for (const table of ["comment", "event_report", "event_report_note", "event_report_reply"]) {
       const { rows } = await getPool().query(`
         SELECT COUNT(*)::int AS cnt FROM "${table}"
@@ -175,138 +196,147 @@ describe("integrity verification", () => {
   });
 });
 
-// ── 3. Invariance verification (requires pre-migration snapshot) ──────────────
+// ── 3. Invariance verification ────────────────────────────────────────────────
 //
-// These are the tests that matter most: schema and integrity checks cannot catch
-// silent data corruption (wrong user mapped to a row, rows silently dropped).
-// Only a before/after comparison can verify the migration was faithful.
+// Verifies that the migration preserved every (openId → row) mapping exactly.
+// Only runs when a PreMigrationSnapshot was written by global-setup.ts —
+// meaning the migration was applied during this test run (CI migration path).
+// Skips on already-migrated local DBs (it.skipIf pattern).
 
 describe("invariance verification", () => {
-  // Helper: resolve user_id → open_id via feishu_user
+  // Resolves a post-migration user_id UUID back to the original open_id.
   async function openIdFor(userId: string): Promise<string | null> {
     const { rows } = await getPool().query<{ open_id: string }>(
       "SELECT open_id FROM feishu_user WHERE user_id = $1::uuid",
-      [userId]
+      [userId],
     );
     return rows[0]?.open_id ?? null;
   }
 
-  it.skipIf(!snapshot)("production_member: row count preserved", async () => {
-    const { rows } = await getPool().query(
-      "SELECT COUNT(*)::int AS cnt FROM production_member"
-    );
-    expect(rows[0].cnt).toBe(snapshot!.counts.production_member);
-  });
-
-  it.skipIf(!snapshot)("cue_list: row count preserved", async () => {
-    const { rows } = await getPool().query(
-      "SELECT COUNT(*)::int AS cnt FROM cue_list"
-    );
-    expect(rows[0].cnt).toBe(snapshot!.counts.cue_list);
-  });
-
-  it.skipIf(!snapshot)("production_event: row count preserved", async () => {
-    const { rows } = await getPool().query(
-      "SELECT COUNT(*)::int AS cnt FROM production_event"
-    );
-    expect(rows[0].cnt).toBe(snapshot!.counts.production_event);
-  });
-
-  it.skipIf(!snapshot)(
-    "production_member: every user_id resolves to the original open_id",
-    async () => {
-      // Build expected map: (production_id, open_id) → open_id
-      const expected = new Map(snapshot!.rows.productionMember.map((r) => [r.key, r.openId]));
-
-      const { rows } = await getPool().query<{
-        production_id: string; user_id: string;
-      }>("SELECT production_id, user_id FROM production_member");
-
-      const mismatches: string[] = [];
-      for (const row of rows) {
-        const resolvedOpenId = await openIdFor(row.user_id);
-        const key = `${row.production_id}:${resolvedOpenId}`;
-        if (!expected.has(key)) {
-          mismatches.push(
-            `production_id=${row.production_id} user_id=${row.user_id} → open_id=${resolvedOpenId} (not in pre-migration snapshot)`
-          );
-        }
-      }
-      expect(mismatches).toEqual([]);
-    }
-  );
-
-  it.skipIf(!snapshot)(
-    "cue_list: every created_by user_id resolves to the original open_id",
-    async () => {
-      const expected = new Map(snapshot!.rows.cueList.map((r) => [r.key, r.openId]));
-
-      const { rows } = await getPool().query<{ id: string; created_by: string }>(
-        "SELECT id, created_by FROM cue_list"
+  it.skipIf(!snapshot)("feishu_user: every factory openId has a corresponding user_id", async () => {
+    for (const user of snapshot!.users) {
+      const { rows } = await getPool().query<{ user_id: string }>(
+        "SELECT user_id FROM feishu_user WHERE open_id = $1",
+        [user.openId],
       );
-      const mismatches: string[] = [];
-      for (const row of rows) {
-        const resolvedOpenId = await openIdFor(row.created_by);
-        const snapshotOpenId = expected.get(row.id);
-        if (resolvedOpenId !== snapshotOpenId) {
-          mismatches.push(
-            `cue_list id=${row.id}: expected open_id=${snapshotOpenId}, got ${resolvedOpenId}`
-          );
-        }
-      }
-      expect(mismatches).toEqual([]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].user_id).toBeTruthy();
     }
-  );
+  });
 
-  it.skipIf(!snapshot)(
-    "comment: every user_id resolves to the original open_id",
-    async () => {
-      const expected = new Map(snapshot!.rows.comment.map((r) => [r.key, r.openId]));
+  it.skipIf(!snapshot)("production_member: row count in factory production preserved", async () => {
+    const { rows } = await getPool().query<{ cnt: number }>(
+      "SELECT COUNT(*)::int AS cnt FROM production_member WHERE production_id = $1",
+      [snapshot!.production.id],
+    );
+    expect(rows[0].cnt).toBe(snapshot!.members.length);
+  });
 
-      const { rows } = await getPool().query<{ id: string; user_id: string }>(
-        "SELECT id, user_id FROM comment"
+  it.skipIf(!snapshot)("production_member: every user_id maps back to original openId", async () => {
+    const { rows } = await getPool().query<{ production_id: string; user_id: string }>(
+      "SELECT production_id, user_id FROM production_member WHERE production_id = $1",
+      [snapshot!.production.id],
+    );
+    const expected = new Set(snapshot!.members.map((m) => m.openId));
+    const mismatches: string[] = [];
+    for (const row of rows) {
+      const resolved = await openIdFor(row.user_id);
+      if (!resolved || !expected.has(resolved)) {
+        mismatches.push(`user_id ${row.user_id} → openId "${resolved}" not in original member set`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it.skipIf(!snapshot)("cue_list: every created_by maps back to original openId", async () => {
+    const mismatches: string[] = [];
+    for (const cl of snapshot!.cueLists) {
+      const { rows } = await getPool().query<{ created_by: string }>(
+        "SELECT created_by FROM cue_list WHERE id = $1",
+        [cl.id],
       );
-      const mismatches: string[] = [];
-      for (const row of rows) {
-        const resolvedOpenId = await openIdFor(row.user_id);
-        const snapshotOpenId = expected.get(row.id);
-        if (resolvedOpenId !== snapshotOpenId) {
-          mismatches.push(
-            `comment id=${row.id}: expected open_id=${snapshotOpenId}, got ${resolvedOpenId}`
-          );
-        }
-      }
-      expect(mismatches).toEqual([]);
-    }
-  );
-
-  it.skipIf(!snapshot)(
-    "JSONB mentions: every userId resolves back to the original openId",
-    async () => {
-      if (!snapshot!.jsonbMentions.length) return; // no mention data, skip
-
-      const mismatches: string[] = [];
-      for (const entry of snapshot!.jsonbMentions) {
-        const { rows } = await getPool().query<{ mentions: Array<{ userId?: string }> }>(
-          `SELECT mentions FROM "${entry.table}" WHERE id = $1`,
-          [entry.rowId]
+      expect(rows, `cue_list ${cl.id} must exist post-migration`).toHaveLength(1);
+      const resolved = await openIdFor(rows[0].created_by);
+      if (resolved !== cl.openId) {
+        mismatches.push(
+          `cue_list ${cl.id}: expected openId "${cl.openId}", got "${resolved}"`,
         );
-        if (!rows[0]) continue;
-        const postUserIds = rows[0].mentions
-          .map((m) => m.userId)
-          .filter((id): id is string => !!id);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
 
-        const resolvedOpenIds = await Promise.all(postUserIds.map(openIdFor));
-        const originalSet = new Set(entry.openIds);
-        for (const resolved of resolvedOpenIds) {
-          if (resolved && !originalSet.has(resolved)) {
-            mismatches.push(
-              `${entry.table} id=${entry.rowId}: resolved open_id=${resolved} not in pre-migration mentions`
-            );
-          }
+  it.skipIf(!snapshot)("production_event: every created_by maps back to original openId", async () => {
+    const mismatches: string[] = [];
+    for (const evt of snapshot!.events) {
+      const { rows } = await getPool().query<{ created_by: string }>(
+        "SELECT created_by FROM production_event WHERE id = $1",
+        [evt.id],
+      );
+      expect(rows, `production_event ${evt.id} must exist post-migration`).toHaveLength(1);
+      const resolved = await openIdFor(rows[0].created_by);
+      if (resolved !== evt.openId) {
+        mismatches.push(
+          `production_event ${evt.id}: expected openId "${evt.openId}", got "${resolved}"`,
+        );
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it.skipIf(!snapshot)("comment: every user_id maps back to original openId", async () => {
+    const mismatches: string[] = [];
+    for (const cmt of snapshot!.comments) {
+      const { rows } = await getPool().query<{ user_id: string }>(
+        "SELECT user_id FROM comment WHERE id = $1",
+        [cmt.id],
+      );
+      expect(rows, `comment ${cmt.id} must exist post-migration`).toHaveLength(1);
+      const resolved = await openIdFor(rows[0].user_id);
+      if (resolved !== cmt.openId) {
+        mismatches.push(
+          `comment ${cmt.id}: expected openId "${cmt.openId}", got "${resolved}"`,
+        );
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it.skipIf(!snapshot)("comment mentions: userId resolves to original openId, no legacy openId key", async () => {
+    const mismatches: string[] = [];
+    for (const cmt of snapshot!.comments) {
+      const { rows } = await getPool().query<{ mentions: Array<Record<string, string>> }>(
+        "SELECT mentions FROM comment WHERE id = $1",
+        [cmt.id],
+      );
+      expect(rows, `comment ${cmt.id} must exist post-migration`).toHaveLength(1);
+      const mentions = rows[0].mentions;
+
+      // No legacy openId keys survive migration.
+      const hasLegacyKey = mentions.some((m) => "openId" in m);
+      if (hasLegacyKey) {
+        mismatches.push(`comment ${cmt.id}: mentions still contain legacy "openId" key`);
+      }
+
+      // Each userId in mentions must resolve to one of the original mentionOpenIds.
+      const expectedSet = new Set(cmt.mentionOpenIds);
+      const resolvedOpenIds = await Promise.all(
+        mentions.filter((m) => m.userId).map((m) => openIdFor(m.userId)),
+      );
+      for (const resolved of resolvedOpenIds) {
+        if (!resolved || !expectedSet.has(resolved)) {
+          mismatches.push(
+            `comment ${cmt.id} mentions: resolved "${resolved}" not in original set [${[...expectedSet].join(", ")}]`,
+          );
         }
       }
-      expect(mismatches).toEqual([]);
+      // The set of resolved openIds must exactly match the original mentionOpenIds.
+      if (new Set(resolvedOpenIds).size !== expectedSet.size) {
+        mismatches.push(
+          `comment ${cmt.id} mentions: count mismatch — got ${resolvedOpenIds.length}, expected ${expectedSet.size}`,
+        );
+      }
     }
-  );
+    expect(mismatches).toEqual([]);
+  });
 });

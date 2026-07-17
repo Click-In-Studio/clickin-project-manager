@@ -1,136 +1,179 @@
 /**
- * Pre-migration snapshot utilities for invariance testing.
+ * Pre-migration factory data for migrate-internal-user-id invariance tests.
  *
- * Captures the state of all open_id FK columns before migrate-internal-user-id.sql
- * runs. After migration, the snapshot lets us verify that every row's new user_id
- * resolves through feishu_user back to the original open_id — the core invariance
- * property that schema/integrity tests alone cannot catch.
+ * createPreMigrationData creates a deterministic set of faker-seeded rows on
+ * the OLD schema (open_id FK references). global-setup.ts calls this before
+ * applying the migration, then writes the returned snapshot to SNAPSHOT_PATH.
+ *
+ * After migration, migration.test.ts reads the snapshot and verifies that
+ * every openId maps faithfully to a userId — the invariance property that
+ * schema and integrity checks cannot catch.
+ *
+ * Pattern for future migrations:
+ *   1. Write a createPreMigrationData() that inserts representative rows on
+ *      the OLD schema and returns a typed snapshot.
+ *   2. Add corresponding invariance tests in the migration test file.
  */
 import os from "os";
 import path from "path";
 import type { Pool } from "pg";
+import type { Faker } from "@faker-js/faker";
 
-/** Path where global-setup writes the snapshot before applying migration. */
-export const SNAPSHOT_PATH = path.join(
-  os.tmpdir(),
-  "migration-invariance-snapshot.json"
-);
+export const SNAPSHOT_PATH = path.join(os.tmpdir(), "migration-invariance-snapshot.json");
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Snapshot types ───────────────────────────────────────────────────────────
 
-/** One (composite-key, open_id) pair sampled from a pre-migration table. */
-export type FkRow = { key: string; openId: string };
-
-export type PreMigrationSnapshot = {
-  /** Row counts for every migrated table — verifies no rows were dropped. */
-  counts: Record<string, number>;
-  /**
-   * Sampled open_id FK rows per table.
-   * After migration: join via user_id → feishu_user.open_id must equal openId.
-   */
-  rows: {
-    productionMember:    FkRow[];  // key = "productionId:openId"
-    cueList:             FkRow[];  // key = id
-    productionEvent:     FkRow[];  // key = id
-    comment:             FkRow[];  // key = id
-    eventReport:         FkRow[];  // key = id
-    eventReportNote:     FkRow[];  // key = id
-    asset:               FkRow[];  // key = id
-    assetMount:          FkRow[];  // key = id
-  };
-  /** JSONB invariance: list of (table, rowId, openIds[]) before migration. */
-  jsonbMentions: Array<{ table: string; rowId: string; openIds: string[] }>;
+export type FactoryUser = {
+  openId: string;
+  name: string;
 };
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+export type FactoryMember = {
+  productionId: string;
+  openId: string;
+};
 
-function asKey(...parts: string[]) { return parts.join(":"); }
+export type FactoryCueList = {
+  id: string;
+  productionId: string;
+  openId: string;
+};
 
-// ─── Capture ──────────────────────────────────────────────────────────────────
+export type FactoryEvent = {
+  id: string;
+  productionId: string;
+  openId: string;
+};
 
-/**
- * Queries pre-migration tables and returns a snapshot.
- * Must be called BEFORE migrate-internal-user-id.sql runs.
- */
-export async function capturePreMigrationSnapshot(pool: Pool): Promise<PreMigrationSnapshot> {
-  // Fetch all rows — real datasets are small enough; this avoids sampling bias.
-  const [pm, cl, pe, co, er, ern, as_, am] = await Promise.all([
-    pool.query<{ production_id: string; open_id: string }>(
-      "SELECT production_id, open_id FROM production_member"
-    ),
-    pool.query<{ id: string; created_by: string }>(
-      "SELECT id, created_by FROM cue_list"
-    ),
-    pool.query<{ id: string; created_by: string }>(
-      "SELECT id, created_by FROM production_event"
-    ),
-    pool.query<{ id: string; open_id: string }>(
-      "SELECT id, open_id FROM comment"
-    ),
-    pool.query<{ id: string; created_by: string }>(
-      "SELECT id, created_by FROM event_report"
-    ),
-    pool.query<{ id: string; author_open_id: string }>(
-      "SELECT id, author_open_id FROM event_report_note"
-    ),
-    pool.query<{ id: string; uploader_open_id: string }>(
-      "SELECT id, uploader_open_id FROM asset"
-    ),
-    pool.query<{ id: string; created_by: string }>(
-      "SELECT id, created_by FROM asset_mount"
-    ),
-  ]);
+export type FactoryComment = {
+  id: string;
+  productionId: string;
+  openId: string;
+  mentionOpenIds: string[];
+};
 
-  // JSONB mentions: tables that have a mentions JSONB column with { openId } objects
-  const mentionTables = ["comment", "event_report", "event_report_note", "event_report_reply"];
-  const jsonbMentions: PreMigrationSnapshot["jsonbMentions"] = [];
-  for (const table of mentionTables) {
-    const { rows } = await pool.query<{ id: string; mentions: Array<{ openId?: string }> }>(`
-      SELECT id, mentions FROM "${table}"
-      WHERE mentions IS NOT NULL AND jsonb_array_length(mentions) > 0
-    `);
-    for (const row of rows) {
-      const openIds = row.mentions
-        .map((m) => m.openId)
-        .filter((id): id is string => !!id);
-      if (openIds.length > 0) {
-        jsonbMentions.push({ table, rowId: row.id, openIds });
-      }
-    }
-  }
+export type PreMigrationSnapshot = {
+  users: FactoryUser[];
+  production: { id: string; name: string };
+  members: FactoryMember[];
+  cueLists: FactoryCueList[];
+  events: FactoryEvent[];
+  comments: FactoryComment[];
+};
 
-  return {
-    counts: {
-      production_member:            pm.rowCount ?? 0,
-      cue_list:                     cl.rowCount ?? 0,
-      production_event:             pe.rowCount ?? 0,
-      comment:                      co.rowCount ?? 0,
-      event_report:                 er.rowCount ?? 0,
-      event_report_note:            ern.rowCount ?? 0,
-      asset:                        as_.rowCount ?? 0,
-      asset_mount:                  am.rowCount ?? 0,
-    },
-    rows: {
-      productionMember: pm.rows.map((r) => ({
-        key: asKey(r.production_id, r.open_id), openId: r.open_id,
-      })),
-      cueList:          cl.rows.map((r) => ({ key: r.id, openId: r.created_by })),
-      productionEvent:  pe.rows.map((r) => ({ key: r.id, openId: r.created_by })),
-      comment:          co.rows.map((r) => ({ key: r.id, openId: r.open_id })),
-      eventReport:      er.rows.map((r) => ({ key: r.id, openId: r.created_by })),
-      eventReportNote:  ern.rows.map((r) => ({ key: r.id, openId: r.author_open_id })),
-      asset:            as_.rows.map((r) => ({ key: r.id, openId: r.uploader_open_id })),
-      assetMount:       am.rows.map((r) => ({ key: r.id, openId: r.created_by })),
-    },
-    jsonbMentions,
-  };
-}
+// ─── Schema check ─────────────────────────────────────────────────────────────
 
-/** Returns true if the DB still has the pre-migration schema (open_id column on production_member). */
+/** Returns true if the DB is still on the pre-migration schema. */
 export async function isPreMigrationSchema(pool: Pool): Promise<boolean> {
   const { rows } = await pool.query(`
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'production_member' AND column_name = 'open_id'
   `);
   return rows.length > 0;
+}
+
+// ─── Pre-migration factory data ───────────────────────────────────────────────
+
+/**
+ * Inserts a faker-seeded set of rows on the OLD schema and returns a snapshot.
+ * Must be called BEFORE the migration SQL runs.
+ *
+ * Creates N users, a production, production_member rows, cue_list rows,
+ * production_event rows, and comment rows with JSONB mentions — one row per
+ * table per user — so every migrated column has a verifiable before/after pair.
+ */
+export async function createPreMigrationData(
+  pool: Pool,
+  faker: Faker,
+): Promise<PreMigrationSnapshot> {
+  const N = 4;
+
+  // ── feishu_user (old schema: no user_id column) ───────────────────────────
+  const users: FactoryUser[] = Array.from({ length: N }, () => ({
+    openId: `inv-${faker.string.alphanumeric(8).toLowerCase()}`,
+    name: faker.person.fullName(),
+  }));
+  for (const u of users) {
+    await pool.query(
+      `INSERT INTO feishu_user (open_id, name, is_super_admin) VALUES ($1, $2, FALSE)`,
+      [u.openId, u.name],
+    );
+  }
+
+  // ── production ────────────────────────────────────────────────────────────
+  const production = {
+    id: `inv-${faker.string.alphanumeric(6).toLowerCase()}`,
+    name: faker.company.name(),
+  };
+  await pool.query(
+    `INSERT INTO production (id, name) VALUES ($1, $2)`,
+    [production.id, production.name],
+  );
+
+  // ── production_member: old schema PK is (production_id, open_id) ─────────
+  const members: FactoryMember[] = users.map((u) => ({
+    productionId: production.id,
+    openId: u.openId,
+  }));
+  for (const m of members) {
+    await pool.query(
+      `INSERT INTO production_member (production_id, open_id) VALUES ($1, $2)`,
+      [m.productionId, m.openId],
+    );
+  }
+
+  // ── cue_list: created_by is TEXT FK → feishu_user.open_id on old schema ──
+  const cueLists: FactoryCueList[] = users.map((u) => ({
+    id: `inv-cl-${faker.string.alphanumeric(6).toLowerCase()}`,
+    productionId: production.id,
+    openId: u.openId,
+  }));
+  for (const cl of cueLists) {
+    await pool.query(
+      `INSERT INTO cue_list (id, production_id, name, created_by) VALUES ($1, $2, $3, $4)`,
+      [cl.id, cl.productionId, faker.lorem.words(3), cl.openId],
+    );
+  }
+
+  // ── production_event: created_by TEXT → feishu_user.open_id on old schema ─
+  const events: FactoryEvent[] = users.map((u) => ({
+    id: `inv-evt-${faker.string.alphanumeric(6).toLowerCase()}`,
+    productionId: production.id,
+    openId: u.openId,
+  }));
+  for (const evt of events) {
+    await pool.query(
+      `INSERT INTO production_event (id, production_id, title, created_by)
+       VALUES ($1, $2, $3, $4)`,
+      [evt.id, evt.productionId, faker.lorem.sentence(), evt.openId],
+    );
+  }
+
+  // ── comment: open_id TEXT; mentions [{ openId }] for JSONB invariance ─────
+  // Each user's comment mentions the next two users (wrapping), giving a
+  // non-trivial JSONB migration path with cross-user references.
+  const comments: FactoryComment[] = users.map((u, i) => ({
+    id: `inv-cmt-${faker.string.alphanumeric(6).toLowerCase()}`,
+    productionId: production.id,
+    openId: u.openId,
+    mentionOpenIds: [users[(i + 1) % N].openId, users[(i + 2) % N].openId],
+  }));
+  for (const cmt of comments) {
+    const mentions = JSON.stringify(cmt.mentionOpenIds.map((id) => ({ openId: id })));
+    await pool.query(
+      `INSERT INTO comment
+         (id, production_id, context_type, context_id, open_id, author_name, body, mentions)
+       VALUES ($1, $2, 'block', 'inv-ctx', $3, $4, $5, $6)`,
+      [
+        cmt.id,
+        cmt.productionId,
+        cmt.openId,
+        users.find((u) => u.openId === cmt.openId)!.name,
+        faker.lorem.sentence(),
+        mentions,
+      ],
+    );
+  }
+
+  return { users, production, members, cueLists, events, comments };
 }
