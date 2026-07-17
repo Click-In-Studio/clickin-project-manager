@@ -368,7 +368,9 @@ ALTER TABLE asset_mount RENAME COLUMN created_by_uid TO created_by;
 -- Tables: comment, event_report, event_report_note, event_report_reply
 -- For each element in the JSONB array that has an openId field, replace the
 -- openId key+value with userId (UUID) using the feishu_user bridge table.
--- Elements whose openId cannot be resolved are kept as-is (no data loss).
+-- Lookup order: exact open_id match first; if the stored value is a display
+-- name (data quality bug), fall back to a unique name match. Elements that
+-- cannot be resolved via either path are kept as-is.
 
 UPDATE comment c
 SET mentions = (
@@ -384,7 +386,15 @@ SET mentions = (
     '[]'::jsonb
   )
   FROM jsonb_array_elements(c.mentions) WITH ORDINALITY AS t(elem, ord)
-  LEFT JOIN feishu_user fu ON fu.open_id = t.elem->>'openId'
+  LEFT JOIN LATERAL (
+    SELECT user_id FROM feishu_user WHERE open_id = t.elem->>'openId'
+    UNION ALL
+    SELECT user_id FROM feishu_user
+    WHERE name = t.elem->>'openId'
+      AND NOT EXISTS (SELECT 1 FROM feishu_user WHERE open_id = t.elem->>'openId')
+      AND 1 = (SELECT COUNT(*) FROM feishu_user WHERE name = t.elem->>'openId')
+    LIMIT 1
+  ) fu ON TRUE
 )
 WHERE jsonb_array_length(c.mentions) > 0;
 
@@ -402,7 +412,15 @@ SET mentions = (
     '[]'::jsonb
   )
   FROM jsonb_array_elements(r.mentions) WITH ORDINALITY AS t(elem, ord)
-  LEFT JOIN feishu_user fu ON fu.open_id = t.elem->>'openId'
+  LEFT JOIN LATERAL (
+    SELECT user_id FROM feishu_user WHERE open_id = t.elem->>'openId'
+    UNION ALL
+    SELECT user_id FROM feishu_user
+    WHERE name = t.elem->>'openId'
+      AND NOT EXISTS (SELECT 1 FROM feishu_user WHERE open_id = t.elem->>'openId')
+      AND 1 = (SELECT COUNT(*) FROM feishu_user WHERE name = t.elem->>'openId')
+    LIMIT 1
+  ) fu ON TRUE
 )
 WHERE jsonb_array_length(r.mentions) > 0;
 
@@ -420,7 +438,15 @@ SET mentions = (
     '[]'::jsonb
   )
   FROM jsonb_array_elements(n.mentions) WITH ORDINALITY AS t(elem, ord)
-  LEFT JOIN feishu_user fu ON fu.open_id = t.elem->>'openId'
+  LEFT JOIN LATERAL (
+    SELECT user_id FROM feishu_user WHERE open_id = t.elem->>'openId'
+    UNION ALL
+    SELECT user_id FROM feishu_user
+    WHERE name = t.elem->>'openId'
+      AND NOT EXISTS (SELECT 1 FROM feishu_user WHERE open_id = t.elem->>'openId')
+      AND 1 = (SELECT COUNT(*) FROM feishu_user WHERE name = t.elem->>'openId')
+    LIMIT 1
+  ) fu ON TRUE
 )
 WHERE jsonb_array_length(n.mentions) > 0;
 
@@ -438,7 +464,15 @@ SET mentions = (
     '[]'::jsonb
   )
   FROM jsonb_array_elements(rp.mentions) WITH ORDINALITY AS t(elem, ord)
-  LEFT JOIN feishu_user fu ON fu.open_id = t.elem->>'openId'
+  LEFT JOIN LATERAL (
+    SELECT user_id FROM feishu_user WHERE open_id = t.elem->>'openId'
+    UNION ALL
+    SELECT user_id FROM feishu_user
+    WHERE name = t.elem->>'openId'
+      AND NOT EXISTS (SELECT 1 FROM feishu_user WHERE open_id = t.elem->>'openId')
+      AND 1 = (SELECT COUNT(*) FROM feishu_user WHERE name = t.elem->>'openId')
+    LIMIT 1
+  ) fu ON TRUE
 )
 WHERE jsonb_array_length(rp.mentions) > 0;
 
