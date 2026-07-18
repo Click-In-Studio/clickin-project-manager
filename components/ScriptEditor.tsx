@@ -35,6 +35,7 @@ import { formatDuration, parseDuration } from "@/lib/duration";
 import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
+import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -1708,12 +1709,12 @@ function ScriptMarkerRow({
   isScriptDragging: boolean;
   dragTarget?: DragTarget | null;
   onRemove: () => void;
-  onRequestDelete: () => void;
+  onRequestDelete: () => boolean;
   onDragStart: (e: DragEvent<HTMLButtonElement>) => void;
   onDragEnd: () => void;
   onDragOver: (e: DragEvent<HTMLDivElement>) => void;
   onDrop: (e: DragEvent<HTMLDivElement>) => void;
-  onSelect: () => void;
+  onSelect: (e: React.MouseEvent<HTMLElement>) => void;
   canAddChapterScene: boolean;
   canAddRehearsal: boolean;
   onAddChapterBefore: () => void;
@@ -1793,7 +1794,7 @@ function ScriptMarkerRow({
     e.preventDefault();
     e.stopPropagation();
     if (isScriptDragging) return;
-    onRequestDelete();
+    if (!onRequestDelete()) return;
     setConfirmDelete(true);
     onDeleteConfirmChange?.(true);
   };
@@ -1833,13 +1834,14 @@ function ScriptMarkerRow({
     <div
       id={`marker-${node.id}`}
       data-script-marker={node.id}
+      data-script-marker-selectable={!isRehearsal ? "true" : undefined}
       title={title}
       onClick={(e) => {
         if (isScriptDragging) return;
         if (isRehearsal) return;
         if (!canEdit) return;
         if ((e.target as HTMLElement | null)?.closest("[data-script-marker-title='true']")) return;
-        onSelect();
+        onSelect(e);
       }}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -1907,7 +1909,10 @@ function ScriptMarkerRow({
                 if (e.shiftKey) e.preventDefault();
                 e.stopPropagation();
               }}
-              onClick={onSelect}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(e);
+              }}
               style={{ left: MARKER_CONTROL_BAR_LEFT_PX }}
               className={`absolute top-1/2 h-[max(1.25rem,calc(100%-0.25rem))] w-4 -translate-y-1/2 select-none rounded opacity-0 outline-none transition-all focus:outline-none focus-visible:outline-none group-hover/marker:opacity-100 ${
                 isReorderLocked
@@ -1955,7 +1960,7 @@ function ScriptMarkerRow({
               e.stopPropagation();
               if (isScriptDragging) return;
               if (!canEdit) return;
-              onSelect();
+              onSelect(e);
             }}
             className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${confirmDelete ? "transition-none" : "transition-all"} ${
               isDeleteHighlighted
@@ -4923,6 +4928,7 @@ function ScriptBlock({
   onToggleType,
   onToggleLyric,
   onRequestLargeSelectionOperation,
+  onCanStartSelectionAction,
   onArrowUpFromChar,
   onArrowDownFromChar,
   onArrowUpFromTextarea,
@@ -5001,6 +5007,7 @@ function ScriptBlock({
   onToggleType: () => void;
   onToggleLyric: () => void;
   onRequestLargeSelectionOperation: (operation: LargeSelectionOperation, count: number, onConfirm: () => void) => void;
+  onCanStartSelectionAction: () => boolean;
   onArrowUpFromChar: () => void;
   onArrowDownFromChar: () => void;
   onArrowUpFromTextarea: () => void;
@@ -5575,6 +5582,7 @@ function ScriptBlock({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (isScriptDragging) return;
+                  if (!onCanStartSelectionAction()) return;
                   onDeleteFocus();
                   if (canDeleteWithoutConfirmation) {
                     onRequestLargeSelectionOperation("delete", selectedCount, onDelete);
@@ -6448,7 +6456,9 @@ export default function ScriptEditor({
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
   const selectionAnchorBlockIdRef = useRef<string | null>(null);
-  const rangeSelectionActiveRef = useRef(false);
+  const selectionDetachedRef = useRef(false);
+  const markerEndedScopeIdsRef = useRef<Set<string>>(new Set());
+  const [invalidSelectionEndIds, setInvalidSelectionEndIds] = useState<Set<string>>(() => new Set());
   const [shiftKeyDown, setShiftKeyDown] = useState(false);
   const [recentlyMovedBlockIds, setRecentlyMovedBlockIds] = useState<Set<string>>(() => new Set());
   const [tocHighlightedMarkerIds, setTocHighlightedMarkerIds] = useState<Set<string>>(() => new Set());
@@ -7070,7 +7080,8 @@ export default function ScriptEditor({
 
   const resetScriptInteractions = useCallback(() => {
     selectionAnchorBlockIdRef.current = null;
-    rangeSelectionActiveRef.current = false;
+    selectionDetachedRef.current = false;
+    markerEndedScopeIdsRef.current = new Set();
     pendingFocus.current = null;
     pendingCharOpen.current = null;
     draggingBlockId.current = null;
@@ -7079,6 +7090,7 @@ export default function ScriptEditor({
     dragInvalidReasonRef.current = null;
     dropHandledRef.current = false;
     setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmationRequest(null);
     setMarkerDetailDeleteConfirmBlockId(null);
@@ -7152,6 +7164,34 @@ export default function ScriptEditor({
       setSelectionChangeNotice("");
     }, 1800);
   }, []);
+
+  const commitBlockSelection = useCallback((next: SelectionState) => {
+    markerEndedScopeIdsRef.current = next.markerEndIds;
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    setSelectedBlockIds(next.selectedIds);
+    if (next.selectedIds.size === 0) {
+      selectionAnchorBlockIdRef.current = null;
+      selectionDetachedRef.current = false;
+    }
+  }, []);
+
+  const clearBlockSelection = useCallback(() => {
+    markerEndedScopeIdsRef.current = new Set();
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    selectionAnchorBlockIdRef.current = null;
+    selectionDetachedRef.current = false;
+  }, []);
+
+  const canPerformSelectedBlockAction = useCallback((ids: string[]) => {
+    if (ids.length <= 1 || markerEndedScopeIdsRef.current.size === 0) {
+      setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+      return true;
+    }
+    setInvalidSelectionEndIds(new Set(markerEndedScopeIdsRef.current));
+    showSelectionChangeNotice("每个选中范围的最后一行必须是剧本行。");
+    return false;
+  }, [showSelectionChangeNotice]);
 
   const requestLargeSelectionOperation = useCallback((
     operation: LargeSelectionOperation,
@@ -9015,7 +9055,6 @@ export default function ScriptEditor({
     });
     applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
     glowAndFocusBlocks(ids);
-    rangeSelectionActiveRef.current = false;
   }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
@@ -9030,7 +9069,6 @@ export default function ScriptEditor({
         : b
     ));
     glowAndFocusBlocks(ids);
-    rangeSelectionActiveRef.current = false;
   }, [glowAndFocusBlocks, markBlockIdsPageMapDirty, saveSnapshot, isLockedMode]);
 
   // Apply pending focus on every render until resolved
@@ -9167,7 +9205,9 @@ export default function ScriptEditor({
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
     void persistMarkerState(next);
     selectionAnchorBlockIdRef.current = blockId;
-    rangeSelectionActiveRef.current = false;
+    selectionDetachedRef.current = false;
+    markerEndedScopeIdsRef.current = new Set([blockId]);
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
     setSelectedBlockIds(new Set([blockId]));
   }, [canEditMetadata, characters, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
 
@@ -9331,9 +9371,11 @@ export default function ScriptEditor({
       for (const id of deleteIds) next.delete(id);
       return next;
     });
+    markerEndedScopeIdsRef.current = new Set();
+    selectionDetachedRef.current = false;
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
     if (selectionAnchorBlockIdRef.current && deleteIds.has(selectionAnchorBlockIdRef.current)) {
       selectionAnchorBlockIdRef.current = null;
-      rangeSelectionActiveRef.current = false;
     }
   }, [markBlockStructureDirty, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, syncOpeningChapterMarkerId, isLockedMode]);
 
@@ -9543,6 +9585,7 @@ export default function ScriptEditor({
     if (isLockedMode) return false;
     const selectedIds = selectedBlockIdsArray;
     if (selectedIds.length === 0) return false;
+    if (!canPerformSelectedBlockAction(selectedIds)) return true;
     const selectedBlocks = selectedIds
       .map((id) => {
         const index = blockIndexByIdRef.current.get(id);
@@ -9564,15 +9607,13 @@ export default function ScriptEditor({
     }));
     setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
-  }, [blocks, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, selectedBlockIdsArray, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, windowRange.end, windowRange.start, isLockedMode]);
+  }, [blocks, canPerformSelectedBlockAction, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, selectedBlockIdsArray, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, windowRange.end, windowRange.start, isLockedMode]);
 
   const requestMarkerDelete = useCallback((id: string) => {
-    if (isLockedMode) return;
+    if (isLockedMode) return false;
     const ids = selectedBlockIds.has(id) ? selectedBlockIdsArray : [id];
     if (!selectedBlockIds.has(id) && selectedBlockIds.size > 0) {
-      selectionAnchorBlockIdRef.current = null;
-      rangeSelectionActiveRef.current = false;
-      setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+      clearBlockSelection();
     }
     if (ids.length === 1) {
       const plan = planMarkerDeletion({
@@ -9582,10 +9623,12 @@ export default function ScriptEditor({
         config: scriptConfigRef.current,
       }, id, sceneDetails);
       setDeleteConfirmingBlockIds(new Set(plan.status === "blocked" ? [id] : plan.previewBlockIds));
-      return;
+      return true;
     }
+    if (!canPerformSelectedBlockAction(ids)) return false;
     setDeleteConfirmingBlockIds(new Set(ids));
-  }, [isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
+    return true;
+  }, [canPerformSelectedBlockAction, clearBlockSelection, isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -9606,25 +9649,23 @@ export default function ScriptEditor({
       if (target.closest("[data-script-scene-detail='true']")) return;
       if (target.closest("[data-script-confirmation='true']")) return;
       const isSelectionBarClick = !!target.closest("[data-script-block-bar='true'], [data-script-marker-bar='true']");
-      if (isSelectionBarClick || target.closest("[data-script-selection-action='true']")) {
+      const isMarkerViewClick = !!target.closest("[data-script-marker-selectable='true']") &&
+        !target.closest("[data-script-marker-title='true'], button, input, textarea, [contenteditable='true']");
+      if (isSelectionBarClick || isMarkerViewClick || target.closest("[data-script-selection-action='true']")) {
         if (isSelectionBarClick && hasDeleteConfirmationOpen) {
-          selectionAnchorBlockIdRef.current = null;
-          rangeSelectionActiveRef.current = false;
-          setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+          clearBlockSelection();
         }
         dismissBlockConfirmations();
         return;
       }
       if (selectedBlockIds.size > 0) {
-        selectionAnchorBlockIdRef.current = null;
-        rangeSelectionActiveRef.current = false;
-        setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+        clearBlockSelection();
       }
       dismissBlockConfirmations();
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, [deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDetailDeleteConfirmBlockId, selectedBlockIds.size]);
+  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDetailDeleteConfirmBlockId, selectedBlockIds.size]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -9642,6 +9683,9 @@ export default function ScriptEditor({
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Shift") setShiftKeyDown(true);
+      if (e.key === "Shift" || e.key === "Control" || e.key === "Meta") {
+        selectionDetachedRef.current = true;
+      }
     };
     const handleKeyUp = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Shift") setShiftKeyDown(false);
@@ -9733,8 +9777,14 @@ export default function ScriptEditor({
       }
       glowChangedBlocks(movedNonRehearsalIds);
       movedRehearsalMarkerIds.forEach(glowTocMarker);
+      const movedEndBlockId = movedBlockIds[movedBlockIds.length - 1];
+      const movedEndBlock = normalizedNext.find((block) => block.id === movedEndBlockId);
       selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
-      rangeSelectionActiveRef.current = false;
+      selectionDetachedRef.current = false;
+      markerEndedScopeIdsRef.current = movedEndBlock && isMarkerBlock(movedEndBlock)
+        ? new Set([movedEndBlock.id])
+        : new Set();
+      setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
       setSelectedBlockIds(new Set(movedBlockIds));
       if (movingHasMarker) {
         showSelectionChangeNotice("章节标记/段落标记/排练记号已更新。");
@@ -11210,7 +11260,7 @@ export default function ScriptEditor({
                     node={markerNode}
                     canEdit={block.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata}
                     isSelected={selectedBlockIds.has(block.id)}
-                    isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id)}
+                    isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id) || invalidSelectionEndIds.has(block.id)}
                     isReorderLocked={isReorderLocked}
                     isScriptDragging={isScriptDragging}
                     dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
@@ -11233,10 +11283,44 @@ export default function ScriptEditor({
                       dismissBlockConfirmations();
                     }}
                     dismissToken={dismissActionToken}
-                    onSelect={() => {
+                    onSelect={(e) => {
+                      if (isReorderLockedRef.current) return;
+                      const isAdditiveSelection = e.ctrlKey || e.metaKey;
+                      if (e.shiftKey && selectedBlockIds.size > 0) {
+                        clearBlockSelection();
+                        return;
+                      }
+                      if (isAdditiveSelection) {
+                        selectionDetachedRef.current = true;
+                        const next = toggleSelectionItem(blocks, {
+                          selectedIds: selectedBlockIds,
+                          markerEndIds: markerEndedScopeIdsRef.current,
+                        }, bIdx, isMarkerBlock);
+                        selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
+                          ? block.id
+                          : next.selectedIds.values().next().value ?? null;
+                        commitBlockSelection(next);
+                        return;
+                      }
+                      if (selectedBlockIds.has(block.id)) {
+                        const next = toggleSelectionItem(blocks, {
+                          selectedIds: selectedBlockIds,
+                          markerEndIds: markerEndedScopeIdsRef.current,
+                        }, bIdx, isMarkerBlock);
+                        selectionAnchorBlockIdRef.current = next.selectedIds.values().next().value ?? null;
+                        commitBlockSelection(next);
+                        return;
+                      }
                       selectionAnchorBlockIdRef.current = block.id;
-                      rangeSelectionActiveRef.current = false;
-                      setSelectedBlockIds(new Set([block.id]));
+                      if (selectionDetachedRef.current) {
+                        commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
+                        return;
+                      }
+                      commitBlockSelection(toggleSelectionItem(blocks, {
+                        selectedIds: selectedBlockIds,
+                        markerEndIds: markerEndedScopeIdsRef.current,
+                      }, bIdx, isMarkerBlock));
+                      selectionDetachedRef.current = true;
                     }}
                     onSceneNameChange={updateScene}
                     onDragStart={(e) => {
@@ -11246,11 +11330,13 @@ export default function ScriptEditor({
                       }
                       const isDraggingSelection = selectedBlockIds.has(block.id);
                       const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
+                      if (isDraggingSelection && !canPerformSelectedBlockAction(ids)) {
+                        e.preventDefault();
+                        return;
+                      }
                       dismissBlockConfirmations();
                       if (!isDraggingSelection && selectedBlockIds.size > 0) {
-                        selectionAnchorBlockIdRef.current = null;
-                        rangeSelectionActiveRef.current = false;
-                        setSelectedBlockIds(new Set());
+                        clearBlockSelection();
                       }
                       clearEditorFocusForDrag();
                       setScriptDragging(true);
@@ -11265,8 +11351,7 @@ export default function ScriptEditor({
                       dragInvalidReasonRef.current = null;
                       if (!isDraggingSelection) {
                         selectionAnchorBlockIdRef.current = block.id;
-                        rangeSelectionActiveRef.current = false;
-                        setSelectedBlockIds(new Set([block.id]));
+                        commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
                       }
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", ids.join(","));
@@ -11473,8 +11558,10 @@ export default function ScriptEditor({
                   onFocus={() => markBlockFocused(block.id)}
                   onDeleteFocus={() => focusBlockContent(block.id, false)}
                   onRequestLargeSelectionOperation={requestLargeSelectionOperation}
+                  onCanStartSelectionAction={() => canPerformSelectedBlockAction(selectedDeleteIds)}
                   onToggleType={() => {
                     if (isSelected && selectedDeleteIds.length > 1) {
+                      if (!canPerformSelectedBlockAction(selectedDeleteIds)) return;
                       setBlocksType(selectedDeleteIds, block.type === "stage" ? "dialogue" : "stage");
                     } else {
                       toggleBlockType(block.id);
@@ -11482,6 +11569,7 @@ export default function ScriptEditor({
                   }}
                   onToggleLyric={() => {
                     if (isSelected && selectedDeleteIds.length > 1) {
+                      if (!canPerformSelectedBlockAction(selectedDeleteIds)) return;
                       setBlocksLyric(selectedDeleteIds, !block.lyric);
                     } else {
                       toggleBlockLyric(block.id);
@@ -11503,52 +11591,47 @@ export default function ScriptEditor({
                     const isAdditiveSelection = e.ctrlKey || e.metaKey;
                     if (e.shiftKey) {
                       const anchorId = selectionAnchorBlockIdRef.current;
-                      const anchorIdx = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
+                      const anchorIdx = anchorId ? blockIndexByIdRef.current.get(anchorId) ?? -1 : -1;
                       const start = anchorIdx === -1 ? bIdx : Math.min(anchorIdx, bIdx);
                       const end = anchorIdx === -1 ? bIdx : Math.max(anchorIdx, bIdx);
-                      const rangeIds = blocks.slice(start, end + 1).map((b) => b.id);
                       if (anchorIdx === -1) selectionAnchorBlockIdRef.current = block.id;
-                      rangeSelectionActiveRef.current = true;
+                      selectionDetachedRef.current = true;
                       if (isAdditiveSelection) {
-                        setSelectedBlockIds((current) => {
-                          const next = new Set(current);
-                          for (const id of rangeIds) next.add(id);
-                          return next;
-                        });
+                        commitBlockSelection(addSelectionRange(blocks, {
+                          selectedIds: selectedBlockIds,
+                          markerEndIds: markerEndedScopeIdsRef.current,
+                        }, start, end, isMarkerBlock));
                       } else {
-                        setSelectedBlockIds(new Set(rangeIds));
+                        commitBlockSelection(replaceSelectionRange(blocks, start, end, isMarkerBlock));
                       }
                       return;
                     }
                     if (isAdditiveSelection) {
-                      selectionAnchorBlockIdRef.current = block.id;
-                      setSelectedBlockIds((current) => {
-                        if (current.has(block.id)) return current;
-                        const next = new Set(current);
-                        next.add(block.id);
-                        return next;
-                      });
+                      selectionDetachedRef.current = true;
+                      const next = toggleSelectionItem(blocks, {
+                        selectedIds: selectedBlockIds,
+                        markerEndIds: markerEndedScopeIdsRef.current,
+                      }, bIdx, isMarkerBlock);
+                      selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
+                        ? block.id
+                        : next.selectedIds.values().next().value ?? null;
+                      commitBlockSelection(next);
                       return;
                     }
-                    if (rangeSelectionActiveRef.current) {
-                      rangeSelectionActiveRef.current = false;
+                    if (!selectedBlockIds.has(block.id) && selectionDetachedRef.current) {
                       selectionAnchorBlockIdRef.current = block.id;
-                      setSelectedBlockIds(new Set([block.id]));
-                    } else {
-                      setSelectedBlockIds((current) => {
-                        const next = new Set(current);
-                        if (next.has(block.id)) {
-                          next.delete(block.id);
-                          if (selectionAnchorBlockIdRef.current === block.id) {
-                            selectionAnchorBlockIdRef.current = next.values().next().value ?? null;
-                          }
-                        } else {
-                          next.add(block.id);
-                          selectionAnchorBlockIdRef.current = block.id;
-                        }
-                        return next;
-                      });
+                      commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
+                      selectionDetachedRef.current = false;
+                      return;
                     }
+                    const next = toggleSelectionItem(blocks, {
+                      selectedIds: selectedBlockIds,
+                      markerEndIds: markerEndedScopeIdsRef.current,
+                    }, bIdx, isMarkerBlock);
+                    selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
+                      ? block.id
+                      : next.selectedIds.values().next().value ?? null;
+                    commitBlockSelection(next);
                   }}
                   onDeleteConfirmationChange={(active) => {
                     setDeleteConfirmingBlockIds((current) => {
@@ -11563,12 +11646,13 @@ export default function ScriptEditor({
                     }
                     const isDraggingSelection = selectedBlockIds.has(block.id);
                     const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
+                    if (isDraggingSelection && !canPerformSelectedBlockAction(ids)) {
+                      e.preventDefault();
+                      return;
+                    }
                     dismissBlockConfirmations();
                     if (!isDraggingSelection && selectedBlockIds.size > 0) {
-                      const emptySelection = new Set<string>();
-                      selectionAnchorBlockIdRef.current = null;
-                      rangeSelectionActiveRef.current = false;
-                      setSelectedBlockIds(emptySelection);
+                      clearBlockSelection();
                     }
                     clearEditorFocusForDrag();
                     setScriptDragging(true);
@@ -11945,9 +12029,7 @@ export default function ScriptEditor({
         });
         const cancelNonEmptyMarkerSelectionDelete = () => {
           setPendingNonEmptyMarkerSelectionDeleteIds(null);
-          selectionAnchorBlockIdRef.current = null;
-          rangeSelectionActiveRef.current = false;
-          setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+          clearBlockSelection();
           dismissBlockConfirmations();
         };
         return (
@@ -11983,7 +12065,10 @@ export default function ScriptEditor({
                   onClick={() => {
                     const ids = scriptBlockDeleteIds;
                     setPendingNonEmptyMarkerSelectionDeleteIds(null);
-                    if (ids.length > 0) deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
+                    if (ids.length > 0) {
+                      deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
+                      clearBlockSelection();
+                    }
                   }}
                   className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-300 hover:text-zinc-800"
                 >
