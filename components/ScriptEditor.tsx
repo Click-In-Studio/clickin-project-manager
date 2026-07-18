@@ -7792,7 +7792,10 @@ export default function ScriptEditor({
         if (el.getBoundingClientRect().top <= 0) savedId = el.dataset.bwrap ?? null;
         else break;
       }
-      if (savedId) document.cookie = `script_pos_${productionId}=${encodeURIComponent(savedId)}; path=/; max-age=31536000; SameSite=Lax`;
+      if (savedId) {
+        const idx = blockIndexByIdRef.current.get(savedId) ?? 0;
+        document.cookie = `script_pos_${productionId}=${encodeURIComponent(`${savedId}:${idx}`)}; path=/; max-age=31536000; SameSite=Lax`;
+      }
     };
   });
 
@@ -8458,10 +8461,19 @@ export default function ScriptEditor({
     // Restore last scroll position from cookie
     if (productionId) {
       const cookieKey = `script_pos_${productionId}`;
-      const savedId = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith(cookieKey + "="))?.slice(cookieKey.length + 1);
-      if (savedId) {
-        const idx = blocksRef.current.findIndex(b => b.id === decodeURIComponent(savedId));
-        if (idx >= 0) scrollToBlockIdx(idx, "start");
+      const raw = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith(cookieKey + "="))?.slice(cookieKey.length + 1);
+      if (raw) {
+        const decoded = decodeURIComponent(raw);
+        const colonAt = decoded.lastIndexOf(":");
+        const blockId = colonAt > 0 ? decoded.slice(0, colonAt) : decoded;
+        const savedIndex = colonAt > 0 ? parseInt(decoded.slice(colonAt + 1), 10) : NaN;
+        const bl = blocksRef.current;
+        const idx = bl.findIndex(b => b.id === blockId);
+        if (idx >= 0) {
+          scrollToBlockIdx(idx, "start");
+        } else if (!isNaN(savedIndex) && bl.length > 0) {
+          scrollToBlockIdx(Math.min(savedIndex, bl.length - 1), "start");
+        }
       }
     }
     return () => clearTimeout(unlockTimer);
