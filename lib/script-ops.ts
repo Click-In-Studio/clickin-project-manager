@@ -10,7 +10,7 @@ export type BlockOp =
   | { op: "insert"; block: Block; afterId: string | null; tags?: TagEntry[] }
   | { op: "update"; block: Block; tags?: TagEntry[] }
   | { op: "delete"; id: string }
-  | { op: "reorder"; ids: string[] }; // full ordered id list of retained blocks
+  | { op: "reorder"; ids: string[]; movedIds?: string[] }; // full order plus the blocks actually moved
 
 export type CharOp =
   | { op: "upsert"; char: Character }

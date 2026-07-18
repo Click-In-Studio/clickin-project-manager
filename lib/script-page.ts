@@ -104,29 +104,41 @@ function charNameHidden(block: Block, prev: Block | null): boolean {
   return sameCharacters(prev.characterIds, block.characterIds);
 }
 
-function estimateBlockHeight(block: Block, prev: Block | null, upl: number, forceCharName = false): number {
+type PaginationHeightFeature = {
+  normalHeight: number;
+  forcedHeight: number;
+  startsScene: boolean;
+};
+
+function paginationHeightFeature(block: Block, prev: Block | null, upl: number): PaginationHeightFeature {
   const text = stripHtml(block.content);
   const stageComment = (block.stageComment ?? "").trim();
   const stageCommentText = block.type === "dialogue" && block.characterIds.length > 0 && stageComment
     ? stageComment.split(/\r\n|\r|\n/).map(line => `（${line}）`).join("\n")
     : "";
   const lines = estimateLines(stageCommentText ? `${stageCommentText}\n${text}` : text, upl);
-  const hideCharName = !forceCharName && charNameHidden(block, prev);
-  const charNameH =
-    block.type === "dialogue" && block.characterIds.length > 0 && (forceCharName || !hideCharName)
-      ? CHAR_NAME_HEIGHT : 0;
-  const wrapperPaddingH = block.type === "stage" || hideCharName ? 0 : 8; // 8px = py-1 wrapper
-  return charNameH + lines * LINE_HEIGHT + wrapperPaddingH;
+  const hasCharacterName = block.type === "dialogue" && block.characterIds.length > 0;
+  const hideCharName = charNameHidden(block, prev);
+  const normalPadding = block.type === "stage" || hideCharName ? 0 : 8; // 8px = py-1 wrapper
+  const forcedPadding = block.type === "stage" ? 0 : 8;
+  return {
+    normalHeight: lines * LINE_HEIGHT + normalPadding + (hasCharacterName && !hideCharName ? CHAR_NAME_HEIGHT : 0),
+    forcedHeight: lines * LINE_HEIGHT + forcedPadding + (hasCharacterName ? CHAR_NAME_HEIGHT : 0),
+    startsScene: !!block.sceneId && block.sceneId !== prev?.sceneId,
+  };
 }
 
 type TextBlockEntry = {
   block: Block;
+  previousBlock: Block | null;
   sourceIndex: number;
 };
 
 type EstimatedPageMapCacheEntry = {
+  block: Block;
   blockId: string;
-  sourceIndex: number;
+  previousBlock: Block | null;
+  heightFeature: PaginationHeightFeature;
   page: number;
   usedAfter: number;
 };
@@ -146,16 +158,30 @@ function textBlockEntries(
   const ownedBlocks = blocksHaveMarkerOwnership ? blocks : withMarkerOwnership(blocks);
   const projectedBlocks = withLegacyOwnershipProjection(ownedBlocks);
   const entries: TextBlockEntry[] = [];
+  let previousTextBlock: Block | null = null;
   for (let i = 0; i < projectedBlocks.length; i++) {
     if (!isMarkerBlock(projectedBlocks[i])) {
-      entries.push({ block: projectedBlocks[i], sourceIndex: i });
+      const block = projectedBlocks[i];
+      entries.push({
+        block,
+        previousBlock: previousTextBlock,
+        sourceIndex: i,
+      });
+      previousTextBlock = block;
     }
   }
   return entries;
 }
 
+function samePaginationHeightFeature(a: PaginationHeightFeature, b: PaginationHeightFeature): boolean {
+  return a.normalHeight === b.normalHeight &&
+    a.forcedHeight === b.forcedHeight &&
+    a.startsScene === b.startsScene;
+}
+
 function normalizeDirtyRanges(dirty: MarkerOwnershipDirty, length: number): MarkerOwnershipRange[] | null {
-  if (!dirty || dirty === "full") return null;
+  if (dirty === "full") return null;
+  if (!dirty) return [];
   const ranges = Array.isArray(dirty) ? dirty : [dirty];
   const normalized = ranges
     .map((range) => ({
@@ -165,22 +191,24 @@ function normalizeDirtyRanges(dirty: MarkerOwnershipDirty, length: number): Mark
     }))
     .filter((range) => range.start < range.end)
     .sort((a, b) => a.start - b.start);
-  return normalized.length > 0 ? normalized : [];
+  const merged: MarkerOwnershipRange[] = [];
+  for (const range of normalized) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start < previous.end) previous.end = Math.max(previous.end, range.end);
+    else merged.push({ ...range });
+  }
+  return merged;
 }
 
-function firstDirtyTextIndex(entries: TextBlockEntry[], ranges: MarkerOwnershipRange[]): number {
-  let first = entries.length;
-  for (const range of ranges) {
-    let lo = 0;
-    let hi = entries.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (entries[mid].sourceIndex < range.start) lo = mid + 1;
-      else hi = mid;
-    }
-    if (lo < entries.length) first = Math.min(first, lo);
+function firstEntryAtOrAfter(entries: Array<Pick<TextBlockEntry, "sourceIndex">>, sourceIndex: number): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (entries[mid].sourceIndex < sourceIndex) low = mid + 1;
+    else high = mid;
   }
-  return first;
+  return low;
 }
 
 /**
@@ -209,7 +237,8 @@ export function computePageMap(
     const block = textBlocks[i];
     const prev = prevTextBlock;
 
-    if (block.sceneId && block.sceneId !== prev?.sceneId) {
+    const feature = paginationHeightFeature(block, prev, upl);
+    if (feature.startsScene) {
       if (used > 0 && used + SCENE_HEADER_HEIGHT > maxH) {
         page++;
         used = 0;
@@ -218,12 +247,12 @@ export function computePageMap(
       used += SCENE_HEADER_HEIGHT;
     }
 
-    let height = estimateBlockHeight(block, prev, upl, !hasBlockOnPage);
+    let height = hasBlockOnPage ? feature.normalHeight : feature.forcedHeight;
     if (used > 0 && used + height > maxH) {
       page++;
       used = 0;
       hasBlockOnPage = false;
-      height = estimateBlockHeight(block, prev, upl, true);
+      height = feature.forcedHeight;
     }
 
     pageMap[block.id] = page;
@@ -257,14 +286,54 @@ export function updateEstimatedPageMap(
 
   let startTextIndex = 0;
   if (canReuse) {
-    const dirtyTextIndex = firstDirtyTextIndex(entries, ranges);
-    startTextIndex = dirtyTextIndex === entries.length ? entries.length : Math.max(0, dirtyTextIndex - 1);
+    let firstFeatureChange = entries.length;
+    const compareCandidate = (index: number): boolean => {
+      const current = entries[index];
+      const cached = previous.entries[index];
+      if (!current && !cached) return false;
+      if (!current || !cached || cached.blockId !== current.block.id) {
+        firstFeatureChange = Math.min(firstFeatureChange, index);
+        return true;
+      }
+      if (
+        cached.block !== current.block ||
+        cached.previousBlock !== current.previousBlock
+      ) {
+        const feature = paginationHeightFeature(current.block, current.previousBlock, upl);
+        if (!samePaginationHeightFeature(cached.heightFeature, feature)) {
+          firstFeatureChange = Math.min(firstFeatureChange, index);
+          return true;
+        }
+      }
+      return false;
+    };
+    if (ranges.length === 0) {
+      const length = Math.max(entries.length, previous.entries.length);
+      for (let index = 0; index < length; index++) {
+        if (compareCandidate(index)) break;
+      }
+    } else {
+      const candidates = new Set<number>();
+      for (const range of ranges) {
+        const start = firstEntryAtOrAfter(entries, range.start);
+        const end = firstEntryAtOrAfter(entries, range.end);
+        for (let index = start; index <= end; index++) candidates.add(index);
+      }
+      for (const current of candidates) {
+        compareCandidate(current);
+      }
+    }
+    if (firstFeatureChange === entries.length && entries.length === previous.entries.length) return previous;
+    if (firstFeatureChange === entries.length) {
+      firstFeatureChange = Math.min(entries.length, previous.entries.length);
+    }
+    startTextIndex = Math.max(0, firstFeatureChange - 1);
     startTextIndex = Math.min(startTextIndex, previous.entries.length);
     const reusablePrefixEnd = Math.min(startTextIndex, previous.entries.length, entries.length);
     for (let i = 0; i < reusablePrefixEnd; i++) {
       const cached = previous.entries[i];
       const current = entries[i];
-      if (cached.blockId !== current.block.id || cached.sourceIndex !== current.sourceIndex) {
+      if (cached.blockId !== current.block.id) {
         startTextIndex = i;
         break;
       }
@@ -276,7 +345,6 @@ export function updateEstimatedPageMap(
   let page = 1;
   let used = 0;
   let hasBlockOnPage = false;
-  let prevTextBlock: Block | null = null;
 
   if (canReuse && startTextIndex > 0) {
     for (let i = 0; i < startTextIndex; i++) {
@@ -288,14 +356,16 @@ export function updateEstimatedPageMap(
     page = prefix.page;
     used = prefix.usedAfter;
     hasBlockOnPage = true;
-    prevTextBlock = entries[startTextIndex - 1]?.block ?? null;
   }
 
   for (let i = startTextIndex; i < entries.length; i++) {
-    const { block, sourceIndex } = entries[i];
-    const prev = prevTextBlock;
+    const { block } = entries[i];
 
-    if (block.sceneId && block.sceneId !== prev?.sceneId) {
+    const cached = canReuse ? previous.entries[i] : null;
+    const heightFeature = cached?.block === block && cached.previousBlock === entries[i].previousBlock
+      ? cached.heightFeature
+      : paginationHeightFeature(block, entries[i].previousBlock, upl);
+    if (heightFeature.startsScene) {
       if (used > 0 && used + SCENE_HEADER_HEIGHT > maxH) {
         page++;
         used = 0;
@@ -304,24 +374,25 @@ export function updateEstimatedPageMap(
       used += SCENE_HEADER_HEIGHT;
     }
 
-    let height = estimateBlockHeight(block, prev, upl, !hasBlockOnPage);
+    let height = hasBlockOnPage ? heightFeature.normalHeight : heightFeature.forcedHeight;
     if (used > 0 && used + height > maxH) {
       page++;
       used = 0;
       hasBlockOnPage = false;
-      height = estimateBlockHeight(block, prev, upl, true);
+      height = heightFeature.forcedHeight;
     }
 
     pageMap[block.id] = page;
     used += height;
     hasBlockOnPage = true;
     nextEntries.push({
+      block,
       blockId: block.id,
-      sourceIndex,
+      previousBlock: entries[i].previousBlock,
+      heightFeature,
       page: pageMap[block.id],
       usedAfter: used,
     });
-    prevTextBlock = block;
   }
 
   return {

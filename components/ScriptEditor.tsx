@@ -24,7 +24,7 @@ import DurationInput from "@/components/DurationInput";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
 import { diffState, type TagEntry } from "@/lib/script-ops";
-import { convertMarker, executeMarkerDeletion, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, type MarkerDeleteOperation } from "@/lib/script-marker-domain";
+import { convertMarker, executeMarkerDeletion, getMarkerChange, insertMarker, markerCacheUpdateBlockIds, normalizeScriptMarkerInvariants as normalizeSharedMarkerInvariants, planMarkerDeletion, type BlockChange, type MarkerChange, type MarkerDeleteOperation } from "@/lib/script-marker-domain";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import { COMPACT_TEXT_SIDE_WIDTH_REM, PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
 import type { EstimatedPageMapCache, PageConfig } from "@/lib/script-page";
@@ -33,7 +33,7 @@ import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
-import { buildMarkerContextById, isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 
 let _seq = 0;
@@ -4370,67 +4370,6 @@ function normalizeScriptBlockStream(blocks: Block[]): Block[] {
   return withMarkerOwnership(blocks);
 }
 
-function withLeadingRehearsalMarkersForMarkedSegments(blocks: Block[]): Block[] {
-  let needsInsertion = false;
-  for (let index = 0; index < blocks.length;) {
-    const boundary = blocks[index];
-    if (boundary.type !== "chapter_marker" && boundary.type !== "scene_marker") {
-      index++;
-      continue;
-    }
-
-    let nextBoundaryIndex = blocks.length;
-    let hasRehearsalInSegment = false;
-    for (let cursor = index + 1; cursor < blocks.length; cursor++) {
-      const candidate = blocks[cursor];
-      if (candidate.type === "chapter_marker" || candidate.type === "scene_marker") {
-        nextBoundaryIndex = cursor;
-        break;
-      }
-      if (candidate.type === "rehearsal_marker") hasRehearsalInSegment = true;
-    }
-
-    if (hasRehearsalInSegment && blocks[index + 1]?.type !== "rehearsal_marker") {
-      needsInsertion = true;
-      break;
-    }
-    index = nextBoundaryIndex;
-  }
-
-  if (!needsInsertion) return blocks;
-
-  let index = 0;
-  const next: Block[] = [];
-  while (index < blocks.length) {
-    const boundary = blocks[index];
-    if (boundary.type !== "chapter_marker" && boundary.type !== "scene_marker") {
-      next.push(boundary);
-      index++;
-      continue;
-    }
-
-    let nextBoundaryIndex = blocks.length;
-    let hasRehearsalInSegment = false;
-    for (let cursor = index + 1; cursor < blocks.length; cursor++) {
-      const candidate = blocks[cursor];
-      if (candidate.type === "chapter_marker" || candidate.type === "scene_marker") {
-        nextBoundaryIndex = cursor;
-        break;
-      }
-      if (candidate.type === "rehearsal_marker") hasRehearsalInSegment = true;
-    }
-
-    next.push(boundary);
-    if (hasRehearsalInSegment && blocks[index + 1]?.type !== "rehearsal_marker") {
-      next.push(makeMarkerBlock("rehearsal_marker"));
-    }
-    next.push(...blocks.slice(index + 1, nextBoundaryIndex));
-    index = nextBoundaryIndex;
-  }
-
-  return normalizeScriptBlockStream(next);
-}
-
 function sameBlocks(a: Block[], b: Block[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((block, index) => {
@@ -4475,22 +4414,23 @@ function markerSegmentIsOpeningWithoutScene(blocks: Block[], markerIndex: number
   return !!openingChapterMarkerId && marker?.id === openingChapterMarkerId && !markerSegmentHasScene(blocks, markerIndex);
 }
 
-function normalizeScriptMarkerInvariants(blocks: Block[], scenes: Scene[], config: ScriptConfig): { blocks: Block[]; scenes: Scene[]; config: ScriptConfig } {
-  const normalized = normalizeMarkerState({
-    blocks: withLeadingRehearsalMarkersForMarkedSegments(normalizeScriptBlockStream(blocks)),
+function normalizeScriptMarkerInvariants(
+  blocks: Block[],
+  scenes: Scene[],
+  config: ScriptConfig,
+  change?: ReturnType<typeof getMarkerChange>,
+): { blocks: Block[]; scenes: Scene[]; config: ScriptConfig } {
+  const normalized = normalizeSharedMarkerInvariants({
+    blocks,
     scenes,
     characters: [],
     config,
-  }, uid);
+  }, uid, change ? { mode: "scoped", ...change } : { mode: "full" });
   return {
-    blocks: sameBlocks(normalized.blocks, blocks) ? blocks : normalizeScriptBlockStream(normalized.blocks),
+    blocks: sameBlocks(normalized.blocks, blocks) ? blocks : normalized.blocks,
     scenes: sameSceneRows(normalized.scenes, scenes) ? scenes : normalized.scenes,
     config: normalized.config.openingChapterMarkerId === config.openingChapterMarkerId ? config : normalized.config,
   };
-}
-
-function normalizeSceneRowsForMarkers<T extends Scene>(rows: T[], markerBlocks: Block[]): T[] {
-  return projectMarkers({ blocks: markerBlocks, scenes: rows }, rows) as unknown as T[];
 }
 
 function previousAdjacentMarker(blocks: Block[], index: number): Block | null {
@@ -4507,66 +4447,46 @@ function markerSegmentHasScene(blocks: Block[], markerIndex: number): boolean {
   return false;
 }
 
-function shouldRepairEmptyBlockAfterMarker(blocks: Block[], markerIndex: number, openingChapterMarkerId: string | null): boolean {
-  if (markerSegmentIsOpeningWithoutScene(blocks, markerIndex, openingChapterMarkerId)) return false;
-  return shouldInsertEmptyBlockAfterMarker(blocks, markerIndex);
-}
-
 function insertMarkerWithEmptyBlockIfNeeded(blocks: Block[], marker: Block, insertIndex: number, openingChapterMarkerId: string | null): Block[] {
   const next = [...blocks];
   const boundedIndex = Math.max(0, Math.min(next.length, insertIndex));
   const previousMarker = previousAdjacentMarker(blocks, boundedIndex);
   next.splice(boundedIndex, 0, marker);
-  if (shouldRepairEmptyBlockAfterMarker(next, boundedIndex, openingChapterMarkerId)) {
-    next.splice(boundedIndex + 1, 0, makeBlock());
-  }
-  const repaired = repairEmptyMarkerSegments(next, [previousMarker?.id, marker.id].filter((id): id is string => !!id), openingChapterMarkerId);
-  return repaired === next ? normalizeScriptBlockStream(next) : repaired;
+  return repairEmptyMarkerSegments(
+    next,
+    [previousMarker?.id, marker.id].filter((id): id is string => !!id),
+    openingChapterMarkerId,
+  );
 }
 
-function repairEmptyMarkerSegments(blocks: Block[], markerIds: Iterable<string>, openingChapterMarkerId: string | null, options?: { includeTerminal?: boolean }): Block[] {
+function repairEmptyMarkerSegments(
+  blocks: Block[],
+  markerIds: Iterable<string>,
+  openingChapterMarkerId: string | null,
+): Block[] {
   const ids = [...new Set(markerIds)];
   if (ids.length === 0) return blocks;
-  const markerIndexes = ids.length <= 1
-    ? ids.map((id) => blocks.findIndex((block) => block.id === id)).filter((index) => index >= 0)
-    : (() => {
-        const markerIndexById = new Map(blocks.map((block, index) => [block.id, index]));
-        return ids
-          .map((id) => markerIndexById.get(id) ?? -1)
-          .filter((index) => index >= 0)
-          .sort((a, b) => b - a);
-      })();
-  let next = blocks;
-  let changed = false;
-  for (const markerIndex of markerIndexes) {
-    if (!shouldRepairEmptyBlockAfterMarker(next, markerIndex, openingChapterMarkerId)) continue;
-    if (!changed) next = [...blocks];
-    next.splice(markerIndex + 1, 0, makeBlock());
-    changed = true;
-  }
-  if (options?.includeTerminal) {
-    const terminalIndexes = changed
-      ? ids
-          .map((id) => next.findIndex((block) => block.id === id))
-          .filter((index) => index >= 0)
-          .sort((a, b) => b - a)
-      : markerIndexes;
-    for (const markerIndex of terminalIndexes) {
-      const marker = next[markerIndex];
-      if (!marker || !isMarkerBlock(marker) || next[markerIndex + 1]) continue;
-      if (markerSegmentIsOpeningWithoutScene(next, markerIndex, openingChapterMarkerId)) continue;
-      if (!changed) next = [...blocks];
-      next.splice(markerIndex + 1, 0, makeBlock());
-      changed = true;
-    }
-  }
-  return changed ? normalizeScriptBlockStream(next) : blocks;
+  const positions = ids
+    .map((id) => blocks.findIndex((block) => block.id === id))
+    .filter((index) => index >= 0);
+  const changes = positions.map((position) => ({
+    kind: "structure" as const,
+    position,
+    blockId: blocks[position].id,
+    beforeType: blocks[position].type,
+    afterType: blocks[position].type,
+  }));
+  return normalizeSharedMarkerInvariants({
+    blocks,
+    scenes: [],
+    characters: [],
+    config: { ...DEFAULT_SCRIPT_CONFIG, openingChapterMarkerId },
+  }, uid, { mode: "scoped", changes, positions, markerStructureChanged: true }).blocks;
 }
 
 function buildEmptyScriptCleanupRemovalPlan(
   currentBlocks: Block[],
   selectedTargets: EmptyScriptCleanupTarget[],
-  options?: { includeEmptyTextBlocks?: boolean; repairDeletedRangeStarts?: boolean }
 ) {
   const selectedSceneIds = new Set(
     selectedTargets
@@ -4579,15 +4499,12 @@ function buildEmptyScriptCleanupRemovalPlan(
       .map((target) => target.id)
   );
   const deleteBlockIds = new Set<string>();
-  const markersToRepair = new Set<string>();
   let currentSectionSelected = false;
   let currentRehearsalSelected = false;
-  let currentMarkerId: string | null = null;
   for (const block of currentBlocks) {
     if (block.type === "chapter_marker") {
       currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
       currentRehearsalSelected = false;
-      currentMarkerId = block.id;
       if (
         block.sceneId &&
         selectedSceneIds.has(block.sceneId)
@@ -4599,7 +4516,6 @@ function buildEmptyScriptCleanupRemovalPlan(
     if (block.type === "scene_marker") {
       currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
       currentRehearsalSelected = false;
-      currentMarkerId = block.id;
       if (block.sceneId && selectedSceneIds.has(block.sceneId)) {
         deleteBlockIds.add(block.id);
       }
@@ -4609,32 +4525,16 @@ function buildEmptyScriptCleanupRemovalPlan(
       currentRehearsalSelected = currentSectionSelected || selectedRehearsalBlockIds.has(block.id);
       if (currentRehearsalSelected) {
         deleteBlockIds.add(block.id);
-        if (currentMarkerId) markersToRepair.add(currentMarkerId);
-      } else {
-        currentMarkerId = block.id;
       }
       continue;
     }
     if (currentSectionSelected || currentRehearsalSelected) {
       deleteBlockIds.add(block.id);
-    } else if (options?.includeEmptyTextBlocks !== false && isEmptyTextBlock(block)) {
+    } else if (isEmptyTextBlock(block)) {
       deleteBlockIds.add(block.id);
-      if (currentMarkerId) markersToRepair.add(currentMarkerId);
     }
   }
-
-  if (options?.repairDeletedRangeStarts) {
-    for (let index = 0; index < currentBlocks.length; index++) {
-      const block = currentBlocks[index];
-      if (!deleteBlockIds.has(block.id)) continue;
-      if (index > 0 && deleteBlockIds.has(currentBlocks[index - 1].id)) continue;
-
-      const previousMarker = previousAdjacentMarker(currentBlocks, index);
-      if (previousMarker && !deleteBlockIds.has(previousMarker.id)) markersToRepair.add(previousMarker.id);
-    }
-  }
-
-  return { deleteBlockIds, markersToRepair, selectedSceneIds };
+  return { deleteBlockIds, selectedSceneIds };
 }
 
 function isOnlyTextBlockInMarkerSegment(blocks: Block[], index: number, openingChapterMarkerId: string | null): boolean {
@@ -6477,6 +6377,16 @@ function mergeDirtyRanges(
   return [...currentRanges, ...nextRanges];
 }
 
+function markerChangeFromOperations(changes: BlockChange[]): MarkerChange {
+  const markerType = (type: BlockType | null) =>
+    type === "chapter_marker" || type === "scene_marker" || type === "rehearsal_marker";
+  return {
+    changes,
+    positions: [...new Set(changes.map((change) => change.position))].sort((a, b) => a - b),
+    markerStructureChanged: changes.some((change) => markerType(change.beforeType) || markerType(change.afterType)),
+  };
+}
+
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
@@ -6631,6 +6541,7 @@ export default function ScriptEditor({
   const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
   const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
   const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
+  const markerLabelDirtyRef = useRef(true);
   const markPageMapDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
     pageMapDirtyRef.current = mergeDirtyRanges(pageMapDirtyRef.current, dirty);
   }, []);
@@ -6638,6 +6549,18 @@ export default function ScriptEditor({
     ownershipDirtyRef.current = mergeDirtyRanges(ownershipDirtyRef.current, dirty);
     markPageMapDirty(dirty);
   }, [markPageMapDirty]);
+  const markBlockStructureDirty = useCallback((previous: Block[], next: Block[], movedBlockIds?: Iterable<string>) => {
+    const change = getMarkerChange(previous, next, movedBlockIds);
+    if (change.positions.length === 0) return;
+    if (change.markerStructureChanged) markerLabelDirtyRef.current = true;
+    markPageMapDirty(change.positions.map((start) => ({ start, end: start + 1 })));
+    const nextIndexById = new Map(next.map((block, index) => [block.id, index]));
+    const ownershipRanges = markerCacheUpdateBlockIds(next, change).flatMap((id): MarkerOwnershipRange[] => {
+      const start = nextIndexById.get(id);
+      return start === undefined ? [] : [{ start, end: start + 1, throughNextMarker: false }];
+    });
+    if (ownershipRanges.length > 0) markOwnershipDirty(ownershipRanges);
+  }, [markOwnershipDirty, markPageMapDirty]);
   const ownedBlocks = useMemo(() => {
     const owned = updateMarkerOwnership(blocks, ownershipDirtyRef.current);
     ownershipDirtyRef.current = null;
@@ -6648,7 +6571,12 @@ export default function ScriptEditor({
     () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
     [markerContextById, ownedBlocks],
   );
-  const rehearsalLabels = useMemo(() => buildMarkerLabelIndex(blocks), [blocks]);
+  const markerLabelCacheRef = useRef<ReturnType<typeof buildMarkerLabelIndex> | null>(null);
+  if (!markerLabelCacheRef.current || markerLabelDirtyRef.current) {
+    markerLabelCacheRef.current = buildMarkerLabelIndex(blocks);
+    markerLabelDirtyRef.current = false;
+  }
+  const rehearsalLabels = markerLabelCacheRef.current;
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
     const markerIndex = openingChapterMarkerId
@@ -6704,13 +6632,15 @@ export default function ScriptEditor({
     const serverState = await response.json() as ScriptState;
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
     const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
+    markOwnershipDirty("full");
+    markerLabelDirtyRef.current = true;
     setBlocks(normalized.blocks);
     setCharacters(serverState.characters);
     setScenes(normalized.scenes);
     setScriptConfig(normalized.config);
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
     syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
-  }, [activeVersionId, effectiveScriptId]);
+  }, [activeVersionId, effectiveScriptId, markOwnershipDirty]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
   const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);
   const scriptLineNumberByBlockId = useMemo(() => {
@@ -6724,13 +6654,19 @@ export default function ScriptEditor({
     return map;
   }, [blocks]);
   const maxLineIndexText = String(Math.max(1, scriptLineNumberByBlockId.size));
-  useEffect(() => {
-    const expandedBlocks = expandLegacyMarkersToBlocks(blocks, scenes);
-    const normalized = normalizeScriptMarkerInvariants(expandedBlocks, scenes, scriptConfigRef.current);
-    if (!sameBlocks(normalized.blocks, blocks)) {
+  const applyBlockStructureEdit = useCallback((previousBlocks: Block[], nextBlocks: Block[], change: MarkerChange | "full") => {
+    const normalized = normalizeScriptMarkerInvariants(
+      nextBlocks,
+      scenes,
+      scriptConfigRef.current,
+      change === "full" ? undefined : change,
+    );
+    if (change === "full") {
+      markerLabelDirtyRef.current = true;
       markOwnershipDirty("full");
-      setBlocks(normalized.blocks);
     }
+    else markBlockStructureDirty(previousBlocks, normalized.blocks);
+    setBlocks(normalized.blocks);
     if (!sameSceneRows(normalized.scenes, scenes)) {
       setScenes(normalized.scenes);
       setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
@@ -6738,7 +6674,7 @@ export default function ScriptEditor({
     if (normalized.config.openingChapterMarkerId !== scriptConfigRef.current.openingChapterMarkerId) {
       syncOpeningChapterMarkerId(normalized.blocks);
     }
-  }, [blocks, markOwnershipDirty, scenes, syncOpeningChapterMarkerId]);
+  }, [markBlockStructureDirty, markOwnershipDirty, scenes, syncOpeningChapterMarkerId]);
   useEffect(() => {
     setFocusedCharacterIds(readStoredCharacterFocus(effectiveScriptId));
     setPendingAggregateFocusPrompt(null);
@@ -8003,6 +7939,7 @@ export default function ScriptEditor({
   const isSyncingRef = useRef(false);
   const syncIdleWaitersRef = useRef<Array<() => void>>([]);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
   const pushPatchRef = useRef<(curr: ScriptState) => void>(() => {});
@@ -8015,6 +7952,11 @@ export default function ScriptEditor({
       try {
         const seq = ++clientSeqRef.current;
         const patch = diffState(syncedStateRef.current, curr, seq);
+        const movedIdsForPatch = [...pendingMovedBlockIdsRef.current];
+        if (movedIdsForPatch.length > 0) {
+          const reorder = patch.blockOps.find((op) => op.op === "reorder");
+          if (reorder?.op === "reorder") reorder.movedIds = movedIdsForPatch;
+        }
 
         // ── Step 1: pending tag inserts (from inheritTags) ───────────────────────
         // These are written synchronously into pendingTagInsertsRef when a new block
@@ -8072,7 +8014,10 @@ export default function ScriptEditor({
         }
         // ── End tag handling ─────────────────────────────────────────────────────
 
-        if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
+        if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) {
+          for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
+          return;
+        }
         const vPatch = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
         const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vPatch}`, {
           method: "PATCH",
@@ -8096,6 +8041,7 @@ export default function ScriptEditor({
           // clear whatever might remain (orphaned entries for blocks that were
           // deleted before the sync fired).
           pendingTagInsertsRef.current.clear();
+          for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
         }
       } catch {
         // Sync failure is non-fatal — will retry on next state change.
@@ -8116,12 +8062,15 @@ export default function ScriptEditor({
     measuredHeightsRef.current.clear();
     measuredHeightTotalRef.current = 0;
     cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
+    markOwnershipDirty("full");
+    markerLabelDirtyRef.current = true;
     setBlocks([placeholderBlock]);
     applyWindowRange({ start: 0, end: 1 }, true);
     setCharacters([]);
     setScenes([]);
     setSceneDetails([]);
     syncedStateRef.current = null;
+    pendingMovedBlockIdsRef.current.clear();
 
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const loadUrl = productionId
@@ -8164,6 +8113,8 @@ export default function ScriptEditor({
           for (let i = 0; i < normalized.blocks.length; i++) {
             cumulativeHRef.current[i + 1] = cumulativeHRef.current[i] + DEFAULT_BLOCK_H;
           }
+          markOwnershipDirty("full");
+          markerLabelDirtyRef.current = true;
           blocksRef.current = normalized.blocks;
           blockIndexByIdRef.current = new Map(normalized.blocks.map((block, index) => [block.id, index]));
           applyWindowRange({ start: 0, end: initialWindowEnd }, true);
@@ -8224,7 +8175,7 @@ export default function ScriptEditor({
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange, syncSpacerHeights]);
+  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
 
   useEffect(() => {
     if (!productionId || !activeVersionId || loadState !== "ready") return;
@@ -8356,6 +8307,8 @@ export default function ScriptEditor({
 
           const mergedBlocks = expandLegacyMarkersToBlocks(mergeServerBlocks(blocksRef.current, serverState.blocks, oldSynced), serverState.scenes);
           const normalized = normalizeScriptMarkerInvariants(mergedBlocks, serverState.scenes, { ...scriptConfigRef.current, ...(serverState.config ?? {}) });
+          markOwnershipDirty("full");
+          markerLabelDirtyRef.current = true;
           requestVirtualWindowRefresh();
           setBlocks(normalized.blocks);
           setCharacters(serverState.characters);
@@ -8509,7 +8462,7 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, requestVirtualWindowRefresh, resetToolbarMeasurement, streamVisible]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, streamVisible]);
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
@@ -8821,12 +8774,11 @@ export default function ScriptEditor({
     const snapshot = undoStack.current.pop();
     if (!snapshot) return;
     redoStack.current.push(blocksRef.current);
-    markOwnershipDirty("full");
+    applyBlockStructureEdit(blocksRef.current, snapshot, "full");
     requestVirtualWindowRefresh();
-    setBlocks(snapshot);
     setCanUndo(undoStack.current.length > 0);
     setCanRedo(true);
-  }, [isLockedMode, markOwnershipDirty, requestVirtualWindowRefresh]);
+  }, [applyBlockStructureEdit, isLockedMode, requestVirtualWindowRefresh]);
 
   const redo = useCallback(() => {
     if (isLockedMode) return;
@@ -8835,12 +8787,11 @@ export default function ScriptEditor({
     const snapshot = redoStack.current.pop();
     if (!snapshot) return;
     undoStack.current.push(blocksRef.current);
-    markOwnershipDirty("full");
+    applyBlockStructureEdit(blocksRef.current, snapshot, "full");
     requestVirtualWindowRefresh();
-    setBlocks(snapshot);
     setCanUndo(true);
     setCanRedo(redoStack.current.length > 0);
-  }, [isLockedMode, markOwnershipDirty, requestVirtualWindowRefresh]);
+  }, [applyBlockStructureEdit, isLockedMode, requestVirtualWindowRefresh]);
 
   // ── Tag handlers ─────────────────────────────────────────────────────────────
   // Tag mutations are no longer sent via a dedicated block-tags PATCH.
@@ -8996,14 +8947,19 @@ export default function ScriptEditor({
   const toggleBlockType = useCallback((id: string) => {
     if (isLockedMode) return;
     saveSnapshot();
-    markBlockPageMapDirty(id);
-    setBlocks((prev) => prev.map((b) =>
-      b.id === id
-        ? { ...b, type: b.type === "dialogue" ? "stage" : "dialogue", characterIds: [] }
-        : b
-    ));
+    const previousBlocks = blocksRef.current;
+    const changes: BlockChange[] = [];
+    const nextBlocks: Block[] = previousBlocks.map((b, position) => {
+      if (b.id !== id) return b;
+      const next = { ...b, type: b.type === "dialogue" ? "stage" as const : "dialogue" as const, characterIds: [] };
+      if (b.type !== next.type) changes.push({
+        kind: "convert", position, blockId: b.id, beforeType: b.type, afterType: next.type,
+      });
+      return next;
+    });
+    applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
     glowAndFocusBlocks([id]);
-  }, [glowAndFocusBlocks, markBlockPageMapDirty, saveSnapshot, isLockedMode]);
+  }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   const toggleStageCueToFocused = useCallback(() => {
     const id = focusedIdRef.current;
@@ -9045,15 +9001,20 @@ export default function ScriptEditor({
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
-    markBlockIdsPageMapDirty(targetIds);
-    setBlocks((prev) => prev.map((b) =>
-      targetIds.has(b.id)
-        ? { ...b, type, characterIds: type === "stage" ? [] : b.characterIds }
-        : b
-    ));
+    const previousBlocks = blocksRef.current;
+    const changes: BlockChange[] = [];
+    const nextBlocks = previousBlocks.map((b, position) => {
+      if (!targetIds.has(b.id)) return b;
+      const next = { ...b, type, characterIds: type === "stage" ? [] : b.characterIds };
+      if (b.type !== type) changes.push({
+        kind: "convert", position, blockId: b.id, beforeType: b.type, afterType: type,
+      });
+      return next;
+    });
+    applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
     glowAndFocusBlocks(ids);
     rangeSelectionActiveRef.current = false;
-  }, [glowAndFocusBlocks, markBlockIdsPageMapDirty, saveSnapshot, isLockedMode]);
+  }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isLockedMode]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
     if (isLockedMode) return;
@@ -9123,26 +9084,28 @@ export default function ScriptEditor({
 
   const addChapterBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !canEditMetadata) return;
+    const previousBlocks = blocksRef.current;
     const next = insertMarker({
-      blocks: blocksRef.current,
+      blocks: previousBlocks,
       scenes: scenesRef.current,
       characters: charactersRef.current,
       config: scriptConfigRef.current,
     }, { kind: "chapter", name: "", beforeBlockId: blockId }, uid);
     saveSnapshot();
-    markOwnershipDirty("full");
+    markBlockStructureDirty(previousBlocks, next.blocks);
     setBlocks(next.blocks);
     setScenes(next.scenes);
     setScriptConfig(next.config);
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
     void persistMarkerState(next);
-  }, [canEditMetadata, isLockedMode, markOwnershipDirty, persistMarkerState, saveSnapshot]);
+  }, [canEditMetadata, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
 
   const addSceneBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !canEditMetadata) return;
     const chapterId = findChapterIdForBlock(blockId);
+    const previousBlocks = blocksRef.current;
     const next = insertMarker({
-      blocks: blocksRef.current,
+      blocks: previousBlocks,
       scenes: scenesRef.current,
       characters: charactersRef.current,
       config: scriptConfigRef.current,
@@ -9153,25 +9116,30 @@ export default function ScriptEditor({
       beforeBlockId: blockId,
     }, uid);
     saveSnapshot();
-    markOwnershipDirty("full");
+    markBlockStructureDirty(previousBlocks, next.blocks);
     setBlocks(next.blocks);
     setScenes(next.scenes);
     setScriptConfig(next.config);
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
     void persistMarkerState(next);
-  }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markOwnershipDirty, persistMarkerState, saveSnapshot]);
+  }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
 
   const addRehearsalBeforeBlock = useCallback((blockId: string) => {
     if (isLockedMode || !effectiveCanEditRehearsalMark) return;
     const marker = makeMarkerBlock("rehearsal_marker");
+    const previousBlocks = blocksRef.current;
+    const index = previousBlocks.findIndex((block) => block.id === blockId);
+    const insertIndex = index === -1 ? previousBlocks.length : index;
+    const nextBlocks = insertMarkerWithEmptyBlockIfNeeded(
+      previousBlocks,
+      marker,
+      insertIndex,
+      scriptConfigRef.current.openingChapterMarkerId,
+    );
     saveSnapshot();
-    markOwnershipDirty("full");
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === blockId);
-      const insertIndex = idx === -1 ? prev.length : idx;
-      return insertMarkerWithEmptyBlockIfNeeded(prev, marker, insertIndex, scriptConfigRef.current.openingChapterMarkerId);
-    });
-  }, [effectiveCanEditRehearsalMark, isLockedMode, markOwnershipDirty, saveSnapshot]);
+    markBlockStructureDirty(previousBlocks, nextBlocks);
+    setBlocks(nextBlocks);
+  }, [effectiveCanEditRehearsalMark, isLockedMode, markBlockStructureDirty, saveSnapshot]);
 
   const convertMarkerBlockType = useCallback((blockId: string, nextType: Extract<BlockType, "chapter_marker" | "scene_marker">) => {
     if (isLockedMode || !canEditMetadata) return;
@@ -9181,15 +9149,16 @@ export default function ScriptEditor({
     if (!currentBlock) return;
     if (!isMarkerBlock(currentBlock)) return;
     if (currentBlock.type === nextType) return;
+    const previousBlocks = blocksRef.current;
     const next = convertMarker({
-      blocks: blocksRef.current,
+      blocks: previousBlocks,
       scenes: scenesRef.current,
       characters,
       config: scriptConfigRef.current,
     }, blockId, nextType === "chapter_marker" ? "chapter" : "scene", uid);
 
     saveSnapshot();
-    markOwnershipDirty("full");
+    markBlockStructureDirty(previousBlocks, next.blocks);
     setBlocks(next.blocks);
     setScenes(next.scenes);
     setScriptConfig(next.config);
@@ -9198,7 +9167,7 @@ export default function ScriptEditor({
     selectionAnchorBlockIdRef.current = blockId;
     rangeSelectionActiveRef.current = false;
     setSelectedBlockIds(new Set([blockId]));
-  }, [canEditMetadata, characters, isLockedMode, markOwnershipDirty, persistMarkerState, saveSnapshot]);
+  }, [canEditMetadata, characters, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
 
   const splitBlock = useCallback((id: string, before: string, after: string) => {
     if (isLockedMode) return;
@@ -9209,12 +9178,10 @@ export default function ScriptEditor({
     // produce a different uid(), causing nextId (from the 2nd call) to diverge
     // from the block actually committed to state (from the 1st call).
     const nextBlockId = uid();
-    const currentIdx = blocksRef.current.findIndex((block) => block.id === id);
-    if (currentIdx !== -1) markOwnershipDirty({ start: currentIdx, end: currentIdx + 2 });
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx === -1) return prev;
-      const cur = prev[idx];
+    const previousBlocks = blocksRef.current;
+    const currentIdx = previousBlocks.findIndex((block) => block.id === id);
+    if (currentIdx !== -1) {
+      const cur = previousBlocks[currentIdx];
       // New block inherits scene, rehearsal mark, and character from the block being split
       const next: Block = {
         ...makeBlock(after, cur.characterIds),
@@ -9223,39 +9190,50 @@ export default function ScriptEditor({
         rehearsalMark: null,
         characterAnnotations: { ...cur.characterAnnotations },
       };
-      const updated = [...prev];
-      updated[idx] = { ...cur, content: before };
-      updated.splice(idx + 1, 0, next);
+      const updated = [...previousBlocks];
+      updated[currentIdx] = { ...cur, content: before };
+      updated.splice(currentIdx + 1, 0, next);
       pendingFocus.current = { id: next.id, textOffset: 0 };
-      // Don't auto-open character picker: character is already inherited
-      return updated;
-    });
+      markOwnershipDirty({ start: currentIdx, end: currentIdx + 1, throughNextMarker: false });
+      applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+        kind: "insert",
+        position: currentIdx + 1,
+        blockId: next.id,
+        beforeType: null,
+        afterType: next.type,
+      }]));
+    }
     inheritTags(id, nextBlockId);
-  }, [markOwnershipDirty, saveSnapshot, inheritTags, isLockedMode]);
+  }, [applyBlockStructureEdit, markOwnershipDirty, saveSnapshot, inheritTags, isLockedMode]);
 
   const mergeBlock = useCallback((id: string) => {
     if (isLockedMode) return;
     saveSnapshot();
-    const currentIdx = blocksRef.current.findIndex((block) => block.id === id);
-    if (currentIdx !== -1) markOwnershipDirty({ start: Math.max(0, currentIdx - 1), end: currentIdx + 1 });
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx === 0) {
-        // Delete empty first block if there are more blocks after it
-        if (prev.length > 1 && !prev[0].content.trim()) {
-          pendingFocus.current = { id: prev[1].id, atEnd: false };
-          return prev.slice(1);
-        }
-        return prev;
+    const previousBlocks = blocksRef.current;
+    const currentIdx = previousBlocks.findIndex((block) => block.id === id);
+    if (currentIdx === 0) {
+      // Delete empty first block if there are more blocks after it
+      if (previousBlocks.length > 1 && !previousBlocks[0].content.trim()) {
+        pendingFocus.current = { id: previousBlocks[1].id, atEnd: false };
+        applyBlockStructureEdit(previousBlocks, previousBlocks.slice(1), markerChangeFromOperations([{
+          kind: "delete",
+          position: 0,
+          blockId: previousBlocks[0].id,
+          beforeType: previousBlocks[0].type,
+          afterType: null,
+        }]));
       }
-      const p = prev[idx - 1];
-      const c = prev[idx];
+      return;
+    }
+    if (currentIdx > 0) {
+      const p = previousBlocks[currentIdx - 1];
+      const c = previousBlocks[currentIdx];
       const mergedContent =
         p.content && c.content ? `${p.content}\n${c.content}` : p.content + c.content;
       const merged = { ...p, content: mergedContent };
-      const updated = [...prev];
-      updated[idx - 1] = merged;
-      updated.splice(idx, 1);
+      const updated = [...previousBlocks];
+      updated[currentIdx - 1] = merged;
+      updated.splice(currentIdx, 1);
       // Place cursor right after the \n separator (= start of the merged-in content).
       // When only one side is non-empty there's no \n, so offset = end of p.content.
       const pLen = getTextLength(mdToHtml(p.content));
@@ -9263,9 +9241,16 @@ export default function ScriptEditor({
         id: p.id,
         textOffset: p.content && c.content ? pLen + 1 : pLen,
       };
-      return updated;
-    });
-  }, [markOwnershipDirty, saveSnapshot, isLockedMode]);
+      markOwnershipDirty({ start: currentIdx - 1, end: currentIdx, throughNextMarker: false });
+      applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+        kind: "delete",
+        position: Math.min(currentIdx, updated.length),
+        blockId: c.id,
+        beforeType: c.type,
+        afterType: null,
+      }]));
+    }
+  }, [applyBlockStructureEdit, markOwnershipDirty, saveSnapshot, isLockedMode]);
 
   const nonEmptyDramaturgyMarkersForBlockIds = useCallback((ids: Iterable<string>): NonEmptyDramaturgyMarker[] => {
     const currentBlocks = blocksRef.current;
@@ -9297,32 +9282,48 @@ export default function ScriptEditor({
     }
     saveSnapshot();
     const emptyBlockId2 = uid(); // pre-generated for the case where all blocks are deleted
-    const firstDeletedIdx = blocksRef.current.findIndex((block) => deleteIds.has(block.id));
-    if (firstDeletedIdx !== -1) markOwnershipDirty("full");
-    setBlocks((prev) => {
-      const remaining: Block[] = [];
-      const markersToRepair = new Set<string>();
-      let firstDeletedIdx = -1;
-      for (let index = 0; index < prev.length; index++) {
-        const block = prev[index];
-        if (!deleteIds.has(block.id)) {
-          remaining.push(block);
-          continue;
-        }
-        if (firstDeletedIdx === -1) firstDeletedIdx = index;
-        const previousMarker = previousAdjacentMarker(prev, index);
-        if (previousMarker) markersToRepair.add(previousMarker.id);
-      }
-      if (remaining.length === prev.length) return prev;
-      if (remaining.length === 0) {
-        const emptyBlock = { ...makeBlock(), id: emptyBlockId2 };
-        pendingFocus.current = { id: emptyBlock.id, atEnd: false };
-        return [emptyBlock];
-      }
-      const focusIdx = Math.min(firstDeletedIdx, remaining.length - 1);
-      pendingFocus.current = { id: remaining[focusIdx].id, atEnd: false };
-      return repairEmptyMarkerSegments(remaining, markersToRepair, scriptConfigRef.current.openingChapterMarkerId, { includeTerminal: true });
+    const currentBlocks = blocksRef.current;
+    const firstDeletedIdx = currentBlocks.findIndex((block) => deleteIds.has(block.id));
+    if (firstDeletedIdx === -1) return;
+    const remaining = currentBlocks.filter((block) => !deleteIds.has(block.id));
+    const editedBlocks = remaining.length > 0 ? remaining : [{ ...makeBlock(), id: emptyBlockId2 }];
+    let retainedBefore = 0;
+    const changes: BlockChange[] = [];
+    for (const block of currentBlocks) {
+      if (deleteIds.has(block.id)) {
+        changes.push({
+          kind: "delete",
+          position: retainedBefore,
+          blockId: block.id,
+          beforeType: block.type,
+          afterType: null,
+        });
+      } else retainedBefore++;
+    }
+    if (remaining.length === 0) changes.push({
+      kind: "insert",
+      position: 0,
+      blockId: editedBlocks[0].id,
+      beforeType: null,
+      afterType: editedBlocks[0].type,
     });
+    const normalized = normalizeScriptMarkerInvariants(
+      editedBlocks,
+      scenesRef.current,
+      scriptConfigRef.current,
+      markerChangeFromOperations(changes),
+    );
+    const focusIdx = Math.min(firstDeletedIdx, editedBlocks.length - 1);
+    pendingFocus.current = { id: editedBlocks[focusIdx].id, atEnd: false };
+    markBlockStructureDirty(currentBlocks, normalized.blocks);
+    setBlocks(normalized.blocks);
+    if (!sameSceneRows(normalized.scenes, scenesRef.current)) {
+      setScenes(normalized.scenes);
+      setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+    }
+    if (normalized.config.openingChapterMarkerId !== scriptConfigRef.current.openingChapterMarkerId) {
+      syncOpeningChapterMarkerId(normalized.blocks);
+    }
     setSelectedBlockIds((current) => {
       const next = new Set(current);
       for (const id of deleteIds) next.delete(id);
@@ -9332,7 +9333,7 @@ export default function ScriptEditor({
       selectionAnchorBlockIdRef.current = null;
       rangeSelectionActiveRef.current = false;
     }
-  }, [markOwnershipDirty, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, isLockedMode]);
+  }, [markBlockStructureDirty, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, syncOpeningChapterMarkerId, isLockedMode]);
 
   const emptyScriptCleanupDescendantKeys = useMemo(() => {
     const childKeysByParent = new Map<string, string[]>();
@@ -9427,22 +9428,43 @@ export default function ScriptEditor({
       }
       return;
     }
-    const { deleteBlockIds, markersToRepair, selectedSceneIds } = buildEmptyScriptCleanupRemovalPlan(
+    const { deleteBlockIds, selectedSceneIds } = buildEmptyScriptCleanupRemovalPlan(
       currentBlocks,
       selectedTargets
     );
 
     const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
     const remainingScenes = scenesRef.current.filter((scene) => !selectedSceneIds.has(scene.id));
-    const repairedBlocks = repairEmptyMarkerSegments(remainingBlocks, markersToRepair, scriptConfigRef.current.openingChapterMarkerId);
+    const editedBlocks = remainingBlocks.length > 0 ? remainingBlocks : [makeBlock()];
+    let retainedBefore = 0;
+    const changes: BlockChange[] = [];
+    for (const block of currentBlocks) {
+      if (deleteBlockIds.has(block.id)) {
+        changes.push({
+          kind: "delete",
+          position: retainedBefore,
+          blockId: block.id,
+          beforeType: block.type,
+          afterType: null,
+        });
+      } else retainedBefore++;
+    }
+    if (remainingBlocks.length === 0) changes.push({
+      kind: "insert",
+      position: 0,
+      blockId: editedBlocks[0].id,
+      beforeType: null,
+      afterType: editedBlocks[0].type,
+    });
     const normalized = normalizeScriptMarkerInvariants(
-      repairedBlocks.length > 0 ? repairedBlocks : [makeBlock()],
+      editedBlocks,
       remainingScenes,
-      scriptConfigRef.current
+      scriptConfigRef.current,
+      markerChangeFromOperations(changes),
     );
 
     saveSnapshot();
-    markOwnershipDirty("full");
+    markBlockStructureDirty(currentBlocks, normalized.blocks);
     resetScriptInteractions();
     setEmptyScriptCleanupDialog(null);
     setBlocks(normalized.blocks);
@@ -9452,17 +9474,18 @@ export default function ScriptEditor({
       normalized.scenes
     ));
     showReorderNotice("已清除选中空白内容。");
-  }, [canEditText, deleteBlocks, isLockedMode, markOwnershipDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, setEmptyScriptCleanupDialog, showReorderNotice]);
+  }, [canEditText, deleteBlocks, isLockedMode, markBlockStructureDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, setEmptyScriptCleanupDialog, showReorderNotice]);
 
   const applyMarkerDeleteOperation = useCallback((operation: MarkerDeleteOperation) => {
+    const previousBlocks = blocksRef.current;
     const next = executeMarkerDeletion({
-      blocks: blocksRef.current,
+      blocks: previousBlocks,
       scenes: scenesRef.current,
       characters: charactersRef.current,
       config: scriptConfigRef.current,
     }, operation, uid);
     saveSnapshot();
-    markOwnershipDirty("full");
+    markBlockStructureDirty(previousBlocks, next.blocks);
     resetScriptInteractions();
     setBlocks(next.blocks);
     setScenes(next.scenes);
@@ -9470,7 +9493,7 @@ export default function ScriptEditor({
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
     setMarkerDeleteDialog(null);
     void persistMarkerState(next);
-  }, [markOwnershipDirty, persistMarkerState, resetScriptInteractions, saveSnapshot]);
+  }, [markBlockStructureDirty, persistMarkerState, resetScriptInteractions, saveSnapshot]);
 
   const deleteMarkerOrEmptyTarget = useCallback((markerBlockId: string, fallbackDeleteIds: string[]) => {
     if (isLockedMode) return;
@@ -9667,23 +9690,19 @@ export default function ScriptEditor({
       .slice(0, rawInsertIdx)
       .filter((b) => movingIds.has(b.id)).length;
     const insertIdx = Math.max(0, Math.min(remaining.length, rawInsertIdx - removedBeforeInsert));
-    const markersToRepair = new Set<string>();
-    const previousMarkerAtSource = previousAdjacentMarker(prev, prev.indexOf(moving[0]));
-    if (previousMarkerAtSource) markersToRepair.add(previousMarkerAtSource.id);
     const next = [...remaining];
     next.splice(insertIdx, 0, ...moving);
-    const previousMarkerAtTarget = previousAdjacentMarker(next, insertIdx);
-    if (previousMarkerAtTarget) markersToRepair.add(previousMarkerAtTarget.id);
-    const firstMoved = moving[0];
-    if (firstMoved && isMarkerBlock(firstMoved)) markersToRepair.add(firstMoved.id);
-    const lastMoved = moving[moving.length - 1];
-    if (lastMoved && isMarkerBlock(lastMoved)) markersToRepair.add(lastMoved.id);
     if (next.every((b, i) => b.id === prev[i]?.id)) {
       showReorderNotice("移动未执行：目标位置与当前位置相同。");
       return false;
     }
-    const repairedNext = repairEmptyMarkerSegments(next, markersToRepair, scriptConfigRef.current.openingChapterMarkerId);
-    const normalizedNext = repairedNext === next ? normalizeScriptBlockStream(next) : repairedNext;
+    const normalized = normalizeScriptMarkerInvariants(
+      next,
+      scenesRef.current,
+      scriptConfigRef.current,
+      getMarkerChange(prev, next, movingIds),
+    );
+    const normalizedNext = normalized.blocks;
     const movedStartIndex = normalizedNext.findIndex((block) => movingIds.has(block.id));
     const movingHasMarker = moving.some(isMarkerBlock);
     const firstMovedOwnerMarkerId = normalizedNext[movedStartIndex].ownerMarkerId ?? null;
@@ -9695,16 +9714,18 @@ export default function ScriptEditor({
 
     requestLargeSelectionOperation("move", moving.length, () => {
       saveSnapshot();
-      markOwnershipDirty("full");
+      for (const id of movingIds) pendingMovedBlockIdsRef.current.add(id);
+      markBlockStructureDirty(prev, normalizedNext, movingIds);
       pendingVirtualScrollAnchorRef.current = null;
       pendingNavigateRef.current = null;
       postNavCorrectionRef.current = null;
       requestVirtualWindowRefresh();
       pendingMoveCenterRef.current = moving[0].id;
       if (movingHasMarker) {
-        const nextScenes = normalizeSceneRowsForMarkers(scenesRef.current, normalizedNext);
-        setScenes(nextScenes);
-        setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, nextScenes));
+        if (!sameSceneRows(normalized.scenes, scenesRef.current)) {
+          setScenes(normalized.scenes);
+          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+        }
         syncOpeningChapterMarkerId(normalizedNext);
       }
       setBlocks(normalizedNext);
@@ -9739,7 +9760,7 @@ export default function ScriptEditor({
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, glowTocMarker, markOwnershipDirty, markerContextById, rehearsalLabels.rehearsalLabelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+  }, [glowChangedBlocks, glowTocMarker, markBlockStructureDirty, markerContextById, rehearsalLabels.rehearsalLabelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
@@ -9854,22 +9875,27 @@ export default function ScriptEditor({
     // Pre-generate the new block ID outside the updater (Strict Mode double-invocation fix).
     const newBlockId = uid();
     // refId must also be determined outside the updater; read it from blocksRef.
-    const refId = index > 0 ? (blocksRef.current[index - 1]?.id ?? null) : null;
-    markOwnershipDirty({ start: index, end: index + 1 });
-    setBlocks((prev) => {
-      const newBlock: Block = {
-        ...makeBlock(),
-        id: newBlockId,  // use the pre-generated stable ID
-        sceneId: null,
-        rehearsalMark: null,
-      };
-      const updated = [...prev];
-      updated.splice(index, 0, newBlock);
-      pendingCharOpen.current = newBlock.id;
-      return normalizeScriptBlockStream(updated);
-    });
+    const previousBlocks = blocksRef.current;
+    const insertIndex = Math.max(0, Math.min(index, previousBlocks.length));
+    const refId = insertIndex > 0 ? (previousBlocks[insertIndex - 1]?.id ?? null) : null;
+    const newBlock: Block = {
+      ...makeBlock(),
+      id: newBlockId,  // use the pre-generated stable ID
+      sceneId: null,
+      rehearsalMark: null,
+    };
+    const updated = [...previousBlocks];
+    updated.splice(insertIndex, 0, newBlock);
+    pendingCharOpen.current = newBlock.id;
+    applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+      kind: "insert",
+      position: insertIndex,
+      blockId: newBlock.id,
+      beforeType: null,
+      afterType: newBlock.type,
+    }]));
     if (refId) inheritTags(refId, newBlockId);
-  }, [markOwnershipDirty, saveSnapshot, inheritTags, isLockedMode]);
+  }, [applyBlockStructureEdit, saveSnapshot, inheritTags, isLockedMode]);
 
   const addChar = (name: string) => {
     if (isLockedMode) return;

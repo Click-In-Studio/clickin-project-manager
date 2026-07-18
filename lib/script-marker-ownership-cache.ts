@@ -4,6 +4,7 @@ import { isMarkerBlock, withMarkerOwnership } from "./script-marker-blocks";
 export type MarkerOwnershipRange = {
   start: number;
   end: number;
+  throughNextMarker?: boolean;
 };
 
 export type MarkerOwnershipDirty = "full" | MarkerOwnershipRange | MarkerOwnershipRange[] | null;
@@ -16,13 +17,14 @@ function normalizeRanges(dirty: MarkerOwnershipDirty, length: number): MarkerOwn
     .map((range) => ({
       start: Math.max(0, Math.min(length, range.start)),
       end: Math.max(0, Math.min(length, range.end)),
+      throughNextMarker: range.throughNextMarker,
     }))
     .filter((range) => range.start < range.end)
     .sort((a, b) => a.start - b.start);
   const merged: MarkerOwnershipRange[] = [];
   for (const range of normalized) {
     const last = merged[merged.length - 1];
-    if (last && range.start <= last.end) {
+    if (last && range.start <= last.end && last.throughNextMarker === range.throughNextMarker) {
       last.end = Math.max(last.end, range.end);
     } else merged.push({ ...range });
   }
@@ -69,7 +71,10 @@ export function updateMarkerOwnership(
   if (ranges.length === 0) return blocks;
   const next = blocks.slice();
   for (const range of ranges) {
-    applyRangeOwnership(next, blocks, range.start, findNextMarkerBoundary(blocks, range.end));
+    const end = range.throughNextMarker === false
+      ? range.end
+      : findNextMarkerBoundary(blocks, range.end);
+    applyRangeOwnership(next, next, range.start, end);
   }
   return next;
 }

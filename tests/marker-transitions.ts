@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Pool } from "pg";
 import {
-  convertMarker, executeMarkerDeletion, insertHierarchyMarker, insertMarker, normalizeMarkerState, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
+  convertMarker, executeMarkerDeletion, getMarkerChange, insertHierarchyMarker, insertMarker, markerCacheUpdateBlockIds, normalizeMarkerState, normalizeMarkerStateAfterEdit, normalizeScriptMarkerInvariants, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
 } from "../lib/script-marker-domain";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../lib/script-types";
 import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
@@ -10,6 +10,7 @@ import { buildMarkerLabelIndex } from "../lib/script-generated-labels";
 import { migrateLegacyRehearsalMentions } from "../lib/mention-types";
 import { updateMarkerOwnership } from "../lib/script-marker-ownership-cache";
 import { getMarkerLabelIndex } from "../lib/db";
+import { computePageMap, updateEstimatedPageMap } from "../lib/script-page";
 
 let id = 0;
 const createId = () => `generated-${++id}`;
@@ -93,6 +94,344 @@ const forcedFirstScenesAcrossChapters = normalizeMarkerState(state([
   block("c0", "chapter_marker"), block("empty-0", "dialogue", "", null), block("s01", "scene_marker"),
   block("c1", "chapter_marker"), block("empty-1", "dialogue", "", null), block("s11", "scene_marker"),
 ]), createId);
+
+const chapterWithLaterRehearsal = normalizeMarkerState(state([
+  block("c-leading", "chapter_marker"),
+  block("t-leading", "dialogue", "text", null),
+  block("r-later", "rehearsal_marker", "", null),
+  block("t-after-r", "dialogue", "text", null),
+]), createId);
+assert.equal(chapterWithLaterRehearsal.blocks[1].type, "rehearsal_marker");
+assert.equal(chapterWithLaterRehearsal.blocks[1].markerMeta?.parentMarkerId, "c-leading");
+
+const sceneWithLaterRehearsal = normalizeMarkerState(state([
+  block("c-scene-leading", "chapter_marker"),
+  block("s-leading", "scene_marker"),
+  block("t-scene-leading", "dialogue", "text", null),
+  block("r-scene-later", "rehearsal_marker", "", null),
+  block("t-scene-after-r", "dialogue", "text", null),
+]), createId);
+const sceneLeadingIndex = sceneWithLaterRehearsal.blocks.findIndex((item) => item.id === "s-leading");
+assert.equal(sceneWithLaterRehearsal.blocks[sceneLeadingIndex + 1].type, "rehearsal_marker");
+assert.equal(sceneWithLaterRehearsal.blocks[sceneLeadingIndex + 1].markerMeta?.parentMarkerId, "s-leading");
+
+const contentEdited = baseline.blocks.map((item) => item.id === "t11" ? { ...item, content: "edited" } : item);
+assert.deepEqual(getMarkerChange(baseline.blocks, contentEdited), { changes: [], positions: [], markerStructureChanged: false });
+const contentEditState = { ...baseline, blocks: contentEdited };
+assert.equal(normalizeMarkerStateAfterEdit(baseline, contentEditState, createId), contentEditState);
+const insertedTextBlocks = [...baseline.blocks];
+insertedTextBlocks.splice(3, 0, block("t-inserted", "dialogue", "inserted", null));
+assert.deepEqual(getMarkerChange(baseline.blocks, insertedTextBlocks), {
+  changes: [{ kind: "insert", position: 3, blockId: "t-inserted", beforeType: null, afterType: "dialogue" }],
+  positions: [3],
+  markerStructureChanged: false,
+});
+const markerRenamed = baseline.blocks.map((item) => item.id === "s11"
+  ? { ...item, markerMeta: { ...item.markerMeta, name: "renamed", synopsis: "details" } }
+  : item);
+assert.deepEqual(getMarkerChange(baseline.blocks, markerRenamed), { changes: [], positions: [], markerStructureChanged: false });
+
+const unrelatedInvalidBlocks = [
+  block("unrelated-chapter", "chapter_marker"),
+  block("unrelated-text-1", "dialogue", "one", null),
+  block("unrelated-text-2", "dialogue", "two", null),
+  block("unrelated-text-3", "dialogue", "three", null),
+  block("unrelated-rehearsal", "rehearsal_marker", "", null),
+  block("unrelated-text-4", "dialogue", "four", null),
+];
+const unrelatedEditedBlocks = [...unrelatedInvalidBlocks];
+unrelatedEditedBlocks.splice(2, 0, block("unrelated-insert", "dialogue", "insert", null));
+const unrelatedScoped = normalizeScriptMarkerInvariants(
+  state(unrelatedEditedBlocks),
+  createId,
+  { mode: "scoped", ...getMarkerChange(unrelatedInvalidBlocks, unrelatedEditedBlocks) },
+);
+assert.equal(unrelatedScoped.blocks[1].type, "dialogue");
+
+const missingOpeningBlocks = [
+  block("missing-opening-text-1", "dialogue", "one", null),
+  block("missing-opening-text-2", "dialogue", "two", null),
+  block("missing-opening-text-3", "dialogue", "three", null),
+];
+const missingOpeningEdited = [...missingOpeningBlocks, block("missing-opening-insert", "dialogue", "four", null)];
+const missingOpeningScoped = normalizeScriptMarkerInvariants(
+  state(missingOpeningEdited),
+  createId,
+  { mode: "scoped", ...getMarkerChange(missingOpeningBlocks, missingOpeningEdited) },
+);
+assert.equal(missingOpeningScoped.blocks[0].id, "missing-opening-text-1");
+const reordered = [...baseline.blocks];
+reordered.splice(7, 0, reordered.splice(4, 1)[0]);
+assert.ok(getMarkerChange(baseline.blocks, reordered).positions.length > 0);
+const normalizedBaselineForScope = normalizeMarkerState(baseline, createId);
+const normalizedReorderedBlocks = [...normalizedBaselineForScope.blocks];
+const movedScopeBlockIndex = normalizedReorderedBlocks.findIndex((item) => item.id === "s11");
+normalizedReorderedBlocks.splice(7, 0, normalizedReorderedBlocks.splice(movedScopeBlockIndex, 1)[0]);
+const normalizedReorder = normalizeMarkerStateAfterEdit(
+  normalizedBaselineForScope,
+  { ...normalizedBaselineForScope, blocks: normalizedReorderedBlocks },
+  createId,
+);
+const unchangedText = normalizedReorder.blocks.find((item) => item.id === "t01");
+assert.equal(unchangedText, normalizedBaselineForScope.blocks.find((item) => item.id === "t01"));
+
+const pageCache = updateEstimatedPageMap(null, normalizedBaselineForScope.blocks, "a4", "center", true, "full");
+const paginationMetadataEdit = normalizedBaselineForScope.blocks.map((item) => item.id === "t11"
+  ? { ...item, markerMeta: { ...item.markerMeta, synopsis: "detail only" } }
+  : item);
+assert.equal(
+  updateEstimatedPageMap(pageCache, paginationMetadataEdit, "a4", "center", true, { start: 4, end: 5 }),
+  pageCache,
+);
+assert.equal(
+  updateEstimatedPageMap(pageCache, paginationMetadataEdit, "a4", "center", true, null),
+  pageCache,
+);
+const sameHeightContentEdit = normalizedBaselineForScope.blocks.map((item) => item.id === "t11"
+  ? { ...item, content: "replacement" }
+  : item);
+assert.equal(
+  updateEstimatedPageMap(pageCache, sameHeightContentEdit, "a4", "center", true, { start: 4, end: 5 }),
+  pageCache,
+);
+const tallerContentEdit = normalizedBaselineForScope.blocks.map((item) => item.id === "t11"
+  ? { ...item, content: "very long ".repeat(500) }
+  : item);
+const tallerPageCache = updateEstimatedPageMap(
+  pageCache,
+  tallerContentEdit,
+  "a4",
+  "center",
+  true,
+  { start: 4, end: 5 },
+);
+assert.notEqual(tallerPageCache, pageCache);
+assert.deepEqual(tallerPageCache.pageMap, computePageMap(tallerContentEdit, "a4", "center", true));
+const unknownRangeTallerPageCache = updateEstimatedPageMap(
+  pageCache,
+  tallerContentEdit,
+  "a4",
+  "center",
+  true,
+  null,
+);
+assert.notEqual(unknownRangeTallerPageCache, pageCache);
+assert.deepEqual(unknownRangeTallerPageCache.pageMap, computePageMap(tallerContentEdit, "a4", "center", true));
+
+const overlappingPaginationBlocks = [
+  block("page-overlap-0", "dialogue", "zero", null),
+  block("page-overlap-1", "dialogue", "one", null),
+  block("page-overlap-2", "dialogue", "two", null),
+  block("page-overlap-3", "dialogue", "three", null),
+];
+const overlappingPageCache = updateEstimatedPageMap(
+  null,
+  overlappingPaginationBlocks,
+  "a4",
+  "center",
+  true,
+  "full",
+);
+const overlappingPaginationEdit = overlappingPaginationBlocks.map((item) => item.id === "page-overlap-3"
+  ? { ...item, content: "very long ".repeat(500) }
+  : item);
+const overlappingRangePageCache = updateEstimatedPageMap(
+  overlappingPageCache,
+  overlappingPaginationEdit,
+  "a4",
+  "center",
+  true,
+  [{ start: 1, end: 2 }, { start: 2, end: 3 }],
+);
+assert.notEqual(overlappingRangePageCache, overlappingPageCache);
+assert.deepEqual(overlappingRangePageCache.pageMap, computePageMap(overlappingPaginationEdit, "a4", "center", true));
+assert.deepEqual(
+  updateEstimatedPageMap(
+    overlappingPageCache,
+    overlappingPaginationEdit,
+    "a4",
+    "center",
+    true,
+    [{ start: 1, end: 3 }, { start: 2, end: 4 }],
+  ).pageMap,
+  computePageMap(overlappingPaginationEdit, "a4", "center", true),
+);
+
+const markerOnlyPaginationBlocks = [...normalizedBaselineForScope.blocks];
+markerOnlyPaginationBlocks.splice(5, 0, block("pagination-marker", "rehearsal_marker", "", null));
+const markerOnlyPaginationOwned = withMarkerOwnership(markerOnlyPaginationBlocks);
+const markerOnlyPageCache = updateEstimatedPageMap(
+  pageCache,
+  markerOnlyPaginationOwned,
+  "a4",
+  "center",
+  true,
+  { start: 5, end: 6 },
+);
+assert.equal(markerOnlyPageCache, pageCache);
+const tallerAfterMarkerInsert = markerOnlyPaginationOwned.map((item) => item.id === "t11"
+  ? { ...item, content: "very long ".repeat(500) }
+  : item);
+assert.deepEqual(
+  updateEstimatedPageMap(markerOnlyPageCache, tallerAfterMarkerInsert, "a4", "center", true, { start: 6, end: 7 }).pageMap,
+  computePageMap(tallerAfterMarkerInsert, "a4", "center", true),
+);
+
+function assertScopedMatchesFull(previous: ScriptState, editedBlocks: Block[]): ScriptState {
+  let fullId = 0;
+  let scopedId = 0;
+  const edited = { ...previous, blocks: editedBlocks };
+  const full = normalizeMarkerState(edited, () => `oracle-${++fullId}`);
+  const scoped = normalizeMarkerStateAfterEdit(previous, edited, () => `oracle-${++scopedId}`);
+  assert.deepEqual(scoped, full);
+  return scoped;
+}
+
+const leadingRepairBaseline = normalizeMarkerState(state([
+  block("c-oracle", "chapter_marker"),
+  block("r-oracle-leading", "rehearsal_marker", "", null),
+  block("r-oracle-later", "rehearsal_marker", "", null),
+  block("s-oracle", "scene_marker"),
+  block("r-scene-oracle-leading", "rehearsal_marker", "", null),
+  block("t-scene-oracle", "dialogue", "text", null),
+  block("r-scene-oracle-later", "rehearsal_marker", "", null),
+  block("t-scene-oracle-later", "dialogue", "text", null),
+]), createId);
+const withoutBothLeadingMarkers = leadingRepairBaseline.blocks.filter((item) =>
+  item.id !== "r-oracle-leading" && item.id !== "r-scene-oracle-leading");
+const repairedLeadingMarkers = assertScopedMatchesFull(leadingRepairBaseline, withoutBothLeadingMarkers);
+const laterChapterRehearsalIndex = repairedLeadingMarkers.blocks.findIndex((item) => item.id === "r-oracle-later");
+let repairedChapterBoundaryIndex = laterChapterRehearsalIndex - 1;
+while (
+  repairedChapterBoundaryIndex >= 0 &&
+  repairedLeadingMarkers.blocks[repairedChapterBoundaryIndex].type !== "chapter_marker" &&
+  repairedLeadingMarkers.blocks[repairedChapterBoundaryIndex].type !== "scene_marker"
+) repairedChapterBoundaryIndex--;
+assert.equal(repairedLeadingMarkers.blocks[repairedChapterBoundaryIndex + 1].type, "rehearsal_marker");
+const repairedSceneIndex = repairedLeadingMarkers.blocks.findIndex((item) => item.id === "s-oracle");
+assert.equal(repairedLeadingMarkers.blocks[repairedSceneIndex + 1].type, "rehearsal_marker");
+
+const convertedOracleBlocks = repairedLeadingMarkers.blocks.map((item) => item.id === "s-oracle"
+  ? { ...item, type: "chapter_marker" as const, markerMeta: { ...item.markerMeta, parentMarkerId: null } }
+  : item);
+assertScopedMatchesFull(repairedLeadingMarkers, convertedOracleBlocks);
+
+const insertedChapterBlocks = [...normalizedBaselineForScope.blocks];
+insertedChapterBlocks.splice(6, 0, block("c-insert-oracle", "chapter_marker"));
+const insertedChapterResult = assertScopedMatchesFull(normalizedBaselineForScope, insertedChapterBlocks);
+assert.equal(
+  insertedChapterResult.blocks.find((item) => item.id === "c2"),
+  normalizedBaselineForScope.blocks.find((item) => item.id === "c2"),
+);
+
+const deletedSceneBlocks = normalizedBaselineForScope.blocks.filter((item) => item.id !== "s11");
+const deletedSceneChange = getMarkerChange(normalizedBaselineForScope.blocks, deletedSceneBlocks);
+assert.equal(deletedSceneChange.markerStructureChanged, true);
+assert.ok(deletedSceneChange.changes.some((item) =>
+  item.kind === "delete" && item.blockId === "s11" && item.beforeType === "scene_marker"));
+const deletedSceneResult = assertScopedMatchesFull(normalizedBaselineForScope, deletedSceneBlocks);
+assert.equal(deletedSceneResult.blocks.find((item) => item.id === "t11")?.ownerMarkerId, "c1");
+assert.equal(
+  deletedSceneResult.blocks.find((item) => item.id === "t21"),
+  normalizedBaselineForScope.blocks.find((item) => item.id === "t21"),
+);
+
+const movedMarkerBlocks = [...normalizedBaselineForScope.blocks];
+const movedMarkerIndex = movedMarkerBlocks.findIndex((item) => item.id === "s21");
+const [movedMarker] = movedMarkerBlocks.splice(movedMarkerIndex, 1);
+movedMarkerBlocks.splice(3, 0, movedMarker);
+assertScopedMatchesFull(normalizedBaselineForScope, movedMarkerBlocks);
+
+const explicitMovePrevious = [
+  block("move-chapter-1", "chapter_marker"),
+  block("move-text-1", "dialogue", "one", null),
+  block("move-text-2", "dialogue", "two", null),
+  block("move-chapter-2", "chapter_marker"),
+  block("move-text-3", "dialogue", "three", null),
+];
+const explicitMoveNext = [
+  explicitMovePrevious[0],
+  explicitMovePrevious[3],
+  explicitMovePrevious[4],
+  explicitMovePrevious[1],
+  explicitMovePrevious[2],
+];
+const explicitMoveChange = getMarkerChange(
+  explicitMovePrevious,
+  explicitMoveNext,
+  ["move-text-1", "move-text-2"],
+);
+assert.deepEqual(
+  [...new Set(explicitMoveChange.changes
+    .filter((change) => change.kind === "move-source" || change.kind === "move-target")
+    .map((change) => change.blockId))],
+  ["move-text-1", "move-text-2"],
+);
+
+const hierarchyOnlyPrevious = [
+  block("hierarchy-chapter", "chapter_marker"),
+  { ...block("hierarchy-scene", "scene_marker"), markerMeta: { parentMarkerId: null } },
+  block("hierarchy-text", "dialogue", "text", null),
+];
+const hierarchyOnlyNext = hierarchyOnlyPrevious.map((item) => item.id === "hierarchy-scene"
+  ? { ...item, markerMeta: { parentMarkerId: "hierarchy-chapter" } }
+  : item);
+assert.deepEqual(
+  markerCacheUpdateBlockIds(
+    hierarchyOnlyNext,
+    getMarkerChange(hierarchyOnlyPrevious, hierarchyOnlyNext),
+  ),
+  ["hierarchy-scene"],
+);
+
+const ordinaryInsertBlocks = [...normalizedBaselineForScope.blocks];
+ordinaryInsertBlocks.splice(3, 0, block("ordinary-scope", "dialogue", "text", null));
+const ordinaryInsertResult = assertScopedMatchesFull(normalizedBaselineForScope, ordinaryInsertBlocks);
+assert.equal(ordinaryInsertResult.scenes, normalizedBaselineForScope.scenes);
+assert.equal(ordinaryInsertResult.blocks.find((item) => item.id === "ordinary-scope")?.ownerMarkerId, "s01");
+assert.equal(
+  ordinaryInsertResult.blocks.find((item) => item.id === "t11"),
+  normalizedBaselineForScope.blocks.find((item) => item.id === "t11"),
+);
+assert.deepEqual(
+  markerCacheUpdateBlockIds(
+    ordinaryInsertResult.blocks,
+    getMarkerChange(normalizedBaselineForScope.blocks, ordinaryInsertResult.blocks),
+  ),
+  ["ordinary-scope"],
+);
+assert.deepEqual(
+  markerCacheUpdateBlockIds(deletedSceneResult.blocks, deletedSceneChange),
+  ["t11"],
+);
+const adjacentMarkerPrevious = [
+  block("adjacent-chapter", "chapter_marker"),
+  block("adjacent-scene", "scene_marker"),
+  block("adjacent-text", "dialogue", "text", null),
+];
+const adjacentMarkerNext = adjacentMarkerPrevious.slice(1);
+assert.deepEqual(
+  markerCacheUpdateBlockIds(adjacentMarkerNext, getMarkerChange(adjacentMarkerPrevious, adjacentMarkerNext)),
+  ["adjacent-scene"],
+);
+
+const sameOrderMarkerMoveBlocks = [...normalizedBaselineForScope.blocks];
+const sameOrderMarkerIndex = sameOrderMarkerMoveBlocks.findIndex((item) => item.id === "s11");
+const [sameOrderMarker] = sameOrderMarkerMoveBlocks.splice(sameOrderMarkerIndex, 1);
+const sameOrderTargetIndex = sameOrderMarkerMoveBlocks.findIndex((item) => item.id === "t11") + 1;
+sameOrderMarkerMoveBlocks.splice(sameOrderTargetIndex, 0, sameOrderMarker);
+assert.equal(getMarkerChange(normalizedBaselineForScope.blocks, sameOrderMarkerMoveBlocks).markerStructureChanged, false);
+const sameOrderMarkerMoveResult = assertScopedMatchesFull(normalizedBaselineForScope, sameOrderMarkerMoveBlocks);
+assert.notEqual(sameOrderMarkerMoveResult.scenes, normalizedBaselineForScope.scenes);
+
+const sameOrderRehearsalMoveBlocks = [...leadingRepairBaseline.blocks];
+const sameOrderRehearsalIndex = sameOrderRehearsalMoveBlocks.findIndex((item) => item.id === "r-scene-oracle-later");
+const [sameOrderRehearsal] = sameOrderRehearsalMoveBlocks.splice(sameOrderRehearsalIndex, 1);
+const sameOrderRehearsalTarget = sameOrderRehearsalMoveBlocks.findIndex((item) => item.id === "t-scene-oracle-later") + 1;
+sameOrderRehearsalMoveBlocks.splice(sameOrderRehearsalTarget, 0, sameOrderRehearsal);
+assert.equal(getMarkerChange(leadingRepairBaseline.blocks, sameOrderRehearsalMoveBlocks).markerStructureChanged, false);
+const sameOrderRehearsalMoveResult = assertScopedMatchesFull(leadingRepairBaseline, sameOrderRehearsalMoveBlocks);
+assert.equal(sameOrderRehearsalMoveResult.scenes, leadingRepairBaseline.scenes);
 assert.equal(forcedFirstScenesAcrossChapters.blocks[1]?.type, "scene_marker");
 const secondChapterIndex = forcedFirstScenesAcrossChapters.blocks.findIndex((item) => item.id === "c1");
 assert.equal(forcedFirstScenesAcrossChapters.blocks[secondChapterIndex + 1]?.type, "scene_marker");
@@ -360,6 +699,13 @@ const incrementallyOwned = updateMarkerOwnership(
   { start: contextBlocks.length, end: contextBlocks.length + 1 },
 );
 assert.equal(incrementallyOwned.at(-1)?.ownerMarkerId, "mark-context");
+const untouchedFollowingText = block("untouched-following", "dialogue", "unchanged", null);
+const exactlyOwned = updateMarkerOwnership(
+  [...contextBlocks, insertedText, untouchedFollowingText],
+  { start: contextBlocks.length, end: contextBlocks.length + 1, throughNextMarker: false },
+);
+assert.equal(exactlyOwned[contextBlocks.length].ownerMarkerId, "mark-context");
+assert.equal(exactlyOwned.at(-1), untouchedFollowingText);
 
 const insertedRehearsalBlocks = withMarkerOwnership([
   ...ownedRehearsalBlocks.slice(0, 3),
