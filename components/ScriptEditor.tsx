@@ -8457,13 +8457,12 @@ export default function ScriptEditor({
     }
     // Restore last scroll position from cookie
     if (productionId) {
-      try {
-        const m = document.cookie.match(new RegExp(`(?:^|;\\s*)script_pos_${productionId}=([^;]*)`));
-        if (m) {
-          const idx = blocksRef.current.findIndex(b => b.id === decodeURIComponent(m[1]));
-          if (idx >= 0) scrollToBlockIdx(idx, "start");
-        }
-      } catch { /* ignore */ }
+      const cookieKey = `script_pos_${productionId}`;
+      const savedId = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith(cookieKey + "="))?.slice(cookieKey.length + 1);
+      if (savedId) {
+        const idx = blocksRef.current.findIndex(b => b.id === decodeURIComponent(savedId));
+        if (idx >= 0) scrollToBlockIdx(idx, "start");
+      }
     }
     return () => clearTimeout(unlockTimer);
   }, [loadState, productionId, scrollToBlockIdx]);
