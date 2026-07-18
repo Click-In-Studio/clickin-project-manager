@@ -256,6 +256,10 @@ type NonEmptyDramaturgyMarker = {
   id: string;
   kind: MarkerDetailDeleteBlockedKind;
 };
+type MarkerDetailField = {
+  label: string;
+  value: string;
+};
 
 function hasTextValue(value: string | null | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
@@ -296,11 +300,29 @@ function markerBlockDramaturgyDeleteBlockedKind(block: Block, detail?: SceneDeta
   return block.type === "chapter_marker" ? "chapter" : "scene";
 }
 
-function markerBlockDisplayName(block: Block, scene?: Scene | null, rehearsalLabel?: string): string {
-  if (block.type === "rehearsal_marker") return `排练记号 ${rehearsalLabel ?? ""}`.trim();
-  const kind = block.type === "chapter_marker" ? "章节" : "段落";
-  const title = [scene?.number, scene?.name].filter(Boolean).join(" ");
-  return title ? `${kind} ${title}` : kind;
+function markerDetailFields(block: Block, detail: SceneDetail | null): MarkerDetailField[] {
+  if (block.type !== "chapter_marker" && block.type !== "scene_marker") return [];
+  const markerMeta = block.markerMeta ?? {};
+  const fields: Array<[string, keyof SceneMetaFields]> = [
+    ["简介", "synopsis"],
+    ["行动线", "actionLine"],
+    ["音乐", "music"],
+    ["舞台呈现", "stageNotes"],
+  ];
+  return fields.map(([label, key]) => {
+    const value = markerMeta[key] || detail?.[key] || "";
+    return { label, value: value.trim() };
+  });
+}
+
+function markerExpectedDuration(block: Block, detail: SceneDetail | null, scenes: SceneDetail[]): string {
+  if (block.type === "chapter_marker" && block.sceneId) {
+    const chapterDuration = getChapterDurationDisplay(scenes.filter((scene) => scene.parentId === block.sceneId));
+    return !chapterDuration || chapterDuration.hasMissingDuration ? "—" : chapterDuration.text || "—";
+  }
+  const value = block.markerMeta?.expectedDuration || detail?.expectedDuration || "";
+  if (!hasTextValue(value)) return "—";
+  return formatDuration(parseDuration(value)) || "—";
 }
 
 function largeSelectionOperationMessage(operation: LargeSelectionOperation, count: number) {
@@ -6480,6 +6502,10 @@ export default function ScriptEditor({
     useState<MarkerDetailDeleteBlockedKind | null>(null);
   const [pendingNonEmptyMarkerSelectionDeleteIds, setPendingNonEmptyMarkerSelectionDeleteIds] =
     useState<string[] | null>(null);
+  const [selectedNonEmptyMarkerDeleteIds, setSelectedNonEmptyMarkerDeleteIds] =
+    useState<Set<string>>(() => new Set());
+  const [expandedNonEmptyMarkerDetailIds, setExpandedNonEmptyMarkerDetailIds] =
+    useState<Set<string>>(() => new Set());
   const [pendingEmptyScriptCleanup, setPendingEmptyScriptCleanup] =
     useState<EmptyScriptCleanupTarget[] | null>(null);
   const [selectedEmptyScriptCleanupKeys, setSelectedEmptyScriptCleanupKeys] =
@@ -9324,6 +9350,8 @@ export default function ScriptEditor({
       if (deleteIds.size === 1) {
         setMarkerDetailDeleteBlockedKind(blockedMarkers[0].kind);
       } else {
+        setSelectedNonEmptyMarkerDeleteIds(new Set());
+        setExpandedNonEmptyMarkerDetailIds(new Set());
         setPendingNonEmptyMarkerSelectionDeleteIds(Array.from(deleteIds));
       }
       return;
@@ -11999,16 +12027,17 @@ export default function ScriptEditor({
             const index = blockIndexByIdRef.current.get(marker.id);
             const block = index === undefined ? null : blocks[index] ?? null;
             if (!block) return null;
+            const detail = block.sceneId ? sceneDetailById.get(block.sceneId) ?? null : null;
+            const scene = block.sceneId ? sceneById.get(block.sceneId) ?? null : null;
             return {
               id: marker.id,
-              label: markerBlockDisplayName(
-                block,
-                block.sceneId ? sceneById.get(block.sceneId) ?? null : null,
-                rehearsalLabels.rehearsalLabelByMarkerId.get(block.id),
-              ),
+              captionNumber: scene?.number?.trim() || "—",
+              captionName: scene?.name?.trim() || "未命名",
+              captionDuration: markerExpectedDuration(block, detail, sceneDetails),
+              details: markerDetailFields(block, detail),
             };
           })
-          .filter((item): item is { id: string; label: string } => item !== null);
+          .filter((item): item is { id: string; captionNumber: string; captionName: string; captionDuration: string; details: MarkerDetailField[] } => item !== null);
         const scriptBlockDeleteIds = pendingNonEmptyMarkerSelectionDeleteIds.filter((id) => {
           const index = blockIndexByIdRef.current.get(id);
           const block = index === undefined ? undefined : blocks[index];
@@ -12016,64 +12045,139 @@ export default function ScriptEditor({
         });
         const cancelNonEmptyMarkerSelectionDelete = () => {
           setPendingNonEmptyMarkerSelectionDeleteIds(null);
+          setSelectedNonEmptyMarkerDeleteIds(new Set());
+          setExpandedNonEmptyMarkerDetailIds(new Set());
           clearBlockSelection();
           dismissBlockConfirmations();
         };
+        const toggleNonEmptyMarkerSelection = (markerId: string) => {
+          setSelectedNonEmptyMarkerDeleteIds((current) => {
+            const next = new Set(current);
+            if (next.has(markerId)) next.delete(markerId);
+            else next.add(markerId);
+            return next;
+          });
+        };
+        const toggleNonEmptyMarkerDetails = (markerId: string) => {
+          setExpandedNonEmptyMarkerDetailIds((current) => {
+            const next = new Set(current);
+            if (next.has(markerId)) next.delete(markerId);
+            else next.add(markerId);
+            return next;
+          });
+        };
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-            onClick={cancelNonEmptyMarkerSelectionDelete}
-            role="dialog"
-            aria-modal="true"
+          <ScriptDialog
+            panelClassName="w-[520px] max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl"
+            onClose={cancelNonEmptyMarkerSelectionDelete}
           >
-            <div
-              className="w-[460px] max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-5 shadow-xl"
-              onClick={e => e.stopPropagation()}
-            >
               <h2 className="text-base font-semibold text-zinc-800">所选标记详情不为空</h2>
               <p className="mt-2 text-sm leading-6 text-zinc-500">
                 以下章节/段落标记包含详情内容。请选择只删除剧本块，或连同这些标记一起删除。
               </p>
-              <div className="mt-3 max-h-44 overflow-y-auto rounded-xl border border-zinc-100 bg-zinc-50/60">
-                {blockedMarkers.map((marker) => (
-                  <div key={marker.id} className="border-b border-zinc-100 px-3 py-2 text-sm text-zinc-600 last:border-0">
-                    {marker.label}
+              <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+                  <span className="text-xs font-semibold tracking-wide text-zinc-600 uppercase">包含详情的标记</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNonEmptyMarkerDeleteIds(new Set(blockedMarkers.map((marker) => marker.id)))}
+                      className="text-[11px] font-medium text-red-700/70 transition-colors hover:text-red-700"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNonEmptyMarkerDeleteIds(new Set())}
+                      className="text-[11px] font-medium text-zinc-400 transition-colors hover:text-red-700"
+                    >
+                      清空
+                    </button>
                   </div>
-                ))}
+                </div>
+                <div className="max-h-56 overflow-y-auto">
+                  {blockedMarkers.map((marker) => {
+                    const selected = selectedNonEmptyMarkerDeleteIds.has(marker.id);
+                    const expanded = expandedNonEmptyMarkerDetailIds.has(marker.id);
+                    return (
+                      <div key={marker.id} className="border-b border-zinc-100 last:border-0">
+                        <div className={`sticky top-0 z-10 flex items-center transition-colors ${selected ? "bg-red-50" : "bg-white hover:bg-zinc-50"}`}>
+                          <button
+                            type="button"
+                            onClick={() => toggleNonEmptyMarkerDetails(marker.id)}
+                            className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-600"
+                            aria-expanded={expanded}
+                          >
+                            <svg className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${expanded ? "rotate-180" : ""}`} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                              <polyline points="3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
+                            </svg>
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="font-bold">【{marker.captionNumber}】</span>
+                              <span>{marker.captionName}</span>
+                            </span>
+                            <span className="h-4 w-px shrink-0 bg-zinc-100" />
+                            <span className="shrink-0 whitespace-nowrap text-xs">
+                              <span className="font-bold">预期时长：</span>
+                              <span className="font-normal">{marker.captionDuration}</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={selected}
+                            aria-label={`${selected ? "取消选择" : "选择"}${marker.captionNumber} ${marker.captionName}`}
+                            onClick={() => toggleNonEmptyMarkerSelection(marker.id)}
+                            className={`mr-3 flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition-colors ${selected ? "bg-red-700" : "bg-zinc-200"}`}
+                          >
+                            <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${selected ? "translate-x-4" : ""}`} />
+                          </button>
+                        </div>
+                        {expanded && (
+                          <div className="space-y-2.5 border-t border-zinc-100 bg-white px-3 py-3 text-xs text-zinc-600">
+                            {marker.details.map((field) => (
+                              <div key={field.label} className="space-y-1.5">
+                                <p className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase">{field.label}</p>
+                                <p className="min-h-[1.75rem] whitespace-pre-wrap break-words rounded-lg border border-zinc-200 bg-transparent px-2.5 py-2 leading-relaxed text-zinc-700">
+                                  {field.value || <span className="italic text-zinc-400">—</span>}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="mt-5 flex justify-end gap-2">
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
                 <button
                   onClick={cancelNonEmptyMarkerSelectionDelete}
-                  className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+                  className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}
                 >
                   取消
                 </button>
                 <button
                   onClick={() => {
-                    const ids = scriptBlockDeleteIds;
+                    const deletingMarkers = selectedNonEmptyMarkerDeleteIds.size > 0;
+                    const ids = !deletingMarkers
+                      ? scriptBlockDeleteIds
+                      : [...scriptBlockDeleteIds, ...selectedNonEmptyMarkerDeleteIds];
                     setPendingNonEmptyMarkerSelectionDeleteIds(null);
+                    setSelectedNonEmptyMarkerDeleteIds(new Set());
+                    setExpandedNonEmptyMarkerDetailIds(new Set());
                     if (ids.length > 0) {
                       deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
-                      clearBlockSelection();
+                      if (!deletingMarkers) clearBlockSelection();
                     }
                   }}
-                  className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-300 hover:text-zinc-800"
+                  className={selectedNonEmptyMarkerDeleteIds.size === 0
+                    ? "rounded border border-red-700/80 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:border-red-900 hover:bg-red-800/80 hover:text-white"
+                    : SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}
                 >
-                  仅删除剧本块
-                </button>
-                <button
-                  onClick={() => {
-                    const ids = pendingNonEmptyMarkerSelectionDeleteIds;
-                    setPendingNonEmptyMarkerSelectionDeleteIds(null);
-                    deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
-                  }}
-                  className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-                >
-                  删除全部
+                  {selectedNonEmptyMarkerDeleteIds.size === 0 ? "仅删除剧本块" : "删除选中标记"}
                 </button>
               </div>
-            </div>
-          </div>
+          </ScriptDialog>
         );
       })()}
 
