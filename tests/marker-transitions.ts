@@ -590,6 +590,24 @@ const emptyPlan = planMarkerDeletion(emptyScene, "s0");
 assert.equal(emptyPlan.status, "ready");
 assert.equal(emptyPlan.status === "ready" ? emptyPlan.operation.type : null, "whole");
 
+const emptyRehearsal = state([
+  block("c0", "chapter_marker"), block("s0", "scene_marker"),
+  block("r0", "rehearsal_marker"), block("empty", "dialogue"),
+  block("r1", "rehearsal_marker"), block("text", "dialogue", "keep"),
+]);
+const emptyRehearsalPlan = planMarkerDeletion(emptyRehearsal, "r0");
+assert.equal(emptyRehearsalPlan.status === "ready" ? emptyRehearsalPlan.operation.type : null, "whole");
+assert.deepEqual(emptyRehearsalPlan.status === "ready" ? emptyRehearsalPlan.previewBlockIds : [], ["r0", "empty"]);
+const withoutEmptyRehearsal = emptyRehearsalPlan.status === "ready"
+  ? executeMarkerDeletion(emptyRehearsal, emptyRehearsalPlan.operation, createId)
+  : emptyRehearsal;
+assert.ok(!withoutEmptyRehearsal.blocks.some((item) => item.id === "r0" || item.id === "empty"));
+assert.ok(withoutEmptyRehearsal.blocks.some((item) => item.id === "r1"));
+assert.ok(withoutEmptyRehearsal.blocks.some((item) => item.id === "text"));
+
+const nonEmptyRehearsalPlan = planMarkerDeletion(emptyRehearsal, "r1");
+assert.equal(nonEmptyRehearsalPlan.status === "ready" ? nonEmptyRehearsalPlan.operation.type : null, "marker-only");
+
 const emptyChapter = state([block("c0", "chapter_marker"), block("empty", "dialogue", "", null)]);
 const emptyChapterPlan = planMarkerDeletion(emptyChapter, "c0");
 assert.equal(emptyChapterPlan.status, "ready");

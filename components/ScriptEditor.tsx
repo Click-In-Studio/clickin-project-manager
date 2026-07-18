@@ -9497,13 +9497,8 @@ export default function ScriptEditor({
     void persistMarkerState(next);
   }, [markBlockStructureDirty, persistMarkerState, resetScriptInteractions, saveSnapshot]);
 
-  const deleteMarkerOrEmptyTarget = useCallback((markerBlockId: string, fallbackDeleteIds: string[]) => {
+  const deleteMarker = useCallback((markerBlockId: string) => {
     if (isLockedMode) return;
-    const marker = blocksRef.current.find((block) => block.id === markerBlockId);
-    if (!marker || (marker.type !== "chapter_marker" && marker.type !== "scene_marker") || fallbackDeleteIds.length !== 1 || fallbackDeleteIds[0] !== markerBlockId) {
-      deleteBlocks(fallbackDeleteIds);
-      return;
-    }
     const plan = planMarkerDeletion({
       blocks: blocksRef.current,
       scenes: scenesRef.current,
@@ -9519,7 +9514,7 @@ export default function ScriptEditor({
       return;
     }
     applyMarkerDeleteOperation(plan.operation);
-  }, [applyMarkerDeleteOperation, canEditText, deleteBlocks, isLockedMode, sceneDetails]);
+  }, [applyMarkerDeleteOperation, canEditText, isLockedMode, sceneDetails]);
 
   const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
     const index = blockIndexByIdRef.current.get(id);
@@ -9580,17 +9575,14 @@ export default function ScriptEditor({
       setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
     }
     if (ids.length === 1) {
-      const marker = blocksRef.current.find((block) => block.id === id);
-      if (marker?.type === "chapter_marker" || marker?.type === "scene_marker") {
-        const plan = planMarkerDeletion({
-          blocks: blocksRef.current,
-          scenes: scenesRef.current,
-          characters: charactersRef.current,
-          config: scriptConfigRef.current,
-        }, id, sceneDetails);
-        setDeleteConfirmingBlockIds(new Set(plan.status === "blocked" ? [id] : plan.previewBlockIds));
-        return;
-      }
+      const plan = planMarkerDeletion({
+        blocks: blocksRef.current,
+        scenes: scenesRef.current,
+        characters: charactersRef.current,
+        config: scriptConfigRef.current,
+      }, id, sceneDetails);
+      setDeleteConfirmingBlockIds(new Set(plan.status === "blocked" ? [id] : plan.previewBlockIds));
+      return;
     }
     setDeleteConfirmingBlockIds(new Set(ids));
   }, [isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
@@ -11205,7 +11197,6 @@ export default function ScriptEditor({
                     : block.type === "rehearsal_marker"
                       ? { kind: "rehearsal", id: block.id, mark: rehearsalLabels.rehearsalLabelByMarkerId.get(block.id) ?? "" }
                       : null;
-              const markerDeleteIds = [block.id];
               const markerEl = markerNode ? (
                 <div
                   key={block.id}
@@ -11225,9 +11216,8 @@ export default function ScriptEditor({
                     dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
                     isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
                     isTocHighlighted={tocHighlightedMarkerIds.has(block.id)}
-                    onRemove={() => deleteMarkerOrEmptyTarget(block.id, markerDeleteIds)}
+                    onRemove={() => deleteMarker(block.id)}
                     onRequestDelete={() => requestMarkerDelete(block.id)}
-                    deleteCount={markerDeleteIds.length}
                     canAddChapterScene={canEditMetadata}
                     canAddRehearsal={effectiveCanEditRehearsalMark}
                     onAddChapterBefore={() => addChapterBeforeBlock(block.id)}

@@ -1,5 +1,5 @@
 import { buildMarkerLabelIndex, type MarkerLabelIndex } from "./script-generated-labels";
-import { isMarkerBlock, shouldInsertEmptyBlockAfterMarker, withMarkerOwnership } from "./script-marker-blocks";
+import { isMarkerBlock, markerBlockRank, shouldInsertEmptyBlockAfterMarker, withMarkerOwnership } from "./script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipRange } from "./script-marker-ownership-cache";
 import { FIXED_INITIAL_CHAPTER_NAME } from "./script-fixed-markers";
 import type { Block, BlockType, MarkerMeta, Scene, ScriptState } from "./script-types";
@@ -829,6 +829,13 @@ function markerIndex(state: ScriptState, id: string): number {
   return resolved ? state.blocks.findIndex((block) => block.id === resolved) : -1;
 }
 
+function deletableMarkerIndex(state: ScriptState, id: string): number {
+  const exactIndex = state.blocks.findIndex((block) => isMarkerBlock(block) && block.id === id);
+  return exactIndex >= 0
+    ? exactIndex
+    : state.blocks.findIndex((block) => isSectionMarker(block) && block.sceneId === id);
+}
+
 export function insertMarker(state: ScriptState, input: MarkerInsert, createId: IdFactory): ScriptState {
   const blocks = [...state.blocks];
   const beforeIndex = input.beforeId ? markerIndex(state, input.beforeId) : -1;
@@ -915,11 +922,11 @@ export function convertMarker(state: ScriptState, id: string, kind: MarkerKind, 
 }
 
 function ownedRange(blocks: Block[], index: number): { end: number; blockIds: string[]; hasNonEmptyScript: boolean } {
-  const marker = blocks[index];
+  const markerRank = markerBlockRank(blocks[index])!;
   let end = blocks.length;
   for (let cursor = index + 1; cursor < blocks.length; cursor++) {
-    const candidate = blocks[cursor];
-    if (marker.type === "scene_marker" ? isSectionMarker(candidate) : candidate.type === "chapter_marker") {
+    const candidateRank = markerBlockRank(blocks[cursor]);
+    if (candidateRank !== null && candidateRank <= markerRank) {
       end = cursor;
       break;
     }
@@ -937,7 +944,7 @@ export function planMarkerDeletion(
   id: string,
   detailRows: Array<Scene & Partial<MarkerDetailFields>> = [],
 ): MarkerDeletePlan {
-  const index = markerIndex(state, id);
+  const index = deletableMarkerIndex(state, id);
   if (index < 0) return { status: "blocked", kind: "scene", message: "未找到章节或段落。" };
   const marker = state.blocks[index];
   const kind: MarkerKind = marker.type === "chapter_marker" ? "chapter" : "scene";
@@ -981,7 +988,7 @@ export function planMarkerDeletion(
 }
 
 export function executeMarkerDeletion(state: ScriptState, operation: MarkerDeleteOperation, createId: IdFactory): ScriptState {
-  const index = markerIndex(state, operation.markerId);
+  const index = deletableMarkerIndex(state, operation.markerId);
   if (index < 0) return state;
   const range = ownedRange(state.blocks, index);
   const removeIds = operation.type === "marker-only"
