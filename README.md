@@ -14,6 +14,7 @@
 
 - [使用指南](docs/USER_GUIDE.md) — 各功能的操作说明与注意事项
 - [开发指南](docs/DEV_GUIDE.md) — 项目结构、本地开发、新增功能流程
+- [测试指南](docs/TEST_GUIDE.md) — UI 功能验证与对抗性测试
 - [部署流程](docs/DEPLOY.md) — 首次部署与日常发版说明
 
 ---
