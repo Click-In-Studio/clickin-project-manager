@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { BASE_PATH } from "@/lib/base-path";
-import type { SceneDetail } from "@/lib/db";
+import type { MarkerProjection } from "@/lib/script-marker-domain";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import { parseDuration, formatDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
@@ -41,17 +40,46 @@ export function getDefaultViewConfig(): TableViewConfigData {
   return { columnOrder, visibleColumns, columnWidths };
 }
 
+export function normalizeTableViewConfig(value: unknown): TableViewConfigData {
+  const defaults = getDefaultViewConfig();
+  if (!value || typeof value !== "object") return defaults;
+
+  const config = value as Partial<TableViewConfigData>;
+  const knownKeys = new Set(defaults.columnOrder);
+  const requestedOrder = Array.isArray(config.columnOrder)
+    ? config.columnOrder.filter((key): key is string => typeof key === "string" && knownKeys.has(key))
+    : [];
+  const uniqueOrder = [...new Set(requestedOrder)];
+  const columnOrder = [...uniqueOrder, ...defaults.columnOrder.filter((key) => !uniqueOrder.includes(key))];
+
+  const requestedVisible = Array.isArray(config.visibleColumns)
+    ? config.visibleColumns.filter((key): key is string => typeof key === "string" && knownKeys.has(key))
+    : defaults.visibleColumns;
+  const visibleColumns = [...new Set([
+    ...requestedVisible,
+    ...defaults.visibleColumns.filter((key) => !requestedOrder.includes(key)),
+  ])];
+
+  const providedWidths = config.columnWidths && typeof config.columnWidths === "object"
+    ? config.columnWidths
+    : {};
+  const columnWidths = Object.fromEntries(defaults.columnOrder.map((key) => {
+    const width = providedWidths[key];
+    return [key, typeof width === "number" && Number.isFinite(width) && width >= 40 ? width : defaults.columnWidths[key]];
+  }));
+
+  return { columnOrder, visibleColumns, columnWidths };
+}
+
 export type SceneTableViewProps = {
   productionId: string;
-  scenes: SceneDetail[];
-  rehearsalMarks: Record<string, string[]>;
+  scenes: MarkerProjection[];
   canEdit: boolean;
   versionId: string | null;
   viewConfig: TableViewConfigData;
   onViewConfigChange: (config: TableViewConfigData) => void;
   onUpdateScene: (sceneId: string, name: string) => Promise<void>;
-  onPatchMeta: (sceneId: string, fields: Partial<Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => Promise<void>;
-  onDeleteScene?: (sceneId: string) => Promise<void>;
+  onPatchMeta: (sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => Promise<void>;
 };
 
 function MetaCell({
@@ -226,7 +254,7 @@ function SceneNameCell({
   canEdit,
   onUpdate,
 }: {
-  scene: SceneDetail;
+  scene: MarkerProjection;
   canEdit: boolean;
   onUpdate: (name: string) => Promise<void>;
 }) {
@@ -282,14 +310,12 @@ function SceneNameCell({
 export default function SceneTableView({
   productionId,
   scenes,
-  rehearsalMarks,
   canEdit,
   versionId,
   viewConfig,
   onViewConfigChange,
   onUpdateScene,
   onPatchMeta,
-  onDeleteScene,
 }: SceneTableViewProps) {
   const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
   const [collapsedChapters, setCollapsedChapters] = useState<Set<string>>(new Set());
@@ -308,7 +334,7 @@ export default function SceneTableView({
       .filter(Boolean);
   }, [viewConfig]);
 
-  const acts = useMemo(() => scenes.filter(s => s.parentId === null), [scenes]);
+  const acts = useMemo(() => scenes.filter(s => s.kind === "chapter"), [scenes]);
   const subScenes = useCallback((actId: string) => scenes.filter(s => s.parentId === actId), [scenes]);
 
   const toggleAssets = (sceneId: string) => {
@@ -358,9 +384,8 @@ export default function SceneTableView({
     document.addEventListener("mouseup", handleUp);
   };
 
-  const renderCell = (scene: SceneDetail, colKey: string, isChapter: boolean, children?: SceneDetail[]) => {
-    const marks = rehearsalMarks[scene.id] ?? [];
-    const uniqueMarks = [...new Set(marks)];
+  const renderCell = (scene: MarkerProjection, colKey: string, isChapter: boolean, children?: MarkerProjection[]) => {
+    const uniqueMarks = [...new Set(scene.rehearsalMarks)];
 
     switch (colKey) {
       case "number":
@@ -484,7 +509,7 @@ export default function SceneTableView({
     }
   };
 
-  const renderRow = (scene: SceneDetail, isChapter: boolean, children?: SceneDetail[]) => {
+  const renderRow = (scene: MarkerProjection, isChapter: boolean, children?: MarkerProjection[]) => {
     const isExpanded = expandedAssets.has(scene.id);
     return (
       <React.Fragment key={scene.id}>

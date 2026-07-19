@@ -70,8 +70,11 @@ CREATE TABLE IF NOT EXISTS version (
   parent_version_id TEXT REFERENCES version(id) ON DELETE SET NULL,
   status            version_status NOT NULL DEFAULT 'editing',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  script_config     JSONB NOT NULL DEFAULT '{}'
+  script_config     JSONB NOT NULL DEFAULT '{}',
+  marker_structure_revision BIGINT NOT NULL DEFAULT 0
 );
+
+ALTER TABLE version ADD COLUMN IF NOT EXISTS marker_structure_revision BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS version_production_idx ON version(production_id, created_at);
 
@@ -166,6 +169,7 @@ CREATE TABLE IF NOT EXISTS script (
   sort_key       TEXT NOT NULL,
   scene_id       TEXT REFERENCES scene(id) ON DELETE SET NULL,
   rehearsal_mark TEXT,
+  owner_marker_id TEXT,
   type           block_type NOT NULL DEFAULT 'dialogue',
   content        TEXT NOT NULL DEFAULT '',
   stage_comment  TEXT,
@@ -178,6 +182,7 @@ CREATE TABLE IF NOT EXISTS script (
 ALTER TABLE script ADD COLUMN IF NOT EXISTS force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE script ADD COLUMN IF NOT EXISTS stage_comment TEXT;
 ALTER TABLE script ADD COLUMN IF NOT EXISTS marker_meta JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE script ADD COLUMN IF NOT EXISTS owner_marker_id TEXT;
 
 CREATE INDEX IF NOT EXISTS script_production_sort_idx ON script(production_id, sort_key);
 

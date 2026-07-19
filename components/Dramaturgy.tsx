@@ -5,11 +5,12 @@ import Link from "next/link";
 import ScenesManager from "./ScenesManager";
 import CharactersManager from "./CharactersManager";
 import VersionSelector from "./VersionSelector";
-import SceneTableView, { getDefaultViewConfig, type TableViewConfigData } from "./SceneTableView";
+import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
 import TableColumnSettings from "./TableColumnSettings";
 import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import { BASE_PATH } from "@/lib/base-path";
-import type { SceneDetail, CharacterDetail, Version } from "@/lib/db";
+import type { CharacterDetail, Version } from "@/lib/db";
+import type { MarkerProjection } from "@/lib/script-marker-domain";
 
 type Tab = "scenes" | "characters";
 type SceneViewMode = "list" | "table";
@@ -19,8 +20,7 @@ type Props = {
   productionName: string;
   versions: Version[];
   versionId: string | null;
-  initialScenes: SceneDetail[];
-  rehearsalMarks: Record<string, string[]>;
+  initialScenes: MarkerProjection[];
   initialCharacters: CharacterDetail[];
   canEdit: boolean;
   canImport?: boolean;
@@ -38,7 +38,6 @@ export default function Dramaturgy({
   versions,
   versionId: initialVersionId,
   initialScenes,
-  rehearsalMarks: initialRehearsalMarks,
   initialCharacters,
   canEdit,
   canImport,
@@ -49,8 +48,7 @@ export default function Dramaturgy({
     initialCharacterId && !initialSceneId ? "characters" : "scenes"
   );
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(initialVersionId);
-  const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
-  const [rehearsalMarks, setRehearsalMarks] = useState<Record<string, string[]>>(initialRehearsalMarks);
+  const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
 
   const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>("list");
@@ -75,7 +73,7 @@ export default function Dramaturgy({
           setSavedViews(data.views);
           const defaultView = data.views.find((v: SavedView) => v.isDefault) ?? data.views[0];
           if (defaultView && defaultView.config) {
-            setTableConfig(defaultView.config as TableViewConfigData);
+            setTableConfig(normalizeTableViewConfig(defaultView.config));
             setActiveViewId(defaultView.id);
           }
         }
@@ -89,15 +87,14 @@ export default function Dramaturgy({
 
   const handleVersionChange = async (versionId: string) => {
     const [scenePayload, charsData] = await Promise.all([
-      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}&includeRehearsalMarks=1`).then(r => r.json()),
+      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}`).then(r => r.json()),
       fetch(`${BASE_PATH}/api/production/${productionId}/characters?versionId=${versionId}`).then(r => r.json()),
     ]);
     if (isUpdatingResponse(scenePayload) || isUpdatingResponse(charsData)) {
       return;
     }
-    setScenes(scenePayload.scenes);
+    setScenes(scenePayload);
     setCharacters(charsData);
-    setRehearsalMarks(scenePayload.rehearsalMarks);
     setCurrentVersionId(versionId);
   };
 
@@ -115,7 +112,7 @@ export default function Dramaturgy({
     setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, name } : s));
   }, [productionId, currentVersionId]);
 
-  const handlePatchMeta = useCallback(async (sceneId: string, fields: Partial<Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => {
+  const handlePatchMeta = useCallback(async (sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -128,16 +125,11 @@ export default function Dramaturgy({
 
   const handleConfigChange = (config: TableViewConfigData) => {
     setTableConfig(config);
-    if (activeViewId) {
-      setActiveViewId(null);
-    }
   };
 
   const handleSelectView = (view: SavedView) => {
-    if (view.id && view.config) {
-      setTableConfig(view.config as TableViewConfigData);
-      setActiveViewId(view.id);
-    }
+    setTableConfig(normalizeTableViewConfig(view.config));
+    setActiveViewId(view.id || null);
   };
 
   return (
@@ -225,7 +217,6 @@ export default function Dramaturgy({
                     currentConfig={tableConfig}
                     onSelectView={handleSelectView}
                     onViewsChange={setSavedViews}
-                    onNewView={() => {}}
                   />
                   <div className="relative">
                     <button
@@ -252,7 +243,6 @@ export default function Dramaturgy({
                 productionId={productionId}
                 productionName={productionName}
                 initialScenes={scenes}
-                rehearsalMarks={rehearsalMarks}
                 canEdit={effectiveCanEdit}
                 versionId={currentVersionId}
                 initialExpandedId={initialSceneId}
@@ -263,7 +253,6 @@ export default function Dramaturgy({
                 key={currentVersionId ?? ""}
                 productionId={productionId}
                 scenes={scenes}
-                rehearsalMarks={rehearsalMarks}
                 canEdit={effectiveCanEdit}
                 versionId={currentVersionId}
                 viewConfig={tableConfig}

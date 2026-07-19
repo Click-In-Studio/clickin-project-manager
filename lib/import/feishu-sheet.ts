@@ -100,16 +100,24 @@ export async function getSheetValues(
  * Returns column labels as either the header text or a column letter (A, B, ...).
  */
 export function parseSheetData(rawRows: string[][]): SheetData {
-  // Find first non-empty row for headers
-  let headerRowIdx = 0;
-  for (let i = 0; i < rawRows.length; i++) {
-    if (rawRows[i].some(c => c.trim())) { headerRowIdx = i; break; }
+  let columnCount = 0;
+  let headerRowIdx: number | null = null;
+  for (let rowIdx = 0; rowIdx < rawRows.length; rowIdx++) {
+    const row = rawRows[rowIdx];
+    for (let i = row.length - 1; i >= 0; i--) {
+      if (!row[i].trim()) continue;
+      columnCount = Math.max(columnCount, i + 1);
+      headerRowIdx ??= rowIdx;
+      break;
+    }
   }
 
-  const rawHeader = rawRows[headerRowIdx] ?? [];
+  const effectiveHeaderRowIdx = headerRowIdx ?? 0;
+  const sourceHeader = rawRows[effectiveHeaderRowIdx] ?? [];
+  const rawHeader = Array.from({ length: columnCount }, (_, idx) => sourceHeader[idx] ?? "");
   const headers = rawHeader.map((cell, idx) => cell.trim() || colLetter(idx));
-  const rows: SheetCell[][] = rawRows.slice(headerRowIdx + 1).map(
-    row => row.map(c => c.trim() || null)
+  const rows: SheetCell[][] = rawRows.slice(effectiveHeaderRowIdx + 1).map(
+    row => row.slice(0, columnCount).map(c => c.trim() || null)
   );
 
   return { headers, rows, rawHeaders: rawHeader.map(c => c.trim() || null) };

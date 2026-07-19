@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
   getProductionMemberContext, listCharactersByVersion, setCharacterMembers,
-  getActiveVersionId, loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion,
+  getActiveVersionId, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/roles";
@@ -36,10 +36,6 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
     return req.nextUrl.searchParams.has("versionId") ? resolved.error : Response.json([]);
   }
   const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
   const characters = await listCharactersByVersion(versionId);
   return Response.json(characters);
 }
@@ -64,14 +60,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
   // Load current characters to check for duplicates
-  const result = await loadProduction(id, versionId);
-  const characters = result?.state.characters ?? [];
+  const characters = await listCharactersByVersion(versionId);
   if (characters.some((c) => c.name === trimmed)) {
     return Response.json({ error: "角色名已存在" }, { status: 409 });
   }

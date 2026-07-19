@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
+import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
+import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSession } from "@/lib/session";
 import {
@@ -83,5 +83,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
 
   await applyPatchToDB(id, versionId, patch);
   const serverSeq = tickAndBroadcastSeq(id, versionId);
+  if (patchAffectsMarkerProjection(patch, current.state)) {
+    broadcastEvent(id, versionId, "markers", { seq: serverSeq });
+  }
   return Response.json({ ok: true, serverSeq });
 }

@@ -9,9 +9,8 @@ import {
   getProductionMemberContext,
   getProductionName,
   listVersions,
-  listScenesByVersion,
+  listMarkerProjectionByVersion,
   listCharactersByVersion,
-  listRehearsalMarksByVersion,
   ensureScriptMarkerMigration,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
@@ -55,18 +54,16 @@ export default async function DramaturgyPage({
     ?? versions[0]?.id
     ?? null;
 
-  const [scenes, rehearsalMarks, characters] = resolvedVersionId
+  const [scenes, characters] = resolvedVersionId
     ? await (async () => {
         const migration = await ensureScriptMarkerMigration(resolvedVersionId);
         if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
         return Promise.all([
-          listScenesByVersion(resolvedVersionId),
-          listRehearsalMarksByVersion(resolvedVersionId),
+          listMarkerProjectionByVersion(resolvedVersionId),
           listCharactersByVersion(resolvedVersionId),
         ]);
       })()
-    : [[], {}, []];
-
+    : [[], []];
   return (
     <Suspense>
       <Dramaturgy
@@ -75,7 +72,6 @@ export default async function DramaturgyPage({
         versions={versions}
         versionId={resolvedVersionId}
         initialScenes={scenes}
-        rehearsalMarks={rehearsalMarks}
         initialCharacters={characters}
         canEdit={canEdit}
         canImport={canImport}

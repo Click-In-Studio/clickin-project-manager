@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { DEFAULT_COLUMNS, type TableColumnDef, type TableViewConfigData, getDefaultViewConfig } from "./SceneTableView";
+import { DEFAULT_COLUMNS, type TableViewConfigData, getDefaultViewConfig } from "./SceneTableView";
 
 type Props = {
   config: TableViewConfigData;

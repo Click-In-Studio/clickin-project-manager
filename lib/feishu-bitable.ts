@@ -272,19 +272,6 @@ export function toScriptState(
   return { blocks, characters, scenes, config: { ...DEFAULT_SCRIPT_CONFIG } };
 }
 
-/**
- * Extract lex sort keys from raw records.
- * Returns a map of record_id → sort key string (only valid keys are included).
- */
-export function extractSortKeys(records: RawRecord[], sortFieldName: string): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const r of records) {
-    const key = extractText(r.fields[sortFieldName]).trim();
-    if (key) map.set(r.record_id, key);
-  }
-  return map;
-}
-
 // ─── Write helpers ────────────────────────────────────────────────────────────
 
 async function feishuPost<T>(path: string, token: string, body: unknown): Promise<T> {
@@ -302,26 +289,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
-}
-
-/** Build the 5 managed field values for a block (for batch_create / batch_update). */
-export function blockToFields(
-  block: Block,
-  scenes: Scene[],
-  characters: Character[]
-): Record<string, unknown> {
-  const scene = block.sceneId ? scenes.find((s) => s.id === block.sceneId) : null;
-  const charNames = block.characterIds
-    .map((cid) => characters.find((c) => c.id === cid)?.name)
-    .filter((n): n is string => n !== undefined);
-  const typeName = block.type === "stage" ? "舞台提示" : block.lyric ? "歌词" : "台词";
-  return {
-    剧本: block.content,
-    段落: scene?.id ?? null,
-    角色: charNames,
-    排练记号: block.rehearsalMark ?? "",
-    类型: typeName,
-  };
 }
 
 /** Create records in bulk; returns new Feishu record IDs in input order. */

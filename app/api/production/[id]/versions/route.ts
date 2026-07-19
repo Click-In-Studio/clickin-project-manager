@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  canUserAccessProduction, listVersions, createVersion, getActiveVersionId, getVersion,
+  canUserAccessProduction, listVersions, createVersion, getActiveVersionId, getVersion, ensureScriptMarkerMigration,
 } from "@/lib/db";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -32,6 +32,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const sourceVersion = await getVersion(fromVersionId);
   if (!sourceVersion || sourceVersion.productionId !== id) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
+  }
+  const migration = await ensureScriptMarkerMigration(fromVersionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
   }
   const name = body.name ?? `新版本 ${new Date().toLocaleDateString("zh-CN")}`;
 

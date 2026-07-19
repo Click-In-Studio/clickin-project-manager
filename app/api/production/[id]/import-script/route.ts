@@ -2,13 +2,12 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
+import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureEmptyScriptBlocksForEmptyScenes, ensureScriptMarkerMigration } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
 import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
-import { toAlphaLabel } from "@/lib/script-generated-labels";
 import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script-fixed-markers";
 import type { BlockType } from "@/lib/script-types";
 import type { MarkerMeta } from "@/lib/script-types";
@@ -73,7 +72,7 @@ type ImportBlock = {
   blockId?: string;
   type: BlockType;
   content: string;
-  stageComment: string | null;
+  stageComment?: string | null;
   lyric: boolean;
   characterIds: string[];
   characterAnnotations: Record<string, string>;
@@ -232,6 +231,12 @@ function sceneLabel(scene: { number: string; name: string | null }): string {
   return scene.name ? `${scene.number} ${scene.name}` : scene.number;
 }
 
+function isImportedOpeningChapter(scene: { number: string; name: string }): boolean {
+  const chapterNumber = scene.number.trim();
+  return (chapterNumber !== "" && Number(chapterNumber) === 0) ||
+    scene.name.trim() === FIXED_INITIAL_CHAPTER_NAME;
+}
+
 function validateProvidedMarkers(markerRows: MarkerImportRow[], textRows: ParsedImportRow[]): string[] {
   if (markerRows.length === 0) return [];
 
@@ -333,6 +338,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!userToken) return Response.json({ error: "飞书授权已过期，请重新登录" }, { status: 401 });
   const previewVersionId = await resolveImportVersionId(req, productionId);
   if (previewVersionId instanceof Response) return previewVersionId;
+  const migration = await ensureScriptMarkerMigration(previewVersionId);
+  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
   const rawRows = body.rows ?? await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows, warningMarks } = parseRows(rawRows, body);
   const markerConflicts = validateProvidedMarkers(markerRows, parsed);
@@ -389,9 +396,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const versionId = await resolveImportVersionId(req, productionId);
   if (versionId instanceof Response) return versionId;
   const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
+  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
 
   const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows } = parseRows(rawRows, body);
@@ -647,12 +652,49 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
   }
 
-  // Reuse the existing opening chapter UUID if the scene still exists, so incremental
-  // re-imports don't accumulate orphan opening chapter blocks.
+  // A zero-numbered chapter or a chapter named 开场 is the imported opening.
+  // Otherwise prepend a hidden, empty opening chapter.
   const existingOpeningScene = existingOpeningChapterId
     ? existingScenes.find(s => s.id === existingOpeningChapterId) ?? null
     : null;
-  const openingChapterMarkerId = existingOpeningScene?.id ?? randomUUID();
+  const importedScriptSceneIds = new Set(blockSpecs.map((spec) => spec.sceneId).filter((id): id is string => !!id));
+  const importedOpeningScenes = [
+    ...upsertScenesFromScript.filter((scene) => (
+      scene.parentId === null && isImportedOpeningChapter(scene)
+    )),
+    ...[...sceneByNum.values()].filter((scene) => (
+      scene.parentId === null &&
+      isImportedOpeningChapter(scene) &&
+      importedScriptSceneIds.has(scene.id)
+    )),
+  ];
+  const openingChapterMarkerId = importedOpeningScenes[0]?.id ?? existingOpeningScene?.id ?? randomUUID();
+  const importedOpeningIds = new Set(importedOpeningScenes.map((scene) => scene.id));
+
+  if (importedOpeningIds.size > 0) {
+    for (const spec of blockSpecs) {
+      if (spec.sceneId && importedOpeningIds.has(spec.sceneId)) spec.sceneId = openingChapterMarkerId;
+    }
+    for (const scene of upsertScenesFromScript) {
+      if (scene.parentId && importedOpeningIds.has(scene.parentId)) scene.parentId = openingChapterMarkerId;
+    }
+    for (const [number, scene] of sceneByNum) {
+      const id = importedOpeningIds.has(scene.id) ? openingChapterMarkerId : scene.id;
+      const parentId = scene.parentId && importedOpeningIds.has(scene.parentId)
+        ? openingChapterMarkerId
+        : scene.parentId;
+      if (id !== scene.id || parentId !== scene.parentId) {
+        sceneByNum.set(number, { ...scene, id, parentId });
+      }
+    }
+  }
+  for (let index = upsertScenesFromScript.length - 1; index >= 0; index--) {
+    const scene = upsertScenesFromScript[index];
+    if (scene.parentId === null && importedOpeningIds.has(scene.id)) {
+      upsertScenesFromScript.splice(index, 1);
+      if (scene.id !== openingChapterMarkerId) replacementSceneIds.delete(scene.id);
+    }
+  }
   upsertScenesFromScript.unshift({
     id: openingChapterMarkerId,
     number: "",
@@ -668,14 +710,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const chapterIdsWithScriptBlocks = new Set<string>();
   let currentChapterId: string | null = null;
   let currentSceneId: string | null = null;
-  let currentRehearsalIndex = 0;
 
   upsertBlocksWithoutKeys.push({
     id: randomUUID(),
     blockId: openingChapterMarkerId,
     type: "chapter_marker",
     content: "",
-    stageComment: null,
     lyric: false,
     characterIds: [],
     characterAnnotations: {},
@@ -699,14 +739,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       blockId: markerId,
       type,
       content: "",
-      stageComment: null,
       lyric: false,
       characterIds: [],
       characterAnnotations: {},
       sceneId: markerId,
       rehearsalMark: null,
       markerMeta: {
-        number: scene?.number ?? "",
         name: scene?.name ?? "",
         parentMarkerId,
         synopsis: scene?.synopsis ?? "",
@@ -717,20 +755,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       },
     });
   };
-  const pushRehearsalMarkerBlock = (rehearsalMark: string) => {
-    upsertBlocksWithoutKeys.push({
-      id: randomUUID(),
-      type: "rehearsal_marker",
-      content: "",
-      stageComment: null,
-      lyric: false,
-      characterIds: [],
-      characterAnnotations: {},
-      sceneId: null,
-      rehearsalMark,
-    });
-  };
-
   const pushScriptBlock = (spec: BlockSpec) => {
     const blockId = randomUUID();
     upsertBlocksWithoutKeys.push({
@@ -753,8 +777,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       spec.rehearsalMark !== previousSpec?.rehearsalMark ||
       spec.sceneId !== previousSpec?.sceneId
     )) {
-      pushRehearsalMarkerBlock(toAlphaLabel(currentRehearsalIndex));
-      currentRehearsalIndex++;
+      upsertBlocksWithoutKeys.push({
+        id: randomUUID(),
+        type: "rehearsal_marker",
+        content: "",
+        lyric: false,
+        characterIds: [],
+        characterAnnotations: {},
+        sceneId: null,
+        rehearsalMark: null,
+      });
     }
     pushScriptBlock(spec);
   };
@@ -780,17 +812,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           pushSceneMarkerBlock("chapter_marker", scene.id);
         }
         currentChapterId = scene.id;
-        currentRehearsalIndex = 0;
       } else {
         if (currentChapterId !== scene.parentId) {
           if (scene.parentId !== openingChapterMarkerId) {
             pushSceneMarkerBlock("chapter_marker", scene.parentId);
           }
           currentChapterId = scene.parentId;
-          currentRehearsalIndex = 0;
         }
         pushSceneMarkerBlock("scene_marker", scene.id);
-        currentRehearsalIndex = 0;
       }
       const sceneSpecs = specsBySceneId.get(scene.id) ?? [];
       for (const spec of sceneSpecs) {
@@ -810,7 +839,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
           currentChapterId = scene.id;
           currentSceneId = null;
-          currentRehearsalIndex = 0;
         }
       } else {
         chapterIdsWithScriptBlocks.add(scene.parentId);
@@ -820,12 +848,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
           currentChapterId = scene.parentId;
           currentSceneId = null;
-          currentRehearsalIndex = 0;
         }
         if (currentSceneId !== scene.id) {
           pushSceneMarkerBlock("scene_marker", scene.id);
           currentSceneId = scene.id;
-          currentRehearsalIndex = 0;
         }
       }
     }
@@ -864,7 +890,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     upsertScenes: upsertScenesFromScript,
     deleteSceneIds,
   });
-  await saveOpeningChapterMarkerId(productionId, versionId, openingChapterMarkerId);
+  await saveOpeningChapterMarkerId(
+    productionId,
+    versionId,
+    openingChapterMarkerId,
+    importedOpeningIds.size > 0 ? undefined : false,
+  );
   if (body.sceneOverrides) await ensureEmptyScriptBlocksForEmptyScenes(productionId, versionId);
 
   await saveScriptStageDelimiters(productionId, stageDelimiter.open, stageDelimiter.close);

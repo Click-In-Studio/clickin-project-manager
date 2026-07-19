@@ -1,12 +1,13 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
+import { getProductionMemberContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getMarkerLabelIndex, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getPool } from "@/lib/pg";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
 import { computePageMap } from "@/lib/script-page";
 import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/mention-types";
 import type { Block, BlockType } from "@/lib/script-types";
+import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -74,6 +75,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     generatedSceneNumMapPromise ??= listScenesByVersion(effectiveVersionId)
       .then((scenes) => new Map(scenes.map((scene) => [scene.id, scene.number])));
     return generatedSceneNumMapPromise;
+  }
+  let rehearsalLabelsPromise: ReturnType<typeof getMarkerLabelIndex> | null = null;
+  function loadRehearsalLabels() {
+    return rehearsalLabelsPromise ??= effectiveVersionId
+      ? getMarkerLabelIndex(effectiveVersionId)
+      : Promise.resolve(buildMarkerLabelIndex([]));
   }
 
   let pageMapPromise: Promise<Record<string, number>> | null = null;
@@ -152,23 +159,36 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
   }
 
-  // ── scene + rehearsal (both need scene_version) ───────────────────────────
-  const sceneIdxs = [...(byKind.get("scene") ?? []), ...(byKind.get("rehearsal") ?? [])];
+  // ── scene + rehearsal ─────────────────────────────────────────────────────
+  const sceneIdxs = byKind.get("scene") ?? [];
   if (sceneIdxs.length > 0 && effectiveVersionId) {
     const numByScene = await loadGeneratedSceneNumMap();
     for (const i of sceneIdxs) {
       const m = mentions[i];
       const num = numByScene.get(m.id);
       if (!num) { labels[i] = "#[已删除]"; continue; }
-      labels[i] = m.kind === "rehearsal" && m.aux
-        ? `#${num}${m.aux}`
-        : `#${num}`;
+      labels[i] = `#${num}`;
       urls[i] = `${base}/script${vParam}`;
     }
   } else if (sceneIdxs.length > 0) {
     for (const i of sceneIdxs) {
       labels[i] = "#[未知版本]";
       urls[i] = `${base}/script${vParam}`;
+    }
+  }
+  const rehearsalIdxs = byKind.get("rehearsal") ?? [];
+  if (rehearsalIdxs.length > 0 && effectiveVersionId) {
+    const rehearsalLabels = await loadRehearsalLabels();
+    for (const i of rehearsalIdxs) {
+      const mention = mentions[i];
+      const label = rehearsalLabels.labelByMarkerId.get(mention.id);
+      labels[i] = label ? `#${label}` : "#[已删除]";
+      urls[i] = `${base}/script${vParam}${label ? `#block-${mention.id}` : ""}`;
+    }
+  } else if (rehearsalIdxs.length > 0) {
+    for (const i of rehearsalIdxs) {
+      labels[i] = "#[未知版本]";
+      urls[i] = `${base}/script`;
     }
   }
 
@@ -254,15 +274,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         [effectiveVersionId, ids]
       );
       const blockInfo = new Map(r.rows.map(row => [row.block_id, row]));
-      const sceneNumMap = await loadGeneratedSceneNumMap();
+      const rehearsalLabels = await loadRehearsalLabels();
 
       for (const i of idxs) {
         const blockId = mentions[i].id;
         const info = blockInfo.get(blockId);
         if (!info || !info.rehearsal_mark) { labels[i] = "#[已删除]"; continue; }
         const pos = parseInt(info.row_num, 10);
-        const num = sceneNumMap.get(info.scene_id);
-        labels[i] = num ? `#${num}${info.rehearsal_mark}-${pos}` : "#[已删除]";
+        const label = rehearsalLabels.labelByMarkerId.get(info.rehearsal_mark);
+        labels[i] = label ? `#${label}-${pos}` : "#[已删除]";
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
     }

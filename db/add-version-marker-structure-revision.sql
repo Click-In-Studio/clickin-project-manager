@@ -1,0 +1,1 @@
+ALTER TABLE version ADD COLUMN IF NOT EXISTS marker_structure_revision BIGINT NOT NULL DEFAULT 0;

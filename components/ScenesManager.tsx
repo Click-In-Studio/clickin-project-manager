@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import VersionSelector from "./VersionSelector";
@@ -9,15 +9,16 @@ import type { SceneDetail, Version } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
-import { withGeneratedSceneNumbers } from "@/lib/script-generated-labels";
+import BoundaryActionMenu from "@/components/BoundaryActionMenu";
+import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
+import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
 
 type MetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
 
 type Props = {
   productionId: string;
   productionName: string;
-  initialScenes: SceneDetail[];
-  rehearsalMarks: Record<string, string[]>;
+  initialScenes: MarkerProjection[];
   canEdit: boolean;
   embedded?: boolean;
   versions?: Version[];
@@ -99,26 +100,27 @@ function SceneEditRow({
   versionId,
   initialExpanded,
   onUpdate,
+  onConvert,
   onDelete,
   onPatchMeta,
 }: {
-  scene: SceneDetail;
+  scene: MarkerProjection;
   indent: boolean;
   marks: string[];
-  childScenes?: SceneDetail[];
+  childScenes?: MarkerProjection[];
   canEdit: boolean;
   canDelete: boolean;
   productionId: string;
   versionId: string | null;
   initialExpanded?: boolean;
   onUpdate: (name: string) => Promise<void>;
+  onConvert: () => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<MetaFields>) => Promise<void>;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(scene.name);
   const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(initialExpanded ?? false);
   const rowRef = useRef<HTMLTableRowElement>(null);
@@ -193,7 +195,7 @@ function SceneEditRow({
         <td className="px-4 py-3">
           {marks.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {[...new Set(marks)].map((m) => (
+              {marks.map((m) => (
                 <span key={m} className="rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 bg-zinc-100">
                   {m}
                 </span>
@@ -201,31 +203,32 @@ function SceneEditRow({
             </div>
           )}
         </td>
-        <td className="px-4 py-3 text-right">
-          <div className="flex items-center justify-end gap-3">
-            {canEdit && canDelete && (
-              confirmDelete ? (
-                <>
-                  <button onClick={del} disabled={deleting} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
-                    {deleting ? "删除中…" : "确认"}
-                  </button>
-                  <button onClick={() => setConfirmDelete(false)} className="text-xs text-zinc-400 hover:text-zinc-600">取消</button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-xs text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all"
-                >
-                  删除
-                </button>
-              )
+        <td className="w-72 px-4 py-3 text-right">
+          <div className="flex h-5 items-center justify-end gap-3">
+            {canEdit && (
+              <span className="inline-flex h-5 items-center">
+                <BoundaryActionMenu
+                  conversionLabel={scene.kind === "scene" ? "转为章节" : "转为段落"}
+                  onConvert={() => { void onConvert(); }}
+                  onDelete={canDelete ? () => { void del(); } : undefined}
+                  deleting={deleting}
+                />
+              </span>
             )}
             <button
               onClick={toggleExpanded}
-              className={`text-xs transition-all ${expanded ? "text-zinc-500" : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-600"}`}
+              className={`inline-flex h-5 w-5 items-center justify-center transition-all ${expanded ? "text-zinc-500" : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-600"}`}
               title={expanded ? "收起" : "展开详情"}
             >
-              {expanded ? "⌃" : "⌄"}
+              <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <polyline
+                  points={expanded ? "3 7.5 6 4.5 9 7.5" : "3 4.5 6 7.5 9 4.5"}
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="square"
+                  strokeLinejoin="miter"
+                />
+              </svg>
             </button>
           </div>
         </td>
@@ -306,18 +309,33 @@ function InsertSceneRow({
   colSpan,
   onAddChapter,
   onAddScene,
+  allowEmptyChapterName = false,
 }: {
   colSpan: number;
   onAddChapter: ((name: string) => Promise<void>) | null;
   onAddScene: ((name: string) => Promise<void>) | null;
+  allowEmptyChapterName?: boolean;
 }) {
   const [open, setOpen] = useState<"chapter" | "scene" | null>(null);
   const [draftName, setDraftName] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: MouseEvent) => {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      setOpen(null);
+      setDraftName("");
+      setError(null);
+    };
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [open]);
 
   const submit = async (kind: "chapter" | "scene") => {
-    if (!draftName.trim()) return;
+    if (!draftName.trim() && !(kind === "chapter" && allowEmptyChapterName)) return;
     const handler = kind === "chapter" ? onAddChapter : onAddScene;
     if (!handler) return;
     setAdding(true);
@@ -336,12 +354,12 @@ function InsertSceneRow({
   return (
     <>
       <tr className="group border-b border-zinc-50">
-        <td colSpan={colSpan} className="px-4 py-1">
-          <div className="relative flex justify-center">
+        <td colSpan={colSpan} className="px-4 py-0">
+          <div ref={panelRef} className="relative flex justify-center">
             {!open ? (
               <button
                 onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
-                className="flex h-5 w-5 items-center justify-center rounded-full text-[12px] leading-none text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-500 group-hover:opacity-100"
+                className="flex h-4 w-5 items-center justify-center rounded-full text-[11px] leading-none text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-500 group-hover:opacity-100"
                 aria-label="添加章节或场景"
               >
                 +
@@ -362,8 +380,8 @@ function InsertSceneRow({
                 {onAddChapter && (
                   <button
                     onClick={() => open === "chapter" ? submit("chapter") : setOpen("chapter")}
-                    disabled={adding || (open === "chapter" && !draftName.trim())}
-                    className={`rounded px-2 py-1 text-xs transition-colors disabled:opacity-30 ${open === "chapter" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-100"}`}
+                    disabled={adding || (open === "chapter" && !draftName.trim() && !allowEmptyChapterName)}
+                    className={`rounded px-2 py-1 text-xs transition-colors disabled:pointer-events-none disabled:opacity-30 ${open === "chapter" ? "bg-zinc-800 text-white hover:bg-zinc-600" : "text-zinc-500 hover:bg-zinc-100"}`}
                   >
                     添加章节
                   </button>
@@ -372,7 +390,7 @@ function InsertSceneRow({
                   <button
                     onClick={() => open === "scene" ? submit("scene") : setOpen("scene")}
                     disabled={adding || (open === "scene" && !draftName.trim())}
-                    className={`rounded px-2 py-1 text-xs transition-colors disabled:opacity-30 ${open === "scene" ? "bg-blue-600 text-white" : "text-zinc-500 hover:bg-zinc-100"}`}
+                    className={`rounded px-2 py-1 text-xs transition-colors disabled:pointer-events-none disabled:opacity-50 ${open === "scene" ? "bg-blue-900/80 text-white hover:bg-blue-700/80" : "text-zinc-500 hover:bg-zinc-100"}`}
                   >
                     添加段落
                   </button>
@@ -395,101 +413,146 @@ function InsertSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, rehearsalMarks, canEdit, embedded, canImport, versions, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
-  const [scenes, setScenes] = useState<SceneDetail[]>(initialScenes);
-  const [marksMap, setMarksMap] = useState<Record<string, string[]>>(rehearsalMarks);
+export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, embedded, canImport, versions, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
+  const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(versionId ?? null);
+  const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
+  const [deleteDialogBusy, setDeleteDialogBusy] = useState(false);
 
   const currentVersion = (versions ?? []).find(v => v.id === currentVersionId);
   const effectiveCanEdit = canEdit && (!currentVersionId || !currentVersion || currentVersion.status === "editing" || currentVersion.status === "committed");
 
   const handleVersionChange = async (vId: string) => {
-    const data: { scenes: SceneDetail[]; rehearsalMarks: Record<string, string[]> } =
-      await fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${vId}&includeRehearsalMarks=1`).then(r => r.json());
+    const data: MarkerProjection[] =
+      await fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${vId}`).then(r => r.json());
     if (isUpdatingResponse(data)) {
       return;
     }
-    setScenes(data.scenes);
-    setMarksMap(data.rehearsalMarks);
+    setScenes(data);
     setCurrentVersionId(vId);
   };
 
+  const applyCanonicalPayload = (data: { scenes?: MarkerProjection[] }) => {
+    if (data.scenes) setScenes(data.scenes);
+  };
+
+  const refreshCanonicalState = useCallback(async () => {
+    const query = currentVersionId ? `?versionId=${encodeURIComponent(currentVersionId)}` : "";
+    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes${query}`);
+    if (!response.ok || response.status === 202) return;
+    const data = await response.json() as MarkerProjection[];
+    setScenes(data);
+  }, [currentVersionId, productionId]);
+
+  useEffect(() => {
+    if (!currentVersionId) return;
+    const stream = new EventSource(`${BASE_PATH}/api/script/${productionId}/stream?v=${encodeURIComponent(currentVersionId)}`);
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleMarkers = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => { void refreshCanonicalState(); }, 50);
+    };
+    stream.addEventListener("markers", handleMarkers);
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      stream.removeEventListener("markers", handleMarkers);
+      stream.close();
+    };
+  }, [currentVersionId, productionId, refreshCanonicalState]);
+
+  const mutate = async (url: string, init: RequestInit) => {
+    let res = await fetch(url, init);
+    if (res.status === 202) res = await fetch(url, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
+    applyCanonicalPayload(data);
+  };
+
   const update = async (id: string, name: string) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+    await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(currentVersionId ? { name, versionId: currentVersionId } : { name }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
-    setScenes((prev) => withGeneratedSceneNumbers(prev.map((s) => s.id === id ? { ...s, name } : s)));
   };
 
   const patchMeta = async (id: string, fields: Partial<MetaFields>) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+    await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(currentVersionId ? { ...fields, versionId: currentVersionId } : fields),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
-    setScenes((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s));
   };
+
+  const convert = async (scene: MarkerProjection) => {
+    await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${scene.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(currentVersionId ? { versionId: currentVersionId } : {}),
+        kind: scene.kind === "scene" ? "chapter" : "scene",
+      }),
+    });
+  };
+
+  const deleteRequest = (id: string, operation?: MarkerDeleteOperation["type"]) => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...(currentVersionId ? { versionId: currentVersionId } : {}), ...(operation ? { operation } : {}) }),
+  });
 
   const del = async (id: string) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentVersionId ? { versionId: currentVersionId } : {}),
-    });
+    let res = await deleteRequest(id);
+    if (res.status === 202) res = await deleteRequest(id);
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败");
-    setScenes((prev) => withGeneratedSceneNumbers(prev.filter((s) => s.id !== id && s.parentId !== id)));
+    if (res.status === 300 && data.plan?.status === "choice") {
+      setDeleteDialog({ plan: data.plan });
+      return;
+    }
+    if (res.status === 409 && data.plan?.status === "blocked") {
+      setDeleteDialog({ plan: data.plan });
+      return;
+    }
+    if (!res.ok || isUpdatingResponse(data)) {
+      setDeleteDialog({ plan: null, message: data.error ?? "删除失败。" });
+      return;
+    }
+    applyCanonicalPayload(data);
   };
 
-  const add = async (name: string, parentId: string | null, target?: { insertBeforeSceneId?: string; insertAfterSceneId?: string }) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes`, {
+  const chooseDeleteOperation = async (operation: MarkerDeleteOperation) => {
+    if (!deleteDialog) return;
+    setDeleteDialogBusy(true);
+    try {
+      const res = await deleteRequest(operation.markerId, operation.type);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) {
+        setDeleteDialog({ plan: null, message: data.error ?? "删除失败。" });
+        return;
+      }
+      applyCanonicalPayload(data);
+      setDeleteDialog(null);
+    } finally {
+      setDeleteDialogBusy(false);
+    }
+  };
+
+  const add = async (name: string, parentId: string | null, target?: { insertBeforeSceneId: string }) => {
+    await mutate(`${BASE_PATH}/api/production/${productionId}/scenes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(currentVersionId ? { name, parentId, versionId: currentVersionId, ...target } : { name, parentId, ...target }),
     });
-    const data = await res.json();
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "添加失败");
-    setScenes((prev) => {
-      const beforeIndex = target?.insertBeforeSceneId ? prev.findIndex((s) => s.id === target.insertBeforeSceneId) : -1;
-      const afterIndex = target?.insertAfterSceneId ? prev.findIndex((s) => s.id === target.insertAfterSceneId) : -1;
-      if (beforeIndex >= 0) {
-        const next = [...prev];
-        next.splice(beforeIndex, 0, data.scene);
-        return withGeneratedSceneNumbers(next);
-      }
-      if (afterIndex >= 0) {
-        const next = [...prev];
-        next.splice(afterIndex + 1, 0, data.scene);
-        return withGeneratedSceneNumbers(next);
-      }
-      if (parentId) {
-        let insertAfter = prev.findIndex((s) => s.id === parentId);
-        for (let i = insertAfter + 1; i < prev.length; i++) {
-          if (prev[i].parentId === parentId) insertAfter = i;
-          else break;
-        }
-        const next = [...prev];
-        next.splice(insertAfter + 1, 0, data.scene);
-        return withGeneratedSceneNumbers(next);
-      }
-      return withGeneratedSceneNumbers([...prev, data.scene]);
-    });
   };
 
-  const acts = scenes.filter((s) => s.parentId === null);
+  const acts = scenes.filter((s) => s.kind === "chapter");
   const subScenes = (actId: string) => scenes.filter((s) => s.parentId === actId);
-  const orphans = scenes.filter((s) => s.parentId !== null && !scenes.find((a) => a.id === s.parentId));
+  const beforeMarker = (marker?: MarkerProjection) => marker ? { insertBeforeSceneId: marker.id } : undefined;
   const colSpan = 4;
 
   const card = (
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
-          {acts.length === 0 && orphans.length === 0 ? (
+          {acts.length === 0 ? (
             <div>
               <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>
               {effectiveCanEdit && (
@@ -499,41 +562,40 @@ export default function ScenesManager({ productionId, productionName, initialSce
                       colSpan={colSpan}
                       onAddChapter={(name) => add(name, null)}
                       onAddScene={null}
+                      allowEmptyChapterName
                     />
                   </tbody>
                 </table>
               )}
             </div>
           ) : (
-            <table className="w-full">
+            <table className="w-full table-fixed">
               <thead>
                 <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
                   <th className="px-4 py-3 font-medium w-24">编号</th>
                   <th className="px-4 py-3 font-medium">名称</th>
                   <th className="px-4 py-3 font-medium">排练记号</th>
-                  <th className="px-4 py-3" />
+                  <th className="w-72 px-4 py-3" />
                 </tr>
               </thead>
               <tbody>
                 {effectiveCanEdit && (
                   <InsertSceneRow
                     colSpan={colSpan}
-                    onAddChapter={(name) => add(name, null, acts[0] ? { insertBeforeSceneId: acts[0].id } : undefined)}
+                    onAddChapter={(name) => add(name, null, beforeMarker(acts[0]))}
                     onAddScene={null}
+                    allowEmptyChapterName
                   />
                 )}
-                {acts.map((act) => {
+                {acts.map((act, actIndex) => {
                   const children = subScenes(act.id);
-                  const actMarkList: string[] = [];
-                  for (const m of marksMap[act.id] ?? []) {
-                    if (actMarkList[actMarkList.length - 1] !== m) actMarkList.push(m);
-                  }
+                  const nextAct = acts[actIndex + 1];
                   return (
                     <React.Fragment key={act.id}>
                       <SceneEditRow
                         scene={act}
                         indent={false}
-                        marks={actMarkList}
+                        marks={act.rehearsalMarks}
                         childScenes={children}
                         canEdit={effectiveCanEdit}
                         canDelete
@@ -541,14 +603,15 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         versionId={currentVersionId}
                         initialExpanded={act.id === initialExpandedId}
                         onUpdate={(name) => update(act.id, name)}
+                        onConvert={() => convert(act)}
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
                       />
                       {effectiveCanEdit && (
                         <InsertSceneRow
                           colSpan={colSpan}
-                          onAddChapter={(name) => add(name, null, { insertAfterSceneId: act.id })}
-                          onAddScene={(name) => add(name, act.id, children[0] ? { insertBeforeSceneId: children[0].id } : { insertAfterSceneId: act.id })}
+                          onAddChapter={(name) => add(name, null, beforeMarker(children[0] ?? nextAct))}
+                          onAddScene={(name) => add(name, act.id, beforeMarker(children[0] ?? nextAct))}
                         />
                       )}
                       {children.map((sub, childIndex) => (
@@ -556,21 +619,22 @@ export default function ScenesManager({ productionId, productionName, initialSce
                           <SceneEditRow
                             scene={sub}
                             indent={true}
-                            marks={marksMap[sub.id] ?? []}
+                            marks={sub.rehearsalMarks}
                             canEdit={effectiveCanEdit}
                             canDelete
                             productionId={productionId}
                             versionId={currentVersionId}
                             initialExpanded={sub.id === initialExpandedId}
                             onUpdate={(name) => update(sub.id, name)}
+                            onConvert={() => convert(sub)}
                             onDelete={() => del(sub.id)}
                             onPatchMeta={(fields) => patchMeta(sub.id, fields)}
                           />
                           {effectiveCanEdit && (
                             <InsertSceneRow
                               colSpan={colSpan}
-                              onAddChapter={(name) => add(name, null, { insertAfterSceneId: sub.id })}
-                              onAddScene={(name) => add(name, act.id, children[childIndex + 1] ? { insertBeforeSceneId: children[childIndex + 1].id } : { insertAfterSceneId: sub.id })}
+                              onAddChapter={(name) => add(name, null, beforeMarker(children[childIndex + 1] ?? nextAct))}
+                              onAddScene={(name) => add(name, act.id, beforeMarker(children[childIndex + 1] ?? nextAct))}
                             />
                           )}
                         </React.Fragment>
@@ -578,22 +642,6 @@ export default function ScenesManager({ productionId, productionName, initialSce
                     </React.Fragment>
                   );
                 })}
-                {orphans.map((s) => (
-                  <SceneEditRow
-                    key={s.id}
-                    scene={s}
-                    indent={false}
-                    marks={marksMap[s.id] ?? []}
-                    canEdit={effectiveCanEdit}
-                    canDelete
-                    productionId={productionId}
-                    versionId={currentVersionId}
-                    initialExpanded={s.id === initialExpandedId}
-                    onUpdate={(name) => update(s.id, name)}
-                    onDelete={() => del(s.id)}
-                    onPatchMeta={(fields) => patchMeta(s.id, fields)}
-                  />
-                ))}
               </tbody>
             </table>
           )}
@@ -601,7 +649,16 @@ export default function ScenesManager({ productionId, productionName, initialSce
         </div>
   );
 
-  if (embedded) return card;
+  const deleteDialogElement = deleteDialog ? (
+    <MarkerDeleteDialog
+      state={deleteDialog}
+      busy={deleteDialogBusy}
+      onChoose={(operation) => { void chooseDeleteOperation(operation); }}
+      onClose={() => setDeleteDialog(null)}
+    />
+  ) : null;
+
+  if (embedded) return <>{card}{deleteDialogElement}</>;
 
   return (
     <div className="min-h-screen bg-zinc-100 px-4 py-8">
@@ -630,6 +687,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
           </div>
         </div>
         {card}
+        {deleteDialogElement}
       </div>
     </div>
   );
