@@ -7,7 +7,7 @@ import { BASE_PATH } from "@/lib/base-path";
 
 type Props = {
   productionId: string;
-  currentOpenId: string;
+  currentUserId: string;
   href: string;
   title: string;
   subtitle: string;
@@ -20,7 +20,7 @@ type Props = {
 
 export default function ProductionMemberGuardLink({
   productionId,
-  currentOpenId,
+  currentUserId,
   href,
   title,
   subtitle,
@@ -40,7 +40,7 @@ export default function ProductionMemberGuardLink({
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/members`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ openId: currentOpenId }),
+        body: JSON.stringify({ userId: currentUserId }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);

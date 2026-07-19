@@ -1,0 +1,318 @@
+name: PR Automation
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to re-run AI review on'
+        required: true
+        type: number
+
+jobs:
+  # Assign the PR author as assignee so ownership is always visible in the PR list.
+  assign-author:
+    if: github.event_name == 'pull_request' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              assignees: [context.payload.pull_request.user.login],
+            });
+
+  # Post (or update) a migration checklist comment when db/add-*.sql or
+  # db/migrate-*.sql files are present in the PR. Removes the comment if those
+  # files are later removed from the PR.
+  migration-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const MARKER = '<!-- migration-checklist -->';
+            const pr = context.payload.pull_request;
+
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const migrationFiles = files
+              .filter(f => /^db\/(add|migrate)-.*\.sql$/.test(f.filename))
+              .map(f => f.filename);
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+            });
+            const existing = comments.find(
+              c => c.user.type === 'Bot' && c.body.includes(MARKER)
+            );
+
+            if (migrationFiles.length === 0) {
+              if (existing) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                });
+              }
+              return;
+            }
+
+            const fileList = migrationFiles.map(f => `- \`${f}\``).join('\n');
+            const verifyLines = migrationFiles
+              .map(f => `grep "${f.split('/').pop()}" /var/www/production-manager/shared/db-applied.txt`)
+              .join('\n');
+            const applyLines = migrationFiles
+              .map(f => `sudo -u postgres psql -d script_editor -f ${f}\necho "${f.split('/').pop()}" >> /var/www/production-manager/shared/db-applied.txt`)
+              .join('\n');
+
+            const body = [
+              MARKER,
+              '## ⚠️ 此 PR 包含数据库 Migration 文件',
+              '',
+              '以下文件将在合并后由 CD **自动执行**：',
+              fileList,
+              '',
+              '**Reviewer 检查项：**',
+              '- [ ] Migration 使用 `IF NOT EXISTS`，可安全重复执行',
+              '- [ ] 没有破坏性 schema 变更（删列、改非空类型等）导致当前线上代码 crash',
+              '- [ ] 合并部署后，在服务器确认 migration 已执行：',
+              '  ```bash',
+              '  ' + verifyLines,
+              '  ```',
+              '',
+              '**如果 CD 未自动执行，手动补跑：**',
+              '```bash',
+              applyLines,
+              '```',
+              '',
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body,
+              });
+            }
+
+  # AI-based code review: posts findings as a PR comment (not a CI gate).
+  # Triggers automatically on PR open; re-run manually via workflow_dispatch.
+  ai-review:
+    if: |
+      (github.event_name == 'pull_request' && github.event.action == 'opened') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          script: |
+            const MARKER = '<!-- ai-code-review -->';
+
+            const prNumber = context.eventName === 'workflow_dispatch'
+              ? parseInt(context.payload.inputs.pr_number, 10)
+              : context.payload.pull_request.number;
+
+            if (!process.env.ANTHROPIC_API_KEY) {
+              console.log('ANTHROPIC_API_KEY not set, skipping AI review.');
+              return;
+            }
+
+            // ── Fetch PR metadata ──────────────────────────────────────────────
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            // ── Build diff context ─────────────────────────────────────────────
+            // Focus on source files; skip lock files and large generated assets.
+            const SKIP = /package-lock\.json|yarn\.lock|pnpm-lock\.yaml|\.png$|\.jpg$|\.svg$|\.ico$/;
+            const PRIORITY = /^(lib\/|app\/api\/|tests\/|db\/|\.github\/)/;
+
+            const relevant = files
+              .filter(f => !SKIP.test(f.filename))
+              .sort((a, b) => {
+                const ap = PRIORITY.test(a.filename) ? 0 : 1;
+                const bp = PRIORITY.test(b.filename) ? 0 : 1;
+                return ap - bp;
+              });
+
+            // Per-file patch cap: 300 lines each, total cap 12 000 chars.
+            const MAX_PATCH_LINES = 300;
+            const MAX_TOTAL_CHARS = 12000;
+
+            let diffText = '';
+            let shownFiles = 0;
+            let cutMidFile = false;
+            for (const f of relevant) {
+              if (diffText.length >= MAX_TOTAL_CHARS) break;
+              const patch = f.patch ?? '(binary or no textual diff)';
+              const lines = patch.split('\n');
+              const truncated = lines.length > MAX_PATCH_LINES
+                ? lines.slice(0, MAX_PATCH_LINES).join('\n') + `\n… (+${lines.length - MAX_PATCH_LINES} lines not shown)`
+                : patch;
+              const entry = `### ${f.filename}  [${f.status}  +${f.additions}/-${f.deletions}]\n${truncated}\n`;
+              const remaining = MAX_TOTAL_CHARS - diffText.length;
+              if (entry.length > remaining) {
+                if (remaining > 0) {
+                  diffText += entry.slice(0, remaining);
+                  cutMidFile = true;
+                  shownFiles++;
+                }
+                diffText += '\n… (cut here — total diff size limit reached)';
+                break;
+              }
+              diffText += entry;
+              shownFiles++;
+            }
+
+            const skippedByBinary = files.length - relevant.length;
+            const skippedByLimit = relevant.length - shownFiles;
+            const footerParts = [];
+            if (skippedByBinary > 0) footerParts.push(`${skippedByBinary} binary/lock file(s) omitted`);
+            if (cutMidFile) footerParts.push('last file shown partially');
+            if (skippedByLimit > 0) footerParts.push(`${skippedByLimit} file(s) not shown — diff too large`);
+            const footer = footerParts.length > 0 ? `\n_(${footerParts.join('; ')})_` : '';
+
+            // ── Call Claude ────────────────────────────────────────────────────
+            const systemPrompt = [
+              'You are a senior code reviewer for a Next.js 15 + PostgreSQL production management web app.',
+              'Tech stack: TypeScript, Next.js App Router, PostgreSQL via `lib/pg.ts` pool, Vitest for tests.',
+              'Key conventions:',
+              '- All DB writes use transactions (`client.query("BEGIN")` ... `COMMIT`).',
+              '- Copy-on-Write for script snapshots: never mutate a shared snapshot (refCount > 1).',
+              '- Every new exported function in `lib/db.ts` or `lib/*-db.ts` must have a corresponding test in `tests/`.',
+              '- Every new `app/api/` route handler must have auth-guard + happy-path tests in `tests/api.test.ts` or a dedicated test file.',
+              '- Runtime migration functions (named `ensureXxx` or `backfillXxx`) must have idempotency tests.',
+              '- `db/schema.sql` changes must be paired with a regenerated `db/seed-schema.json`.',
+              '- No raw DDL (`ALTER TABLE`, `CREATE INDEX`, `DROP TABLE`) in `lib/` or `app/api/` -- DDL belongs in `db/` files only.',
+              '- GC queries must use separate statements, not CTEs (CTE snapshot isolation prevents NOT EXISTS from seeing same-transaction deletes).',
+              '',
+              'Review ONLY what is visible in the diff. Do not speculate about files not shown.',
+              'If the diff ends with "cut here" or lists files as "not shown", that is a size limit — do not flag it as a finding.',
+              'Be concise. Skip trivial style issues. Focus on correctness, safety, and convention violations.',
+            ].join('\n');
+
+            const prBody = pr.body ? pr.body.slice(0, 1000) : '(no description)';
+            const userPrompt = [
+              `PR #${prNumber}: ${pr.title}`,
+              '',
+              prBody,
+              '',
+              `## Changed files (${files.length} total)`,
+              diffText + footer,
+            ].join('\n');
+
+            const callClaude = async () => {
+              const res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  'x-api-key': process.env.ANTHROPIC_API_KEY,
+                  'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                  model: 'claude-sonnet-5',
+                  max_tokens: 5000,
+                  system: systemPrompt,
+                  messages: [{ role: 'user', content: userPrompt }],
+                }),
+              });
+              if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+              const data = await res.json();
+              const text = (data.content ?? []).find(b => b.type === 'text')?.text;
+              if (!text) console.log(`Empty content. stop_reason=${data.stop_reason} content_types=${JSON.stringify((data.content ?? []).map(b => b.type))}`);
+              return text ?? null;
+            };
+
+            let aiResponse;
+            try {
+              aiResponse = await callClaude();
+              if (!aiResponse) {
+                console.log('Retrying after empty response…');
+                aiResponse = await callClaude();
+              }
+              aiResponse = aiResponse ?? '(empty response)';
+            } catch (err) {
+              console.log(`Anthropic API request failed: ${err.message}`);
+              return;
+            }
+
+            // ── Post or update comment ─────────────────────────────────────────
+            const now = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+            const actionsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/pr-automation.yml`;
+            const body = [
+              MARKER,
+              '## 🤖 AI Code Review',
+              '',
+              aiResponse,
+              '',
+              `---`,
+              `_claude-sonnet-5 · ${now} · 重新触发: [Actions → Run workflow](${actionsUrl}) (pr\\_number=${prNumber})_`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(
+              c => c.user.type === 'Bot' && c.body.includes(MARKER)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+            console.log(`AI review posted to PR #${prNumber}.`);

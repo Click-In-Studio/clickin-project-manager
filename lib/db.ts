@@ -8,8 +8,8 @@ import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { updateEstimatedPageMap, type EstimatedPageMapCache } from "./script-page";
-import { buildMarkerLabelIndex, withMarkerSceneLabels, type MarkerLabelIndex } from "./script-generated-labels";
-import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
+import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, withMarkerSceneLabels, type MarkerLabelIndex } from "./script-generated-labels";
+import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
 import { migrateLegacyRehearsalMentions } from "./mention-types";
@@ -1721,16 +1721,27 @@ export async function flushToDBVersioned(
       }
     }
 
-    // Deletes: remove from version relation; garbage-collect orphan snapshots
+    // Deletes: remove from version relation; garbage-collect orphan snapshots.
+    // Two separate statements — CTE and its main query share one snapshot and
+    // cannot see each other's writes, so split into sequential statements.
     if (deleteSnapshotIds.length > 0) {
       await client.query(
-        `WITH removed AS (
-           DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2 RETURNING snapshot_id
-         )
-         DELETE FROM script s
-         WHERE s.id IN (SELECT snapshot_id FROM removed)
-           AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+        "DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2",
         [deleteSnapshotIds, versionId]
+      );
+      await client.query(
+        `DELETE FROM script s
+         WHERE s.id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = s.id)`,
+        [deleteSnapshotIds]
+      );
+      // Clean up asset_mounts for snapshots that were actually GC'd
+      await client.query(
+        `DELETE FROM asset_mount
+         WHERE mount_type = 'block_snapshot'
+           AND mount_id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script WHERE id = asset_mount.mount_id)`,
+        [deleteSnapshotIds]
       );
     }
 
@@ -2022,22 +2033,45 @@ export async function importScriptToVersion(
     await client.query("BEGIN");
     const previousMarkerStructure = await markerStructureBlocksInTx(client, versionId);
 
-    // Clear all blocks from this version; GC snapshots no longer referenced by any version
-    await client.query(
-      `WITH removed AS (
-         DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id, block_id
-       ),
-       deleted_orphan_tags AS (
-         DELETE FROM block_tag bt
-         WHERE bt.block_id IN (SELECT block_id FROM removed)
-           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.block_id = bt.block_id)
-         RETURNING 1
-       )
-       DELETE FROM script s
-       WHERE s.id IN (SELECT snapshot_id FROM removed)
-         AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+    // Clear all blocks from this version; GC snapshots no longer referenced by any version.
+    // Split into three separate statements to avoid PostgreSQL CTE snapshot isolation:
+    // a single statement's NOT EXISTS would see the pre-deletion state of the CTE rows.
+    const removedSV = await client.query<{ snapshot_id: string; block_id: string }>(
+      "DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id, block_id",
       [versionId]
     );
+    const removedSnapshotIds = removedSV.rows.map(r => r.snapshot_id);
+    const removedBlockIds    = removedSV.rows.map(r => r.block_id);
+
+    if (removedBlockIds.length > 0) {
+      await client.query(
+        `DELETE FROM block_tag WHERE block_id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.block_id = block_tag.block_id)`,
+        [removedBlockIds]
+      );
+    }
+    if (removedSnapshotIds.length > 0) {
+      await client.query(
+        `DELETE FROM script WHERE id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = script.id)`,
+        [removedSnapshotIds]
+      );
+    }
+
+    // Clear cue bindings for this version; GC cue revision rows sole-referenced by it.
+    // Anchors are soft references (no FK), so deleted snapshots leave no FK constraint.
+    const removedCV = await client.query<{ revision_id: string }>(
+      "DELETE FROM cue_version WHERE version_id = $1 RETURNING revision_id",
+      [versionId]
+    );
+    const removedCueRevisionIds = removedCV.rows.map(r => r.revision_id);
+    if (removedCueRevisionIds.length > 0) {
+      await client.query(
+        `DELETE FROM cue WHERE id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = cue.id)`,
+        [removedCueRevisionIds]
+      );
+    }
 
     // Import is a full replacement of script + dramaturgy for this version.
     // scene_version is only a compatibility cache; rebuild it from markers below.
@@ -2233,7 +2267,7 @@ export async function deleteProduction(id: string): Promise<void> {
   await getPool().query("DELETE FROM production WHERE id = $1", [id]);
 }
 
-export async function listProductions(opts: { openId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number }[]> {
+export async function listProductions(opts: { userId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number }[]> {
   const orderBy = "CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END, sort_order ASC, created_at ASC";
   let res;
   if (opts.isAdmin) {
@@ -2244,8 +2278,8 @@ export async function listProductions(opts: { openId: string; isAdmin: boolean }
     res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null; sort_order: number }>(
       `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order FROM production p
        JOIN production_member pm ON pm.production_id = p.id
-       WHERE pm.open_id = $1 ORDER BY ${orderBy}`,
-      [opts.openId]
+       WHERE pm.user_id = $1 ORDER BY ${orderBy}`,
+      [opts.userId]
     );
   }
   return res.rows.map(r => ({
@@ -2280,62 +2314,118 @@ export async function updateProductionSortOrders(orderedIds: string[]): Promise<
 
 // ─── Auth / users ─────────────────────────────────────────────────────────────
 
-export type UserInfo = { openId: string; name: string; avatarUrl: string | null; isAdmin: boolean };
+export type UserInfo = { userId: string; openId: string; name: string; avatarUrl: string | null; isAdmin: boolean };
 
-export async function upsertFeishuUser(openId: string, name: string, avatarUrl: string | null, isAdmin: boolean): Promise<void> {
-  await getPool().query(
-    `INSERT INTO feishu_user (open_id, name, avatar_url, is_super_admin, updated_at)
-     VALUES ($1, $2, $3, $4, now())
-     ON CONFLICT (open_id) DO UPDATE
-       SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, is_super_admin = EXCLUDED.is_super_admin, updated_at = now()`,
-    [openId, name, avatarUrl, isAdmin]
-  );
+/**
+ * Upsert a Feishu user after OAuth login. Creates an app_user row for new
+ * users; updates profile fields for returning users. Returns the internal userId.
+ */
+export async function upsertFeishuUser(
+  openId: string,
+  name: string,
+  avatarUrl: string | null,
+  isAdmin: boolean,
+): Promise<{ userId: string; name: string; avatarUrl: string | null; isAdmin: boolean }> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query<{ user_id: string }>(
+      "SELECT user_id FROM feishu_user WHERE open_id = $1",
+      [openId],
+    );
+    let userId: string;
+    if (existing.rows.length > 0) {
+      userId = existing.rows[0].user_id;
+      await client.query(
+        `UPDATE feishu_user
+         SET name = $1, avatar_url = $2, is_super_admin = $3, updated_at = now()
+         WHERE open_id = $4`,
+        [name, avatarUrl, isAdmin, openId],
+      );
+    } else {
+      const { rows } = await client.query<{ id: string }>(
+        "INSERT INTO app_user DEFAULT VALUES RETURNING id",
+      );
+      userId = rows[0].id;
+      await client.query(
+        `INSERT INTO feishu_user (open_id, name, avatar_url, is_super_admin, user_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now())`,
+        [openId, name, avatarUrl, isAdmin, userId],
+      );
+    }
+    await client.query("COMMIT");
+    return { userId, name, avatarUrl, isAdmin };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getFeishuUser(openId: string): Promise<UserInfo | null> {
-  const res = await getPool().query<{ open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
-    "SELECT open_id, name, avatar_url, is_super_admin FROM feishu_user WHERE open_id = $1",
-    [openId]
+  const res = await getPool().query<{ user_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
+    "SELECT user_id, name, avatar_url, is_super_admin FROM feishu_user WHERE open_id = $1",
+    [openId],
   );
   if (!res.rows.length) return null;
   const r = res.rows[0];
-  return { openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin };
+  return { userId: r.user_id, openId, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin };
+}
+
+/** Look up the Feishu open_id for an internal user — used by Feishu-specific subsystems. */
+export async function getFeishuOpenId(userId: string): Promise<string | null> {
+  const res = await getPool().query<{ open_id: string }>(
+    "SELECT open_id FROM feishu_user WHERE user_id = $1",
+    [userId],
+  );
+  return res.rows[0]?.open_id ?? null;
+}
+
+export async function batchGetFeishuOpenIds(userIds: string[]): Promise<Map<string, string>> {
+  if (!userIds.length) return new Map();
+  const res = await getPool().query<{ user_id: string; open_id: string }>(
+    "SELECT user_id, open_id FROM feishu_user WHERE user_id = ANY($1)",
+    [userIds],
+  );
+  return new Map(res.rows.map(r => [r.user_id, r.open_id]));
 }
 
 export async function listAllUsers(): Promise<UserInfo[]> {
-  const res = await getPool().query<{ open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
-    "SELECT open_id, name, avatar_url, is_super_admin FROM feishu_user ORDER BY name"
+  const res = await getPool().query<{ user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
+    "SELECT user_id, open_id, name, avatar_url, is_super_admin FROM feishu_user ORDER BY name",
   );
-  return res.rows.map(r => ({ openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
+  return res.rows.map(r => ({ userId: r.user_id, openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
 }
 
-export async function canUserAccessProduction(openId: string, productionId: string): Promise<boolean> {
+export async function canUserAccessProduction(userId: string, productionId: string): Promise<boolean> {
   const res = await getPool().query<{ count: string }>(
-    "SELECT count(*)::text FROM production_member WHERE open_id = $1 AND production_id = $2",
-    [openId, productionId]
+    "SELECT count(*)::text FROM production_member WHERE user_id = $1 AND production_id = $2",
+    [userId, productionId],
   );
   return parseInt(res.rows[0].count) > 0;
 }
 
 /** Returns the user's roles in the production, or null if they are not a member. */
 export async function getProductionMemberRoles(
-  openId: string,
+  userId: string,
   productionId: string,
 ): Promise<string[] | null> {
   const res = await getPool().query<{ roles: string[] }>(
-    "SELECT roles FROM production_member WHERE open_id = $1 AND production_id = $2",
-    [openId, productionId],
+    "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
+    [userId, productionId],
   );
   return res.rows.length ? res.rows[0].roles : null;
 }
 
 export async function getPermissionOverrides(
   productionId: string,
-  openId: string,
+  userId: string,
 ): Promise<PermissionOverrides> {
   const res = await getPool().query<{ permission: string; granted: boolean }>(
-    "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND open_id = $2",
-    [productionId, openId],
+    "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId],
   );
   const map: PermissionOverrides = new Map();
   for (const row of res.rows) map.set(row.permission as Permission, row.granted);
@@ -2344,21 +2434,21 @@ export async function getPermissionOverrides(
 
 export async function setPermissionOverride(
   productionId: string,
-  openId: string,
+  userId: string,
   permission: Permission,
   granted: boolean | null,
 ): Promise<void> {
   if (granted === null) {
     await getPool().query(
-      "DELETE FROM production_member_permission WHERE production_id = $1 AND open_id = $2 AND permission = $3",
-      [productionId, openId, permission],
+      "DELETE FROM production_member_permission WHERE production_id = $1 AND user_id = $2 AND permission = $3",
+      [productionId, userId, permission],
     );
   } else {
     await getPool().query(
-      `INSERT INTO production_member_permission (production_id, open_id, permission, granted)
+      `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (production_id, open_id, permission) DO UPDATE SET granted = EXCLUDED.granted`,
-      [productionId, openId, permission, granted],
+       ON CONFLICT (production_id, user_id, permission) DO UPDATE SET granted = EXCLUDED.granted`,
+      [productionId, userId, permission, granted],
     );
   }
 }
@@ -2367,27 +2457,27 @@ export async function setPermissionOverride(
 export async function getAllPermissionOverrides(
   productionId: string,
 ): Promise<Record<string, Record<string, boolean>>> {
-  const res = await getPool().query<{ open_id: string; permission: string; granted: boolean }>(
-    "SELECT open_id, permission, granted FROM production_member_permission WHERE production_id = $1",
+  const res = await getPool().query<{ user_id: string; permission: string; granted: boolean }>(
+    "SELECT user_id, permission, granted FROM production_member_permission WHERE production_id = $1",
     [productionId],
   );
   const result: Record<string, Record<string, boolean>> = {};
   for (const row of res.rows) {
-    result[row.open_id] ??= {};
-    result[row.open_id][row.permission] = row.granted;
+    result[row.user_id] ??= {};
+    result[row.user_id][row.permission] = row.granted;
   }
   return result;
 }
 
 /** Fetch roles + overrides + archived status for a single user in parallel. */
 export async function getProductionMemberContext(
-  openId: string,
+  userId: string,
   isAdmin: boolean,
   productionId: string,
 ): Promise<{ memberRoles: string[] | null; overrides: PermissionOverrides; isArchived: boolean }> {
   const [memberRoles, overrides, archivedRow] = await Promise.all([
-    getProductionMemberRoles(openId, productionId),
-    getPermissionOverrides(productionId, openId),
+    getProductionMemberRoles(userId, productionId),
+    getPermissionOverrides(productionId, userId),
     getPool().query<{ archived_at: Date | null }>(
       "SELECT archived_at FROM production WHERE id = $1",
       [productionId],
@@ -2420,42 +2510,43 @@ export async function unarchiveProduction(id: string): Promise<void> {
 }
 
 export async function listProductionMembers(productionId: string): Promise<UserInfo[]> {
-  const res = await getPool().query<{ open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
-    `SELECT fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin
-     FROM production_member pm JOIN feishu_user fu ON fu.open_id = pm.open_id
+  const res = await getPool().query<{ user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
+    `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin
+     FROM production_member pm JOIN feishu_user fu ON fu.user_id = pm.user_id
      WHERE pm.production_id = $1 ORDER BY fu.name`,
-    [productionId]
+    [productionId],
   );
-  return res.rows.map(r => ({ openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
+  return res.rows.map(r => ({ userId: r.user_id, openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
 }
 
-export async function addProductionMember(productionId: string, openId: string): Promise<void> {
+export async function addProductionMember(productionId: string, userId: string): Promise<void> {
   await getPool().query(
-    "INSERT INTO production_member (production_id, open_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-    [productionId, openId]
+    "INSERT INTO production_member (production_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    [productionId, userId],
   );
 }
 
-export async function removeProductionMember(productionId: string, openId: string): Promise<void> {
+export async function removeProductionMember(productionId: string, userId: string): Promise<void> {
   await getPool().query(
-    "DELETE FROM production_member WHERE production_id = $1 AND open_id = $2",
-    [productionId, openId]
+    "DELETE FROM production_member WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId],
   );
 }
 
 export async function searchFeishuUsers(query: string): Promise<{
-  openId: string; name: string; avatarUrl: string | null;
+  userId: string; openId: string; name: string; avatarUrl: string | null;
   email: string | null; phone: string | null; hint: string | null;
 }[]> {
   const res = await getPool().query<{
-    open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
+    user_id: string; open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
   }>(
-    `SELECT open_id, name, avatar_url, email, phone FROM feishu_user
+    `SELECT user_id, open_id, name, avatar_url, email, phone FROM feishu_user
      WHERE name ILIKE $1
      ORDER BY name LIMIT 20`,
-    [`%${query}%`]
+    [`%${query}%`],
   );
   return res.rows.map((r) => ({
+    userId: r.user_id,
     openId: r.open_id,
     name: r.name,
     avatarUrl: r.avatar_url,
@@ -2469,44 +2560,44 @@ export async function searchFeishuUsers(query: string): Promise<{
 
 export async function setMemberRoles(
   productionId: string,
-  openId: string,
-  roles: string[]
+  userId: string,
+  roles: string[],
 ): Promise<void> {
   await getPool().query(
-    "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND open_id = $2",
-    [productionId, openId, roles]
+    "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId, roles],
   );
 }
 
 export async function updateUserContact(
-  openId: string,
+  userId: string,
   email: string | null,
-  phone: string | null
+  phone: string | null,
 ): Promise<void> {
   await getPool().query(
     `UPDATE feishu_user
      SET email = COALESCE($2, email),
          phone = COALESCE($3, phone),
          updated_at = now()
-     WHERE open_id = $1`,
-    [openId, email, phone]
+     WHERE user_id = $1`,
+    [userId, email, phone],
   );
 }
 
 export async function setMemberPhoto(
   productionId: string,
-  openId: string,
-  photoUrl: string | null
+  userId: string,
+  photoUrl: string | null,
 ): Promise<void> {
   await getPool().query(
-    "UPDATE production_member SET photo_url = $3 WHERE production_id = $1 AND open_id = $2",
-    [productionId, openId, photoUrl]
+    "UPDATE production_member SET photo_url = $3 WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId, photoUrl],
   );
 }
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
-export type Mention = { openId: string; name: string };
+export type Mention = { userId: string; name: string };
 
 export type Comment = {
   id: string;
@@ -2514,7 +2605,7 @@ export type Comment = {
   contextType: string;
   contextId: string;
   parentId: string | null;
-  openId: string;
+  userId: string;
   authorName: string;
   body: string;
   mentions: Mention[];
@@ -2528,7 +2619,7 @@ type CommentRow = {
   context_type: string;
   context_id: string;
   parent_id: string | null;
-  open_id: string;
+  user_id: string;
   author_name: string;
   body: string;
   mentions: Mention[];
@@ -2543,7 +2634,7 @@ function rowToComment(r: CommentRow): Comment {
     contextType: r.context_type,
     contextId: r.context_id,
     parentId: r.parent_id,
-    openId: r.open_id,
+    userId: r.user_id,
     authorName: r.author_name,
     body: r.body,
     mentions: r.mentions ?? [],
@@ -2555,7 +2646,7 @@ function rowToComment(r: CommentRow): Comment {
 export async function listProductionComments(productionId: string): Promise<Comment[]> {
   const res = await getPool().query<CommentRow>(
     `SELECT id, production_id, context_type, context_id, parent_id,
-            open_id, author_name, body, mentions, created_at, updated_at
+            user_id, author_name, body, mentions, created_at, updated_at
      FROM comment WHERE production_id = $1 ORDER BY created_at ASC`,
     [productionId]
   );
@@ -2567,18 +2658,18 @@ export async function createComment(
   contextType: string,
   contextId: string,
   parentId: string | null,
-  openId: string,
+  userId: string,
   authorName: string,
   body: string,
   mentions: Mention[],
 ): Promise<Comment> {
   const res = await getPool().query<CommentRow>(
     `INSERT INTO comment
-       (production_id, context_type, context_id, parent_id, open_id, author_name, body, mentions)
+       (production_id, context_type, context_id, parent_id, user_id, author_name, body, mentions)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, production_id, context_type, context_id, parent_id,
-               open_id, author_name, body, mentions, created_at, updated_at`,
-    [productionId, contextType, contextId, parentId, openId, authorName, body, JSON.stringify(mentions)]
+               user_id, author_name, body, mentions, created_at, updated_at`,
+    [productionId, contextType, contextId, parentId, userId, authorName, body, JSON.stringify(mentions)],
   );
   return rowToComment(res.rows[0]);
 }
@@ -2586,28 +2677,28 @@ export async function createComment(
 export async function getCommentById(id: string): Promise<Comment | null> {
   const res = await getPool().query<CommentRow>(
     `SELECT id, production_id, context_type, context_id, parent_id,
-            open_id, author_name, body, mentions, created_at, updated_at
+            user_id, author_name, body, mentions, created_at, updated_at
      FROM comment WHERE id = $1`,
-    [id]
+    [id],
   );
   return res.rows.length ? rowToComment(res.rows[0]) : null;
 }
 
-export async function updateComment(id: string, openId: string, body: string): Promise<Comment | null> {
+export async function updateComment(id: string, userId: string, body: string): Promise<Comment | null> {
   const res = await getPool().query<CommentRow>(
     `UPDATE comment SET body = $1, updated_at = now()
-     WHERE id = $2 AND open_id = $3
+     WHERE id = $2 AND user_id = $3
      RETURNING id, production_id, context_type, context_id, parent_id,
-               open_id, author_name, body, mentions, created_at, updated_at`,
-    [body, id, openId]
+               user_id, author_name, body, mentions, created_at, updated_at`,
+    [body, id, userId],
   );
   return res.rows.length ? rowToComment(res.rows[0]) : null;
 }
 
-export async function deleteComment(id: string, openId: string, isAdmin: boolean): Promise<boolean> {
+export async function deleteComment(id: string, userId: string, isAdmin: boolean): Promise<boolean> {
   const res = isAdmin
     ? await getPool().query("DELETE FROM comment WHERE id = $1 RETURNING id", [id])
-    : await getPool().query("DELETE FROM comment WHERE id = $1 AND open_id = $2 RETURNING id", [id, openId]);
+    : await getPool().query("DELETE FROM comment WHERE id = $1 AND user_id = $2 RETURNING id", [id, userId]);
   return res.rows.length > 0;
 }
 
@@ -2626,6 +2717,7 @@ export async function updateProductionName(id: string, name: string): Promise<vo
 }
 
 export type MemberWithRoles = {
+  userId: string;
   openId: string;
   name: string;
   avatarUrl: string | null;
@@ -2638,18 +2730,19 @@ export type MemberWithRoles = {
 
 export async function listProductionMembersWithRoles(productionId: string): Promise<MemberWithRoles[]> {
   const res = await getPool().query<{
-    open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean;
+    user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean;
     email: string | null; phone: string | null; roles: string[]; photo_url: string | null;
   }>(
-    `SELECT fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
+    `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
             fu.email, fu.phone, pm.roles, pm.photo_url
      FROM production_member pm
-     JOIN feishu_user fu ON fu.open_id = pm.open_id
+     JOIN feishu_user fu ON fu.user_id = pm.user_id
      WHERE pm.production_id = $1
      ORDER BY fu.name`,
-    [productionId]
+    [productionId],
   );
   return res.rows.map((r) => ({
+    userId: r.user_id,
     openId: r.open_id,
     name: r.name,
     avatarUrl: r.avatar_url,
@@ -2661,46 +2754,92 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
   }));
 }
 
-/** Returns open IDs of all 制作人 and 制作助理 in a production (auto-added to dept chats). */
+
+/** Returns Feishu open_ids of 制作人 / 制作助理 — used by Feishu bot to add them to dept chats. */
 export async function getBossOpenIds(productionId: string): Promise<string[]> {
   const res = await getPool().query<{ open_id: string }>(
-    `SELECT open_id FROM production_member
-     WHERE production_id = $1
-       AND ('制作人' = ANY(roles) OR '制作助理' = ANY(roles))`,
-    [productionId]
+    `SELECT fu.open_id
+     FROM production_member pm
+     JOIN feishu_user fu ON fu.user_id = pm.user_id
+     WHERE pm.production_id = $1
+       AND ('制作人' = ANY(pm.roles) OR '制作助理' = ANY(pm.roles))`,
+    [productionId],
   );
   return res.rows.map(r => r.open_id);
 }
 
-// ─── Contact import ───────────────────────────────────────────────────────────
-
-export async function findUserByName(name: string): Promise<{ openId: string } | null> {
-  const res = await getPool().query<{ open_id: string }>(
-    "SELECT open_id FROM feishu_user WHERE name = $1 LIMIT 1",
-    [name]
+export async function getBossUserIds(productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ user_id: string }>(
+    `SELECT pm.user_id
+     FROM production_member pm
+     WHERE pm.production_id = $1
+       AND ('制作人' = ANY(pm.roles) OR '制作助理' = ANY(pm.roles))`,
+    [productionId],
   );
-  return res.rows[0] ? { openId: res.rows[0].open_id } : null;
+  return res.rows.map(r => r.user_id);
 }
 
-// Writes a user sourced from the contact sheet. Email/phone only overwrite if non-null.
+// ─── Contact import ───────────────────────────────────────────────────────────
+
+export async function findUserByName(name: string): Promise<{ userId: string } | null> {
+  const res = await getPool().query<{ user_id: string }>(
+    "SELECT user_id FROM feishu_user WHERE name = $1 LIMIT 1",
+    [name],
+  );
+  return res.rows[0] ? { userId: res.rows[0].user_id } : null;
+}
+
+/**
+ * Upsert a user sourced from the contact sheet or Feishu directory.
+ * Creates an app_user row for new users. Returns the internal userId.
+ */
 export async function upsertContactUser(
   openId: string,
   name: string,
   avatarUrl: string | null,
   email: string | null,
-  phone: string | null
-): Promise<void> {
-  await getPool().query(
-    `INSERT INTO feishu_user (open_id, name, avatar_url, email, phone, updated_at)
-     VALUES ($1, $2, $3, $4, $5, now())
-     ON CONFLICT (open_id) DO UPDATE
-       SET name       = EXCLUDED.name,
-           avatar_url = COALESCE(EXCLUDED.avatar_url, feishu_user.avatar_url),
-           email      = COALESCE(EXCLUDED.email,      feishu_user.email),
-           phone      = COALESCE(EXCLUDED.phone,      feishu_user.phone),
-           updated_at = now()`,
-    [openId, name, avatarUrl, email, phone]
-  );
+  phone: string | null,
+): Promise<{ userId: string }> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query<{ user_id: string }>(
+      "SELECT user_id FROM feishu_user WHERE open_id = $1",
+      [openId],
+    );
+    let userId: string;
+    if (existing.rows.length > 0) {
+      userId = existing.rows[0].user_id;
+      await client.query(
+        `UPDATE feishu_user
+         SET name       = $1,
+             avatar_url = COALESCE($2, avatar_url),
+             email      = COALESCE($3, email),
+             phone      = COALESCE($4, phone),
+             updated_at = now()
+         WHERE open_id = $5`,
+        [name, avatarUrl, email, phone, openId],
+      );
+    } else {
+      const { rows } = await client.query<{ id: string }>(
+        "INSERT INTO app_user DEFAULT VALUES RETURNING id",
+      );
+      userId = rows[0].id;
+      await client.query(
+        `INSERT INTO feishu_user (open_id, name, avatar_url, email, phone, user_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now())`,
+        [openId, name, avatarUrl, email, phone, userId],
+      );
+    }
+    await client.query("COMMIT");
+    return { userId };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export type CharacterDetail = Character & {
@@ -2872,6 +3011,22 @@ export async function listProductionScenes(productionId: string): Promise<SceneD
   if (!versionId) return [];
   return listScenesByVersion(versionId);
 }
+
+export async function listRehearsalMarksByVersion(versionId: string): Promise<Record<string, string[]>> {
+  const res = await getPool().query<{ scene_id: string | null; rehearsal_mark: string | null; type: string }>(
+    `${VERSION_OWNED_BLOCKS_CTE}
+     SELECT scene_id, rehearsal_mark, type
+     FROM owned_blocks
+     ORDER BY sort_key`,
+    [versionId]
+  );
+  return generatedRehearsalMarksByScene(res.rows.map((row) => ({
+    sceneId: row.scene_id,
+    rehearsalMark: row.rehearsal_mark,
+    type: row.type,
+  })));
+}
+
 
 export async function getCharacterById(id: string, productionId: string, versionId?: string | null): Promise<CharacterDetail | null> {
   const resolvedVersionId = versionId ?? await (async () => {
@@ -3103,7 +3258,7 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.default_edit_roles, cl.created_by, fu.name AS created_by_name, cl.created_at
      FROM cue_list cl
-     JOIN feishu_user fu ON fu.open_id = cl.created_by
+     JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
      ORDER BY cl.created_at`,
     [productionId]
@@ -3127,7 +3282,7 @@ export async function getCueList(id: string, productionId: string): Promise<CueL
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.default_edit_roles, cl.created_by, fu.name AS created_by_name, cl.created_at
      FROM cue_list cl
-     JOIN feishu_user fu ON fu.open_id = cl.created_by
+     JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.id = $1 AND cl.production_id = $2`,
     [id, productionId]
   );
@@ -3159,26 +3314,26 @@ export async function deleteCueList(id: string, productionId: string): Promise<v
 }
 
 export async function listCueListPermissions(cueListId: string): Promise<CueListPermissionRow[]> {
-  const res = await getPool().query<{ open_id: string; can_edit: boolean }>(
-    "SELECT open_id, can_edit FROM cue_list_permission WHERE cue_list_id = $1",
-    [cueListId]
+  const res = await getPool().query<{ user_id: string; can_edit: boolean }>(
+    "SELECT user_id, can_edit FROM cue_list_permission WHERE cue_list_id = $1",
+    [cueListId],
   );
-  return res.rows.map(r => ({ openId: r.open_id, canEdit: r.can_edit }));
+  return res.rows.map(r => ({ userId: r.user_id, canEdit: r.can_edit }));
 }
 
 export async function setCueListPermission(
-  cueListId: string, openId: string, canEdit: boolean | null
+  cueListId: string, userId: string, canEdit: boolean | null
 ): Promise<void> {
   if (canEdit === null) {
     await getPool().query(
-      "DELETE FROM cue_list_permission WHERE cue_list_id = $1 AND open_id = $2",
-      [cueListId, openId]
+      "DELETE FROM cue_list_permission WHERE cue_list_id = $1 AND user_id = $2",
+      [cueListId, userId],
     );
   } else {
     await getPool().query(
-      `INSERT INTO cue_list_permission (cue_list_id, open_id, can_edit) VALUES ($1, $2, $3)
-       ON CONFLICT (cue_list_id, open_id) DO UPDATE SET can_edit = EXCLUDED.can_edit`,
-      [cueListId, openId, canEdit]
+      `INSERT INTO cue_list_permission (cue_list_id, user_id, can_edit) VALUES ($1, $2, $3)
+       ON CONFLICT (cue_list_id, user_id) DO UPDATE SET can_edit = EXCLUDED.can_edit`,
+      [cueListId, userId, canEdit],
     );
   }
 }
@@ -3392,6 +3547,7 @@ export async function updateCue(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
     const refRes = await client.query<{ count: string }>(
       "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [id]
     );
@@ -3450,6 +3606,17 @@ export async function updateCue(
            AND version_id IN (SELECT id FROM descendants)`,
         [versionId, newId, id]
       );
+      // Copy cue_revision asset mounts to the new revision (mirrors cowCue behaviour)
+      await client.query(
+        `INSERT INTO asset_mount
+           (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
+            folder_path, mount_mode, version_resolved, created_by)
+         SELECT 'am_' || substr(md5(id || $1), 1, 16),
+           asset_id, production_id, 'cue_revision', $1, mount_aux_id,
+           folder_path, mount_mode, version_resolved, created_by
+         FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
+        [newId, id]
+      );
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -3487,6 +3654,9 @@ export async function deleteCue(id: string, cueListId: string, versionId?: strin
     );
     if (parseInt(refRes.rows[0].count, 10) === 0) {
       await client.query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
+      await client.query(
+        "DELETE FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $1", [id]
+      );
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -3602,6 +3772,9 @@ async function removeCueFromVersion(
   );
   if (parseInt(refRes.rows[0].count, 10) <= 1) {
     await client.query("DELETE FROM cue WHERE id = $1", [revisionId]);
+    await client.query(
+      "DELETE FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $1", [revisionId]
+    );
   } else {
     await client.query(
       `WITH RECURSIVE descendants AS (
@@ -3748,17 +3921,17 @@ export async function handleBlockContentChanged(
 
 export async function upsertProductionMemberWithRoles(
   productionId: string,
-  openId: string,
+  userId: string,
   roles: string[],
-  photoUrl: string | null
+  photoUrl: string | null,
 ): Promise<void> {
   await getPool().query(
-    `INSERT INTO production_member (production_id, open_id, roles, photo_url)
+    `INSERT INTO production_member (production_id, user_id, roles, photo_url)
      VALUES ($1, $2, $3, $4)
-     ON CONFLICT (production_id, open_id) DO UPDATE
+     ON CONFLICT (production_id, user_id) DO UPDATE
        SET roles     = EXCLUDED.roles,
            photo_url = EXCLUDED.photo_url`,
-    [productionId, openId, roles, photoUrl]
+    [productionId, userId, roles, photoUrl],
   );
 }
 
@@ -4254,14 +4427,14 @@ export async function cowCueRevisionForMount(
 }
 
 /** All productions where the user has a membership role (regardless of SA status). */
-export async function listMemberProductions(openId: string): Promise<{ id: string; name: string; archivedAt: string | null }[]> {
+export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null }[]> {
   const res = await getPool().query<{ id: string; name: string; archived_at: Date | null }>(
     `SELECT p.id, p.name, p.archived_at
      FROM production p
      JOIN production_member pm ON pm.production_id = p.id
-     WHERE pm.open_id = $1
+     WHERE pm.user_id = $1
      ORDER BY CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC`,
-    [openId],
+    [userId],
   );
   return res.rows.map(r => ({
     id: r.id,
@@ -4859,15 +5032,25 @@ export async function applyPatchToDB(
             updatedBlockIds?.has(previousBlock.blockId)
           ) explicitOwnershipBlockIds?.add(previousBlock.blockId);
 
-          // Remove from version; GC orphan snapshot if no other version references it
+          // Remove from version; GC orphan snapshot if no other version references it.
+          // Two separate statements so the second sees the effect of the first
+          // (CTE and its main query share one snapshot and cannot see each other's writes).
           await client.query(
-            `WITH removed AS (
-               DELETE FROM script_version WHERE snapshot_id = $1 AND version_id = $2 RETURNING snapshot_id
-             )
-             DELETE FROM script s
-             WHERE s.id IN (SELECT snapshot_id FROM removed)
-               AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
+            "DELETE FROM script_version WHERE snapshot_id = $1 AND version_id = $2",
             [cur.snapshotId, versionId]
+          );
+          await client.query(
+            `DELETE FROM script
+             WHERE id = $1
+               AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = $1)`,
+            [cur.snapshotId]
+          );
+          // Clean up asset_mount for the GC'd block_snapshot if it was actually deleted
+          await client.query(
+            `DELETE FROM asset_mount
+             WHERE mount_type = 'block_snapshot' AND mount_id = $1
+               AND NOT EXISTS (SELECT 1 FROM script WHERE id = $1)`,
+            [cur.snapshotId]
           );
 
           // Clean up block_tag rows keyed by logical block_id.

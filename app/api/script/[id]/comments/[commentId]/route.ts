@@ -11,7 +11,7 @@ export async function PATCH(
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const { body } = (await req.json()) as { body?: string };
   if (!body?.trim()) return Response.json({ error: "内容不能为空" }, { status: 400 });
-  const comment = await updateComment(commentId, session.openId, body.trim());
+  const comment = await updateComment(commentId, session.userId, body.trim());
   if (!comment) return Response.json({ error: "评论不存在或无权修改" }, { status: 403 });
   return Response.json({ comment });
 }
@@ -23,7 +23,7 @@ export async function DELETE(
   const { commentId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = await deleteComment(commentId, session.openId, session.isAdmin);
+  const ok = await deleteComment(commentId, session.userId, session.isAdmin);
   if (!ok) return Response.json({ error: "评论不存在或无权删除" }, { status: 403 });
   return Response.json({ ok: true });
 }

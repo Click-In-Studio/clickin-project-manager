@@ -29,7 +29,8 @@ export type BotContext = {
     messageId: string;
     chatId: string;
     chatType: "p2p" | "group";
-    senderId: string;
+    senderId: string;   // platform-specific ID (Feishu open_id) — for p2p reply and context memory key
+    userId: string;     // internal app_user UUID — for all DB queries
     senderName: string;
     text: string;    // @bot mention stripped
     rawText: string;

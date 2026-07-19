@@ -71,7 +71,36 @@ jobs:
           scp /tmp/deploy_bundle.tar.gz prod:/tmp/deploy_bundle.tar.gz
           ssh prod "tar -xzf /tmp/deploy_bundle.tar.gz -C $RELEASE_DIR && rm /tmp/deploy_bundle.tar.gz"
 
-      # ── 7. Run DB migrations ─────────────────────────────────────────────────
+      # ── 7. Backup DB if migrations pending ──────────────────────────────────
+      - name: Backup production DB before migrations
+        run: |
+          SHARED="/var/www/production-manager/shared"
+          ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' 'db/migrate-*.sql'             | while read commit; do
+                git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' 'db/migrate-*.sql' | sort
+              done)
+          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" > /tmp/db-applied-backup-check.txt
+          PENDING=0
+          while IFS= read -r FILEPATH; do
+            FILENAME=$(basename "$FILEPATH")
+            if [ -f "$FILEPATH" ] && ! grep -qxF "$FILENAME" /tmp/db-applied-backup-check.txt 2>/dev/null; then
+              PENDING=$((PENDING + 1))
+            fi
+          done <<< "$ORDERED"
+          if [ "$PENDING" -gt 0 ]; then
+            echo "Found $PENDING pending migration(s) — creating production DB backup..."
+            BACKUP="pre_migration_${{ github.run_number }}_$(date +%Y%m%d_%H%M%S).pgdump"
+            ssh prod "
+              mkdir -p $SHARED/backups &&
+              sudo -u postgres pg_dump -d script_editor --format=custom --compress=9 > $SHARED/backups/$BACKUP &&
+              ls -lh $SHARED/backups/$BACKUP &&
+              ls -1t $SHARED/backups/*.pgdump 2>/dev/null | tail -n +6 | xargs -r rm -f
+            "
+            echo "Backup saved to $SHARED/backups/$BACKUP"
+          else
+            echo "No pending migrations — backup skipped."
+          fi
+
+      # ── 8. Run DB migrations ───────────────────────────────────────────────
       - name: Run DB migrations
         run: |
           SHARED="/var/www/production-manager/shared"
@@ -115,7 +144,7 @@ jobs:
             fi
           done <<< "$ORDERED"
 
-      # ── 8. Swap symlink & reload PM2 ─────────────────────────────────────────
+      # ── 9. Swap symlink & reload PM2 ─────────────────────────────────────────
       - name: Activate release
         run: |
           ssh prod "
@@ -123,7 +152,7 @@ jobs:
             pm2 reload /var/www/production-manager/shared/ecosystem.config.js --update-env
           "
 
-      # ── 9. Clean up old releases (keep latest 5) ─────────────────────────────
+      # ── 10. Clean up old releases (keep latest 5) ────────────────────────────
       - name: Clean old releases
         run: |
           ssh prod "

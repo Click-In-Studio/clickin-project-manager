@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
@@ -23,13 +23,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 /**
  * PUT — replace the full participant list.
- * Body: { participants: { openId: string; name: string; departmentId: string | null; role: "participant" | "follower" }[] }
+ * Body: { participants: { userId: string; name: string; departmentId: string | null; role: "participant" | "follower" }[] }
  */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("event:assign_people", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -44,19 +44,19 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     body.participants.some(
       (x) =>
         typeof x !== "object" || x === null ||
-        typeof (x as Record<string, unknown>).openId !== "string" ||
+        typeof (x as Record<string, unknown>).userId !== "string" ||
         typeof (x as Record<string, unknown>).name !== "string" ||
         !validRoles.has((x as Record<string, unknown>).role as string)
     )
   ) {
     return Response.json(
-      { error: "participants 必须是 { openId, name, departmentId?, role }[]" },
+      { error: "participants 必须是 { userId, name, departmentId?, role }[]" },
       { status: 400 }
     );
   }
 
   const participants = body.participants as {
-    openId: string; name: string; departmentId: string | null; role: "participant" | "follower";
+    userId: string; name: string; departmentId: string | null; role: "participant" | "follower";
   }[];
   await setEventParticipants(eventId, participants);
 

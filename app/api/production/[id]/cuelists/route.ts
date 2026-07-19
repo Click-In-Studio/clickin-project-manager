@@ -10,7 +10,7 @@ const uid = () => `cl${Date.now().toString(36)}${(++_seq).toString(36)}`;
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   return { session, memberRoles, overrides, isArchived };
 }
 
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
       abbr,
       template: body.template ?? null,
       defaultEditRoles,
-      createdBy: session.openId,
+      createdBy: session.userId,
     });
   } catch (e: unknown) {
     if ((e as { constraint?: string }).constraint === "cue_list_abbr_production_unique")

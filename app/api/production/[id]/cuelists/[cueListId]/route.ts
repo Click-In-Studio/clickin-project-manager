@@ -10,7 +10,7 @@ import { canEditCueList, canManageCueListPermissions } from "@/lib/cue-list-type
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   return { session, memberRoles, overrides, isArchived };
 }
 
@@ -27,8 +27,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const canEdit = canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions);
-  const canManage = canManageCueListPermissions(session.openId, memberRoles, session.isAdmin, cueList);
+  const canEdit = canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions);
+  const canManage = canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList);
   return Response.json({ cueList, permissions, canEdit, canManage });
 }
 
@@ -43,7 +43,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     listCueListPermissions(cueListId),
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions))
+  if (!canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as { name?: string; notes?: string; abbr?: string | null };
@@ -71,7 +71,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canManageCueListPermissions(session.openId, memberRoles, session.isAdmin, cueList))
+  if (!canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteCueList(cueListId, id);

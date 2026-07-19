@@ -1,0 +1,5 @@
+# Default reviewers for all files.
+* @kevin-wang-2 @Click-In-Studio/reviewer
+
+# CI/CD workflows are infrastructure — only the repo owner can approve changes.
+.github/workflows/ @kevin-wang-2

@@ -48,8 +48,8 @@ type Props = {
   event: ProductionEvent;
   scheduleItems: EventScheduleItem[];
   deptName: string | null;
-  deptPeople: { openId: string; name: string }[];
-  allPeople?: { openId: string; name: string }[];
+  deptPeople: { userId: string; name: string }[];
+  allPeople?: { userId: string; name: string }[];
   isPocOfDept: boolean;
   isAssignee: boolean;
   canViewFull: boolean;
@@ -189,10 +189,10 @@ export default function ReqDetailClient({
     return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
   });
 
-  function toggleAssignee(person: { openId: string; name: string }) {
+  function toggleAssignee(person: { userId: string; name: string }) {
     setAssignees(prev =>
-      prev.some(a => a.openId === person.openId)
-        ? prev.filter(a => a.openId !== person.openId)
+      prev.some(a => a.userId === person.userId)
+        ? prev.filter(a => a.userId !== person.userId)
         : [...prev, person]
     );
   }
@@ -370,9 +370,9 @@ export default function ReqDetailClient({
                     )}
                     <div className="flex flex-wrap gap-1.5">
                       {pool.map(p => {
-                        const selected = assignees.some(a => a.openId === p.openId);
+                        const selected = assignees.some(a => a.userId === p.userId);
                         return (
-                          <button key={p.openId} type="button"
+                          <button key={p.userId} type="button"
                             onClick={() => toggleAssignee(p)}
                             className={`rounded-full px-3 py-1 text-xs border transition-colors ${
                               selected
@@ -418,7 +418,7 @@ export default function ReqDetailClient({
                   <p className="text-xs text-zinc-400 mb-2">负责人</p>
                   <div className="flex flex-wrap gap-1.5">
                     {req.assignees.map(a => (
-                      <span key={a.openId}
+                      <span key={a.userId}
                         className="rounded-full px-3 py-1 text-xs bg-zinc-50 text-zinc-600 border border-zinc-100">
                         {a.name}
                       </span>

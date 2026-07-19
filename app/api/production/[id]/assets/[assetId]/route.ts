@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ id: string; assetId: string }> };
 async function checkAccess(req: NextRequest, id: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, error: Response.json({ error: "未登录" }, { status: 401 }) };
-  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
   if (!ok) return { session: null, error: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { session, error: null };
 }
@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const isOwner = asset.uploaderOpenId === session.openId;
+  const isOwner = asset.uploaderUserId === session.userId;
   if (!isOwner && !session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { assetType?: AssetType; name?: string | null; fileName?: string };
@@ -48,7 +48,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const isOwner = asset.uploaderOpenId === session.openId;
+  const isOwner = asset.uploaderUserId === session.userId;
   if (!isOwner && !session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const { r2Keys } = await deleteAsset(assetId);

@@ -8,7 +8,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   const { id } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
   if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }

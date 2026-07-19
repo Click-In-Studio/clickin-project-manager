@@ -14,6 +14,7 @@
 
 - [使用指南](docs/USER_GUIDE.md) — 各功能的操作说明与注意事项
 - [开发指南](docs/DEV_GUIDE.md) — 项目结构、本地开发、新增功能流程
+- [测试指南](docs/TEST_GUIDE.md) — UI 功能验证与对抗性测试
 - [部署流程](docs/DEPLOY.md) — 首次部署与日常发版说明
 
 ---
@@ -23,18 +24,15 @@
 ### 1. PostgreSQL
 
 ```bash
-# 创建主库用户和数据库
-sudo -u postgres psql <<'EOF'
-CREATE USER script_editor WITH PASSWORD 'your-password';
-CREATE DATABASE script_editor OWNER script_editor;
-EOF
+# macOS（Homebrew）— 当前 OS 用户直接创建，无需密码
+createdb script_editor
+psql -d script_editor -f db/schema.sql
 
-# 初始化 schema
-sudo -u postgres psql -d script_editor -f db/schema.sql
-
-# 创建 Agent Bot 数据库（可选，仅 Bot 功能需要）
-sudo -u postgres psql -f db/setup-agent-db.sql
+# Agent Bot 数据库（可选，仅 Bot 功能需要）
+psql -f db/setup-agent-db.sql
 ```
+
+> Linux / Docker 环境：`sudo -u postgres psql` 执行上述命令，并按 `db/setup-agent-db.sql` 中注释修改密码。
 
 ### 2. 飞书应用
 
@@ -43,14 +41,14 @@ sudo -u postgres psql -f db/setup-agent-db.sql
 1. **添加应用能力** → 开启「机器人」
 2. **安全设置** → 添加 OAuth 重定向 URL：
    ```
-   http://127.0.0.1:3000/app/api/auth/feishu-code
+   http://127.0.0.1:3000/app/api/oath-callback
    ```
-3. **权限管理** → 申请以下权限：
+3. **权限管理** → 申请以下权限（标注 `*Bot` 的仅在启用群机器人功能时需要）：
    - `contact:user.base:readonly`（读取用户信息）
    - `contact:user.id:readonly`
-   - `im:message:send_as_bot`（Bot 发消息）
-   - `im:message`（接收群消息）
-4. **事件与回调 → 事件订阅** → 添加事件 `im.message.receive_v1`，记录 Verification Token 和 Encrypt Key
+   - `im:message:send_as_bot` \*Bot（Bot 发消息）
+   - `im:message` \*Bot（接收群消息）
+4. \*Bot：**事件与回调 → 事件订阅** → 添加事件 `im.message.receive_v1`，填写回调 URL（`/app/api/feishu-webhook`）
 5. 发布/更新应用版本，在企业内开放
 
 获取 **App ID** 和 **App Secret** 填入 `.env.local`。
@@ -72,39 +70,41 @@ sudo -u postgres psql -f db/setup-agent-db.sql
 
 ### 4. 环境变量
 
+新建 `.env.local`，按以下分组填写：
+
 ```bash
-cp .env.example .env.local
-```
-
-填写 `.env.local`：
-
-```
+# ── 核心（必填）──────────────────────────────────────────────────────────────
 FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxx
-FEISHU_REDIRECT_URI=http://127.0.0.1:3000/app/api/auth/feishu-code
-FEISHU_WEBHOOK_TOKEN=xxxxxxxx   # 事件订阅 Verification Token
-FEISHU_ENCRYPT_KEY=xxxxxxxx     # 事件订阅 Encrypt Key（未启用加密可留空）
+FEISHU_REDIRECT_URI=http://127.0.0.1:3000/app/api/oath-callback
 
-PGHOST=localhost
-PGDATABASE=script_editor
-PGUSER=script_editor
-PGPASSWORD=your-password
+SESSION_SECRET=any-random-string        # 生产环境必须设置；本地开发可留空（有警告）
 
-AGENT_PGHOST=localhost
-AGENT_PGDATABASE=click_in_agent
-AGENT_PGUSER=agent_user
-AGENT_PGPASSWORD=your-agent-password
+# ── 数据库（主库）── macOS 本地开发通常无需设置（使用系统用户 peer auth）─────
+# Linux / Docker 环境或需要密码时取消注释：
+# PGHOST=localhost
+# PGDATABASE=script_editor
+# PGUSER=your-os-username
+# PGPASSWORD=your-password
 
+# ── 文件上传（使用资产/文件功能时必填）──────────────────────────────────────
 R2_ACCOUNT_ID=xxxxxxxx
 R2_ACCESS_KEY_ID=xxxxxxxx
 R2_SECRET_ACCESS_KEY=xxxxxxxx
-R2_BUCKET=click-in-test
+R2_BUCKET=click-in-test                 # 本地建议用独立测试 bucket
 
-APP_BASE_URL=http://127.0.0.1:3000
-INTERNAL_NOTIFY_SECRET=any-local-secret
+# ── 群机器人 / 定时通知（启用 Bot 功能时必填；无默认值，需显式填写）────────
+# AGENT_PGHOST=localhost
+# AGENT_PGDATABASE=click_in_agent
+# AGENT_PGUSER=your-os-username         # macOS peer auth：填入 OS 用户名，不需要 AGENT_PGPASSWORD
 
+LLM_PROVIDER=openai                     # openai（默认）或 deepseek
 OPENAI_API_KEY=sk-xxxxxxxx
-OPENAI_MODEL=gpt-4o-mini
+# OPENAI_MODEL=gpt-4o-mini             # 可选，默认 gpt-4o-mini
+# DEEPSEEK_API_KEY=sk-xxxxxxxx         # 使用 DeepSeek 时设置，替代 OPENAI_API_KEY
+# DEEPSEEK_MODEL=deepseek-chat         # 可选，默认 deepseek-chat
+
+INTERNAL_NOTIFY_SECRET=any-local-secret # 定时通知 cron 鉴权 Bearer token
 ```
 
 ### 5. 启动

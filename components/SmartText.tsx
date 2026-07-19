@@ -10,7 +10,7 @@ import {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export type MentionMember = { openId: string; name: string; avatarUrl?: string | null };
+export type MentionMember = { userId: string; name: string; avatarUrl?: string | null };
 
 // Kept for backward compat — callers that already pass plugins=[...] still work.
 export type InlinePlugin = {

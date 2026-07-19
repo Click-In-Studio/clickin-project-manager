@@ -42,9 +42,10 @@ CREATE TABLE IF NOT EXISTS chat_memories (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Long-term memory scoped to an individual user (cross-chat).
+-- Long-term memory scoped to an individual user (cross-chat, cross-platform).
+-- Keyed by internal app_user UUID so memory is shared across Feishu, future platforms, etc.
 CREATE TABLE IF NOT EXISTS user_memories (
-  sender_id  TEXT PRIMARY KEY,
+  user_id    TEXT PRIMARY KEY,
   memory     TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

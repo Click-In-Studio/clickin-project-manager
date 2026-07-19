@@ -16,7 +16,7 @@ import {
   getAllRecords,
   toScriptState,
 } from "@/lib/feishu-bitable";
-import { createProduction, flushToDB, savePageMap } from "@/lib/db";
+import { createProduction, flushToDBVersioned, getActiveVersionId, savePageMap } from "@/lib/db";
 import { computePageMap, PAGE_CONFIGS } from "@/lib/script-page";
 import { initialKeys } from "@/lib/lex-order";
 import type { Block } from "@/lib/script-types";
@@ -139,9 +139,13 @@ export async function POST(req: NextRequest) {
     lexKey: lexKeys[index],
   }));
 
-  await flushToDB(productionId, {
-    upsertBlocks: dbBlocks,
-    deleteBlockIds: [],
+  const versionId = await getActiveVersionId(productionId);
+  if (!versionId) {
+    return Response.json({ error: "演出版本创建失败" }, { status: 500 });
+  }
+  await flushToDBVersioned(productionId, versionId, {
+    upsertBlocks: dbBlocks.map(b => ({ ...b, snapshotId: `sn_new_${b.id}` })),
+    deleteSnapshotIds: [],
     upsertChars: dbChars,
     deleteCharIds: [],
     upsertScenes: dbScenes,

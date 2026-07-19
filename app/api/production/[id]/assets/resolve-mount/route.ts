@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
   if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const sp = req.nextUrl.searchParams;

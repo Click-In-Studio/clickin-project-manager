@@ -30,7 +30,7 @@ export default async function AssetPreviewPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
   if (!ok) redirect("/");
 
   const asset = await getAsset(assetId);
@@ -45,6 +45,7 @@ export default async function AssetPreviewPage({
       mimeType={asset.mimeType}
       storageType={asset.storageType}
       feishuUrl={asset.feishuUrl}
+      userName={session.name}
     />
   );
 }

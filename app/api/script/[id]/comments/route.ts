@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
+import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName, batchGetFeishuOpenIds } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { sendCard, buildScriptCommentMentionCard } from "@/lib/feishu-bot";
@@ -10,7 +10,7 @@ import { getOptedOutUsers } from "@/lib/notification-prefs";
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("script:comment", session.isAdmin, memberRoles, overrides)) {
     return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const comment = await createComment(
     productionId, "block", blockId, parentId,
-    session.openId, session.name, text, mentions,
+    session.userId, session.name, text, mentions,
   );
 
   // Fire-and-forget: notify mentioned users via card
@@ -60,15 +60,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const appId = process.env.FEISHU_APP_ID ?? "";
     const blockPath = `${BASE_PATH}/production/${productionId}/script#block-${blockId}?open_comment=true`;
     const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(blockPath)}`;
-    const [optedOut, productionName] = await Promise.all([
+    const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
+    const [optedOut, productionName, userIdToOpenId] = await Promise.all([
       getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
       getProductionName(productionId).catch(() => null),
+      batchGetFeishuOpenIds(mentionUserIds).catch(() => new Map<string, string>()),
     ]);
     const card = buildScriptCommentMentionCard(session.name, productionName ?? "制作", text, url);
     for (const m of mentions) {
-      if (optedOut.has(m.openId)) continue;
-      sendCard(m.openId, card).catch(e =>
-        console.error(`[mention] notify failed for ${m.openId}:`, (e as Error).message)
+      if (optedOut.has(m.userId)) continue;
+      const openId = userIdToOpenId.get(m.userId);
+      if (!openId) continue;
+      sendCard(openId, card).catch(e =>
+        console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message)
       );
     }
   }

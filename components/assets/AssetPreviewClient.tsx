@@ -18,6 +18,7 @@ interface Props {
   mimeType: string | null;
   storageType: string;
   feishuUrl: string | null;
+  userName: string;
 }
 
 function getPreviewType(mimeType: string | null): PreviewType | null {
@@ -30,7 +31,7 @@ function getPreviewType(mimeType: string | null): PreviewType | null {
 }
 
 export default function AssetPreviewClient({
-  productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl,
+  productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl, userName,
 }: Props) {
   const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
@@ -125,6 +126,7 @@ export default function AssetPreviewClient({
           productionId={productionId}
           assetId={assetId}
           assetName={fileName}
+          userName={userName}
           onClose={() => setShareOpen(false)}
         />
       )}

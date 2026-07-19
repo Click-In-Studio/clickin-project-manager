@@ -14,15 +14,16 @@ interface Props {
   productionId: string;
   assetId: string;
   assetName: string;
+  userName: string;
   onClose: () => void;
 }
 
-export default function AssetShareModal({ productionId, assetId, assetName, onClose }: Props) {
+export default function AssetShareModal({ productionId, assetId, assetName, userName, onClose }: Props) {
   const [allowDownload, setAllowDownload] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(30);
   const [creating, setCreating] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"url" | "intro" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function generate() {
@@ -50,11 +51,14 @@ export default function AssetShareModal({ productionId, assetId, assetName, onCl
     }
   }
 
-  function copy() {
+  function copy(withIntro: boolean) {
     if (!generatedUrl) return;
-    navigator.clipboard.writeText(generatedUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+    const text = withIntro
+      ? `${userName}向你分享了《${assetName}》，链接：${generatedUrl}`
+      : generatedUrl;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(withIntro ? "intro" : "url");
+      setTimeout(() => setCopied(null), 2000);
     });
   }
 
@@ -131,15 +135,23 @@ export default function AssetShareModal({ productionId, assetId, assetName, onCl
             <div className="space-y-2">
               <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                 <p className="flex-1 text-xs text-zinc-600 truncate">{generatedUrl}</p>
+              </div>
+              <div className="flex gap-2">
                 <button
-                  onClick={copy}
-                  className="shrink-0 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
+                  onClick={() => copy(false)}
+                  className="flex-1 rounded-xl border border-zinc-200 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
                 >
-                  {copied ? "已复制" : "复制"}
+                  {copied === "url" ? "已复制" : "复制链接"}
+                </button>
+                <button
+                  onClick={() => copy(true)}
+                  className="flex-1 rounded-xl bg-zinc-800 py-2 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
+                >
+                  {copied === "intro" ? "已复制" : "复制带简介"}
                 </button>
               </div>
               <button
-                onClick={() => { setGeneratedUrl(null); setCopied(false); }}
+                onClick={() => { setGeneratedUrl(null); setCopied(null); }}
                 className="w-full text-xs text-zinc-400 hover:text-zinc-600 transition-colors py-1"
               >
                 重新生成

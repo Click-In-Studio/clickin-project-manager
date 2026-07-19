@@ -60,7 +60,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
       listProductionMembers(productionId),
     ]);
 
-    await markReportRead(reportId, tokenData.openId);
+    await markReportRead(reportId, tokenData.userId);
 
     return (
       <ReportViewClient
@@ -72,17 +72,17 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
         departments={departments.filter(d => d.kind === "dept")}
         canWriteNote={false}
         canModerateNotes={false}
-        currentUserOpenId={tokenData.openId}
+        currentUserId={tokenData.userId}
         isPublished={true}
         replies={replies}
         canReply={false}
         memberDeptIds={[]}
-        members={allMembers.map(m => ({ openId: m.openId, name: m.name }))}
+        members={allMembers.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
       />
     );
   }
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
@@ -102,7 +102,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   if (!report.publishedAt && !isReportViewer)
     redirect(`/production/${productionId}/events/${eventId}/view`);
 
-  const permCtx = await loadEventPermContext(session.openId, eventId);
+  const permCtx = await loadEventPermContext(session.userId, eventId);
 
   const [notes, departments, replies, allMembers] = await Promise.all([
     listReportNotes(reportId),
@@ -112,7 +112,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   ]);
 
   if (report.publishedAt) {
-    await markReportRead(reportId, session.openId);
+    await markReportRead(reportId, session.userId);
   }
 
   const userCanWriteNote = canWriteNote(session.isAdmin, memberRoles, permCtx);
@@ -129,12 +129,12 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
       departments={departments.filter(d => d.kind === "dept")}
       canWriteNote={userCanWriteNote}
       canModerateNotes={userCanModerate}
-      currentUserOpenId={session.openId}
+      currentUserId={session.userId}
       isPublished={!!report.publishedAt}
       replies={replies}
       canReply={userCanReply}
       memberDeptIds={permCtx.memberDeptIds}
-      members={allMembers.map(m => ({ openId: m.openId, name: m.name }))}
+      members={allMembers.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
     />
   );
 }

@@ -26,3 +26,92 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+  unit-test:
+    runs-on: ubuntu-latest
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: script_editor_test
+      PGUSER: script_editor
+      PGPASSWORD: testpassword
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: script_editor
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: script_editor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      # Fetch the base branch tip so we can detect new migration files and
+      # restore the pre-migration schema for the migration test path.
+      - name: Fetch base branch
+        run: git fetch --depth=1 origin $GITHUB_BASE_REF
+
+      # Detect db/add-*.sql or db/migrate-*.sql files that are NEW in this PR
+      # (not yet on the base branch). These are static migrations that will be
+      # applied to existing production data at deploy time.
+      - name: Detect DDL migration files in this PR
+        id: migrations
+        run: |
+          FILES=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only --diff-filter=A -- 'db/add-*.sql' 'db/migrate-*.sql')
+          if [ -n "$FILES" ]; then
+            echo "has_migrations=true" >> $GITHUB_OUTPUT
+            printf 'files<<EOF\n%s\nEOF\n' "$FILES" >> $GITHUB_OUTPUT
+            echo "Migration files detected:"
+            echo "$FILES"
+          else
+            echo "has_migrations=false" >> $GITHUB_OUTPUT
+            echo "No new migration files in this PR."
+          fi
+
+      # ── Schema application (two paths) ──────────────────────────────────────
+      #
+      # MIGRATION PATH: Apply the base-branch schema so we can test that the
+      # migration files work correctly on real pre-migration data.
+      - name: Apply base schema (migration path)
+        if: steps.migrations.outputs.has_migrations == 'true'
+        run: git show origin/$GITHUB_BASE_REF:db/schema.sql | psql -v ON_ERROR_STOP=1
+
+      # NORMAL PATH: Fresh install from the current schema (no new migrations).
+      - name: Apply current schema (normal path)
+        if: steps.migrations.outputs.has_migrations != 'true'
+        run: psql -v ON_ERROR_STOP=1 -f db/schema.sql
+
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write test .env.local
+        run: |
+          cat > .env.local <<'EOF'
+          PGHOST=localhost
+          PGPORT=5432
+          PGDATABASE=script_editor_test
+          PGUSER=script_editor
+          PGPASSWORD=testpassword
+          EOF
+
+      # MIGRATION PATH: global-setup.ts detects the old schema, inserts factory
+      # data for invariance testing, captures a snapshot, then applies the
+      # migration — so invariance tests have real data to verify against.
+      # (We do NOT apply migration files via psql here; the test harness does it.)
+
+      # ── Unit tests ────────────────────────────────────────────────────────────
+      - name: Run unit tests
+        run: npm test

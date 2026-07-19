@@ -8,12 +8,12 @@ import { canManageCueListPermissions } from "@/lib/cue-list-types";
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   return { session, memberRoles, overrides, isArchived };
 }
 
 // PATCH /api/production/[id]/cuelists/[cueListId]/permissions
-// body: { openId: string; canEdit: boolean | null }  (null = remove override)
+// body: { userId: string; canEdit: boolean | null }  (null = remove override)
 export async function PATCH(
   req: NextRequest,
   ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]/permissions">
@@ -25,13 +25,13 @@ export async function PATCH(
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canManageCueListPermissions(session.openId, memberRoles, session.isAdmin, cueList))
+  if (!canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = await req.json() as { openId: string; canEdit: boolean | null };
-  if (!body.openId) return Response.json({ error: "缺少 openId" }, { status: 400 });
+  const body = await req.json() as { userId: string; canEdit: boolean | null };
+  if (!body.userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
 
-  await setCueListPermission(cueListId, body.openId, body.canEdit);
+  await setCueListPermission(cueListId, body.userId, body.canEdit);
   const permissions = await listCueListPermissions(cueListId);
   return Response.json(permissions);
 }

@@ -17,13 +17,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id, assetId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.openId, id));
+  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
   if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const isOwner = asset.uploaderOpenId === session.openId;
+  const isOwner = asset.uploaderUserId === session.userId;
   if (!isOwner && !session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
   if (asset.storageType !== "r2") return Response.json({ error: "非 R2 文件，无法上传新版本" }, { status: 400 });
 

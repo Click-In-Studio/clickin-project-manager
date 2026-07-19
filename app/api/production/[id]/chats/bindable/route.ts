@@ -21,7 +21,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     await Promise.all(
       candidates.map(async c => {
         const members = await getChatMemberOpenIds(c.chatId);
-        return members.includes(session.openId) ? c : null;
+        return members.includes(session.userId) ? c : null;
       })
     )
   ).filter(Boolean) as { chatId: string; name: string }[];

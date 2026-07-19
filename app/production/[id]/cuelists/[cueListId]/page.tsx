@@ -26,7 +26,7 @@ export default async function CueListDetailPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, id);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
   if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
 
   const [name, cueList, permissions, members] = await Promise.all([
@@ -37,8 +37,8 @@ export default async function CueListDetailPage({
   ]);
   if (!name || !cueList) redirect(`/production/${id}/cuelists`);
 
-  const canEdit = canEditCueList(session.openId, memberRoles, session.isAdmin, cueList, permissions);
-  const canManage = canManageCueListPermissions(session.openId, memberRoles, session.isAdmin, cueList);
+  const canEdit = canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions);
+  const canManage = canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList);
 
   return (
     <CueListDetail
@@ -49,7 +49,7 @@ export default async function CueListDetailPage({
       members={members}
       canEdit={canEdit}
       canManage={canManage}
-      myOpenId={session.openId}
+      myUserId={session.userId}
     />
   );
 }

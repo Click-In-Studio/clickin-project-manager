@@ -8,6 +8,6 @@ export async function GET(req: NextRequest) {
     name: session.name,
     avatarUrl: session.avatarUrl,
     isAdmin: session.isAdmin,
-    openId: session.openId,
+    userId: session.userId,
   });
 }

@@ -5,6 +5,7 @@ import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
 import { loadEventPermContext, canEditTechReq } from "@/lib/event-permissions";
 import { sendChatCard, buildAwaitingReqCard } from "@/lib/feishu-bot";
+import { batchGetFeishuOpenIds } from "@/lib/db";
 import { BASE_PATH } from "@/lib/base-path";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -40,13 +41,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     title?: string; description?: string; scheduleItemIds?: string[];
     presetMinutes?: number | null; departmentId?: string | null;
-    assignees?: { openId: string; name: string }[];
+    assignees?: { userId: string; name: string }[];
   };
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
 
   // Allow if role-based edit OR POC of the target department
-  const permCtx = await loadEventPermContext(session.openId, eventId);
+  const permCtx = await loadEventPermContext(session.userId, eventId);
   if (!canEditTechReq(session.isAdmin, memberRoles, overrides, permCtx, body.departmentId ?? null))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
@@ -64,12 +65,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // Notify dept group chat when a new awaiting req is created
   if (techReq.status === "awaiting" && techReq.departmentId) {
     const dept = await getEventDepartment(techReq.departmentId, productionId);
-    if (dept?.chatId && dept.pocOpenIds.length) {
+    if (dept?.chatId && dept.pocUserIds.length) {
       const appId = process.env.FEISHU_APP_ID ?? "";
       const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs/${techReq.id}`;
       const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(reqPath)}`;
-      const card = buildAwaitingReqCard(techReq.title, event.title, dept.name, dept.pocOpenIds, url);
-      sendChatCard(dept.chatId, card).catch(e => console.error("[tech-req] notify failed:", e));
+      // Convert poc user_ids to Feishu open_ids for card at-mentions
+      batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
+        const pocOpenIds = dept.pocUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);
+        const card = buildAwaitingReqCard(techReq.title, event.title, dept.name, pocOpenIds, url);
+        sendChatCard(dept.chatId!, card).catch(e => console.error("[tech-req] notify failed:", e));
+      }).catch(e => console.error("[tech-req] notify failed:", e));
     }
   }
 

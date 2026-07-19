@@ -13,7 +13,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -21,7 +21,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const existing = await getEventReport(reportId, eventId);
   if (!existing) return Response.json({ error: "记录不存在" }, { status: 404 });
 
-  const permCtx = await loadEventPermContext(session.openId, eventId);
+  const permCtx = await loadEventPermContext(session.userId, eventId);
   if (!canWriteReport(session.isAdmin, memberRoles, overrides, permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
@@ -55,7 +55,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.openId, session.isAdmin, productionId);
+  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!hasPermission("event:publish", session.isAdmin, memberRoles, overrides))
     return Response.json({ error: "权限不足" }, { status: 403 });

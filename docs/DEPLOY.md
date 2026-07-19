@@ -116,14 +116,14 @@ OPENAI_API_KEY=sk-xxxxxxxx
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-### 6. 首次部署代码
+### 6. 触发首次部署
+
+服务器环境配置完成后，push 到 `main` 即触发 CI/CD（`deploy.yml`）自动完成首次部署：构建、打包上传、应用 DB schema、创建 release 目录、启动 pm2。
+
+如果 pm2 进程尚未存在，CI 会在 `Activate release` 步骤里执行 `pm2 start`；若已存在则 `pm2 reload`。首次部署后执行：
 
 ```bash
-rsync -a --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='.env.local' \
-  ./ <server>:/var/www/production-manager/
-
-ssh <server> "cd /var/www/production-manager && npm install && npm run build && pm2 start npm --name production-manager -- start"
-pm2 save  # 持久化，开机自启
+ssh <server> "pm2 save"   # 持久化进程列表，开机自启
 ```
 
 ### 7. Nginx 反向代理
