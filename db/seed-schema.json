@@ -1404,6 +1404,11 @@
       "column": "block_id",
       "type": "text",
       "nullable": false
+    },
+    {
+      "column": "owner_marker_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "script_character": [
@@ -1596,6 +1601,113 @@
       "type": "jsonb",
       "nullable": false,
       "default": "'{}'::jsonb"
+    },
+    {
+      "column": "marker_structure_revision",
+      "type": "bigint",
+      "nullable": false,
+      "default": "0"
+    }
+  ],
+  "asset_share_token": [
+    {
+      "column": "token",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "asset_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "label",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "one_time",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "used_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "revoked_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
+  "scene_table_view_config": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "view_name",
+      "type": "text",
+      "nullable": false,
+      "default": "'默认视图'::text"
+    },
+    {
+      "column": "is_default",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "config",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'{}'::jsonb"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ]
 }

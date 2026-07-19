@@ -1578,6 +1578,23 @@ export async function flushToDBVersioned(
 
     // Scenes: ensure identity row exists in scene (FK anchor), then upsert versioned data
     if (upsertScenes.length > 0) {
+      const incomingHasMarkers = upsertBlocks.some((block) =>
+        block.type === "chapter_marker" || block.type === "scene_marker" || block.type === "rehearsal_marker"
+      );
+      const existingMarkers = await client.query(
+        `SELECT 1
+         FROM script_version sv
+         JOIN script s ON s.id = sv.snapshot_id
+         WHERE sv.version_id = $1
+           AND NOT (sv.snapshot_id = ANY($2::text[]))
+           AND s.type IN ('chapter_marker', 'scene_marker', 'rehearsal_marker')
+         LIMIT 1`,
+        [versionId, deleteSnapshotIds]
+      );
+      const markerBacked = incomingHasMarkers || existingMarkers.rowCount !== 0;
+      const sceneNumbers = markerBacked
+        ? upsertScenes.map(() => "")
+        : upsertScenes.map((scene) => scene.number);
       await client.query(
         `INSERT INTO scene (id, production_id)
          SELECT unnest($1::text[]), $2::text
@@ -1585,13 +1602,13 @@ export async function flushToDBVersioned(
         [upsertScenes.map(s => s.id), productionId]
       );
       await client.query(
-        `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::text[])
+        `INSERT INTO scene_version (scene_id, version_id, num, name, sort_order, parent_id)
+         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]), unnest($5::int[]), unnest($6::text[])
          ON CONFLICT (scene_id, version_id) DO UPDATE
-           SET name = EXCLUDED.name,
+           SET num = EXCLUDED.num, name = EXCLUDED.name,
                sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
         [upsertScenes.map(s => s.id), versionId,
-         upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
+         sceneNumbers, upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
          upsertScenes.map(s => s.parentId ?? null)]
       );
     }
