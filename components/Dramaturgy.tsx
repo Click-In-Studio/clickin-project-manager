@@ -1,15 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import ScenesManager from "./ScenesManager";
 import CharactersManager from "./CharactersManager";
 import VersionSelector from "./VersionSelector";
+import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
+import TableColumnSettings from "./TableColumnSettings";
+import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail, Version } from "@/lib/db";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 
 type Tab = "scenes" | "characters";
+type SceneViewMode = "list" | "table";
 
 type Props = {
   productionId: string;
@@ -40,13 +44,46 @@ export default function Dramaturgy({
   initialSceneId,
   initialCharacterId,
 }: Props) {
-  // sceneId takes precedence over characterId
   const [tab, setTab] = useState<Tab>(
     initialCharacterId && !initialSceneId ? "characters" : "scenes"
   );
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(initialVersionId);
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
+
+  const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>("list");
+
+  useEffect(() => {
+    setSceneViewMode(window.innerWidth > 1920 ? "table" : "list");
+  }, []);
+  const [tableConfig, setTableConfig] = useState<TableViewConfigData>(getDefaultViewConfig());
+  const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [viewsLoaded, setViewsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "scenes" || viewsLoaded) return;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.views && data.views.length > 0) {
+          setSavedViews(data.views);
+          const defaultView = data.views.find((v: SavedView) => v.isDefault) ?? data.views[0];
+          if (defaultView && defaultView.config) {
+            setTableConfig(normalizeTableViewConfig(defaultView.config));
+            setActiveViewId(defaultView.id);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load table views", e);
+      } finally {
+        setViewsLoaded(true);
+      }
+    })();
+  }, [tab, productionId, viewsLoaded]);
 
   const handleVersionChange = async (versionId: string) => {
     const [scenePayload, charsData] = await Promise.all([
@@ -64,9 +101,40 @@ export default function Dramaturgy({
   const currentVersion = versions.find(v => v.id === currentVersionId);
   const effectiveCanEdit = canEdit && (!currentVersion || currentVersion.status === "editing" || currentVersion.status === "committed");
 
+  const handleUpdateScene = useCallback(async (sceneId: string, name: string) => {
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentVersionId ? { name, versionId: currentVersionId } : { name }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+    setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, name } : s));
+  }, [productionId, currentVersionId]);
+
+  const handlePatchMeta = useCallback(async (sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => {
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentVersionId ? { ...fields, versionId: currentVersionId } : fields),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+    setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, ...fields } : s));
+  }, [productionId, currentVersionId]);
+
+  const handleConfigChange = (config: TableViewConfigData) => {
+    setTableConfig(config);
+  };
+
+  const handleSelectView = (view: SavedView) => {
+    setTableConfig(normalizeTableViewConfig(view.config));
+    setActiveViewId(view.id || null);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-100 px-4 py-8">
-      <div className="mx-auto max-w-2xl">
+      <div className={`mx-auto ${sceneViewMode === "table" && tab === "scenes" ? "max-w-full px-2 xl:max-w-none" : "max-w-2xl"}`}>
         <div className="mb-6 flex items-center justify-between">
           <Link href={`/production/${productionId}`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
             ← 返回
@@ -114,16 +182,86 @@ export default function Dramaturgy({
         </div>
 
         {tab === "scenes" ? (
-          <ScenesManager
-            key={currentVersionId ?? ""}
-            productionId={productionId}
-            productionName={productionName}
-            initialScenes={scenes}
-            canEdit={effectiveCanEdit}
-            versionId={currentVersionId}
-            initialExpandedId={initialSceneId}
-            embedded
-          />
+          <>
+            {/* Scene view mode toggle + view selector */}
+            <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="flex items-center gap-1 rounded-lg bg-white p-0.5 shadow-sm w-fit">
+                <button
+                  onClick={() => setSceneViewMode("list")}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    sceneViewMode === "list"
+                      ? "bg-zinc-100 text-zinc-700"
+                      : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  ☰ 列表
+                </button>
+                <button
+                  onClick={() => setSceneViewMode("table")}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    sceneViewMode === "table"
+                      ? "bg-zinc-100 text-zinc-700"
+                      : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  ⊞ 表格
+                </button>
+              </div>
+
+              {sceneViewMode === "table" && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <TableViewSelector
+                    productionId={productionId}
+                    views={savedViews}
+                    activeViewId={activeViewId}
+                    currentConfig={tableConfig}
+                    onSelectView={handleSelectView}
+                    onViewsChange={setSavedViews}
+                  />
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowColumnSettings((v) => !v)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors"
+                    >
+                      ⚙️ 列设置
+                    </button>
+                    {showColumnSettings && (
+                      <TableColumnSettings
+                        config={tableConfig}
+                        onChange={handleConfigChange}
+                        onClose={() => setShowColumnSettings(false)}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {sceneViewMode === "list" ? (
+              <ScenesManager
+                key={currentVersionId ?? ""}
+                productionId={productionId}
+                productionName={productionName}
+                initialScenes={scenes}
+                canEdit={effectiveCanEdit}
+                versionId={currentVersionId}
+                initialExpandedId={initialSceneId}
+                embedded
+              />
+            ) : (
+              <SceneTableView
+                key={currentVersionId ?? ""}
+                productionId={productionId}
+                scenes={scenes}
+                canEdit={effectiveCanEdit}
+                versionId={currentVersionId}
+                viewConfig={tableConfig}
+                onViewConfigChange={handleConfigChange}
+                onUpdateScene={handleUpdateScene}
+                onPatchMeta={handlePatchMeta}
+              />
+            )}
+          </>
         ) : (
           <CharactersManager
             key={currentVersionId ?? ""}

@@ -616,3 +616,40 @@ CREATE TABLE IF NOT EXISTS asset_version_rel (
 
 CREATE INDEX IF NOT EXISTS asset_version_rel_version_idx ON asset_version_rel(version_id);
 CREATE INDEX IF NOT EXISTS asset_version_rel_file_idx ON asset_version_rel(asset_file_id);
+
+-- Share tokens for public (unauthenticated) asset preview.
+-- one_time=true: token is consumed on first access, but streaming continues for 4h (grace period).
+-- expires_at=null + one_time=false: permanent token (discouraged; prefer long-expiry time_limited).
+CREATE TABLE IF NOT EXISTS asset_share_token (
+  token         TEXT        PRIMARY KEY,
+  asset_id      TEXT        NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  created_by    UUID        NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  label         TEXT,
+  expires_at    TIMESTAMPTZ,
+  one_time      BOOLEAN     NOT NULL DEFAULT FALSE,
+  used_at       TIMESTAMPTZ,
+  revoked_at    TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS asset_share_token_asset_idx ON asset_share_token(asset_id);
+
+-- ── Scene table view configs ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS scene_table_view_config (
+  id            TEXT PRIMARY KEY,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  view_name     TEXT NOT NULL DEFAULT '默认视图',
+  is_default    BOOLEAN NOT NULL DEFAULT false,
+  config        JSONB NOT NULL DEFAULT '{}',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS scene_table_view_user_prod_idx
+  ON scene_table_view_config (user_id, production_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS scene_table_view_one_default_idx
+  ON scene_table_view_config (user_id, production_id) WHERE is_default;
