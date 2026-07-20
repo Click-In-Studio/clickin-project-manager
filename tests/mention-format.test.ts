@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseLine, serializeAtMention, parseAtMentionToken } from "@/lib/mention-format";
+import { parseLine, parseToDoc, serializeAtMention, parseAtMentionToken } from "@/lib/mention-format";
 
 describe("serializeAtMention", () => {
   it("formats with id as new format", () => {
@@ -57,6 +57,30 @@ describe("parseLine — atMention round-trip", () => {
     expect(nodes[2]).toMatchObject({ type: "text", text: " and " });
     expect(nodes[3]).toMatchObject({ type: "atMention", attrs: { id: null, label: "Bob" } });
     expect(nodes[4]).toMatchObject({ type: "text", text: " done" });
+  });
+});
+
+describe("parseToDoc", () => {
+  it("splits multi-line text into paragraphs", () => {
+    const doc = parseToDoc("line one\nline two");
+    expect(doc.type).toBe("doc");
+    expect(doc.content).toHaveLength(2);
+    expect(doc.content![0]).toMatchObject({ type: "paragraph" });
+    expect(doc.content![1]).toMatchObject({ type: "paragraph" });
+  });
+
+  it("preserves mention id across lines", () => {
+    const doc = parseToDoc("@[Alice](uid:a1)\n@Bob");
+    const p0 = doc.content![0].content!;
+    const p1 = doc.content![1].content!;
+    expect(p0[0]).toMatchObject({ type: "atMention", attrs: { id: "a1", label: "Alice" } });
+    expect(p1[0]).toMatchObject({ type: "atMention", attrs: { id: null, label: "Bob" } });
+  });
+
+  it("empty line produces paragraph with no content", () => {
+    const doc = parseToDoc("hello\n\nworld");
+    expect(doc.content).toHaveLength(3);
+    expect(doc.content![1].content).toBeUndefined();
   });
 });
 
