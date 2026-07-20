@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import {
   getEventReport, getReportNote, getProductionEvent,
@@ -11,8 +11,9 @@ import {
   loadEventPermContext,
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
-import { sendCard, buildReplyMentionCard } from "@/lib/feishu-bot";
+import { buildReplyMentionCard } from "@/lib/feishu-bot";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
+import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 import { BASE_PATH } from "@/lib/base-path";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
@@ -79,26 +80,28 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     mentions,
   });
 
-  // Fire-and-forget: notify @mentioned users via card
+  // Fire-and-forget: notify @mentioned users via platform adapter
   if (mentions.length > 0) {
-    const appId = process.env.FEISHU_APP_ID ?? "";
     const replyPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}#reply-${id}`;
-    const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(replyPath)}`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
-    const [optedOut, eventRow, userIdToOpenId] = await Promise.all([
+    const [optedOut, eventRow, targets] = await Promise.all([
       getOptedOutUsers("report_mention").catch(() => new Set<string>()),
       getProductionEvent(eventId, productionId).catch(() => null),
-      batchGetFeishuOpenIds(mentionUserIds).catch(() => new Map<string, string>()),
+      batchResolveNotificationTargets(mentionUserIds, productionId),
     ]);
     const eventTitle = eventRow?.title ?? "";
-    const card = buildReplyMentionCard(session.name, report.title, eventTitle, body.content.trim(), url);
     for (const m of mentions) {
       if (optedOut.has(m.userId)) continue;
-      const openId = userIdToOpenId.get(m.userId);
-      if (!openId) continue;
-      sendCard(openId, card).catch(e =>
-        console.error(`[reply-mention] notify failed for ${m.userId}:`, (e as Error).message)
-      );
+      const target = targets.get(m.userId);
+      if (!target) continue;
+      const actionUrl = target.adapter.buildActionUrl(replyPath);
+      const card = buildReplyMentionCard(session.name, report.title, eventTitle, body.content.trim(), actionUrl);
+      target.adapter.sendDirectMessage(target.platformUserId, {
+        text: `${session.name} 在报告「${report.title}」中提到了你`,
+        title: "评论提及",
+        primaryUrl: actionUrl,
+        richContent: card,
+      }).catch(e => console.error(`[reply-mention] notify failed for ${m.userId}:`, (e as Error).message));
     }
   }
 

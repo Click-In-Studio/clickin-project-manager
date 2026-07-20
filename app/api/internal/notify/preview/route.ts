@@ -6,7 +6,8 @@
  *   GET /api/internal/notify/preview?type=daily&eventId=xxx
  *   GET /api/internal/notify/preview?type=report&reportId=xxx&eventId=xxx&productionId=xxx
  *
- * Returns { dryCards: [{ openId, card }] } — paste a card into
+ * Returns { dryMessages: [{ platformUserId, platformId, message }] }.
+ * For feishu, message.richContent is the card JSON — paste into
  * https://open.feishu.cn/tool/cardbuilder to preview the layout.
  */
 import { type NextRequest } from "next/server";

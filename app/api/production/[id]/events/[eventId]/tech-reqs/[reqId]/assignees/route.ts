@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { getProductionEvent, getEventTechReq, setTechReqAssignees } from "@/lib/event-db";
-import { addChatMembers } from "@/lib/feishu-chat";
+import { feishuPlatform } from "@/lib/platform/feishu";
 import { loadEventPermContext, canAssignTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -52,7 +52,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       // Convert user_ids to Feishu open_ids for addChatMembers
       batchGetFeishuOpenIds(newUserIds).then(m => {
         const openIds = newUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);
-        if (openIds.length) addChatMembers(updated.chatId!, openIds).catch(console.error);
+        if (openIds.length) feishuPlatform.addGroupMembers(updated.chatId!, openIds).catch(console.error);
       }).catch(console.error);
     }
   }

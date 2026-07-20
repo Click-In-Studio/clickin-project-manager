@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import { sendBotDm } from "@/lib/feishu-bot";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
+import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -59,15 +59,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     Promise.all([
       getProductionName(productionId).catch(() => null),
       getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
-      batchGetFeishuOpenIds(mentionUserIds).catch(() => new Map<string, string>()),
-    ]).then(([productionName, optedOut, userIdToOpenId]) => {
+      batchResolveNotificationTargets(mentionUserIds, productionId),
+    ]).then(([productionName, optedOut, targets]) => {
       const prefix = productionName ? `《${productionName}》` : "制作";
       const notifyText = `${session.name} 在${prefix}的 Cue 评论中提到了你：\n${text}`;
       for (const m of mentions) {
         if (optedOut.has(m.userId)) continue;
-        const openId = userIdToOpenId.get(m.userId);
-        if (!openId) continue;
-        sendBotDm(openId, notifyText).catch(e =>
+        const target = targets.get(m.userId);
+        if (!target) continue;
+        target.adapter.sendDirectMessage(target.platformUserId, { text: notifyText }).catch(e =>
           console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message)
         );
       }

@@ -5,6 +5,7 @@ import { upsertContactUser } from "@/lib/db";
 import { resolveUserId } from "@/agent/db";
 import { processMessage as agentProcessMessage, processButtonClick } from "@/agent/index";
 import type { BotContext, HistoryMessage } from "@/agent/types";
+import { getGateway } from "@/lib/platform/registry";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 const HISTORY_SIZE = parseInt(process.env.FEISHU_HISTORY_SIZE ?? "20", 10);
@@ -126,36 +127,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  if (body.type === "url_verification") {
-    return NextResponse.json({ challenge: body.challenge });
+  const gateway = getGateway("feishu");
+  if (!gateway.verifyRequest(body, Object.fromEntries(req.headers))) {
+    return new NextResponse(null, { status: 401 });
   }
 
-  const header = body.header as { event_type?: string } | undefined;
+  // Capture card action response: Feishu requires a synchronous toast reply for button clicks.
+  let cardActionResponse: NextResponse | null = null;
 
-  if (header?.event_type === "card.action.trigger") {
-    return handleCardAction(body);
+  const result = await gateway.process(body, {
+    personal: {
+      handlePersonalEvent: async (event) => {
+        if (event.type === "interaction_response") {
+          cardActionResponse = await handleCardAction(event.raw as Record<string, unknown>);
+        } else if (event.type === "direct_message") {
+          void processMessage(event.raw as Record<string, unknown>).catch((err) =>
+            console.error("[feishu-webhook] unhandled error:", err),
+          );
+        }
+      },
+    },
+    org: {
+      handleOrgEvent: async (event) => {
+        if (event.type === "group_message") {
+          void processMessage(event.raw as Record<string, unknown>).catch((err) =>
+            console.error("[feishu-webhook] unhandled error:", err),
+          );
+        } else if (event.type === "user_created" || event.type === "user_updated") {
+          void handleContactUserEvent(event.raw as Record<string, unknown>).catch((err) =>
+            console.error("[feishu-webhook] contact user event error:", err),
+          );
+        }
+      },
+    },
+  });
+
+  if (result.type === "verification") {
+    return NextResponse.json({ challenge: result.challenge });
   }
 
-  // Sync Feishu user info on create / update events
-  if (
-    header?.event_type === "contact.user.created_v3" ||
-    header?.event_type === "contact.user.updated_v3"
-  ) {
-    void handleContactUserEvent(body).catch((err) =>
-      console.error("[feishu-webhook] contact user event error:", err),
-    );
-    return NextResponse.json({ ok: true });
-  }
-
-  if (header?.event_type !== "im.message.receive_v1") {
-    return NextResponse.json({ ok: true });
-  }
-
-  void processMessage(body).catch(err =>
-    console.error("[feishu-webhook] unhandled error:", err),
-  );
-
-  return NextResponse.json({ ok: true });
+  return cardActionResponse ?? NextResponse.json({ ok: true });
 }
 
 async function handleContactUserEvent(body: Record<string, unknown>): Promise<void> {
