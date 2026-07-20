@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     Promise.all([
       getProductionName(productionId).catch(() => null),
       getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
-      batchResolveNotificationTargets(mentionUserIds, productionId),
+      batchResolveNotificationTargets(mentionUserIds, productionId).catch(() => new Map<string, import("@/lib/platform/notification-router").NotificationTarget>()),
     ]).then(([productionName, optedOut, targets]) => {
       const prefix = productionName ? `《${productionName}》` : "制作";
       const notifyText = `${session.name} 在${prefix}的 Cue 评论中提到了你：\n${text}`;
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         if (optedOut.has(m.userId)) continue;
         const target = targets.get(m.userId);
         if (!target) continue;
-        target.adapter.sendDirectMessage(target.platformUserId, { text: notifyText }).catch(e =>
+        target.adapter.sendDirectMessage(target.platformUserId, { text: notifyText }).catch((e: unknown) =>
           console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message)
         );
       }
