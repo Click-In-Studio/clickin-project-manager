@@ -4,8 +4,9 @@ import { getProductionMemberContext } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
 import { loadEventPermContext, canEditTechReq } from "@/lib/event-permissions";
-import { sendChatCard, buildAwaitingReqCard } from "@/lib/feishu-bot";
+import { buildAwaitingReqCard } from "@/lib/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
+import { feishuPlatform } from "@/lib/platform/feishu";
 import { BASE_PATH } from "@/lib/base-path";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
@@ -66,14 +67,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (techReq.status === "awaiting" && techReq.departmentId) {
     const dept = await getEventDepartment(techReq.departmentId, productionId);
     if (dept?.chatId && dept.pocUserIds.length) {
-      const appId = process.env.FEISHU_APP_ID ?? "";
       const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs/${techReq.id}`;
-      const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(reqPath)}`;
-      // Convert poc user_ids to Feishu open_ids for card at-mentions
+      // Feishu open_ids still needed for @mention syntax inside the card body
       batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
         const pocOpenIds = dept.pocUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);
+        const url = feishuPlatform.buildActionUrl(reqPath);
         const card = buildAwaitingReqCard(techReq.title, event.title, dept.name, pocOpenIds, url);
-        sendChatCard(dept.chatId!, card).catch(e => console.error("[tech-req] notify failed:", e));
+        feishuPlatform.sendGroupMessage(dept.chatId!, {
+          text: `新需求待确认：${techReq.title}（${event.title}）`,
+          richContent: card,
+        }).catch(e => console.error("[tech-req] notify failed:", e));
       }).catch(e => console.error("[tech-req] notify failed:", e));
     }
   }

@@ -533,6 +533,41 @@ CREATE TABLE IF NOT EXISTS event_report_reply (
 
 CREATE INDEX IF NOT EXISTS idx_event_report_reply_report_id ON event_report_reply(report_id);
 
+-- ── Platform identities ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_platform_identity (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  platform_id      TEXT NOT NULL,
+  platform_user_id TEXT NOT NULL,
+  label            TEXT,
+  is_login_method  BOOLEAN NOT NULL DEFAULT false,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (platform_id, platform_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS upi_user_id_idx ON user_platform_identity(user_id);
+
+CREATE TABLE IF NOT EXISTS notification_preference (
+  user_id              UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  scope_type           TEXT NOT NULL,
+  scope_id             TEXT NOT NULL DEFAULT '',
+  platform_identity_id UUID NOT NULL REFERENCES user_platform_identity(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, scope_type, scope_id)
+);
+
+CREATE TABLE IF NOT EXISTS production_platform_channel (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id       TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  org_id              TEXT,
+  platform_id         TEXT NOT NULL,
+  platform_channel_id TEXT NOT NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ppc_prod_org_uniq
+  ON production_platform_channel(production_id, COALESCE(org_id, ''));
+
 -- ── Notifications ─────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS notification_subscription (

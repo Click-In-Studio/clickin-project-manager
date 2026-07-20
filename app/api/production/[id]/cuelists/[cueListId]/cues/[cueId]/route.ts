@@ -1,11 +1,12 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionMemberContext, getCueList, listCueListPermissions, updateCue, deleteCue,
-         getCue, listProductionMembersWithRoles, getProductionName, getVersion, batchGetFeishuOpenIds } from "@/lib/db";
+         getCue, listProductionMembersWithRoles, getProductionName, getVersion } from "@/lib/db";
 import { canEditCueList } from "@/lib/cue-list-types";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
-import { sendCard, buildCueWarningCard } from "@/lib/feishu-bot";
+import { buildCueWarningCard } from "@/lib/feishu-bot";
+import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 import { BASE_PATH } from "@/lib/base-path";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
 
@@ -127,22 +128,24 @@ async function notifyCueWarning(
 
   if (recipients.size === 0) return;
 
-  const [optedOut, appId, openIdMap] = await Promise.all([
-    getOptedOutUsers("cue_warning"),
-    Promise.resolve(process.env.FEISHU_APP_ID ?? ""),
-    batchGetFeishuOpenIds([...recipients]),
-  ]);
   const cuePath = `${BASE_PATH}/production/${productionId}/cuelists/${cueListId}`;
-  const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(cuePath)}`;
-  const card = buildCueWarningCard(productionName ?? "制作", cueList.name, cueNumber, cueName, url);
+  const [optedOut, targets] = await Promise.all([
+    getOptedOutUsers("cue_warning"),
+    batchResolveNotificationTargets([...recipients], productionId),
+  ]);
 
   for (const userId of recipients) {
     if (optedOut.has(userId)) continue;
-    const openId = openIdMap.get(userId);
-    if (!openId) continue;
-    sendCard(openId, card).catch(e =>
-      console.error(`[cue-warning] dm failed for ${openId}:`, (e as Error).message)
-    );
+    const target = targets.get(userId);
+    if (!target) continue;
+    const actionUrl = target.adapter.buildActionUrl(cuePath);
+    const card = buildCueWarningCard(productionName ?? "制作", cueList.name, cueNumber, cueName, actionUrl);
+    target.adapter.sendDirectMessage(target.platformUserId, {
+      text: `你负责的 Cue #${cueNumber}${cueName ? ` ${cueName}` : ""} 被标记为报警`,
+      title: "Cue 报警",
+      primaryUrl: actionUrl,
+      richContent: card,
+    }).catch(e => console.error(`[cue-warning] dm failed for ${target.platformUserId}:`, (e as Error).message));
   }
 }
 

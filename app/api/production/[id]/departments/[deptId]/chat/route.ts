@@ -15,7 +15,7 @@ import { hasPermission } from "@/lib/roles";
 import {
   getEventDepartment, setDepartmentChatId,
 } from "@/lib/event-db";
-import { createChat } from "@/lib/feishu-chat";
+import { feishuPlatform } from "@/lib/platform/feishu";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     ]),
   ];
 
-  const chatId = await createChat(chatName, sessionOpenId, memberIds, "only_owner_and_administrator");
+  const chatId = await feishuPlatform.createDeptGroup(chatName, memberIds, sessionOpenId);
   if (!chatId) return Response.json({ error: "飞书建群失败" }, { status: 502 });
 
   await setDepartmentChatId(deptId, chatId);

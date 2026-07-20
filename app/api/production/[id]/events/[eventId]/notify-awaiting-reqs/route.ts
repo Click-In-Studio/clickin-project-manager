@@ -11,9 +11,11 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
-import { sendChatCard, sendCard, buildUrgeReqCard } from "@/lib/feishu-bot";
+import { buildUrgeReqCard } from "@/lib/feishu-bot";
 import { getOptedInUsers } from "@/lib/notification-prefs";
 import { BASE_PATH } from "@/lib/base-path";
+import { feishuPlatform } from "@/lib/platform/feishu";
+import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -31,7 +33,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const allReqs = await listEventTechReqs(eventId);
   const awaitingReqs = allReqs.filter(r => r.status === "awaiting" && r.departmentId);
 
-  // Group by department
   const byDept = new Map<string, typeof awaitingReqs>();
   for (const r of awaitingReqs) {
     const key = r.departmentId!;
@@ -39,36 +40,41 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     byDept.get(key)!.push(r);
   }
 
-  const appId = process.env.FEISHU_APP_ID ?? "";
   let notified = 0;
 
   for (const [deptId, reqs] of byDept) {
     const dept = await getEventDepartment(deptId, productionId);
     if (!dept?.chatId || !dept.pocUserIds.length) continue;
 
+    // Feishu open_ids still needed for @mention syntax inside the card body
     const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
     const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
 
-    // Link to the event's reqs tab
     const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs`;
-    const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(reqPath)}`;
-    const card = buildUrgeReqCard(
-      event.title, dept.name,
-      reqs.map(r => r.title),
-      pocOpenIds,
-      url,
-    );
-    await sendChatCard(dept.chatId, card).catch(e =>
-      console.error(`[notify-awaiting] dept ${deptId} failed:`, e)
-    );
-    // Extra personal DM for POCs who opted in to tech_req_poc
-    getOptedInUsers("tech_req_poc").then((optedIn) => {
-      for (const userId of dept.pocUserIds) {
-        if (!optedIn.has(userId)) continue;
-        const openId = userIdToOpenId.get(userId);
-        if (openId) sendCard(openId, card).catch(e => console.error("[notify-awaiting] personal dm failed:", e));
-      }
-    }).catch(() => {});
+    const groupActionUrl = feishuPlatform.buildActionUrl(reqPath);
+    const card = buildUrgeReqCard(event.title, dept.name, reqs.map(r => r.title), pocOpenIds, groupActionUrl);
+
+    await feishuPlatform.sendGroupMessage(dept.chatId, {
+      text: `需求确认催办 — ${dept.name}，${reqs.length} 个需求待处理`,
+      richContent: card,
+    }).catch(e => console.error(`[notify-awaiting] dept ${deptId} failed:`, e));
+
+    // Personal DM copies for opted-in POCs — routed through platform adapter
+    const [optedIn, targets] = await Promise.all([
+      getOptedInUsers("tech_req_poc"),
+      batchResolveNotificationTargets(dept.pocUserIds, productionId),
+    ]);
+    for (const userId of dept.pocUserIds) {
+      if (!optedIn.has(userId)) continue;
+      const target = targets.get(userId);
+      if (!target) continue;
+      const dmActionUrl = target.adapter.buildActionUrl(reqPath);
+      const dmCard = buildUrgeReqCard(event.title, dept.name, reqs.map(r => r.title), pocOpenIds, dmActionUrl);
+      target.adapter.sendDirectMessage(target.platformUserId, {
+        text: `需求确认催办 — ${dept.name}，${reqs.length} 个需求待处理，查看：${dmActionUrl}`,
+        richContent: dmCard,
+      }).catch(e => console.error("[notify-awaiting] personal dm failed:", e));
+    }
     notified++;
   }
 

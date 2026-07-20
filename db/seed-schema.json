@@ -1094,6 +1094,29 @@
       "nullable": false
     }
   ],
+  "notification_preference": [
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "scope_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "scope_id",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "platform_identity_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
   "notification_subscription": [
     {
       "column": "notification_type",
@@ -1290,6 +1313,40 @@
       "column": "user_id",
       "type": "uuid",
       "nullable": false
+    }
+  ],
+  "production_platform_channel": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "org_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "platform_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "platform_channel_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "scene": [
@@ -1644,6 +1701,46 @@
       "type": "integer",
       "nullable": false,
       "default": "0"
+    }
+  ],
+  "user_platform_identity": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "platform_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "platform_user_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "label",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "is_login_method",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "version": [
