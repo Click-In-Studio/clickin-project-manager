@@ -6635,6 +6635,12 @@ export default function ScriptEditor({
   const [versions, setVersions] = useState<Version[]>([]);
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null);
 
+  // Persist active version to cookie so the server can restore it on next page load
+  useEffect(() => {
+    if (!productionId || !activeVersionId) return;
+    document.cookie = `ver_${productionId}=${encodeURIComponent(activeVersionId)}; path=/; max-age=31536000; SameSite=Lax`;
+  }, [productionId, activeVersionId]);
+
   // Gate edit permissions by version status
   const baseCanEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
   const baseCanEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
@@ -7774,11 +7780,31 @@ export default function ScriptEditor({
     };
   }, [scrollLocked]);
 
+  // Always-fresh scroll-position saver — reads DOM directly to avoid stale estimates
+  const saveScrollPosRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    saveScrollPosRef.current = () => {
+      if (loadState !== "ready" || !productionId) return;
+      const container = blocksContainerRef.current;
+      if (!container) return;
+      let savedId: string | null = null;
+      for (const el of container.querySelectorAll<HTMLElement>("[data-bwrap]")) {
+        if (el.getBoundingClientRect().top <= 0) savedId = el.dataset.bwrap ?? null;
+        else break;
+      }
+      if (savedId) {
+        const idx = blockIndexByIdRef.current.get(savedId) ?? 0;
+        document.cookie = `script_pos_${productionId}=${encodeURIComponent(`${savedId}:${idx}`)}; path=/; max-age=31536000; SameSite=Lax`;
+      }
+    };
+  });
+
   // Scroll listener + debounced position save
   useEffect(() => {
     let rafId = 0;
     let didCenterForScrollGesture = false;
     let scrollGestureTimer: ReturnType<typeof setTimeout> | undefined;
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
     const cancelPendingCorrectionForUserScroll = () => {
       if (suppressProgrammaticScrollRef.current) return;
       postNavCorrectionRef.current = null;
@@ -7806,7 +7832,11 @@ export default function ScriptEditor({
         const activeSceneChanged = recomputeWindow();
         if (shouldRecenterToc || activeSceneChanged) window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
-      if (!scrollLockedRef.current) postNavCorrectionRef.current = null;
+      if (!scrollLockedRef.current) {
+        postNavCorrectionRef.current = null;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
+      }
     };
     window.addEventListener('wheel', cancelPendingCorrectionForUserScroll, { passive: true });
     window.addEventListener('touchmove', cancelPendingCorrectionForUserScroll, { passive: true });
@@ -7821,6 +7851,7 @@ export default function ScriptEditor({
       window.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(rafId);
       clearTimeout(scrollGestureTimer);
+      clearTimeout(saveTimer);
     };
   }, [recomputeWindow, updateActiveSceneFromScroll]);
 
@@ -8411,7 +8442,7 @@ export default function ScriptEditor({
     return () => document.removeEventListener("visibilitychange", updateStreamVisibility);
   }, []);
 
-  // ── Hash-based deep link ─────────────────────────────────────────────────────
+  // ── Hash-based deep link + position restore ──────────────────────────────────
   useEffect(() => {
     if (loadState !== "ready") return;
     // Fallback: unlock scroll 300ms after ready; correction useLayoutEffect unlocks earlier.
@@ -8427,8 +8458,26 @@ export default function ScriptEditor({
       }
       return () => clearTimeout(unlockTimer);
     }
+    // Restore last scroll position from cookie
+    if (productionId) {
+      const cookieKey = `script_pos_${productionId}`;
+      const raw = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith(cookieKey + "="))?.slice(cookieKey.length + 1);
+      if (raw) {
+        const decoded = decodeURIComponent(raw);
+        const colonAt = decoded.lastIndexOf(":");
+        const blockId = colonAt > 0 ? decoded.slice(0, colonAt) : decoded;
+        const savedIndex = colonAt > 0 ? parseInt(decoded.slice(colonAt + 1), 10) : NaN;
+        const bl = blocksRef.current;
+        const idx = bl.findIndex(b => b.id === blockId);
+        if (idx >= 0) {
+          scrollToBlockIdx(idx, "start");
+        } else if (!isNaN(savedIndex) && bl.length > 0) {
+          scrollToBlockIdx(Math.min(savedIndex, bl.length - 1), "start");
+        }
+      }
+    }
     return () => clearTimeout(unlockTimer);
-  }, [loadState, scrollToBlockIdx]);
+  }, [loadState, productionId, scrollToBlockIdx]);
 
   // ── Clear block highlight on scroll or click ─────────────────────────────────
   useEffect(() => {

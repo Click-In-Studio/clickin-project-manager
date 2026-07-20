@@ -15,11 +15,18 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   }
 
   try {
-    const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id);
+    const requestedVersionId = req.nextUrl.searchParams.get("v");
+    let versionId = requestedVersionId ?? await getActiveVersionId(id);
     if (!versionId) {
       return Response.json({ error: "剧本不存在或无版本" }, { status: 404 });
     }
-    const version = await getVersion(versionId);
+    let version = await getVersion(versionId);
+    // Requested version missing or belongs to another production — fall back to active version
+    if (requestedVersionId && (!version || version.productionId !== id)) {
+      const fallbackId = await getActiveVersionId(id);
+      versionId = fallbackId ?? versionId;
+      version = fallbackId ? await getVersion(fallbackId) : null;
+    }
     if (!version || version.productionId !== id) {
       return Response.json({ error: "版本不存在" }, { status: 404 });
     }
