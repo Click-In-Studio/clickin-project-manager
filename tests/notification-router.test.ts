@@ -2,6 +2,20 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { getPool } from "@/lib/pg";
 import { resolveNotificationTarget, batchResolveNotificationTargets } from "@/lib/platform/notification-router";
+import { registerPersonalChannel } from "@/lib/platform/registry";
+import type { PersonalChannel } from "@/lib/platform/types";
+
+// Stub email adapter so notification_preference can point to it in tests.
+const emailStub: PersonalChannel = {
+  platformId: "email",
+  capabilities: { canLogin: false, canSendDirect: true, supportsInteractiveMessages: false, supportsRichMessages: false },
+  generateAuthUrl: () => "",
+  handleAuthCallback: async () => ({ platformUserId: "", name: "" }),
+  getUserInfo: async (id) => ({ platformUserId: id, name: id }),
+  sendDirectMessage: async () => {},
+  buildActionUrl: (path) => path,
+};
+registerPersonalChannel(emailStub);
 
 // ── Test data helpers ─────────────────────────────────────────────────────────
 
