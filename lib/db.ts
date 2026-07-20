@@ -1981,7 +1981,7 @@ export async function listAllFeishuUsers(): Promise<{
   const res = await getPool().query<{
     user_id: string; open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
   }>(
-    `SELECT user_id, open_id, name, avatar_url, email, phone FROM feishu_user ORDER BY name LIMIT 500`,
+    `SELECT user_id, open_id, name, avatar_url, email, phone FROM feishu_user ORDER BY name`,
   );
   return res.rows.map((r) => ({
     userId: r.user_id,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { match as pinyinMatch } from "pinyin-pro";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
@@ -415,7 +415,8 @@ function AddMemberPanel({
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadAllUsers = async () => {
+  const loadAllUsers = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/feishu-user-search`);
       const data = await res.json();
@@ -426,9 +427,9 @@ function AddMemberPanel({
     } finally {
       setLoading(false);
     }
-  };
+  }, [productionId]);
 
-  useEffect(() => { loadAllUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadAllUsers(); }, [loadAllUsers]);
 
   const results = query.trim()
     ? allUsers.filter((u) =>
