@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, searchFeishuUsers } from "@/lib/db";
+import { getProductionMemberContext, searchFeishuUsers, listAllFeishuUsers } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -14,8 +14,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
 
   const q = req.nextUrl.searchParams.get("q")?.trim();
-  if (!q || q.length < 1) return Response.json({ users: [] });
-
-  const users = await searchFeishuUsers(q);
+  const users = q ? await searchFeishuUsers(q) : await listAllFeishuUsers();
   return Response.json({ users });
 }

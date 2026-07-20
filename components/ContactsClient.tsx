@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { match as pinyinMatch } from "pinyin-pro";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
@@ -406,39 +407,34 @@ function AddMemberPanel({
   onAdded: (member: MemberWithRoles) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searched, setSearched] = useState(false);
+  const [allUsers, setAllUsers] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runSearch = async (q: string) => {
-    if (!q.trim()) { setResults([]); setSearched(false); return; }
-    setSearching(true);
-    setError(null);
+  const loadAllUsers = async () => {
     try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/feishu-user-search?q=${encodeURIComponent(q.trim())}`
-      );
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/feishu-user-search`);
       const data = await res.json();
       if (data.error) setError(data.error);
-      else setResults(data.users ?? []);
-      setSearched(true);
+      else setAllUsers(data.users ?? []);
     } catch {
-      setError("搜索失败");
+      setError("加载通讯录失败");
     } finally {
-      setSearching(false);
+      setLoading(false);
     }
   };
 
-  const search = (q: string) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runSearch(q), 400);
-  };
+  useEffect(() => { loadAllUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const results = query.trim()
+    ? allUsers.filter((u) =>
+        u.name.includes(query) || pinyinMatch(u.name, query.toLowerCase()) != null
+      )
+    : allUsers;
 
   const syncAndSearch = async () => {
     setSyncing(true);
@@ -447,8 +443,8 @@ function AddMemberPanel({
       const res = await fetch(`${BASE_PATH}/api/admin/sync-feishu-users`, { method: "POST" });
       const data = await res.json();
       if (!data.ok) { setError(data.error ?? "同步失败"); return; }
-      // Re-run search with current query after sync
-      await runSearch(query);
+      setLoading(true);
+      await loadAllUsers();
     } catch {
       setError("同步失败，请重试");
     } finally {
@@ -514,19 +510,19 @@ function AddMemberPanel({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Search input + always-visible sync button */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5">按姓名搜索</label>
+            <label className="block text-xs text-zinc-500 mb-1.5">按姓名或拼音搜索</label>
             <input
               autoFocus
               value={query}
-              onChange={(e) => { setQuery(e.target.value); search(e.target.value); setSelected(null); setSearched(false); }}
-              placeholder="输入姓名…"
+              onChange={(e) => { setQuery(e.target.value); setSelected(null); }}
+              placeholder="输入姓名、全拼或首拼…"
               className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
             />
             <div className="flex items-center justify-between mt-1.5">
               <p className="text-[11px] text-zinc-300">搜索本地通讯录</p>
               <button
                 onClick={syncAndSearch}
-                disabled={syncing}
+                disabled={syncing || loading}
                 className="text-[11px] text-zinc-400 hover:text-zinc-700 disabled:opacity-40 underline underline-offset-2 transition-colors"
               >
                 {syncing ? "同步中…" : "同步飞书通讯录"}
@@ -537,13 +533,13 @@ function AddMemberPanel({
           {/* Search results */}
           {!selected && (
             <div className="space-y-1">
-              {(searching || syncing) && (
+              {(loading || syncing) && (
                 <p className="text-xs text-zinc-300 text-center py-3">
-                  {syncing ? "正在同步飞书通讯录…" : "搜索中…"}
+                  {syncing ? "正在同步飞书通讯录…" : "加载中…"}
                 </p>
               )}
-              {!searching && !syncing && error && <p className="text-xs text-red-500">{error}</p>}
-              {!searching && !syncing && results.map((u) => {
+              {!loading && !syncing && error && <p className="text-xs text-red-500">{error}</p>}
+              {!loading && !syncing && results.map((u) => {
                 const alreadyAdded = existingUserIds.has(u.userId);
                 return (
                   <button
@@ -575,7 +571,7 @@ function AddMemberPanel({
                   </button>
                 );
               })}
-              {!searching && !syncing && !error && searched && results.length === 0 && (
+              {!loading && !syncing && !error && query.trim() && results.length === 0 && (
                 <p className="text-xs text-zinc-300 text-center py-3">未找到「{query}」，试试同步通讯录</p>
               )}
             </div>
