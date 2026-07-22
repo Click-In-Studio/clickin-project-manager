@@ -69,9 +69,7 @@ export async function getBotOpenId(): Promise<string | null> {
 
 // ─── OAuth helpers ────────────────────────────────────────────────────────────
 
-export function buildOAuthUrl(state: string): string {
-  const redirectUri = process.env.FEISHU_REDIRECT_URI;
-  if (!redirectUri) throw new Error("FEISHU_REDIRECT_URI is not set");
+export function buildOAuthUrl(state: string, redirectUri: string): string {
   const params = new URLSearchParams({
     app_id: appId(),
     redirect_uri: redirectUri,

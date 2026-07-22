@@ -80,8 +80,8 @@ export class FeishuPlatform implements PersonalChannel, OrgChannel, InboundGatew
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
-  generateAuthUrl(state: string): string {
-    return buildOAuthUrl(state);
+  generateAuthUrl(state: string, redirectUri: string): string {
+    return buildOAuthUrl(state, redirectUri);
   }
 
   async handleAuthCallback(code: string): Promise<PlatformIdentity> {

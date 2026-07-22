@@ -7,6 +7,7 @@ export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
   cookieStore.delete(TOKEN_COOKIE);
-  const origin = new URL(process.env.FEISHU_REDIRECT_URI!).origin;
-  return NextResponse.redirect(new URL("/login", origin));
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  return NextResponse.redirect(new URL("/login", `${proto}://${host}`));
 }
