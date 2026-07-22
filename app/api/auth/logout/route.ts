@@ -8,5 +8,5 @@ export async function POST(req: NextRequest) {
   cookieStore.delete(SESSION_COOKIE);
   cookieStore.delete(TOKEN_COOKIE);
   const origin = new URL(process.env.FEISHU_REDIRECT_URI!).origin;
-  return NextResponse.redirect(new URL("/app/login", origin));
+  return NextResponse.redirect(new URL("/login", origin));
 }
