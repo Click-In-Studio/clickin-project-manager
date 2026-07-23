@@ -153,7 +153,6 @@ export default function Dramaturgy({
                   productionId={productionId}
                   versions={versions}
                   currentVersionId={currentVersionId}
-                  canManage={canEdit}
                   onChange={handleVersionChange}
                 />
               )}

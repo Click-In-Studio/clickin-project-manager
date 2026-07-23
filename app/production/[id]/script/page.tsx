@@ -38,7 +38,6 @@ export default async function ProductionScriptPage({
       canEditRehearsalMark={p("script:rehearsal_mark")}
       canImport={p("manage_permissions")}
       versionId={versionId}
-      canManageVersions={p("script:metadata")}
     />
   );
 }

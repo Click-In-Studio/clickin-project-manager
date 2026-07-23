@@ -618,7 +618,6 @@ export default function ScenesManager({ productionId, productionName, initialSce
                 productionId={productionId}
                 versions={versions}
                 currentVersionId={currentVersionId}
-                canManage={canEdit}
                 onChange={handleVersionChange}
               />
             )}

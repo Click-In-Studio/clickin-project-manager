@@ -106,7 +106,6 @@ type Props = {
   versions?: Version[];
   versionId?: string;
   versionStatus?: VersionStatus;
-  canManageVersions?: boolean;
 };
 
 type Selection =
@@ -846,7 +845,7 @@ function ExportModal({
 export default function CuePage({
   productionId, productionName, blocks: rawBlocks, characters, scenes,
   cueLists, initialCues, editableListIds, myUserId, isAdmin, pageMap,
-  versions = [], versionId, versionStatus, canManageVersions = false,
+  versions = [], versionId, versionStatus,
 }: Props) {
   const router = useRouter();
   const blocks = useMemo(() => textBlocksWithMarkerOwnership(rawBlocks), [rawBlocks]);
@@ -1961,7 +1960,6 @@ export default function CuePage({
                 productionId={productionId}
                 versions={versions}
                 currentVersionId={versionId ?? null}
-                canManage={canManageVersions}
                 onChange={(vid) => {
                   router.push(`/production/${productionId}/cues?v=${encodeURIComponent(vid)}`);
                 }}

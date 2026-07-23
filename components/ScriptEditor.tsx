@@ -6617,7 +6617,6 @@ export default function ScriptEditor({
   canEditRehearsalMark = true,
   canImport = false,
   versionId: initialVersionId,
-  canManageVersions = false,
 }: {
   scriptId?: string;
   productionId?: string;
@@ -6626,7 +6625,6 @@ export default function ScriptEditor({
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
   versionId?: string | null;
-  canManageVersions?: boolean;
 }) {
   const effectiveScriptId = productionId ?? scriptId;
 
@@ -10564,7 +10562,6 @@ export default function ScriptEditor({
                   productionId={productionId}
                   versions={versions}
                   currentVersionId={activeVersionId}
-                  canManage={canManageVersions}
                   onNavigate={prepareForNavigation}
                   onChange={(vid) => {
                     setActiveVersionId(vid);
