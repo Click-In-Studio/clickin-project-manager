@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
         id: p.id,
         name: p.name,
         archivedAt: p.archivedAt,
+        roles: p.roles,
         permissions,
       };
     }),

@@ -33,7 +33,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/production/[
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("members:manage_overrides", permCtx)) {
+  if (!hasPermission("production:manage_integrations", permCtx)) {
     return Response.json({ error: "无权配置通知通道" }, { status: 403 });
   }
 
@@ -63,7 +63,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("members:manage_overrides", permCtx)) {
+  if (!hasPermission("production:manage_integrations", permCtx)) {
     return Response.json({ error: "无权配置通知通道" }, { status: 403 });
   }
 

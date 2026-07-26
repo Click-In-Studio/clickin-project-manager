@@ -56,7 +56,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
   const { id } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !hasPermission("members:manage_overrides", access.permCtx)) {
+  if (!access || !hasPermission("production:rename", access.permCtx)) {
     return Response.json({ error: "无权修改" }, { status: 403 });
   }
 

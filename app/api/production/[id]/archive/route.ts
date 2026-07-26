@@ -11,7 +11,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx } = access;
-  if (!hasPermission("members:manage_overrides", permCtx))
+  if (!hasPermission("production:archive", permCtx))
     return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { deny: null };
 }

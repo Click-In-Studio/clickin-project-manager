@@ -4056,9 +4056,9 @@ export async function cowCueRevisionForMount(
 }
 
 /** All productions where the user has a membership role (regardless of SA status). */
-export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null }[]> {
-  const res = await getPool().query<{ id: string; name: string; archived_at: Date | null }>(
-    `SELECT p.id, p.name, p.archived_at
+export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null; roles: string[] }[]> {
+  const res = await getPool().query<{ id: string; name: string; archived_at: Date | null; roles: string[] }>(
+    `SELECT p.id, p.name, p.archived_at, pm.roles
      FROM production p
      JOIN production_member pm ON pm.production_id = p.id
      WHERE pm.user_id = $1
@@ -4069,6 +4069,7 @@ export async function listMemberProductions(userId: string): Promise<{ id: strin
     id: r.id,
     name: r.name,
     archivedAt: r.archived_at?.toISOString() ?? null,
+    roles: r.roles,
   }));
 }
 
