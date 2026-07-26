@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getCueList, listCueListPermissions, updateCue, deleteCue,
-         getCue, listProductionMembersWithRoles, getProductionName, getVersion } from "@/lib/db";
-import { canEditCueList } from "@/lib/cue-list-types";
+import { getProductionPermissionContext, getCueList, updateCue, deleteCue,
+         getCue, listCueListRoleMembers, getProductionName, getVersion, hasListAccess } from "@/lib/db";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/feishu-bot";
@@ -12,23 +11,23 @@ import { getOptedOutUsers } from "@/lib/notification-prefs";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, isArchived: false };
-  const { memberRoles, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, isArchived };
+  if (!session) return { session: null, isArchived: false };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { session, isArchived: false };
+  return { session, isArchived: access.isArchived };
 }
 
 async function checkEdit(req: NextRequest, id: string, cueListId: string) {
-  const { session, memberRoles, isArchived } = await getCtx(req, id);
-  if (!session) return { ok: false, session: null, memberRoles: null, isArchived: false, status: 401 as const };
-  if (isArchived) return { ok: false, session, memberRoles, isArchived, status: 403 as const };
-  const [cueList, permissions] = await Promise.all([
+  const { session, isArchived } = await getCtx(req, id);
+  if (!session) return { ok: false, session: null, isArchived: false, status: 401 as const };
+  if (isArchived) return { ok: false, session, isArchived, status: 403 as const };
+  const [cueList, canEdit] = await Promise.all([
     getCueList(cueListId, id),
-    listCueListPermissions(cueListId),
+    hasListAccess(cueListId, session.userId),
   ]);
-  if (!cueList) return { ok: false, session, memberRoles, isArchived, status: 404 as const };
-  if (!canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions))
-    return { ok: false, session, memberRoles, isArchived, status: 403 as const };
-  return { ok: true, session, memberRoles, isArchived, status: 200 as const };
+  if (!cueList) return { ok: false, session, isArchived, status: 404 as const };
+  if (!canEdit) return { ok: false, session, isArchived, status: 403 as const };
+  return { ok: true, session, isArchived, status: 200 as const };
 }
 
 async function resolveVersion(productionId: string, versionId?: string | null) {
@@ -95,36 +94,14 @@ async function notifyCueWarning(
   productionId: string, cueListId: string, _cueId: string,
   cueNumber: string, cueName: string,
 ): Promise<void> {
-  const [cueList, permissions, members, productionName] = await Promise.all([
+  const [cueList, productionName, roleEditorUserIds] = await Promise.all([
     getCueList(cueListId, productionId),
-    listCueListPermissions(cueListId),
-    listProductionMembersWithRoles(productionId),
     getProductionName(productionId),
+    listCueListRoleMembers(cueListId),
   ]);
   if (!cueList) return;
 
-  // Build explicit deny set by userId (canEdit=false override → no notification)
-  const denied = new Set(permissions.filter(p => !p.canEdit).map(p => p.userId));
-
-  const recipients = new Set<string>();
-
-  // 1. Creator
-  if (!denied.has(cueList.createdBy)) recipients.add(cueList.createdBy);
-
-  // 2. Personal overrides with canEdit=true
-  for (const p of permissions) {
-    if (p.canEdit) recipients.add(p.userId);
-  }
-
-  // 3. Members whose roles match defaultEditRoles
-  if (cueList.defaultEditRoles.length > 0) {
-    for (const m of members) {
-      if (denied.has(m.userId)) continue;
-      if (m.roles.some(r => cueList.defaultEditRoles.includes(r))) {
-        recipients.add(m.userId);
-      }
-    }
-  }
+  const recipients = new Set<string>([cueList.createdBy, ...roleEditorUserIds]);
 
   if (recipients.size === 0) return;
 

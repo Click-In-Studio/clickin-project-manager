@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -12,7 +12,7 @@ import {
   getSelfParticipantRole,
   listEventDepartments,
 } from "@/lib/event-db";
-import { REPORT_VIEWER_ROLES } from "@/lib/event-permissions";
+import { isReportViewer } from "@/lib/event-permissions";
 import EventFollowerClient from "@/components/EventFollowerClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -33,13 +33,15 @@ export default async function EventViewPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!_prodAccess) redirect("/");
+  const { permCtx: prodPermCtx } = _prodAccess;
+  if (!hasPermission("event:follow", prodPermCtx)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) redirect(`/production/${productionId}/events`);
 
-  const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
+  const canViewFull = hasPermission("event:edit", prodPermCtx);
 
   // Non-editors cannot see unpublished events
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
@@ -56,8 +58,8 @@ export default async function EventViewPage({
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
   const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0;
 
-  const isReportViewer = session.isAdmin || memberRoles?.some(r => REPORT_VIEWER_ROLES.has(r)) || false;
-  const visibleReports = isReportViewer ? reports : reports.filter(r => r.publishedAt !== null);
+  const canViewReport = isReportViewer(prodPermCtx);
+  const visibleReports = canViewReport ? reports : reports.filter(r => r.publishedAt !== null);
 
   return (
     <EventFollowerClient

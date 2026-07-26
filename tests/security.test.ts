@@ -35,7 +35,7 @@ beforeAll(async () => {
   const anchor = { kind: "gap" as const, afterBlockId: null };
   await createCueList({
     id: CL_ID, productionId: prodA.prodId, name: "安全测试走位表",
-    notes: "", abbr: null, template: null, defaultEditRoles: [], createdBy: TEST_USER,
+    notes: "", abbr: null, template: null, roleIds: [], createdBy: TEST_USER,
   });
   await createCue({ id: CUE_ID, cueListId: CL_ID, number: "S1", name: "安全测试Q", content: "", start: anchor, end: anchor });
   await createProductionEvent({

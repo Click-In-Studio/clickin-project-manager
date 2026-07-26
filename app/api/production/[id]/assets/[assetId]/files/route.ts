@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction, getVersion } from "@/lib/db";
+import { getProductionPermissionContext, getVersion } from "@/lib/db";
 import { getAsset, addUniversalAssetFile, createAssetFileVersion } from "@/lib/asset-db";
 import { putR2Object, assetR2Key, thumbnailR2Key } from "@/lib/r2";
 import sharp from "sharp";
@@ -17,8 +17,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id, assetId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });

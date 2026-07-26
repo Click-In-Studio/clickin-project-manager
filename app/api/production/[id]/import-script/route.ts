@@ -2,8 +2,8 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionMemberContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureScriptMarkerMigration, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
 import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
@@ -17,9 +17,11 @@ import { randomUUID } from "node:crypto";
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { permCtx, isArchived } = access;
   if (isArchived) return { session, deny: Response.json({ error: "已归档" }, { status: 403 }) };
-  if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
+  if (!hasPermission("script:import", permCtx)) {
     return { session, deny: Response.json({ error: "仅制作人可导入数据" }, { status: 403 }) };
   }
   return { session, deny: null };

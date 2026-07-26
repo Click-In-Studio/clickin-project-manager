@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
+import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import { buildScriptCommentMentionCard } from "@/lib/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
@@ -11,8 +11,10 @@ import { batchResolveNotificationTargets } from "@/lib/platform/notification-rou
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("script:comment", session.isAdmin, memberRoles, overrides)) {
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { permCtx } = access;
+  if (!hasPermission("script:comment", permCtx)) {
     return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
   return { session, deny: null };

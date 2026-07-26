@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "事件" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { listProductionEvents, listUserEventParticipations, listEventDepartments } from "@/lib/event-db";
 import EventsClient from "@/components/EventsClient";
 
@@ -15,11 +15,11 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
-  const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
-  const canCreate = hasPermission("event:create", session.isAdmin, memberRoles, overrides);
+  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
+  const canCreate = hasPermission("event:create", access.permCtx);
 
   const [name, allEvents, myParticipations, departments] = await Promise.all([
     getProductionName(id),

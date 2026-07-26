@@ -1,24 +1,30 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listCueLists, createCueList } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
-import { CUE_LIST_TEMPLATES, availableTemplatesForRoles } from "@/lib/cue-list-types";
+import {
+  getProductionPermissionContext,
+  getUserAllowedCueTypes,
+  listCueLists, createCueList, resolveRoleIdsByNames,
+} from "@/lib/db";
+import { hasPermission, type PermissionContext } from "@/lib/permissions";
+import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
 
 let _seq = 0;
 const uid = () => `cl${Date.now().toString(36)}${(++_seq).toString(36)}`;
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
+  if (!session) return { session: null, permCtx: null as PermissionContext | null, isArchived: false };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { session, permCtx: null as PermissionContext | null, isArchived: false };
+  const { permCtx, isArchived } = access;
+  return { session, permCtx, isArchived };
 }
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides))
+  if (!permCtx || !hasPermission("cue_list:view", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
   const lists = await listCueLists(id);
   return Response.json(lists);
@@ -26,10 +32,11 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
+  const { session, permCtx, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!permCtx) return Response.json({ error: "无权访问" }, { status: 403 });
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("cue:create", session.isAdmin, memberRoles, overrides))
+  if (!hasPermission("cue_list:create", permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as { name: string; notes?: string; template?: string; abbr?: string };
@@ -37,17 +44,20 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
 
   const abbr = body.abbr?.trim().toUpperCase() || null;
 
-  let defaultEditRoles: string[] = [];
+  let defaultRoles: string[] = [];
   if (body.template) {
     const tpl = CUE_LIST_TEMPLATES.find((t) => t.key === body.template);
     if (!tpl) return Response.json({ error: "未知模板" }, { status: 400 });
-    // Verify user can create this template type
-    const roles = memberRoles ?? [];
-    const allowed = availableTemplatesForRoles(roles, session.isAdmin);
-    if (!allowed.find((t) => t.key === body.template))
-      return Response.json({ error: "无权创建该类型Cue表" }, { status: 403 });
-    defaultEditRoles = tpl.defaultEditRoles;
+    // Admins (create_any) bypass template filtering; others must have a matching role via production_role_cue_type.
+    if (!hasPermission("cue_list:create_any", permCtx)) {
+      const allowedTypes = await getUserAllowedCueTypes(session!.userId, id);
+      if (!allowedTypes.includes(body.template))
+        return Response.json({ error: "无权创建该类型Cue表" }, { status: 403 });
+    }
+    defaultRoles = tpl.defaultRoles;
   }
+
+  const roleIds = await resolveRoleIdsByNames(id, defaultRoles);
 
   try {
     await createCueList({
@@ -57,8 +67,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
       notes: body.notes?.trim() ?? "",
       abbr,
       template: body.template ?? null,
-      defaultEditRoles,
-      createdBy: session.userId,
+      roleIds,
+      createdBy: session!.userId,
     });
   } catch (e: unknown) {
     if ((e as { constraint?: string }).constraint === "cue_list_abbr_production_unique")

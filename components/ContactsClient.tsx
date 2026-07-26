@@ -6,7 +6,14 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
 import type { EventDepartment } from "@/lib/event-db";
-import { ROLE_GROUPS, PERMISSION_GROUPS, PERMISSION_LABELS, roleBasedPermission, type Permission } from "@/lib/roles";
+import { ROLE_GROUPS } from "@/lib/roles";
+import {
+  type Permission,
+  MEMBER_BASE_PERMISSIONS,
+  ROLE_TEMPLATE_PERMISSIONS,
+  ASSISTANT_ROLE_MIGRATION,
+  SENSITIVE_ADMIN_PERMISSIONS,
+} from "@/lib/permissions";
 // Search result returned by feishu-user-search API (local DB, includes raw contact info)
 type SearchResult = {
   userId: string;
@@ -18,6 +25,55 @@ type SearchResult = {
   email?: string | null;
   phone?: string | null;
 };
+
+// ─── Permission UI constants (for PermissionsPanel override UI) ───────────────
+
+const UI_PERMISSION_GROUPS: { label: string; perms: Permission[] }[] = [
+  { label: "通讯录", perms: ["contacts:view", "contacts:import"] },
+  { label: "剧本", perms: ["script:view", "script:comment", "rehearsal_mark:create", "scene:rename", "script:edit", "script:manage"] },
+  { label: "Cue表", perms: ["cue_list:view", "cue_list:create"] },
+  { label: "事件", perms: ["event:follow", "event:view_call_sheet_any", "event:create", "event:edit", "event:publish", "event:edit_schedule", "event:assign_participants", "event:edit_call", "event:delete_tech_req_any"] },
+  { label: "管理", perms: ["dept:create", "members:manage_overrides"] },
+];
+
+const UI_PERMISSION_LABELS: Partial<Record<Permission, string>> = {
+  "contacts:view": "查看通讯录",
+  "contacts:import": "导入/更新人员",
+  "script:view": "查看剧本",
+  "script:comment": "剧本评论",
+  "rehearsal_mark:create": "排练记号",
+  "scene:rename": "场次/角色元数据",
+  "script:edit": "剧本文本编辑",
+  "script:manage": "剧本管理（含场次）",
+  "cue_list:view": "查看Cue表",
+  "cue_list:create": "创建Cue表",
+  "event:follow": "关注事件",
+  "event:view_call_sheet_any": "查看完整Call Sheet",
+  "event:create": "创建事件",
+  "event:edit": "编辑事件",
+  "event:publish": "发布事件",
+  "event:edit_schedule": "编辑子事件",
+  "event:assign_participants": "绑定参与人员",
+  "event:edit_call": "设置Call Time",
+  "event:delete_tech_req_any": "删除技术需求",
+  "dept:create": "管理部门",
+  "members:manage_overrides": "管理成员权限",
+};
+
+function computeRoleDefault(perm: Permission, member: MemberWithRoles): boolean {
+  if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) return false;
+  if (member.isAdmin) return true;
+  const memberPerms = new Set<Permission>(MEMBER_BASE_PERMISSIONS);
+  for (const role of member.roles) {
+    const perms = ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
+    if (perms) for (const p of perms) memberPerms.add(p);
+  }
+  // Handle rehearsal_mark implication from script operation permissions
+  if (perm === "rehearsal_mark:create") {
+    return memberPerms.has("script:manage") || memberPerms.has("script:edit") || memberPerms.has("script:annotate") || memberPerms.has(perm);
+  }
+  return memberPerms.has(perm);
+}
 
 const ROLE_ORDER = ROLE_GROUPS.flatMap((g) => g.roles);
 const ALL_ROLE_GROUPS = ROLE_GROUPS;
@@ -161,21 +217,21 @@ function PermissionsPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {PERMISSION_GROUPS.map((group) => (
+          {UI_PERMISSION_GROUPS.map((group) => (
             <div key={group.label}>
               <p className="mb-2 text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">
                 {group.label}
               </p>
               <div className="space-y-2">
                 {group.perms.map((perm) => {
-                  const roleValue = roleBasedPermission(perm, member.isAdmin, member.roles);
+                  const roleValue = computeRoleDefault(perm, member);
                   const override = perm in overrides ? overrides[perm] : null;
                   const isSaving = saving === perm;
 
                   return (
                     <div key={perm} className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm text-zinc-700">{PERMISSION_LABELS[perm]}</p>
+                        <p className="text-sm text-zinc-700">{UI_PERMISSION_LABELS[perm] ?? perm}</p>
                         <p className="text-[11px] text-zinc-400">
                           职位默认：{roleValue ? "允许" : "禁止"}
                         </p>

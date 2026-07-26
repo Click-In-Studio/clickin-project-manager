@@ -145,13 +145,26 @@ Adversarial 测试不只是"以恶意用户视角攻击"，更多是：
 
 ```javascript
 // 把 production id 换成另一个你不是成员的剧目
-fetch("/app/api/production/<other-id>/scenes", {
+fetch("/api/production/<other-id>/scenes", {
   credentials: "include",
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ name: "test" })
 }).then(r => console.log(r.status));
 // 预期 403；返回 2xx 说明后端保护缺失
+```
+
+**原子权限越权**：除了跨 production 隔离，还需验证权限粒度。例如：普通成员（"演员"角色）是否能调用需要 `cue_list:create` 权限的接口：
+
+```javascript
+// 用一个只有"演员"角色的账号 session，尝试创建 Cue 表
+fetch("/api/production/<id>/cuelists", {
+  credentials: "include",
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: "test" })
+}).then(r => console.log(r.status));
+// 预期 403；返回 201 说明权限检查缺失
 ```
 
 **需要验证的性质**：UI 上隐藏某个操作入口≠该操作在后端被拒绝。每一个"只有特定角色可见的按钮"背后，都应有对应的 API 层保护。

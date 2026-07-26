@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import { getCtx } from "./ctx";
 
 type ViewConfig = {
@@ -23,9 +23,9 @@ type ViewRow = {
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scene-table-views">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
+  if (!permCtx || !hasPermission("script:view", permCtx)) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 
@@ -52,9 +52,9 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scene-table-views">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
+  if (!permCtx || !hasPermission("script:view", permCtx)) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 

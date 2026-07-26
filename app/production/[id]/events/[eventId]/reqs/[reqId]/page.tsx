@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   getEventTechReq,
@@ -26,11 +26,8 @@ export default async function ReqDetailPage({ params }: Ctx) {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(
-    session.userId, session.isAdmin, productionId
-  );
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
-    redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) redirect("/");
 
   const [event, req, scheduleItems, departments, productionMembers] = await Promise.all([
     getProductionEvent(eventId, productionId),
@@ -43,7 +40,7 @@ export default async function ReqDetailPage({ params }: Ctx) {
   if (!event) redirect(`/production/${productionId}/events`);
   if (!req) redirect(`/production/${productionId}/events/${eventId}/reqs`);
 
-  const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
+  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);

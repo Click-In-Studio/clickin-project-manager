@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "角色" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import CharactersManager from "@/components/CharactersManager";
 
 export default async function CharactersPage({
@@ -18,10 +18,10 @@ export default async function CharactersPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
-  const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
+  const canEdit = hasPermission("scene:rename", access.permCtx);
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 

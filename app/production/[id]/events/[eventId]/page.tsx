@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listProductionMembersWithRoles, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles, listVersions } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -34,13 +34,15 @@ export default async function EventDetailPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!_prodAccess) redirect("/");
+  const { permCtx: prodPermCtx } = _prodAccess;
+  if (!hasPermission("event:follow", prodPermCtx)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) redirect(`/production/${productionId}/events`);
 
-  const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
+  const canViewFull = hasPermission("event:edit", prodPermCtx);
 
   // Non-editors always go to the follower view (which enforces status visibility too)
   if (!canViewFull) redirect(`/production/${productionId}/events/${eventId}/view`);
@@ -48,7 +50,7 @@ export default async function EventDetailPage({
   const name = await getProductionName(productionId);
   if (!name) redirect("/");
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
   const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions] =
     await Promise.all([
@@ -74,14 +76,14 @@ export default async function EventDetailPage({
     reports = [defaultReport];
   }
 
-  const canEdit = hasPermission("event:edit", session.isAdmin, memberRoles, overrides);
-  const canScheduleEdit = hasPermission("event:schedule_edit", session.isAdmin, memberRoles, overrides);
-  const canAssignPeople = hasPermission("event:assign_people", session.isAdmin, memberRoles, overrides);
-  const canCallEdit = hasPermission("event:call_edit", session.isAdmin, memberRoles, overrides);
-  const canTechReqDelete = hasPermission("event:tech_req_delete", session.isAdmin, memberRoles, overrides);
-  const userCanWriteReport = canWriteReport(session.isAdmin, memberRoles, overrides, permCtx);
-  const canEditAnyTechReq = canEditTechReq(session.isAdmin, memberRoles, overrides, permCtx, null);
-  const pocDeptIds = permCtx.pocDeptIds;
+  const canEdit = hasPermission("event:edit", prodPermCtx);
+  const canScheduleEdit = hasPermission("event:edit_schedule", prodPermCtx);
+  const canAssignPeople = hasPermission("event:assign_participants", prodPermCtx);
+  const canCallEdit = hasPermission("event:edit_call", prodPermCtx);
+  const canTechReqDelete = hasPermission("event:delete_tech_req_any", prodPermCtx);
+  const userCanWriteReport = canWriteReport(prodPermCtx, eventPermCtx);
+  const canEditAnyTechReq = canEditTechReq(prodPermCtx, eventPermCtx, null);
+  const pocDeptIds = eventPermCtx.pocDeptIds;
 
   return (
     <EventDetailClient

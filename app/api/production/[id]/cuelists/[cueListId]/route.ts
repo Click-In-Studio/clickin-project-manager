@@ -1,49 +1,53 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getCueList, updateCueList, deleteCueList,
-  listCueListPermissions,
+  getProductionPermissionContext,
+  getCueList, updateCueList, deleteCueList,
+  listCueListPermissions, hasListAccess,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
-import { canEditCueList, canManageCueListPermissions } from "@/lib/cue-list-types";
+import { hasPermission, hasScopedPermission, type PermissionContext } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
+  if (!session) return { session: null, permCtx: null as PermissionContext | null, isArchived: false };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { session, permCtx: null as PermissionContext | null, isArchived: false };
+  const { permCtx, isArchived } = access;
+  return { session, permCtx, isArchived };
 }
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides))
+  if (!permCtx || !hasPermission("cue_list:view", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
-  const [cueList, permissions] = await Promise.all([
+  const [cueList, permissions, canEdit] = await Promise.all([
     getCueList(cueListId, id),
     listCueListPermissions(cueListId),
+    hasListAccess(cueListId, session.userId),
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const canEdit = canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions);
-  const canManage = canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList);
+  const isCreator = cueList.createdBy === session.userId;
+  const canManage = hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx);
   return Response.json({ cueList, permissions, canEdit, canManage });
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles, isArchived } = await getCtx(req, id);
+  const { session, permCtx, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!permCtx) return Response.json({ error: "无权访问" }, { status: 403 });
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const [cueList, permissions] = await Promise.all([
+  const [cueList, canEdit] = await Promise.all([
     getCueList(cueListId, id),
-    listCueListPermissions(cueListId),
+    hasListAccess(cueListId, session.userId),
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions))
+  if (!canEdit)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as { name?: string; notes?: string; abbr?: string | null };
@@ -65,13 +69,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
 export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles, isArchived } = await getCtx(req, id);
+  const { session, permCtx, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!permCtx) return Response.json({ error: "无权访问" }, { status: 403 });
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList))
+  const isCreator = cueList.createdBy === session.userId;
+  if (!hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteCueList(cueListId, id);

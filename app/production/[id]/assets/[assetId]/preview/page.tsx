@@ -2,7 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset } from "@/lib/asset-db";
 import AssetPreviewClient from "@/components/assets/AssetPreviewClient";
 
@@ -30,8 +30,8 @@ export default async function AssetPreviewPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) notFound();

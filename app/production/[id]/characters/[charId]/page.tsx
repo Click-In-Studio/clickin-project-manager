@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getCharacterById, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getCharacterById, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import CharacterDetailView from "@/components/CharacterDetail";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; charId: string }> }): Promise<Metadata> {
@@ -29,10 +29,10 @@ export default async function CharacterDetailPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
-  const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
+  const canEdit = hasPermission("scene:rename", access.permCtx);
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 

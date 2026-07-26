@@ -1,16 +1,19 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getBlockTagsForProduction, upsertBlockTag, deleteBlockTag } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getBlockTagsForProduction, upsertBlockTag, deleteBlockTag } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
+import type { ProductionAccess } from "@/lib/db";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
-    return { session, memberRoles, overrides, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  if (!session) return { session: null, access: null as ProductionAccess | null, deny: Response.json({ error: "未登录" }, { status: 401 }) };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { session, access: null as ProductionAccess | null, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { permCtx } = access;
+  if (!hasPermission("script:view", permCtx)) {
+    return { session, access, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
-  return { session, memberRoles, overrides, deny: null };
+  return { session, access, deny: null };
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -23,9 +26,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
-  const { session, memberRoles, overrides, deny } = await guard(req, productionId);
+  const { session, access, deny } = await guard(req, productionId);
   if (!session || deny) return deny!;
-  if (!hasPermission("script:edit", session.isAdmin, memberRoles!, overrides)) {
+  const { permCtx } = access!;
+  if (!hasPermission("script:edit_block", permCtx)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
