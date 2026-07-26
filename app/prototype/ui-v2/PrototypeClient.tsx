@@ -22,6 +22,7 @@ type View =
 
 type Role = "制作人 / 舞监" | "导演 / 构作" | "设计 / 技术" | "演员";
 type PlanningView = "calendar" | "gantt" | "timetable";
+type ProjectOption = { id: string; organization: string; name: string; avatar: string };
 
 const VIEW_META: Record<View, { label: string; eyebrow: string; side?: "script" | "stage" }> = {
   home: { label: "我的工作", eyebrow: "平台级" },
@@ -48,6 +49,30 @@ const SCRIPT_NAV: { id: View; label: string; hint: string }[] = [
   { id: "assets", label: "数字资产", hint: "文件 · 图纸 · 音视频" },
   { id: "cue", label: "Cue", hint: "部门执行设计" },
 ];
+
+const PROJECTS: ProjectOption[] = [
+  { id: "romeo", organization: "棱镜剧团", name: "海边的罗密欧", avatar: "海" },
+  { id: "teahouse", organization: "棱镜剧团", name: "茶馆", avatar: "茶" },
+  { id: "school", organization: "青年剧社", name: "春季汇演", avatar: "春" },
+];
+
+const NAV_GLYPHS: Record<View, string> = {
+  home: "今",
+  project: "项",
+  script: "文",
+  dramaturgy: "构",
+  table: "表",
+  assets: "库",
+  cue: "Cue",
+  people: "人",
+  events: "E",
+  tasks: "T",
+  notifications: "通",
+  planning: "计",
+  finance: "¥",
+  materials: "物",
+  framework: "i",
+};
 
 const STAGE_NAV: { id: View; label: string; hint: string }[] = [
   { id: "people", label: "人员与角色", hint: "演员 · 部门 · 角色" },
@@ -135,7 +160,8 @@ function ProgressRing({ value }: { value: number }) {
 
 export default function PrototypeClient() {
   const [view, setView] = useState<View>("home");
-  const [role, setRole] = useState<Role>("制作人 / 舞监");
+  const role: Role = "制作人 / 舞监";
+  const [currentProject, setCurrentProject] = useState<ProjectOption>(PROJECTS[0]);
   const [mobilePreview, setMobilePreview] = useState(false);
   const [mobileSide, setMobileSide] = useState<"script" | "stage">("script");
   const [drawer, setDrawer] = useState<"task" | "cue" | "notification" | null>(null);
@@ -145,6 +171,11 @@ export default function PrototypeClient() {
   const [published, setPublished] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [completedTasks, setCompletedTasks] = useState<string[]>(["t1"]);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
+  const [joinProjectOpen, setJoinProjectOpen] = useState(false);
+  const [projectAvatarUrl, setProjectAvatarUrl] = useState<string | null>(null);
 
   const meta = VIEW_META[view];
   const navForMobile = mobileSide === "script" ? SCRIPT_NAV : STAGE_NAV;
@@ -181,58 +212,129 @@ export default function PrototypeClient() {
 
       <div className={contentClass}>
         <header className={styles.topbar}>
-          <button type="button" className={styles.brand} onClick={() => go("home")} aria-label="返回我的工作">
-            <span className={styles.brandMark}>CI</span>
-            <span className={styles.brandText}>CLICK-IN</span>
-          </button>
+          <div className={styles.brand}>
+            <div className={styles.avatarControl}>
+              <button
+                type="button"
+                className={styles.projectAvatarButton}
+                onClick={() => { setAvatarMenuOpen((v) => !v); setProjectMenuOpen(false); setAccountMenuOpen(false); }}
+                aria-label="项目头像设置"
+                aria-expanded={avatarMenuOpen}
+              >
+                {projectAvatarUrl ? <img src={projectAvatarUrl} alt="" /> : <span>{currentProject.avatar}</span>}
+                <i>＋</i>
+              </button>
+              {avatarMenuOpen && (
+                <div className={`${styles.popoverMenu} ${styles.avatarPopover}`}>
+                  <b>项目头像</b>
+                  <small>管理员可以上传 JPG、PNG 或 WebP</small>
+                  <label className={styles.uploadButton}>
+                    上传新头像
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) setProjectAvatarUrl(URL.createObjectURL(file));
+                        setAvatarMenuOpen(false);
+                      }}
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+            <button type="button" className={styles.brandName} onClick={() => go("home")} aria-label="返回我的工作">
+              CLICK-IN
+            </button>
+          </div>
           <div className={styles.contextControls}>
-            <label className={styles.fieldLabel}>
-              <span>机构 / 项目</span>
-              <select defaultValue="romeo" className={styles.selectControl}>
-                <option value="romeo">棱镜剧团 · 海边的罗密欧</option>
-                <option value="teahouse">棱镜剧团 · 茶馆</option>
-                <option value="school">青年剧社 · 春季汇演</option>
-              </select>
-            </label>
-            <label className={styles.fieldLabel}>
-              <span>角色视角</span>
-              <select value={role} onChange={(e) => setRole(e.target.value as Role)} className={styles.selectControl}>
-                {Object.keys(roleHome).map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
+            <div className={styles.projectSwitcher}>
+              <button
+                type="button"
+                className={styles.switcherButton}
+                onClick={() => { setProjectMenuOpen((v) => !v); setAccountMenuOpen(false); setAvatarMenuOpen(false); }}
+                aria-expanded={projectMenuOpen}
+              >
+                <span><small>{currentProject.organization}</small><b>{currentProject.name}</b></span>
+                <i>⌄</i>
+              </button>
+              {projectMenuOpen && (
+                <div className={`${styles.popoverMenu} ${styles.projectMenu}`}>
+                  <button type="button" className={styles.personalCenterItem} onClick={() => { go("home"); setProjectMenuOpen(false); }}>
+                    <span className={styles.menuAvatar}>林</span><span><b>个人中心</b><small>今天与我有关</small></span>
+                  </button>
+                  <p>已加入的项目</p>
+                  {PROJECTS.map((project) => (
+                    <button
+                      type="button"
+                      key={project.id}
+                      className={currentProject.id === project.id ? styles.selectedProject : ""}
+                      onClick={() => { setCurrentProject(project); setProjectAvatarUrl(null); setProjectMenuOpen(false); go("project"); }}
+                    >
+                      <span className={styles.menuAvatar}>{project.avatar}</span>
+                      <span><b>{project.name}</b><small>{project.organization}</small></span>
+                      {currentProject.id === project.id && <i>✓</i>}
+                    </button>
+                  ))}
+                  <button type="button" className={styles.joinProjectButton} onClick={() => { setJoinProjectOpen(true); setProjectMenuOpen(false); }}>
+                    <span>＋</span><b>加入项目</b>
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className={styles.roleDisplay} title="角色与部门由项目管理员分配">
+              <span>当前角色</span><b>{role}</b><i>锁定</i>
+            </div>
           </div>
           <div className={styles.topActions}>
             <button type="button" className={styles.searchButton}>⌕ <span>搜索全部内容</span></button>
-            <button type="button" className={styles.iconButton} onClick={() => go("notifications")} aria-label="通知">
-              ◉<span className={styles.unreadDot}>3</span>
+            <button type="button" className={styles.notificationButton} onClick={() => go("notifications")} aria-label="通知，3 条重要通知">
+              通知<span className={styles.unreadDot}>3</span>
             </button>
-            <button type="button" className={styles.avatarButton} aria-label="个人设置">林</button>
+            <div className={styles.accountControl}>
+              <button
+                type="button"
+                className={styles.avatarButton}
+                aria-label="管理中心"
+                aria-expanded={accountMenuOpen}
+                onClick={() => { setAccountMenuOpen((v) => !v); setProjectMenuOpen(false); setAvatarMenuOpen(false); }}
+              >林</button>
+              {accountMenuOpen && (
+                <div className={`${styles.popoverMenu} ${styles.accountMenu}`}>
+                  <div className={styles.accountSummary}><span>林</span><p><b>林淼</b><small>linmiao@click-in.cn</small></p></div>
+                  {["个人信息", "账号安全中心", "功能与设置", "管理后台", "信息隐私与权限", "帮助与反馈"].map((item) => (
+                    <button type="button" key={item} onClick={() => setAccountMenuOpen(false)}>{item}<span>›</span></button>
+                  ))}
+                  <button type="button" className={styles.logoutButton} onClick={() => setAccountMenuOpen(false)}>退出登录</button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
         <aside className={styles.sidebar}>
           <nav aria-label="产品导航">
             <button type="button" className={`${styles.navItem} ${view === "home" ? styles.activeNav : ""}`} onClick={() => go("home")}>
-              <span className={styles.navSymbol}>⌂</span><span><b>我的工作</b><small>今天与我有关</small></span>
+              <span className={styles.navSymbol}>{NAV_GLYPHS.home}</span><span><b>我的工作</b><small>今天与我有关</small></span>
             </button>
             <button type="button" className={`${styles.navItem} ${view === "project" ? styles.activeNav : ""}`} onClick={() => go("project")}>
-              <span className={styles.navSymbol}>◇</span><span><b>项目首页</b><small>进度与风险</small></span>
+              <span className={styles.navSymbol}>{NAV_GLYPHS.project}</span><span><b>{currentProject.name}</b><small>进度与风险</small></span>
             </button>
 
-            <div className={styles.navGroup}>
+            <div className={`${styles.navGroup} ${styles.scriptGroup}`}>
               <div className={styles.navGroupTitle}><span className={styles.scriptDot} />剧本侧</div>
               {SCRIPT_NAV.map((item) => (
                 <button key={item.id} type="button" className={`${styles.navItem} ${view === item.id ? styles.activeNav : ""}`} onClick={() => go(item.id)}>
-                  <span className={styles.navSymbol}>{item.label.slice(0, 1)}</span><span><b>{item.label}</b><small>{item.hint}</small></span>
+                  <span className={`${styles.navSymbol} ${styles.scriptSymbol}`}>{NAV_GLYPHS[item.id]}</span><span><b>{item.label}</b><small>{item.hint}</small></span>
                 </button>
               ))}
             </div>
 
-            <div className={styles.navGroup}>
+            <div className={`${styles.navGroup} ${styles.stageGroup}`}>
               <div className={styles.navGroupTitle}><span className={styles.stageDot} />舞台侧</div>
               {STAGE_NAV.map((item) => (
                 <button key={item.id} type="button" className={`${styles.navItem} ${view === item.id ? styles.activeNav : ""}`} onClick={() => go(item.id)}>
-                  <span className={styles.navSymbol}>{item.label === "Notification" ? "N" : item.label.slice(0, 1)}</span><span><b>{item.label}</b><small>{item.hint}</small></span>
+                  <span className={`${styles.navSymbol} ${styles.stageSymbol}`}>{NAV_GLYPHS[item.id]}</span><span><b>{item.label}</b><small>{item.hint}</small></span>
                   {item.id === "notifications" && <em>3</em>}
                 </button>
               ))}
@@ -258,8 +360,8 @@ export default function PrototypeClient() {
         <section className={styles.workspace}>
           <div className={styles.pageHeader}>
             <div>
-              <p className={styles.eyebrow}>{meta.eyebrow}</p>
-              <h1>{meta.label}</h1>
+              {view !== "project" && <p className={styles.eyebrow}>{meta.eyebrow}</p>}
+              <h1>{view === "project" ? currentProject.name : meta.label}</h1>
             </div>
             <div className={styles.headerActions}>
               {view === "events" && <button type="button" className={styles.primaryButton} onClick={() => { setEventWizard(true); setEventStep(1); }}>＋ 创建 Event</button>}
@@ -296,7 +398,31 @@ export default function PrototypeClient() {
           publish={() => { setPublished(true); setEventWizard(false); setAcknowledged(false); }}
         />
       )}
+      {joinProjectOpen && <JoinProjectModal close={() => setJoinProjectOpen(false)} />}
     </main>
+  );
+}
+
+function JoinProjectModal({ close }: { close: () => void }) {
+  return (
+    <div className={styles.modalBackdrop} role="presentation">
+      <section className={`${styles.modal} ${styles.joinProjectModal}`} role="dialog" aria-modal="true" aria-labelledby="join-project-title">
+        <div className={styles.modalHeader}>
+          <div><p>JOIN A PROJECT</p><h2 id="join-project-title">加入项目</h2></div>
+          <button type="button" onClick={close} aria-label="关闭">×</button>
+        </div>
+        <p className={styles.modalLead}>向项目管理员获取邀请码。加入后，项目与管理员分配的角色会出现在顶部切换器中。</p>
+        <div className={styles.joinProjectBody}>
+          <label><span>项目邀请码</span><input placeholder="例如：ROMEO-2026-08" /></label>
+          <label><span>你的姓名</span><input defaultValue="林淼" /></label>
+          <div className={styles.inviteHint}><span>i</span><p><b>角色不可自行选择</b><small>制作人、Owner 或项目管理员会在你加入后分配角色与部门。</small></p></div>
+        </div>
+        <div className={styles.modalFooter}>
+          <button type="button" className={styles.secondaryButton} onClick={close}>取消</button>
+          <button type="button" className={styles.primaryButton} onClick={close}>验证邀请码</button>
+        </div>
+      </section>
+    </div>
   );
 }
 

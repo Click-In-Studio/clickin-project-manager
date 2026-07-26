@@ -54,24 +54,67 @@
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 18px;
   padding: 0 22px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   z-index: 5;
 }
-.brand { border: 0; background: transparent; padding: 0; display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.brandMark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--ink); font-size: 11px; font-weight: 700; }
-.brandText { font-size: 13px; font-weight: 700; letter-spacing: .18em; }
+.brand { display: flex; align-items: center; gap: 9px; }
+.brandName { border: 0; background: transparent; padding: 6px 0; cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: .18em; }
+.avatarControl, .projectSwitcher, .accountControl { position: relative; }
+.projectAvatarButton { width: 38px; height: 38px; padding: 0; border: 2px solid var(--surface); border-radius: 50%; background: linear-gradient(145deg, #315f62, var(--ink)); color: #fff; box-shadow: 0 0 0 1px #cbd5d1; cursor: pointer; position: relative; overflow: visible; }
+.projectAvatarButton > span { display: grid; width: 100%; height: 100%; place-items: center; font-family: Georgia, "Noto Serif SC", serif; font-size: 15px; }
+.projectAvatarButton img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 50%; }
+.projectAvatarButton > i { position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; display: grid; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--stage); color: #fff; font-size: 10px; font-style: normal; line-height: 1; }
 .contextControls { display: flex; gap: 10px; }
-.fieldLabel { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
-.fieldLabel > span { display: none; }
-.selectControl { border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 9px 30px 9px 10px; color: var(--ink); font-size: 12px; }
+.switcherButton { min-width: 205px; height: 42px; padding: 7px 11px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); cursor: pointer; text-align: left; }
+.switcherButton > span { min-width: 0; display: flex; flex-direction: column; }
+.switcherButton small { color: var(--muted); font-size: 8px; line-height: 1.2; }
+.switcherButton b { max-width: 164px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.switcherButton > i { margin-left: auto; color: var(--muted); font-style: normal; }
+.roleDisplay { min-width: 154px; height: 42px; padding: 7px 10px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: #f0f0eb; cursor: default; }
+.roleDisplay > span { color: var(--muted); font-size: 8px; }
+.roleDisplay b { font-size: 11px; font-weight: 700; }
+.roleDisplay i { grid-column: 2; grid-row: 1 / 3; padding: 3px 5px; border-radius: 5px; background: #e2e5e1; color: var(--muted); font-size: 8px; font-style: normal; }
 .topActions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .searchButton { width: 180px; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 9px 12px; text-align: left; color: var(--muted); cursor: pointer; }
-.iconButton, .avatarButton { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); cursor: pointer; position: relative; }
+.notificationButton { min-width: 66px; height: 36px; padding: 0 30px 0 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; position: relative; font-size: 11px; font-weight: 700; }
+.avatarButton { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); cursor: pointer; position: relative; }
 .avatarButton { background: var(--ink); color: #fff; border-color: var(--ink); }
-.unreadDot { position: absolute; top: -5px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--stage); color: #fff; font-size: 9px; }
+.unreadDot { position: absolute; top: 8px; right: 8px; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 9px; background: #c8463a; color: #fff; font-size: 9px; line-height: 1; }
+.popoverMenu { position: absolute; z-index: 40; top: calc(100% + 10px); min-width: 270px; padding: 8px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 18px 55px rgba(24,42,42,.18); }
+.popoverMenu::before { content: ""; position: absolute; top: -5px; width: 9px; height: 9px; transform: rotate(45deg); border-left: 1px solid var(--line); border-top: 1px solid var(--line); background: var(--surface); }
+.projectMenu { left: 0; }
+.projectMenu::before, .avatarPopover::before { left: 20px; }
+.projectMenu > p { margin: 10px 10px 5px; color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: .1em; }
+.projectMenu > button { width: 100%; min-height: 49px; padding: 7px 9px; display: flex; align-items: center; gap: 10px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
+.projectMenu > button:hover, .projectMenu .selectedProject { background: var(--paper); }
+.projectMenu button > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; }
+.projectMenu button b { font-size: 11px; }
+.projectMenu button small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.projectMenu button > i { color: var(--success); font-style: normal; }
+.menuAvatar { width: 31px; height: 31px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 9px; background: var(--script-soft); color: var(--script); font-family: Georgia, "Noto Serif SC", serif; font-size: 12px; }
+.personalCenterItem .menuAvatar { border-radius: 50%; background: var(--ink); color: #fff; }
+.projectMenu .joinProjectButton { min-height: 42px; margin-top: 7px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; color: var(--script); }
+.joinProjectButton > span { width: 31px; text-align: center; font-size: 18px; }
+.avatarPopover { left: -5px; width: 245px; padding: 14px; }
+.avatarPopover b, .avatarPopover small { display: block; }
+.avatarPopover b { font-size: 11px; }
+.avatarPopover small { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.uploadButton { margin-top: 12px; display: block; padding: 9px 10px; border-radius: 8px; background: var(--ink); color: #fff; cursor: pointer; font-size: 10px; text-align: center; }
+.uploadButton input { display: none; }
+.accountMenu { right: 0; width: 268px; }
+.accountMenu::before { right: 13px; }
+.accountSummary { display: flex; align-items: center; gap: 10px; padding: 8px 9px 13px; border-bottom: 1px solid var(--line); }
+.accountSummary > span { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: #fff; }
+.accountSummary p { margin: 0; display: flex; flex-direction: column; }
+.accountSummary b { font-size: 11px; }
+.accountSummary small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.accountMenu > button { width: 100%; min-height: 36px; padding: 8px 10px; display: flex; border: 0; border-radius: 7px; background: transparent; cursor: pointer; font-size: 10px; text-align: left; }
+.accountMenu > button:hover { background: var(--paper); }
+.accountMenu > button span { margin-left: auto; color: var(--muted); }
+.accountMenu .logoutButton { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; color: var(--danger); }
 
 .sidebar {
   grid-row: 2;
@@ -82,14 +125,18 @@
   flex-direction: column;
 }
 .sidebar nav { display: flex; flex-direction: column; gap: 3px; }
-.navGroup { margin-top: 18px; display: flex; flex-direction: column; gap: 3px; }
-.navGroupTitle { padding: 0 10px 7px; display: flex; align-items: center; gap: 7px; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.navGroup { margin-top: 15px; display: flex; flex-direction: column; gap: 3px; }
+.navGroupTitle { min-height: 32px; margin-bottom: 4px; padding: 0 11px; display: flex; align-items: center; gap: 8px; border-radius: 8px; background: var(--ink); color: #f4f7f5; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.stageGroup .navGroupTitle { background: #4d3328; }
 .scriptDot, .stageDot { width: 7px; height: 7px; border-radius: 50%; background: var(--script); }
-.stageDot { background: var(--stage); }
+.scriptDot { background: #7fc0c7; }
+.stageDot { background: #e9a578; }
 .navItem, .frameworkButton { width: 100%; min-height: 46px; border: 0; background: transparent; border-radius: 9px; padding: 6px 9px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
 .navItem:hover, .frameworkButton:hover { background: rgba(255,255,255,.54); }
 .activeNav { background: var(--surface) !important; box-shadow: inset 3px 0 0 var(--ink); }
-.navSymbol { width: 27px; height: 27px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid #cbd2cf; border-radius: 7px; color: var(--muted); font-size: 11px; }
+.navSymbol { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid #cbd2cf; border-radius: 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: -.03em; }
+.scriptSymbol { border-color: #bfd4d6; background: #edf5f5; color: var(--script); }
+.stageSymbol { border-color: #e3c9b9; background: #f8eee7; color: var(--stage); }
 .navItem > span:nth-child(2), .frameworkButton > span:nth-child(2) { display: flex; flex-direction: column; min-width: 0; }
 .navItem b, .frameworkButton b { font-size: 12px; font-weight: 700; }
 .navItem small, .frameworkButton small { color: var(--muted); font-size: 9px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -368,14 +415,24 @@
 .publishSummary small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .publishSummary > p { grid-column: 1 / -1; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .modalFooter { border-top: 1px solid var(--line); padding: 15px 25px; display: flex; justify-content: flex-end; gap: 8px; }
+.joinProjectModal { width: min(520px, 100%); }
+.joinProjectBody { padding: 2px 25px 24px; display: flex; flex-direction: column; gap: 14px; }
+.joinProjectBody label { display: flex; flex-direction: column; gap: 6px; }
+.joinProjectBody label > span { color: var(--muted); font-size: 10px; }
+.joinProjectBody input { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); padding: 12px; color: var(--ink); font-size: 11px; }
+.inviteHint { display: flex; align-items: center; gap: 11px; padding: 13px; border-radius: 10px; background: var(--script-soft); }
+.inviteHint > span { width: 27px; height: 27px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: var(--script); color: #fff; font-family: Georgia, serif; }
+.inviteHint p { margin: 0; display: flex; flex-direction: column; }
+.inviteHint b { font-size: 10px; }
+.inviteHint small { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.5; }
 
 .mobileProjectNav, .bottomNav { display: none; }
 
 .previewMobile { width: 390px; min-height: 844px; margin: 0 auto 30px; grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 64px; border-radius: 22px; }
 .previewMobile .topbar { grid-column: 1; padding: 0 13px; gap: 9px; }
-.previewMobile .brandText, .previewMobile .contextControls .fieldLabel:first-child, .previewMobile .searchButton, .previewMobile .sidebar, .previewMobile .headerActions, .previewMobile .demoHint { display: none; }
+.previewMobile .brandName, .previewMobile .projectSwitcher, .previewMobile .searchButton, .previewMobile .sidebar, .previewMobile .headerActions, .previewMobile .demoHint { display: none; }
 .previewMobile .contextControls { margin-left: 0; }
-.previewMobile .contextControls .selectControl { max-width: 130px; padding: 7px 20px 7px 8px; font-size: 10px; }
+.previewMobile .roleDisplay { min-width: 132px; height: 38px; }
 .previewMobile .topActions { gap: 4px; }
 .previewMobile .mobileProjectNav { grid-row: 2; display: block; background: var(--surface); border-bottom: 1px solid var(--line); padding: 10px 13px; min-width: 0; }
 .previewMobile .workspace { grid-row: 3; padding: 18px 14px 90px; }
@@ -422,6 +479,11 @@
   .shell { grid-template-columns: 210px minmax(0, 1fr); }
   .searchButton { width: 40px; text-align: center; }
   .searchButton span { display: none; }
+  .switcherButton { min-width: 170px; }
+  .switcherButton small { display: none; }
+  .roleDisplay { min-width: 135px; }
+  .roleDisplay > span, .roleDisplay > i { display: none; }
+  .roleDisplay b { grid-row: 1 / 3; }
   .dashboardGrid, .taskLayout { grid-template-columns: 1fr; }
   .relationshipStrip { grid-template-columns: 1fr; }
 }
@@ -431,8 +493,8 @@
   .demoHint { display: none; }
   .shell { width: 100%; margin: 0; grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 64px; border-radius: 0; }
   .topbar { grid-column: 1; padding: 0 12px; gap: 8px; }
-  .brandText, .contextControls .fieldLabel:first-child, .searchButton, .sidebar, .headerActions { display: none; }
-  .contextControls .selectControl { max-width: 130px; padding: 7px 20px 7px 8px; font-size: 10px; }
+  .brandName, .projectSwitcher, .searchButton, .sidebar, .headerActions { display: none; }
+  .roleDisplay { min-width: 132px; height: 38px; }
   .mobileProjectNav { grid-row: 2; display: block; background: var(--surface); border-bottom: 1px solid var(--line); padding: 10px 12px; min-width: 0; }
   .workspace { grid-row: 3; padding: 18px 13px 88px; }
   .pageHeader { margin-bottom: 18px; }
