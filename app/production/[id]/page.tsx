@@ -4,11 +4,11 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import {
-  canUserAccessProduction, getProductionName,
-  getProductionMemberContext, listCueLists, listCueListPermissions,
-  countWarningCues,
+  getProductionName,
+  getProductionPermissionContext,
+  listCueLists, countWarningCues, hasListAccess,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import ArchiveButton from "@/components/ArchiveButton";
 import ProductionNameEditor from "@/components/ProductionNameEditor";
 import ProductionMemberGuardLink from "@/components/ProductionMemberGuardLink";
@@ -18,7 +18,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const name = await getProductionName(id);
   return { title: name ?? "项目" };
 }
-import { canEditCueList } from "@/lib/cue-list-types";
 import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listUnreadFollowedReports } from "@/lib/event-db";
 import { fmtCallAt, fmtDate } from "@/lib/tz";
 
@@ -36,32 +35,32 @@ export default async function ProductionDashboard({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.userId, id);
-    if (!ok) redirect("/");
-  }
-
-  const [name, cueLists, { memberRoles, overrides, isArchived }, callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
+  const [name, cueLists, _access, callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
     getProductionName(id),
     listCueLists(id),
-    getProductionMemberContext(session.userId, session.isAdmin, id),
+    getProductionPermissionContext(session.userId, session.isAdmin, id),
     listMyUpcomingCallTimes(session.userId, id),
     listMyPendingTechReqs(session.userId, id),
     listMyPocAwaitingReqs(session.userId, id),
     listUnreadFollowedReports(session.userId, id),
   ]);
-  const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
-  const isProjectMember = memberRoles !== null;
+  if (!_access) redirect("/");
+  const { permCtx, isArchived } = _access;
+  const canManage = hasPermission("members:manage_overrides", permCtx);
+  const isProjectMember = permCtx.memberPermissions !== null;
   if (!name) redirect("/");
 
   const editableListIds: string[] = [];
-  await Promise.all(
-    cueLists.map(async (cl) => {
-      const perms = await listCueListPermissions(cl.id);
-      if (canEditCueList(session.userId, memberRoles, session.isAdmin, cl, perms))
-        editableListIds.push(cl.id);
-    })
-  );
+  if (hasPermission("cue:rename_any", permCtx)) {
+    editableListIds.push(...cueLists.map(cl => cl.id));
+  } else {
+    await Promise.all(
+      cueLists.map(async (cl) => {
+        if (await hasListAccess(cl.id, session.userId) && hasPermission("cue:rename", permCtx))
+          editableListIds.push(cl.id);
+      })
+    );
+  }
   const warningCount = await countWarningCues(editableListIds);
 
   return (

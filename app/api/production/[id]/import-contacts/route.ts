@@ -13,21 +13,24 @@ import {
   findUserByName,
   upsertContactUser,
   upsertProductionMemberWithRoles,
-  getProductionMemberContext,
+  getProductionPermissionContext,
+  getProductionRoleNames,
   getFeishuOpenId,
   updateUserContact,
 } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { ALL_ROLES, hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
 
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("import_contacts", session.isAdmin, memberRoles, overrides)) {
+  if (!hasPermission("contacts:import", permCtx)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
@@ -54,8 +57,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return Response.json({ error: "表格结构不匹配", details: validation.errors }, { status: 400 });
   }
 
-  const records = await getAllRecords(appToken, tableId, token);
-  const { rows, errors: parseErrors } = toContactRows(validation.fieldMap, records, ALL_ROLES);
+  const [records, validRoles] = await Promise.all([
+    getAllRecords(appToken, tableId, token),
+    getProductionRoleNames(productionId),
+  ]);
+  const { rows, errors: parseErrors } = toContactRows(validation.fieldMap, records, validRoles);
 
   // Non-fatal parse errors (unknown roles, skipped rows) are returned as warnings.
   // Fatal: no valid rows at all.

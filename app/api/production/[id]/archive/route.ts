@@ -1,15 +1,17 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, archiveProduction, unarchiveProduction } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, archiveProduction, unarchiveProduction } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { permCtx } = access;
+  if (!hasPermission("members:manage_overrides", permCtx))
     return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { deny: null };
 }

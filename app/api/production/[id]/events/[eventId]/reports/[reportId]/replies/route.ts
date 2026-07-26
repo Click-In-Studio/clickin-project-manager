@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getEventReport, getReportNote, getProductionEvent,
   listReportReplies, createReportReply,
@@ -22,8 +22,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("event:follow", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const replies = await listReportReplies(reportId);
@@ -34,9 +36,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
+  if (!hasPermission("event:follow", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const report = await getEventReport(reportId, eventId);
@@ -53,17 +57,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!["report", "note", "reply"].includes(body.parentType))
     return Response.json({ error: "无效的父级类型" }, { status: 400 });
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
   let allowed = false;
   if (body.parentType === "report") {
-    allowed = canReplyToReport(session.isAdmin, permCtx.isFollower, permCtx.isInCall);
+    allowed = canReplyToReport(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);
   } else if (body.parentType === "note") {
     const note = await getReportNote(body.parentId, reportId);
     if (!note) return Response.json({ error: "Note 不存在" }, { status: 404 });
-    allowed = canReplyToReportNote(session.isAdmin, permCtx.isFollower, permCtx.isInCall, permCtx.memberDeptIds, note.departmentId);
+    allowed = canReplyToReportNote(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall, eventPermCtx.memberDeptIds, note.departmentId);
   } else {
-    allowed = canReplyToReply(session.isAdmin, permCtx.isFollower, permCtx.isInCall);
+    allowed = canReplyToReply(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);
   }
 
   if (!allowed) return Response.json({ error: "权限不足" }, { status: 403 });

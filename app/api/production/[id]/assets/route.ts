@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, canUserAccessProduction, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getVersion } from "@/lib/db";
 import { createAsset, listAssets, type AssetType } from "@/lib/asset-db";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
@@ -16,8 +15,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const assets = await listAssets(id);
   return Response.json({ assets });
@@ -28,9 +27,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides))
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const ct = req.headers.get("content-type") ?? "";
 

@@ -13,6 +13,8 @@ type Props = {
   initialCueList: CueList;
   initialPermissions: CueListPermissionRow[];
   members: MemberWithRoles[];
+  /** User IDs that have role-based edit access (determines "default" tooltip). */
+  roleEditorUserIds: string[];
   canEdit: boolean;
   canManage: boolean;
   myUserId: string;
@@ -114,14 +116,16 @@ function memberPermState(
 function PermissionRow({
   member,
   state,
-  cueList,
+  cueListId,
   productionId,
+  isDefaultEditor,
   onUpdated,
 }: {
   member: MemberWithRoles;
   state: PermState;
-  cueList: CueList;
+  cueListId: string;
   productionId: string;
+  isDefaultEditor: boolean;
   onUpdated: (permissions: CueListPermissionRow[]) => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -132,7 +136,7 @@ function PermissionRow({
     try {
       const canEdit: boolean | null = next === "allow" ? true : next === "deny" ? false : null;
       const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${cueList.id}/permissions`,
+        `${BASE_PATH}/api/production/${productionId}/cuelists/${cueListId}/permissions`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -147,8 +151,6 @@ function PermissionRow({
       setSaving(false);
     }
   };
-
-  const isDefaultEditor = cueList.defaultEditRoles.some((r) => member.roles.includes(r));
 
   return (
     <div className="flex items-center gap-2 py-2 border-b border-zinc-100 last:border-0">
@@ -192,6 +194,7 @@ export default function CueListDetail({
   initialCueList,
   initialPermissions,
   members,
+  roleEditorUserIds,
   canEdit,
   canManage,
 }: Props) {
@@ -305,8 +308,9 @@ export default function CueListDetail({
                     key={m.userId}
                     member={m}
                     state={memberPermState(m.userId, permissions)}
-                    cueList={cueList}
+                    cueListId={cueList.id}
                     productionId={productionId}
+                    isDefaultEditor={roleEditorUserIds.includes(m.userId)}
                     onUpdated={setPermissions}
                   />
                 ))}

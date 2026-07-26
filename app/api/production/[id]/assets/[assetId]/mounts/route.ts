@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction, cowBlockSnapshotForMount, cowCueRevisionForMount, getVersion } from "@/lib/db";
+import { getProductionPermissionContext, cowBlockSnapshotForMount, cowCueRevisionForMount, getVersion } from "@/lib/db";
 import { getAsset, addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset-db";
 import { getPool } from "@/lib/pg";
 
@@ -113,8 +113,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id, assetId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
@@ -127,8 +127,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id, assetId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });

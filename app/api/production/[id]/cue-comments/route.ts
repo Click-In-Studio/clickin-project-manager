@@ -1,16 +1,18 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
+import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
 import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { permCtx, isArchived } = access;
+  if (!hasPermission("cue_list:view", permCtx))
     return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }), isArchived };
   return { session, deny: null, isArchived };
 }

@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "技术需求" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listEventTechReqs,
@@ -24,13 +24,13 @@ export default async function ReqsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) redirect(`/production/${productionId}/events`);
 
-  const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
+  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
