@@ -776,6 +776,7 @@ export async function ensureScriptMarkerMigration(
       .catch((err) => {
         state.error = err instanceof Error ? err.message : String(err);
         console.error(`[marker migration] failed for version ${versionId}:`, err);
+        markerMigrations.delete(versionId);
       });
     return markerMigrationProgress(state);
   })().catch((error) => {
@@ -1572,6 +1573,7 @@ export async function flushToDBVersioned(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
     const previousMarkerStructure = mayChangeMarkerStructure
       ? await markerStructureBlocksInTx(client, versionId)
       : [];
@@ -1778,6 +1780,7 @@ export async function flushToDBVersioned(
       await normalizeSceneOwnershipOrderInTx(client, versionId);
     }
     if (mayChangeMarkerStructure) {
+      await normalizeRehearsalMarkOwnershipInTx(client, versionId);
       const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
       if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
         await bumpMarkerStructureRevisionInTx(client, versionId);
@@ -1850,6 +1853,7 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
     const previousMarkerStructure = versionId && mayChangeMarkerStructure
       ? await markerStructureBlocksInTx(client, versionId)
       : [];
@@ -1970,6 +1974,7 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
       await client.query("DELETE FROM scene WHERE id = ANY($1::text[])", [deleteSceneIds]);
 
     if (versionId && mayChangeMarkerStructure) {
+      await normalizeRehearsalMarkOwnershipInTx(client, versionId);
       const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
       if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
         await bumpMarkerStructureRevisionInTx(client, versionId);
@@ -2178,6 +2183,7 @@ export async function importScriptToVersion(
       }
     }
 
+    await normalizeRehearsalMarkOwnershipInTx(client, versionId);
     await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
     const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
     if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {

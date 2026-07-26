@@ -6,6 +6,7 @@ import {
   createProduction,
   createVersion,
   deleteProduction,
+  flushToDBVersioned,
   getActiveVersionId,
   loadPageMap,
   getMarkerLabelIndex,
@@ -101,6 +102,43 @@ async function run() {
       textLayoutMode: "compact",
     });
     await saveScriptConfig(productionId, sourceVersionId, scriptConfig);
+
+    const repairVersion = await createVersion(productionId, sourceVersionId, "Parent repair");
+    const repairSceneId = `scene_${randomUUID()}`;
+    const repairScene = marker(repairSceneId, "scene_marker", chapterId);
+    await applyPatchToDB(productionId, repairVersion.id, {
+      clientSeq: 2,
+      blockOps: [{ op: "insert", block: repairScene, afterId: chapterId }],
+      charOps: [],
+      sceneOps: [],
+    });
+    const repairRow = await getPool().query<{ snapshot_id: string; sort_key: string }>(
+      "SELECT snapshot_id, sort_key FROM script_version WHERE version_id = $1 AND block_id = $2",
+      [repairVersion.id, repairSceneId],
+    );
+    await getPool().query(
+      "UPDATE script SET marker_meta = jsonb_set(marker_meta, '{parentMarkerId}', 'null'::jsonb) WHERE id = $1",
+      [repairRow.rows[0].snapshot_id],
+    );
+    await flushToDBVersioned(productionId, repairVersion.id, {
+      upsertBlocks: [{
+        ...repairScene,
+        snapshotId: repairRow.rows[0].snapshot_id,
+        lexKey: repairRow.rows[0].sort_key,
+        markerMeta: { parentMarkerId: null },
+      }],
+      deleteSnapshotIds: [],
+      upsertChars: [],
+      deleteCharIds: [],
+      upsertScenes: [],
+      deleteSceneIds: [],
+    });
+    const repairedParent = await getPool().query<{ parent_marker_id: string | null }>(
+      "SELECT marker_meta->>'parentMarkerId' AS parent_marker_id FROM script WHERE id = $1",
+      [repairRow.rows[0].snapshot_id],
+    );
+    assert.equal(repairedParent.rows[0]?.parent_marker_id, chapterId);
+    assert.equal((await getMarkerLabelIndex(repairVersion.id)).labelByMarkerId.get(repairSceneId), "0-1");
 
     const cached = await getMarkerLabelIndex(sourceVersionId);
     const textBlock = marker(`text_${randomUUID()}`, "dialogue", null);
