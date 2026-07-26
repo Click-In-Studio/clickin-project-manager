@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, removeAssetMount, listAssetMounts } from "@/lib/asset-db";
 
 type Ctx = { params: Promise<{ id: string; assetId: string; mountId: string }> };
@@ -9,8 +9,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id, assetId, mountId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });

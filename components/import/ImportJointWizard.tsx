@@ -79,7 +79,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const [dataError, setDataError] = useState<string | null>(null);
   const [sceneMapping, setSceneMapping] = useState<Record<string, number | null>>({ sceneNum: null, sceneName: null, intro: null, actionLine: null, music: null, stagePres: null, duration: null });
   const [scriptMapping, setScriptMapping] = useState<Record<string, number | number[] | null>>({ sceneNum: null, rehearsalMark: null, typeTag: null, character: null, stageComment: null, bodyColumns: [], stageInlineColumns: [] });
-  const [stageInlinePatterns, setStageInlinePatterns] = useState<StageDelimiterPattern[]>([]);
+  const [stageInlinePatterns, setStageInlinePatterns] = useState<StageDelimiterPattern[]>(STAGE_DELIMITER_PATTERNS);
   const [stageDelimiterPattern, setStageDelimiterPattern] = useState<ScriptConfigStageDelimiterPattern>("（）");
   const [typeValues, setTypeValues] = useState<string[]>([]);
   const [typeTagMapping, setTypeTagMapping] = useState<TypeTagMapping>({});
@@ -153,6 +153,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       return ["剧本", "内容", "台词", "文本"].some(c => normalized.includes(c.toLowerCase()));
     });
     if (bodyIdx >= 0) next.bodyColumns = [bodyIdx];
+    next.stageInlineColumns = headers.flatMap((header, index) => header.toLowerCase().includes("cue") ? [index] : []);
     return next;
   }
 
@@ -1059,11 +1060,26 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                       <code className="text-xs bg-gray-100 px-1 rounded">{pat}</code>
                     </label>
                   ))}
-                  <span className="text-xs text-gray-400">不定项选择</span>
+                  <button
+                    type="button"
+                    onClick={() => setStageInlinePatterns(STAGE_DELIMITER_PATTERNS)}
+                    disabled={stageInlinePatterns.length === STAGE_DELIMITER_PATTERNS.length}
+                    className="text-xs text-blue-600 hover:underline disabled:text-gray-300 disabled:no-underline"
+                  >
+                    全选
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStageInlinePatterns([])}
+                    disabled={stageInlinePatterns.length === 0}
+                    className="text-xs text-zinc-500 hover:underline disabled:text-gray-300 disabled:no-underline"
+                  >
+                    清空
+                  </button>
                 </div>
               </div>
               <div className="space-y-1.5">
-                <p className="text-gray-500">统一替换为</p>
+                <p className="text-gray-500">统一替换为：</p>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                   {SCRIPT_CONFIG_STAGE_DELIMITER_PATTERNS.map(pat => (
                     <label key={pat} className="flex items-center gap-1.5 cursor-pointer">
@@ -1076,7 +1092,6 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                       <code className="text-xs bg-gray-100 px-1 rounded">{pat}</code>
                     </label>
                   ))}
-                  <span className="text-xs text-gray-400">单项选择</span>
                 </div>
               </div>
             </div>
@@ -1224,7 +1239,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                 onKeyDown={e => { if (e.key === "Enter") createTagGroup(); }}
                 className="border border-gray-200 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:border-blue-400"
               />
-              <button onClick={createTagGroup} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-violet-700">创建</button>
+              <button onClick={createTagGroup} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-800">创建</button>
             </div>
           </div>
 

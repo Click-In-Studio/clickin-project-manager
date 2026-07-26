@@ -5,12 +5,11 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getProductionName,
-  loadProduction, listCueLists, listCuesByProduction, listCueListPermissions,
-  getActiveVersionId, getVersion, listVersions, ensureScriptMarkerMigration,
+  getProductionPermissionContext, getProductionName,
+  loadProduction, listCueLists, listCuesByProduction,
+  getActiveVersionId, getVersion, listVersions, ensureScriptMarkerMigration, hasListAccess,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
-import { canEditCueList } from "@/lib/cue-list-types";
+import { hasPermission } from "@/lib/permissions";
 import { computePageMap } from "@/lib/script-page";
 import CuePage from "@/components/CuePage";
 
@@ -27,8 +26,8 @@ export default async function CuesPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!_access || !hasPermission("cue_list:view", _access.permCtx)) redirect("/");
 
   const versions = await listVersions(id);
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -56,20 +55,15 @@ export default async function CuesPage({
   ]);
   if (!name || !production) redirect("/");
 
-  // Determine per-list edit permission for the current user
-  const editableListIds = new Set<string>();
-  await Promise.all(
-    cueLists.map(async (cl) => {
-      const perms = await listCueListPermissions(cl.id);
-      if (canEditCueList(session.userId, memberRoles, session.isAdmin, cl, perms))
-        editableListIds.add(cl.id);
-    })
+  const editableListIds = new Set<string>(
+    (await Promise.all(cueLists.map(async (cl) => ({
+      id: cl.id,
+      canEdit: await hasListAccess(cl.id, session.userId),
+    })))).filter(r => r.canEdit).map(r => r.id)
   );
 
   const pageLayout = production.state.config.pageLayout;
   const pageMap: Record<string, number> = computePageMap(production.state.blocks, pageLayout);
-
-  const canManageVersions = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
 
   return (
     <CuePage
@@ -87,7 +81,6 @@ export default async function CuesPage({
       versions={versions}
       versionId={resolvedVersionId ?? undefined}
       versionStatus={version?.status ?? undefined}
-      canManageVersions={canManageVersions}
     />
   );
 }

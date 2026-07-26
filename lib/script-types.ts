@@ -20,6 +20,7 @@ export type Block = {
   characterAnnotations: Record<string, string>;
   forceShowCharacterName?: boolean;
   lyric: boolean;
+  ownerMarkerId?: string | null;
   sceneId: string | null;
   rehearsalMark: string | null;
   markerMeta?: MarkerMeta | null;
@@ -34,6 +35,7 @@ export type ScriptConfig = {
   pageLayout: PageLayout;
   textLayoutMode: ScriptTextLayoutMode;
   openingChapterMarkerId: string | null;
+  showOpeningChapter: boolean;
 };
 
 export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
@@ -42,6 +44,7 @@ export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
   pageLayout: "a4",
   textLayoutMode: "center",
   openingChapterMarkerId: null,
+  showOpeningChapter: false,
 };
 
 export type ScriptState = {

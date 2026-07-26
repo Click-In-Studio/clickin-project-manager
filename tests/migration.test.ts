@@ -44,7 +44,7 @@ describe("schema verification", () => {
   it("app_user table exists", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'app_user'
+      WHERE table_schema = current_schema() AND table_name = 'app_user'
     `);
     expect(rows).toHaveLength(1);
   });
@@ -52,7 +52,8 @@ describe("schema verification", () => {
   it("feishu_user.user_id is UUID NOT NULL", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'feishu_user' AND column_name = 'user_id'
+      WHERE table_schema = current_schema()
+        AND table_name = 'feishu_user' AND column_name = 'user_id'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("uuid");
@@ -63,8 +64,10 @@ describe("schema verification", () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.table_constraints tc
       JOIN information_schema.constraint_column_usage ccu
-        ON ccu.constraint_name = tc.constraint_name
-      WHERE tc.table_name = 'feishu_user'
+        ON ccu.constraint_schema = tc.constraint_schema
+       AND ccu.constraint_name = tc.constraint_name
+      WHERE tc.table_schema = current_schema()
+        AND tc.table_name = 'feishu_user'
         AND tc.constraint_type = 'UNIQUE'
         AND ccu.column_name = 'user_id'
     `);
@@ -74,7 +77,8 @@ describe("schema verification", () => {
   it("production_member: open_id column is gone", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.columns
-      WHERE table_name = 'production_member' AND column_name = 'open_id'
+      WHERE table_schema = current_schema()
+        AND table_name = 'production_member' AND column_name = 'open_id'
     `);
     expect(rows).toHaveLength(0);
   });
@@ -82,7 +86,8 @@ describe("schema verification", () => {
   it("production_member: user_id is UUID NOT NULL", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_member' AND column_name = 'user_id'
+      WHERE table_schema = current_schema()
+        AND table_name = 'production_member' AND column_name = 'user_id'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("uuid");
@@ -92,7 +97,8 @@ describe("schema verification", () => {
   it("cue_list.created_by is UUID NOT NULL", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'cue_list' AND column_name = 'created_by'
+      WHERE table_schema = current_schema()
+        AND table_name = 'cue_list' AND column_name = 'created_by'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("uuid");
@@ -102,7 +108,8 @@ describe("schema verification", () => {
   it("production_event.created_by is UUID NOT NULL", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_event' AND column_name = 'created_by'
+      WHERE table_schema = current_schema()
+        AND table_name = 'production_event' AND column_name = 'created_by'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("uuid");
@@ -112,13 +119,15 @@ describe("schema verification", () => {
   it("comment: open_id column is gone, user_id UUID NOT NULL", async () => {
     const { rows: gone } = await getPool().query(`
       SELECT 1 FROM information_schema.columns
-      WHERE table_name = 'comment' AND column_name = 'open_id'
+      WHERE table_schema = current_schema()
+        AND table_name = 'comment' AND column_name = 'open_id'
     `);
     expect(gone).toHaveLength(0);
 
     const { rows: neo } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'comment' AND column_name = 'user_id'
+      WHERE table_schema = current_schema()
+        AND table_name = 'comment' AND column_name = 'user_id'
     `);
     expect(neo).toHaveLength(1);
     expect(neo[0].data_type).toBe("uuid");

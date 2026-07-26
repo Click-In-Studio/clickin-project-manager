@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { loadProduction, canUserAccessProduction, getActiveVersionId, listVersions, updateProductionName, getProductionMemberContext, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
+import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
   const session = getSession(req.cookies);
@@ -9,10 +9,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
 
   const { id } = await ctx.params;
 
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.userId, id);
-    if (!ok) return Response.json({ error: "无权访问该剧本" }, { status: 403 });
-  }
+  const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!_access) return Response.json({ error: "无权访问该剧本" }, { status: 403 });
 
   try {
     const requestedVersionId = req.nextUrl.searchParams.get("v");
@@ -57,8 +55,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access || !hasPermission("production:rename", access.permCtx)) {
     return Response.json({ error: "无权修改" }, { status: 403 });
   }
 

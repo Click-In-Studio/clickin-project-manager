@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, selfFollowEvent, selfUnfollowEvent, getSelfParticipantRole } from "@/lib/event-db";
 import { addChatMembers } from "@/lib/feishu-chat";
 
@@ -11,8 +11,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("event:follow", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -32,8 +34,10 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("event:follow", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

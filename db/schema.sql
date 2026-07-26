@@ -70,8 +70,11 @@ CREATE TABLE IF NOT EXISTS version (
   parent_version_id TEXT REFERENCES version(id) ON DELETE SET NULL,
   status            version_status NOT NULL DEFAULT 'editing',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  script_config     JSONB NOT NULL DEFAULT '{}'
+  script_config     JSONB NOT NULL DEFAULT '{}',
+  marker_structure_revision BIGINT NOT NULL DEFAULT 0
 );
+
+ALTER TABLE version ADD COLUMN IF NOT EXISTS marker_structure_revision BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS version_production_idx ON version(production_id, created_at);
 
@@ -81,6 +84,34 @@ DO $$ BEGIN
     FOREIGN KEY (active_version_id) REFERENCES version(id);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ── Atomic permission roles ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS production_role (
+  id            TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (production_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS production_role_production_idx ON production_role(production_id);
+
+CREATE TABLE IF NOT EXISTS production_role_permission (
+  role_id        TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
+  permission_key TEXT NOT NULL,
+  PRIMARY KEY (role_id, permission_key)
+);
+
+CREATE INDEX IF NOT EXISTS production_role_permission_role_idx ON production_role_permission(role_id);
+
+CREATE TABLE IF NOT EXISTS production_role_cue_type (
+  role_id  TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
+  cue_type TEXT NOT NULL,
+  PRIMARY KEY (role_id, cue_type)
+);
+
+CREATE INDEX IF NOT EXISTS production_role_cue_type_role_idx ON production_role_cue_type(role_id);
 
 -- ── Members & permission overrides ────────────────────────────────────────────
 
@@ -166,6 +197,7 @@ CREATE TABLE IF NOT EXISTS script (
   sort_key       TEXT NOT NULL,
   scene_id       TEXT REFERENCES scene(id) ON DELETE SET NULL,
   rehearsal_mark TEXT,
+  owner_marker_id TEXT,
   type           block_type NOT NULL DEFAULT 'dialogue',
   content        TEXT NOT NULL DEFAULT '',
   stage_comment  TEXT,
@@ -178,6 +210,7 @@ CREATE TABLE IF NOT EXISTS script (
 ALTER TABLE script ADD COLUMN IF NOT EXISTS force_show_character_name BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE script ADD COLUMN IF NOT EXISTS stage_comment TEXT;
 ALTER TABLE script ADD COLUMN IF NOT EXISTS marker_meta JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE script ADD COLUMN IF NOT EXISTS owner_marker_id TEXT;
 
 CREATE INDEX IF NOT EXISTS script_production_sort_idx ON script(production_id, sort_key);
 
@@ -280,27 +313,38 @@ CREATE INDEX IF NOT EXISTS comment_mentions_idx ON comment USING GIN (mentions);
 -- ── Cue lists ─────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS cue_list (
-  id                 TEXT PRIMARY KEY,
-  production_id      TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name               TEXT NOT NULL,
-  abbr               TEXT,
-  notes              TEXT NOT NULL DEFAULT '',
-  template           TEXT,
-  default_edit_roles TEXT[] NOT NULL DEFAULT '{}',
-  created_by         UUID NOT NULL REFERENCES app_user(id),
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  id            TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  abbr          TEXT,
+  notes         TEXT NOT NULL DEFAULT '',
+  template      TEXT,
+  created_by    UUID NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- abbr must be unique per production (NULLs are treated as distinct).
 CREATE UNIQUE INDEX IF NOT EXISTS cue_list_abbr_production_unique ON cue_list(production_id, abbr);
 CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, created_at);
 
+-- Per-user access override: can_edit=true grants, can_edit=false denies,
+-- absence falls through to cue_list_role check. Creator is auto-inserted here
+-- at list creation time so all access grants live in one table.
 CREATE TABLE IF NOT EXISTS cue_list_permission (
   cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
   user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   can_edit    BOOLEAN NOT NULL,
   PRIMARY KEY (cue_list_id, user_id)
 );
+
+-- Role-based default edit access: any member whose production_role matches
+-- a row here can edit cue entries in the list (unless denied by cue_list_permission).
+CREATE TABLE IF NOT EXISTS cue_list_role (
+  cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
+  role_id     TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
+  PRIMARY KEY (cue_list_id, role_id)
+);
+CREATE INDEX IF NOT EXISTS cue_list_role_list_idx ON cue_list_role(cue_list_id);
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
 -- Each row is a revision of a cue. cue_id is the stable logical identity across

@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "场景" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listVersions, listScenesByVersion, listRehearsalMarksByVersion, ensureScriptMarkerMigration } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion, ensureScriptMarkerMigration } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import ScenesManager from "@/components/ScenesManager";
 
 export default async function ScenesPage({
@@ -18,11 +18,11 @@ export default async function ScenesPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
-  const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
-  const canImport = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
+  const canEdit = hasPermission("scene:rename", access.permCtx);
+  const canImport = hasPermission("dramaturgy:import", access.permCtx);
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
   const [name, versions] = await Promise.all([getProductionName(id), listVersions(id)]);
@@ -36,20 +36,18 @@ export default async function ScenesPage({
     ?? versions[0]?.id
     ?? null;
 
-  const [scenes, rehearsalMarks] = resolvedVersionId
+  const scenes = resolvedVersionId
     ? await (async () => {
         const migration = await ensureScriptMarkerMigration(resolvedVersionId);
         if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
-        return Promise.all([listScenesByVersion(resolvedVersionId), listRehearsalMarksByVersion(resolvedVersionId)]);
+        return listMarkerProjectionByVersion(resolvedVersionId);
       })()
-    : [[] as Awaited<ReturnType<typeof listScenesByVersion>>, {} as Awaited<ReturnType<typeof listRehearsalMarksByVersion>>];
-
+    : [];
   return (
     <ScenesManager
       productionId={id}
       productionName={name}
       initialScenes={scenes}
-      rehearsalMarks={rehearsalMarks}
       canEdit={canEdit}
       canImport={canImport}
       versions={versions}

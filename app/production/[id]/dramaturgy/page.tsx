@@ -6,15 +6,14 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext,
+  getProductionPermissionContext,
   getProductionName,
   listVersions,
-  listScenesByVersion,
+  listMarkerProjectionByVersion,
   listCharactersByVersion,
-  listRehearsalMarksByVersion,
   ensureScriptMarkerMigration,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import Dramaturgy from "@/components/Dramaturgy";
 
 export default async function DramaturgyPage({
@@ -30,11 +29,11 @@ export default async function DramaturgyPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
-  const canEdit = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
-  const canImport = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
+  const canEdit = hasPermission("scene:rename", access.permCtx);
+  const canImport = hasPermission("dramaturgy:import", access.permCtx);
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 
@@ -55,18 +54,16 @@ export default async function DramaturgyPage({
     ?? versions[0]?.id
     ?? null;
 
-  const [scenes, rehearsalMarks, characters] = resolvedVersionId
+  const [scenes, characters] = resolvedVersionId
     ? await (async () => {
         const migration = await ensureScriptMarkerMigration(resolvedVersionId);
         if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
         return Promise.all([
-          listScenesByVersion(resolvedVersionId),
-          listRehearsalMarksByVersion(resolvedVersionId),
+          listMarkerProjectionByVersion(resolvedVersionId),
           listCharactersByVersion(resolvedVersionId),
         ]);
       })()
-    : [[], {}, []];
-
+    : [[], []];
   return (
     <Suspense>
       <Dramaturgy
@@ -75,7 +72,6 @@ export default async function DramaturgyPage({
         versions={versions}
         versionId={resolvedVersionId}
         initialScenes={scenes}
-        rehearsalMarks={rehearsalMarks}
         initialCharacters={characters}
         canEdit={canEdit}
         canImport={canImport}

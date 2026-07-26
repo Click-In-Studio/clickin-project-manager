@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  canUserAccessProduction, listVersions, createVersion, getActiveVersionId, getVersion,
+  getProductionPermissionContext, listVersions, createVersion, getActiveVersionId, getVersion,
+  ensureScriptMarkerMigration,
 } from "@/lib/db";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -9,8 +10,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const versions = await listVersions(id);
   return Response.json({ versions });
@@ -21,10 +22,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.userId, id);
-    if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
-  }
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { fromVersionId?: string; name?: string };
   const fromVersionId = body.fromVersionId ?? await getActiveVersionId(id);
@@ -32,6 +31,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const sourceVersion = await getVersion(fromVersionId);
   if (!sourceVersion || sourceVersion.productionId !== id) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
+  }
+  const migration = await ensureScriptMarkerMigration(fromVersionId);
+  if (migration.status === "running") {
+    return Response.json({ status: "updating", migration }, { status: 202 });
   }
   const name = body.name ?? `新版本 ${new Date().toLocaleDateString("zh-CN")}`;
 

@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getActiveVersionId, getVersion, saveScriptConfig } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getActiveVersionId, getVersion, saveScriptConfig } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { broadcastEvent } from "@/lib/server-cache";
 import type { ScriptConfig } from "@/lib/script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
@@ -11,9 +11,11 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, id);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档" }, { status: 403 });
-  if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
+  if (!hasPermission("scene:rename", permCtx)) {
     return Response.json({ error: "无权修改剧本设置" }, { status: 403 });
   }
 

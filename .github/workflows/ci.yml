@@ -89,6 +89,24 @@ jobs:
         if: steps.migrations.outputs.has_migrations != 'true'
         run: psql -v ON_ERROR_STOP=1 -f db/schema.sql
 
+      # Additive DDL migrations are safe to apply directly after the base
+      # schema. Data migrations remain the responsibility of the test harness
+      # so it can capture and verify pre-migration data first.
+      - name: Apply additive DDL migrations
+        if: steps.migrations.outputs.has_migrations == 'true'
+        env:
+          MIGRATION_FILES: ${{ steps.migrations.outputs.files }}
+        run: |
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              db/add-*.sql)
+                echo "Applying $file"
+                psql -v ON_ERROR_STOP=1 -f "$file"
+                ;;
+            esac
+          done <<< "$MIGRATION_FILES"
+
       - uses: actions/setup-node@v4.4.0
         with:
           node-version: '22'
@@ -107,20 +125,9 @@ jobs:
           PGPASSWORD=testpassword
           EOF
 
-      # MIGRATION PATH: Apply any new add-*.sql files (additive DDL — new tables only,
-      # no data migration required). These are applied via psql before tests run.
-      # migrate-*.sql files are handled by global-setup.ts (it needs pre-migration
-      # data for invariance testing), so we do NOT apply them here via psql.
-      - name: Apply new add-*.sql files (migration path)
-        if: steps.migrations.outputs.has_migrations == 'true'
-        run: |
-          FILES=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only --diff-filter=A -- 'db/add-*.sql')
-          if [ -n "$FILES" ]; then
-            echo "$FILES" | while IFS= read -r f; do
-              echo "Applying $f..."
-              psql -v ON_ERROR_STOP=1 -f "$f"
-            done
-          fi
+      # MIGRATION PATH: global-setup.ts detects the old schema, inserts factory
+      # data for invariance testing, captures a snapshot, then applies the
+      # data migration — so invariance tests have real data to verify against.
 
       # ── Unit tests ────────────────────────────────────────────────────────────
       - name: Run unit tests

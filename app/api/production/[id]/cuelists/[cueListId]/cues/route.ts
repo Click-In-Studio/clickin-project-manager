@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getCueList, listCueListPermissions, listCues, createCue, getVersion } from "@/lib/db";
-import { canEditCueList } from "@/lib/cue-list-types";
+import { getProductionPermissionContext, getCueList, listCues, createCue, getVersion, hasListAccess } from "@/lib/db";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 
@@ -10,9 +9,10 @@ const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, isArchived: false };
-  const { memberRoles, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, isArchived };
+  if (!session) return { session: null, isArchived: false };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return { session, isArchived: false };
+  return { session, isArchived: access.isArchived };
 }
 
 async function resolveVersion(productionId: string, versionId?: string | null) {
@@ -43,17 +43,16 @@ export async function POST(
   ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]/cues">
 ) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles, isArchived } = await getCtx(req, id);
+  const { session, isArchived } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const [cueList, permissions] = await Promise.all([
+  const [cueList, canEdit] = await Promise.all([
     getCueList(cueListId, id),
-    listCueListPermissions(cueListId),
+    hasListAccess(cueListId, session.userId),
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions))
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  if (!canEdit) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;

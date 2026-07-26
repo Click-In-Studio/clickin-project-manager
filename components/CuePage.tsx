@@ -16,7 +16,8 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
-import { textBlocksWithMarkerOwnership } from "@/lib/script-marker-blocks";
+import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwnershipProjection } from "@/lib/script-marker-blocks";
+import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
 
@@ -106,7 +107,6 @@ type Props = {
   versions?: Version[];
   versionId?: string;
   versionStatus?: VersionStatus;
-  canManageVersions?: boolean;
 };
 
 type Selection =
@@ -846,10 +846,17 @@ function ExportModal({
 export default function CuePage({
   productionId, productionName, blocks: rawBlocks, characters, scenes,
   cueLists, initialCues, editableListIds, myUserId, isAdmin, pageMap,
-  versions = [], versionId, versionStatus, canManageVersions = false,
+  versions = [], versionId, versionStatus,
 }: Props) {
   const router = useRouter();
-  const blocks = useMemo(() => textBlocksWithMarkerOwnership(rawBlocks), [rawBlocks]);
+  const blocks = useMemo(() => withLegacyOwnershipProjection(
+    textBlocksWithMarkerOwnership(rawBlocks),
+    buildMarkerContextById(rawBlocks),
+  ), [rawBlocks]);
+  const rehearsalLabelByMarkerId = useMemo(
+    () => buildMarkerLabelIndex(rawBlocks).rehearsalLabelByMarkerId,
+    [rawBlocks],
+  );
   const versionIdRef = useRef(versionId);
   useEffect(() => {
     versionIdRef.current = versionId;
@@ -1961,7 +1968,6 @@ export default function CuePage({
                 productionId={productionId}
                 versions={versions}
                 currentVersionId={versionId ?? null}
-                canManage={canManageVersions}
                 onChange={(vid) => {
                   router.push(`/production/${productionId}/cues?v=${encodeURIComponent(vid)}`);
                 }}
@@ -2069,6 +2075,7 @@ export default function CuePage({
             const rangeHL = rangeHighlightsForBlock.get(block.id) ?? [];
             const pendingHL = pendingHighlightForBlock.get(block.id) ?? null;
             const prevBlock = blockIdx > 0 ? blocks[blockIdx - 1] : null;
+            const rehearsalLabel = block.rehearsalMark ? rehearsalLabelByMarkerId.get(block.rehearsalMark) : null;
 
             const scene = block.sceneId ? sceneMap.get(block.sceneId) : null;
             const prevScene = prevBlock?.sceneId ? sceneMap.get(prevBlock.sceneId) : null;
@@ -2211,8 +2218,8 @@ export default function CuePage({
 
                   {/* Line / page / rehearsal mark info */}
                   <div className="shrink-0 flex flex-col items-end justify-start pt-0.5 pr-2 gap-0.5 w-14 select-none">
-                    {block.rehearsalMark && (
-                      <span className="text-[10px] font-bold text-zinc-500 leading-none">{block.rehearsalMark}</span>
+                    {rehearsalLabel && (
+                      <span className="text-[10px] font-bold text-zinc-500 leading-none">{rehearsalLabel}</span>
                     )}
                     <span className="text-[10px] text-zinc-300 tabular-nums leading-none">#{blockIdx + 1}</span>
                     {pageMap[block.id] != null && (

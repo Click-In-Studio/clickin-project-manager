@@ -1,17 +1,17 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, listCharactersByVersion, setCharacterMembers,
-  getActiveVersionId, loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion,
+  getProductionPermissionContext, listCharactersByVersion, setCharacterMembers,
+  getActiveVersionId, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
+  if (!session) return { session: null, access: null };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  return { session, access };
 }
 
 async function resolveProductionVersion(productionId: string, requestedVersionId?: unknown) {
@@ -26,9 +26,11 @@ async function resolveProductionVersion(productionId: string, requestedVersionId
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/characters">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, access } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("script:view", permCtx)) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const resolved = await resolveProductionVersion(id, req.nextUrl.searchParams.get("versionId") ?? undefined);
@@ -36,20 +38,18 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
     return req.nextUrl.searchParams.has("versionId") ? resolved.error : Response.json([]);
   }
   const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
   const characters = await listCharactersByVersion(versionId);
   return Response.json(characters);
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/[id]/characters">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
+  const { session, access } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
+  if (!hasPermission("scene:rename", permCtx)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
@@ -64,14 +64,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
   // Load current characters to check for duplicates
-  const result = await loadProduction(id, versionId);
-  const characters = result?.state.characters ?? [];
+  const characters = await listCharactersByVersion(versionId);
   if (characters.some((c) => c.name === trimmed)) {
     return Response.json({ error: "角色名已存在" }, { status: 409 });
   }

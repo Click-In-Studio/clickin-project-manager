@@ -1,6 +1,8 @@
 import { type NextRequest } from "next/server";
 import { updatePresence } from "@/lib/server-cache";
-import { getActiveVersionId, getVersion } from "@/lib/db";
+import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
+import { getSession } from "@/lib/session";
+import { hasPermission } from "@/lib/permissions";
 
 type PresenceBody = {
   clientId: string;
@@ -11,6 +13,12 @@ type PresenceBody = {
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access || !hasPermission("script:view", access.permCtx))
+    return Response.json({ error: "无权访问" }, { status: 403 });
+
   const { clientId, userName, blockId, versionId: bodyVersionId } = (await req.json()) as PresenceBody;
   if (!clientId || !userName) return Response.json({ error: "missing fields" }, { status: 400 });
   const versionId = bodyVersionId ?? req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id) ?? '';

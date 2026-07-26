@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  canUserAccessProduction, getVersion, updateVersionMeta, updateVersionStatus,
-  rollbackToVersion, getActiveVersionId,
+  getProductionPermissionContext, getVersion, updateVersionMeta, updateVersionStatus,
+  rollbackToVersion, getActiveVersionId, ensureScriptMarkerMigration,
 } from "@/lib/db";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; versionId: string }> }) {
@@ -10,8 +10,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const version = await getVersion(versionId);
   if (!version || version.productionId !== id) {
@@ -25,10 +25,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  if (!session.isAdmin) {
-    const ok = await canUserAccessProduction(session.userId, id);
-    if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
-  }
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const version = await getVersion(versionId);
   if (!version || version.productionId !== id) {
@@ -47,6 +45,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (body.rollback) {
     const currentVersionId = await getActiveVersionId(id);
     if (!currentVersionId) return Response.json({ error: "无当前编辑版本" }, { status: 400 });
+    const migration = await ensureScriptMarkerMigration(versionId);
+    if (migration.status === "running") {
+      return Response.json({ status: "updating", migration }, { status: 202 });
+    }
     const rollbackName = body.rollbackName ?? `回滚至 ${version.name}`;
     const newVersion = await rollbackToVersion(currentVersionId, versionId, id, rollbackName);
     return Response.json({ version: newVersion });

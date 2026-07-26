@@ -8,8 +8,8 @@
 
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
 import { buildUrgeReqCard } from "@/lib/feishu-bot";
 import { getOptedInUsers } from "@/lib/notification-prefs";
@@ -23,8 +23,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:create", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("event:create", permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

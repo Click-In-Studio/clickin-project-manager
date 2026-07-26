@@ -1,5 +1,5 @@
 import type { Block, Character, Scene, ScriptState } from "./script-types";
-import { isMarkerBlock } from "./script-marker-blocks";
+import { isMarkerBlock, withLegacyOwnershipProjection } from "./script-marker-blocks";
 
 // ─── Op types ─────────────────────────────────────────────────────────────────
 
@@ -10,7 +10,7 @@ export type BlockOp =
   | { op: "insert"; block: Block; afterId: string | null; tags?: TagEntry[] }
   | { op: "update"; block: Block; tags?: TagEntry[] }
   | { op: "delete"; id: string }
-  | { op: "reorder"; ids: string[] }; // full ordered id list of retained blocks
+  | { op: "reorder"; ids: string[]; movedIds?: string[] }; // full order plus the blocks actually moved
 
 export type CharOp =
   | { op: "upsert"; char: Character }
@@ -42,11 +42,12 @@ export function diffState(
   const blockOps: BlockOp[] = [];
   const charOps: CharOp[] = [];
   const sceneOps: SceneOp[] = [];
+  const projectedCurrBlocks = withLegacyOwnershipProjection(curr.blocks);
 
   if (prev === null) {
     // Full sync: treat everything as inserts / upserts
     let afterId: string | null = null;
-    for (const block of curr.blocks) {
+    for (const block of projectedCurrBlocks) {
       blockOps.push({ op: "insert", block, afterId });
       afterId = block.id;
     }
@@ -58,6 +59,8 @@ export function diffState(
     }
     return { clientSeq, blockOps, charOps, sceneOps };
   }
+
+  const projectedPrevBlocks = withLegacyOwnershipProjection(prev.blocks);
 
   // ── Characters ──────────────────────────────────────────────────────────────
   const prevCharMap = new Map(prev.characters.map((c) => [c.id, c]));
@@ -101,28 +104,28 @@ export function diffState(
   }
 
   // ── Blocks ───────────────────────────────────────────────────────────────────
-  const prevBlockMap = new Map(prev.blocks.map((b) => [b.id, b]));
-  const currBlockMap = new Map(curr.blocks.map((b) => [b.id, b]));
-  const currBlockIds = new Set(curr.blocks.map((b) => b.id));
+  const prevBlockMap = new Map(projectedPrevBlocks.map((b) => [b.id, b]));
+  const currBlockMap = new Map(projectedCurrBlocks.map((b) => [b.id, b]));
+  const currBlockIds = new Set(projectedCurrBlocks.map((b) => b.id));
 
   // Deletes
-  for (const block of prev.blocks) {
+  for (const block of projectedPrevBlocks) {
     if (!currBlockIds.has(block.id)) {
       blockOps.push({ op: "delete", id: block.id });
     }
   }
 
   // Inserts
-  for (let i = 0; i < curr.blocks.length; i++) {
-    const block = curr.blocks[i];
+  for (let i = 0; i < projectedCurrBlocks.length; i++) {
+    const block = projectedCurrBlocks[i];
     if (!prevBlockMap.has(block.id)) {
-      const afterId = i > 0 ? curr.blocks[i - 1].id : null;
+      const afterId = i > 0 ? projectedCurrBlocks[i - 1].id : null;
       blockOps.push({ op: "insert", block, afterId });
     }
   }
 
   // Updates (content/field changes on retained blocks)
-  for (const block of curr.blocks) {
+  for (const block of projectedCurrBlocks) {
     const old = prevBlockMap.get(block.id);
     if (old && JSON.stringify(old) !== JSON.stringify(block)) {
       blockOps.push({ op: "update", block });
@@ -144,19 +147,49 @@ export function diffState(
   return { clientSeq, blockOps, charOps, sceneOps };
 }
 
+export function patchAffectsMarkerProjection(patch: ScriptPatch, prevState: ScriptState): boolean {
+  if (patch.sceneOps.length > 0) return true;
+  if (patch.blockOps.length === 0) return false;
+  const prevBlockById = new Map(prevState.blocks.map((block) => [block.id, block]));
+  for (const op of patch.blockOps) {
+    if (op.op === "insert" && isMarkerBlock(op.block)) return true;
+    if (op.op === "delete") {
+      const previous = prevBlockById.get(op.id);
+      if (previous && isMarkerBlock(previous)) return true;
+    }
+    if (op.op === "update") {
+      const previous = prevBlockById.get(op.block.id);
+      if (previous?.type !== op.block.type) {
+        if (isMarkerBlock(op.block) || !!previous && isMarkerBlock(previous)) return true;
+      } else if (op.block.type === "chapter_marker" || op.block.type === "scene_marker") {
+        return true;
+      }
+    }
+    if (op.op === "reorder") {
+      const previousOrder = prevState.blocks.filter(isMarkerBlock).map((block) => block.id);
+      const nextOrder = op.ids.filter((id) => {
+        const block = prevBlockById.get(id);
+        return !!block && isMarkerBlock(block);
+      });
+      if (previousOrder.join(",") !== nextOrder.join(",")) return true;
+    }
+  }
+  return false;
+}
+
 // ─── Permission classification ────────────────────────────────────────────────
 
 export type ScriptPermissions = {
-  "script:edit": boolean;
-  "script:metadata": boolean;
-  "script:rehearsal_mark": boolean;
+  "script:edit_block": boolean;
+  "scene:rename": boolean;
+  "rehearsal_mark:create": boolean;
 };
 
 function addMarkerPermission(block: Block, needed: Set<keyof ScriptPermissions>): void {
   if (block.type === "rehearsal_marker") {
-    needed.add("script:rehearsal_mark");
+    needed.add("rehearsal_mark:create");
   } else if (block.type === "chapter_marker" || block.type === "scene_marker") {
-    needed.add("script:metadata");
+    needed.add("scene:rename");
   }
 }
 
@@ -171,19 +204,19 @@ export function requiredPermissions(
   const needed = new Set<keyof ScriptPermissions>();
   const prevBlockMap = new Map(prevState.blocks.map((b) => [b.id, b]));
 
-  if (patch.charOps.length > 0) needed.add("script:metadata");
-  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("script:metadata");
+  if (patch.charOps.length > 0) needed.add("scene:rename");
+  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("scene:rename");
 
   for (const op of patch.blockOps) {
     if (op.op === "insert") {
       if (isMarkerBlock(op.block)) addMarkerPermission(op.block, needed);
-      else needed.add("script:edit");
+      else needed.add("script:edit_block");
       continue;
     }
     if (op.op === "delete") {
       const old = prevBlockMap.get(op.id);
       if (old && isMarkerBlock(old)) addMarkerPermission(old, needed);
-      else needed.add("script:edit");
+      else needed.add("script:edit_block");
       continue;
     }
     if (op.op === "reorder") {
@@ -192,7 +225,7 @@ export function requiredPermissions(
       const nextIndexById = new Map(op.ids.map((id, index) => [id, index]));
       const prevTextOrder = prevState.blocks.filter((block) => !isMarkerBlock(block)).map((block) => block.id).join(",");
       const nextTextOrder = nextBlocks.filter((block) => !isMarkerBlock(block)).map((block) => block.id).join(",");
-      if (prevTextOrder !== nextTextOrder) needed.add("script:edit");
+      if (prevTextOrder !== nextTextOrder) needed.add("script:edit_block");
       for (const block of nextBlocks) {
         if (isMarkerBlock(block) && prevIndexById.get(block.id) !== nextIndexById.get(block.id)) {
           addMarkerPermission(block, needed);
@@ -203,11 +236,11 @@ export function requiredPermissions(
 
     // op === "update" — diff against previous block to see what changed
     const old = prevBlockMap.get(op.block.id);
-    if (!old) { needed.add("script:edit"); continue; }
+    if (!old) { needed.add("script:edit_block"); continue; }
 
     if (isMarkerBlock(op.block) || isMarkerBlock(old)) {
       if (op.block.type !== old.type && (!isMarkerBlock(op.block) || !isMarkerBlock(old))) {
-        needed.add("script:edit");
+        needed.add("script:edit_block");
       }
       addMarkerPermission(op.block, needed);
       addMarkerPermission(old, needed);
@@ -221,9 +254,9 @@ export function requiredPermissions(
       op.block.lyric !== old.lyric ||
       (op.block.forceShowCharacterName ?? false) !== (old.forceShowCharacterName ?? false) ||
       JSON.stringify(op.block.characterIds) !== JSON.stringify(old.characterIds)
-    ) needed.add("script:edit");
-    if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("script:rehearsal_mark");
-    if (op.block.sceneId !== old.sceneId) needed.add("script:metadata");
+    ) needed.add("script:edit_block");
+    if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("rehearsal_mark:create");
+    if (op.block.sceneId !== old.sceneId) needed.add("scene:rename");
   }
 
   return needed;

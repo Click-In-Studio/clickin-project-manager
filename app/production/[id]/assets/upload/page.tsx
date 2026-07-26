@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "上传 Asset" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import AssetUploadPageClient from "@/components/assets/AssetUploadPageClient";
 
 export default async function AssetUploadPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,8 +13,8 @@ export default async function AssetUploadPage({ params }: { params: Promise<{ id
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 

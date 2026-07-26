@@ -10,8 +10,7 @@
  */
 
 import { getPool } from "./pg";
-import { hasPermission } from "./roles";
-import type { PermissionOverrides } from "./roles";
+import { hasPermission, type PermissionContext } from "./permissions";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
 
@@ -81,122 +80,72 @@ export async function loadEventPermContext(
 
 // ─── Permission checks ────────────────────────────────────────────────────────
 
-/**
- * Can write / publish a report.
- * 制作人 / 制作助理: unconditional.
- * 舞台监督 / 助理舞台监督: only if in the event call.
- */
+/** Can write / publish a report. */
 export function canWriteReport(
-  isAdmin: boolean,
-  memberRoles: string[] | null,
-  overrides: PermissionOverrides,
+  permCtx: PermissionContext,
   ctx: Pick<EventPermContext, "isInCall">,
 ): boolean {
-  if (isAdmin) return true;
-  if (!memberRoles) return false;
-  if (hasPermission("event:publish", isAdmin, memberRoles, overrides)) {
-    // 制作人 / 制作助理 pass unconditionally
-    if (memberRoles.some(r => r === "制作人" || r === "制作助理")) return true;
-    // SM roles only if in call
-    const isSm = memberRoles.some(r => r === "舞台监督" || r === "助理舞台监督");
-    return isSm && ctx.isInCall;
-  }
+  if (permCtx.isAdmin) return true;
+  if (permCtx.memberPermissions === null) return false;
+  if (hasPermission("report:publish", permCtx)) return true;
+  if (hasPermission("event:publish", permCtx)) return ctx.isInCall;
   return false;
 }
 
-/**
- * Can add or edit a tech requirement.
- * Passes if role-based check succeeds, OR if the user is a POC of the
- * requirement's department.
- */
+/** Can add or edit a tech requirement. */
 export function canEditTechReq(
-  isAdmin: boolean,
-  memberRoles: string[] | null,
-  overrides: PermissionOverrides,
+  permCtx: PermissionContext,
   ctx: Pick<EventPermContext, "pocDeptIds">,
   techReqDeptId: string | null,
 ): boolean {
-  // SM + director roles + 技术导演 pass unconditionally
-  const baseRoles = new Set([
-    "制作人", "制作助理", "舞台监督", "助理舞台监督",
-    "导演", "导演助理", "技术导演",
-  ]);
-  if (isAdmin) return true;
-  if (memberRoles?.some(r => baseRoles.has(r))) return true;
-  // Dept POC: can only edit reqs belonging to their own department
+  if (permCtx.isAdmin) return true;
+  if (hasPermission("event:create", permCtx) || hasPermission("event:edit_schedule", permCtx)) return true;
   if (techReqDeptId && ctx.pocDeptIds.includes(techReqDeptId)) return true;
   return false;
 }
 
-/**
- * Can assign tech personnel to a requirement.
- * Same set as canEditTechReq (same roles + own-dept POC).
- */
+/** Can assign tech personnel to a requirement. Same logic as canEditTechReq. */
 export function canAssignTechReq(
-  isAdmin: boolean,
-  memberRoles: string[] | null,
-  overrides: PermissionOverrides,
+  permCtx: PermissionContext,
   ctx: Pick<EventPermContext, "pocDeptIds">,
   techReqDeptId: string | null,
 ): boolean {
-  return canEditTechReq(isAdmin, memberRoles, overrides, ctx, techReqDeptId);
+  return canEditTechReq(permCtx, ctx, techReqDeptId);
 }
 
-/**
- * Can view a tech requirement.
- * Full-access roles pass unconditionally; others pass if they are a
- * participant assigned to the requirement's department in this event.
- */
+/** Can view a tech requirement. */
 export function canViewTechReq(
-  isAdmin: boolean,
-  memberRoles: string[] | null,
-  overrides: PermissionOverrides,
+  permCtx: PermissionContext,
   ctx: Pick<EventPermContext, "participantDeptIds">,
   techReqDeptId: string | null,
 ): boolean {
-  const fullAccessRoles = new Set([
-    "制作人", "制作助理", "舞台监督", "助理舞台监督",
-    "导演", "导演助理", "技术导演",
-  ]);
-  if (isAdmin) return true;
-  if (memberRoles?.some(r => fullAccessRoles.has(r))) return true;
+  if (permCtx.isAdmin) return true;
+  if (hasPermission("event:view_tech_req_any", permCtx)) return true;
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   return false;
 }
 
-const NOTE_WRITE_ROLES = new Set([
-  "制作人", "制作助理", "舞台监督", "助理舞台监督", "导演", "导演助理",
-]);
-
-const NOTE_MODERATE_ROLES = new Set([
-  "制作人", "制作助理", "舞台监督", "助理舞台监督",
-]);
-
 /** Can add/edit a department note on a report. */
 export function canWriteNote(
-  isAdmin: boolean,
-  memberRoles: string[] | null,
+  permCtx: PermissionContext,
   ctx: Pick<EventPermContext, "isInCall">,
 ): boolean {
-  if (!memberRoles) return false;
-  if (isAdmin) return true;
-  if (memberRoles.some(r => NOTE_WRITE_ROLES.has(r))) return true;
+  if (permCtx.memberPermissions === null) return false;
+  if (permCtx.isAdmin) return true;
+  if (hasPermission("report:create_note_any", permCtx)) return true;
   return ctx.isInCall;
 }
 
 /** Can delete or edit any note (not just own). */
-export function canModerateNotes(
-  isAdmin: boolean,
-  memberRoles: string[] | null,
-): boolean {
-  if (isAdmin) return true;
-  return memberRoles?.some(r => NOTE_MODERATE_ROLES.has(r)) ?? false;
+export function canModerateNotes(permCtx: PermissionContext): boolean {
+  if (permCtx.isAdmin) return true;
+  return hasPermission("report:edit_note_any", permCtx);
 }
 
-/** Roles that can view unpublished reports without event:view_full. */
-export const REPORT_VIEWER_ROLES = new Set([
-  "制作人", "制作助理", "舞台监督", "助理舞台监督", "导演", "导演助理",
-]);
+/** Returns true if the user can view unpublished reports. */
+export function isReportViewer(permCtx: PermissionContext): boolean {
+  return permCtx.isAdmin || hasPermission("event:edit", permCtx) || hasPermission("event:edit_schedule", permCtx);
+}
 
 /**
  * Can reply to the report body or to any existing reply.

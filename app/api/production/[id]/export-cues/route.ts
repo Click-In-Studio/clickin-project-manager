@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
-import { canUserAccessProduction, listCues, loadProduction, getActiveVersionId, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionPermissionContext, listCues, loadProduction, getActiveVersionId, ensureScriptMarkerMigration } from "@/lib/db";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/feishu-sheet";
 import { formatCuePosition } from "@/lib/cue-export";
 import type { CueAnchor } from "@/lib/cue-types";
@@ -32,8 +32,8 @@ export async function POST(
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
   if (!userToken) return new Response("飞书登录已过期，请重新登录", { status: 401 });
 
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, productionId));
-  if (!ok) return new Response("权限不足", { status: 403 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return new Response("权限不足", { status: 403 });
 
   const body = (await req.json()) as { cueListIds?: string[]; wikiUrl?: string };
   if (!body.cueListIds?.length) return new Response("cueListIds 不能为空", { status: 400 });

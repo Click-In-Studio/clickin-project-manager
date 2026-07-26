@@ -1,19 +1,19 @@
 import { type NextRequest } from "next/server";
-import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
+import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
+import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getActiveVersionId, getVersion,
+  getProductionPermissionContext, getActiveVersionId, getVersion,
   loadProduction, applyPatchToDB, ensureScriptMarkerMigration,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
+  if (!session) return { session: null, access: null };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  return { session, access };
 }
 
 async function resolveVersion(req: NextRequest, productionId: string): Promise<string | null> {
@@ -26,9 +26,11 @@ async function resolveVersion(req: NextRequest, productionId: string): Promise<s
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, access } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("script:view", permCtx)) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
   const versionId = await resolveVersion(req, id);
@@ -46,10 +48,12 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]"
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id]">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
+  const { session, access } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
+  if (!hasPermission("script:view", permCtx)) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
 
@@ -73,7 +77,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   const patch = (await req.json()) as ScriptPatch;
   const needed = requiredPermissions(patch, current.state);
   for (const perm of needed) {
-    if (!hasPermission(perm, session.isAdmin, memberRoles, overrides)) {
+    if (!hasPermission(perm, permCtx)) {
       return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
     }
   }
@@ -83,5 +87,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
 
   await applyPatchToDB(id, versionId, patch);
   const serverSeq = tickAndBroadcastSeq(id, versionId);
+  if (patchAffectsMarkerProjection(patch, current.state)) {
+    broadcastEvent(id, versionId, "markers", { seq: serverSeq });
+  }
   return Response.json({ ok: true, serverSeq });
 }

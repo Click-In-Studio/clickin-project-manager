@@ -12,8 +12,8 @@
 
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent, getEventTechReq, setTechReqChatId,
   getReqChatTargets, getProductionDeptChatIds, isUserDeptPoc,
@@ -26,7 +26,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reqId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
 
   const [event, techReq] = await Promise.all([
     getProductionEvent(eventId, productionId),
@@ -39,7 +41,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const isPoc = techReq.departmentId
     ? await isUserDeptPoc(techReq.departmentId, session.userId)
     : false;
-  const canManage = hasPermission("event:tech_req_delete", session.isAdmin, memberRoles, overrides) || isPoc;
+  const canManage = hasPermission("event:delete_tech_req_any", permCtx) || isPoc;
   if (!canManage) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { action: "create" | "bind"; chatId?: string };

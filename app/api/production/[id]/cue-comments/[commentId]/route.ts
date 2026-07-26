@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { updateComment, deleteComment, getProductionMemberContext } from "@/lib/db";
+import { updateComment, deleteComment, getProductionPermissionContext } from "@/lib/db";
 
 export async function PATCH(
   req: NextRequest,
@@ -9,7 +9,9 @@ export async function PATCH(
   const { id: productionId, commentId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const { body } = (await req.json()) as { body?: string };
   if (!body?.trim()) return Response.json({ error: "内容不能为空" }, { status: 400 });
@@ -25,7 +27,9 @@ export async function DELETE(
   const { id: productionId, commentId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const ok = await deleteComment(commentId, session.userId, session.isAdmin);
   if (!ok) return Response.json({ error: "评论不存在或无权删除" }, { status: 403 });

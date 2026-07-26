@@ -105,7 +105,7 @@ export interface PersonalChannel {
   readonly capabilities: PersonalCapabilities;
 
   // === Auth ===
-  generateAuthUrl(state: string): string;
+  generateAuthUrl(state: string, redirectUri: string): string;
   handleAuthCallback(code: string): Promise<PlatformIdentity>;
   refreshAuth?(refreshToken: string): Promise<AuthToken>;
   getBotIdentity?(): Promise<PlatformIdentity>;

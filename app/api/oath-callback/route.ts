@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
   });
   cookieStore.delete(OAUTH_STATE_COOKIE);
 
-  const origin = new URL(process.env.FEISHU_REDIRECT_URI!).origin;
-  return NextResponse.redirect(new URL("/app", origin));
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  return NextResponse.redirect(new URL("/", `${proto}://${host}`));
 }
