@@ -7,7 +7,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { SceneDetail } from "@/lib/db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/DurationInput";
-import { parseDurationSafe, parseDuration } from "@/lib/duration";
+import { parseDuration } from "@/lib/duration";
 
 type Props = {
   productionId: string;
@@ -80,15 +80,12 @@ function Field({
 
 export default function SceneDetailView({ productionId, productionName, scene, canEdit, versionId }: Props) {
   const router = useRouter();
-  const [number, setNumber] = useState(scene.number);
   const [name, setName] = useState(scene.name);
-  const [lastSeenNumber, setLastSeenNumber] = useState(scene.number);
   const [lastSeenName, setLastSeenName] = useState(scene.name);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  if (lastSeenNumber !== scene.number) { setLastSeenNumber(scene.number); setNumber(scene.number); }
   if (lastSeenName !== scene.name) { setLastSeenName(scene.name); setName(scene.name); }
 
   const patchScene = async (body: Record<string, string>) => {
@@ -102,10 +99,10 @@ export default function SceneDetailView({ productionId, productionName, scene, c
   };
 
   const saveIdentity = async () => {
-    const n = number.trim(), nm = name.trim();
-    if (n === scene.number && nm === scene.name) return;
+    const nm = name.trim();
+    if (nm === scene.name) return;
     setSaving(true);
-    try { await patchScene({ number: n, name: nm }); } finally { setSaving(false); }
+    try { await patchScene({ name: nm }); } finally { setSaving(false); }
   };
 
   const del = async () => {
@@ -147,18 +144,7 @@ export default function SceneDetailView({ productionId, productionName, scene, c
           <div className="flex gap-4">
             <div className="w-28 shrink-0 space-y-1.5">
               <label className="text-xs font-semibold tracking-widest text-zinc-400 uppercase">编号</label>
-              {canEdit ? (
-                <input
-                  value={number}
-                  onChange={(e) => setNumber(e.target.value)}
-                  onBlur={saveIdentity}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                  disabled={saving}
-                  className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400 disabled:opacity-50"
-                />
-              ) : (
-                <p className="text-sm text-zinc-700 py-2">{number || "—"}</p>
-              )}
+              <p className="text-sm text-zinc-700 py-2">{scene.number || "—"}</p>
             </div>
             <div className="flex-1 space-y-1.5">
               <label className="text-xs font-semibold tracking-widest text-zinc-400 uppercase">名称</label>

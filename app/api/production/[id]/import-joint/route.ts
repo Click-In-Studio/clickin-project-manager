@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
-import { getProductionPermissionContext, getVersion, getActiveVersionId, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import type { JointImportMarker, JointImportMappingRow, JointImportPreview, SceneColMap, ScriptColMap } from "@/lib/import/types";
 
@@ -210,10 +210,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const versionId = await resolveImportVersionId(req, productionId);
   if (versionId instanceof Response) return versionId;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
   const [scriptRows, dramaturgyRows] = await Promise.all([
     body.script.rows

@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, patchCharacterMeta, setCharacterMembers,
-  getActiveVersionId, loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion,
+  getActiveVersionId, listCharactersByVersion, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/permissions";
@@ -44,11 +44,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
       : [];
     const resolved = await resolveProductionVersion(id, body.versionId);
     if (resolved.error) return resolved.error;
-    const { versionId } = resolved;
-    const migration = await ensureScriptMarkerMigration(versionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
     await setCharacterMembers(id, charId, memberIds);
     return Response.json({ ok: true });
   }
@@ -69,10 +64,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     const resolvedMetaVersionId = typeof metaVersionId === "string" ? metaVersionId : await metaVersionId;
     const resolved = await resolveProductionVersion(id, resolvedMetaVersionId);
     if (resolved.error) return resolved.error;
-    const migration = await ensureScriptMarkerMigration(resolved.versionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
     await patchCharacterMeta(charId, resolved.versionId, meta);
     return Response.json({ ok: true });
   }
@@ -81,13 +72,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
-  const result = await loadProduction(id, versionId);
-  const char = result?.state.characters.find((c) => c.id === charId);
+  const char = (await listCharactersByVersion(versionId)).find((c) => c.id === charId);
   if (!char) return Response.json({ error: "未找到角色" }, { status: 404 });
 
   const nameVal = typeof body.name === "string" ? body.name.trim() : char.name;
@@ -127,10 +113,6 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/producti
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
   await applyPatchToDB(id, versionId, {
     clientSeq: 0, blockOps: [], sceneOps: [],

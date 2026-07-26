@@ -19,7 +19,6 @@ type Props = {
   currentConfig: unknown;
   onSelectView: (view: SavedView) => void;
   onViewsChange: (views: SavedView[]) => void;
-  onNewView: () => void;
 };
 
 export default function TableViewSelector({
@@ -29,7 +28,6 @@ export default function TableViewSelector({
   currentConfig,
   onSelectView,
   onViewsChange,
-  onNewView,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);

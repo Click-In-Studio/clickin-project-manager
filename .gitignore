@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.marker-test-dist/
 /out/
 
 # production

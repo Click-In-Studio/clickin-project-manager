@@ -1615,6 +1615,11 @@
       "column": "block_id",
       "type": "text",
       "nullable": false
+    },
+    {
+      "column": "owner_marker_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "script_character": [
@@ -1847,6 +1852,12 @@
       "type": "jsonb",
       "nullable": false,
       "default": "'{}'::jsonb"
+    },
+    {
+      "column": "marker_structure_revision",
+      "type": "bigint",
+      "nullable": false,
+      "default": "0"
     }
   ]
 }

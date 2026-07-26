@@ -174,7 +174,7 @@ describe("schema fingerprint matches committed seed-schema.json", () => {
     }>(`
       SELECT table_name, column_name, data_type, is_nullable, column_default
       FROM information_schema.columns
-      WHERE table_schema = 'public'
+      WHERE table_schema = current_schema()
         AND table_name NOT LIKE 'test-%'
       ORDER BY table_name, ordinal_position
     `);

@@ -86,3 +86,34 @@ export function decodeMentionHref(href: string): ContentMentionAttrs | null {
   if (!href.startsWith(CM_HREF_PREFIX)) return null;
   return deserializeMention(`[#${href.slice(CM_HREF_PREFIX.length)}]`);
 }
+
+export function migrateLegacyRehearsalMentions(
+  content: string,
+  versionId: string,
+  mappings: Array<{ sceneId: string; label: string; markerId: string }>,
+  includeUnversioned: boolean,
+): string {
+  const markerIdByLegacyKey = new Map(
+    mappings.map(({ sceneId, label, markerId }) => [`${sceneId}\u0000${label}`, markerId]),
+  );
+  const replacement = (sceneId: string, tokenVersionId: string | undefined, label: string) => {
+    if (tokenVersionId ? tokenVersionId !== versionId : !includeUnversioned) return null;
+    const markerId = markerIdByLegacyKey.get(`${sceneId}\u0000${label.toUpperCase()}`);
+    return markerId ? `${markerId}${tokenVersionId ? `?v=${tokenVersionId}` : ""}` : null;
+  };
+  return content
+    .replace(
+      /\[#rehearsal:([^:?\]]+)(?:\?v=([^:\]]+))?:([A-Za-z]+)\]/g,
+      (match, sceneId: string, tokenVersionId: string | undefined, label: string) => {
+        const migrated = replacement(sceneId, tokenVersionId, label);
+        return migrated ? `[#rehearsal:${migrated}]` : match;
+      },
+    )
+    .replace(
+      /\/__cm__rehearsal:([^:?)]+)(?:\?v=([^:)]+))?:([A-Za-z]+)\)/g,
+      (match, sceneId: string, tokenVersionId: string | undefined, label: string) => {
+        const migrated = replacement(sceneId, tokenVersionId, label);
+        return migrated ? `${CM_HREF_PREFIX}rehearsal:${migrated})` : match;
+      },
+    );
+}

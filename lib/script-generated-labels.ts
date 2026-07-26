@@ -1,4 +1,11 @@
-import type { Scene } from "./script-types";
+import type { Block, Scene } from "./script-types";
+
+export type MarkerLabelIndex = {
+  readonly labelByMarkerId: ReadonlyMap<string, string>;
+  readonly rehearsalLabelByMarkerId: ReadonlyMap<string, string>;
+  readonly markerIdByParentAndLabel: ReadonlyMap<string, string>;
+  readonly parentIdByMarkerId: ReadonlyMap<string, string>;
+};
 
 export function toAlphaLabel(index: number): string {
   let n = index + 1;
@@ -11,33 +18,51 @@ export function toAlphaLabel(index: number): string {
   return label;
 }
 
-export function withGeneratedSceneNumbers<T extends Scene>(scenes: T[]): T[] {
-  let changed = false;
-  let chapterIndex = 0;
-  const chapterCount = scenes.reduce((count, scene) => scene.parentId === null ? count + 1 : count, 0);
+export function buildMarkerLabelIndex(
+  blocks: Array<Pick<Block, "id" | "type" | "markerMeta">>,
+): MarkerLabelIndex {
+  const labelByMarkerId = new Map<string, string>();
+  const rehearsalLabelByMarkerId = new Map<string, string>();
+  const markerIdByParentAndLabel = new Map<string, string>();
+  const parentIdByMarkerId = new Map<string, string>();
+  const markers: typeof blocks = [];
+  let chapterCount = 0;
+  for (const block of blocks) {
+    if (block.type !== "chapter_marker" && block.type !== "scene_marker" && block.type !== "rehearsal_marker") continue;
+    markers.push(block);
+    if (block.type === "chapter_marker") chapterCount++;
+  }
   const chapterWidth = String(Math.max(0, chapterCount - 1)).length;
-  const sceneIndexByChapterId = new Map<string, number>();
-  const numberById = new Map<string, string>();
+  const sceneCountByChapterId = new Map<string, number>();
+  const rehearsalCountByParentId = new Map<string, number>();
+  let chapterIndex = 0;
 
-  const next = scenes.map((scene) => {
-    let generatedNumber: string;
-    if (scene.parentId === null) {
-      generatedNumber = String(chapterIndex).padStart(chapterWidth, "0");
-      chapterIndex++;
-      sceneIndexByChapterId.set(scene.id, 0);
-    } else {
-      const chapterNumber = numberById.get(scene.parentId) ?? "0".padStart(chapterWidth, "0");
-      const sceneIndex = (sceneIndexByChapterId.get(scene.parentId) ?? 0) + 1;
-      sceneIndexByChapterId.set(scene.parentId, sceneIndex);
-      generatedNumber = `${chapterNumber}-${sceneIndex}`;
+  for (const block of markers) {
+    const parentId = block.markerMeta?.parentMarkerId;
+    if (block.type === "chapter_marker") {
+      const label = String(chapterIndex++).padStart(chapterWidth, "0");
+      labelByMarkerId.set(block.id, label);
+      sceneCountByChapterId.set(block.id, 0);
+    } else if (block.type === "scene_marker" && parentId) {
+      const sceneIndex = (sceneCountByChapterId.get(parentId) ?? 0) + 1;
+      sceneCountByChapterId.set(parentId, sceneIndex);
+      const localLabel = String(sceneIndex);
+      const label = `${labelByMarkerId.get(parentId) ?? "0".padStart(chapterWidth, "0")}-${localLabel}`;
+      labelByMarkerId.set(block.id, label);
+      parentIdByMarkerId.set(block.id, parentId);
+    } else if (block.type === "rehearsal_marker" && parentId) {
+      const rehearsalIndex = rehearsalCountByParentId.get(parentId) ?? 0;
+      rehearsalCountByParentId.set(parentId, rehearsalIndex + 1);
+      const localLabel = toAlphaLabel(rehearsalIndex);
+      const label = `${labelByMarkerId.get(parentId) ?? ""}-${localLabel}`;
+      labelByMarkerId.set(block.id, label);
+      rehearsalLabelByMarkerId.set(block.id, localLabel);
+      markerIdByParentAndLabel.set(`${parentId}\u0000${localLabel}`, block.id);
+      parentIdByMarkerId.set(block.id, parentId);
     }
-    numberById.set(scene.id, generatedNumber);
-    if (scene.number === generatedNumber) return scene;
-    changed = true;
-    return { ...scene, number: generatedNumber };
-  });
+  }
 
-  return changed ? next : scenes;
+  return { labelByMarkerId, rehearsalLabelByMarkerId, markerIdByParentAndLabel, parentIdByMarkerId };
 }
 
 export function generatedRehearsalMarksByScene(
@@ -81,4 +106,16 @@ export function generatedRehearsalMarksByScene(
   }
 
   return map;
+}
+
+export function withMarkerSceneLabels<T extends Scene>(scenes: T[]): T[] {
+  const labels = buildMarkerLabelIndex(scenes.map((scene) => ({
+    id: scene.id,
+    type: scene.parentId === null ? "chapter_marker" as const : "scene_marker" as const,
+    markerMeta: { parentMarkerId: scene.parentId },
+  })));
+  return scenes.map((scene) => ({
+    ...scene,
+    number: labels.labelByMarkerId.get(scene.id) ?? "",
+  }));
 }
