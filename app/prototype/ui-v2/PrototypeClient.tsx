@@ -187,6 +187,33 @@ export default function PrototypeClient() {
     if (requestedView && requestedView in VIEW_META) setView(requestedView as View);
   }, []);
 
+  useEffect(() => {
+    function dismissOpenSurfaces(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      if (!target.closest('[data-dismiss-surface="project-menu"]')) setProjectMenuOpen(false);
+      if (!target.closest('[data-dismiss-surface="avatar-menu"]')) setAvatarMenuOpen(false);
+      if (!target.closest('[data-dismiss-surface="account-menu"]')) setAccountMenuOpen(false);
+      if (!target.closest('[data-dismiss-surface="detail-drawer"]')) setDrawer(null);
+    }
+
+    function dismissWithEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setProjectMenuOpen(false);
+      setAvatarMenuOpen(false);
+      setAccountMenuOpen(false);
+      setDrawer(null);
+    }
+
+    document.addEventListener("pointerdown", dismissOpenSurfaces);
+    document.addEventListener("keydown", dismissWithEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOpenSurfaces);
+      document.removeEventListener("keydown", dismissWithEscape);
+    };
+  }, []);
+
   function go(next: View) {
     setView(next);
     setDrawer(null);
@@ -213,7 +240,7 @@ export default function PrototypeClient() {
       <div className={contentClass}>
         <header className={styles.topbar}>
           <div className={styles.brand}>
-            <div className={styles.avatarControl}>
+            <div className={styles.avatarControl} data-dismiss-surface="avatar-menu">
               <button
                 type="button"
                 className={styles.projectAvatarButton}
@@ -248,7 +275,7 @@ export default function PrototypeClient() {
             </button>
           </div>
           <div className={styles.contextControls}>
-            <div className={styles.projectSwitcher}>
+            <div className={styles.projectSwitcher} data-dismiss-surface="project-menu">
               <button
                 type="button"
                 className={styles.switcherButton}
@@ -291,7 +318,7 @@ export default function PrototypeClient() {
             <button type="button" className={styles.notificationButton} onClick={() => go("notifications")} aria-label="通知，3 条重要通知">
               通知<span className={styles.unreadDot}>3</span>
             </button>
-            <div className={styles.accountControl}>
+            <div className={styles.accountControl} data-dismiss-surface="account-menu">
               <button
                 type="button"
                 className={styles.avatarButton}
@@ -653,7 +680,7 @@ function FrameworkView({ go }: { go: (v: View) => void }) {
 }
 
 function DetailDrawer({ type, close, acknowledged, setAcknowledged, completeTask, completed }: { type: "task" | "cue" | "notification"; close: () => void; acknowledged: boolean; setAcknowledged: (v: boolean) => void; completeTask: (id: string) => void; completed: string[] }) {
-  return <aside className={styles.drawer} aria-label="关联详情"><div className={styles.drawerHeader}><div><p>{type === "task" ? "TASK DETAIL" : type === "cue" ? "CUE DETAIL" : "NOTIFICATION DETAIL"}</p><h2>{type === "task" ? "确认第三幕转场动线" : type === "cue" ? "LX 38 · 海浪淡出" : "第三幕排练时间调整"}</h2></div><button type="button" onClick={close} aria-label="关闭详情">×</button></div>{type === "task" && <div className={styles.drawerBody}><Badge tone="amber">今天 18:00 截止</Badge><p>确认第三幕结束后，从海边平台到终场站位的转场路径，并与灯光暗场时间保持一致。</p><dl><div><dt>负责人</dt><dd>林淼（舞监）</dd></div><div><dt>关联 Event</dt><dd>第三幕合成排练、第一次全本联排</dd></div><div><dt>关联内容</dt><dd>第三幕 · LX 42 · 舞台右侧平台</dd></div></dl><label className={styles.drawerCheck}><input type="checkbox" checked={completed.includes("drawer-task")} onChange={() => completeTask("drawer-task")} /><span><b>标记为完成</b><small>完成后通知协作部门</small></span></label></div>}{type === "cue" && <div className={styles.drawerBody}><div><Badge tone="blue">灯光 Cue</Badge> <Badge>已同步 Timetable</Badge></div><blockquote>“潮水已经退去，但盐还留在我们身上。”</blockquote><dl><div><dt>动作</dt><dd>海浪纹理从 45% 淡出至 0%</dd></div><div><dt>时长</dt><dd>5 秒（原 3 秒）</dd></div><div><dt>关联部门</dt><dd>灯光、多媒体、音响</dd></div></dl><button type="button" className={styles.secondaryButton}>在剧本中定位</button></div>}{type === "notification" && <div className={styles.drawerBody}><Badge tone="amber">必须确认</Badge><p>第三幕合成排练由 14:00 调整至 13:30。你的 Call Time 为 13:00，地点仍为黑匣子 B。</p><dl><div><dt>已确认</dt><dd>{acknowledged ? "15 / 18 人" : "10 / 18 人"}</dd></div><div><dt>未确认</dt><dd>{acknowledged ? "王屿、周嘉、韩松" : "王屿、周嘉、韩松等 8 人"}</dd></div><div><dt>最后提醒</dt><dd>10 分钟前 · 站内通知</dd></div></dl>{!acknowledged && <button type="button" className={styles.primaryButton} onClick={() => setAcknowledged(true)}>我已知悉并确认</button>}</div>}</aside>;
+  return <aside className={styles.drawer} aria-label="关联详情" data-dismiss-surface="detail-drawer"><div className={styles.drawerHeader}><div><p>{type === "task" ? "TASK DETAIL" : type === "cue" ? "CUE DETAIL" : "NOTIFICATION DETAIL"}</p><h2>{type === "task" ? "确认第三幕转场动线" : type === "cue" ? "LX 38 · 海浪淡出" : "第三幕排练时间调整"}</h2></div><button type="button" onClick={close} aria-label="关闭详情">×</button></div>{type === "task" && <div className={styles.drawerBody}><Badge tone="amber">今天 18:00 截止</Badge><p>确认第三幕结束后，从海边平台到终场站位的转场路径，并与灯光暗场时间保持一致。</p><dl><div><dt>负责人</dt><dd>林淼（舞监）</dd></div><div><dt>关联 Event</dt><dd>第三幕合成排练、第一次全本联排</dd></div><div><dt>关联内容</dt><dd>第三幕 · LX 42 · 舞台右侧平台</dd></div></dl><label className={styles.drawerCheck}><input type="checkbox" checked={completed.includes("drawer-task")} onChange={() => completeTask("drawer-task")} /><span><b>标记为完成</b><small>完成后通知协作部门</small></span></label></div>}{type === "cue" && <div className={styles.drawerBody}><div><Badge tone="blue">灯光 Cue</Badge> <Badge>已同步 Timetable</Badge></div><blockquote>“潮水已经退去，但盐还留在我们身上。”</blockquote><dl><div><dt>动作</dt><dd>海浪纹理从 45% 淡出至 0%</dd></div><div><dt>时长</dt><dd>5 秒（原 3 秒）</dd></div><div><dt>关联部门</dt><dd>灯光、多媒体、音响</dd></div></dl><button type="button" className={styles.secondaryButton}>在剧本中定位</button></div>}{type === "notification" && <div className={styles.drawerBody}><Badge tone="amber">必须确认</Badge><p>第三幕合成排练由 14:00 调整至 13:30。你的 Call Time 为 13:00，地点仍为黑匣子 B。</p><dl><div><dt>已确认</dt><dd>{acknowledged ? "15 / 18 人" : "10 / 18 人"}</dd></div><div><dt>未确认</dt><dd>{acknowledged ? "王屿、周嘉、韩松" : "王屿、周嘉、韩松等 8 人"}</dd></div><div><dt>最后提醒</dt><dd>10 分钟前 · 站内通知</dd></div></dl>{!acknowledged && <button type="button" className={styles.primaryButton} onClick={() => setAcknowledged(true)}>我已知悉并确认</button>}</div>}</aside>;
 }
 
 function EventWizard({ step, setStep, close, publish }: { step: number; setStep: (s: number) => void; close: () => void; publish: () => void }) {
