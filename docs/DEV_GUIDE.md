@@ -39,7 +39,8 @@
 │   ├── asset-db.ts         # Asset 数据库操作
 │   ├── event-db.ts         # 事件/日程数据库操作
 │   ├── r2.ts               # Cloudflare R2 presigned URL、multipart upload
-│   ├── roles.ts            # 权限角色定义与 hasPermission()
+│   ├── permissions.ts      # 原子权限定义、PermissionContext、角色模版权限映射
+│   ├── roles.ts            # ROLE_GROUPS（UI 角色分组数据，仅供前端展示）
 │   ├── session.ts          # Cookie session（HMAC 签名，无服务端状态）
 │   ├── feishu-auth.ts      # 飞书 OAuth
 │   ├── feishu-bot.ts       # 飞书 Bot 消息发送
@@ -206,13 +207,82 @@ npm run dev
 
 ## 5. 权限模型
 
+### 5.1 三层叠加
+
 权限由三层叠加决定：
 
-1. **超级管理员（isAdmin）**：登录时从飞书 `is_tenant_manager` 读取，写入 session cookie。SA 拥有全部权限。
-2. **角色（roles）**：每个用户在每个剧目中可有多个角色（如 `director`、`stage_manager`），角色决定权限集合。
-3. **手动覆盖（overrides）**：可以为单个用户在特定剧目中覆盖某项权限（允许或拒绝），优先于角色推导。
+1. **超级管理员（isAdmin）**：登录时从飞书 `is_tenant_manager` 读取，写入 session cookie。SA 对大部分权限有 bypass；少数权限（标注 `adminBypass: false`，如 `script:edit_block`）即使 SA 也必须持有对应角色。
+2. **角色权限（role permissions）**：每个用户在每个剧目中有若干角色，存于 `production_member.roles[]`。每个角色对应 `production_role_permission` 中的一组原子权限 key，由 `seedProductionRoles` 在剧目创建时从 `lib/permissions.ts` 的模版写入。
+3. **手动覆盖（overrides）**：可以为单个用户在特定剧目中覆盖某项权限（允许或拒绝），优先于角色推导，存于 `production_member_permission`。
 
-权限检查统一使用 `lib/roles.ts` 中的 `hasPermission(permKey, isAdmin, roles, overrides)`。
+### 5.2 原子权限系统
+
+所有权限检查统一使用 `lib/permissions.ts` 中的接口：
+
+```typescript
+import { hasPermission } from "@/lib/permissions";
+import { getProductionPermissionContext } from "@/lib/db";
+
+// 取权限上下文（返回 ProductionAccess | null，null = 无成员资格且非管理员）
+const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+
+const { permCtx, isArchived } = access;
+
+// 检查单个权限
+if (!hasPermission("cue_list:create", permCtx)) { ... }
+```
+
+`PermissionContext` 结构：
+
+```typescript
+type PermissionContext = {
+  userId: string;
+  isAdmin: boolean;
+  memberPermissions: Set<Permission> | null;  // null = 非成员（仅 admin 时）
+  overrides: Map<Permission, boolean>;
+  deptIds: string[];     // 用户所属部门 ID
+  pocDeptIds: string[];  // 用户作为 POC 的部门 ID
+};
+```
+
+### 5.3 Permission 枚举
+
+所有合法的 `Permission` key 定义在 `lib/permissions.ts` 的 `Permission` union type 中，按功能域分组（`cue_list:*`、`script:*`、`event:*`、`contacts:*` 等）。**新增功能需要新权限时，在此文件中追加**。
+
+### 5.4 角色模版权限（ROLE_TEMPLATE_PERMISSIONS）
+
+`lib/permissions.ts` 中的 `ROLE_TEMPLATE_PERMISSIONS` 定义了各角色默认持有哪些权限：
+
+```typescript
+export const ROLE_TEMPLATE_PERMISSIONS: Record<string, Permission[]> = {
+  "舞台监督": ["event:create", "event:edit", "cue_list:create_any", ...],
+  "灯光设计": ["cue_list:create", "cue_list:view", ...],
+  // ...
+};
+```
+
+新增功能涉及权限时，需同步更新对应角色的模版。模版在剧目创建时由 `seedProductionRoles` 写入 `production_role_permission` 表，已存在的剧目**不会自动更新**（需单独的 migration 补填）。
+
+### 5.5 Cue 模版类型权限（production_role_cue_type）
+
+哪些角色可以创建哪种类型的 Cue 表模版，由 `production_role_cue_type` 表记录，通过 `CUE_LIST_TEMPLATES[].creatorRoles` 在 `seedProductionRoles` 时写入。检查时用：
+
+```typescript
+import { getUserAllowedCueTypes } from "@/lib/db";
+const allowedTypes = await getUserAllowedCueTypes(session.userId, productionId);
+if (!allowedTypes.includes(body.template)) { /* 403 */ }
+```
+
+### 5.6 新增功能的权限检查清单
+
+开发新 API 路由或页面时，依次确认：
+
+1. **是否需要新的 Permission key？** → 在 `lib/permissions.ts` 的 `Permission` union 中追加
+2. **哪些角色默认拥有该权限？** → 更新 `ROLE_TEMPLATE_PERMISSIONS` 对应角色
+3. **是否需要 adminBypass: false？** → 在 `PERMISSION_CONFIG` 中标注
+4. **路由中调用** `getProductionPermissionContext` + `hasPermission`，不要用旧的 `getProductionMemberContext`
+5. **如已有生产数据的剧目需要补填**，写 `db/add-*.sql` 补充 INSERT 到 `production_role_permission`
 
 ---
 
@@ -342,7 +412,7 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 Agent 与主业务**完全隔离**，有严格限制：
 
-- `agent/` 只能从 `lib/roles.ts` 引入外部代码，其他 `lib/*` 全部禁止。
+- `agent/` 只能从 `lib/roles.ts`（ROLE_GROUPS 角色分组数据）引入外部代码，其他 `lib/*` 全部禁止。
 - 数据库访问只能通过 `agent/db.ts`，连接 `click_in_agent` 库（独立配置）。
 - 不得使用 Next.js API（`cookies()`、`NextRequest` 等）。
 - 唯一允许调用 `agent/` 的文件是 `app/api/feishu-webhook/route.ts`。
@@ -367,17 +437,34 @@ Agent 与主业务**完全隔离**，有严格限制：
 ```typescript
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;          // Next.js 16: params 是 Promise
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return Response.json({ error: "权限不足" }, { status: 403 });
+
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+
+  const { permCtx, isArchived } = access;
+  if (!hasPermission("your_feature:view", permCtx))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+
   // ...业务逻辑
 }
 ```
+
+写入类路由还需检查 `isArchived`：
+
+```typescript
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  if (!hasPermission("your_feature:edit", permCtx))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+```
+
+**不要使用旧的 `getProductionMemberContext` / `lib/roles` 的 `hasPermission`**——那套接口已废弃。
 
 ### 步骤三：页面
 
@@ -580,15 +667,23 @@ const res = await listCueListsHandler(
 
 #### 权限注意事项
 
-部分权限有 `adminBypass: false`（如 `script:edit`、`script:metadata`），**超级管理员也不能绕过**。这类测试需要在 DB 里给 `TEST_USER` 加成员角色：
+权限检查现在使用原子权限系统（`lib/permissions.ts`）。`getProductionPermissionContext` 在测试中的行为：
+- `isAdmin: true` 的 session → `permCtx.isAdmin = true`，大多数权限自动通过（`adminBypass: true`）
+- `isAdmin: false` 且用户不是成员 → `getProductionPermissionContext` 返回 `null` → 403
+- `isAdmin: false` 且用户是成员 → `permCtx.memberPermissions` 为该用户角色对应的权限集合
+
+部分权限有 `adminBypass: false`（如 `script:edit_block`、`scene:rename`），**超级管理员也不能绕过**，需要用户确实持有对应角色。这类测试需要给 `TEST_USER` 加成员角色：
 
 ```typescript
-await addProductionMember(TEST_USER, PROD_ID);
+// global-setup 中已 seedProductionRoles，所以 production_role 里有角色记录
+// 只需把用户加为成员并分配角色
+await addProductionMember(PROD_ID, TEST_USER);
 await setMemberRoles(PROD_ID, TEST_USER, ["制作人"]);
 // 然后使用 isAdmin: false 的 session
+const session = createSession({ openId: TEST_USER, name: "测试员", avatarUrl: null, isAdmin: false });
 ```
 
-记得在 `afterAll` 里 `removeProductionMember` 或直接删除测试演出。
+记得在 `afterAll` 里 `removeProductionMember` 或直接让 `cleanupProduction` 级联删除。
 
 ### 11.5 开发规约自动化测试（conventions.test.ts）
 
@@ -694,7 +789,7 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
 | **Top** | 新增会修改数据的 DB 函数 | **必须**在对应 `*.test.ts` 中加重复 ID 抛错、并发只有一个成功、删除后不可读的完整性验证 |
 | **Top** | 级联关系变更（外键、ON DELETE） | **必须**在 `resilience.test.ts` 中验证级联删除全量触发、无孤儿行 |
 | **Top** | 并发写入路径（advisory lock、唯一约束） | **必须**在 `api-race.test.ts` 中验证并发结果的一致性 |
-| **P1** | 新增 API route | **必须**在 `api.test.ts` 中加 auth guard（无 cookie → 401）和 authorization（非成员/非管理员 → 403）；`adminBypass:false` 路由还需验证 wrong-role → 403 |
+| **P1** | 新增 API route | **必须**在 `api.test.ts` 中加 auth guard（无 cookie → 401）和 authorization（非成员/非管理员 → 403）；`adminBypass:false` 权限（如 `script:edit_block`）还需验证 wrong-role → 403（用 `isAdmin:false` + 不具备该权限的角色） |
 | **P1** | 新增跨 production 的读写操作 | **必须**在 `security.test.ts` 中加"错误 productionId → null / no-op"验证 |
 | — | 新增读操作 DB 函数 | 建议加 happy path + 不存在时返回 null 的测试 |
 | — | 新增运行时 migration | **必须**在 `conventions.test.ts` 中加幂等性测试 |
