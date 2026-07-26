@@ -96,7 +96,7 @@ async function physicalCueExists(revisionId: string): Promise<boolean> {
 async function mkCueList(prod: string, clId: string): Promise<void> {
   await createCueList({
     id: clId, productionId: prod, name: "测试走位表",
-    notes: "", abbr: null, template: null, defaultEditRoles: [], createdBy: TEST_USER,
+    notes: "", abbr: null, template: null, roleIds: [], createdBy: TEST_USER,
   });
 }
 

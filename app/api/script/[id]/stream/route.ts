@@ -1,9 +1,17 @@
 import { type NextRequest } from "next/server";
 import { registerSSE, removePresence, presenceFrameFor } from "@/lib/server-cache";
-import { getActiveVersionId, getVersion } from "@/lib/db";
+import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
+import { getSession } from "@/lib/session";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access || !hasPermission("script:view", access.permCtx))
+    return Response.json({ error: "无权访问" }, { status: 403 });
+
   const clientId = req.nextUrl.searchParams.get("cid") ?? Math.random().toString(36).slice(2);
   const connectionId = `${clientId}:${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id) ?? '';

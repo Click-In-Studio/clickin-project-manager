@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { canUserAccessProduction } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, updateAsset, deleteAsset, type AssetType } from "@/lib/asset-db";
 import { deleteR2Object } from "@/lib/r2";
 
@@ -9,8 +9,8 @@ type Ctx = { params: Promise<{ id: string; assetId: string }> };
 async function checkAccess(req: NextRequest, id: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, error: Response.json({ error: "未登录" }, { status: 401 }) };
-  const ok = session.isAdmin || (await canUserAccessProduction(session.userId, id));
-  if (!ok) return { session: null, error: Response.json({ error: "权限不足" }, { status: 403 }) };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return { session: null, error: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { session, error: null };
 }
 

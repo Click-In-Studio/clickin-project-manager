@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, listScenesByVersion, getActiveVersionId,
+  getProductionPermissionContext, listScenesByVersion, getActiveVersionId,
   loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion, listMarkerProjectionByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import { diffState } from "@/lib/script-ops";
 import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";
 
@@ -13,9 +13,9 @@ const createId = () => crypto.randomUUID();
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
+  if (!session) return { session: null, access: null };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  return { session, access };
 }
 
 async function resolveProductionVersion(productionId: string, requestedVersionId?: unknown) {
@@ -30,9 +30,11 @@ async function resolveProductionVersion(productionId: string, requestedVersionId
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides } = await getCtx(req, id);
+  const { session, access } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) {
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("script:view", permCtx)) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const resolved = await resolveProductionVersion(id, req.nextUrl.searchParams.get("versionId") ?? undefined);
@@ -47,10 +49,12 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes">) {
   const { id } = await ctx.params;
-  const { session, memberRoles, overrides, isArchived } = await getCtx(req, id);
+  const { session, access } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("script:metadata", session.isAdmin, memberRoles, overrides)) {
+  if (!hasPermission("scene:rename", permCtx)) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
   const body = await req.json();

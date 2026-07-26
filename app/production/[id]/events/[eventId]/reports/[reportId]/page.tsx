@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
-import { getProductionMemberContext, listProductionMembers } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, listProductionMembers } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   getEventReport,
@@ -15,7 +15,7 @@ import {
 } from "@/lib/event-db";
 import {
   loadEventPermContext,
-  canWriteNote, canModerateNotes, REPORT_VIEWER_ROLES,
+  canWriteNote, canModerateNotes, isReportViewer,
   canReplyToReport,
 } from "@/lib/event-permissions";
 import ReportViewClient from "@/components/ReportViewClient";
@@ -82,27 +82,29 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
     );
   }
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!_prodAccess) redirect("/");
+  const { permCtx: prodPermCtx } = _prodAccess;
+  if (!hasPermission("event:follow", prodPermCtx)) redirect("/");
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) redirect(`/production/${productionId}/events`);
 
-  const canViewFull = hasPermission("event:view_full", session.isAdmin, memberRoles, overrides);
-  const isReportViewer = session.isAdmin || memberRoles?.some(r => REPORT_VIEWER_ROLES.has(r)) || false;
+  const canViewFull = hasPermission("event:edit", prodPermCtx);
+  const canViewReportUnpublished = isReportViewer(prodPermCtx);
 
   // Event visibility: directors/SM can see draft events; others need published/completed
-  if (!canViewFull && !isReportViewer && !VISIBLE_STATUSES.has(event.status))
+  if (!canViewFull && !canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   const report = await getEventReport(reportId, eventId);
   if (!report) redirect(`/production/${productionId}/events/${eventId}/view`);
 
   // Report visibility: published for everyone; unpublished only for SM/director roles
-  if (!report.publishedAt && !isReportViewer)
+  if (!report.publishedAt && !canViewReportUnpublished)
     redirect(`/production/${productionId}/events/${eventId}/view`);
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
   const [notes, departments, replies, allMembers] = await Promise.all([
     listReportNotes(reportId),
@@ -115,9 +117,9 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
     await markReportRead(reportId, session.userId);
   }
 
-  const userCanWriteNote = canWriteNote(session.isAdmin, memberRoles, permCtx);
-  const userCanModerate = canModerateNotes(session.isAdmin, memberRoles);
-  const userCanReply = canReplyToReport(session.isAdmin, permCtx.isFollower, permCtx.isInCall);
+  const userCanWriteNote = canWriteNote(prodPermCtx, eventPermCtx);
+  const userCanModerate = canModerateNotes(prodPermCtx);
+  const userCanReply = canReplyToReport(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);
 
   return (
     <ReportViewClient
@@ -133,7 +135,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
       isPublished={!!report.publishedAt}
       replies={replies}
       canReply={userCanReply}
-      memberDeptIds={permCtx.memberDeptIds}
+      memberDeptIds={eventPermCtx.memberDeptIds}
       members={allMembers.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
     />
   );

@@ -180,16 +180,16 @@ export function patchAffectsMarkerProjection(patch: ScriptPatch, prevState: Scri
 // ─── Permission classification ────────────────────────────────────────────────
 
 export type ScriptPermissions = {
-  "script:edit": boolean;
-  "script:metadata": boolean;
-  "script:rehearsal_mark": boolean;
+  "script:edit_block": boolean;
+  "scene:rename": boolean;
+  "rehearsal_mark:create": boolean;
 };
 
 function addMarkerPermission(block: Block, needed: Set<keyof ScriptPermissions>): void {
   if (block.type === "rehearsal_marker") {
-    needed.add("script:rehearsal_mark");
+    needed.add("rehearsal_mark:create");
   } else if (block.type === "chapter_marker" || block.type === "scene_marker") {
-    needed.add("script:metadata");
+    needed.add("scene:rename");
   }
 }
 
@@ -204,19 +204,19 @@ export function requiredPermissions(
   const needed = new Set<keyof ScriptPermissions>();
   const prevBlockMap = new Map(prevState.blocks.map((b) => [b.id, b]));
 
-  if (patch.charOps.length > 0) needed.add("script:metadata");
-  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("script:metadata");
+  if (patch.charOps.length > 0) needed.add("scene:rename");
+  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("scene:rename");
 
   for (const op of patch.blockOps) {
     if (op.op === "insert") {
       if (isMarkerBlock(op.block)) addMarkerPermission(op.block, needed);
-      else needed.add("script:edit");
+      else needed.add("script:edit_block");
       continue;
     }
     if (op.op === "delete") {
       const old = prevBlockMap.get(op.id);
       if (old && isMarkerBlock(old)) addMarkerPermission(old, needed);
-      else needed.add("script:edit");
+      else needed.add("script:edit_block");
       continue;
     }
     if (op.op === "reorder") {
@@ -225,7 +225,7 @@ export function requiredPermissions(
       const nextIndexById = new Map(op.ids.map((id, index) => [id, index]));
       const prevTextOrder = prevState.blocks.filter((block) => !isMarkerBlock(block)).map((block) => block.id).join(",");
       const nextTextOrder = nextBlocks.filter((block) => !isMarkerBlock(block)).map((block) => block.id).join(",");
-      if (prevTextOrder !== nextTextOrder) needed.add("script:edit");
+      if (prevTextOrder !== nextTextOrder) needed.add("script:edit_block");
       for (const block of nextBlocks) {
         if (isMarkerBlock(block) && prevIndexById.get(block.id) !== nextIndexById.get(block.id)) {
           addMarkerPermission(block, needed);
@@ -236,11 +236,11 @@ export function requiredPermissions(
 
     // op === "update" — diff against previous block to see what changed
     const old = prevBlockMap.get(op.block.id);
-    if (!old) { needed.add("script:edit"); continue; }
+    if (!old) { needed.add("script:edit_block"); continue; }
 
     if (isMarkerBlock(op.block) || isMarkerBlock(old)) {
       if (op.block.type !== old.type && (!isMarkerBlock(op.block) || !isMarkerBlock(old))) {
-        needed.add("script:edit");
+        needed.add("script:edit_block");
       }
       addMarkerPermission(op.block, needed);
       addMarkerPermission(old, needed);
@@ -254,9 +254,9 @@ export function requiredPermissions(
       op.block.lyric !== old.lyric ||
       (op.block.forceShowCharacterName ?? false) !== (old.forceShowCharacterName ?? false) ||
       JSON.stringify(op.block.characterIds) !== JSON.stringify(old.characterIds)
-    ) needed.add("script:edit");
-    if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("script:rehearsal_mark");
-    if (op.block.sceneId !== old.sceneId) needed.add("script:metadata");
+    ) needed.add("script:edit_block");
+    if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("rehearsal_mark:create");
+    if (op.block.sceneId !== old.sceneId) needed.add("scene:rename");
   }
 
   return needed;

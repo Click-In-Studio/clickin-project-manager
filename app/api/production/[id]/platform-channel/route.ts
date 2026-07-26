@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 
 // GET /api/production/:id/platform-channel         — get current production-level channel (org_id IS NULL)
 // PUT /api/production/:id/platform-channel         — upsert production-level channel (制作人 only)
@@ -30,8 +30,10 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/production/[
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("production:manage_integrations", permCtx)) {
     return Response.json({ error: "无权配置通知通道" }, { status: 403 });
   }
 
@@ -58,8 +60,10 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides)) {
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("production:manage_integrations", permCtx)) {
     return Response.json({ error: "无权配置通知通道" }, { status: 403 });
   }
 

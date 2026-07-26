@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getEventReport, updateEventReport, deleteEventReport } from "@/lib/event-db";
 import { loadEventPermContext, canWriteReport } from "@/lib/event-permissions";
 import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify";
@@ -13,7 +13,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -21,8 +23,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const existing = await getEventReport(reportId, eventId);
   if (!existing) return Response.json({ error: "记录不存在" }, { status: 404 });
 
-  const permCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canWriteReport(session.isAdmin, memberRoles, overrides, permCtx))
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
+  if (!canWriteReport(permCtx, eventPermCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
@@ -55,9 +57,11 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId, reportId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:publish", session.isAdmin, memberRoles, overrides))
+  if (!hasPermission("event:publish", permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

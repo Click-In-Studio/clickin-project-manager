@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "剧本" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import ScriptEditor from "@/components/ScriptEditor";
 
 export default async function ProductionScriptPage({
@@ -21,11 +21,11 @@ export default async function ProductionScriptPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
-    hasPermission(perm, session.isAdmin, memberRoles, overrides);
+    hasPermission(perm, access.permCtx);
 
   // Resolve initial version: URL param > cookie
   const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -34,9 +34,9 @@ export default async function ProductionScriptPage({
     <ScriptEditor
       productionId={id}
       canEditText={p("script:edit")}
-      canEditMetadata={p("script:metadata")}
-      canEditRehearsalMark={p("script:rehearsal_mark")}
-      canImport={p("manage_permissions")}
+      canEditMetadata={p("scene:rename")}
+      canEditRehearsalMark={p("rehearsal_mark:create")}
+      canImport={p("script:import")}
       versionId={versionId}
     />
   );

@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getActiveVersionId, loadProduction, applyPatchToDB,
+  getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB,
   ensureScriptMarkerMigration, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import { diffState } from "@/lib/script-ops";
 import {
   convertMarker, executeMarkerDeletion, planMarkerDeletion, projectMarkers, resolveMarkerId,
@@ -17,9 +17,9 @@ const META_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDur
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
+  if (!session) return { session: null, access: null };
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  return { session, access };
 }
 
 async function resolveProductionVersion(productionId: string, requestedVersionId?: unknown) {
@@ -33,8 +33,10 @@ async function resolveProductionVersion(productionId: string, requestedVersionId
 async function context(req: NextRequest, productionId: string, requestedVersionId: unknown) {
   const auth = await getCtx(req, productionId);
   if (!auth.session) return { error: Response.json({ error: "未登录" }, { status: 401 }) };
-  if (auth.isArchived) return { error: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
-  if (!hasPermission("script:metadata", auth.session.isAdmin, auth.memberRoles, auth.overrides)) {
+  if (!auth.access) return { error: Response.json({ error: "无权访问" }, { status: 403 }) };
+  const { permCtx, isArchived } = auth.access;
+  if (isArchived) return { error: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
+  if (!hasPermission("scene:rename", permCtx)) {
     return { error: Response.json({ error: "权限不足" }, { status: 403 }) };
   }
   const resolved = await resolveProductionVersion(productionId, requestedVersionId);
@@ -46,7 +48,7 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   if (migration.status === "running") return { error: Response.json({ status: "updating", migration }, { status: 202 }) };
   const result = await loadProduction(productionId, resolved.versionId);
   if (!result) return { error: Response.json({ error: "未找到版本" }, { status: 404 }) };
-  return { auth, result, versionId: resolved.versionId };
+  return { permCtx, result, versionId: resolved.versionId };
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes/[sceneId]">) {
@@ -93,9 +95,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
     : { type: body.operation === "whole" ? "whole" : "marker-only", markerId: sceneId };
   if (operation.type === "whole" && !hasPermission(
     "script:edit",
-    current.auth.session.isAdmin,
-    current.auth.memberRoles,
-    current.auth.overrides,
+    current.permCtx,
   )) {
     return Response.json({ error: "删除整段内容需要剧本编辑权限" }, { status: 403 });
   }

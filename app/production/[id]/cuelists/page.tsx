@@ -4,9 +4,9 @@ export const metadata: Metadata = { title: "CUE表" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getProductionName, listCueLists } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
-import { canCreateCueList, availableTemplatesForRoles } from "@/lib/cue-list-types";
+import { getProductionPermissionContext, getProductionName, listCueLists, getUserAllowedCueTypes } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
+import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
 import CueListsManager from "@/components/CueListsManager";
 
 export default async function CueListsPage({
@@ -19,18 +19,24 @@ export default async function CueListsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!_access) redirect("/");
+  const { permCtx } = _access;
+  if (!hasPermission("cue_list:view", permCtx)) redirect("/");
 
-  const [name, cueLists] = await Promise.all([
+  const canCreate = hasPermission("cue_list:create", permCtx);
+  const canCreateAny = hasPermission("cue_list:create_any", permCtx);
+
+  const [name, cueLists, allowedCueTypes] = await Promise.all([
     getProductionName(id),
     listCueLists(id),
+    canCreate && !canCreateAny ? getUserAllowedCueTypes(session.userId, id) : Promise.resolve(null),
   ]);
   if (!name) redirect("/");
 
-  const roles = memberRoles ?? [];
-  const canCreate = canCreateCueList(roles, session.isAdmin);
-  const availableTemplates = availableTemplatesForRoles(roles, session.isAdmin);
+  const availableTemplates = canCreateAny
+    ? CUE_LIST_TEMPLATES
+    : CUE_LIST_TEMPLATES.filter((t) => allowedCueTypes?.includes(t.key));
 
   return (
     <CueListsManager

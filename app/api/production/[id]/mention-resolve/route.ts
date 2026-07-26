@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getMarkerLabelIndex, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getMarkerLabelIndex, getVersion } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
 import { computePageMap } from "@/lib/script-page";
@@ -39,10 +39,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const { memberRoles, overrides } = await getProductionMemberContext(
+  const access = await getProductionPermissionContext(
     session.userId, session.isAdmin, productionId
   );
-  if (!hasPermission("script:read", session.isAdmin, memberRoles, overrides))
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("script:view", permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as ResolveInput;

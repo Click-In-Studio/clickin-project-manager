@@ -2,7 +2,14 @@ import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
-import type { Permission, PermissionOverrides } from "./roles";
+import type { Permission as AtomicPermission, PermissionContext } from "./permissions";
+
+export type ProductionAccess = {
+  permCtx: PermissionContext;
+  isArchived: boolean;
+};
+import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION } from "./permissions";
+import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
@@ -2284,6 +2291,70 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
 export async function createProduction(id: string, name: string): Promise<void> {
   await getPool().query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
   await createInitialVersion(id);
+  await seedProductionRoles(id);
+}
+
+/** Populate production_role + production_role_permission + production_role_cue_type from templates. */
+export async function seedProductionRoles(productionId: string): Promise<void> {
+  const pool = getPool();
+
+  // Build cue-type map: roleName → cue_type[]
+  const roleCueTypes = new Map<string, string[]>();
+  for (const tpl of CUE_LIST_TEMPLATES) {
+    for (const role of tpl.creatorRoles) {
+      const types = roleCueTypes.get(role) ?? [];
+      types.push(tpl.key);
+      roleCueTypes.set(role, types);
+    }
+  }
+
+  const entries = Object.entries(ROLE_TEMPLATE_PERMISSIONS);
+  for (const [roleName, perms] of entries) {
+    const roleId = `r_${productionId}_${encodeURIComponent(roleName)}`;
+    await pool.query(
+      `INSERT INTO production_role (id, production_id, name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (production_id, name) DO NOTHING`,
+      [roleId, productionId, roleName],
+    );
+    // Re-fetch actual id in case of conflict (row existed, our roleId may differ)
+    const roleRow = await pool.query<{ id: string }>(
+      "SELECT id FROM production_role WHERE production_id = $1 AND name = $2",
+      [productionId, roleName],
+    );
+    const actualId = roleRow.rows[0].id;
+    if (perms.length > 0) {
+      await pool.query(
+        `INSERT INTO production_role_permission (role_id, permission_key)
+         SELECT $1, unnest($2::text[])
+         ON CONFLICT DO NOTHING`,
+        [actualId, perms],
+      );
+    }
+    const cueTypes = roleCueTypes.get(roleName);
+    if (cueTypes?.length) {
+      await pool.query(
+        `INSERT INTO production_role_cue_type (role_id, cue_type)
+         SELECT $1, unnest($2::text[])
+         ON CONFLICT DO NOTHING`,
+        [actualId, cueTypes],
+      );
+    }
+  }
+}
+
+/** Returns cue_type keys the user is allowed to create in a production, based on production_role_cue_type. */
+export async function getUserAllowedCueTypes(userId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ cue_type: string }>(
+    `SELECT DISTINCT prct.cue_type
+     FROM production_role_cue_type prct
+     JOIN production_role pr ON pr.id = prct.role_id
+     JOIN production_member pm ON pm.production_id = pr.production_id
+       AND pr.name = ANY(pm.roles)
+     WHERE pm.user_id = $1 AND pr.production_id = $2`,
+    [userId, productionId],
+  );
+  return res.rows.map((r) => r.cue_type);
 }
 
 export async function deleteProduction(id: string): Promise<void> {
@@ -2422,13 +2493,6 @@ export async function listAllUsers(): Promise<UserInfo[]> {
   return res.rows.map(r => ({ userId: r.user_id, openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
 }
 
-export async function canUserAccessProduction(userId: string, productionId: string): Promise<boolean> {
-  const res = await getPool().query<{ count: string }>(
-    "SELECT count(*)::text FROM production_member WHERE user_id = $1 AND production_id = $2",
-    [userId, productionId],
-  );
-  return parseInt(res.rows[0].count) > 0;
-}
 
 /** Returns the user's roles in the production, or null if they are not a member. */
 export async function getProductionMemberRoles(
@@ -2442,23 +2506,10 @@ export async function getProductionMemberRoles(
   return res.rows.length ? res.rows[0].roles : null;
 }
 
-export async function getPermissionOverrides(
-  productionId: string,
-  userId: string,
-): Promise<PermissionOverrides> {
-  const res = await getPool().query<{ permission: string; granted: boolean }>(
-    "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
-    [productionId, userId],
-  );
-  const map: PermissionOverrides = new Map();
-  for (const row of res.rows) map.set(row.permission as Permission, row.granted);
-  return map;
-}
-
 export async function setPermissionOverride(
   productionId: string,
   userId: string,
-  permission: Permission,
+  permission: AtomicPermission,
   granted: boolean | null,
 ): Promise<void> {
   if (granted === null) {
@@ -2492,22 +2543,97 @@ export async function getAllPermissionOverrides(
   return result;
 }
 
-/** Fetch roles + overrides + archived status for a single user in parallel. */
-export async function getProductionMemberContext(
+/**
+ * New permission context for the atomic permission system.
+ * Queries production_role_permission via role name JOIN; falls back to static
+ * templates from lib/permissions.ts when the production has no role records yet.
+ * Also returns department membership for hasScopedPermission dept checks.
+ */
+export async function getProductionPermissionContext(
   userId: string,
   isAdmin: boolean,
   productionId: string,
-): Promise<{ memberRoles: string[] | null; overrides: PermissionOverrides; isArchived: boolean }> {
-  const [memberRoles, overrides, archivedRow] = await Promise.all([
-    getProductionMemberRoles(userId, productionId),
-    getPermissionOverrides(productionId, userId),
-    getPool().query<{ archived_at: Date | null }>(
+): Promise<ProductionAccess | null> {
+  const pool = getPool();
+
+  const [memberRow, dbPermsRow, overridesRow, deptRow, archivedRow] = await Promise.all([
+    // Is user a member? And what are their role strings?
+    pool.query<{ roles: string[] }>(
+      "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
+      [userId, productionId],
+    ),
+    // Try DB-backed permissions first (production_role populated after creation/backfill)
+    pool.query<{ permission_key: string }>(
+      `SELECT DISTINCT prp.permission_key
+       FROM production_member pm
+       JOIN production_role pr
+         ON pr.production_id = pm.production_id AND pr.name = ANY(pm.roles)
+       JOIN production_role_permission prp ON prp.role_id = pr.id
+       WHERE pm.user_id = $1 AND pm.production_id = $2`,
+      [userId, productionId],
+    ),
+    // Personal overrides (permission key column stores new atomic keys post-migration,
+    // old keys are cast and silently ignored at runtime)
+    pool.query<{ permission: string; granted: boolean }>(
+      "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    ),
+    // Department memberships
+    pool.query<{ department_id: string; is_poc: boolean }>(
+      `SELECT edm.department_id, edm.is_poc
+       FROM event_department_member edm
+       JOIN event_department ed ON ed.id = edm.department_id
+       WHERE edm.user_id = $1 AND ed.production_id = $2 AND edm.is_member = true`,
+      [userId, productionId],
+    ),
+    pool.query<{ archived_at: Date | null }>(
       "SELECT archived_at FROM production WHERE id = $1",
       [productionId],
     ),
   ]);
-  void isAdmin;
-  return { memberRoles, overrides, isArchived: archivedRow.rows[0]?.archived_at != null };
+
+  const isMember = memberRow.rows.length > 0;
+  if (!isAdmin && !isMember) return null;
+
+  let memberPermissions: Set<AtomicPermission> | null = null;
+
+  if (isMember) {
+    if (dbPermsRow.rows.length > 0) {
+      // DB records exist: use them
+      memberPermissions = new Set(
+        dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
+      );
+    } else {
+      // Fallback: derive permissions from static templates using existing role strings
+      const roleStrings = memberRow.rows[0].roles;
+      const perms = new Set<AtomicPermission>(MEMBER_BASE_PERMISSIONS);
+      for (const role of roleStrings) {
+        const templatePerms =
+          ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
+        if (templatePerms) {
+          for (const p of templatePerms) perms.add(p);
+        }
+      }
+      memberPermissions = perms;
+    }
+  }
+
+  const overrides = new Map<AtomicPermission, boolean>();
+  for (const row of overridesRow.rows) {
+    overrides.set(row.permission as AtomicPermission, row.granted);
+  }
+
+  const deptIds: string[] = [];
+  const pocDeptIds: string[] = [];
+  for (const row of deptRow.rows) {
+    deptIds.push(row.department_id);
+    if (row.is_poc) pocDeptIds.push(row.department_id);
+  }
+
+  return {
+    permCtx: { userId, isAdmin, memberPermissions, overrides, deptIds, pocDeptIds },
+    isArchived: archivedRow.rows[0]?.archived_at != null,
+  };
 }
 
 export async function isProductionArchived(productionId: string): Promise<boolean> {
@@ -3285,14 +3411,14 @@ import type { CueList, CueListPermissionRow } from "./cue-list-types";
 
 type CueListRow = {
   id: string; production_id: string; name: string; notes: string;
-  abbr: string | null; template: string | null; default_edit_roles: string[];
+  abbr: string | null; template: string | null;
   created_by: string; created_by_name: string; created_at: Date;
 };
 
 function rowToCueList(r: CueListRow): CueList {
   return {
     id: r.id, productionId: r.production_id, name: r.name, notes: r.notes,
-    abbr: r.abbr, template: r.template, defaultEditRoles: r.default_edit_roles,
+    abbr: r.abbr, template: r.template,
     createdBy: r.created_by, createdByName: r.created_by_name,
     createdAt: r.created_at.toISOString(),
   };
@@ -3301,7 +3427,7 @@ function rowToCueList(r: CueListRow): CueList {
 export async function listCueLists(productionId: string): Promise<CueList[]> {
   const res = await getPool().query<CueListRow>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
-            cl.default_edit_roles, cl.created_by, fu.name AS created_by_name, cl.created_at
+            cl.created_by, fu.name AS created_by_name, cl.created_at
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
@@ -3313,19 +3439,42 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
 
 export async function createCueList(data: {
   id: string; productionId: string; name: string; notes: string;
-  abbr: string | null; template: string | null; defaultEditRoles: string[]; createdBy: string;
+  abbr: string | null; template: string | null; roleIds: string[]; createdBy: string;
 }): Promise<void> {
-  await getPool().query(
-    `INSERT INTO cue_list (id, production_id, name, notes, abbr, template, default_edit_roles, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.defaultEditRoles, data.createdBy]
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO cue_list (id, production_id, name, notes, abbr, template, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy]
+    );
+    // Creator gets a personal edit grant so all access grants live in one table.
+    await client.query(
+      `INSERT INTO cue_list_permission (cue_list_id, user_id, can_edit) VALUES ($1, $2, true)
+       ON CONFLICT (cue_list_id, user_id) DO NOTHING`,
+      [data.id, data.createdBy]
+    );
+    if (data.roleIds.length > 0) {
+      const values = data.roleIds.map((_, i) => `($1, $${i + 2})`).join(", ");
+      await client.query(
+        `INSERT INTO cue_list_role (cue_list_id, role_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+        [data.id, ...data.roleIds]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getCueList(id: string, productionId: string): Promise<CueList | null> {
   const res = await getPool().query<CueListRow>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
-            cl.default_edit_roles, cl.created_by, fu.name AS created_by_name, cl.created_at
+            cl.created_by, fu.name AS created_by_name, cl.created_at
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.id = $1 AND cl.production_id = $2`,
@@ -3333,6 +3482,71 @@ export async function getCueList(id: string, productionId: string): Promise<CueL
   );
   if (!res.rows.length) return null;
   return rowToCueList(res.rows[0]);
+}
+
+/** Returns the set of role names defined for a production (from production_role table). */
+export async function getProductionRoleNames(productionId: string): Promise<Set<string>> {
+  const res = await getPool().query<{ name: string }>(
+    `SELECT name FROM production_role WHERE production_id = $1`,
+    [productionId],
+  );
+  return new Set(res.rows.map((r) => r.name));
+}
+
+/** Resolves role names to production_role IDs for the given production. */
+export async function resolveRoleIdsByNames(productionId: string, names: string[]): Promise<string[]> {
+  if (!names.length) return [];
+  const res = await getPool().query<{ id: string }>(
+    `SELECT id FROM production_role WHERE production_id = $1 AND name = ANY($2)`,
+    [productionId, names]
+  );
+  return res.rows.map(r => r.id);
+}
+
+/**
+ * Returns true if the user has edit access to this cue list.
+ * Checks cue_list_permission override first (grant or deny), then falls back to role-based access.
+ */
+export async function hasListAccess(cueListId: string, userId: string): Promise<boolean> {
+  const res = await getPool().query<{ has_access: boolean | null }>(
+    `SELECT CASE
+       WHEN clp.can_edit IS NOT NULL THEN clp.can_edit
+       ELSE EXISTS (
+         SELECT 1 FROM cue_list_role clr
+         JOIN production_role pr ON pr.id = clr.role_id
+         JOIN production_member pm ON pm.production_id = cl.production_id
+           AND pm.user_id = $2 AND pr.name = ANY(pm.roles)
+         WHERE clr.cue_list_id = cl.id
+       )
+     END AS has_access
+     FROM cue_list cl
+     LEFT JOIN cue_list_permission clp ON clp.cue_list_id = cl.id AND clp.user_id = $2
+     WHERE cl.id = $1`,
+    [cueListId, userId]
+  );
+  return (res.rows[0]?.has_access) === true;
+}
+
+/**
+ * Returns user IDs of all members who currently have edit access to a cue list
+ * (via personal grant OR role match), excluding those with explicit deny overrides.
+ * Used for cue warning notifications.
+ */
+export async function listCueListRoleMembers(cueListId: string): Promise<string[]> {
+  const res = await getPool().query<{ user_id: string }>(
+    `SELECT DISTINCT pm.user_id
+     FROM cue_list_role clr
+     JOIN production_role pr ON pr.id = clr.role_id
+     JOIN production_member pm ON pm.production_id = pr.production_id
+       AND pr.name = ANY(pm.roles)
+     WHERE clr.cue_list_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM cue_list_permission clp
+         WHERE clp.cue_list_id = $1 AND clp.user_id = pm.user_id AND NOT clp.can_edit
+       )`,
+    [cueListId]
+  );
+  return res.rows.map(r => r.user_id);
 }
 
 export async function updateCueList(
@@ -4472,9 +4686,9 @@ export async function cowCueRevisionForMount(
 }
 
 /** All productions where the user has a membership role (regardless of SA status). */
-export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null }[]> {
-  const res = await getPool().query<{ id: string; name: string; archived_at: Date | null }>(
-    `SELECT p.id, p.name, p.archived_at
+export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null; roles: string[] }[]> {
+  const res = await getPool().query<{ id: string; name: string; archived_at: Date | null; roles: string[] }>(
+    `SELECT p.id, p.name, p.archived_at, pm.roles
      FROM production p
      JOIN production_member pm ON pm.production_id = p.id
      WHERE pm.user_id = $1
@@ -4485,6 +4699,7 @@ export async function listMemberProductions(userId: string): Promise<{ id: strin
     id: r.id,
     name: r.name,
     archivedAt: r.archived_at?.toISOString() ?? null,
+    roles: r.roles,
   }));
 }
 

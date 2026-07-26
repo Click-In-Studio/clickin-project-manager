@@ -1,16 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getCueList, listCueListPermissions, setCueListPermission,
+  getProductionPermissionContext, getCueList, listCueListPermissions, setCueListPermission,
 } from "@/lib/db";
-import { canManageCueListPermissions } from "@/lib/cue-list-types";
-
-async function getCtx(req: NextRequest, productionId: string) {
-  const session = getSession(req.cookies);
-  if (!session) return { session: null, memberRoles: null, overrides: new Map(), isArchived: false };
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  return { session, memberRoles, overrides, isArchived };
-}
+import { hasScopedPermission } from "@/lib/permissions";
 
 // PATCH /api/production/[id]/cuelists/[cueListId]/permissions
 // body: { userId: string; canEdit: boolean | null }  (null = remove override)
@@ -19,13 +12,18 @@ export async function PATCH(
   ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]/permissions">
 ) {
   const { id, cueListId } = await ctx.params;
-  const { session, memberRoles, isArchived } = await getCtx(req, id);
+  const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  if (!canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList))
+  const isCreator = cueList.createdBy === session.userId;
+  if (!hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as { userId: string; canEdit: boolean | null };

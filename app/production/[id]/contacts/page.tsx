@@ -5,12 +5,12 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext,
+  getProductionPermissionContext,
   getProductionName,
   listProductionMembersWithRoles,
   getAllPermissionOverrides,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { hasPermission } from "@/lib/permissions";
 import { listEventDepartments } from "@/lib/event-db";
 import ContactsClient from "@/components/ContactsClient";
 
@@ -24,12 +24,12 @@ export default async function ContactsPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("view_contacts", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
 
-  const canManage = hasPermission("manage_permissions", session.isAdmin, memberRoles, overrides);
-  const canImport = hasPermission("import_contacts", session.isAdmin, memberRoles, overrides);
-  const canManageDepts = hasPermission("dept:manage", session.isAdmin, memberRoles, overrides);
+  const canManage = hasPermission("members:manage_overrides", access.permCtx);
+  const canImport = hasPermission("contacts:import", access.permCtx);
+  const canManageDepts = hasPermission("dept:create", access.permCtx);
 
   const [name, members, allOverrides, departments] = await Promise.all([
     getProductionName(id),

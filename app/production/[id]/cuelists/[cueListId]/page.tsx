@@ -3,18 +3,18 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
-  getProductionMemberContext, getProductionName,
+  getProductionPermissionContext, getProductionName,
   getCueList, listCueListPermissions, listProductionMembersWithRoles,
+  hasListAccess, listCueListRoleMembers,
 } from "@/lib/db";
+import { hasPermission, hasScopedPermission } from "@/lib/permissions";
+import CueListDetail from "@/components/CueListDetail";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; cueListId: string }> }): Promise<Metadata> {
   const { id, cueListId } = await params;
   const cueList = await getCueList(cueListId, id);
   return { title: cueList?.name ?? "CUE表" };
 }
-import { hasPermission } from "@/lib/roles";
-import { canEditCueList, canManageCueListPermissions } from "@/lib/cue-list-types";
-import CueListDetail from "@/components/CueListDetail";
 
 export default async function CueListDetailPage({
   params,
@@ -26,19 +26,22 @@ export default async function CueListDetailPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, id);
-  if (!hasPermission("cue:read", session.isAdmin, memberRoles, overrides)) redirect("/");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access || !hasPermission("cue_list:view", access.permCtx)) redirect("/");
+  const { permCtx } = access;
 
-  const [name, cueList, permissions, members] = await Promise.all([
+  const [name, cueList, permissions, members, canEdit, roleEditorUserIds] = await Promise.all([
     getProductionName(id),
     getCueList(cueListId, id),
     listCueListPermissions(cueListId),
     listProductionMembersWithRoles(id),
+    hasListAccess(cueListId, session.userId),
+    listCueListRoleMembers(cueListId),
   ]);
   if (!name || !cueList) redirect(`/production/${id}/cuelists`);
 
-  const canEdit = canEditCueList(session.userId, memberRoles, session.isAdmin, cueList, permissions);
-  const canManage = canManageCueListPermissions(session.userId, memberRoles, session.isAdmin, cueList);
+  const isCreator = cueList.createdBy === session.userId;
+  const canManage = hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx);
 
   return (
     <CueListDetail
@@ -47,6 +50,7 @@ export default async function CueListDetailPage({
       initialCueList={cueList}
       initialPermissions={permissions}
       members={members}
+      roleEditorUserIds={roleEditorUserIds}
       canEdit={canEdit}
       canManage={canManage}
       myUserId={session.userId}

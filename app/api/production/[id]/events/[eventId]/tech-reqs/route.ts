@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext } from "@/lib/db";
-import { hasPermission } from "@/lib/roles";
+import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
 import { loadEventPermContext, canEditTechReq } from "@/lib/event-permissions";
 import { buildAwaitingReqCard } from "@/lib/feishu-bot";
@@ -18,12 +18,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
-  if (!hasPermission("event:follow", session.isAdmin, memberRoles, overrides))
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx } = access;
+  if (!hasPermission("event:follow", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
-  if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
+  if (!event) return Response.json({ error: "事件��存在" }, { status: 404 });
 
   const techReqs = await listEventTechReqs(eventId);
   return Response.json({ techReqs });
@@ -33,7 +35,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId, eventId } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { memberRoles, overrides, isArchived } = await getProductionMemberContext(session.userId, session.isAdmin, productionId);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -45,11 +49,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     assignees?: { userId: string; name: string }[];
   };
   const title = body.title?.trim();
-  if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
+  if (!title) return Response.json({ error: "标题不���为空" }, { status: 400 });
 
-  // Allow if role-based edit OR POC of the target department
-  const permCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canEditTechReq(session.isAdmin, memberRoles, overrides, permCtx, body.departmentId ?? null))
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
+  if (!canEditTechReq(permCtx, eventPermCtx, body.departmentId ?? null))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const techReq = await createEventTechReq({
