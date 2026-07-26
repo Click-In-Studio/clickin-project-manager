@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { DEFAULT_COLUMNS, type TableViewConfigData, getDefaultViewConfig } from "./SceneTableView";
 
 type Props = {
@@ -10,8 +10,6 @@ type Props = {
 };
 
 export default function TableColumnSettings({ config, onChange, onClose }: Props) {
-  const [localOrder, setLocalOrder] = useState<string[]>(config.columnOrder);
-  const [localVisible, setLocalVisible] = useState<string[]>(config.visibleColumns);
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -27,12 +25,10 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
   }, [onClose]);
 
   const toggleColumn = (key: string) => {
-    setLocalVisible((prev) => {
-      if (prev.includes(key)) {
-        return prev.filter((k) => k !== key);
-      }
-      return [...prev, key];
-    });
+    const newVisible = config.visibleColumns.includes(key)
+      ? config.visibleColumns.filter((k) => k !== key)
+      : [...config.visibleColumns, key];
+    onChange({ ...config, visibleColumns: newVisible });
   };
 
   const handleDragStart = (key: string) => {
@@ -45,34 +41,20 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
 
   const handleDragEnd = () => {
     if (dragItem.current && dragOverItem.current && dragItem.current !== dragOverItem.current) {
-      const newOrder = [...localOrder];
+      const newOrder = [...config.columnOrder];
       const dragIndex = newOrder.indexOf(dragItem.current);
       const dropIndex = newOrder.indexOf(dragOverItem.current);
       newOrder.splice(dragIndex, 1);
       newOrder.splice(dropIndex, 0, dragItem.current);
-      setLocalOrder(newOrder);
+      onChange({ ...config, columnOrder: newOrder });
     }
     dragItem.current = null;
     dragOverItem.current = null;
   };
 
-  const handleApply = () => {
-    onChange({
-      ...config,
-      columnOrder: localOrder,
-      visibleColumns: localVisible,
-    });
-    onClose();
-  };
-
-  const handleReset = () => {
-    onChange(getDefaultViewConfig());
-    onClose();
-  };
-
-  const columnsByOrder = localOrder.map(
-    (key) => DEFAULT_COLUMNS.find((c) => c.key === key)!
-  ).filter(Boolean);
+  const columnsByOrder = config.columnOrder
+    .map((key) => DEFAULT_COLUMNS.find((c) => c.key === key)!)
+    .filter(Boolean);
 
   return (
     <div
@@ -96,7 +78,7 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
             <span className="text-zinc-300 text-xs select-none">⋮⋮</span>
             <input
               type="checkbox"
-              checked={localVisible.includes(col.key)}
+              checked={config.visibleColumns.includes(col.key)}
               onChange={() => toggleColumn(col.key)}
               className="rounded border-zinc-300 text-zinc-800 focus:ring-zinc-400"
             />
@@ -106,16 +88,16 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
       </div>
       <div className="px-3 py-2 border-t border-zinc-100 flex gap-2">
         <button
-          onClick={handleReset}
+          onClick={() => onChange(getDefaultViewConfig())}
           className="flex-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded transition-colors"
         >
           重置
         </button>
         <button
-          onClick={handleApply}
+          onClick={onClose}
           className="flex-1 px-2 py-1 text-xs text-white bg-zinc-800 hover:bg-zinc-700 rounded transition-colors"
         >
-          应用
+          关闭
         </button>
       </div>
     </div>

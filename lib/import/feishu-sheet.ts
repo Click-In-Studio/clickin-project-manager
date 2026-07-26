@@ -1,4 +1,5 @@
 import type { SheetMeta, SheetData, SheetCell } from "./types";
+import { extractFeishuText } from "@/lib/feishu-bitable";
 
 const BASE = "https://open.feishu.cn/open-apis";
 
@@ -75,7 +76,7 @@ export async function getSheetValues(
     const pt = Date.now();
 
     const data = await feishuGet<{
-      data: { valueRange: { values?: (string | number | boolean | null)[][] } };
+      data: { valueRange: { values?: unknown[][] } };
     }>(
       `/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}`,
       userToken,
@@ -84,7 +85,7 @@ export async function getSheetValues(
 
     const rows = data.data.valueRange.values ?? [];
     console.log(`[feishu-sheet] page ${page + 1}: got ${rows.length} rows in ${Date.now() - pt}ms`);
-    allRows.push(...rows.map(row => row.map(cell => (cell == null ? "" : String(cell)))));
+    allRows.push(...rows.map(row => row.map(extractFeishuText)));
 
     if (rows.length < PAGE_SIZE || (maxRow && end >= maxRow)) break;
     start += PAGE_SIZE;
@@ -122,6 +123,7 @@ export function parseSheetData(rawRows: string[][]): SheetData {
 
   return { headers, rows, rawHeaders: rawHeader.map(c => c.trim() || null) };
 }
+
 
 function colLetter(idx: number): string {
   let s = "";

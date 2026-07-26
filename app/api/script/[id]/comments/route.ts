@@ -1,11 +1,12 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionMemberContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
-import { sendCard, buildScriptCommentMentionCard } from "@/lib/feishu-bot";
+import { buildScriptCommentMentionCard } from "@/lib/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { getOptedOutUsers } from "@/lib/notification-prefs";
+import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -55,25 +56,27 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     session.userId, session.name, text, mentions,
   );
 
-  // Fire-and-forget: notify mentioned users via card
+  // Fire-and-forget: notify mentioned users via platform adapter
   if (mentions.length > 0) {
-    const appId = process.env.FEISHU_APP_ID ?? "";
     const blockPath = `${BASE_PATH}/production/${productionId}/script#block-${blockId}?open_comment=true`;
-    const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(blockPath)}`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
-    const [optedOut, productionName, userIdToOpenId] = await Promise.all([
+    const [optedOut, productionName, targets] = await Promise.all([
       getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
       getProductionName(productionId).catch(() => null),
-      batchGetFeishuOpenIds(mentionUserIds).catch(() => new Map<string, string>()),
+      batchResolveNotificationTargets(mentionUserIds, productionId),
     ]);
-    const card = buildScriptCommentMentionCard(session.name, productionName ?? "制作", text, url);
     for (const m of mentions) {
       if (optedOut.has(m.userId)) continue;
-      const openId = userIdToOpenId.get(m.userId);
-      if (!openId) continue;
-      sendCard(openId, card).catch(e =>
-        console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message)
-      );
+      const target = targets.get(m.userId);
+      if (!target) continue;
+      const actionUrl = target.adapter.buildActionUrl(blockPath);
+      const card = buildScriptCommentMentionCard(session.name, productionName ?? "制作", text, actionUrl);
+      target.adapter.sendDirectMessage(target.platformUserId, {
+        text: `${session.name} 在剧本评论中提到了你`,
+        title: "评论提及",
+        primaryUrl: actionUrl,
+        richContent: card,
+      }).catch(e => console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message));
     }
   }
 

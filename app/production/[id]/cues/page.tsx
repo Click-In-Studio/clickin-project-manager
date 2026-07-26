@@ -69,8 +69,6 @@ export default async function CuesPage({
   const pageLayout = production.state.config.pageLayout;
   const pageMap: Record<string, number> = computePageMap(production.state.blocks, pageLayout);
 
-  const canManageVersions = hasPermission("script:metadata", session.isAdmin, memberRoles, overrides);
-
   return (
     <CuePage
       productionId={id}
@@ -87,7 +85,6 @@ export default async function CuesPage({
       versions={versions}
       versionId={resolvedVersionId ?? undefined}
       versionStatus={version?.status ?? undefined}
-      canManageVersions={canManageVersions}
     />
   );
 }

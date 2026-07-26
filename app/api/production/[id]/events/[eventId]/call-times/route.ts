@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, listEventCallTimes, createEventCallTime } from "@/lib/event-db";
-import { addChatMembers } from "@/lib/feishu-chat";
+import { feishuPlatform } from "@/lib/platform/feishu";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // Convert internal userId to Feishu open_id for addChatMembers
     batchGetFeishuOpenIds([body.userId]).then(m => {
       const openId = m.get(body.userId!);
-      if (openId) addChatMembers(event.chatId!, [openId]).catch(console.error);
+      if (openId) feishuPlatform.addGroupMembers(event.chatId!, [openId]).catch(console.error);
     }).catch(console.error);
   }
 

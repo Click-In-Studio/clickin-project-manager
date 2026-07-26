@@ -3,10 +3,12 @@ import { getSession } from "@/lib/session";
 import { getProductionMemberContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/roles";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
-import { sendChatCard, sendCard, buildAwaitingReqCard } from "@/lib/feishu-bot";
+import { buildAwaitingReqCard } from "@/lib/feishu-bot";
 import { getOptedInUsers } from "@/lib/notification-prefs";
 import { BASE_PATH } from "@/lib/base-path";
 import { getPool } from "@/lib/pg";
+import { feishuPlatform } from "@/lib/platform/feishu";
+import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -27,7 +29,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const departmentIds = body.departmentIds ?? [];
   if (!departmentIds.length) return Response.json({ techReqs: [] });
 
-  // Snapshot which depts already have an awaiting req before the upsert
   const existingRes = await getPool().query<{ department_id: string }>(
     `SELECT department_id FROM event_tech_req WHERE event_id = $1 AND department_id = ANY($2) AND status = 'awaiting'`,
     [eventId, departmentIds],
@@ -36,26 +37,40 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const techReqs = await upsertAwaitingTechReqs(eventId, departmentIds, body.scheduleItemId);
 
-  // Send notification for newly created reqs only
-  const appId = process.env.FEISHU_APP_ID ?? "";
   for (const req of techReqs) {
     if (!req.departmentId || alreadyExisting.has(req.departmentId)) continue;
     const dept = await getEventDepartment(req.departmentId, productionId);
     if (!dept?.chatId || !dept.pocUserIds.length) continue;
+
     const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs/${req.id}`;
-    const url = `https://applink.feishu.cn/client/web_app/open?appId=${appId}&path=${encodeURIComponent(reqPath)}`;
+    // Feishu open_ids still needed for @mention syntax inside the card body
     const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
     const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
-    const card = buildAwaitingReqCard(req.title || dept.name, event.title, dept.name, pocOpenIds, url);
-    sendChatCard(dept.chatId, card).catch(e => console.error("[awaiting-req] notify failed:", e));
-    // Extra personal DM for POCs who opted in to tech_req_poc
-    getOptedInUsers("tech_req_poc").then((optedIn) => {
-      for (const userId of dept.pocUserIds) {
-        if (!optedIn.has(userId)) continue;
-        const openId = userIdToOpenId.get(userId);
-        if (openId) sendCard(openId, card).catch(e => console.error("[awaiting-req] personal dm failed:", e));
-      }
-    }).catch(() => {});
+    const groupActionUrl = feishuPlatform.buildActionUrl(reqPath);
+    const card = buildAwaitingReqCard(req.title || dept.name, event.title, dept.name, pocOpenIds, groupActionUrl);
+
+    // Group notification via adapter
+    feishuPlatform.sendGroupMessage(dept.chatId, {
+      text: `新需求待确认：${req.title || dept.name}（${event.title}）`,
+      richContent: card,
+    }).catch(e => console.error("[awaiting-req] group notify failed:", e));
+
+    // Personal DM copies for opted-in POCs — routed through platform adapter
+    const [optedIn, targets] = await Promise.all([
+      getOptedInUsers("tech_req_poc"),
+      batchResolveNotificationTargets(dept.pocUserIds, productionId),
+    ]);
+    for (const userId of dept.pocUserIds) {
+      if (!optedIn.has(userId)) continue;
+      const target = targets.get(userId);
+      if (!target) continue;
+      const dmActionUrl = target.adapter.buildActionUrl(reqPath);
+      const dmCard = buildAwaitingReqCard(req.title || dept.name, event.title, dept.name, pocOpenIds, dmActionUrl);
+      target.adapter.sendDirectMessage(target.platformUserId, {
+        text: `新需求待确认：${req.title || dept.name}（${event.title}），查看：${dmActionUrl}`,
+        richContent: dmCard,
+      }).catch(e => console.error("[awaiting-req] personal dm failed:", e));
+    }
   }
 
   return Response.json({ techReqs });

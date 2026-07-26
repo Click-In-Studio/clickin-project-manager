@@ -14,10 +14,12 @@ import type { JSONContent } from "@tiptap/react";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
 import type { MentionSearchResult } from "@/lib/mention-types";
 import {
-  serializeMention, deserializeMention,
+  deserializeMention,
   encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
+import { parseLine, parseToDoc, serializeAtMention } from "@/lib/mention-format";
+import { serializeMention } from "@/lib/mention-types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -235,8 +237,8 @@ const AtMentionExt = Mention.extend({
   addStorage() {
     return {
       markdown: {
-        serialize(state: { write: (s: string) => void }, node: { attrs: { label: string } }) {
-          state.write(`@${node.attrs.label}`);
+        serialize(state: { write: (s: string) => void }, node: { attrs: { id: string | null; label: string } }) {
+          state.write(serializeAtMention(node.attrs.id, node.attrs.label));
         },
       },
     };
@@ -255,48 +257,9 @@ function serializeDoc(editor: ReturnType<typeof useEditor>): string {
         const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
         return serializeMention({ kind, displayMode, id, aux, versionId });
       },
-      atMention: ({ node }) => `@${node.attrs.label}`,
+      atMention: ({ node }) => serializeAtMention(node.attrs.id as string | null, node.attrs.label as string),
     },
   });
-}
-
-function parseLine(line: string): JSONContent[] {
-  const CMENTION = String.raw`\[#[^\]\n]*\](?:\([^\s)"]+(?:\s+"[^"]*")?\))?`;
-  const AT = String.raw`@[\w一-鿿]+`;
-  const parts = line.split(new RegExp(`(${CMENTION}|${AT})`));
-  const nodes: JSONContent[] = [];
-  for (const part of parts) {
-    if (!part) continue;
-    if (/^\[#[^\]]+\]$/.test(part)) {
-      const attrs = deserializeMention(part);
-      if (attrs) { nodes.push({ type: "contentMention", attrs: { ...attrs, label: null } }); continue; }
-    }
-    const legacyM = part.match(/^\[#([^\]]*)\]\(([^\s)"]+)(?:\s+"([^"]*)")?\)$/);
-    if (legacyM) {
-      const [, label, href] = legacyM;
-      const blockIdM = href.match(/#block-([^"?\s]+)/);
-      if (blockIdM) {
-        nodes.push({ type: "contentMention", attrs: { kind: "block", displayMode: "scene", id: blockIdM[1], aux: null, versionId: null, label } });
-        continue;
-      }
-      nodes.push({ type: "text", text: `#${label}` });
-      continue;
-    }
-    const am = part.match(/^@([\w一-鿿]+)$/);
-    if (am) { nodes.push({ type: "atMention", attrs: { id: am[1], label: am[1] } }); continue; }
-    nodes.push({ type: "text", text: part });
-  }
-  return nodes;
-}
-
-function parseToDoc(text: string): JSONContent {
-  return {
-    type: "doc",
-    content: text.split("\n").map((line) => {
-      const inline = parseLine(line);
-      return { type: "paragraph", content: inline.length ? inline : undefined };
-    }),
-  };
 }
 
 // ── Drop state ────────────────────────────────────────────────────────────────
@@ -525,13 +488,23 @@ export default function SmartTextarea({
       if (memberMentionRef.current?.onMentionsChange) {
         const mentioned: MentionMember[] = [];
         const seen = new Set<string>();
+        const members = memberMentionRef.current.members;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         function traverse(node: any) {
-          if ((node.type === "atMention" || node.type === "mention") && node.attrs?.id && !seen.has(node.attrs.id)) {
-            seen.add(node.attrs.id);
-            mentioned.push({ userId: node.attrs.id, name: node.attrs.label ?? node.attrs.id });
+          if (node.type !== "atMention" && node.type !== "mention") {
+            node.content?.forEach(traverse);
+            return;
           }
-          node.content?.forEach(traverse);
+          const label: string | undefined = node.attrs?.label;
+          let userId: string | undefined = node.attrs?.id ?? undefined;
+          if (!userId && label) {
+            const matches = members.filter(m => m.name === label);
+            if (matches.length === 1) userId = matches[0].userId;
+          }
+          if (userId && !seen.has(userId)) {
+            seen.add(userId);
+            mentioned.push({ userId, name: label ?? userId });
+          }
         }
         editor.getJSON().content?.forEach(traverse);
         memberMentionRef.current.onMentionsChange(mentioned);

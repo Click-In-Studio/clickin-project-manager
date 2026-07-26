@@ -78,7 +78,6 @@
 
 - Route Handler 的 `params` 是 `Promise`，需要 `await ctx.params`
 - `cookies()` 和 `headers()` 是异步函数
-- `basePath` 设为 `/app`（见 `next.config.ts`）
 
 在编写路由或中间件前请先阅读 `node_modules/next/dist/docs/` 中的相关说明。
 
@@ -94,7 +93,9 @@
 # ── 核心（必填）──────────────────────────────────────────────────────────────
 FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxx
-FEISHU_REDIRECT_URI=http://127.0.0.1:3000/app/api/oath-callback
+# FEISHU_REDIRECT_URI 已不再需要，redirect_uri 由服务器从请求 Host 头动态构造
+# 本地开发时飞书应用需在「安全设置 → 重定向 URL」中添加：
+#   http://127.0.0.1:3000/api/oath-callback
 
 SESSION_SECRET=any-random-string        # 生产环境必须设置；本地开发可留空（有警告）
 
@@ -145,7 +146,7 @@ npm install
 npm run dev
 ```
 
-访问 `http://127.0.0.1:3000/app`（注意：飞书 OAuth 的回调 URL 必须是 `127.0.0.1`，不是 `localhost`）。
+访问 `http://127.0.0.1:3000`（注意：飞书 OAuth 的回调 URL 必须是 `127.0.0.1`，不是 `localhost`）。
 
 ### R2 CORS（本地调试上传/预览）
 
@@ -321,9 +322,13 @@ R2 不经过服务器中转，客户端直接 PUT：
 
 ```
 用户点击登录
-  → /api/auth/login  → 重定向到飞书授权页
-  → 飞书回调 /api/auth/feishu-code  → 换 token → 写 session cookie → 重定向首页
+  → /api/auth/login  → 根据请求 Host 构造 redirect_uri → 重定向到飞书授权页
+  → 飞书回调 /api/oath-callback  → 换 token → 写 session cookie → 重定向首页
 ```
+
+redirect_uri 动态从 `Host`/`x-forwarded-host` 头构造，支持 `app.*` 和 `backstage.*` 各自独立回调，无需 `FEISHU_REDIRECT_URI` 环境变量。
+
+飞书客户端内嵌浏览器（JSBridge 流程）走 `/api/auth/feishu-code`（POST），由客户端直接拿到 code 后换 token，不经过上述 redirect 流程。
 
 Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容：`{ userId, name, avatarUrl, isAdmin }`（`userId` 为 `app_user.id` UUID）。
 
@@ -391,7 +396,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
 ### 步骤四：导航
 
-在对应的 sidebar/nav 组件里加入新页面的链接。使用 `<Link href="/production/{id}/your-feature">` 而**不是**手动拼 `BASE_PATH`——`<Link>` 会自动加 basePath。只有在 `fetch()`、`<a href>`、`window.location` 等非 Link 场景下才需要 `${BASE_PATH}/...`。
+在对应的 sidebar/nav 组件里加入新页面的链接，直接用 `<Link href="/production/{id}/your-feature">`。`fetch()`、`<a href>`、`window.location` 等非 Link 场景下使用 `${BASE_PATH}/...`（`BASE_PATH` 现在始终为空字符串，等价于直接写 `/...`，保留它只是为了兼容现有代码）。
 
 ### 步骤五：部署
 

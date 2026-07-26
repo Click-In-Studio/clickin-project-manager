@@ -173,12 +173,15 @@ export async function getAllRecords(
 // objects. Text fields may also be plain strings rather than the [{type,text}] array
 // format described in some API versions. We handle both.
 
-function extractText(value: unknown): string {
+/** Extract plain text from a Feishu cell value.
+ *  Handles primitives, null, rich-text arrays [{text:string}], and bare objects. */
+export function extractFeishuText(value: unknown): string {
+  if (value == null) return "";
   if (typeof value === "string") return value;
-  if (!Array.isArray(value)) return "";
-  return (value as Array<{ text?: string }>)
-    .map((s) => s.text ?? "")
-    .join("");
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return (value as { text?: unknown }[]).map(s => String(s.text ?? "")).join("");
+  if (typeof value === "object") return String((value as Record<string, unknown>).text ?? "");
+  return String(value);
 }
 
 function extractSelectName(value: unknown): string | null {
@@ -222,8 +225,8 @@ export function toScriptState(
   if (sortFieldName) {
     const withIdx = records.map((r, i) => ({ r, i }));
     withIdx.sort((a, b) => {
-      const ka = extractText(a.r.fields[sortFieldName]) || null;
-      const kb = extractText(b.r.fields[sortFieldName]) || null;
+      const ka = extractFeishuText(a.r.fields[sortFieldName]) || null;
+      const kb = extractFeishuText(b.r.fields[sortFieldName]) || null;
       if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : 0;
       if (ka) return -1; // records with a key come first
       if (kb) return 1;
@@ -250,8 +253,8 @@ export function toScriptState(
 
     const sceneId = extractSelectName(f["段落"]);
     const characterIds = extractMultiSelectNames(f["角色"]);
-    const content = extractText(f["剧本"]);
-    const rehearsalMark = extractText(f["排练记号"]).trim() || null;
+    const content = extractFeishuText(f["剧本"]);
+    const rehearsalMark = extractFeishuText(f["排练记号"]).trim() || null;
 
     const 类型Name = extractSelectName(f["类型"]) ?? "台词";
     const blockType = 类型Name === "舞台提示" ? "stage" : "dialogue";
@@ -424,7 +427,7 @@ export function toContactRows(
 
   for (const record of records) {
     const f = record.fields;
-    const name = extractText(f[fieldMap.姓名.field_name]).trim();
+    const name = extractFeishuText(f[fieldMap.姓名.field_name]).trim();
     if (!name) continue; // skip blank rows silently
 
     const rawRoles = extractMultiSelectNames(f[fieldMap.职位.field_name]);
@@ -442,8 +445,8 @@ export function toContactRows(
     rows.push({
       name,
       feishuOpenId: fieldMap.人员 ? extractPersonOpenId(f[fieldMap.人员.field_name]) : null,
-      email: fieldMap.邮箱 ? extractText(f[fieldMap.邮箱.field_name]).trim() || null : null,
-      phone: fieldMap.电话 ? extractText(f[fieldMap.电话.field_name]).trim() || null : null,
+      email: fieldMap.邮箱 ? extractFeishuText(f[fieldMap.邮箱.field_name]).trim() || null : null,
+      phone: fieldMap.电话 ? extractFeishuText(f[fieldMap.电话.field_name]).trim() || null : null,
       photoUrl: fieldMap.照片 ? extractAttachmentToken(f[fieldMap.照片.field_name]) : null,
       roles,
     });

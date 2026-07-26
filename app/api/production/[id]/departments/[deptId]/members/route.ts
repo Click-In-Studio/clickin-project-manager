@@ -6,7 +6,7 @@ import {
   getEventDepartment, setDepartmentMembers,
   getDepartmentCurrentEntries, getDeptReqsWithChat,
 } from "@/lib/event-db";
-import { addChatMembers, removeChatMember } from "@/lib/feishu-chat";
+import { feishuPlatform } from "@/lib/platform/feishu";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
@@ -81,12 +81,12 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     const toRemoveOpenIds = toRemoveUserIds.map(id => openIdMap.get(id)).filter((id): id is string => !!id);
     const newPocOpenIds   = newPocUserIds.map(id => openIdMap.get(id)).filter((id): id is string => !!id);
 
-    if (toAddOpenIds.length) await addChatMembers(chatId, toAddOpenIds);
-    await Promise.all(toRemoveOpenIds.map(id => removeChatMember(chatId, id)));
+    if (toAddOpenIds.length) await feishuPlatform.addGroupMembers(chatId, toAddOpenIds);
+    await Promise.all(toRemoveOpenIds.map(id => feishuPlatform.removeGroupMember(chatId, id)));
 
     if (newPocOpenIds.length) {
       const reqsWithChat = await getDeptReqsWithChat(deptId);
-      await Promise.all(reqsWithChat.map(r => addChatMembers(r.chatId, newPocOpenIds)));
+      await Promise.all(reqsWithChat.map(r => feishuPlatform.addGroupMembers(r.chatId, newPocOpenIds)));
     }
   } else if (updated) {
     // No dept chat — still handle POC→req chat sync
@@ -98,7 +98,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       const newPocOpenIds = newPocUserIds.map(id => openIdMap.get(id)).filter((id): id is string => !!id);
       if (newPocOpenIds.length) {
         const reqsWithChat = await getDeptReqsWithChat(deptId);
-        await Promise.all(reqsWithChat.map(r => addChatMembers(r.chatId, newPocOpenIds)));
+        await Promise.all(reqsWithChat.map(r => feishuPlatform.addGroupMembers(r.chatId, newPocOpenIds)));
       }
     }
   }

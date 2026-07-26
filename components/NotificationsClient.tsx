@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { NotifPref } from "@/lib/notification-prefs";
+import { BASE_PATH } from "@/lib/base-path";
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -51,7 +52,7 @@ export default function NotificationsClient({ prefs: initialPrefs }: { prefs: No
     setError(null);
     setPrefs((prev) => prev.map((p) => (p.type === type ? { ...p, enabled } : p)));
     try {
-      const res = await fetch("/api/my/notification-prefs", {
+      const res = await fetch(`${BASE_PATH}/api/my/notification-prefs`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type, enabled }),

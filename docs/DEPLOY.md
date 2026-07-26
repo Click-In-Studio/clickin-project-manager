@@ -40,17 +40,19 @@ sudo -u postgres psql -f /var/www/production-manager/db/setup-agent-db.sql
 在[飞书开放平台](https://open.feishu.cn)创建**自建应用（内部应用）**：
 
 1. **添加应用能力** → 开启「机器人」
-2. **安全设置** → 重定向 URL 添加：
+2. **安全设置** → 重定向 URL 添加（每个托管子域各一条）：
    ```
-   https://<your-domain>/app/api/auth/feishu-code
+   https://app.<your-domain>/api/oath-callback
+   https://backstage.<your-domain>/api/oath-callback
    ```
+   redirect_uri 由服务器根据请求的 Host 头动态构造，无需在 env 里写死。
 3. **权限管理** → 申请以下权限：
    - `contact:user.base:readonly`（读取用户基本信息，登录时获取姓名、头像）
    - `contact:user.id:readonly`（获取 open_id）
    - `im:message:send_as_bot`（Bot 主动推送消息）
    - `im:message`（接收群消息，供 Bot 使用）
 4. **事件与回调 → 事件订阅**：
-   - 请求 URL 填：`https://<your-domain>/app/api/feishu-webhook`
+   - 请求 URL 填：`https://app.<your-domain>/api/feishu-webhook`
    - 添加事件：`im.message.receive_v1`
    - 记录 **Verification Token** 和 **Encrypt Key**
 5. 创建新版本并发布，在企业内对全员开放
@@ -74,7 +76,7 @@ Dashboard → R2 → 对应 Bucket → Settings → CORS Policy：
 
 ```json
 [{
-  "AllowedOrigins": ["https://<your-domain>"],
+  "AllowedOrigins": ["https://app.<your-domain>", "https://backstage.<your-domain>"],
   "AllowedMethods": ["GET", "PUT"],
   "AllowedHeaders": ["*"],
   "MaxAgeSeconds": 3600
@@ -90,7 +92,7 @@ Dashboard → R2 → 对应 Bucket → Settings → CORS Policy：
 ```
 FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxx
-FEISHU_REDIRECT_URI=https://<your-domain>/app/api/auth/feishu-code
+# FEISHU_REDIRECT_URI 已不再需要——redirect_uri 由服务器从 Host 头动态构造
 FEISHU_WEBHOOK_TOKEN=xxxxxxxx
 FEISHU_ENCRYPT_KEY=xxxxxxxx
 
@@ -109,7 +111,7 @@ R2_ACCESS_KEY_ID=xxxxxxxx
 R2_SECRET_ACCESS_KEY=xxxxxxxx
 R2_BUCKET=click-in
 
-APP_BASE_URL=https://<your-domain>
+APP_BASE_URL=https://app.<your-domain>
 INTERNAL_NOTIFY_SECRET=xxxxxxxx   # 随机字符串，用于保护 cron 接口
 
 OPENAI_API_KEY=sk-xxxxxxxx
@@ -128,20 +130,68 @@ ssh <server> "pm2 save"   # 持久化进程列表，开机自启
 
 ### 7. Nginx 反向代理
 
+应用通过子域名访问，无 basePath 前缀。将下面的配置写入 sites-available 并 symlink 到 sites-enabled，然后 `sudo nginx -t && sudo systemctl reload nginx`。
+
 ```nginx
+# app.<your-domain> → production-manager (port 3001)
 server {
     listen 443 ssl;
-    server_name <your-domain>;
+    server_name app.<your-domain>;
+    ssl_certificate /etc/letsencrypt/live/app.<your-domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.<your-domain>/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    location /app {
-        proxy_pass http://localhost:3000;
+    location / {
+        client_max_body_size 32m;
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_cache_bypass $http_upgrade;
     }
 }
+server {
+    listen 80;
+    server_name app.<your-domain>;
+    return 301 https://app.<your-domain>$request_uri;
+}
+
+# backstage.<your-domain> → production-manager (port 3001，与 app 共用同一服务)
+server {
+    listen 443 ssl;
+    server_name backstage.<your-domain>;
+    ssl_certificate /etc/letsencrypt/live/app.<your-domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.<your-domain>/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        client_max_body_size 32m;
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+server {
+    listen 80;
+    server_name backstage.<your-domain>;
+    return 301 https://backstage.<your-domain>$request_uri;
+}
+```
+
+SSL 证书申请（两个子域名可共用一张）：
+
+```bash
+sudo certbot --nginx -d app.<your-domain> -d backstage.<your-domain>
 ```
 
 ### 8. Cron 通知
@@ -154,11 +204,11 @@ crontab -e
 
 ```cron
 # 每天 12:00 CST（04:00 UTC）发送次日 daily call 通知
-0 4 * * *  curl -sX POST https://<your-domain>/app/api/internal/notify/daily-call \
+0 4 * * *  curl -sX POST https://app.<your-domain>/api/internal/notify/daily-call \
              -H "Authorization: Bearer $INTERNAL_NOTIFY_SECRET" >> /var/log/notify-daily.log 2>&1
 
 # 每周日 12:00 CST（04:00 UTC）发送本周 weekly call 通知
-0 4 * * 0  curl -sX POST https://<your-domain>/app/api/internal/notify/weekly-call \
+0 4 * * 0  curl -sX POST https://app.<your-domain>/api/internal/notify/weekly-call \
              -H "Authorization: Bearer $INTERNAL_NOTIFY_SECRET" >> /var/log/notify-weekly.log 2>&1
 ```
 

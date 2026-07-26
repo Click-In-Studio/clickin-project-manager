@@ -2575,6 +2575,28 @@ export async function searchFeishuUsers(query: string): Promise<{
   }));
 }
 
+export async function listAllFeishuUsers(): Promise<{
+  userId: string; openId: string; name: string; avatarUrl: string | null;
+  email: string | null; phone: string | null; hint: string | null;
+}[]> {
+  const res = await getPool().query<{
+    user_id: string; open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
+  }>(
+    `SELECT user_id, open_id, name, avatar_url, email, phone FROM feishu_user ORDER BY name`,
+  );
+  return res.rows.map((r) => ({
+    userId: r.user_id,
+    openId: r.open_id,
+    name: r.name,
+    avatarUrl: r.avatar_url,
+    email: r.email,
+    phone: r.phone,
+    hint: r.email ?? (r.phone && r.phone.length >= 4
+      ? r.phone.replace(/(\d{3})\d+(\d{4})/, "$1****$2")
+      : r.phone),
+  }));
+}
+
 export async function setMemberRoles(
   productionId: string,
   userId: string,
