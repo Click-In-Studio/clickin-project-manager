@@ -2124,6 +2124,36 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
   }));
 }
 
+export type MyProductionEntry = {
+  id: string; name: string; createdAt: string; archivedAt: string | null;
+  sortOrder: number; roles: string[];
+};
+
+export async function listMyProductionsWithRoles(
+  userId: string, isAdmin: boolean,
+): Promise<MyProductionEntry[]> {
+  const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
+  const res = await getPool().query<{
+    id: string; name: string; created_at: Date; archived_at: Date | null;
+    sort_order: number; roles: string[] | null;
+  }>(
+    `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order,
+            pm.roles
+     FROM production p
+     LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
+     WHERE ($2 OR pm.user_id IS NOT NULL)
+     ORDER BY ${orderBy}`,
+    [userId, isAdmin],
+  );
+  return res.rows.map(r => ({
+    id: r.id, name: r.name,
+    createdAt: r.created_at.toISOString(),
+    archivedAt: r.archived_at?.toISOString() ?? null,
+    sortOrder: r.sort_order,
+    roles: r.roles ?? [],
+  }));
+}
+
 export async function updateProductionSortOrders(orderedIds: string[]): Promise<void> {
   if (orderedIds.length === 0) return;
   const pool = getPool();
@@ -3174,6 +3204,41 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
     [productionId]
   );
   return res.rows.map(rowToCueList);
+}
+
+/**
+ * Returns all cue lists for a production together with whether the given user
+ * has edit access to each one (personal grant OR role match, respecting denials).
+ * Runs a single query instead of N×hasListAccess calls.
+ */
+export async function listCueListsWithAccess(
+  productionId: string,
+  userId: string,
+): Promise<(CueList & { canEdit: boolean })[]> {
+  const res = await getPool().query<CueListRow & { can_edit: boolean | null }>(
+    `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
+            cl.created_by, fu.name AS created_by_name, cl.created_at,
+            CASE
+              WHEN clp.can_edit IS NOT NULL THEN clp.can_edit
+              ELSE EXISTS (
+                SELECT 1 FROM cue_list_role clr
+                JOIN production_role pr ON pr.id = clr.role_id
+                JOIN production_member pm
+                  ON pm.production_id = cl.production_id
+                  AND pm.user_id = $2
+                  AND pr.name = ANY(pm.roles)
+                WHERE clr.cue_list_id = cl.id
+              )
+            END AS can_edit
+     FROM cue_list cl
+     JOIN feishu_user fu ON fu.user_id = cl.created_by
+     LEFT JOIN cue_list_permission clp
+       ON clp.cue_list_id = cl.id AND clp.user_id = $2
+     WHERE cl.production_id = $1
+     ORDER BY cl.created_at`,
+    [productionId, userId],
+  );
+  return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit === true }));
 }
 
 export async function createCueList(data: {

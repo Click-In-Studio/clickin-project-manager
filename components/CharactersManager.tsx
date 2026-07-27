@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/db";
 
@@ -36,7 +35,7 @@ function MetaField({
 }) {
   const [draft, setDraft] = useState(value);
   const commit = () => { if (draft !== value) onSave(draft); };
-  const cls = "w-full rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700 outline-none focus:border-zinc-400 resize-none disabled:opacity-50 disabled:cursor-default";
+  const cls = "w-full rounded border border-[var(--line)] bg-zinc-50 px-2 py-1 text-xs text-zinc-700 outline-none focus:border-zinc-400 resize-none disabled:opacity-50 disabled:cursor-default";
   return (
     <div className="space-y-0.5">
       <p className="text-[10px] font-semibold tracking-widest text-zinc-400 uppercase">{label}</p>
@@ -200,7 +199,7 @@ function CharacterEditRow({
 
   return (
     <>
-      <tr className="group border-b border-zinc-100">
+      <tr className="group border-b border-[var(--line)]">
         {/* 姓名 */}
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
@@ -286,7 +285,7 @@ function CharacterEditRow({
       </tr>
 
       {expanded && (
-        <tr className="border-b border-zinc-100 bg-zinc-50">
+        <tr className="border-b border-[var(--line)] bg-zinc-50">
           <td colSpan={4} className="px-6 py-4 space-y-4">
             {char.isAggregate ? (
               <AggregateMembersPanel
@@ -321,7 +320,7 @@ function CharacterEditRow({
             )}
 
             {canEdit && (
-              <div className="border-t border-zinc-200 pt-3">
+              <div className="border-t border-[var(--line)] pt-3">
                 {confirmConvert ? (
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-zinc-500 flex-1">
@@ -400,7 +399,7 @@ function AddCharacterForm({
   };
 
   return (
-    <div className="border-t border-zinc-100 px-4 py-3 space-y-2">
+    <div className="border-t border-[var(--line)] px-4 py-3 space-y-2">
       <div className="flex items-center gap-3">
         <input
           value={draft}
@@ -459,6 +458,10 @@ export default function CharactersManager({ productionId, productionName, initia
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
 
+  useEffect(() => {
+    if (!embedded) window.scrollTo(0, 0);
+  }, [embedded]);
+
   const rename = async (id: string, name: string) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
       method: "PATCH",
@@ -516,66 +519,55 @@ export default function CharactersManager({ productionId, productionName, initia
   };
 
   const card = (
-        <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
-          {characters.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无角色</p>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
-                  <th className="px-4 py-3 font-medium">姓名</th>
-                  <th className="px-4 py-3 font-medium">性别</th>
-                  <th className="px-4 py-3 font-medium">角色属性</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {characters.map((c) => (
-                  <CharacterEditRow
-                    key={c.id}
-                    char={c}
-                    allChars={characters}
-                    canEdit={canEdit}
-                    onRename={(name) => rename(c.id, name)}
-                    onDelete={() => del(c.id)}
-                    onPatchMeta={(fields) => patchMeta(c.id, fields)}
-                    onUpdateMembers={(ids) => updateMembers(c.id, ids)}
-                    onConvert={(toAggregate) => convert(c.id, toAggregate)}
-                    expanded={expandedId === c.id}
-                    onToggleExpand={() => setExpandedId(expandedId === c.id ? null : c.id)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          )}
+    <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
+      {characters.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无角色</p>
+      ) : (
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-[var(--line)] text-left text-xs text-zinc-400">
+              <th className="px-4 py-3 font-medium">姓名</th>
+              <th className="px-4 py-3 font-medium">性别</th>
+              <th className="px-4 py-3 font-medium">角色属性</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {characters.map((c) => (
+              <CharacterEditRow
+                key={c.id}
+                char={c}
+                allChars={characters}
+                canEdit={canEdit}
+                onRename={(name) => rename(c.id, name)}
+                onDelete={() => del(c.id)}
+                onPatchMeta={(fields) => patchMeta(c.id, fields)}
+                onUpdateMembers={(ids) => updateMembers(c.id, ids)}
+                onConvert={(toAggregate) => convert(c.id, toAggregate)}
+                expanded={expandedId === c.id}
+                onToggleExpand={() => setExpandedId(expandedId === c.id ? null : c.id)}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
 
-          {canEdit && (
-            <AddCharacterForm
-              productionId={productionId}
-              allChars={characters}
-              onAdd={(char) => setCharacters((prev) => [...prev, char])}
-              versionId={versionId}
-            />
-          )}
-        </div>
+      {canEdit && (
+        <AddCharacterForm
+          productionId={productionId}
+          allChars={characters}
+          onAdd={(char) => setCharacters((prev) => [...prev, char])}
+          versionId={versionId}
+        />
+      )}
+    </div>
   );
 
   if (embedded) return card;
 
   return (
-    <div className="min-h-screen bg-zinc-100 px-4 py-8">
-      <div className="mx-auto max-w-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <Link href={`/production/${productionId}/script`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
-            ← 返回剧本
-          </Link>
-          <div className="text-right">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Characters</p>
-            <p className="text-sm font-bold text-zinc-500">{productionName}</p>
-          </div>
-        </div>
-        {card}
-      </div>
+    <div style={{ padding: "28px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      {card}
     </div>
   );
 }

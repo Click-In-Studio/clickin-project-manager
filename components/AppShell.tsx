@@ -5,9 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 
-const ROLES = ["制作人 / 舞监", "导演 / 构作", "设计 / 技术", "演员"] as const;
-
-type Production = { id: string; name: string; archivedAt: string | null };
+type Production = { id: string; name: string; archivedAt: string | null; roles: string[] };
 type ShellSession = { name: string; avatarUrl: string | null };
 
 interface AppShellProps {
@@ -16,22 +14,21 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-const SCRIPT_NAV = [
+const CREATION_NAV = [
   { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script" },
   { label: "构作", hint: "章节 · 行动线", path: "dramaturgy" },
-  { label: "表格", hint: "场次 · 角色 · 时长", path: "scenes" },
-  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets" },
+  { label: "角色", hint: "角色 · 人物关系 · 聚合", path: "characters" },
   { label: "Cue", hint: "部门执行设计", path: "cues" },
 ] as const;
 
-const STAGE_NAV = [
-  { label: "人员与角色", hint: "演员 · 部门 · 角色", path: "contacts" },
-  { label: "Event", hint: "围读 · 排练 · 演出", path: "events" },
-  { label: "Task", hint: "任务 · 节点 · 里程碑", path: "tasks" },
-  { label: "Notification", hint: "告知 · 确认 · 处理", path: "notifications" },
-  { label: "计划与日程", hint: "日历 · 甘特 · 执行表", path: "planning" },
+const PRODUCTION_NAV = [
+  { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts" },
+  { label: "日程", hint: "围读 · 排练 · 演出", path: "events" },
+  { label: "任务", hint: "任务 · 节点 · 里程碑", path: "tasks" },
+  { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications" },
   { label: "财务", hint: "预算 · 支出 · 关联", path: "finance" },
-  { label: "实体物料", hint: "道具 · 服装 · 设备", path: "materials" },
+  { label: "物料", hint: "道具 · 服装 · 设备", path: "materials" },
+  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets" },
 ] as const;
 
 function extractProductionId(pathname: string): string | null {
@@ -121,8 +118,6 @@ function BottomNavItem({
 export default function AppShell({ session, productions, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [role, setRole] = useState<string>(ROLES[0]);
-
   if (!session || pathname.startsWith("/login")) {
     return <>{children}</>;
   }
@@ -178,18 +173,14 @@ export default function AppShell({ session, productions, children }: AppShellPro
             </select>
           </label>
 
-          <label className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
-            <span className="hidden lg:block shrink-0">角色视角</span>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              className="border border-[#dfe5e2] bg-[#f4f2ec] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a]"
-            >
-              {ROLES.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </select>
-          </label>
+          {productionId && currentProduction && currentProduction.roles.length > 0 && (
+            <div className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
+              <span className="hidden lg:block shrink-0">我的角色</span>
+              <span className="border border-[#dfe5e2] bg-[#f4f2ec] rounded-lg py-2 px-2.5 text-[#182a2a] text-[12px]">
+                {currentProduction.roles.join(" · ")}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right actions */}
@@ -218,27 +209,86 @@ export default function AppShell({ session, productions, children }: AppShellPro
         {/* Sidebar (desktop only) */}
         <aside className="hidden lg:flex w-[240px] shrink-0 flex-col sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto bg-[#e8e8e1] border-r border-[#dfe5e2] px-3.5 py-5">
           <nav className="flex flex-col gap-0.5 flex-1">
-            {/* Platform */}
-            <NavItem
-              href="/"
-              symbol="⌂"
-              label="我的工作"
-              hint="今天与我有关"
-              active={isHome}
-            />
+            {!productionId && (
+              <div className="mt-1 flex flex-col gap-0.5">
+                <NavItem
+                  href="/"
+                  symbol="⌂"
+                  label="我的工作"
+                  hint="今天与我有关"
+                  active={isHome}
+                />
+                <NavItem
+                  href="/my/projects"
+                  symbol="◈"
+                  label="我的项目"
+                  hint="管理与新建项目"
+                  active={pathname.startsWith("/my/projects")}
+                />
+                <NavItem
+                  href="/my/announcements"
+                  symbol="⊟"
+                  label="公告"
+                  hint="演出公告与风险提醒"
+                  active={pathname.startsWith("/my/announcements")}
+                />
+                <NavItem
+                  href="/my/weekly-call"
+                  symbol="◷"
+                  label="日程"
+                  hint="完整 Weekly Call"
+                  active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")}
+                />
+                <NavItem
+                  href="/my/tasks"
+                  symbol="✓"
+                  label="任务"
+                  hint="需求 · 跟进 · 完成"
+                  active={pathname.startsWith("/my/tasks")}
+                />
+                <NavItem
+                  href="/my/notifications"
+                  symbol="◉"
+                  label="通知提醒"
+                  hint="确认与告知"
+                  active={pathname.startsWith("/my/notifications")}
+                />
+                <NavItem
+                  href="/my/reports"
+                  symbol="≡"
+                  label="报告"
+                  hint="所有演出报告"
+                  active={pathname.startsWith("/my/reports")}
+                />
+              </div>
+            )}
 
             {productionId ? (
               <>
                 <NavItem
                   href={`/production/${productionId}`}
-                  symbol="◇"
-                  label="项目首页"
-                  hint="进度与风险"
+                  symbol="⌂"
+                  label="我的工作"
+                  hint="今天与我有关"
                   active={activeModule === ""}
                 />
 
-                <NavGroup label="剧本侧" color="script" />
-                {SCRIPT_NAV.map((item) => (
+                <NavGroup label="创作侧" color="script" />
+                {CREATION_NAV.map((item) => (
+                  <NavItem
+                    key={item.path}
+                    href={navHref(item.path)}
+                    symbol={item.label.charAt(0)}
+                    label={item.label}
+                    hint={item.hint}
+                    active={isModuleActive(
+                      item.path === "cues" ? ["cues", "cuelists"] : item.path
+                    )}
+                  />
+                ))}
+
+                <NavGroup label="制作侧" color="stage" />
+                {PRODUCTION_NAV.map((item) => (
                   <NavItem
                     key={item.path}
                     href={navHref(item.path)}
@@ -246,20 +296,6 @@ export default function AppShell({ session, productions, children }: AppShellPro
                     label={item.label}
                     hint={item.hint}
                     active={isModuleActive(item.path)}
-                  />
-                ))}
-
-                <NavGroup label="舞台侧" color="stage" />
-                {STAGE_NAV.map((item) => (
-                  <NavItem
-                    key={item.path}
-                    href={navHref(item.path)}
-                    symbol={item.label === "Notification" ? "N" : item.label === "Event" ? "E" : item.label.charAt(0)}
-                    label={item.label}
-                    hint={item.hint}
-                    active={isModuleActive(
-                      item.path === "contacts" ? ["contacts", "characters"] : item.path
-                    )}
                   />
                 ))}
               </>

@@ -10,7 +10,6 @@ import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
 import type { Version, VersionStatus } from "@/lib/db";
-import VersionSelector from "@/components/VersionSelector";
 import CueMountAssets from "@/components/assets/CueMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
@@ -332,7 +331,7 @@ function CueCommentsPanel({
 
   return (
     <div
-      className="fixed right-0 top-[44px] bottom-[44px] z-30 flex w-80 flex-col border-l border-zinc-200 bg-white shadow-xl"
+      className="fixed right-0 top-[108px] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl"
       onClick={e => e.stopPropagation()}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
@@ -1899,16 +1898,18 @@ export default function CuePage({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-100" onClick={handleContainerClick}>
+    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]" onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-zinc-200 shrink-0" onClick={e => e.stopPropagation()}>
-        <Link href={`/production/${productionId}`} className="text-xs text-zinc-400 hover:text-zinc-600 shrink-0">
-          ← {productionName}
-        </Link>
-        <Link href={`/production/${productionId}/cuelists`} className="text-xs text-zinc-400 hover:text-zinc-600 shrink-0 transition-colors">
-          Cue表
-        </Link>
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--line)] shrink-0" onClick={e => e.stopPropagation()}>
+        <div className="flex shrink-0 gap-0.5 rounded-lg bg-[var(--surface-2)] p-0.5">
+          <Link
+            href={`/production/${productionId}/cuelists`}
+            className="rounded-md px-3 py-1 text-[11px] font-bold text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] hover:shadow-sm transition-all"
+          >
+            Cue 表
+          </Link>
+        </div>
         <span className="text-zinc-200">|</span>
         <div className="flex gap-1.5 flex-wrap">
           {cueLists.map((cl, i) => {
@@ -1962,20 +1963,7 @@ export default function CuePage({
           </select>
         </div>
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
-          {versions.length > 0 && (
-            <>
-              <VersionSelector
-                productionId={productionId}
-                versions={versions}
-                currentVersionId={versionId ?? null}
-                onChange={(vid) => {
-                  router.push(`/production/${productionId}/cues?v=${encodeURIComponent(vid)}`);
-                }}
-              />
-              <span className="text-zinc-200 mx-0.5">|</span>
-            </>
-          )}
-          <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-400">
+          <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
             {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
           </span>
           {(["line", "page", "scene"] as const).map(t => (
@@ -2008,7 +1996,7 @@ export default function CuePage({
 
       {/* ── Jump bar panel ── */}
       {jumpTarget && (
-        <div className="shrink-0 border-t border-zinc-100 bg-white px-4 py-2 flex items-center gap-3" onClick={e => e.stopPropagation()}>
+        <div className="shrink-0 border-t border-[var(--line)] bg-[var(--surface)] px-4 py-2 flex items-center gap-3" onClick={e => e.stopPropagation()}>
           {jumpTarget === "scene" ? (
             <>
               <span className="shrink-0 text-xs text-zinc-400">段落跳转</span>
@@ -2334,7 +2322,7 @@ export default function CuePage({
         const commentCount = comments.filter(c => c.contextId === selectedCue.id).length;
         return (
           <div
-            className="shrink-0 bg-white border-t border-zinc-200 px-4 py-2.5 flex items-center gap-3"
+            className="shrink-0 bg-[var(--surface)] border-t border-[var(--line)] px-4 py-2.5 flex items-center gap-3"
             onClick={e => e.stopPropagation()}
           >
             {selectedCue.warning && (

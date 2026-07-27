@@ -20,10 +20,10 @@ export default async function DramaturgyPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string; sceneId?: string; characterId?: string }>;
+  searchParams: Promise<{ v?: string; sceneId?: string }>;
 }) {
   const { id } = await params;
-  const { v, sceneId, characterId } = await searchParams;
+  const { v, sceneId } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -32,7 +32,6 @@ export default async function DramaturgyPage({
   if (!access) redirect("/");
 
   const canEdit = hasPermission("scene:rename", access.permCtx);
-  const canImport = hasPermission("dramaturgy:import", access.permCtx);
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 
@@ -42,7 +41,6 @@ export default async function DramaturgyPage({
   ]);
   if (!name) redirect("/");
 
-  // Resolve version: URL param > cookie > editing version > first
   const validCookieVersionId = cookieVersionId && versions.some(ver => ver.id === cookieVersionId)
     ? cookieVersionId
     : null;
@@ -53,27 +51,24 @@ export default async function DramaturgyPage({
     ?? versions[0]?.id
     ?? null;
 
-  const [scenes, characters] = resolvedVersionId
+  const scenes = resolvedVersionId
     ? await (async () => {
         return Promise.all([
           listMarkerProjectionByVersion(resolvedVersionId),
           listCharactersByVersion(resolvedVersionId),
         ]);
       })()
-    : [[], []];
+    : [];
+
   return (
     <Suspense>
       <Dramaturgy
         productionId={id}
         productionName={name}
-        versions={versions}
         versionId={resolvedVersionId}
         initialScenes={scenes}
-        initialCharacters={characters}
         canEdit={canEdit}
-        canImport={canImport}
         initialSceneId={sceneId}
-        initialCharacterId={characterId}
       />
     </Suspense>
   );

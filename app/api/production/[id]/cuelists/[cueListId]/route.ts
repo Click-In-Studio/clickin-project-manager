@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext,
   getCueList, updateCueList, deleteCueList,
-  listCueListPermissions, hasListAccess,
+  listCueListPermissions, hasListAccess, listCueListRoleMembers,
 } from "@/lib/db";
 import { hasPermission, hasScopedPermission, type PermissionContext } from "@/lib/permissions";
 
@@ -32,7 +32,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
 
   const isCreator = cueList.createdBy === session.userId;
   const canManage = hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx);
-  return Response.json({ cueList, permissions, canEdit, canManage });
+  const roleEditorUserIds = canManage ? await listCueListRoleMembers(cueListId) : [];
+  return Response.json({ cueList, permissions, canEdit, canManage, roleEditorUserIds });
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {
