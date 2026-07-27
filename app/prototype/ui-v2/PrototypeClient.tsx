@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./prototype.module.css";
 
 type View =
@@ -23,6 +23,21 @@ type View =
 type Role = "制作人 / 舞监" | "导演 / 构作" | "设计 / 技术" | "演员";
 type PlanningView = "calendar" | "gantt" | "timetable";
 type ProjectOption = { id: string; organization: string; name: string; avatar: string };
+type PlanningEvent = {
+  id: string; title: string; date: string; start: string; end: string;
+  location: string; status: "筹备中" | "已发布"; milestone: string;
+};
+type PlanningPerson = { id: string; name: string; department: string };
+type RundownLane = { id: string; label: string; owner: string; tone: "main" | "script" | "stage" };
+type RundownItem = {
+  id: string; eventId: string; title: string; start: string; end: string; location: string;
+  laneIds: string[]; participantIds: string[]; type: "call" | "run" | "task" | "break" | "notes";
+  taskIds: string[]; note: string;
+};
+type LinkedPlanTask = {
+  id: string; eventId: string; scheduleItemId: string; title: string;
+  ownerIds: string[]; due: string; status: "待开始" | "进行中" | "已完成" | "有风险";
+};
 
 const VIEW_META: Record<View, { label: string; eyebrow: string; side?: "script" | "stage" }> = {
   home: { label: "我的工作", eyebrow: "平台级" },
@@ -54,6 +69,61 @@ const PROJECTS: ProjectOption[] = [
   { id: "romeo", organization: "棱镜剧团", name: "海边的罗密欧", avatar: "海" },
   { id: "teahouse", organization: "棱镜剧团", name: "茶馆", avatar: "茶" },
   { id: "school", organization: "青年剧社", name: "春季汇演", avatar: "春" },
+];
+
+const PLANNING_PEOPLE: PlanningPerson[] = [
+  { id: "lin", name: "林淼", department: "舞监 / 场务" },
+  { id: "chen", name: "陈洛华", department: "演员" },
+  { id: "wang", name: "王恺镔", department: "灯光" },
+  { id: "zhou", name: "周嘉", department: "音响" },
+  { id: "han", name: "韩松", department: "多媒体" },
+  { id: "xu", name: "徐宁", department: "置景 / 道具" },
+];
+
+const PLANNING_EVENTS: PlanningEvent[] = [
+  { id: "e-tech", title: "第三幕合成排练", date: "7 月 20 日", start: "13:00", end: "16:00", location: "黑匣子 B", status: "已发布", milestone: "第三幕技术闭环" },
+  { id: "e-run", title: "第一次全本联排", date: "7 月 27 日", start: "12:30", end: "18:30", location: "排练厅 A", status: "筹备中", milestone: "全本首次连续运行" },
+  { id: "e-premiere", title: "首演", date: "8 月 13 日", start: "17:00", end: "22:00", location: "城市剧院", status: "筹备中", milestone: "首演交付" },
+];
+
+const RUNDOWN_LANES: RundownLane[] = [
+  { id: "main", label: "主流程", owner: "林淼 · 舞监", tone: "main" },
+  { id: "stage", label: "舞监 / 场务", owner: "林淼 · 徐宁", tone: "stage" },
+  { id: "cast", label: "演员工作", owner: "陈洛华", tone: "stage" },
+  { id: "light", label: "灯光", owner: "王恺镔", tone: "script" },
+  { id: "audio", label: "音响", owner: "周嘉", tone: "script" },
+  { id: "media", label: "多媒体", owner: "韩松", tone: "script" },
+  { id: "props", label: "置景 / 道具", owner: "徐宁", tone: "stage" },
+];
+
+const RUNDOWN_ITEMS: RundownItem[] = [
+  { id: "r-call", eventId: "e-tech", title: "全体 Call · 签到与设备预热", start: "13:00", end: "13:30", location: "黑匣子 B", laneIds: ["all"], participantIds: ["lin", "chen", "wang", "zhou", "han", "xu"], type: "call", taskIds: ["t-checkin"], note: "工作人员提前 30 分钟抵达；演员完成换装。" },
+  { id: "r-stage", eventId: "e-tech", title: "第三幕走位与转场", start: "13:30", end: "14:30", location: "主舞台", laneIds: ["main", "stage", "cast"], participantIds: ["lin", "chen", "xu"], type: "run", taskIds: ["t-route", "t-props"], note: "从海边平台到终场站位，确认右侧通道。" },
+  { id: "r-light", eventId: "e-tech", title: "LX 34–42 编程与联调", start: "13:30", end: "14:30", location: "灯光控制台", laneIds: ["light"], participantIds: ["wang", "lin"], type: "task", taskIds: ["t-light"], note: "LX 38 淡出调整为 5 秒。" },
+  { id: "r-audio", eventId: "e-tech", title: "SD 18–23 音量平衡", start: "13:30", end: "14:15", location: "音响控制台", laneIds: ["audio"], participantIds: ["zhou", "lin"], type: "task", taskIds: ["t-audio"], note: "确认海浪声与对白清晰度。" },
+  { id: "r-media", eventId: "e-tech", title: "V 09–12 海浪素材同步", start: "13:45", end: "14:30", location: "多媒体席", laneIds: ["media"], participantIds: ["han", "lin"], type: "task", taskIds: ["t-media"], note: "视频淡出需与 LX 38 同步。" },
+  { id: "r-props", eventId: "e-tech", title: "平台与红色马克笔就位", start: "13:30", end: "14:00", location: "舞台右侧", laneIds: ["props"], participantIds: ["xu"], type: "task", taskIds: ["t-props"], note: "转场前复核道具清单。" },
+  { id: "r-break", eventId: "e-tech", title: "休息 / 各部门快速复盘", start: "14:30", end: "14:45", location: "休息区", laneIds: ["all"], participantIds: [], type: "break", taskIds: [], note: "有风险项在复跑前上报舞监。" },
+  { id: "r-run", eventId: "e-tech", title: "第三幕连续运行", start: "14:45", end: "15:30", location: "主舞台", laneIds: ["all"], participantIds: ["lin", "chen", "wang", "zhou", "han", "xu"], type: "run", taskIds: ["t-run"], note: "不中断运行；部门问题先记录，结束后统一处理。" },
+  { id: "r-notes", eventId: "e-tech", title: "部门 Notes · 查缺补漏", start: "15:30", end: "16:00", location: "观众席前排", laneIds: ["all"], participantIds: ["lin", "wang", "zhou", "han", "xu"], type: "notes", taskIds: ["t-notes"], note: "未完成事项自动形成部门 Task 草稿。" },
+  { id: "r2-call", eventId: "e-run", title: "全体 Call 与热身", start: "12:30", end: "13:00", location: "排练厅 A", laneIds: ["all"], participantIds: ["lin", "chen"], type: "call", taskIds: [], note: "服化、道具和技术同步签到。" },
+  { id: "r2-run", eventId: "e-run", title: "第一次全本连续运行", start: "13:00", end: "16:00", location: "排练厅 A", laneIds: ["all"], participantIds: ["lin", "chen", "wang", "zhou", "han", "xu"], type: "run", taskIds: ["t-fullrun"], note: "首次验证全本时长与转场节奏。" },
+  { id: "r3-call", eventId: "e-premiere", title: "首演全体 Call · 安检与预热", start: "17:00", end: "18:00", location: "城市剧院", laneIds: ["all"], participantIds: ["lin", "chen", "wang", "zhou", "han", "xu"], type: "call", taskIds: [], note: "演员、技术与前台按首演 Call Sheet 到场。" },
+  { id: "r3-show", eventId: "e-premiere", title: "首演 · 正式演出", start: "19:30", end: "21:45", location: "主舞台", laneIds: ["all"], participantIds: ["lin", "chen", "wang", "zhou", "han", "xu"], type: "run", taskIds: ["t-premiere"], note: "舞监按正式演出流程统一发出 Standby 与 Go。" },
+  { id: "r3-notes", eventId: "e-premiere", title: "谢幕、撤场与演后 Notes", start: "21:45", end: "22:00", location: "主舞台 / 后台", laneIds: ["all"], participantIds: ["lin", "wang", "zhou", "han", "xu"], type: "notes", taskIds: [], note: "记录设备、道具与次日复演事项。" },
+];
+
+const LINKED_PLAN_TASKS: LinkedPlanTask[] = [
+  { id: "t-checkin", eventId: "e-tech", scheduleItemId: "r-call", title: "确认全员签到与 Call", ownerIds: ["lin"], due: "13:10", status: "进行中" },
+  { id: "t-route", eventId: "e-tech", scheduleItemId: "r-stage", title: "确认第三幕转场动线", ownerIds: ["lin", "xu"], due: "14:20", status: "进行中" },
+  { id: "t-light", eventId: "e-tech", scheduleItemId: "r-light", title: "完成 LX 38 淡出修订", ownerIds: ["wang"], due: "14:20", status: "有风险" },
+  { id: "t-audio", eventId: "e-tech", scheduleItemId: "r-audio", title: "确认海浪声压与对白", ownerIds: ["zhou"], due: "14:10", status: "已完成" },
+  { id: "t-media", eventId: "e-tech", scheduleItemId: "r-media", title: "锁定海浪视频最终版", ownerIds: ["han"], due: "14:20", status: "待开始" },
+  { id: "t-props", eventId: "e-tech", scheduleItemId: "r-props", title: "检查平台和关键道具", ownerIds: ["xu"], due: "13:50", status: "已完成" },
+  { id: "t-run", eventId: "e-tech", scheduleItemId: "r-run", title: "记录连续运行问题", ownerIds: ["lin"], due: "15:35", status: "待开始" },
+  { id: "t-notes", eventId: "e-tech", scheduleItemId: "r-notes", title: "分派部门 Notes", ownerIds: ["lin"], due: "16:00", status: "待开始" },
+  { id: "t-fullrun", eventId: "e-run", scheduleItemId: "r2-run", title: "确认全本联排执行清单", ownerIds: ["lin"], due: "7 月 26 日", status: "进行中" },
+  { id: "t-premiere", eventId: "e-premiere", scheduleItemId: "r3-show", title: "执行首演正式 Rundown", ownerIds: ["lin"], due: "21:45", status: "待开始" },
 ];
 
 const NAV_GLYPHS: Record<View, string> = {
@@ -176,6 +246,8 @@ export default function PrototypeClient() {
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [joinProjectOpen, setJoinProjectOpen] = useState(false);
   const [projectAvatarUrl, setProjectAvatarUrl] = useState<string | null>(null);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const mobileRailRef = useRef<HTMLDivElement>(null);
 
   const meta = VIEW_META[view];
   const navForMobile = mobileSide === "script" ? SCRIPT_NAV : STAGE_NAV;
@@ -195,6 +267,7 @@ export default function PrototypeClient() {
       if (!target.closest('[data-dismiss-surface="project-menu"]')) setProjectMenuOpen(false);
       if (!target.closest('[data-dismiss-surface="avatar-menu"]')) setAvatarMenuOpen(false);
       if (!target.closest('[data-dismiss-surface="account-menu"]')) setAccountMenuOpen(false);
+      if (!target.closest('[data-dismiss-surface="mobile-search"]')) setMobileSearchOpen(false);
       if (!target.closest('[data-dismiss-surface="detail-drawer"]')) setDrawer(null);
     }
 
@@ -203,6 +276,7 @@ export default function PrototypeClient() {
       setProjectMenuOpen(false);
       setAvatarMenuOpen(false);
       setAccountMenuOpen(false);
+      setMobileSearchOpen(false);
       setDrawer(null);
     }
 
@@ -223,6 +297,10 @@ export default function PrototypeClient() {
 
   function completeTask(id: string) {
     setCompletedTasks((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
+  }
+
+  function moveMobileRail(direction: -1 | 1) {
+    mobileRailRef.current?.scrollBy({ left: direction * 210, behavior: "smooth" });
   }
 
   const taskProgress = useMemo(() => Math.round((completedTasks.length / 4) * 100), [completedTasks]);
@@ -314,7 +392,18 @@ export default function PrototypeClient() {
             </div>
           </div>
           <div className={styles.topActions}>
-            <button type="button" className={styles.searchButton}>⌕ <span>搜索全部内容</span></button>
+            <div className={`${styles.searchControl} ${mobileSearchOpen ? styles.searchExpanded : ""}`} data-dismiss-surface="mobile-search">
+              <button
+                type="button"
+                className={styles.searchButton}
+                aria-label={mobileSearchOpen ? "收起搜索" : "搜索全部内容"}
+                aria-expanded={mobileSearchOpen}
+                onClick={() => setMobileSearchOpen((open) => !open)}
+              >
+                <span className={styles.searchIcon}>⌕</span><span>搜索全部内容</span>
+              </button>
+              {mobileSearchOpen && <input autoFocus type="search" placeholder="搜索 Event、Task、人员…" aria-label="搜索关键词" />}
+            </div>
             <button type="button" className={styles.notificationButton} onClick={() => go("notifications")} aria-label="通知，3 条重要通知">
               通知<span className={styles.unreadDot}>3</span>
             </button>
@@ -377,10 +466,14 @@ export default function PrototypeClient() {
             <button type="button" aria-pressed={mobileSide === "script"} onClick={() => setMobileSide("script")}>剧本侧</button>
             <button type="button" aria-pressed={mobileSide === "stage"} onClick={() => setMobileSide("stage")}>舞台侧</button>
           </div>
-          <div className={styles.mobileModuleRail}>
-            {navForMobile.map((item) => (
-              <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => go(item.id)}>{item.label}</button>
-            ))}
+          <div className={styles.mobileRailShell}>
+            <button type="button" className={styles.railArrow} onClick={() => moveMobileRail(-1)} aria-label="向左查看更多模块">‹</button>
+            <div className={styles.mobileModuleRail} ref={mobileRailRef}>
+              {navForMobile.map((item) => (
+                <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => go(item.id)}>{item.label}</button>
+              ))}
+            </div>
+            <button type="button" className={styles.railArrow} onClick={() => moveMobileRail(1)} aria-label="向右查看更多模块">›</button>
           </div>
         </section>
 
@@ -574,11 +667,11 @@ function EventsView({ published, openWizard, setDrawer, go }: { published: boole
       </section>
       {published && <section className={styles.successBanner}><span>✓</span><div><b>首演技术合成已发布</b><small>已创建 4 个 Task，并向 18 位相关成员生成站内 Notification。</small></div><button type="button" onClick={() => go("notifications")}>查看通知</button></section>}
       <section className={styles.panel}>
-        <div className={styles.panelHeading}><div><p className={styles.kicker}>UPCOMING</p><h2>即将发生</h2></div><button type="button" onClick={openWizard}>使用模板创建</button></div>
+        <div className={styles.panelHeading}><div><p className={styles.kicker}>UPCOMING</p><h2>即将发生</h2></div><button type="button" onClick={openWizard}>使用模板创建 <span>→</span></button></div>
         <div className={styles.eventList}>
-          <article><time><b>20</b><small>7 月</small></time><div><div><Badge tone="blue">排练</Badge><Badge tone="amber">需要确认</Badge></div><h3>第三幕合成排练</h3><p>13:30–18:00 · 黑匣子 B · 18 人</p><div className={styles.inlineActions}><button type="button" onClick={() => go("planning")}>Timetable</button><button type="button" onClick={() => setDrawer("task")}>6 个 Task</button><button type="button" onClick={() => setDrawer("cue")}>24 个 Cue</button></div></div><span className={styles.eventStatus}>8 人未确认</span></article>
-          <article><time><b>22</b><small>7 月</small></time><div><div><Badge tone="neutral">围读</Badge></div><h3>全本节奏围读</h3><p>14:00–17:00 · 排练厅 2 · 全体演员</p><div className={styles.inlineActions}><button type="button" onClick={() => go("script")}>关联剧本 V12</button><button type="button" onClick={() => setDrawer("task")}>3 个 Task</button></div></div><span className={styles.eventStatus}>草稿</span></article>
-          <article><time><b>13</b><small>8 月</small></time><div><div><Badge tone="red">演出</Badge></div><h3>首演</h3><p>19:30–21:45 · 城市剧院 · 全体</p><div className={styles.inlineActions}><button type="button" onClick={() => go("planning")}>演出执行表</button><button type="button" onClick={() => go("people")}>人员与 Call</button></div></div><span className={styles.eventStatus}>筹备中</span></article>
+          <article><time><b>20</b><small>7 月</small></time><div><div><Badge tone="blue">排练</Badge><Badge tone="amber">需要确认</Badge></div><h3>第三幕合成排练</h3><p>13:30–18:00 · 黑匣子 B · 18 人</p><div className={styles.inlineActions}><button type="button" onClick={() => go("planning")}>Timetable <span>→</span></button><button type="button" onClick={() => setDrawer("task")}>6 个 Task <span>→</span></button><button type="button" onClick={() => setDrawer("cue")}>24 个 Cue <span>→</span></button></div></div><span className={styles.eventStatus}>8 人未确认</span></article>
+          <article><time><b>22</b><small>7 月</small></time><div><div><Badge tone="neutral">围读</Badge></div><h3>全本节奏围读</h3><p>14:00–17:00 · 排练厅 2 · 全体演员</p><div className={styles.inlineActions}><button type="button" onClick={() => go("script")}>关联剧本 V12 <span>→</span></button><button type="button" onClick={() => setDrawer("task")}>3 个 Task <span>→</span></button></div></div><span className={styles.eventStatus}>草稿</span></article>
+          <article><time><b>13</b><small>8 月</small></time><div><div><Badge tone="red">演出</Badge></div><h3>首演</h3><p>19:30–21:45 · 城市剧院 · 全体</p><div className={styles.inlineActions}><button type="button" onClick={() => go("planning")}>演出执行表 <span>→</span></button><button type="button" onClick={() => go("people")}>人员与 Call <span>→</span></button></div></div><span className={styles.eventStatus}>筹备中</span></article>
         </div>
       </section>
     </div>
@@ -636,33 +729,152 @@ function NotificationsView({ acknowledged, setAcknowledged, setDrawer }: { ackno
 }
 
 function PlanningViewPanel({ mode, setMode, setDrawer }: { mode: PlanningView; setMode: (m: PlanningView) => void; setDrawer: (v: "task" | "cue") => void }) {
+  const [selectedEventId, setSelectedEventId] = useState("e-tech");
+  const [personFilter, setPersonFilter] = useState("lin");
+  const [taskStatus, setTaskStatus] = useState<Record<string, LinkedPlanTask["status"]>>({});
+
+  function openRundown(eventId: string) {
+    setSelectedEventId(eventId);
+    setMode("timetable");
+  }
+
+  function toggleTask(taskId: string) {
+    const base = LINKED_PLAN_TASKS.find((task) => task.id === taskId)?.status ?? "待开始";
+    setTaskStatus((current) => ({ ...current, [taskId]: (current[taskId] ?? base) === "已完成" ? "进行中" : "已完成" }));
+  }
+
   return (
     <div className={styles.contentStack}>
+      <section className={styles.planningRelation}>
+        <span>Event</span><i>→</i><span>Schedule Item</span><i>→</i><span>Task / Todo</span>
+        <p>同一份日期、人员与状态信息，分别生成日历总览、项目甘特和 Event 当天 Rundown。</p>
+      </section>
       <div className={styles.viewTabs}>
-        <button type="button" aria-pressed={mode === "calendar"} onClick={() => setMode("calendar")}><b>Calendar</b><small>日 / 周 / 月总览</small></button>
-        <button type="button" aria-pressed={mode === "gantt"} onClick={() => setMode("gantt")}><b>Gantt</b><small>项目阶段与风险</small></button>
-        <button type="button" aria-pressed={mode === "timetable"} onClick={() => setMode("timetable")}><b>Timetable</b><small>分钟级现场执行</small></button>
+        <button type="button" aria-pressed={mode === "calendar"} onClick={() => setMode("calendar")}><b>Calendar</b><small>Event · Task · Milestone</small></button>
+        <button type="button" aria-pressed={mode === "gantt"} onClick={() => setMode("gantt")}><b>Gantt</b><small>项目阶段与重要排期</small></button>
+        <button type="button" aria-pressed={mode === "timetable"} onClick={() => setMode("timetable")}><b>Rundown / Timetable</b><small>Event 当天分钟级执行</small></button>
       </div>
-      {mode === "calendar" && <CalendarMock setDrawer={setDrawer} />}
-      {mode === "gantt" && <GanttMock setDrawer={setDrawer} />}
-      {mode === "timetable" && <TimetableMock setDrawer={setDrawer} />}
+      {mode === "calendar" && <CalendarMock openRundown={openRundown} setDrawer={setDrawer} />}
+      {mode === "gantt" && <GanttMock openRundown={openRundown} setDrawer={setDrawer} />}
+      {mode === "timetable" && <TimetableMock selectedEventId={selectedEventId} setSelectedEventId={setSelectedEventId} personFilter={personFilter} setPersonFilter={setPersonFilter} taskStatus={taskStatus} toggleTask={toggleTask} setDrawer={setDrawer} />}
     </div>
   );
 }
 
-function CalendarMock({ setDrawer }: { setDrawer: (v: "task" | "cue") => void }) {
+function CalendarMock({ openRundown, setDrawer }: { openRundown: (id: string) => void; setDrawer: (v: "task" | "cue") => void }) {
   const days = Array.from({ length: 28 }, (_, i) => i + 7);
-  return <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.kicker}>2026 年 7 月</p><h2>项目日历</h2></div><div className={styles.legend}><span><i className={styles.legendEvent} />Event</span><span><i className={styles.legendTask} />Task</span><span><i className={styles.legendMilestone} />里程碑</span></div></div><div className={styles.calendarWeek}>{["一", "二", "三", "四", "五", "六", "日"].map((d) => <span key={d}>周{d}</span>)}</div><div className={styles.calendarGrid}>{days.map((day) => <div key={day} className={day === 20 ? styles.todayCell : ""}><b>{day > 31 ? day - 31 : day}</b>{day === 14 && <button type="button" className={styles.taskEvent} onClick={() => setDrawer("task")}>地胶尺寸确认</button>}{day === 20 && <><button type="button" className={styles.mainEvent}>第三幕合成排练</button><button type="button" className={styles.taskEvent} onClick={() => setDrawer("cue")}>Cue 联调</button></>}{day === 25 && <button type="button" className={styles.milestoneEvent}>◆ 舞台可交付</button>}{day === 27 && <button type="button" className={styles.mainEvent}>第一次全本联排</button>}</div>)}</div></section>;
+  return <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.kicker}>2026 年 7 月</p><h2>项目日历</h2></div><div className={styles.legend}><span><i className={styles.legendEvent} />Event</span><span><i className={styles.legendTask} />Task</span><span><i className={styles.legendMilestone} />Milestone</span></div></div><div className={styles.calendarWeek}>{["一", "二", "三", "四", "五", "六", "日"].map((d) => <span key={d}>周{d}</span>)}</div><div className={styles.calendarGrid}>{days.map((day) => <div key={day} className={day === 20 ? styles.todayCell : ""}><b>{day > 31 ? day - 31 : day}</b>{day === 14 && <button type="button" className={styles.taskEvent} onClick={() => setDrawer("task")}>Task · 地胶尺寸确认</button>}{day === 20 && <><button type="button" className={styles.mainEvent} onClick={() => openRundown("e-tech")}>Event · 第三幕合成排练</button><button type="button" className={styles.taskEvent} onClick={() => setDrawer("cue")}>Task · Cue 联调</button></>}{day === 25 && <button type="button" className={styles.milestoneEvent} onClick={() => setDrawer("task")}>◆ 舞台可交付</button>}{day === 27 && <button type="button" className={styles.mainEvent} onClick={() => openRundown("e-run")}>Event · 第一次全本联排</button>}</div>)}</div></section>;
 }
 
-function GanttMock({ setDrawer }: { setDrawer: (v: "task") => void }) {
-  return <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.kicker}>JUL — AUG</p><h2>项目长线计划</h2></div><div className={styles.legend}><span><i className={styles.legendEvent} />正常</span><span><i className={styles.legendTask} />需关注</span><span><i className={styles.legendRisk} />有风险</span></div></div><div className={styles.gantt}><div className={styles.ganttHeader}><span>工作流</span>{["7/13", "7/20", "7/27", "8/3", "8/10"].map((d) => <b key={d}>{d}</b>)}</div>{[
-    ["剧本与构作", "6", "28", "normal"], ["舞美制作", "18", "46", "normal"], ["灯光 / 音响设计", "28", "55", "watch"], ["地胶采购与铺设", "16", "38", "risk"], ["排练与联排", "33", "76", "normal"], ["演出准备", "68", "96", "watch"],
-  ].map(([name, left, right, tone]) => <button type="button" key={name} className={styles.ganttRow} onClick={() => setDrawer("task")}><span>{name}</span><i className={styles.ganttGrid}>{[1,2,3,4,5].map((n) => <em key={n} />)}<b className={`${styles.ganttBar} ${styles[`gantt_${tone}`]}`} style={{ left: `${left}%`, width: `${Number(right) - Number(left)}%` }}>{tone === "risk" ? "风险：供应延期" : ""}</b></i></button>)}</div></section>;
+function GanttMock({ openRundown, setDrawer }: { openRundown: (id: string) => void; setDrawer: (v: "task") => void }) {
+  const rows = [
+    { name: "剧本与构作", left: 4, right: 29, tone: "normal", label: "第三稿锁定", eventId: "" },
+    { name: "舞美制作", left: 14, right: 49, tone: "normal", label: "舞台可交付", eventId: "" },
+    { name: "灯光 / 音响", left: 28, right: 65, tone: "watch", label: "技术系统完成", eventId: "" },
+    { name: "地胶采购与铺设", left: 16, right: 39, tone: "risk", label: "供应延期", eventId: "" },
+    { name: "排练与联排", left: 31, right: 78, tone: "normal", label: "合成 → 全本联排", eventId: "e-tech" },
+    { name: "首演准备", left: 69, right: 97, tone: "watch", label: "首演交付", eventId: "e-premiere" },
+  ];
+  return <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.kicker}>JUL — AUG</p><h2>Event 与 Milestone 甘特</h2></div><div className={styles.legend}><span><i className={styles.legendEvent} />正常</span><span><i className={styles.legendTask} />需关注</span><span><i className={styles.legendRisk} />有风险</span></div></div><div className={styles.gantt}><div className={styles.ganttHeader}><span>工作流</span>{["7/13", "7/20", "7/27", "8/3", "8/10"].map((d) => <b key={d}>{d}</b>)}</div>{rows.map((row) => <button type="button" key={row.name} className={styles.ganttRow} onClick={() => row.eventId ? openRundown(row.eventId) : setDrawer("task")}><span>{row.name}</span><i className={styles.ganttGrid}>{[1,2,3,4,5].map((n) => <em key={n} />)}<b className={`${styles.ganttBar} ${styles[`gantt_${row.tone}`]}`} style={{ left: `${row.left}%`, width: `${row.right - row.left}%` }}>{row.label}</b><strong className={styles.ganttMilestone} style={{ left: `${row.right}%` }}>◆</strong></i></button>)}</div></section>;
 }
 
-function TimetableMock({ setDrawer }: { setDrawer: (v: "task" | "cue") => void }) {
-  return <section className={styles.panel}><div className={styles.timetableHeader}><div><p className={styles.kicker}>7 月 20 日 · 第三幕合成排练</p><h2>现场分钟执行表</h2></div><div><Badge tone="amber">18 人 · 8 人未确认</Badge><Badge>黑匣子 B</Badge></div></div><div className={styles.timetable}><div><time>13:00</time><span className={styles.callLine}><b>演员与技术组 Call</b><small>签到、换装、设备预热</small></span><Badge tone="amber">Call</Badge></div><div><time>13:30</time><span><b>第三幕走位与转场</b><small>罗密欧、朱丽叶、群演 A 组 · 舞台 / 道具</small></span><button type="button" onClick={() => setDrawer("task")}>2 Task</button></div><div><time>14:20</time><span><b>灯光、音响、多媒体合成</b><small>LX 34–42 · SD 18–23 · V 09–12</small></span><button type="button" onClick={() => setDrawer("cue")}>18 Cue</button></div><div><time>16:10</time><span><b>第三幕连续运行</b><small>从“潮水已经退去”开始 · 预计 38 分钟</small></span><Badge tone="blue">Run</Badge></div><div><time>17:10</time><span><b>部门 Notes 与问题收集</b><small>自动形成部门 Task 草稿</small></span><button type="button" onClick={() => setDrawer("task")}>记录 Task</button></div></div></section>;
+function minutesOf(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function durationText(start: string, end: string) {
+  return `${minutesOf(end) - minutesOf(start)} min`;
+}
+
+function TimetableMock({
+  selectedEventId, setSelectedEventId, personFilter, setPersonFilter, taskStatus, toggleTask, setDrawer,
+}: {
+  selectedEventId: string; setSelectedEventId: (id: string) => void;
+  personFilter: string; setPersonFilter: (id: string) => void;
+  taskStatus: Record<string, LinkedPlanTask["status"]>; toggleTask: (id: string) => void;
+  setDrawer: (v: "task" | "cue") => void;
+}) {
+  const event = PLANNING_EVENTS.find((item) => item.id === selectedEventId) ?? PLANNING_EVENTS[0];
+  const eventItems = RUNDOWN_ITEMS.filter((item) => item.eventId === event.id);
+  const visibleItems = personFilter === "all" ? eventItems : eventItems.filter((item) => item.participantIds.includes(personFilter) || item.type === "break");
+  const relevantTaskIds = Array.from(new Set(eventItems.flatMap((item) => item.taskIds)));
+  const completedCount = relevantTaskIds.filter((id) => (taskStatus[id] ?? LINKED_PLAN_TASKS.find((task) => task.id === id)?.status) === "已完成").length;
+  const startMinutes = minutesOf(event.start);
+  const endMinutes = minutesOf(event.end);
+  const slotMinutes = 15;
+  const slots = Array.from({ length: Math.max(1, (endMinutes - startMinutes) / slotMinutes) }, (_, index) => startMinutes + index * slotMinutes);
+  const personName = personFilter === "all" ? "全部成员" : PLANNING_PEOPLE.find((person) => person.id === personFilter)?.name ?? "林淼";
+
+  function fmtMinutes(total: number) {
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  function taskFor(item: RundownItem) {
+    return LINKED_PLAN_TASKS.find((task) => item.taskIds.includes(task.id));
+  }
+
+  function statusFor(task?: LinkedPlanTask) {
+    return task ? taskStatus[task.id] ?? task.status : null;
+  }
+
+  function statusClass(status: LinkedPlanTask["status"] | null) {
+    if (status === "已完成") return styles.runStatusDone;
+    if (status === "有风险") return styles.runStatusRisk;
+    if (status === "进行中") return styles.runStatusActive;
+    return styles.runStatusPending;
+  }
+
+  function gridPlacements(item: RundownItem) {
+    if (item.laneIds.includes("all")) return [{ start: 2, span: RUNDOWN_LANES.length }];
+    const indexes = item.laneIds.map((id) => RUNDOWN_LANES.findIndex((lane) => lane.id === id)).filter((index) => index >= 0).sort((a, b) => a - b);
+    if (!indexes.length) return [];
+    const contiguous = indexes.every((value, index) => index === 0 || value === indexes[index - 1] + 1);
+    return contiguous ? [{ start: indexes[0] + 2, span: indexes[indexes.length - 1] - indexes[0] + 1 }] : indexes.map((index) => ({ start: index + 2, span: 1 }));
+  }
+
+  return (
+    <section className={`${styles.panel} ${styles.rundownPanel}`}>
+      <div className={styles.timetableHeader}>
+        <div><p className={styles.kicker}>{event.date} · {event.status}</p><h2>Rundown / 现场执行表</h2><small>{event.start}–{event.end} · {event.location} · 15 分钟自动粒度</small></div>
+        <div><Badge tone={completedCount === relevantTaskIds.length ? "green" : "amber"}>{completedCount} / {relevantTaskIds.length} Task 完成</Badge><Badge>{event.milestone}</Badge></div>
+      </div>
+      <div className={styles.rundownControls}>
+        <label><span>Event</span><select value={event.id} onChange={(e) => setSelectedEventId(e.target.value)}>{PLANNING_EVENTS.map((item) => <option value={item.id} key={item.id}>{item.date} · {item.title}</option>)}</select></label>
+        <label><span>查看工作流</span><select value={personFilter} onChange={(e) => setPersonFilter(e.target.value)}><option value="all">全部成员</option>{PLANNING_PEOPLE.map((person) => <option value={person.id} key={person.id}>{person.name} · {person.department}</option>)}</select></label>
+        <p><b>{personName}</b><small>可查看其当前工作、对接人和工作地点</small></p>
+      </div>
+
+      <div className={styles.rundownMatrixWrap}>
+        <div className={styles.rundownGrid} style={{ "--lane-count": RUNDOWN_LANES.length, "--slot-count": slots.length } as React.CSSProperties}>
+          <div className={styles.rundownCorner}><b>时间</b><small>地点 / 时长</small></div>
+          {RUNDOWN_LANES.map((lane, index) => <div key={lane.id} className={`${styles.rundownLaneHeader} ${styles[`lane_${lane.tone}`]}`} style={{ gridColumn: index + 2 }}><b>{lane.label}</b><small>{lane.owner}</small></div>)}
+          {slots.map((minutes, index) => <div key={minutes} className={styles.rundownTime} style={{ gridRow: index + 2 }}><b>{fmtMinutes(minutes)}</b><small>{index % 2 === 0 ? "15 min" : ""}</small></div>)}
+          {visibleItems.flatMap((item) => gridPlacements(item).map((placement, placementIndex) => {
+            const linkedTask = taskFor(item);
+            const status = statusFor(linkedTask);
+            const rowStart = Math.max(2, Math.floor((minutesOf(item.start) - startMinutes) / slotMinutes) + 2);
+            const rowSpan = Math.max(1, Math.ceil((minutesOf(item.end) - minutesOf(item.start)) / slotMinutes));
+            return <article key={`${item.id}-${placementIndex}`} tabIndex={0} className={`${styles.rundownCell} ${styles[`rundown_${item.type}`]} ${status === "有风险" ? styles.rundownRisk : ""}`} style={{ gridColumn: `${placement.start} / span ${placement.span}`, gridRow: `${rowStart} / span ${rowSpan}` }} onClick={() => setDrawer(item.type === "task" && item.laneIds.includes("light") ? "cue" : "task")}>
+              <div><b>{item.title}</b>{linkedTask && <span className={`${styles.runStatus} ${statusClass(status)}`}>{status}</span>}</div>
+              <small>{item.location} · {durationText(item.start, item.end)}</small>
+              <p>{item.participantIds.map((id) => PLANNING_PEOPLE.find((person) => person.id === id)?.name).filter(Boolean).join(" · ")}</p>
+              {linkedTask && <button type="button" onClick={(e) => { e.stopPropagation(); toggleTask(linkedTask.id); }}>{status === "已完成" ? "✓ 已完成" : `○ ${linkedTask.due} 前`}</button>}
+            </article>;
+          }))}
+        </div>
+      </div>
+
+      <div className={styles.rundownMobileList}>
+        <p><b>{personName}的执行时间线</b><small>点击人员筛选可查看其他人的工作与位置</small></p>
+        {visibleItems.map((item) => {
+          const linkedTask = taskFor(item);
+          const status = statusFor(linkedTask);
+          return <article key={item.id} onClick={() => setDrawer("task")}><time>{item.start}<small>{item.end}</small></time><div><span><Badge tone={item.type === "call" ? "amber" : item.type === "run" ? "blue" : "neutral"}>{item.type.toUpperCase()}</Badge>{status && <b>{status}</b>}</span><h3>{item.title}</h3><p>{item.location} · {item.note}</p><small>{item.participantIds.map((id) => PLANNING_PEOPLE.find((person) => person.id === id)?.name).filter(Boolean).join(" · ")}</small></div>{linkedTask && <button type="button" onClick={(e) => { e.stopPropagation(); toggleTask(linkedTask.id); }}>{status === "已完成" ? "✓" : "○"}</button>}</article>;
+        })}
+      </div>
+    </section>
+  );
 }
 
 function FrameworkView({ go }: { go: (v: View) => void }) {

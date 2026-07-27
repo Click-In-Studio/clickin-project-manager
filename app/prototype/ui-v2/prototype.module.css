@@ -78,7 +78,12 @@
 .roleDisplay b { font-size: 11px; font-weight: 700; }
 .roleDisplay i { grid-column: 2; grid-row: 1 / 3; padding: 3px 5px; border-radius: 5px; background: #e2e5e1; color: var(--muted); font-size: 8px; font-style: normal; }
 .topActions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.searchControl { position: relative; display: flex; align-items: center; }
 .searchButton { width: 180px; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 9px 12px; text-align: left; color: var(--muted); cursor: pointer; }
+.searchIcon { font-size: 15px; line-height: 1; }
+.searchControl input { width: 260px; height: 38px; padding: 0 42px 0 12px; border: 1px solid var(--script); border-radius: 9px; background: var(--surface); outline: 3px solid rgba(47,102,112,.12); color: var(--ink); font-size: 10px; }
+.searchExpanded .searchButton { position: absolute; z-index: 1; right: 4px; width: 34px; height: 34px; padding: 0; border: 0; display: grid; place-items: center; background: transparent; }
+.searchExpanded .searchButton > span:last-child { display: none; }
 .notificationButton { min-width: 66px; height: 36px; padding: 0 30px 0 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; position: relative; font-size: 11px; font-weight: 700; }
 .avatarButton { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); cursor: pointer; position: relative; }
 .avatarButton { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -158,7 +163,8 @@
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 22px; }
 .panel h2 { font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; font-weight: 500; margin: 5px 0 0; }
 .panelHeading { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
-.panelHeading > button { margin-left: auto; border: 0; background: transparent; color: var(--script); cursor: pointer; font-size: 11px; padding: 5px; }
+.panelHeading > button { margin-left: auto; min-height: 34px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--script); cursor: pointer; font-size: 10px; font-weight: 700; }
+.panelHeading > button:hover { border-color: var(--script); background: var(--script-soft); }
 .badge { display: inline-flex; align-items: center; width: fit-content; min-height: 22px; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
 .badge_blue { background: var(--script-soft); color: var(--script); }
 .badge_amber { background: var(--stage-soft); color: var(--stage); }
@@ -251,8 +257,10 @@
 .eventList h3 { margin: 8px 0 3px; font-family: Georgia, "Noto Serif SC", serif; font-size: 17px; font-weight: 500; }
 .eventList p { margin: 0; color: var(--muted); font-size: 10px; }
 .inlineActions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.inlineActions button { border: 0; background: transparent; padding: 0; color: var(--script); font-size: 10px; cursor: pointer; }
-.eventStatus { color: var(--stage); font-size: 10px; }
+.inlineActions button { min-height: 28px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--script); font-size: 9px; cursor: pointer; }
+.inlineActions button:hover { border-color: var(--script); background: var(--script-soft); }
+.inlineActions button span { margin-left: 3px; }
+.eventStatus { width: fit-content; padding: 5px 8px; border-radius: 999px; background: var(--stage-soft); color: var(--stage); font-size: 9px; font-weight: 700; }
 
 .taskHero { background: var(--ink); }
 .taskHero .progressRing { margin-left: auto; flex: 0 0 auto; }
@@ -338,6 +346,64 @@
 .timetable > div > span { display: flex; flex-direction: column; }
 .timetable b { font-size: 11px; }
 .timetable small { color: var(--muted); font-size: 9px; margin-top: 4px; }
+
+.planningRelation { display: flex; align-items: center; gap: 8px; padding: 10px 13px; border: 1px solid #cbdad6; border-radius: 11px; background: #edf4f1; }
+.planningRelation span { padding: 5px 8px; border-radius: 7px; background: var(--ink); color: #fff; font-size: 9px; font-weight: 700; }
+.planningRelation i { color: var(--script); font-style: normal; }
+.planningRelation p { margin: 0 0 0 auto; color: var(--muted); font-size: 9px; }
+.rundownPanel { padding: 20px; overflow: hidden; }
+.timetableHeader > div:first-child > small { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.rundownControls { display: grid; grid-template-columns: minmax(210px, 1.25fr) minmax(190px, 1fr) minmax(190px, .8fr); gap: 10px; margin-bottom: 14px; }
+.rundownControls label, .rundownControls > p { min-width: 0; min-height: 58px; margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
+.rundownControls label { display: flex; flex-direction: column; gap: 5px; }
+.rundownControls label > span { color: var(--muted); font-size: 8px; font-weight: 700; }
+.rundownControls select { width: 100%; border: 0; background: transparent; color: var(--ink); outline: 0; font-size: 10px; font-weight: 700; }
+.rundownControls > p { display: flex; flex-direction: column; justify-content: center; }
+.rundownControls p b { font-size: 11px; }
+.rundownControls p small { margin-top: 4px; color: var(--muted); font-size: 8px; }
+.rundownMatrixWrap { max-height: 690px; overflow: auto; border: 1px solid var(--line); border-radius: 11px; background: #f7f7f3; }
+.rundownGrid { min-width: calc(86px + var(--lane-count) * 150px); display: grid; grid-template-columns: 86px repeat(var(--lane-count), minmax(145px, 1fr)); grid-template-rows: 58px repeat(var(--slot-count), 38px); position: relative; background: repeating-linear-gradient(to bottom, transparent 0, transparent 37px, rgba(122,139,134,.18) 37px, rgba(122,139,134,.18) 38px); }
+.rundownCorner, .rundownLaneHeader { position: sticky; top: 0; z-index: 8; padding: 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--ink); color: #fff; }
+.rundownCorner { left: 0; z-index: 10; display: flex; flex-direction: column; }
+.rundownCorner b, .rundownLaneHeader b { font-size: 10px; }
+.rundownCorner small, .rundownLaneHeader small { margin-top: 4px; color: #b9c8c4; font-size: 8px; }
+.rundownLaneHeader { display: flex; flex-direction: column; }
+.lane_script { background: var(--script); }
+.lane_stage { background: #75472d; }
+.lane_main { background: var(--ink); }
+.rundownTime { position: sticky; left: 0; z-index: 5; padding: 7px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #f2f2ed; display: flex; flex-direction: column; }
+.rundownTime b { font-family: monospace; font-size: 10px; }
+.rundownTime small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.rundownCell { z-index: 3; min-width: 0; margin: 2px; padding: 7px 8px; overflow: hidden; border: 1px solid rgba(47,102,112,.28); border-radius: 7px; background: #e0ecec; cursor: pointer; box-shadow: 0 2px 6px rgba(24,42,42,.06); }
+.rundownCell:hover { z-index: 6; border-color: var(--script); box-shadow: 0 7px 18px rgba(24,42,42,.14); }
+.rundownCell > div { display: flex; align-items: flex-start; gap: 5px; }
+.rundownCell b { overflow: hidden; text-overflow: ellipsis; font-size: 9px; white-space: nowrap; }
+.rundownCell small, .rundownCell p { display: block; margin: 3px 0 0; overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.rundownCell > button { margin-top: 5px; padding: 3px 5px; border: 1px solid rgba(24,42,42,.18); border-radius: 5px; background: rgba(255,255,255,.6); font-size: 7px; cursor: pointer; }
+.rundown_call { background: #f2e3d6; border-color: #d9ab8d; }
+.rundown_run { background: #dce9e9; }
+.rundown_task { background: #edf0e5; border-color: #c9d0b7; }
+.rundown_break { background: repeating-linear-gradient(135deg, #f1f0eb 0, #f1f0eb 8px, #e6e4dc 8px, #e6e4dc 16px); border-color: #d4d1c7; }
+.rundown_notes { background: #eee5f0; border-color: #cdb9d3; }
+.rundownRisk { box-shadow: inset 3px 0 var(--danger), 0 2px 6px rgba(24,42,42,.06); }
+.runStatus { flex: 0 0 auto; margin-left: auto; padding: 2px 4px; border-radius: 4px; font-size: 7px; font-weight: 700; }
+.runStatusPending { background: #e5e8e5; color: var(--muted); }
+.runStatusActive { background: var(--script-soft); color: var(--script); }
+.runStatusDone { background: var(--success-soft); color: var(--success); }
+.runStatusRisk { background: var(--danger-soft); color: var(--danger); }
+.rundownMobileList { display: none; }
+.rundownMobileList > p { margin: 0 0 8px; padding: 10px; border-radius: 9px; background: var(--ink); color: #fff; display: flex; flex-direction: column; }
+.rundownMobileList > p b { font-size: 11px; }
+.rundownMobileList > p small { margin-top: 3px; color: #b9c8c4; font-size: 8px; }
+.rundownMobileList article { display: grid; grid-template-columns: 48px 1fr 25px; gap: 9px; padding: 11px 4px; border-top: 1px solid var(--line); cursor: pointer; }
+.rundownMobileList time { color: var(--stage); font-family: monospace; font-size: 10px; display: flex; flex-direction: column; }
+.rundownMobileList time small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.rundownMobileList article > div { min-width: 0; }
+.rundownMobileList article > div > span { display: flex; align-items: center; gap: 5px; }
+.rundownMobileList article > div > span b { color: var(--muted); font-size: 8px; }
+.rundownMobileList h3 { margin: 5px 0 2px; font-family: Georgia, "Noto Serif SC", serif; font-size: 14px; font-weight: 500; }
+.rundownMobileList p, .rundownMobileList article > div > small { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.rundownMobileList article > button { width: 24px; height: 24px; align-self: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--success); cursor: pointer; }
 .timetable button { border: 0; background: transparent; color: var(--script); cursor: pointer; font-size: 10px; }
 .callLine { border-left: 3px solid var(--stage); padding-left: 12px; }
 
@@ -428,12 +494,26 @@
 
 .mobileProjectNav, .bottomNav { display: none; }
 
-.previewMobile { width: 390px; min-height: 844px; margin: 0 auto 30px; grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 64px; border-radius: 22px; }
-.previewMobile .topbar { grid-column: 1; padding: 0 13px; gap: 9px; }
-.previewMobile .brandName, .previewMobile .projectSwitcher, .previewMobile .searchButton, .previewMobile .sidebar, .previewMobile .headerActions, .previewMobile .demoHint { display: none; }
-.previewMobile .contextControls { margin-left: 0; }
-.previewMobile .roleDisplay { min-width: 132px; height: 38px; }
+.shell.previewMobile { width: 390px; min-height: 844px; margin: 0 auto 30px; grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 64px; border-radius: 22px; }
+.previewMobile .topbar { grid-column: 1; padding: 0 10px; gap: 6px; }
+.previewMobile .brand, .previewMobile .brandName, .previewMobile .sidebar, .previewMobile .headerActions, .previewMobile .demoHint { display: none; }
+.previewMobile .contextControls { margin-left: 0; gap: 5px; }
+.previewMobile .projectSwitcher { display: block; }
+.previewMobile .switcherButton { min-width: 76px; width: 76px; height: 36px; padding: 6px 8px; gap: 4px; }
+.previewMobile .switcherButton small { display: none; }
+.previewMobile .switcherButton b { max-width: 50px; font-size: 9px; }
+.previewMobile .roleDisplay { min-width: 88px; width: 88px; height: 36px; padding: 5px 7px; }
+.previewMobile .roleDisplay > span, .previewMobile .roleDisplay > i { display: none; }
+.previewMobile .roleDisplay b { grid-row: 1 / 3; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .previewMobile .topActions { gap: 4px; }
+.previewMobile .searchControl { display: flex; }
+.previewMobile .searchButton { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border-radius: 50%; text-align: center; }
+.previewMobile .searchButton > span:last-child { display: none; }
+.previewMobile .searchExpanded { position: absolute; z-index: 30; left: 10px; right: 10px; }
+.previewMobile .searchExpanded input { width: 100%; height: 40px; }
+.previewMobile .notificationButton { min-width: 52px; height: 34px; padding: 0 23px 0 8px; font-size: 9px; }
+.previewMobile .notificationButton .unreadDot { top: 8px; right: 5px; min-width: 15px; height: 15px; padding: 0 4px; font-size: 7px; }
+.previewMobile .avatarButton { width: 34px; height: 34px; }
 .previewMobile .mobileProjectNav { grid-row: 2; display: block; background: var(--surface); border-bottom: 1px solid var(--line); padding: 10px 13px; min-width: 0; }
 .previewMobile .workspace { grid-row: 3; padding: 18px 14px 90px; }
 .previewMobile .pageHeader { margin-bottom: 18px; }
@@ -445,9 +525,19 @@
 .previewMobile .roleSecondary, .previewMobile .projectMetric, .previewMobile .moduleNumber, .previewMobile .taskHero .progressRing, .previewMobile .frameworkIntro > button { display: none; }
 .previewMobile .roleBanner h2, .previewMobile .projectHero h2, .previewMobile .moduleIntro h2, .previewMobile .taskHero h2, .previewMobile .frameworkIntro h2 { font-size: 23px; }
 .previewMobile .relationshipStrip, .previewMobile .notificationSummary, .previewMobile .deviceRules { grid-template-columns: 1fr; }
-.previewMobile .flowExplainer { grid-template-columns: 1fr; }
-.previewMobile .flowExplainer > i { transform: rotate(90deg); text-align: center; }
-.previewMobile .eventList article { grid-template-columns: 52px 1fr; }
+.previewMobile .flowExplainer { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.previewMobile .flowExplainer > i { display: none; }
+.previewMobile .flowExplainer > div { min-height: 102px; padding: 10px 8px; grid-template-columns: 1fr; grid-template-rows: 28px auto 1fr; gap: 3px; }
+.previewMobile .flowStep { width: 25px; height: 25px; grid-row: auto; font-size: 8px; }
+.previewMobile .flowExplainer b { font-size: 9px; }
+.previewMobile .flowExplainer small { font-size: 8px; line-height: 1.35; }
+.previewMobile .panel { padding: 16px; }
+.previewMobile .panelHeading { margin-bottom: 9px; }
+.previewMobile .eventList article { grid-template-columns: 46px 1fr; gap: 10px; padding: 13px 0; }
+.previewMobile .eventList time { width: 44px; height: 51px; }
+.previewMobile .eventList h3 { margin-top: 6px; font-size: 15px; }
+.previewMobile .inlineActions { gap: 5px; margin-top: 8px; }
+.previewMobile .inlineActions button { padding: 5px 7px; }
 .previewMobile .eventStatus { grid-column: 2; }
 .previewMobile .viewTabs button { padding: 10px 7px; }
 .previewMobile .viewTabs small { display: none; }
@@ -456,8 +546,14 @@
 .previewMobile .mainEvent, .previewMobile .taskEvent, .previewMobile .milestoneEvent { font-size: 0; min-height: 5px; padding: 0; }
 .previewMobile .ganttHeader, .previewMobile .ganttRow { grid-template-columns: 90px repeat(5, 1fr); }
 .previewMobile .ganttBar { font-size: 0; }
-.previewMobile .timetable > div { grid-template-columns: 50px 1fr; }
-.previewMobile .timetable > div > :last-child { grid-column: 2; justify-self: start; }
+.previewMobile .planningRelation { display: grid; grid-template-columns: auto auto auto auto auto; gap: 5px; padding: 9px; }
+.previewMobile .planningRelation p { grid-column: 1 / -1; margin: 2px 0 0; line-height: 1.4; }
+.previewMobile .rundownMatrixWrap { display: none; }
+.previewMobile .rundownMobileList { display: block; }
+.previewMobile .rundownControls { grid-template-columns: 1fr; gap: 7px; }
+.previewMobile .rundownControls label, .previewMobile .rundownControls > p { min-height: 52px; }
+.previewMobile .timetableHeader { flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.previewMobile .timetableHeader > div:last-child { margin-left: 0; flex-wrap: wrap; }
 .previewMobile .notificationSummary > div { min-height: 68px; }
 .previewMobile .priorityTable > div { grid-template-columns: 42px 1fr; }
 .previewMobile .priorityTable strong { grid-column: 2; text-align: left; }
@@ -465,9 +561,11 @@
 .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: var(--surface-2); border-radius: 8px; padding: 3px; }
 .segmented button { border: 0; background: transparent; border-radius: 6px; padding: 7px; font-size: 10px; cursor: pointer; }
 .segmented button[aria-pressed="true"] { background: var(--ink); color: #fff; }
-.mobileModuleRail { margin-top: 8px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.mobileRailShell { margin-top: 8px; display: grid; grid-template-columns: 25px minmax(0, 1fr) 25px; gap: 4px; align-items: center; }
+.railArrow { width: 25px; height: 29px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--script); cursor: pointer; font-size: 18px; line-height: 1; }
+.mobileModuleRail { min-width: 0; display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
 .mobileModuleRail::-webkit-scrollbar { display: none; }
-.mobileModuleRail button { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 6px 9px; font-size: 9px; cursor: pointer; }
+.mobileModuleRail button { flex: 0 0 auto; scroll-snap-align: start; border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 6px 9px; font-size: 9px; cursor: pointer; }
 .mobileModuleRail button[aria-pressed="true"] { background: var(--script-soft); border-color: var(--script); color: var(--script); }
 .bottomNav { background: var(--surface); border-top: 1px solid var(--line); grid-template-columns: repeat(4, 1fr); padding: 6px 5px 7px; z-index: 10; }
 .bottomNav button { border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); font-size: 9px; position: relative; cursor: pointer; }
@@ -478,7 +576,7 @@
 @media (max-width: 940px) {
   .shell { grid-template-columns: 210px minmax(0, 1fr); }
   .searchButton { width: 40px; text-align: center; }
-  .searchButton span { display: none; }
+  .searchButton > span:last-child { display: none; }
   .switcherButton { min-width: 170px; }
   .switcherButton small { display: none; }
   .roleDisplay { min-width: 135px; }
@@ -492,9 +590,24 @@
   .demoBar { justify-content: space-between; }
   .demoHint { display: none; }
   .shell { width: 100%; margin: 0; grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 64px; border-radius: 0; }
-  .topbar { grid-column: 1; padding: 0 12px; gap: 8px; }
-  .brandName, .projectSwitcher, .searchButton, .sidebar, .headerActions { display: none; }
-  .roleDisplay { min-width: 132px; height: 38px; }
+  .topbar { grid-column: 1; padding: 0 10px; gap: 6px; }
+  .brand, .brandName, .sidebar, .headerActions { display: none; }
+  .contextControls { margin-left: 0; gap: 5px; }
+  .projectSwitcher { display: block; }
+  .switcherButton { min-width: 76px; width: 76px; height: 36px; padding: 6px 8px; gap: 4px; }
+  .switcherButton small { display: none; }
+  .switcherButton b { max-width: 50px; font-size: 9px; }
+  .roleDisplay { min-width: 88px; width: 88px; height: 36px; padding: 5px 7px; }
+  .roleDisplay > span, .roleDisplay > i { display: none; }
+  .roleDisplay b { grid-row: 1 / 3; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .topActions { gap: 4px; }
+  .searchControl { display: flex; }
+  .searchButton { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border-radius: 50%; text-align: center; }
+  .searchExpanded { position: absolute; z-index: 30; left: 10px; right: 10px; }
+  .searchExpanded input { width: 100%; height: 40px; }
+  .notificationButton { min-width: 52px; height: 34px; padding: 0 23px 0 8px; font-size: 9px; }
+  .notificationButton .unreadDot { top: 8px; right: 5px; min-width: 15px; height: 15px; padding: 0 4px; font-size: 7px; }
+  .avatarButton { width: 34px; height: 34px; }
   .mobileProjectNav { grid-row: 2; display: block; background: var(--surface); border-bottom: 1px solid var(--line); padding: 10px 12px; min-width: 0; }
   .workspace { grid-row: 3; padding: 18px 13px 88px; }
   .pageHeader { margin-bottom: 18px; }
@@ -506,9 +619,19 @@
   .roleSecondary, .projectMetric, .moduleNumber, .taskHero .progressRing, .frameworkIntro > button { display: none; }
   .roleBanner h2, .projectHero h2, .moduleIntro h2, .taskHero h2, .frameworkIntro h2 { font-size: 23px; }
   .notificationSummary, .deviceRules { grid-template-columns: 1fr; }
-  .flowExplainer { grid-template-columns: 1fr; }
-  .flowExplainer > i { transform: rotate(90deg); text-align: center; }
-  .eventList article { grid-template-columns: 52px 1fr; }
+  .flowExplainer { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .flowExplainer > i { display: none; }
+  .flowExplainer > div { min-height: 102px; padding: 10px 8px; grid-template-columns: 1fr; grid-template-rows: 28px auto 1fr; gap: 3px; }
+  .flowStep { width: 25px; height: 25px; grid-row: auto; font-size: 8px; }
+  .flowExplainer b { font-size: 9px; }
+  .flowExplainer small { font-size: 8px; line-height: 1.35; }
+  .panel { padding: 16px; }
+  .panelHeading { margin-bottom: 9px; }
+  .eventList article { grid-template-columns: 46px 1fr; gap: 10px; padding: 13px 0; }
+  .eventList time { width: 44px; height: 51px; }
+  .eventList h3 { margin-top: 6px; font-size: 15px; }
+  .inlineActions { gap: 5px; margin-top: 8px; }
+  .inlineActions button { padding: 5px 7px; }
   .eventStatus { grid-column: 2; }
   .viewTabs button { padding: 10px 6px; }
   .viewTabs small, .legend { display: none; }
@@ -516,8 +639,14 @@
   .mainEvent, .taskEvent, .milestoneEvent { font-size: 0; min-height: 5px; padding: 0; }
   .ganttHeader, .ganttRow { grid-template-columns: 88px repeat(5, 1fr); }
   .ganttBar { font-size: 0; }
-  .timetable > div { grid-template-columns: 48px 1fr; }
-  .timetable > div > :last-child { grid-column: 2; justify-self: start; }
+  .planningRelation { display: grid; grid-template-columns: auto auto auto auto auto; gap: 5px; padding: 9px; }
+  .planningRelation p { grid-column: 1 / -1; margin: 2px 0 0; line-height: 1.4; }
+  .rundownMatrixWrap { display: none; }
+  .rundownMobileList { display: block; }
+  .rundownControls { grid-template-columns: 1fr; gap: 7px; }
+  .rundownControls label, .rundownControls > p { min-height: 52px; }
+  .timetableHeader { flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .timetableHeader > div:last-child { margin-left: 0; flex-wrap: wrap; }
   .publishSummary { grid-template-columns: 1fr; }
   .publishSummary > p { grid-column: 1; }
 }
