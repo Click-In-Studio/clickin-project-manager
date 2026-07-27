@@ -12,7 +12,7 @@ type CharEntry = { raw: string; parsedBase: string; parsedSuffix: string | null;
 type TagGroupInfo = { id: string; name: string; options: { id: string; label: string; color: string }[] };
 type Workbook = { token: string; sheets: SheetMeta[] };
 type SheetPickerPreset = { url: string; token: string; sheets: SheetMeta[]; nonce: number };
-type ApiResult<T> = Partial<T> & { error?: string; status?: string; migration?: { phase?: string } };
+type ApiResult<T> = Partial<T> & { error?: string };
 type JointImportMappingAction = "create" | "preserve";
 type SceneSummaryItem = { sceneId: string | null; num: string | null; name: string | null; count: number };
 type TagTypeAction = Extract<TypeAction, { action: "mapTag" }>;
@@ -22,9 +22,6 @@ async function readApiResult<T>(res: Response, fallback: string): Promise<ApiRes
   if (!text) return {} as ApiResult<T>;
   try {
     const data = JSON.parse(text) as ApiResult<T>;
-    if (data.status === "updating") {
-      return { error: data.migration?.phase ? `剧本数据正在更新：${data.migration.phase}` : "剧本数据正在更新，请稍后重试" } as ApiResult<T>;
-    }
     return data;
   } catch {
     return { error: `${fallback}（HTTP ${res.status}）：${text.slice(0, 120)}` } as ApiResult<T>;

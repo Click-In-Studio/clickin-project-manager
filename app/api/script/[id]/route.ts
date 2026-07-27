@@ -5,7 +5,7 @@ import { TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getActiveVersionId, getVersion,
-  loadProduction, applyPatchToDB, ensureScriptMarkerMigration,
+  loadProduction, applyPatchToDB,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 
@@ -36,11 +36,6 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]"
   const versionId = await resolveVersion(req, id);
   if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
 
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
-
   const result = await loadProduction(id, versionId);
   if (!result) return Response.json({ error: "版本不存在" }, { status: 404 });
   return Response.json(result.state);
@@ -59,11 +54,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
 
   const versionId = await resolveVersion(req, id);
   if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
-
-  const migration = await ensureScriptMarkerMigration(versionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
 
   const ver = await getVersion(versionId);
   if (!ver || ver.status !== 'editing') {

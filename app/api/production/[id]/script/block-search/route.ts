@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, ensureScriptMarkerMigration, getMarkerLabelIndex, getVersion } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, getMarkerLabelIndex, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { computePageMap } from "@/lib/script-page";
@@ -64,13 +64,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (paramVersionId && !effectiveVersionId) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
   }
-  if (effectiveVersionId) {
-    const migration = await ensureScriptMarkerMigration(effectiveVersionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
-  }
-
   const pool = getPool();
   const results: MentionSearchResult[] = [];
   let rehearsalLabelsPromise: ReturnType<typeof getMarkerLabelIndex> | null = null;
@@ -108,13 +101,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
     }
   }
-  if (explicitVersionId && explicitVersionId !== effectiveVersionId) {
-    const migration = await ensureScriptMarkerMigration(explicitVersionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
-  }
-
   // ── Version-aware query helpers ────────────────────────────────────────────
 
   async function firstBlockInScene(sceneId: string): Promise<{ id: string } | null> {

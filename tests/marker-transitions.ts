@@ -7,7 +7,6 @@ import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../lib/scri
 import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../lib/script-ops";
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "../lib/script-marker-blocks";
 import { buildMarkerLabelIndex } from "../lib/script-generated-labels";
-import { migrateLegacyRehearsalMentions } from "../lib/mention-types";
 import { updateMarkerOwnership } from "../lib/script-marker-ownership-cache";
 import { getMarkerLabelIndex } from "../lib/db";
 import { computePageMap, updateEstimatedPageMap } from "../lib/script-page";
@@ -769,47 +768,6 @@ assert.deepEqual(
 const normalizedLabels = buildMarkerLabelIndex(normalizedRehearsalCache);
 assert.equal(normalizedLabels.rehearsalLabelByMarkerId.get("mark-1"), "A");
 assert.equal(normalizedLabels.rehearsalLabelByMarkerId.get("mark-2"), "A");
-
-const legacyMentionMappings = [{ sceneId: "scene-1", label: "A", markerId: "mark-1" }];
-assert.equal(
-  migrateLegacyRehearsalMentions(
-    "before [#rehearsal:scene-1:A] after",
-    "version-1",
-    legacyMentionMappings,
-    true,
-  ),
-  "before [#rehearsal:mark-1] after",
-);
-assert.equal(
-  migrateLegacyRehearsalMentions(
-    "[#A](/__cm__rehearsal:scene-1?v=version-1:A)",
-    "version-1",
-    legacyMentionMappings,
-    false,
-  ),
-  "[#A](/__cm__rehearsal:mark-1?v=version-1)",
-);
-assert.equal(
-  migrateLegacyRehearsalMentions(
-    "[#rehearsal:scene-1:A]",
-    "version-1",
-    legacyMentionMappings,
-    false,
-  ),
-  "[#rehearsal:scene-1:A]",
-);
-assert.equal(
-  migrateLegacyRehearsalMentions(
-    "[#AA](/__cm__rehearsal:scene-1:AA)",
-    "version-1",
-    [
-      ...legacyMentionMappings,
-      { sceneId: "scene-1", label: "AA", markerId: "mark-27" },
-    ],
-    true,
-  ),
-  "[#AA](/__cm__rehearsal:mark-27)",
-);
 
 type FakeMarker = {
   id: string;

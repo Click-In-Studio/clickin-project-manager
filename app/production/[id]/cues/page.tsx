@@ -7,7 +7,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getProductionName,
   loadProduction, listCueLists, listCuesByProduction,
-  getActiveVersionId, getVersion, listVersions, ensureScriptMarkerMigration, hasListAccess,
+  getActiveVersionId, getVersion, listVersions, hasListAccess,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { computePageMap } from "@/lib/script-page";
@@ -42,8 +42,6 @@ export default async function CuesPage({
     ?? validCookieVersionId
     ?? await getActiveVersionId(id);
   if (resolvedVersionId) {
-    const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-    if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
   }
 
   const [name, production, cueLists, allCues, version] = await Promise.all([

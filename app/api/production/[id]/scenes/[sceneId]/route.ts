@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
-  getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB,
-  ensureScriptMarkerMigration, getVersion, listScenesByVersion,
+  getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/permissions";
@@ -44,8 +43,6 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   if (resolved.version.status !== "editing") {
     return { error: Response.json({ error: "该版本不可编辑" }, { status: 403 }) };
   }
-  const migration = await ensureScriptMarkerMigration(resolved.versionId);
-  if (migration.status === "running") return { error: Response.json({ status: "updating", migration }, { status: 202 }) };
   const result = await loadProduction(productionId, resolved.versionId);
   if (!result) return { error: Response.json({ error: "未找到版本" }, { status: 404 }) };
   return { permCtx, result, versionId: resolved.versionId };

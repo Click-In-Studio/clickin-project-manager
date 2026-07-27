@@ -6675,7 +6675,6 @@ export default function ScriptEditor({
   const reloadScriptState = useCallback(async () => {
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
-    if (response.status === 202) return;
     if (!response.ok) throw new Error("Failed to reload script state");
     const serverState = await response.json() as ScriptState;
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
@@ -7603,28 +7602,9 @@ export default function ScriptEditor({
     return updateActiveSceneFromScroll();
   }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll]);
 
-  type LoadState = "loading" | "updating" | "ready" | "not-found" | "error";
-  type MigrationProgress = {
-    progress?: number;
-    phase?: string;
-    startedAt?: number | null;
-  };
+  type LoadState = "loading" | "ready" | "not-found" | "error";
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string>("");
-  const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
-  const [migrationNow, setMigrationNow] = useState(() => Date.now());
-  const formatMigrationElapsed = (ms: number | null | undefined): string => {
-    if (!ms || ms <= 0) return "已用时 0 秒";
-    const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return `已用时 ${seconds} 秒`;
-    return `已用时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
-  };
-  useEffect(() => {
-    if (loadState !== "updating") return;
-    setMigrationNow(Date.now());
-    const timer = setInterval(() => setMigrationNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [loadState]);
 
   // Keep scrollLockedRef in sync
   useEffect(() => { scrollLockedRef.current = scrollLocked; }, [scrollLocked]);
@@ -8127,13 +8107,6 @@ export default function ScriptEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
         });
-        if (res.status === 202) {
-          if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-          syncTimerRef.current = setTimeout(() => {
-            pushPatchRef.current(curr);
-          }, 1200);
-          return;
-        }
         if (res.ok) {
           const body = await res.json() as { ok: boolean; serverSeq: number };
           serverSeqRef.current = body.serverSeq;
@@ -8160,7 +8133,6 @@ export default function ScriptEditor({
   useEffect(() => {
     setLoadState("loading");
     setLoadError("");
-    setMigrationProgress(null);
     const placeholderBlock = makeBlock();
     measuredHeightsRef.current.clear();
     measuredHeightTotalRef.current = 0;
@@ -8181,24 +8153,16 @@ export default function ScriptEditor({
       : `${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`;
 
     let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const load = async () => {
       try {
         const r = await fetch(loadUrl);
         // Production route returns { state, versionId, versions }; script route returns ScriptState directly.
         type ProdResponse = { state: ScriptState; versionId: string; versions: Version[] };
         type ErrResponse = { error?: string };
-        type UpdatingResponse = { status?: "updating"; migration?: MigrationProgress };
-        const body = await r.json() as ProdResponse | ScriptState | ErrResponse | UpdatingResponse;
+        const body = await r.json() as ProdResponse | ScriptState | ErrResponse;
         if (cancelled) return;
-        if (r.status === 202) {
-          setMigrationProgress((body as UpdatingResponse).migration ?? null);
-          setLoadState("updating");
-          retryTimer = setTimeout(load, 1200);
-          return;
-        }
-        if (r.status === 404) { setMigrationProgress(null); setLoadState("not-found"); return; }
-        if (!r.ok) { setMigrationProgress(null); setLoadError((body as ErrResponse).error ?? "加载失败"); setLoadState("error"); return; }
+        if (r.status === 404) { setLoadState("not-found"); return; }
+        if (!r.ok) { setLoadError((body as ErrResponse).error ?? "加载失败"); setLoadState("error"); return; }
 
         const isProdResponse = productionId && "state" in body;
         const state: ScriptState = isProdResponse
@@ -8244,7 +8208,6 @@ export default function ScriptEditor({
         }
 
         setLoadState("ready");
-        setMigrationProgress(null);
 
         // Load tag groups and block tags in parallel (non-blocking)
         if (productionId) {
@@ -8274,10 +8237,7 @@ export default function ScriptEditor({
       }
     };
     void load();
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
+    return () => { cancelled = true; };
   }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
 
   useEffect(() => {
@@ -8413,13 +8373,6 @@ export default function ScriptEditor({
         try {
           const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
           const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
-          if (r.status === 202) {
-            streamDebounceTimerRef.current = setTimeout(() => {
-              streamDebounceTimerRef.current = null;
-              handleSeq(seq);
-            }, 1200);
-            return;
-          }
           if (!r.ok) return;
           const serverState = await r.json() as ScriptState;
 
@@ -10048,9 +10001,8 @@ export default function ScriptEditor({
   const runSceneMenuMutation = async (request: () => Promise<Response>, failureMessage: string) => {
     try {
       if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
-      let response = await request();
-      if (response.status === 202) response = await request();
-      if (!response.ok || response.status === 202) throw new Error(failureMessage);
+      const response = await request();
+      if (!response.ok) throw new Error(failureMessage);
       await reloadScriptState();
     } catch (error) {
       showReorderNotice(error instanceof Error ? error.message : failureMessage);
@@ -10096,14 +10048,13 @@ export default function ScriptEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) }),
       });
-      let response = await request();
-      if (response.status === 202) response = await request();
+      const response = await request();
       const data = await response.json().catch(() => ({}));
       if ((response.status === 300 && data.plan?.status === "choice") || (response.status === 409 && data.plan?.status === "blocked")) {
         setMarkerDeleteDialog({ plan: data.plan, source: "server" });
         return;
       }
-      if (!response.ok || response.status === 202) {
+      if (!response.ok) {
         setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
         return;
       }
@@ -10127,7 +10078,7 @@ export default function ScriptEditor({
         body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || response.status === 202) {
+      if (!response.ok) {
         setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
         return;
       }
@@ -10145,12 +10096,6 @@ export default function ScriptEditor({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(activeVersionId ? { ...fields, versionId: activeVersionId } : fields),
     });
-    if (response.status === 202) {
-      const body = await response.json().catch(() => null) as { migration?: MigrationProgress } | null;
-      setMigrationProgress(body?.migration ?? null);
-      setLoadState("updating");
-      return;
-    }
     if (!response.ok) throw new Error("Failed to update scene metadata");
     setSceneDetails((prev) => prev.map((scene) => (scene.id === id ? { ...scene, ...fields } : scene)));
   };
@@ -10210,32 +10155,10 @@ export default function ScriptEditor({
     );
   }
 
-  if (loadState === "loading" || loadState === "updating") {
-    const localElapsedMs = migrationProgress?.startedAt
-      ? Math.max(0, migrationNow - migrationProgress.startedAt)
-      : 0;
-    const progress = Math.max(1, Math.min(99, Math.round(migrationProgress?.progress ?? 8)));
-    const elapsedText = formatMigrationElapsed(localElapsedMs);
+  if (loadState === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-100">
-        {loadState === "updating" ? (
-          <div className="w-[min(22rem,calc(100vw-2rem))]">
-            <div className="mb-3 flex items-center justify-between text-sm text-zinc-500">
-              <span className="font-medium">数据更新中...</span>
-              <span className="tabular-nums">{progress}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-zinc-200">
-              <div
-                className="h-full rounded-full bg-[#2f6fed] transition-[width] duration-500 ease-out"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <div className="mt-3 truncate text-xs text-zinc-400">{migrationProgress?.phase ?? "正在更新数据"}</div>
-            <div className="mt-1 text-xs text-zinc-400">{elapsedText}</div>
-          </div>
-        ) : (
-          <span className="text-sm text-zinc-400">加载中...</span>
-        )}
+        <span className="text-sm text-zinc-400">加载中...</span>
       </div>
     );
   }

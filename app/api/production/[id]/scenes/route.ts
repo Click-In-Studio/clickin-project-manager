@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, listScenesByVersion, getActiveVersionId,
-  loadProduction, applyPatchToDB, ensureScriptMarkerMigration, getVersion, listMarkerProjectionByVersion,
+  loadProduction, applyPatchToDB, getVersion, listMarkerProjectionByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasPermission } from "@/lib/permissions";
@@ -39,8 +39,6 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   }
   const resolved = await resolveProductionVersion(id, req.nextUrl.searchParams.get("versionId") ?? undefined);
   if (resolved.error) return resolved.error;
-  const migration = await ensureScriptMarkerMigration(resolved.versionId);
-  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
   const scenes = await listMarkerProjectionByVersion(resolved.versionId);
   return req.nextUrl.searchParams.get("includeRehearsalMarks") === "1"
     ? Response.json({ scenes, rehearsalMarks: Object.fromEntries(scenes.map((scene) => [scene.id, scene.rehearsalMarks])) })
@@ -63,8 +61,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   if (resolved.version.status !== "editing") {
     return Response.json({ error: "该版本不可编辑" }, { status: 403 });
   }
-  const migration = await ensureScriptMarkerMigration(resolved.versionId);
-  if (migration.status === "running") return Response.json({ status: "updating", migration }, { status: 202 });
   const result = await loadProduction(id, resolved.versionId);
   if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
 

@@ -1,7 +1,7 @@
 import { getScriptEditorPool } from "./db";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "../lib/script-marker-sql";
 import { withMarkerSceneLabels, type MarkerLabelIndex } from "../lib/script-generated-labels";
-import { ensureScriptMarkerMigration, getMarkerLabelIndex } from "../lib/db";
+import { getMarkerLabelIndex } from "../lib/db";
 
 export type ScriptBlockRow = {
   id:            string;
@@ -158,15 +158,6 @@ async function getActiveVersionId(productionId: string): Promise<string | null> 
   return res.rows[0]?.active_version_id ?? null;
 }
 
-async function getMigratedActiveVersionId(productionId: string): Promise<string | null> {
-  const versionId = await getActiveVersionId(productionId);
-  if (versionId) {
-    const migration = await ensureScriptMarkerMigration(versionId, getScriptEditorPool());
-    if (migration.status === "running") throw new Error("剧本数据正在更新，请稍后重试");
-  }
-  return versionId;
-}
-
 function versionedBlocksCTE(): string {
   return `${VERSION_OWNED_BLOCKS_CTE},
   version_snapshots AS (
@@ -321,7 +312,7 @@ export async function getBlockById(
   blockId:      string,
 ): Promise<ScriptBlockRow | null> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
     resolvedVersionId
       ? `${versionedBlocksCTE()}
@@ -343,7 +334,7 @@ export async function getBlockByLine(
   lineNum:      number,
 ): Promise<ScriptBlockRow | null> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
     resolvedVersionId
       ? `${versionedBlocksCTE()}
@@ -367,7 +358,7 @@ export async function searchBlocks(
   limit         = 20,
 ): Promise<ScriptBlockRow[]> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const res = await pool.query<RawBlockRow>(
     resolvedVersionId
       ? `${versionedBlocksCTE()}
@@ -424,7 +415,7 @@ export async function queryBlocks(
 ): Promise<ScriptBlockRow[]> {
   const pool = getScriptEditorPool();
   const { page, type, scene, rehearsalMark, limit = 30 } = filter;
-  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
+  const resolvedVersionId = await getActiveVersionId(productionId);
 
   const params: unknown[] = [resolvedVersionId ?? productionId];
   const conditions: string[] = [];
@@ -587,7 +578,7 @@ export type SceneRow = {
 
 export async function getScenesForProduction(productionId: string): Promise<SceneRow[]> {
   const pool = getScriptEditorPool();
-  const resolvedVersionId = await getMigratedActiveVersionId(productionId);
+  const resolvedVersionId = await getActiveVersionId(productionId);
   const [res, labels] = await Promise.all([pool.query<{
     id: string; name: string | null; parent_id: string | null;
     synopsis: string | null; action_line: string | null; music: string | null;
