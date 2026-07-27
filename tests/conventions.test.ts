@@ -10,12 +10,10 @@
  *  2. Runtime migrations are idempotent   (run twice → no side effects)
  *  3. Schema fingerprint matches seed     (schema drift detection)
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { readdir, readFile } from "fs/promises";
 import path from "path";
 import { getPool } from "@/lib/pg";
-import { ensureScriptMarkerMigration } from "@/lib/db";
-import { makeProduction, cleanupProduction } from "./factories";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. No runtime DDL in application source
@@ -116,43 +114,6 @@ describe("no runtime DDL in application source", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Runtime migrations are idempotent
 // ─────────────────────────────────────────────────────────────────────────────
-
-let versionId: string;
-let prodId: string;
-
-beforeAll(async () => {
-  ({ prodId, versionId } = await makeProduction());
-});
-
-afterAll(async () => {
-  await cleanupProduction(prodId).catch(() => {});
-});
-
-describe("runtime migration idempotency", () => {
-  it("ensureScriptMarkerMigration: fresh version returns ready immediately (no blocks to migrate)", async () => {
-    const result = await ensureScriptMarkerMigration(versionId);
-    expect(result.status).toBe("ready");
-  });
-
-  it("ensureScriptMarkerMigration: idempotent — second call returns ready too", async () => {
-    await ensureScriptMarkerMigration(versionId); // first call
-    const result = await ensureScriptMarkerMigration(versionId); // second call
-    expect(result.status).toBe("ready");
-  });
-
-  it("ensureScriptMarkerMigration: row count in script_version is unchanged after call", async () => {
-    const before = await getPool().query<{ count: string }>(
-      "SELECT COUNT(*) AS count FROM script_version WHERE version_id = $1",
-      [versionId],
-    );
-    await ensureScriptMarkerMigration(versionId);
-    const after = await getPool().query<{ count: string }>(
-      "SELECT COUNT(*) AS count FROM script_version WHERE version_id = $1",
-      [versionId],
-    );
-    expect(after.rows[0].count).toBe(before.rows[0].count);
-  });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Schema fingerprint — detect seed vs schema drift

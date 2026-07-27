@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, loadProduction, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, loadProduction, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { computePageMap } from "@/lib/script-page";
 
@@ -23,10 +23,6 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
     }
   }
   if (versionId) {
-    const migration = await ensureScriptMarkerMigration(versionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
-    }
   }
   const result = await loadProduction(id, versionId);
   const blocks = result?.state.blocks ?? [];

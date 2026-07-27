@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "场景" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import ScenesManager from "@/components/ScenesManager";
 
@@ -38,8 +38,6 @@ export default async function ScenesPage({
 
   const scenes = resolvedVersionId
     ? await (async () => {
-        const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-        if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
         return listMarkerProjectionByVersion(resolvedVersionId);
       })()
     : [];

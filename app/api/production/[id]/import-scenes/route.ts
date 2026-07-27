@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listScenesByVersion, listSceneVersionsByVersion, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion, ensureScriptMarkerMigration } from "@/lib/db";
+import { getProductionPermissionContext, listScenesByVersion, listSceneVersionsByVersion, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import type { SceneColMap, SceneConflict, ImportScenePreview } from "@/lib/import/types";
 import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
@@ -69,10 +69,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!resolvedVersionId) {
     return Response.json({ error: "演出没有可用版本，无法导入构作" }, { status: 400 });
   }
-  const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
-  }
   const { scenes: existing, markerBacked } = await listExistingScenesForImport(resolvedVersionId, productionId);
   const existingByNum = new Map(existing.map(s => [s.number, s]));
 
@@ -122,10 +118,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (resolvedVersionId instanceof Response) return resolvedVersionId;
   if (!resolvedVersionId) {
     return Response.json({ error: "演出没有可用版本，无法导入构作" }, { status: 400 });
-  }
-  const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-  if (migration.status === "running") {
-    return Response.json({ status: "updating", migration }, { status: 202 });
   }
   const { scenes: existing, markerBacked } = await listExistingScenesForImport(resolvedVersionId, productionId);
   const existingByNum = new Map(existing.map(s => [s.number, s]));

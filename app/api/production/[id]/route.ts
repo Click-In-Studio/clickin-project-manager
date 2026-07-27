@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, ensureScriptMarkerMigration, getVersion } from "@/lib/db";
+import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, getVersion } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { hasPermission } from "@/lib/permissions";
 
@@ -27,11 +27,6 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
     }
     if (!version || version.productionId !== id) {
       return Response.json({ error: "版本不存在" }, { status: 404 });
-    }
-
-    const migration = await ensureScriptMarkerMigration(versionId);
-    if (migration.status === "running") {
-      return Response.json({ status: "updating", migration }, { status: 202 });
     }
 
     const [result, versions] = await Promise.all([

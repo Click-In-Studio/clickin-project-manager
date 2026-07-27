@@ -19,25 +19,15 @@ import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, withMarkerSceneL
 import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
-import { migrateLegacyRehearsalMentions } from "./mention-types";
-
-type MarkerMigrationState = {
-  error?: string;
-  startedAt: number;
-  progress: number;
-  phase: string;
-};
 
 type MarkerLabelCacheEntry = { revision: string; index: MarkerLabelIndex };
 
 const scriptMarkerGlobals = globalThis as typeof globalThis & {
-  __scriptMarkerMigrations?: Map<string, "ready" | MarkerMigrationState | Promise<MarkerMigrationProgress>>;
   __scriptMarkerLabelCache?: Map<string, MarkerLabelCacheEntry>;
   __scriptMarkerLabelLoads?: Map<string, Promise<MarkerLabelCacheEntry | null>>;
   __scriptPageMapCache?: Map<string, EstimatedPageMapCache>;
   __scriptPageMapUpdates?: Map<string, Promise<void>>;
 };
-const markerMigrations = scriptMarkerGlobals.__scriptMarkerMigrations ??= new Map();
 
 const MARKER_LABEL_CACHE_LIMIT = 64;
 const markerLabelCache = scriptMarkerGlobals.__scriptMarkerLabelCache ??= new Map();
@@ -107,20 +97,6 @@ export async function getMarkerLabelIndex(
   }).finally(() => markerLabelLoads.delete(versionId));
   markerLabelLoads.set(versionId, load);
   return (await load)?.index ?? buildMarkerLabelIndex([]);
-}
-
-type MarkerMigrationProgress =
-  | { status: "ready" }
-  | { status: "running"; progress: number; phase: string; startedAt: number };
-
-function markerMigrationProgress(state?: MarkerMigrationState): MarkerMigrationProgress {
-  if (!state) return { status: "ready" };
-  return {
-    status: "running",
-    progress: state.progress,
-    phase: state.phase,
-    startedAt: state.startedAt,
-  };
 }
 
 // ─── Version types ────────────────────────────────────────────────────────────
@@ -460,183 +436,9 @@ const STALE_REHEARSAL_OWNERSHIP_SQL = `current_mark IS DISTINCT FROM ${EXPECTED_
   OR current_owner_marker_id IS DISTINCT FROM ${EXPECTED_OWNER_MARKER_SQL}
   OR current_meta IS DISTINCT FROM ${EXPECTED_REHEARSAL_META_SQL}`;
 
-const LEGACY_MENTION_TEXT_TARGETS = {
-  production_event: { table: "production_event", column: "description" },
-  event_schedule_item: { table: "event_schedule_item", column: "notes" },
-  event_call_time: { table: "event_call_time", column: "notes" },
-  event_tech_req: { table: "event_tech_req", column: "description" },
-  event_report: { table: "event_report", column: "body" },
-  event_report_note: { table: "event_report_note", column: "content" },
-  event_report_reply: { table: "event_report_reply", column: "content" },
-} as const;
-
-type LegacyMentionTextSource = keyof typeof LEGACY_MENTION_TEXT_TARGETS;
-
-type LegacyMentionTextRow = {
-  source: LegacyMentionTextSource;
-  id: string;
-  content: string;
-  include_unversioned: boolean;
-};
-
-async function rehearsalMentionMappings(versionId: string, db: Pool | PoolClient) {
-  const { rows } = await db.query<{
-    id: string;
-    type: Block["type"];
-    marker_meta: MarkerMeta | null;
-    legacy_scene_id: string | null;
-  }>(
-    VERSION_MARKER_LABEL_ROWS_SQL,
-    [versionId],
-  );
-  const labels = buildMarkerLabelIndex(rows.map((row) => ({
-    ...row,
-    markerMeta: cleanMarkerMeta(row.marker_meta),
-  })));
-  const legacySceneIdByParentId = new Map(
-    rows.flatMap((row) => row.legacy_scene_id ? [[row.id, row.legacy_scene_id] as const] : []),
-  );
-  return rows.flatMap((row) => {
-    if (row.type !== "rehearsal_marker") return [];
-    const label = labels.rehearsalLabelByMarkerId.get(row.id);
-    const parentId = labels.parentIdByMarkerId.get(row.id);
-    const sceneId = parentId ? legacySceneIdByParentId.get(parentId) : null;
-    return sceneId && label ? [{ sceneId, label, markerId: row.id }] : [];
-  });
-}
-
-async function legacyRehearsalMentionRows(versionId: string, db: Pool | PoolClient): Promise<LegacyMentionTextRow[]> {
-  const { rows } = await db.query<LegacyMentionTextRow>(
-    `WITH context AS (
-       SELECT v.production_id, p.active_version_id = v.id AS is_active
-       FROM version v
-       JOIN production p ON p.id = v.production_id
-       WHERE v.id = $1
-     ), event_text AS (
-       SELECT 'production_event'::text AS source, pe.id, pe.description AS content,
-              COALESCE(pe.version_id = $1, context.is_active) AS include_unversioned
-       FROM production_event pe, context
-       WHERE pe.production_id = context.production_id AND pe.description LIKE '%rehearsal:%'
-       UNION ALL
-       SELECT 'event_schedule_item', item.id, item.notes,
-              COALESCE(pe.version_id = $1, context.is_active)
-       FROM event_schedule_item item
-       JOIN production_event pe ON pe.id = item.event_id
-       JOIN context ON context.production_id = pe.production_id
-       WHERE item.notes LIKE '%rehearsal:%'
-       UNION ALL
-       SELECT 'event_call_time', call.id, call.notes,
-              COALESCE(pe.version_id = $1, context.is_active)
-       FROM event_call_time call
-       JOIN production_event pe ON pe.id = call.event_id
-       JOIN context ON context.production_id = pe.production_id
-       WHERE call.notes LIKE '%rehearsal:%'
-       UNION ALL
-       SELECT 'event_tech_req', req.id, req.description,
-              COALESCE(pe.version_id = $1, context.is_active)
-       FROM event_tech_req req
-       JOIN production_event pe ON pe.id = req.event_id
-       JOIN context ON context.production_id = pe.production_id
-       WHERE req.description LIKE '%rehearsal:%'
-       UNION ALL
-       SELECT 'event_report', report.id, report.body,
-              COALESCE(pe.version_id = $1, context.is_active)
-       FROM event_report report
-       JOIN production_event pe ON pe.id = report.event_id
-       JOIN context ON context.production_id = pe.production_id
-       WHERE report.body LIKE '%rehearsal:%'
-       UNION ALL
-       SELECT 'event_report_note', note.id, note.content,
-              COALESCE(pe.version_id = $1, context.is_active)
-       FROM event_report_note note
-       JOIN event_report report ON report.id = note.report_id
-       JOIN production_event pe ON pe.id = report.event_id
-       JOIN context ON context.production_id = pe.production_id
-       WHERE note.content LIKE '%rehearsal:%'
-       UNION ALL
-       SELECT 'event_report_reply', reply.id, reply.content,
-              COALESCE(pe.version_id = $1, context.is_active)
-       FROM event_report_reply reply
-       JOIN event_report report ON report.id = reply.report_id
-       JOIN production_event pe ON pe.id = report.event_id
-       JOIN context ON context.production_id = pe.production_id
-       WHERE reply.content LIKE '%rehearsal:%'
-     )
-     SELECT source, id, content, include_unversioned FROM event_text`,
-    [versionId],
-  );
-  return rows;
-}
-
-async function legacyRehearsalMentionUpdates(versionId: string, db: Pool | PoolClient) {
-  const rows = await legacyRehearsalMentionRows(versionId, db);
-  if (rows.length === 0) return [];
-  const mappings = await rehearsalMentionMappings(versionId, db);
-  if (mappings.length === 0) return [];
-  return rows.flatMap((row) => {
-    const content = migrateLegacyRehearsalMentions(
-      row.content,
-      versionId,
-      mappings,
-      row.include_unversioned,
-    );
-    return content === row.content ? [] : [{ ...row, content }];
-  });
-}
-
-async function scriptMarkerCacheMigrationStatus(versionId: string, db: Pool | PoolClient) {
-  const { rows } = await db.query<{ has_markers: boolean; needed: boolean }>(
-    `${REHEARSAL_MARK_OWNERSHIP_CTE}
-     SELECT COUNT(*) FILTER (WHERE type = 'rehearsal_marker') > 0 AS has_markers,
-            COALESCE(bool_or(${STALE_REHEARSAL_OWNERSHIP_SQL}), false)
-              OR EXISTS (
-                SELECT 1
-                FROM scene_version
-                WHERE version_id = $1
-                  AND num <> ''
-              ) AS needed
-     FROM owned`,
-    [versionId],
-  );
-  return rows[0];
-}
-
-async function scriptMarkerMigrationNeeded(versionId: string, db: Pool | PoolClient): Promise<boolean> {
-  const cache = await scriptMarkerCacheMigrationStatus(versionId, db);
-  return cache.needed
-    || cache.has_markers && (await legacyRehearsalMentionUpdates(versionId, db)).length > 0;
-}
-
-async function migrateLegacyRehearsalMentionRowsInTx(client: PoolClient, versionId: string): Promise<void> {
-  const updates = await legacyRehearsalMentionUpdates(versionId, client);
-  for (const source of Object.keys(LEGACY_MENTION_TEXT_TARGETS) as LegacyMentionTextSource[]) {
-    const sourceUpdates = updates.filter((update) => update.source === source);
-    if (sourceUpdates.length === 0) continue;
-    const { table, column } = LEGACY_MENTION_TEXT_TARGETS[source];
-    await client.query(
-      `UPDATE ${table} target
-       SET ${column} = updates.content
-       FROM unnest($1::text[], $2::text[]) AS updates(id, content)
-       WHERE target.id = updates.id`,
-      [sourceUpdates.map((update) => update.id), sourceUpdates.map((update) => update.content)],
-    );
-  }
-}
-
-async function clearSceneVersionNumbersInTx(client: PoolClient, versionId: string): Promise<void> {
-  await client.query(
-    `UPDATE scene_version
-     SET num = ''
-     WHERE version_id = $1
-       AND num <> ''`,
-    [versionId],
-  );
-}
-
 async function normalizeRehearsalMarkOwnershipInTx(
   client: PoolClient,
   versionId: string,
-  state?: MarkerMigrationState,
   affectedBlockIds?: string[],
 ): Promise<void> {
   const ownershipCte = affectedBlockIds ? SCOPED_MARKER_OWNERSHIP_CTE : REHEARSAL_MARK_OWNERSHIP_CTE;
@@ -660,10 +462,6 @@ async function normalizeRehearsalMarkOwnershipInTx(
        AND ($2::text[] IS NULL OR block_id = ANY($2::text[]))`,
     [versionId, affectedBlockIds ?? null],
   );
-  if (state) {
-    state.progress = 15;
-    state.phase = "正在更新当前版本的排练记号缓存";
-  }
   if (stale.length === 0) return;
   const exclusive = stale.filter((row) => row.ref_count <= 1);
   if (exclusive.length > 0) {
@@ -686,9 +484,7 @@ async function normalizeRehearsalMarkOwnershipInTx(
     );
   }
   const shared = stale.filter((row) => row.ref_count > 1);
-  if (state) state.progress = 60;
-  for (let index = 0; index < shared.length; index++) {
-    const row = shared[index];
+  for (const row of shared) {
     const newSnapshotId = genSnapshotId();
     await client.query(
       `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
@@ -715,83 +511,7 @@ async function normalizeRehearsalMarkOwnershipInTx(
       "UPDATE script_version SET snapshot_id = $1 WHERE version_id = $2 AND snapshot_id = $3",
       [newSnapshotId, versionId, row.snapshot_id],
     );
-    if (state) state.progress = 60 + Math.floor(((index + 1) / shared.length) * 30);
   }
-  if (state) {
-    state.progress = 92;
-    state.phase = "正在校验更新结果";
-  }
-  if ((await scriptMarkerCacheMigrationStatus(versionId, client)).needed) {
-    throw new Error("排练记号缓存校验失败");
-  }
-}
-
-async function runScriptMarkerMigration(versionId: string, state: MarkerMigrationState, pool: Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
-    if (!await scriptMarkerMigrationNeeded(versionId, client)) {
-      await client.query("COMMIT");
-      return;
-    }
-    const previousMarkerStructure = await markerStructureBlocksInTx(client, versionId);
-    await clearSceneVersionNumbersInTx(client, versionId);
-    await normalizeRehearsalMarkOwnershipInTx(client, versionId, state);
-    await migrateLegacyRehearsalMentionRowsInTx(client, versionId);
-    const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
-    if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
-      await bumpMarkerStructureRevisionInTx(client, versionId);
-    }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function ensureScriptMarkerMigration(
-  versionId: string,
-  pool: Pool = getPool(),
-): Promise<MarkerMigrationProgress> {
-  const current = markerMigrations.get(versionId);
-  if (current === "ready") return markerMigrationProgress();
-  if (current instanceof Promise) return current;
-  if (current?.error !== undefined) {
-    throw new Error(`剧本数据更新失败：${current.error}`);
-  }
-  if (current) return markerMigrationProgress(current);
-
-  const check = (async () => {
-    if (!await scriptMarkerMigrationNeeded(versionId, pool)) {
-      markerMigrations.set(versionId, "ready");
-      return markerMigrationProgress();
-    }
-
-    const state: MarkerMigrationState = {
-      startedAt: Date.now(),
-      progress: 5,
-      phase: "正在统计剧本数据量，耗时取决于数据库大小",
-    };
-    markerMigrations.set(versionId, state);
-    void runScriptMarkerMigration(versionId, state, pool)
-      .then(() => {
-        markerMigrations.set(versionId, "ready");
-      })
-      .catch((err) => {
-        state.error = err instanceof Error ? err.message : String(err);
-        console.error(`[marker migration] failed for version ${versionId}:`, err);
-        markerMigrations.delete(versionId);
-      });
-    return markerMigrationProgress(state);
-  })().catch((error) => {
-    markerMigrations.delete(versionId);
-    throw error;
-  });
-  markerMigrations.set(versionId, check);
-  return check;
 }
 
 async function syncSceneVersionsFromMarkersInTx(
@@ -5459,7 +5179,7 @@ export async function applyPatchToDB(
       ? markerCacheUpdateBlockIds(finalBlocks, finalBlockChange)
       : [];
     if (affectedBlockIds.length > 0) {
-      await normalizeRehearsalMarkOwnershipInTx(client, versionId, undefined, affectedBlockIds);
+      await normalizeRehearsalMarkOwnershipInTx(client, versionId, affectedBlockIds);
     }
     if (markerStructureChanged) {
       const openingChapterMarkerId = finalBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;

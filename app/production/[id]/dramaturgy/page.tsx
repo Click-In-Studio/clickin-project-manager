@@ -11,7 +11,6 @@ import {
   listVersions,
   listMarkerProjectionByVersion,
   listCharactersByVersion,
-  ensureScriptMarkerMigration,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import Dramaturgy from "@/components/Dramaturgy";
@@ -56,8 +55,6 @@ export default async function DramaturgyPage({
 
   const [scenes, characters] = resolvedVersionId
     ? await (async () => {
-        const migration = await ensureScriptMarkerMigration(resolvedVersionId);
-        if (migration.status === "running") redirect(`/production/${id}/script?v=${resolvedVersionId}`);
         return Promise.all([
           listMarkerProjectionByVersion(resolvedVersionId),
           listCharactersByVersion(resolvedVersionId),

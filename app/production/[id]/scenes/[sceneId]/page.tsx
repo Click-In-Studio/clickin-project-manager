@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getSceneById, getProductionName, ensureScriptMarkerMigration, listVersions, type SceneDetail } from "@/lib/db";
+import { getProductionPermissionContext, getSceneById, getProductionName, listVersions, type SceneDetail } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import SceneDetailView from "@/components/SceneDetail";
 
@@ -16,8 +16,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     ?? versions[0]?.id
     ?? null;
   if (versionId) {
-    const migration = await ensureScriptMarkerMigration(versionId);
-    if (migration.status === "running") return { title: "剧本更新中" };
   }
   const scene = await getSceneById(sceneId, id, versionId);
   return { title: scene?.name ?? "场景" };
@@ -45,8 +43,6 @@ export default async function SceneDetailPage({
     ?? versions[0]?.id
     ?? null;
   if (versionId) {
-    const migration = await ensureScriptMarkerMigration(versionId);
-    if (migration.status === "running") redirect(`/production/${id}/script?v=${versionId}`);
   }
 
   const [name, scene] = await Promise.all([
