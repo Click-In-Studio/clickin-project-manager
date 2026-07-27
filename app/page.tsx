@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 
@@ -10,8 +9,7 @@ import HomeClient from "@/components/HomeClient";
 
 export default async function Home() {
   const cookieStore = await cookies();
-  const session = getSession(cookieStore);
-  if (!session) redirect("/login");
+  const session = getSession(cookieStore)!;
 
   const [productions, myCallTimes, myPendingReqs, myFollowedEvents, myUnreadReports] = await Promise.all([
     listProductions({ userId: session.userId, isAdmin: session.isAdmin }),

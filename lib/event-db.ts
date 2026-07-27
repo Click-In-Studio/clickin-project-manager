@@ -1313,10 +1313,13 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
      FROM event_report er
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
-     JOIN event_participant ep ON ep.event_id = pe.id AND ep.user_id = $1
      WHERE er.published_at IS NOT NULL
        AND pe.status IN ('published', 'completed')
        ${prodFilter}
+       AND (
+         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
+         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+       )
        AND NOT EXISTS (
          SELECT 1 FROM event_report_read err
          WHERE err.report_id = er.id AND err.user_id = $1
@@ -1334,6 +1337,122 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
     productionId: r.production_id,
     productionName: r.production_name,
   }));
+}
+
+export type MyReportEntry = {
+  reportId: string;
+  title: string;
+  reportType: string;
+  publishedAt: string;
+  eventId: string;
+  eventTitle: string;
+  productionId: string;
+  productionName: string;
+  isRead: boolean;
+};
+
+export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
+  const res = await getPool().query<{
+    report_id: string; report_title: string; report_type: string; published_at: Date;
+    event_id: string; event_title: string; production_id: string; production_name: string;
+    is_read: boolean;
+  }>(
+    `SELECT er.id AS report_id, er.title AS report_title, er.report_type,
+            er.published_at,
+            pe.id AS event_id, pe.title AS event_title,
+            pe.production_id, p.name AS production_name,
+            EXISTS (
+              SELECT 1 FROM event_report_read err
+              WHERE err.report_id = er.id AND err.user_id = $1
+            ) AS is_read
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     JOIN production p ON p.id = pe.production_id
+     WHERE er.published_at IS NOT NULL
+       AND (
+         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
+         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+       )
+     ORDER BY er.published_at DESC
+     LIMIT 100`,
+    [userId],
+  );
+  return res.rows.map(r => ({
+    reportId: r.report_id,
+    title: r.report_title,
+    reportType: r.report_type,
+    publishedAt: r.published_at.toISOString(),
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    productionId: r.production_id,
+    productionName: r.production_name,
+    isRead: r.is_read,
+  }));
+}
+
+export type WeeklyCallEvent = {
+  eventId: string;
+  eventTitle: string;
+  eventLocation: string;
+  productionId: string;
+  productionName: string;
+  calls: { callAt: string; notes: string }[];
+  schedItems: { title: string; startTime: string | null }[];
+};
+
+export async function listWeeklyCallSchedule(
+  userId: string,
+  weekStart: Date,
+  weekEnd: Date,
+): Promise<WeeklyCallEvent[]> {
+  type CallRow = {
+    call_at: string; call_notes: string;
+    event_id: string; event_title: string; event_location: string;
+    production_id: string; production_name: string;
+  };
+  type SchedRow = { event_id: string; title: string; start_time: string | null };
+
+  const [callsRes, schedRes] = await Promise.all([
+    getPool().query<CallRow>(
+      `SELECT ect.call_at, ect.notes AS call_notes,
+              pe.id AS event_id, pe.title AS event_title,
+              pe.location AS event_location,
+              pe.production_id, p.name AS production_name
+       FROM event_call_time ect
+       JOIN production_event pe ON pe.id = ect.event_id
+       JOIN production p ON p.id = pe.production_id
+       WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+       ORDER BY ect.call_at`,
+      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+    ),
+    getPool().query<SchedRow>(
+      `SELECT esi.event_id, esi.title, esi.start_time
+       FROM event_schedule_item esi
+       WHERE esi.event_id IN (
+         SELECT DISTINCT event_id FROM event_call_time
+         WHERE user_id = $1 AND call_at >= $2 AND call_at < $3
+       )
+       ORDER BY esi.event_id, esi.order_index`,
+      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+    ),
+  ]);
+
+  const byEvent = new Map<string, WeeklyCallEvent>();
+  for (const r of callsRes.rows) {
+    if (!byEvent.has(r.event_id)) {
+      byEvent.set(r.event_id, {
+        eventId: r.event_id, eventTitle: r.event_title,
+        eventLocation: r.event_location, productionId: r.production_id,
+        productionName: r.production_name, calls: [], schedItems: [],
+      });
+    }
+    byEvent.get(r.event_id)!.calls.push({ callAt: r.call_at, notes: r.call_notes });
+  }
+  for (const r of schedRes.rows) {
+    byEvent.get(r.event_id)?.schedItems.push({ title: r.title, startTime: r.start_time });
+  }
+
+  return [...byEvent.values()];
 }
 
 // ─── Self-follow ──────────────────────────────────────────────────────────────

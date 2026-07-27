@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { listProductions } from "@/lib/db";
+import { listMyProductionsWithRoles } from "@/lib/db";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
 import AppShell from "@/components/AppShell";
 import "./globals.css";
@@ -31,7 +31,7 @@ export default async function RootLayout({
   const session = getSession(cookieStore);
 
   const productions = session
-    ? await listProductions({ userId: session.userId, isAdmin: session.isAdmin })
+    ? await listMyProductionsWithRoles(session.userId, session.isAdmin)
     : [];
 
   const shellSession = session
