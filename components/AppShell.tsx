@@ -1,0 +1,298 @@
+"use client";
+
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import Link from "next/link";
+import { BASE_PATH } from "@/lib/base-path";
+
+const ROLES = ["制作人 / 舞监", "导演 / 构作", "设计 / 技术", "演员"] as const;
+
+type Production = { id: string; name: string; archivedAt: string | null };
+type ShellSession = { name: string; avatarUrl: string | null };
+
+interface AppShellProps {
+  session: ShellSession | null;
+  productions: Production[];
+  children: React.ReactNode;
+}
+
+const SCRIPT_NAV = [
+  { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script" },
+  { label: "构作", hint: "章节 · 行动线", path: "dramaturgy" },
+  { label: "表格", hint: "场次 · 角色 · 时长", path: "scenes" },
+  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets" },
+  { label: "Cue", hint: "部门执行设计", path: "cues" },
+] as const;
+
+const STAGE_NAV = [
+  { label: "人员与角色", hint: "演员 · 部门 · 角色", path: "contacts" },
+  { label: "Event", hint: "围读 · 排练 · 演出", path: "events" },
+  { label: "Task", hint: "任务 · 节点 · 里程碑", path: "tasks" },
+  { label: "Notification", hint: "告知 · 确认 · 处理", path: "notifications" },
+  { label: "计划与日程", hint: "日历 · 甘特 · 执行表", path: "planning" },
+  { label: "财务", hint: "预算 · 支出 · 关联", path: "finance" },
+  { label: "实体物料", hint: "道具 · 服装 · 设备", path: "materials" },
+] as const;
+
+function extractProductionId(pathname: string): string | null {
+  const m = pathname.match(/^\/production\/([^/]+)/);
+  return m ? m[1] : null;
+}
+
+function extractModule(pathname: string, productionId: string): string {
+  const base = `/production/${productionId}`;
+  if (pathname === base || pathname === base + "/") return "";
+  const rest = pathname.slice(base.length + 1);
+  return rest.split("/")[0];
+}
+
+function NavItem({
+  href,
+  symbol,
+  label,
+  hint,
+  active,
+}: {
+  href: string;
+  symbol: string;
+  label: string;
+  hint: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors ${
+        active
+          ? "bg-[#fffefa] shadow-[inset_3px_0_0_#182a2a]"
+          : "hover:bg-white/50"
+      }`}
+    >
+      <span className="w-[27px] h-[27px] rounded-[7px] border border-[#cbd2cf] flex items-center justify-center text-[11px] text-[#667676] shrink-0 leading-none">
+        {symbol}
+      </span>
+      <span className="flex flex-col min-w-0">
+        <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
+        <span className="text-[9px] text-[#667676] mt-0.5 truncate">{hint}</span>
+      </span>
+    </Link>
+  );
+}
+
+function NavGroup({ label, color }: { label: string; color: "script" | "stage" }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2.5 pt-5 pb-1.5">
+      <span
+        className={`w-[7px] h-[7px] rounded-full shrink-0 ${
+          color === "script" ? "bg-[#2f6670]" : "bg-[#a55c32]"
+        }`}
+      />
+      <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function BottomNavItem({
+  href,
+  label,
+  symbol,
+  active,
+}: {
+  href: string;
+  label: string;
+  symbol: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors ${
+        active ? "text-[#182a2a]" : "text-[#667676]"
+      }`}
+    >
+      <span className="text-base leading-none">{symbol}</span>
+      {label}
+    </Link>
+  );
+}
+
+export default function AppShell({ session, productions, children }: AppShellProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [role, setRole] = useState<string>(ROLES[0]);
+
+  if (!session || pathname.startsWith("/login")) {
+    return <>{children}</>;
+  }
+
+  const productionId = extractProductionId(pathname);
+  const activeModule = productionId ? extractModule(pathname, productionId) : null;
+  const isHome = pathname === "/";
+  const currentProduction = productionId
+    ? productions.find((p) => p.id === productionId)
+    : null;
+  const activeProductions = productions.filter((p) => !p.archivedAt);
+
+  function navHref(path: string) {
+    return productionId ? `/production/${productionId}/${path}` : "#";
+  }
+
+  function isModuleActive(path: string | readonly string[]) {
+    if (!productionId || activeModule === null) return false;
+    const paths = Array.isArray(path) ? path : [path];
+    return (paths as string[]).includes(activeModule);
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f4f2ec]">
+      {/* Topbar */}
+      <header className="h-16 bg-[#fffefa] border-b border-[#dfe5e2] flex items-center gap-5 px-5 sticky top-0 z-40">
+        {/* Brand */}
+        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+          <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[10px] font-bold flex items-center justify-center select-none">
+            CI
+          </span>
+          <span className="text-[13px] font-bold tracking-[0.18em] text-[#182a2a] hidden md:block">
+            CLICK-IN
+          </span>
+        </Link>
+
+        {/* Context controls */}
+        <div className="flex items-center gap-2.5">
+          <label className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
+            <span className="hidden lg:block shrink-0">机构 / 项目</span>
+            <select
+              value={productionId ?? ""}
+              onChange={(e) => {
+                if (e.target.value) router.push(`/production/${e.target.value}`);
+                else router.push("/");
+              }}
+              className="border border-[#dfe5e2] bg-[#f4f2ec] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a] max-w-[180px] lg:max-w-[240px]"
+            >
+              <option value="">— 选择项目 —</option>
+              {activeProductions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
+            <span className="hidden lg:block shrink-0">角色视角</span>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="border border-[#dfe5e2] bg-[#f4f2ec] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a]"
+            >
+              {ROLES.map((r) => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {/* Right actions */}
+        <div className="ml-auto flex items-center gap-3">
+          <Link
+            href="/my/notifications"
+            className="w-9 h-9 rounded-full border border-[#dfe5e2] bg-[#fffefa] flex items-center justify-center text-[#667676] hover:bg-[#f4f2ec] transition-colors text-sm shrink-0"
+            title="通知"
+          >
+            ◉
+          </Link>
+          <span className="text-sm text-[#667676] hidden sm:block">{session.name}</span>
+          <form action={`${BASE_PATH}/api/auth/logout`} method="post">
+            <button
+              type="submit"
+              className="text-xs text-[#667676] hover:text-[#182a2a] transition-colors"
+            >
+              退出
+            </button>
+          </form>
+        </div>
+      </header>
+
+      {/* Body: sidebar + workspace */}
+      <div className="flex">
+        {/* Sidebar (desktop only) */}
+        <aside className="hidden lg:flex w-[240px] shrink-0 flex-col sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto bg-[#e8e8e1] border-r border-[#dfe5e2] px-3.5 py-5">
+          <nav className="flex flex-col gap-0.5 flex-1">
+            {/* Platform */}
+            <NavItem
+              href="/"
+              symbol="⌂"
+              label="我的工作"
+              hint="今天与我有关"
+              active={isHome}
+            />
+
+            {productionId ? (
+              <>
+                <NavItem
+                  href={`/production/${productionId}`}
+                  symbol="◇"
+                  label="项目首页"
+                  hint="进度与风险"
+                  active={activeModule === ""}
+                />
+
+                <NavGroup label="剧本侧" color="script" />
+                {SCRIPT_NAV.map((item) => (
+                  <NavItem
+                    key={item.path}
+                    href={navHref(item.path)}
+                    symbol={item.label.charAt(0)}
+                    label={item.label}
+                    hint={item.hint}
+                    active={isModuleActive(item.path)}
+                  />
+                ))}
+
+                <NavGroup label="舞台侧" color="stage" />
+                {STAGE_NAV.map((item) => (
+                  <NavItem
+                    key={item.path}
+                    href={navHref(item.path)}
+                    symbol={item.label === "Notification" ? "N" : item.label === "Event" ? "E" : item.label.charAt(0)}
+                    label={item.label}
+                    hint={item.hint}
+                    active={isModuleActive(
+                      item.path === "contacts" ? ["contacts", "characters"] : item.path
+                    )}
+                  />
+                ))}
+              </>
+            ) : null}
+          </nav>
+        </aside>
+
+        {/* Workspace */}
+        <main className="flex-1 min-w-0 pb-16 lg:pb-0">{children}</main>
+      </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-[#fffefa] border-t border-[#dfe5e2] flex z-40 safe-area-bottom">
+        <BottomNavItem href="/" label="今日" symbol="⌂" active={isHome} />
+        <BottomNavItem
+          href={productionId ? `/production/${productionId}` : "/"}
+          label="项目"
+          symbol="◇"
+          active={!!productionId && activeModule === ""}
+        />
+        <BottomNavItem
+          href={productionId ? `/production/${productionId}/tasks` : "/"}
+          label="Task"
+          symbol="✓"
+          active={isModuleActive("tasks")}
+        />
+        <BottomNavItem
+          href="/my/notifications"
+          label="通知"
+          symbol="◉"
+          active={pathname.startsWith("/my/notifications")}
+        />
+      </nav>
+    </div>
+  );
+}

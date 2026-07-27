@@ -25,7 +25,6 @@ export default async function Home() {
     <HomeClient
       productions={productions}
       isAdmin={session.isAdmin}
-      currentUser={{ name: session.name, avatarUrl: session.avatarUrl }}
       myCallTimes={myCallTimes}
       myPendingReqs={myPendingReqs}
       myFollowedEvents={myFollowedEvents}

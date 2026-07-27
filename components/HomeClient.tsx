@@ -15,14 +15,11 @@ type Production = { id: string; name: string; createdAt: string; archivedAt: str
 type Props = {
   productions: Production[];
   isAdmin: boolean;
-  currentUser: { name: string; avatarUrl: string | null };
   myCallTimes: MyCallTimeEntry[];
   myPendingReqs: MyPendingTechReqEntry[];
   myFollowedEvents: MyFollowedEventEntry[];
   myUnreadReports: UnreadReportEntry[];
 };
-
-function formatCallAt(iso: string): string { return fmtCallAt(iso); }
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "待处理",
@@ -33,7 +30,19 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   rehearsal: "排练", performance: "演出", meeting: "会议", custom: "其他",
 };
 
-export default function HomeClient({ productions: initial, isAdmin, currentUser, myCallTimes, myPendingReqs, myFollowedEvents, myUnreadReports }: Props) {
+function SectionCard({ title, action, children }: { title: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl bg-white px-5 py-5 shadow-sm">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-[11px] font-bold tracking-[0.14em] text-[#667676] uppercase">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export default function HomeClient({ productions: initial, isAdmin, myCallTimes, myPendingReqs, myFollowedEvents, myUnreadReports }: Props) {
   const router = useRouter();
   const [productions, setProductions] = useState<Production[]>(initial);
   const [creating, setCreating] = useState(false);
@@ -109,298 +118,298 @@ export default function HomeClient({ productions: initial, isAdmin, currentUser,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
-      if (res.ok) setProductions((prev) => prev.filter((p) => p.id !== id));
+      if (res.ok) setProductions(prev => prev.filter(p => p.id !== id));
     } catch { /* ignore */ } finally {
       setDeleting(null);
     }
   };
 
+  const hasPersonalData = myCallTimes.length > 0 || myFollowedEvents.length > 0 || myUnreadReports.length > 0 || myPendingReqs.length > 0;
+
   return (
-    <div className="flex min-h-screen flex-col items-center bg-zinc-100 px-4 py-10">
-      <div className="w-full max-w-sm space-y-4">
-        {/* Productions card */}
-        <div className="rounded-2xl bg-white px-8 py-8 shadow-sm">
-          {/* Header */}
-          <div className="mb-6 flex items-center justify-between">
-            <h1 className="text-sm font-bold tracking-[0.2em] text-zinc-400 uppercase">项目管理器</h1>
-            <div className="flex items-center gap-3">
-              {isAdmin && !sortMode && (
-                <button onClick={enterSortMode} className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">排序</button>
-              )}
-              {sortMode && (
-                <>
-                  <button onClick={() => setSortMode(false)} disabled={sortSaving} className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">取消</button>
-                  <button onClick={saveSort} disabled={sortSaving} className="text-xs font-medium text-zinc-600 hover:text-zinc-800 transition-colors">{sortSaving ? "保存中…" : "完成"}</button>
-                </>
-              )}
-              {!sortMode && (
-                <>
-                  <span className="text-xs text-zinc-400">{currentUser.name}</span>
-                  <Link href="/my/notifications" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">通知</Link>
-                  <Link href="/my/permissions" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">权限</Link>
-                  <form action={`${BASE_PATH}/api/auth/logout`} method="post">
-                    <button type="submit" className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors">退出</button>
-                  </form>
-                </>
-              )}
-            </div>
+    <div className="px-5 py-8 lg:px-10">
+      {/* Page header */}
+      <div className="mb-6">
+        <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-[#667676] mb-1">平台级</p>
+        <h1 className="font-serif text-3xl font-medium text-[#182a2a] tracking-tight" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>
+          我的工作
+        </h1>
+      </div>
+
+      {/* Two-column on desktop */}
+      <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-5 max-w-4xl">
+
+        {/* Left column: productions */}
+        <div className="space-y-4">
+          {/* Quick nav */}
+          <div className="grid grid-cols-3 gap-2.5">
+            <Link href="/my/weekly-call"
+              className="rounded-xl bg-white px-3 py-4 shadow-sm text-center hover:shadow-md transition-shadow">
+              <p className="text-[9px] font-bold tracking-widest text-[#667676] uppercase mb-1">Weekly</p>
+              <p className="text-sm font-medium text-[#182a2a]">本周安排</p>
+            </Link>
+            <Link href={`/my/daily-call?date=${todayCSTStr()}`}
+              className="rounded-xl bg-white px-3 py-4 shadow-sm text-center hover:shadow-md transition-shadow">
+              <p className="text-[9px] font-bold tracking-widest text-[#667676] uppercase mb-1">Today</p>
+              <p className="text-sm font-medium text-[#182a2a]">今日 Call</p>
+            </Link>
+            <Link href="/my/reqs"
+              className="rounded-xl bg-white px-3 py-4 shadow-sm text-center hover:shadow-md transition-shadow">
+              <p className="text-[9px] font-bold tracking-widest text-[#667676] uppercase mb-1">Reqs</p>
+              <p className="text-sm font-medium text-[#182a2a]">我的需求</p>
+            </Link>
           </div>
 
-          {/* Productions list */}
-          {productions.length === 0 && !showInput ? (
-            <p className="mb-4 text-center text-xs text-zinc-300">暂无剧本</p>
-          ) : sortMode ? (
-            <ul className="mb-3 space-y-1">
-              {sortedActive.map((p, idx) => (
-                <li key={p.id} className="flex items-center gap-1 rounded-lg bg-zinc-50 px-2 py-2">
-                  <div className="flex flex-col">
-                    <button onClick={() => moveItem(idx, -1)} disabled={idx === 0}
-                      className="text-zinc-300 hover:text-zinc-600 disabled:opacity-20 leading-none text-xs px-1">▲</button>
-                    <button onClick={() => moveItem(idx, 1)} disabled={idx === sortedActive.length - 1}
-                      className="text-zinc-300 hover:text-zinc-600 disabled:opacity-20 leading-none text-xs px-1">▼</button>
-                  </div>
-                  <span className="flex-1 px-2 text-sm text-zinc-700">{p.name}</span>
-                </li>
-              ))}
-              {archivedProductions.map(p => (
-                <li key={p.id} className="flex items-center gap-2 rounded-lg px-3 py-2.5 opacity-40">
-                  <span className="flex-1 text-sm text-zinc-400">{p.name}</span>
-                  <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-zinc-100 text-zinc-400">已归档</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul className="mb-3 space-y-1">
-              {productions.map((p) => (
-                <li key={p.id} className="group flex items-center gap-1 rounded-lg hover:bg-zinc-50">
-                  <button
-                    onClick={() => router.push(`/production/${p.id}`)}
-                    className="flex-1 px-3 py-2.5 text-left text-sm flex items-center gap-2"
-                  >
-                    <span className={p.archivedAt ? "text-zinc-400" : "text-zinc-700"}>{p.name}</span>
-                    {p.archivedAt && (
-                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-zinc-100 text-zinc-400">
-                        已归档
-                      </span>
-                    )}
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={() => deleteProduction(p.id)}
-                      disabled={deleting === p.id}
-                      title="删除剧本"
-                      className="shrink-0 rounded px-1.5 py-1 text-[11px] text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-red-400 disabled:opacity-30 transition-opacity"
-                    >
-                      删除
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* Create new production (admin only) */}
-          {isAdmin && (
-            showInput ? (
-              <>
-                <input
-                  value={newName}
-                  onChange={(e) => { setNewName(e.target.value); setError(""); }}
-                  onKeyDown={(e) => e.key === "Enter" && create()}
-                  placeholder="输入剧名"
-                  autoFocus
-                  className="w-full rounded-lg border border-zinc-200 px-4 py-2.5 text-sm text-zinc-800 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
-                />
-                {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => { setShowInput(false); setNewName(""); setError(""); }}
-                    className="flex-1 rounded-lg border border-zinc-200 py-2.5 text-sm text-zinc-500 hover:border-zinc-400"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={create}
-                    disabled={!newName.trim() || creating}
-                    className="flex-1 rounded-lg bg-zinc-800 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-30"
-                  >
-                    {creating ? "创建中…" : "创建"}
-                  </button>
+          {/* Productions */}
+          <SectionCard
+            title="项目"
+            action={
+              isAdmin && !sortMode ? (
+                <button onClick={enterSortMode} className="text-[11px] text-[#667676] hover:text-[#182a2a] transition-colors">
+                  排序
+                </button>
+              ) : sortMode ? (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setSortMode(false)} disabled={sortSaving} className="text-[11px] text-[#667676] hover:text-[#182a2a]">取消</button>
+                  <button onClick={saveSort} disabled={sortSaving} className="text-[11px] font-medium text-[#182a2a]">{sortSaving ? "保存中…" : "完成"}</button>
                 </div>
-              </>
+              ) : null
+            }
+          >
+            {productions.length === 0 && !showInput ? (
+              <p className="text-center text-xs text-[#a0aeab] py-3">暂无项目</p>
+            ) : sortMode ? (
+              <ul className="space-y-1 mb-3">
+                {sortedActive.map((p, idx) => (
+                  <li key={p.id} className="flex items-center gap-1 rounded-lg bg-[#f4f2ec] px-2 py-2">
+                    <div className="flex flex-col">
+                      <button onClick={() => moveItem(idx, -1)} disabled={idx === 0}
+                        className="text-[#a0aeab] hover:text-[#182a2a] disabled:opacity-20 leading-none text-xs px-1">▲</button>
+                      <button onClick={() => moveItem(idx, 1)} disabled={idx === sortedActive.length - 1}
+                        className="text-[#a0aeab] hover:text-[#182a2a] disabled:opacity-20 leading-none text-xs px-1">▼</button>
+                    </div>
+                    <span className="flex-1 px-2 text-sm text-[#182a2a]">{p.name}</span>
+                  </li>
+                ))}
+                {archivedProductions.map(p => (
+                  <li key={p.id} className="flex items-center gap-2 rounded-lg px-3 py-2.5 opacity-40">
+                    <span className="flex-1 text-sm text-[#667676]">{p.name}</span>
+                    <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-[#eeeee8] text-[#667676]">已归档</span>
+                  </li>
+                ))}
+              </ul>
             ) : (
-              <button
-                onClick={() => setShowInput(true)}
-                className="w-full rounded-lg border border-zinc-200 py-2.5 text-sm font-medium text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 transition-colors"
-              >
-                新建剧本
-              </button>
-            )
-          )}
-        </div>
-
-        {/* Schedule quick nav — always visible */}
-        <div className="grid grid-cols-3 gap-3">
-          <Link href={`/my/weekly-call`}
-            className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Weekly</p>
-            <p className="text-sm font-medium text-zinc-700">本周安排</p>
-          </Link>
-          <Link href={`/my/daily-call?date=${todayCSTStr()}`}
-            className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Today</p>
-            <p className="text-sm font-medium text-zinc-700">今日 Call</p>
-          </Link>
-          <Link href="/my/reqs"
-            className="rounded-2xl bg-white px-4 py-5 shadow-sm text-center hover:shadow-md transition-shadow">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase mb-1">Reqs</p>
-            <p className="text-sm font-medium text-zinc-700">我的需求</p>
-          </Link>
-        </div>
-
-        {/* Upcoming call times (within 7 days) */}
-        {myCallTimes.length > 0 && (
-          <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">
-                本周我的 Call <span className="font-normal normal-case text-zinc-300">UTC+8</span>
-              </h2>
-              <Link href={`/my/weekly-call`}
-                className="text-[11px] text-zinc-400 hover:text-zinc-600">
-                完整安排 →
-              </Link>
-            </div>
-            {(() => {
-              const byDate = new Map<string, MyCallTimeEntry[]>();
-              for (const ct of myCallTimes) {
-                const d = cstDateStr(ct.callAt);
-                if (!byDate.has(d)) byDate.set(d, []);
-                byDate.get(d)!.push(ct);
-              }
-              return [...byDate.entries()].map(([date, calls]) => (
-                <div key={date} className="mb-3 last:mb-0">
-                  <div className="flex items-center justify-between mb-1 px-1">
-                    <span className="text-[11px] font-medium text-zinc-300">{formatCallAt(calls[0].callAt).split(" ")[0]}</span>
-                    <Link href={`/my/daily-call?date=${date}`}
-                      className="text-[11px] text-zinc-400 hover:text-zinc-600">
-                      当日 Call →
-                    </Link>
-                  </div>
-                  <ul className="space-y-1">
-                    {calls.map(ct => (
-                      <li key={ct.id}>
-                        <button
-                          onClick={() => router.push(`/production/${ct.productionId}/events/${ct.eventId}/callsheet`)}
-                          className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-zinc-50 transition-colors"
-                        >
-                          <div className="flex items-baseline justify-between gap-2">
-                            <span className="text-sm font-medium text-zinc-800">{ct.eventTitle}</span>
-                            <span className="shrink-0 text-xs font-mono text-zinc-500">{formatCallAt(ct.callAt)}</span>
-                          </div>
-                          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-400">
-                            <span>{ct.productionName}</span>
-                            {ct.eventLocation && <><span>·</span><span>{ct.eventLocation}</span></>}
-                            {ct.notes && <><span>·</span><span className="truncate max-w-[120px]">{ct.notes}</span></>}
-                          </div>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ));
-            })()}
-          </div>
-        )}
-
-        {/* Followed upcoming events */}
-        {myFollowedEvents.length > 0 && (
-          <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
-            <h2 className="mb-4 text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">我关注的事件</h2>
-            <ul className="space-y-2">
-              {myFollowedEvents.map(ev => (
-                <li key={ev.eventId}>
-                  <button
-                    onClick={() => router.push(`/production/${ev.productionId}/events/${ev.eventId}`)}
-                    className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-zinc-50 transition-colors"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-medium text-zinc-800">{ev.eventTitle}</span>
-                      {ev.startTime && (
-                        <span className="shrink-0 text-xs font-mono text-zinc-500">{formatCallAt(ev.startTime)}</span>
+              <ul className="space-y-0.5 mb-3">
+                {productions.map(p => (
+                  <li key={p.id} className="group flex items-center gap-1 rounded-lg hover:bg-[#f4f2ec]">
+                    <button
+                      onClick={() => router.push(`/production/${p.id}`)}
+                      className="flex-1 px-3 py-2.5 text-left text-sm flex items-center gap-2"
+                    >
+                      <span className={p.archivedAt ? "text-[#a0aeab]" : "text-[#182a2a]"}>{p.name}</span>
+                      {p.archivedAt && (
+                        <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-widest uppercase bg-[#eeeee8] text-[#a0aeab]">
+                          已归档
+                        </span>
                       )}
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-400">
-                      <span className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-500">
-                        {EVENT_TYPE_LABELS[ev.eventType] ?? ev.eventType}
-                      </span>
-                      <span>{ev.productionName}</span>
-                      {ev.eventLocation && <><span>·</span><span>{ev.eventLocation}</span></>}
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => deleteProduction(p.id)}
+                        disabled={deleting === p.id}
+                        title="删除项目"
+                        className="shrink-0 rounded px-1.5 py-1 text-[11px] text-[#a0aeab] opacity-0 group-hover:opacity-100 hover:text-red-400 disabled:opacity-30 transition-opacity"
+                      >
+                        删除
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
 
-        {/* Unread reports for followed events */}
-        {myUnreadReports.length > 0 && (
-          <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
-            <h2 className="mb-4 text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">未读报告</h2>
-            <ul className="space-y-2">
-              {myUnreadReports.map(r => (
-                <li key={r.reportId}>
-                  <button
-                    onClick={() => router.push(`/production/${r.productionId}/events/${r.eventId}/reports/${r.reportId}`)}
-                    className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-zinc-50 transition-colors"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-medium text-zinc-800">{r.reportTitle}</span>
-                      <span className="shrink-0 text-xs font-mono text-zinc-400">
-                        {fmtDate(r.publishedAt)}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-zinc-400">
-                      {r.eventTitle} · {r.productionName}
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+            {isAdmin && (
+              showInput ? (
+                <>
+                  <input
+                    value={newName}
+                    onChange={e => { setNewName(e.target.value); setError(""); }}
+                    onKeyDown={e => e.key === "Enter" && create()}
+                    placeholder="输入项目名"
+                    autoFocus
+                    className="w-full rounded-lg border border-[#dfe5e2] px-4 py-2.5 text-sm text-[#182a2a] outline-none placeholder:text-[#a0aeab] focus:border-[#182a2a]"
+                  />
+                  {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
+                  <div className="mt-2.5 flex gap-2">
+                    <button
+                      onClick={() => { setShowInput(false); setNewName(""); setError(""); }}
+                      className="flex-1 rounded-lg border border-[#dfe5e2] py-2.5 text-sm text-[#667676] hover:border-[#182a2a] transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={create}
+                      disabled={!newName.trim() || creating}
+                      className="flex-1 rounded-lg bg-[#182a2a] py-2.5 text-sm font-medium text-white hover:bg-[#2b4140] disabled:opacity-30 transition-colors"
+                    >
+                      {creating ? "创建中…" : "创建"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  onClick={() => setShowInput(true)}
+                  className="w-full rounded-lg border border-[#dfe5e2] py-2.5 text-sm font-medium text-[#667676] hover:border-[#182a2a] hover:text-[#182a2a] transition-colors"
+                >
+                  新建项目
+                </button>
+              )
+            )}
+          </SectionCard>
+        </div>
 
-        {/* Pending tech requirements I'm responsible for */}
-        {myPendingReqs.length > 0 && (
-          <div className="rounded-2xl bg-white px-8 py-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-semibold tracking-[0.15em] text-zinc-400 uppercase">我负责的待处理需求</h2>
-              <Link href="/my/reqs" className="text-[11px] text-zinc-400 hover:text-zinc-600">查看全部 →</Link>
-            </div>
-            <ul className="space-y-2">
-              {myPendingReqs.map(req => (
-                <li key={req.id}>
-                  <button
-                    onClick={() => router.push(`/production/${req.productionId}/events/${req.eventId}/reqs/${req.id}`)}
-                    className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-zinc-50 transition-colors"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-medium text-zinc-800">{req.title}</span>
-                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        req.status === "in_progress"
-                          ? "bg-blue-50 text-blue-500"
-                          : "bg-zinc-100 text-zinc-500"
-                      }`}>
-                        {STATUS_LABEL[req.status] ?? req.status}
-                      </span>
+        {/* Right column: personal data */}
+        {hasPersonalData && (
+          <div className="space-y-4">
+            {/* Call times */}
+            {myCallTimes.length > 0 && (
+              <SectionCard
+                title={<>本周我的 Call <span className="font-normal normal-case text-[#a0aeab]">UTC+8</span></>}
+                action={
+                  <Link href="/my/weekly-call" className="text-[11px] text-[#667676] hover:text-[#182a2a]">
+                    完整安排 →
+                  </Link>
+                }
+              >
+                {(() => {
+                  const byDate = new Map<string, MyCallTimeEntry[]>();
+                  for (const ct of myCallTimes) {
+                    const d = cstDateStr(ct.callAt);
+                    if (!byDate.has(d)) byDate.set(d, []);
+                    byDate.get(d)!.push(ct);
+                  }
+                  return [...byDate.entries()].map(([date, calls]) => (
+                    <div key={date} className="mb-3 last:mb-0">
+                      <div className="flex items-center justify-between mb-1 px-1">
+                        <span className="text-[11px] font-medium text-[#a0aeab]">{fmtCallAt(calls[0].callAt).split(" ")[0]}</span>
+                        <Link href={`/my/daily-call?date=${date}`} className="text-[11px] text-[#667676] hover:text-[#182a2a]">
+                          当日 Call →
+                        </Link>
+                      </div>
+                      <ul className="space-y-0.5">
+                        {calls.map(ct => (
+                          <li key={ct.id}>
+                            <button
+                              onClick={() => router.push(`/production/${ct.productionId}/events/${ct.eventId}/callsheet`)}
+                              className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f4f2ec] transition-colors"
+                            >
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-sm font-medium text-[#182a2a]">{ct.eventTitle}</span>
+                                <span className="shrink-0 text-xs font-mono text-[#a55c32] font-medium">{fmtCallAt(ct.callAt)}</span>
+                              </div>
+                              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[#a0aeab]">
+                                <span>{ct.productionName}</span>
+                                {ct.eventLocation && <><span>·</span><span>{ct.eventLocation}</span></>}
+                                {ct.notes && <><span>·</span><span className="truncate max-w-[100px]">{ct.notes}</span></>}
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                    <div className="mt-0.5 text-[11px] text-zinc-400">
-                      {req.eventTitle} · {req.productionName}
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                  ));
+                })()}
+              </SectionCard>
+            )}
+
+            {/* Followed events */}
+            {myFollowedEvents.length > 0 && (
+              <SectionCard title="我关注的事件">
+                <ul className="space-y-0.5">
+                  {myFollowedEvents.map(ev => (
+                    <li key={ev.eventId}>
+                      <button
+                        onClick={() => router.push(`/production/${ev.productionId}/events/${ev.eventId}`)}
+                        className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f4f2ec] transition-colors"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium text-[#182a2a]">{ev.eventTitle}</span>
+                          {ev.startTime && (
+                            <span className="shrink-0 text-xs font-mono text-[#667676]">{fmtCallAt(ev.startTime)}</span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[#a0aeab]">
+                          <span className="rounded bg-[#eeeee8] px-1 py-0.5 text-[#667676]">
+                            {EVENT_TYPE_LABELS[ev.eventType] ?? ev.eventType}
+                          </span>
+                          <span>{ev.productionName}</span>
+                          {ev.eventLocation && <><span>·</span><span>{ev.eventLocation}</span></>}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </SectionCard>
+            )}
+
+            {/* Unread reports */}
+            {myUnreadReports.length > 0 && (
+              <SectionCard title="未读报告">
+                <ul className="space-y-0.5">
+                  {myUnreadReports.map(r => (
+                    <li key={r.reportId}>
+                      <button
+                        onClick={() => router.push(`/production/${r.productionId}/events/${r.eventId}/reports/${r.reportId}`)}
+                        className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f4f2ec] transition-colors"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium text-[#182a2a]">{r.reportTitle}</span>
+                          <span className="shrink-0 text-xs font-mono text-[#a0aeab]">{fmtDate(r.publishedAt)}</span>
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[#a0aeab]">
+                          {r.eventTitle} · {r.productionName}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </SectionCard>
+            )}
+
+            {/* Pending reqs */}
+            {myPendingReqs.length > 0 && (
+              <SectionCard
+                title="我负责的待处理需求"
+                action={
+                  <Link href="/my/reqs" className="text-[11px] text-[#667676] hover:text-[#182a2a]">查看全部 →</Link>
+                }
+              >
+                <ul className="space-y-0.5">
+                  {myPendingReqs.map(req => (
+                    <li key={req.id}>
+                      <button
+                        onClick={() => router.push(`/production/${req.productionId}/events/${req.eventId}/reqs/${req.id}`)}
+                        className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f4f2ec] transition-colors"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium text-[#182a2a]">{req.title}</span>
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            req.status === "in_progress"
+                              ? "bg-blue-50 text-blue-500"
+                              : "bg-[#eeeee8] text-[#667676]"
+                          }`}>
+                            {STATUS_LABEL[req.status] ?? req.status}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[#a0aeab]">
+                          {req.eventTitle} · {req.productionName}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </SectionCard>
+            )}
           </div>
         )}
       </div>

@@ -514,6 +514,25 @@ async function normalizeRehearsalMarkOwnershipInTx(
   }
 }
 
+export async function backfillAllMarkerMigrations(pool: Pool = getPool()): Promise<void> {
+  const { rows } = await pool.query<{ id: string }>("SELECT id FROM version ORDER BY id");
+  console.log(`[marker backfill] ${rows.length} versions`);
+  let ok = 0, skipped = 0, errors = 0;
+  for (const { id } of rows) {
+    try {
+      if (!await scriptMarkerMigrationNeeded(id, pool)) { skipped++; continue; }
+      const state: MarkerMigrationState = { startedAt: Date.now(), progress: 0, phase: "backfill" };
+      await runScriptMarkerMigration(id, state, pool);
+      ok++;
+      console.log(`[marker backfill] ${id}: ok`);
+    } catch (err) {
+      errors++;
+      console.error(`[marker backfill] ${id}: ERROR`, err);
+    }
+  }
+  console.log(`[marker backfill] done — migrated: ${ok}, skipped: ${skipped}, errors: ${errors}`);
+}
+
 async function syncSceneVersionsFromMarkersInTx(
   client: PoolClient,
   productionId: string,

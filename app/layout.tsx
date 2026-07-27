@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
+import { getSession } from "@/lib/session";
+import { listProductions } from "@/lib/db";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
+import AppShell from "@/components/AppShell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,11 +22,22 @@ export const metadata: Metadata = {
   description: "演出项目管理",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const session = getSession(cookieStore);
+
+  const productions = session
+    ? await listProductions({ userId: session.userId, isAdmin: session.isAdmin })
+    : [];
+
+  const shellSession = session
+    ? { name: session.name, avatarUrl: session.avatarUrl }
+    : null;
+
   return (
     <html
       lang="zh"
@@ -44,9 +59,11 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full">
         <ManualSaveNotice />
-        {children}
+        <AppShell session={shellSession} productions={productions}>
+          {children}
+        </AppShell>
       </body>
     </html>
   );
