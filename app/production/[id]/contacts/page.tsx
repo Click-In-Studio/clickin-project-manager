@@ -8,10 +8,8 @@ import {
   getProductionPermissionContext,
   getProductionName,
   listProductionMembersWithRoles,
-  getAllPermissionOverrides,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
-import { listEventDepartments } from "@/lib/event-db";
 import ContactsClient from "@/components/ContactsClient";
 
 export default async function ContactsPage({
@@ -29,13 +27,10 @@ export default async function ContactsPage({
 
   const canManage = hasPermission("members:manage_overrides", access.permCtx);
   const canImport = hasPermission("contacts:import", access.permCtx);
-  const canManageDepts = hasPermission("dept:create", access.permCtx);
 
-  const [name, members, allOverrides, departments] = await Promise.all([
+  const [name, members] = await Promise.all([
     getProductionName(id),
     listProductionMembersWithRoles(id),
-    canManage ? getAllPermissionOverrides(id) : Promise.resolve({} as Record<string, Record<string, boolean>>),
-    listEventDepartments(id),
   ]);
   if (!name) redirect("/");
 
@@ -47,9 +42,6 @@ export default async function ContactsPage({
       canImport={canImport}
       canManage={canManage}
       myUserId={session.userId}
-      initialOverrides={allOverrides}
-      canManageDepts={canManageDepts}
-      initialDepartments={departments}
     />
   );
 }

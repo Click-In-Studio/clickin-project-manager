@@ -3307,6 +3307,126 @@ export async function resolveRoleIdsByNames(productionId: string, names: string[
   return res.rows.map(r => r.id);
 }
 
+// ─── Role CRUD (admin panel) ───────────────────────────────────────────────────
+
+export type ProductionRole = {
+  id: string;
+  name: string;
+  permissions: string[];
+  createdAt: string;
+};
+
+export async function listProductionRolesWithPermissions(productionId: string): Promise<ProductionRole[]> {
+  const [rolesRes, permsRes] = await Promise.all([
+    getPool().query<{ id: string; name: string; created_at: Date }>(
+      `SELECT id, name, created_at FROM production_role WHERE production_id = $1 ORDER BY name`,
+      [productionId],
+    ),
+    getPool().query<{ role_id: string; permission_key: string }>(
+      `SELECT prp.role_id, prp.permission_key
+       FROM production_role_permission prp
+       JOIN production_role pr ON pr.id = prp.role_id
+       WHERE pr.production_id = $1`,
+      [productionId],
+    ),
+  ]);
+  const permMap = new Map<string, string[]>();
+  for (const r of permsRes.rows) {
+    const list = permMap.get(r.role_id) ?? [];
+    list.push(r.permission_key);
+    permMap.set(r.role_id, list);
+  }
+  return rolesRes.rows.map((r) => ({
+    id: r.id, name: r.name,
+    permissions: permMap.get(r.id) ?? [],
+    createdAt: r.created_at.toISOString(),
+  }));
+}
+
+let _roleSeq = 0;
+function newRoleId(productionId: string) {
+  return `r_${productionId.slice(0, 8)}_${Date.now().toString(36)}${(++_roleSeq).toString(36)}`;
+}
+
+export async function createProductionRole(productionId: string, name: string): Promise<ProductionRole> {
+  const id = newRoleId(productionId);
+  const res = await getPool().query<{ id: string; name: string; created_at: Date }>(
+    `INSERT INTO production_role (id, production_id, name)
+     VALUES ($1, $2, $3) RETURNING id, name, created_at`,
+    [id, productionId, name],
+  );
+  const row = res.rows[0];
+  return { id: row.id, name: row.name, permissions: [], createdAt: row.created_at.toISOString() };
+}
+
+export async function renameProductionRole(roleId: string, productionId: string, name: string): Promise<void> {
+  await getPool().query(
+    `UPDATE production_role SET name = $1 WHERE id = $2 AND production_id = $3`,
+    [name, roleId, productionId],
+  );
+}
+
+export async function deleteProductionRole(roleId: string, productionId: string): Promise<void> {
+  await getPool().query(
+    `DELETE FROM production_role WHERE id = $1 AND production_id = $2`,
+    [roleId, productionId],
+  );
+}
+
+export async function setRolePermissions(roleId: string, permissions: string[]): Promise<void> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM production_role_permission WHERE role_id = $1`, [roleId]);
+    if (permissions.length > 0) {
+      await client.query(
+        `INSERT INTO production_role_permission (role_id, permission_key)
+         SELECT $1, unnest($2::text[])`,
+        [roleId, permissions],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function copyProductionRole(productionId: string, sourceRoleId: string, newName: string): Promise<ProductionRole> {
+  const pool = getPool();
+  const newId = newRoleId(productionId);
+  const sourcePerms = await pool.query<{ permission_key: string }>(
+    `SELECT permission_key FROM production_role_permission WHERE role_id = $1`,
+    [sourceRoleId],
+  );
+  const permissions = sourcePerms.rows.map((r) => r.permission_key);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<{ created_at: Date }>(
+      `INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, $3) RETURNING created_at`,
+      [newId, productionId, newName],
+    );
+    if (permissions.length > 0) {
+      await client.query(
+        `INSERT INTO production_role_permission (role_id, permission_key)
+         SELECT $1, unnest($2::text[])`,
+        [newId, permissions],
+      );
+    }
+    await client.query("COMMIT");
+    return { id: newId, name: newName, permissions, createdAt: res.rows[0].created_at.toISOString() };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * Returns true if the user has edit access to this cue list.
  * Checks cue_list_permission override first (grant or deny), then falls back to role-based access.

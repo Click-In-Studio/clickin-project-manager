@@ -6,6 +6,7 @@ import {
   setPermissionOverride,
   listProductionMembersWithRoles,
 } from "@/lib/db";
+import { getPool } from "@/lib/pg";
 import { hasPermission, type Permission } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -53,4 +54,51 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   await setPermissionOverride(productionId, userId, permission as Permission, granted ?? null);
   return Response.json({ ok: true });
+}
+
+/** POST — bulk-apply the same override to multiple members at once. */
+export async function POST(req: NextRequest, ctx: Ctx) {
+  const { id: productionId } = await ctx.params;
+  const { deny, isArchived } = await requireManage(req, productionId);
+  if (deny) return deny;
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+
+  const { userIds, permission, granted } = (await req.json()) as {
+    userIds?: string[];
+    permission?: string;
+    granted?: boolean | null;
+  };
+
+  if (!Array.isArray(userIds) || !userIds.length || !permission) {
+    return Response.json({ error: "userIds（数组）和 permission 为必填" }, { status: 400 });
+  }
+
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const userId of userIds) {
+      if (granted === null || granted === undefined) {
+        await client.query(
+          "DELETE FROM production_member_permission WHERE production_id = $1 AND user_id = $2 AND permission = $3",
+          [productionId, userId, permission],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (production_id, user_id, permission) DO UPDATE SET granted = EXCLUDED.granted`,
+          [productionId, userId, permission, granted],
+        );
+      }
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  return Response.json({ ok: true, affected: userIds.length });
 }

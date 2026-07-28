@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { listMyProductionsWithRoles } from "@/lib/db";
+import { ROLE_TEMPLATE_PERMISSIONS } from "@/lib/permissions";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
 import AppShell from "@/components/AppShell";
 import "./globals.css";
@@ -30,9 +31,17 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const productions = session
+  const rawProductions = session
     ? await listMyProductionsWithRoles(session.userId, session.isAdmin)
     : [];
+
+  const ADMIN_PERMS = new Set(["members:manage_overrides", "dept:create"]);
+  const productions = rawProductions.map((p) => ({
+    ...p,
+    canAdmin: session!.isAdmin || p.roles.some((role) =>
+      (ROLE_TEMPLATE_PERMISSIONS[role] ?? []).some((perm) => ADMIN_PERMS.has(perm))
+    ),
+  }));
 
   const shellSession = session
     ? { name: session.name, avatarUrl: session.avatarUrl }
