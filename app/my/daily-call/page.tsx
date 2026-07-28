@@ -94,9 +94,9 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
   type SchedRow = { id: string; event_id: string; title: string; start_time: string | null; end_time: string | null; location: string; order_index: number };
   type PartRow = { item_id: string; name: string };
 
-  let callsByEvent = new Map<string, CallRow[]>();
-  let schedsByEvent = new Map<string, SchedRow[]>();
-  let partByItem = new Map<string, string[]>();
+  const callsByEvent = new Map<string, CallRow[]>();
+  const schedsByEvent = new Map<string, SchedRow[]>();
+  const partByItem = new Map<string, string[]>();
 
   if (eventIds.length > 0) {
     const [allCallsRes, schedsRes, partsRes] = await Promise.all([
