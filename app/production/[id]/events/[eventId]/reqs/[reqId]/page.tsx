@@ -1,76 +1,8 @@
-import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
-import {
-  getProductionEvent,
-  getEventTechReq,
-  listScheduleItems,
-  listEventDepartments,
-} from "@/lib/event-db";
-import ReqDetailClient from "@/components/ReqDetailClient";
 
-export async function generateMetadata({ params }: { params: Promise<{ eventId: string; reqId: string }> }): Promise<Metadata> {
-  const { eventId, reqId } = await params;
-  const req = await getEventTechReq(reqId, eventId);
-  return { title: req?.title ?? "技术需求" };
-}
+type Ctx = { params: Promise<{ id: string; reqId: string }> };
 
-type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
-
-export default async function ReqDetailPage({ params }: Ctx) {
-  const { id: productionId, eventId, reqId } = await params;
-  const cookieStore = await cookies();
-  const session = getSession(cookieStore);
-  if (!session) redirect("/login");
-
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) redirect("/");
-
-  const [event, req, scheduleItems, departments, productionMembers] = await Promise.all([
-    getProductionEvent(eventId, productionId),
-    getEventTechReq(reqId, eventId),
-    listScheduleItems(eventId),
-    listEventDepartments(productionId),
-    listProductionMembersWithRoles(productionId),
-  ]);
-
-  if (!event) redirect(`/production/${productionId}/events`);
-  if (!req) redirect(`/production/${productionId}/events/${eventId}/reqs`);
-
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
-  const pocDeptIds = departments
-    .filter(d => d.pocUserIds.includes(session.userId))
-    .map(d => d.id);
-  const isPocOfDept = req.departmentId ? pocDeptIds.includes(req.departmentId) : false;
-  const isAssignee = req.assignees.some(a => a.userId === session.userId);
-
-  if (!canViewFull && !isPocOfDept && !isAssignee)
-    redirect(`/production/${productionId}/events/${eventId}/reqs`);
-
-  const dept = departments.find(d => d.id === req.departmentId);
-  const deptPeople = dept
-    ? productionMembers
-        .filter(m => new Set([...dept.memberUserIds, ...dept.pocUserIds]).has(m.userId))
-        .map(m => ({ userId: m.userId, name: m.name }))
-    : [];
-
-  const allPeople = productionMembers.map(m => ({ userId: m.userId, name: m.name }));
-
-  return (
-    <ReqDetailClient
-      req={req}
-      event={event}
-      scheduleItems={scheduleItems}
-      deptName={dept?.name ?? null}
-      deptPeople={deptPeople}
-      allPeople={allPeople}
-      isPocOfDept={isPocOfDept}
-      isAssignee={isAssignee}
-      canViewFull={canViewFull}
-      productionId={productionId}
-    />
-  );
+export default async function ReqLegacyRedirect({ params }: Ctx) {
+  const { id, reqId } = await params;
+  redirect(`/production/${id}/tasks/${reqId}`);
 }

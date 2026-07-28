@@ -143,7 +143,7 @@ export default function ProductionHomeClient({
                   {awaitingReqs.slice(0, 3).map(req => (
                     <button
                       key={req.id}
-                      onClick={() => router.push(`/production/${productionId}/events/${req.eventId}/reqs/${req.id}`)}
+                      onClick={() => router.push(`/production/${productionId}/tasks/${req.id}`)}
                     >
                       <span className={styles.compactLabel}>
                         <b>{req.departmentName ?? "（无部门）"}</b>
@@ -186,7 +186,7 @@ export default function ProductionHomeClient({
                   {pendingReqs.slice(0, 3).map(req => (
                     <button
                       key={req.id}
-                      onClick={() => router.push(`/production/${productionId}/events/${req.eventId}/reqs/${req.id}`)}
+                      onClick={() => router.push(`/production/${productionId}/tasks/${req.id}`)}
                     >
                       <span className={styles.compactLabel}>
                         <b>{req.title}</b>
@@ -226,7 +226,7 @@ export default function ProductionHomeClient({
                   {unreadReports.slice(0, 3).map(r => (
                     <button
                       key={r.reportId}
-                      onClick={() => router.push(`/production/${productionId}/events/${r.eventId}/reports/${r.reportId}`)}
+                      onClick={() => router.push(`/production/${productionId}/reports/${r.reportId}`)}
                     >
                       <span className={styles.compactLabel}>
                         <b>{r.reportTitle}</b>

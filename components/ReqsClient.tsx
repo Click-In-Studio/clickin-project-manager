@@ -48,7 +48,7 @@ function AwaitingReqCard({
 }) {
   return (
     <Link
-      href={`/production/${productionId}/events/${eventId}/reqs/${req.id}`}
+      href={`/production/${productionId}/tasks/${req.id}`}
       className="bg-white rounded-2xl shadow-sm px-5 py-4 flex items-start gap-3 hover:shadow-md transition-shadow"
     >
       <div className="flex-1 min-w-0">
@@ -153,7 +153,7 @@ function ReqCard({
       {(canViewFull || isPocOfDept || isMyReq) && (
         <div className="mt-3 flex justify-end">
           <Link
-            href={`/production/${productionId}/events/${eventId}/reqs/${req.id}`}
+            href={`/production/${productionId}/tasks/${req.id}`}
             className="text-[11px] text-zinc-400 hover:text-zinc-600">
             详情 →
           </Link>

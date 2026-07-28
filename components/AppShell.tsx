@@ -24,7 +24,8 @@ const CREATION_NAV = [
 const PRODUCTION_NAV = [
   { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts" },
   { label: "日程", hint: "围读 · 排练 · 演出", path: "events" },
-  { label: "任务", hint: "任务 · 节点 · 里程碑", path: "tasks" },
+  { label: "任务", hint: "技术需求 · 跟进", path: "tasks" },
+  { label: "报告", hint: "演出报告 · 归档", path: "reports" },
   { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications" },
   { label: "财务", hint: "预算 · 支出 · 关联", path: "finance" },
   { label: "物料", hint: "道具 · 服装 · 设备", path: "materials" },
@@ -56,7 +57,12 @@ function extractModule(pathname: string, productionId: string): string {
   const base = `/production/${productionId}`;
   if (pathname === base || pathname === base + "/") return "";
   const rest = pathname.slice(base.length + 1);
-  return rest.split("/")[0];
+  const first = rest.split("/")[0];
+  if (first === "events") {
+    if (rest.includes("/reqs/")) return "tasks";
+    if (rest.includes("/reports/")) return "reports";
+  }
+  return first;
 }
 
 function extractAdminModule(pathname: string, productionId: string): string {

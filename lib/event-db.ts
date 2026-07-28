@@ -945,6 +945,34 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
   );
 }
 
+export async function getTechReqByProduction(id: string, productionId: string): Promise<EventTechReq | null> {
+  const pool = getPool();
+  const [reqRes, assigneeRes, itemRes] = await Promise.all([
+    pool.query<TechReqRow>(
+      `SELECT etr.id, etr.event_id, etr.title, etr.description,
+              etr.preset_minutes, etr.department_id, etr.status, etr.chat_id, etr.created_at
+       FROM event_tech_req etr
+       JOIN production_event pe ON pe.id = etr.event_id
+       WHERE etr.id = $1 AND pe.production_id = $2`,
+      [id, productionId]
+    ),
+    pool.query<TechAssigneeRow>(
+      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1",
+      [id]
+    ),
+    pool.query<{ item_id: string }>(
+      "SELECT item_id FROM event_tech_req_item WHERE req_id = $1",
+      [id]
+    ),
+  ]);
+  if (!reqRes.rows[0]) return null;
+  return rowToTechReq(
+    reqRes.rows[0],
+    assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
+    itemRes.rows.map(r => r.item_id),
+  );
+}
+
 export async function setTechReqItems(reqId: string, itemIds: string[]): Promise<void> {
   const client = await getPool().connect();
   try {
@@ -1148,6 +1176,18 @@ export async function getEventReport(id: string, eventId: string): Promise<Event
             created_at, updated_at, published_at, mentions
      FROM event_report WHERE id = $1 AND event_id = $2`,
     [id, eventId]
+  );
+  return res.rows[0] ? rowToReport(res.rows[0]) : null;
+}
+
+export async function getReportByProduction(id: string, productionId: string): Promise<EventReport | null> {
+  const res = await getPool().query<ReportRow>(
+    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
+            er.created_at, er.updated_at, er.published_at, er.mentions
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     WHERE er.id = $1 AND pe.production_id = $2`,
+    [id, productionId]
   );
   return res.rows[0] ? rowToReport(res.rows[0]) : null;
 }
@@ -1614,6 +1654,103 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
     amPoc: r.am_poc,
     assignees: r.assignees_json ?? [],
     deptPeople: r.dept_people_json ?? [],
+  }));
+}
+
+export type ProductionTechReqEntry = {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  eventId: string;
+  eventTitle: string;
+  eventStartTime: string | null;
+  assignees: { userId: string; name: string }[];
+};
+
+export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
+  const res = await getPool().query<{
+    id: string; title: string; description: string; status: string;
+    department_id: string | null; department_name: string | null;
+    event_id: string; event_title: string; event_start_time: string | null;
+    assignees_json: { userId: string; name: string }[] | null;
+  }>(
+    `SELECT
+       etr.id, etr.title, etr.description, etr.status, etr.department_id,
+       ed.name AS department_name,
+       pe.id AS event_id, pe.title AS event_title, pe.start_time AS event_start_time,
+       (
+         SELECT json_agg(json_build_object('userId', eta.user_id, 'name', eta.name) ORDER BY eta.name)
+         FROM event_tech_assignee eta WHERE eta.req_id = etr.id
+       ) AS assignees_json
+     FROM event_tech_req etr
+     JOIN production_event pe ON pe.id = etr.event_id
+     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     WHERE pe.production_id = $1 AND pe.status != 'cancelled'
+     ORDER BY pe.start_time NULLS LAST, etr.created_at`,
+    [productionId]
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    departmentId: r.department_id,
+    departmentName: r.department_name,
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    eventStartTime: r.event_start_time,
+    assignees: r.assignees_json ?? [],
+  }));
+}
+
+export type ProductionReportEntry = EventReport & {
+  eventTitle: string;
+  eventStartTime: string | null;
+  isMentioned: boolean;
+  isFollower: boolean;
+  isParticipant: boolean;
+};
+
+/** All reports for a production visible to this user, with relationship flags.
+ *  includeDrafts should only be true for users with isReportViewer permission. */
+export async function listProductionReports(
+  productionId: string,
+  userId: string,
+  includeDrafts: boolean,
+): Promise<ProductionReportEntry[]> {
+  const res = await getPool().query<ReportRow & {
+    event_title: string; event_start_time: string | null;
+    is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
+  }>(
+    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
+            er.created_at, er.updated_at, er.published_at, er.mentions,
+            pe.title AS event_title, pe.start_time AS event_start_time,
+            (er.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
+            EXISTS (
+              SELECT 1 FROM event_participant ep
+              WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'follower'
+            ) AS is_follower,
+            EXISTS (
+              SELECT 1 FROM event_participant ep
+              WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'participant'
+            ) AS is_participant
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     WHERE pe.production_id = $1
+       AND ($3 OR er.published_at IS NOT NULL)
+     ORDER BY COALESCE(er.published_at, er.updated_at) DESC`,
+    [productionId, userId, includeDrafts]
+  );
+  return res.rows.map(r => ({
+    ...rowToReport(r),
+    eventTitle: r.event_title,
+    eventStartTime: r.event_start_time,
+    isMentioned: r.is_mentioned,
+    isFollower: r.is_follower,
+    isParticipant: r.is_participant,
   }));
 }
 

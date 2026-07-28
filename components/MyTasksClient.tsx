@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { MyTechReqFullEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
+import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -78,6 +79,8 @@ export default function MyTasksClient() {
     if (statusFilter === "active") return t.status !== "done";
     return t.status === statusFilter;
   });
+
+  const visibleSelected = filtered.find(t => t.id === selected?.id) ?? null;
 
   // Cross-filter counts: each dimension counts with the OTHER dimension's active filter applied
   const countForProd = (prodId: string | "all") => tasks.filter(t => {
@@ -232,7 +235,7 @@ export default function MyTasksClient() {
 
           {/* Right: detail */}
           <div style={{ overflowY: "auto", padding: "0 0 24px 24px" }}>
-            {!selected ? (
+            {!visibleSelected ? (
               <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
                 选择左侧任务查看详情
               </div>
@@ -240,7 +243,7 @@ export default function MyTasksClient() {
               <div>
                 <div style={{ marginBottom: 18 }}>
                   <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
-                    {selected.productionName} · {selected.eventTitle}
+                    {visibleSelected.productionName} · {visibleSelected.eventTitle}
                   </p>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
                     <h2 style={{
@@ -249,18 +252,18 @@ export default function MyTasksClient() {
                       fontSize: "clamp(18px, 1.8vw, 24px)", fontWeight: 500, color: "var(--ink)",
                       lineHeight: 1.3,
                     }}>
-                      {selected.title || "待填写需求名称…"}
+                      {visibleSelected.title || "待填写需求名称…"}
                     </h2>
                     <select
                       disabled={updating}
-                      value={selected.status}
-                      onChange={e => updateStatus(selected, e.target.value)}
+                      value={visibleSelected.status}
+                      onChange={e => updateStatus(visibleSelected, e.target.value)}
                       style={{
                         flexShrink: 0, borderRadius: 6, padding: "4px 8px",
                         fontSize: 11, fontWeight: 700, cursor: "pointer",
                         border: "1px solid transparent", outline: "none",
                         opacity: updating ? 0.5 : 1,
-                        ...statusBadgeStyle(selected.status),
+                        ...statusBadgeStyle(visibleSelected.status),
                       }}
                     >
                       {VALID_STATUSES.map(s => (
@@ -269,33 +272,31 @@ export default function MyTasksClient() {
                     </select>
                   </div>
 
-                  {selected.departmentName && (
+                  {visibleSelected.departmentName && (
                     <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
-                      部门：{selected.departmentName}
+                      部门：{visibleSelected.departmentName}
                     </p>
                   )}
-                  {selected.assignees.length > 0 && (
+                  {visibleSelected.assignees.length > 0 && (
                     <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
-                      负责人：{selected.assignees.map(a => a.name).join("、")}
+                      负责人：{visibleSelected.assignees.map(a => a.name).join("、")}
                     </p>
                   )}
                 </div>
 
-                {selected.description && (
+                {visibleSelected.description && (
                   <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 20 }}>
-                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: "var(--ink)", whiteSpace: "pre-wrap" }}>
-                      {selected.description}
-                    </p>
+                    <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={visibleSelected.productionId} />
                   </div>
                 )}
 
-                {selected.deptPeople.length > 0 && (
+                {visibleSelected.deptPeople.length > 0 && (
                   <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, marginBottom: 20 }}>
                     <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
                       部门成员
                     </p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {selected.deptPeople.map(p => (
+                      {visibleSelected.deptPeople.map(p => (
                         <span key={p.userId} style={{
                           fontSize: 12, padding: "4px 10px", borderRadius: 6,
                           background: "var(--surface-2)", color: "var(--ink)",
@@ -308,7 +309,7 @@ export default function MyTasksClient() {
                 )}
 
                 <Link
-                  href={`/production/${selected.productionId}/events/${selected.eventId}/reqs/${selected.id}`}
+                  href={`/production/${visibleSelected.productionId}/tasks/${visibleSelected.id}`}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
                     border: "1px solid var(--ink)",

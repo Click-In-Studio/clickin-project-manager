@@ -148,7 +148,7 @@ export default function ReportsClient() {
                   {filtered.map(r => (
                     <Link
                       key={r.reportId}
-                      href={`/production/${r.productionId}/events/${r.eventId}/reports/${r.reportId}`}
+                      href={`/production/${r.productionId}/reports/${r.reportId}`}
                       className={`${styles.reportRow} ${!r.isRead ? styles.unread : ""}`}
                     >
                       <div className={styles.reportTitle}>

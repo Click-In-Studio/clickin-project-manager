@@ -70,7 +70,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (techReq.status === "awaiting" && techReq.departmentId) {
     const dept = await getEventDepartment(techReq.departmentId, productionId);
     if (dept?.chatId && dept.pocUserIds.length) {
-      const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs/${techReq.id}`;
+      const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${techReq.id}`;
       // Feishu open_ids still needed for @mention syntax inside the card body
       batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
         const pocOpenIds = dept.pocUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);
