@@ -67,9 +67,9 @@ jobs:
           echo "RELEASE=$RELEASE" >> $GITHUB_ENV
           echo "RELEASE_DIR=$RELEASE_DIR" >> $GITHUB_ENV
 
-          ssh prod "mkdir -p $RELEASE_DIR"
+          ssh prod "mkdir -p $RELEASE_DIR" < /dev/null
           scp /tmp/deploy_bundle.tar.gz prod:/tmp/deploy_bundle.tar.gz
-          ssh prod "tar -xzf /tmp/deploy_bundle.tar.gz -C $RELEASE_DIR && rm /tmp/deploy_bundle.tar.gz"
+          ssh prod "tar -xzf /tmp/deploy_bundle.tar.gz -C $RELEASE_DIR && rm /tmp/deploy_bundle.tar.gz" < /dev/null
 
       # ── 7. Backup DB if migrations pending ──────────────────────────────────
       - name: Backup production DB before migrations
@@ -78,7 +78,7 @@ jobs:
           ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' 'db/migrate-*.sql'             | while read commit; do
                 git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' 'db/migrate-*.sql' | sort
               done)
-          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" > /tmp/db-applied-backup-check.txt
+          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" < /dev/null > /tmp/db-applied-backup-check.txt
           PENDING=0
           while IFS= read -r FILEPATH; do
             FILENAME=$(basename "$FILEPATH")
@@ -94,7 +94,7 @@ jobs:
               sudo -u postgres pg_dump -d script_editor --format=custom --compress=9 > $SHARED/backups/$BACKUP &&
               ls -lh $SHARED/backups/$BACKUP &&
               ls -1t $SHARED/backups/*.pgdump 2>/dev/null | tail -n +6 | xargs -r rm -f
-            "
+            " < /dev/null
             echo "Backup saved to $SHARED/backups/$BACKUP"
           else
             echo "No pending migrations — backup skipped."
@@ -119,7 +119,7 @@ jobs:
           fi
 
           # Fetch the applied manifest from server (empty if not yet created)
-          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" > /tmp/db-applied.txt
+          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" < /dev/null > /tmp/db-applied.txt
 
           echo "Already applied:"
           cat /tmp/db-applied.txt || echo "(none)"
@@ -132,14 +132,20 @@ jobs:
               # File was deleted from the repo (e.g. consolidated into schema.sql).
               # Mark as applied so future runs don't warn about it.
               echo "SKIP  $FILENAME (deleted from repo, marking as applied)"
-              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt"
+              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
               echo "$FILENAME" >> /tmp/db-applied.txt
             else
               echo "APPLY $FILENAME"
               scp "$FILEPATH" prod:/tmp/migration.sql
-              ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql"
+              # `< /dev/null` on every ssh call below is required: this loop's stdin is
+              # the migration file list (via `<<< "$ORDERED"`), and ssh forwards local
+              # stdin to the remote command by default. Without this, ssh competes with
+              # `read -r FILEPATH` for the same fd and can silently swallow the next
+              # line(s), dropping migrations from a run with 2+ pending files without
+              # any error (this is exactly what happened to migrate-cue-list-role.sql).
+              ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null
               # Record in manifest
-              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt"
+              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
               echo "$FILENAME" >> /tmp/db-applied.txt
             fi
           done <<< "$ORDERED"
@@ -150,7 +156,7 @@ jobs:
           ssh prod "
             ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current &&
             pm2 reload /var/www/production-manager/shared/ecosystem.config.js --update-env
-          "
+          " < /dev/null
 
       # ── 10. Clean up old releases (keep latest 5) ────────────────────────────
       - name: Clean old releases
@@ -159,4 +165,4 @@ jobs:
             ls -1dt /var/www/production-manager/releases/*/ |
             tail -n +6 |
             xargs rm -rf --
-          "
+          " < /dev/null
