@@ -1544,8 +1544,8 @@ function ScenePanel({
       </button>
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-64" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 18rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
@@ -2398,8 +2398,8 @@ function CharacterPanel({
 
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-64" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 18rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
@@ -5035,6 +5035,7 @@ function ScriptBlock({
   onTagCopyClick,
   onTagPasteClick,
   onCharacterChangeFocus,
+  onMobileMenuOpen,
   contentPlaceholder,
 }: {
   block: Block;
@@ -5114,6 +5115,7 @@ function ScriptBlock({
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
   onCharacterChangeFocus?: () => void;
+  onMobileMenuOpen?: () => void;
   contentPlaceholder?: string;
 }) {
   const blockRootRef = useRef<HTMLDivElement | null>(null);
@@ -5437,7 +5439,7 @@ function ScriptBlock({
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
     : undefined;
-  const rightActionRowClass = `absolute z-20 flex items-center transition-opacity ${
+  const rightActionRowClass = `absolute z-20 hidden sm:flex items-center transition-opacity ${
     isStage || isCompactTextLayout || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
   } ${hasSceneLabel ? "right-8" : "right-2"}`;
   const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
@@ -5657,18 +5659,19 @@ function ScriptBlock({
                 if (e.shiftKey) e.preventDefault();
                 e.stopPropagation();
               }}
-              onClick={onToggleSelected}
-              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded opacity-0 outline-none transition-all focus:outline-none focus-visible:outline-none group-hover:opacity-100 ${
+              onClick={(e) => { onToggleSelected(e); onMobileMenuOpen?.(); }}
+              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
-                  : `cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
-                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] opacity-100" : "text-zinc-200"
+                  : `sm:cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
+                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
                     }`
               }`}
-              title="拖动调整位置"
-              aria-label="拖动调整位置"
+              title="更多操作"
+              aria-label="更多操作"
             >
-              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current" />
+              <span className="pointer-events-none flex items-center justify-center text-[13px] font-bold sm:hidden">⋮</span>
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current hidden sm:block" />
             </button>
           )}
         </div>
@@ -6500,6 +6503,7 @@ export default function ScriptEditor({
   const [reorderNotice, setReorderNotice] = useState("");
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
+  const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
@@ -6836,12 +6840,12 @@ export default function ScriptEditor({
   const toggleMoreMenu = useCallback(() => {
     setMoreMenuOpen(prev => {
       const next = !prev;
-      if (!next) setOpenMenu(null);
+      setOpenMenu(null);
       return next;
     });
   }, []);
   const openNestedMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setMoreMenuOpen(true);
+    setMoreMenuOpen(false);
     setOpenMenu(name);
   }, []);
   const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
@@ -10299,11 +10303,9 @@ export default function ScriptEditor({
       ? "拖拽当前剧本块至指定位置松开以调整位置"
       : "";
   const rightMenuClass = `${
-    moreMenuOpen
-      ? "fixed right-2 top-64"
-      : toolbarCompact
-        ? "fixed right-2 top-[7.5rem]"
-        : "absolute right-0 top-full"
+    toolbarCompact
+      ? "fixed right-2 top-[7.5rem]"
+      : "absolute right-0 top-full"
   } z-30 mt-1 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
 
   return (
@@ -10463,7 +10465,7 @@ export default function ScriptEditor({
                     canImport={canImport}
                     onNavigate={prepareForNavigation}
                     triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
-                    nestedFromMore={moreMenuOpen}
+                    nestedFromMore={toolbarCompact}
                     label={toolbarShort ? "章" : "章节"}
                   />
                   <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
@@ -10487,7 +10489,7 @@ export default function ScriptEditor({
                     ? "bg-zinc-100 text-zinc-800"
                     : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
                 }`}
-                nestedFromMore={moreMenuOpen}
+                nestedFromMore={toolbarCompact}
                 label={toolbarShort ? "角" : "角色"}
               />
               <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
@@ -10783,7 +10785,7 @@ export default function ScriptEditor({
               type="button"
               aria-label="更多工具"
               onClick={toggleMoreMenu}
-              className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
             >
               ⋮
             </button>
@@ -11720,6 +11722,7 @@ export default function ScriptEditor({
                   onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
                   onTagCopyClick={() => handleTagCopy(block.id)}
                   onTagPasteClick={() => handleTagPaste(block.id)}
+                  onMobileMenuOpen={() => setMobileBlockMenuBlockId(block.id)}
                 />
               </div>
             );
@@ -12336,6 +12339,83 @@ export default function ScriptEditor({
             </div>
         </ScriptDialog>
       )}
+
+      {/* Mobile block action bottom sheet */}
+      {mobileBlockMenuBlockId !== null && (() => {
+        const menuBlock = blocks.find(b => b.id === mobileBlockMenuBlockId);
+        if (!menuBlock) return null;
+        const isStageBlock = menuBlock.type === "stage";
+        const hasLyricBlock = !!menuBlock.lyric;
+        const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
+        const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
+        const isBatchMode = selectedBlockIds.has(mobileBlockMenuBlockId) && selectedBlockIds.size > 1;
+        const batchCount = selectedBlockIds.size;
+        const close = () => setMobileBlockMenuBlockId(null);
+        return (
+          <div className="sm:hidden fixed inset-0 z-50 flex items-end" onClick={close}>
+            <div
+              className="w-full rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-zinc-200" />
+              </div>
+              {isBatchMode && (
+                <p className="px-5 py-2 text-xs text-zinc-400">已选中 {batchCount} 行</p>
+              )}
+              <div className="flex flex-col">
+                {canEditText && !isStageBlock && !hasLyricCfg && (
+                  <button
+                    onClick={() => { toggleBlockLyric(mobileBlockMenuBlockId); close(); }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {hasLyricBlock ? "转为台词" : "转为歌词"}
+                  </button>
+                )}
+                {canEditText && (
+                  <button
+                    onClick={() => {
+                      if (isBatchMode) {
+                        setBlocksType(Array.from(selectedBlockIds), isStageBlock ? "dialogue" : "stage");
+                      } else {
+                        toggleBlockType(mobileBlockMenuBlockId);
+                      }
+                      close();
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {isStageBlock ? "转为台词" : "转为舞台提示"}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(mobileBlockMenuBlockId); close(); }}
+                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                >
+                  附件
+                </button>
+                <button
+                  onClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(mobileBlockMenuBlockId); close(); }}
+                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                >
+                  {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
+                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => {
+                      deleteBlocks(isBatchMode ? Array.from(selectedBlockIds) : [mobileBlockMenuBlockId]);
+                      close();
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-red-500 border-t border-zinc-100"
+                  >
+                    {isBatchMode ? `删除所选 ${batchCount} 行` : "删除此行"}
+                  </button>
+                )}
+              </div>
+              <div className="h-6" />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 关于 modal */}
       {aboutOpen && (
