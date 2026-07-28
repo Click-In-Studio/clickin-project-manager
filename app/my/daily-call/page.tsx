@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { CSSProperties } from "react";
 export const metadata: Metadata = { title: "当日 Call Sheet" };
 
 /**
@@ -41,6 +42,12 @@ function tomorrowCSTStr(): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
+const rule: CSSProperties = { border: "none", borderTop: "1px solid var(--line)", margin: 0 };
+const sectionBar: CSSProperties = {
+  fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase",
+  color: "var(--muted)", padding: "10px 0", margin: 0,
+};
+
 type Ctx = { searchParams: Promise<{ date?: string; t?: string }> };
 
 export default async function DailyCallPage({ searchParams }: Ctx) {
@@ -82,82 +89,78 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
 
   const eventIds = eventsRes.rows.map(r => r.event_id);
 
-  if (eventIds.length === 0) {
-    return (
-      <div className="min-h-screen bg-zinc-100">
-        <div className="max-w-lg mx-auto px-4 pt-8 pb-16">
-          <div className="mb-6 flex items-center justify-between">
-            {!isTokenMode && <Link href={`/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>}
-            <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">
-            当日 Call Sheet <span className="font-normal normal-case text-zinc-300 text-xs">UTC+8</span>
-          </h1>
-          </div>
-          <p className="text-center text-sm text-zinc-300 py-16">{fmtDateFull(`${dateStr}T00:00:00+08:00`)} 暂无 Call</p>
-        </div>
-      </div>
-    );
-  }
-
   // Call times for each event (all participants, not just current user)
   type CallRow = { event_id: string; user_id: string; name: string; call_at: string; notes: string; department_id: string | null };
-  const allCallsRes = await pool.query<CallRow>(
-    `SELECT event_id, user_id, name, call_at, notes, department_id
-     FROM event_call_time WHERE event_id = ANY($1) ORDER BY call_at, name`,
-    [eventIds],
-  );
-
-  // Schedule items with participants
   type SchedRow = { id: string; event_id: string; title: string; start_time: string | null; end_time: string | null; location: string; order_index: number };
   type PartRow = { item_id: string; name: string };
-  const [schedsRes, partsRes] = await Promise.all([
-    pool.query<SchedRow>(
-      `SELECT id, event_id, title, start_time, end_time, location, order_index
-       FROM event_schedule_item WHERE event_id = ANY($1) ORDER BY order_index`,
-      [eventIds],
-    ),
-    pool.query<PartRow>(
-      `SELECT sip.item_id, sip.name
-       FROM schedule_item_participant sip
-       JOIN event_schedule_item esi ON esi.id = sip.item_id
-       WHERE esi.event_id = ANY($1)`,
-      [eventIds],
-    ),
-  ]);
 
-  const partByItem = new Map<string, string[]>();
-  for (const r of partsRes.rows) {
-    if (!partByItem.has(r.item_id)) partByItem.set(r.item_id, []);
-    partByItem.get(r.item_id)!.push(r.name);
-  }
-
-  // Index by event
   const callsByEvent = new Map<string, CallRow[]>();
   const schedsByEvent = new Map<string, SchedRow[]>();
-  for (const r of allCallsRes.rows) {
-    if (!callsByEvent.has(r.event_id)) callsByEvent.set(r.event_id, []);
-    callsByEvent.get(r.event_id)!.push(r);
-  }
-  for (const r of schedsRes.rows) {
-    if (!schedsByEvent.has(r.event_id)) schedsByEvent.set(r.event_id, []);
-    schedsByEvent.get(r.event_id)!.push(r);
+  const partByItem = new Map<string, string[]>();
+
+  if (eventIds.length > 0) {
+    const [allCallsRes, schedsRes, partsRes] = await Promise.all([
+      pool.query<CallRow>(
+        `SELECT event_id, user_id, name, call_at, notes, department_id
+         FROM event_call_time WHERE event_id = ANY($1) ORDER BY call_at, name`,
+        [eventIds],
+      ),
+      pool.query<SchedRow>(
+        `SELECT id, event_id, title, start_time, end_time, location, order_index
+         FROM event_schedule_item WHERE event_id = ANY($1) ORDER BY order_index`,
+        [eventIds],
+      ),
+      pool.query<PartRow>(
+        `SELECT sip.item_id, sip.name
+         FROM schedule_item_participant sip
+         JOIN event_schedule_item esi ON esi.id = sip.item_id
+         WHERE esi.event_id = ANY($1)`,
+        [eventIds],
+      ),
+    ]);
+
+    for (const r of partsRes.rows) {
+      if (!partByItem.has(r.item_id)) partByItem.set(r.item_id, []);
+      partByItem.get(r.item_id)!.push(r.name);
+    }
+    for (const r of allCallsRes.rows) {
+      if (!callsByEvent.has(r.event_id)) callsByEvent.set(r.event_id, []);
+      callsByEvent.get(r.event_id)!.push(r);
+    }
+    for (const r of schedsRes.rows) {
+      if (!schedsByEvent.has(r.event_id)) schedsByEvent.set(r.event_id, []);
+      schedsByEvent.get(r.event_id)!.push(r);
+    }
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="max-w-lg mx-auto px-4 pt-8 pb-16">
-        <div className="mb-2 flex items-center justify-between">
-          {!isTokenMode && <Link href={`/`} className="text-xs text-zinc-400 hover:text-zinc-600">← 返回</Link>}
-          <h1 className="text-sm font-bold tracking-[0.15em] text-zinc-400 uppercase">
-            当日 Call Sheet <span className="font-normal normal-case text-zinc-300 text-xs">UTC+8</span>
-          </h1>
-        </div>
-        <p className="text-center text-xs text-zinc-300 mb-6">{fmtDateFull(`${dateStr}T00:00:00+08:00`)}</p>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
 
-        <div className="flex flex-col gap-5">
+      {/* Eyebrow + nav link */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
+          Daily Call Sheet · UTC+8
+        </p>
+        {!isTokenMode && (
+          <Link href="/my/weekly-call" style={{ fontSize: 11, color: "var(--muted)", textDecoration: "none" }}>
+            ← 本周日程
+          </Link>
+        )}
+      </div>
+
+      {/* Date heading */}
+      <h1 style={{ fontSize: 24, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: "0 0 20px" }}>
+        {fmtDateFull(`${dateStr}T00:00:00+08:00`)}
+      </h1>
+
+      {eventIds.length === 0 ? (
+        <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "48px 0" }}>暂无 Call 安排</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {eventsRes.rows.map(ev => {
             const myCalls = (callsByEvent.get(ev.event_id) ?? []).filter(c => c.user_id === userId);
-            const allCalls = (callsByEvent.get(ev.event_id) ?? []);
-            const schedItems = (schedsByEvent.get(ev.event_id) ?? []).sort((a, b) => {
+            const allCalls = callsByEvent.get(ev.event_id) ?? [];
+            const schedItems = (schedsByEvent.get(ev.event_id) ?? []).slice().sort((a, b) => {
               if (!a.start_time && !b.start_time) return a.order_index - b.order_index;
               if (!a.start_time) return 1;
               if (!b.start_time) return -1;
@@ -165,87 +168,109 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
             });
 
             return (
-              <div key={ev.event_id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
-                {/* Header */}
-                <div className="px-5 py-4 border-b border-zinc-50">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs text-zinc-400">{ev.production_name}</p>
-                      <h2 className="text-base font-semibold text-zinc-800 mt-0.5">{ev.event_title}</h2>
-                      {ev.event_location && (
-                        <p className="text-xs text-zinc-400 mt-0.5">📍 {ev.event_location}</p>
-                      )}
-                    </div>
-                    {!isTokenMode && (
-                      <Link
-                        href={`/production/${ev.production_id}/events/${ev.event_id}/callsheet`}
-                        className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-600 mt-1">
-                        完整 →
-                      </Link>
+              <div key={ev.event_id} style={{ background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "24px 28px" }}>
+
+                {/* Event title block */}
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
+                  <div>
+                    <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 4px" }}>{ev.production_name}</p>
+                    <h2 style={{ fontSize: 18, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0, lineHeight: 1.2 }}>
+                      {ev.event_title}
+                    </h2>
+                    {ev.event_location && (
+                      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{ev.event_location}</p>
                     )}
                   </div>
-
-                  {/* My call times */}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {myCalls.map((c, i) => (
-                      <div key={i} className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5">
-                        <span className="text-sm font-mono font-semibold text-amber-600">{fmtTime(c.call_at)}</span>
-                        {c.notes && <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-amber-400" />}
-                      </div>
-                    ))}
-                  </div>
+                  {!isTokenMode && (
+                    <Link
+                      href={`/production/${ev.production_id}/events/${ev.event_id}/callsheet`}
+                      style={{ flexShrink: 0, fontSize: 11, color: "var(--muted)", textDecoration: "none", paddingTop: 4 }}
+                    >
+                      完整 →
+                    </Link>
+                  )}
                 </div>
 
-                {/* Schedule */}
+                {/* My call times */}
+                {myCalls.length > 0 && (
+                  <>
+                    <hr style={rule} />
+                    <p style={sectionBar}>我的 Call</p>
+                    <hr style={rule} />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "12px 0" }}>
+                      {myCalls.map((c, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, borderRadius: 8, background: "#fffbeb", padding: "6px 10px" }}>
+                          <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#d97706", fontSize: 14 }}>{fmtTime(c.call_at)}</span>
+                          {c.notes && (
+                            <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-amber-400" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Schedule items */}
                 {schedItems.length > 0 && (
-                  <div className="px-5 py-3 border-b border-zinc-50">
-                    <p className="text-[10px] font-semibold tracking-widest text-zinc-300 uppercase mb-2">日程</p>
-                    <div className="flex flex-col gap-1.5">
-                      {schedItems.map(s => {
-                        const people = partByItem.get(s.id) ?? [];
-                        return (
-                          <div key={s.id}>
-                            <div className="flex items-baseline gap-2">
-                              <span className="shrink-0 font-mono text-xs text-zinc-400 w-10">
-                                {s.start_time ? fmtTime(s.start_time) : "—"}
-                              </span>
-                              <span className="text-sm text-zinc-700">{s.title}</span>
-                              {s.location && <span className="text-[11px] text-zinc-300">@ {s.location}</span>}
+                  <>
+                    <hr style={rule} />
+                    <p style={sectionBar}>事件流程</p>
+                    <hr style={rule} />
+                    {schedItems.map(s => {
+                      const people = partByItem.get(s.id) ?? [];
+                      return (
+                        <div key={s.id} style={{ padding: "11px 0", borderBottom: "1px solid var(--line)" }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{s.title}</span>
+                              {s.location && (
+                                <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{s.location}</p>
+                              )}
+                              {people.length > 0 && (
+                                <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{people.join("、")}</p>
+                              )}
                             </div>
-                            {people.length > 0 && (
-                              <p className="text-[11px] text-zinc-400 ml-12 mt-0.5">
-                                {people.join("、")}
-                              </p>
+                            {s.start_time && (
+                              <span style={{ flexShrink: 0, fontSize: 12, color: "var(--muted)", fontFamily: "monospace" }}>
+                                {fmtTime(s.start_time)}
+                                {s.end_time && s.end_time !== s.start_time && (
+                                  <span style={{ color: "var(--line)" }}> – {fmtTime(s.end_time)}</span>
+                                )}
+                              </span>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                        </div>
+                      );
+                    })}
+                  </>
                 )}
 
                 {/* All call times */}
                 {allCalls.length > 0 && (
-                  <div className="px-5 py-3">
-                    <p className="text-[10px] font-semibold tracking-widest text-zinc-300 uppercase mb-2">全组 Call</p>
-                    <div className="flex flex-col gap-1">
-                      {allCalls.map((c, i) => (
-                        <div key={i} className="flex items-baseline gap-2">
-                          <span className="shrink-0 font-mono text-xs text-zinc-500 w-10">{fmtTime(c.call_at)}</span>
-                          <span className={`text-sm ${c.user_id === userId ? "font-semibold text-zinc-800" : "text-zinc-600"}`}>
-                            {c.name}
-                          </span>
-                          {c.notes && <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-300" />}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <>
+                    <hr style={rule} />
+                    <p style={sectionBar}>全组 Call</p>
+                    <hr style={rule} />
+                    {allCalls.map((c, i) => (
+                      <div key={i} style={{ padding: "11px 0", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 16 }}>
+                        <span style={{ flexShrink: 0, fontFamily: "monospace", fontSize: 13, color: "var(--muted)", minWidth: 44 }}>
+                          {fmtTime(c.call_at)}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: c.user_id === userId ? 700 : 400, color: c.user_id === userId ? "var(--ink)" : "var(--muted)" }}>
+                          {c.name}
+                        </span>
+                        {c.notes && (
+                          <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-300" />
+                        )}
+                      </div>
+                    ))}
+                  </>
                 )}
               </div>
             );
           })}
         </div>
-      </div>
+      )}
     </div>
   );
 }

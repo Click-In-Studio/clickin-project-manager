@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "CUE表" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getProductionName, listCueLists, getUserAllowedCueTypes } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listCueListsWithAccess, getUserAllowedCueTypes, listProductionMembersWithRoles } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
 import CueListsManager from "@/components/CueListsManager";
@@ -27,10 +27,11 @@ export default async function CueListsPage({
   const canCreate = hasPermission("cue_list:create", permCtx);
   const canCreateAny = hasPermission("cue_list:create_any", permCtx);
 
-  const [name, cueLists, allowedCueTypes] = await Promise.all([
+  const [name, cueListsWithAccess, allowedCueTypes, members] = await Promise.all([
     getProductionName(id),
-    listCueLists(id),
+    listCueListsWithAccess(id, session.userId),
     canCreate && !canCreateAny ? getUserAllowedCueTypes(session.userId, id) : Promise.resolve(null),
+    listProductionMembersWithRoles(id),
   ]);
   if (!name) redirect("/");
 
@@ -38,13 +39,18 @@ export default async function CueListsPage({
     ? CUE_LIST_TEMPLATES
     : CUE_LIST_TEMPLATES.filter((t) => allowedCueTypes?.includes(t.key));
 
+  const editableIds = cueListsWithAccess.filter(cl => cl.canEdit).map(cl => cl.id);
+
   return (
     <CueListsManager
       productionId={id}
-      initialCueLists={cueLists}
+      productionName={name}
+      initialCueLists={cueListsWithAccess}
       canCreate={canCreate}
       availableTemplates={availableTemplates}
       myUserId={session.userId}
+      editableIds={editableIds}
+      members={members}
     />
   );
 }

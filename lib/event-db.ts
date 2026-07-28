@@ -945,6 +945,34 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
   );
 }
 
+export async function getTechReqByProduction(id: string, productionId: string): Promise<EventTechReq | null> {
+  const pool = getPool();
+  const [reqRes, assigneeRes, itemRes] = await Promise.all([
+    pool.query<TechReqRow>(
+      `SELECT etr.id, etr.event_id, etr.title, etr.description,
+              etr.preset_minutes, etr.department_id, etr.status, etr.chat_id, etr.created_at
+       FROM event_tech_req etr
+       JOIN production_event pe ON pe.id = etr.event_id
+       WHERE etr.id = $1 AND pe.production_id = $2`,
+      [id, productionId]
+    ),
+    pool.query<TechAssigneeRow>(
+      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1",
+      [id]
+    ),
+    pool.query<{ item_id: string }>(
+      "SELECT item_id FROM event_tech_req_item WHERE req_id = $1",
+      [id]
+    ),
+  ]);
+  if (!reqRes.rows[0]) return null;
+  return rowToTechReq(
+    reqRes.rows[0],
+    assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
+    itemRes.rows.map(r => r.item_id),
+  );
+}
+
 export async function setTechReqItems(reqId: string, itemIds: string[]): Promise<void> {
   const client = await getPool().connect();
   try {
@@ -1152,6 +1180,18 @@ export async function getEventReport(id: string, eventId: string): Promise<Event
   return res.rows[0] ? rowToReport(res.rows[0]) : null;
 }
 
+export async function getReportByProduction(id: string, productionId: string): Promise<EventReport | null> {
+  const res = await getPool().query<ReportRow>(
+    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
+            er.created_at, er.updated_at, er.published_at, er.mentions
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     WHERE er.id = $1 AND pe.production_id = $2`,
+    [id, productionId]
+  );
+  return res.rows[0] ? rowToReport(res.rows[0]) : null;
+}
+
 export async function createEventReport(data: {
   id: string; eventId: string; reportType: string;
   title: string; body: string; createdBy: string;
@@ -1313,10 +1353,13 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
      FROM event_report er
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
-     JOIN event_participant ep ON ep.event_id = pe.id AND ep.user_id = $1
      WHERE er.published_at IS NOT NULL
        AND pe.status IN ('published', 'completed')
        ${prodFilter}
+       AND (
+         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
+         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+       )
        AND NOT EXISTS (
          SELECT 1 FROM event_report_read err
          WHERE err.report_id = er.id AND err.user_id = $1
@@ -1334,6 +1377,122 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
     productionId: r.production_id,
     productionName: r.production_name,
   }));
+}
+
+export type MyReportEntry = {
+  reportId: string;
+  title: string;
+  reportType: string;
+  publishedAt: string;
+  eventId: string;
+  eventTitle: string;
+  productionId: string;
+  productionName: string;
+  isRead: boolean;
+};
+
+export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
+  const res = await getPool().query<{
+    report_id: string; report_title: string; report_type: string; published_at: Date;
+    event_id: string; event_title: string; production_id: string; production_name: string;
+    is_read: boolean;
+  }>(
+    `SELECT er.id AS report_id, er.title AS report_title, er.report_type,
+            er.published_at,
+            pe.id AS event_id, pe.title AS event_title,
+            pe.production_id, p.name AS production_name,
+            EXISTS (
+              SELECT 1 FROM event_report_read err
+              WHERE err.report_id = er.id AND err.user_id = $1
+            ) AS is_read
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     JOIN production p ON p.id = pe.production_id
+     WHERE er.published_at IS NOT NULL
+       AND (
+         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
+         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+       )
+     ORDER BY er.published_at DESC
+     LIMIT 100`,
+    [userId],
+  );
+  return res.rows.map(r => ({
+    reportId: r.report_id,
+    title: r.report_title,
+    reportType: r.report_type,
+    publishedAt: r.published_at.toISOString(),
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    productionId: r.production_id,
+    productionName: r.production_name,
+    isRead: r.is_read,
+  }));
+}
+
+export type WeeklyCallEvent = {
+  eventId: string;
+  eventTitle: string;
+  eventLocation: string;
+  productionId: string;
+  productionName: string;
+  calls: { callAt: string; notes: string }[];
+  schedItems: { title: string; startTime: string | null }[];
+};
+
+export async function listWeeklyCallSchedule(
+  userId: string,
+  weekStart: Date,
+  weekEnd: Date,
+): Promise<WeeklyCallEvent[]> {
+  type CallRow = {
+    call_at: string; call_notes: string;
+    event_id: string; event_title: string; event_location: string;
+    production_id: string; production_name: string;
+  };
+  type SchedRow = { event_id: string; title: string; start_time: string | null };
+
+  const [callsRes, schedRes] = await Promise.all([
+    getPool().query<CallRow>(
+      `SELECT ect.call_at, ect.notes AS call_notes,
+              pe.id AS event_id, pe.title AS event_title,
+              pe.location AS event_location,
+              pe.production_id, p.name AS production_name
+       FROM event_call_time ect
+       JOIN production_event pe ON pe.id = ect.event_id
+       JOIN production p ON p.id = pe.production_id
+       WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+       ORDER BY ect.call_at`,
+      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+    ),
+    getPool().query<SchedRow>(
+      `SELECT esi.event_id, esi.title, esi.start_time
+       FROM event_schedule_item esi
+       WHERE esi.event_id IN (
+         SELECT DISTINCT event_id FROM event_call_time
+         WHERE user_id = $1 AND call_at >= $2 AND call_at < $3
+       )
+       ORDER BY esi.event_id, esi.order_index`,
+      [userId, weekStart.toISOString(), weekEnd.toISOString()],
+    ),
+  ]);
+
+  const byEvent = new Map<string, WeeklyCallEvent>();
+  for (const r of callsRes.rows) {
+    if (!byEvent.has(r.event_id)) {
+      byEvent.set(r.event_id, {
+        eventId: r.event_id, eventTitle: r.event_title,
+        eventLocation: r.event_location, productionId: r.production_id,
+        productionName: r.production_name, calls: [], schedItems: [],
+      });
+    }
+    byEvent.get(r.event_id)!.calls.push({ callAt: r.call_at, notes: r.call_notes });
+  }
+  for (const r of schedRes.rows) {
+    byEvent.get(r.event_id)?.schedItems.push({ title: r.title, startTime: r.start_time });
+  }
+
+  return [...byEvent.values()];
 }
 
 // ─── Self-follow ──────────────────────────────────────────────────────────────
@@ -1498,6 +1657,103 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
   }));
 }
 
+export type ProductionTechReqEntry = {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  eventId: string;
+  eventTitle: string;
+  eventStartTime: string | null;
+  assignees: { userId: string; name: string }[];
+};
+
+export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
+  const res = await getPool().query<{
+    id: string; title: string; description: string; status: string;
+    department_id: string | null; department_name: string | null;
+    event_id: string; event_title: string; event_start_time: string | null;
+    assignees_json: { userId: string; name: string }[] | null;
+  }>(
+    `SELECT
+       etr.id, etr.title, etr.description, etr.status, etr.department_id,
+       ed.name AS department_name,
+       pe.id AS event_id, pe.title AS event_title, pe.start_time AS event_start_time,
+       (
+         SELECT json_agg(json_build_object('userId', eta.user_id, 'name', eta.name) ORDER BY eta.name)
+         FROM event_tech_assignee eta WHERE eta.req_id = etr.id
+       ) AS assignees_json
+     FROM event_tech_req etr
+     JOIN production_event pe ON pe.id = etr.event_id
+     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     WHERE pe.production_id = $1 AND pe.status != 'cancelled'
+     ORDER BY pe.start_time NULLS LAST, etr.created_at`,
+    [productionId]
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    departmentId: r.department_id,
+    departmentName: r.department_name,
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    eventStartTime: r.event_start_time,
+    assignees: r.assignees_json ?? [],
+  }));
+}
+
+export type ProductionReportEntry = EventReport & {
+  eventTitle: string;
+  eventStartTime: string | null;
+  isMentioned: boolean;
+  isFollower: boolean;
+  isParticipant: boolean;
+};
+
+/** All reports for a production visible to this user, with relationship flags.
+ *  includeDrafts should only be true for users with isReportViewer permission. */
+export async function listProductionReports(
+  productionId: string,
+  userId: string,
+  includeDrafts: boolean,
+): Promise<ProductionReportEntry[]> {
+  const res = await getPool().query<ReportRow & {
+    event_title: string; event_start_time: string | null;
+    is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
+  }>(
+    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
+            er.created_at, er.updated_at, er.published_at, er.mentions,
+            pe.title AS event_title, pe.start_time AS event_start_time,
+            (er.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
+            EXISTS (
+              SELECT 1 FROM event_participant ep
+              WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'follower'
+            ) AS is_follower,
+            EXISTS (
+              SELECT 1 FROM event_participant ep
+              WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'participant'
+            ) AS is_participant
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     WHERE pe.production_id = $1
+       AND ($3 OR er.published_at IS NOT NULL)
+     ORDER BY COALESCE(er.published_at, er.updated_at) DESC`,
+    [productionId, userId, includeDrafts]
+  );
+  return res.rows.map(r => ({
+    ...rowToReport(r),
+    eventTitle: r.event_title,
+    eventStartTime: r.event_start_time,
+    isMentioned: r.is_mentioned,
+    isFollower: r.is_follower,
+    isParticipant: r.is_participant,
+  }));
+}
+
 /** Batch-load the current user's participant role across all events in a production. */
 export async function listUserEventParticipations(
   userId: string, productionId: string,
@@ -1572,8 +1828,21 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
   }));
 }
 
+function currentCSTWeekRange(): { weekStart: Date; weekEnd: Date } {
+  const now = new Date(Date.now() + 8 * 3_600_000); // shift to CST
+  const dow = now.getUTCDay();
+  const afterSundayNoon = dow === 0 && (now.getUTCHours() > 12 || (now.getUTCHours() === 12 && now.getUTCMinutes() >= 0));
+  const daysFromMonday = dow === 0 ? 6 : dow - 1;
+  const weekOffset = afterSundayNoon ? 7 : 0;
+  const mondayCSTDate = now.getUTCDate() - daysFromMonday + weekOffset;
+  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), mondayCSTDate) - 8 * 3_600_000);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 3_600_000);
+  return { weekStart, weekEnd };
+}
+
 export async function listMyUpcomingCallTimes(userId: string, productionId?: string): Promise<MyCallTimeEntry[]> {
-  const params: unknown[] = [userId];
+  const { weekStart, weekEnd } = currentCSTWeekRange();
+  const params: unknown[] = [userId, weekStart.toISOString(), weekEnd.toISOString()];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     id: string; call_at: Date; notes: string;
@@ -1588,8 +1857,8 @@ export async function listMyUpcomingCallTimes(userId: string, productionId?: str
      JOIN production p ON p.id = pe.production_id
      WHERE ect.user_id = $1
        AND pe.status = 'published'
-       AND ect.call_at >= now()
-       AND ect.call_at <= now() + interval '7 days'
+       AND ect.call_at >= $2
+       AND ect.call_at < $3
        ${prodFilter}
      ORDER BY ect.call_at`,
     params

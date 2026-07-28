@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime as fmtDate } from "@/lib/tz";
@@ -363,133 +363,145 @@ export default function ReportViewClient({
 
   const commonThreadProps = { canModerate: canModerateNotes, currentUserId, replyBase, onRepliesChange: setReplies, members, productionId };
 
+  const navLink: React.CSSProperties = { fontSize: 11, color: "var(--muted)", textDecoration: "none" };
+
   return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="max-w-xl mx-auto px-4 pt-8 pb-16">
-        {/* Nav */}
-        <div className="flex items-center gap-3 mb-5 text-xs text-zinc-400">
-          <Link href={`/production/${productionId}/events/${eventId}/view`} className="hover:text-zinc-600">
-            ← {event.title}
-          </Link>
-        </div>
+    <div style={{ minHeight: "100vh", background: "var(--paper)", padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+      {/* Eyebrow + utility nav outside page sheet */}
+      <p style={{ margin: "0 0 10px", fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--stage)" }}>
+        Reports
+      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+        <Link href={`/production/${productionId}/events/${eventId}/view`} style={navLink}>日程: {event.title}</Link>
+      </div>
 
-        {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-start justify-between gap-3">
-            <h1 className="text-xl font-bold text-zinc-800 leading-tight">{report.title}</h1>
-            <span className={`shrink-0 text-[11px] rounded-full px-2.5 py-1 font-medium ${
-              report.publishedAt ? "bg-green-50 text-green-600" : "bg-zinc-100 text-zinc-500"
-            }`}>
-              {report.publishedAt ? "已发布" : "草稿"}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 mt-1.5 text-xs text-zinc-400">
-            <span>{REPORT_TYPE_LABELS[report.reportType] ?? report.reportType}</span>
-            {report.publishedAt && <span>{fmtDate(report.publishedAt)}</span>}
-          </div>
+      {/* Page sheet */}
+      <div style={{ background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "24px 28px" }}>
+        {/* Title + status */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "var(--ink)", lineHeight: 1.3 }}>
+            {report.title}
+          </h1>
+          <span style={{
+            flexShrink: 0, fontSize: 11, fontWeight: 600, borderRadius: 20, padding: "3px 10px",
+            ...(report.publishedAt ? { background: "#f0fdf4", color: "#16a34a" } : { background: "var(--paper)", color: "var(--muted)" }),
+          }}>
+            {report.publishedAt ? "已发布" : "草稿"}
+          </span>
         </div>
+        <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--muted)" }}>
+          {REPORT_TYPE_LABELS[report.reportType] ?? report.reportType}
+          {report.publishedAt && ` · ${fmtDate(report.publishedAt)}`}
+        </p>
 
-        {/* Report body + replies */}
-        <section className="mb-6">
-          {report.body ? (
-            <div className="bg-white rounded-2xl shadow-sm px-5 py-4">
-              <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
-            </div>
-          ) : (
-            <p className="text-center text-sm text-zinc-300">暂无正文</p>
-          )}
-          <div className="bg-white rounded-2xl shadow-sm px-5 py-4 mt-3">
-            <MountPointAssets
-              productionId={productionId}
-              mountType="event_report"
-              mountId={report.id}
-              label={report.title}
-              canEdit={false}
-              display="panel"
-            />
+        <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 20px" }} />
+
+        {/* Body */}
+        {report.body ? (
+          <div style={{ marginBottom: 20 }}>
+            <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
           </div>
-          <ReplyThread
-            parentType="report" parentId={report.id}
-            parentAuthor={members.find(m => m.userId === report.createdBy)}
-            allReplies={replies} canAdd={canReply}
-            {...commonThreadProps}
+        ) : (
+          <p style={{ margin: "0 0 20px", textAlign: "center", fontSize: 13, color: "var(--muted)" }}>暂无正文</p>
+        )}
+
+        <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 20px" }} />
+
+        {/* Assets */}
+        <div style={{ marginBottom: 20 }}>
+          <MountPointAssets
+            productionId={productionId}
+            mountType="event_report"
+            mountId={report.id}
+            label={report.title}
+            canEdit={false}
+            display="panel"
           />
-        </section>
+        </div>
+
+        {/* Report reply thread */}
+        <ReplyThread
+          parentType="report" parentId={report.id}
+          parentAuthor={members.find(m => m.userId === report.createdBy)}
+          allReplies={replies} canAdd={canReply}
+          {...commonThreadProps}
+        />
 
         {/* Notes section */}
-        <section>
-          <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-3">部门 Notes</h2>
+        {(notes.length > 0 || (canWriteNote && !isPublished && departments.length > 0)) && (
+          <>
+            <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "20px 0 16px" }} />
+            <p style={{ margin: "0 0 16px", fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--muted)" }}>
+              部门 Notes
+            </p>
 
-          {notes.length === 0 && (
-            <p className="text-xs text-zinc-300 py-4 text-center">暂无 Notes</p>
-          )}
-
-          {[...grouped.entries()].map(([deptId, deptNotes]) => (
-            <div key={deptId} className="mb-4">
-              <p className="text-[11px] font-semibold text-zinc-300 mb-2">{deptMap.get(deptId)}</p>
-              <div className="flex flex-col gap-3">
-                {deptNotes.map((note, i) => (
-                  <div key={note.id}>
-                    <NoteCard
-                      note={note} dept={undefined} noteNum={i + 1}
-                      members={members} productionId={productionId}
-                      canEdit={!isPublished && (canModerateNotes || note.authorUserId === currentUserId)}
-                      onSave={(content, mentions) => saveNote(note.id, content, mentions)}
-                      onDelete={() => deleteNote(note.id)}
-                    />
-                    <ReplyThread
-                      parentType="note" parentId={note.id} parentLabel={note.authorName}
-                      parentAuthor={members.find(m => m.userId === note.authorUserId)}
-                      allReplies={replies} canAdd={canReplyToNote(note)}
-                      {...commonThreadProps}
-                    />
-                  </div>
-                ))}
+            {[...grouped.entries()].map(([deptId, deptNotes]) => (
+              <div key={deptId} style={{ marginBottom: 16 }}>
+                <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>{deptMap.get(deptId)}</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {deptNotes.map((note, i) => (
+                    <div key={note.id}>
+                      <NoteCard
+                        note={note} dept={undefined} noteNum={i + 1}
+                        members={members} productionId={productionId}
+                        canEdit={!isPublished && (canModerateNotes || note.authorUserId === currentUserId)}
+                        onSave={(content, mentions) => saveNote(note.id, content, mentions)}
+                        onDelete={() => deleteNote(note.id)}
+                      />
+                      <ReplyThread
+                        parentType="note" parentId={note.id} parentLabel={note.authorName}
+                        parentAuthor={members.find(m => m.userId === note.authorUserId)}
+                        allReplies={replies} canAdd={canReplyToNote(note)}
+                        {...commonThreadProps}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-          {noDept.map((note, i) => (
-            <div key={note.id} className="mb-3">
-              <NoteCard
-                note={note} dept={deptMap.get(note.departmentId)} noteNum={i + 1}
-                members={members} productionId={productionId}
-                canEdit={!isPublished && (canModerateNotes || note.authorUserId === currentUserId)}
-                onSave={(content, mentions) => saveNote(note.id, content, mentions)}
-                onDelete={() => deleteNote(note.id)}
-              />
-              <ReplyThread
-                parentType="note" parentId={note.id} parentLabel={note.authorName}
-                parentAuthor={members.find(m => m.userId === note.authorUserId)}
-                allReplies={replies} canAdd={canReplyToNote(note)}
-                {...commonThreadProps}
-              />
-            </div>
-          ))}
+            {noDept.map((note, i) => (
+              <div key={note.id} style={{ marginBottom: 12 }}>
+                <NoteCard
+                  note={note} dept={deptMap.get(note.departmentId)} noteNum={i + 1}
+                  members={members} productionId={productionId}
+                  canEdit={!isPublished && (canModerateNotes || note.authorUserId === currentUserId)}
+                  onSave={(content, mentions) => saveNote(note.id, content, mentions)}
+                  onDelete={() => deleteNote(note.id)}
+                />
+                <ReplyThread
+                  parentType="note" parentId={note.id} parentLabel={note.authorName}
+                  parentAuthor={members.find(m => m.userId === note.authorUserId)}
+                  allReplies={replies} canAdd={canReplyToNote(note)}
+                  {...commonThreadProps}
+                />
+              </div>
+            ))}
 
-          {canWriteNote && !isPublished && departments.length > 0 && (
-            <div className="mt-4 bg-white rounded-2xl shadow-sm px-5 py-4 flex flex-col gap-3">
-              <p className="text-xs font-medium text-zinc-400">添加 Note</p>
-              <select value={newDeptId} onChange={e => setNewDeptId(e.target.value)}
-                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
-                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-              <SmartTextarea
-                value={newContent}
-                onChange={setNewContent}
-                memberMention={{ members, onMentionsChange: setNewMentions }}
-                contentMention={{ productionId }}
-                rows={3}
-                placeholder="写 note… 输入 @ 可提及成员，# 可引用剧本位置"
-                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none w-full"
-              />
-              <button onClick={addNote} disabled={adding || !newContent.trim()}
-                className="self-start px-4 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50">
-                {adding ? "添加中…" : "添加"}
-              </button>
-            </div>
-          )}
-        </section>
+            {canWriteNote && !isPublished && departments.length > 0 && (
+              <div style={{ marginTop: 16, background: "var(--paper)", borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>添加 Note</p>
+                <select value={newDeptId} onChange={e => setNewDeptId(e.target.value)}
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+                <SmartTextarea
+                  value={newContent}
+                  onChange={setNewContent}
+                  memberMention={{ members, onMentionsChange: setNewMentions }}
+                  contentMention={{ productionId }}
+                  rows={3}
+                  placeholder="写 note… 输入 @ 可提及成员，# 可引用剧本位置"
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none w-full"
+                />
+                <button onClick={addNote} disabled={adding || !newContent.trim()}
+                  className="self-start px-4 py-1.5 rounded-lg bg-zinc-800 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50">
+                  {adding ? "添加中…" : "添加"}
+                </button>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

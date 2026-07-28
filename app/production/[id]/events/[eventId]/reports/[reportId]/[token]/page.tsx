@@ -1,11 +1,8 @@
-import ReportViewPage from "../page";
+import { redirect } from "next/navigation";
 
-type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string; token: string }> };
+type Ctx = { params: Promise<{ id: string; reportId: string; token: string }> };
 
-export default async function ReportTokenPage({ params }: Ctx) {
-  const { id, eventId, reportId, token } = await params;
-  return ReportViewPage({
-    params: Promise.resolve({ id, eventId, reportId }),
-    searchParams: Promise.resolve({ t: token }),
-  });
+export default async function ReportTokenLegacyRedirect({ params }: Ctx) {
+  const { id, reportId, token } = await params;
+  redirect(`/production/${id}/reports/${reportId}/${token}`);
 }

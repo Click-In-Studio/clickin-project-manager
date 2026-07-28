@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartTextarea from "@/components/SmartTextarea";
@@ -243,40 +243,46 @@ export default function ReqDetailClient({
     }
   }
 
+  const navLink: React.CSSProperties = { fontSize: 11, color: "var(--muted)", textDecoration: "none" };
+
   return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="max-w-xl mx-auto px-4 pt-8 pb-16">
+    <div style={{ minHeight: "100vh", background: "var(--paper)", padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+      {/* Eyebrow + utility nav outside page sheet */}
+      <p style={{ margin: "0 0 10px", fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--stage)" }}>
+        Tasks
+      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+        <Link href={`/production/${productionId}/events/${event.id}/view`} style={navLink}>日程: {event.title}</Link>
+      </div>
 
-        {/* Nav */}
-        <div className="flex items-center gap-3 mb-6 text-xs text-zinc-400">
-          <Link href={`/production/${productionId}/events/${event.id}/reqs`} className="hover:text-zinc-600">
-            ← 需求列表
-          </Link>
-          <span className="text-zinc-300">/</span>
-          <span className="truncate">{event.title}</span>
-        </div>
-
+      {/* Page sheet */}
+      <div style={{ background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "24px 28px" }}>
         {/* Req header */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-1">
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16 }}>
+          <div style={{ flex: 1 }}>
             {deptName && (
-              <span className={`text-[11px] font-medium rounded px-1.5 py-0.5 ${STATUS_COLORS[req.status] ?? "bg-zinc-100 text-zinc-500"}`}>
+              <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
                 {deptName}
-              </span>
+              </p>
             )}
-            <span className={`text-[11px] font-medium rounded px-1.5 py-0.5 ${STATUS_COLORS[req.status] ?? "bg-zinc-100 text-zinc-500"}`}>
-              {STATUS_LABELS[req.status] ?? req.status}
-            </span>
+            <h1 style={{
+              margin: 0, fontSize: 20, fontWeight: 800, lineHeight: 1.3,
+              color: req.title ? "var(--ink)" : "var(--muted)",
+              fontStyle: req.title ? "normal" : "italic",
+            }}>
+              {req.title || "待填写需求名称…"}
+            </h1>
           </div>
-          <h1 className={`text-lg font-bold ${req.title ? "text-zinc-800" : "text-zinc-400 italic"}`}>
-            {req.title || "待填写需求名称…"}
-          </h1>
+          <span className={`shrink-0 text-[11px] font-medium rounded px-2 py-0.5 ${STATUS_COLORS[req.status] ?? "bg-zinc-100 text-zinc-500"}`}>
+            {STATUS_LABELS[req.status] ?? req.status}
+          </span>
         </div>
 
         {/* Schedule section */}
         {scheduleItems.length > 0 && (
           <section className="mb-6">
-            <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase mb-3">日程</p>
+            <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 16px" }} />
+            <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase mb-3">事件流程</p>
             <div className="flex flex-col gap-2">
               {sortedItems.map(item => {
                 const linked = linkedIds.has(item.id);
@@ -320,6 +326,7 @@ export default function ReqDetailClient({
         {/* Group chat section */}
         {(isPocOfDept || canViewFull) && (
           <section className="mb-6">
+            <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 16px" }} />
             <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase mb-3">飞书群</p>
             <ReqChatSection
               req={req} event={event} productionId={productionId}
@@ -331,6 +338,7 @@ export default function ReqDetailClient({
 
         {/* Req info section */}
         <section>
+          <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 16px" }} />
           <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase mb-3">需求信息</p>
 
           {canEdit ? (
@@ -444,7 +452,7 @@ export default function ReqDetailClient({
             </div>
           )}
         </section>
-      </div>
+      </div>{/* end page sheet */}
     </div>
   );
 }

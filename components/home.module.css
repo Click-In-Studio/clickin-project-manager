@@ -1,0 +1,584 @@
+.workspace {
+  padding: 34px clamp(22px, 4vw, 62px) 72px;
+}
+
+.pageHeader {
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.pageTitle {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: clamp(28px, 3vw, 42px);
+  font-weight: 500;
+  letter-spacing: -.04em;
+  color: var(--ink);
+}
+
+.contentStack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Alert banner (replacing role banner) */
+.alertBanner {
+  border-radius: 14px;
+  padding: 28px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  background: var(--ink);
+  color: #fff;
+  overflow: hidden;
+  position: relative;
+}
+
+.alertBanner::after {
+  content: "";
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  right: -90px;
+  bottom: -150px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 50%;
+  box-shadow: 0 0 0 38px rgba(255,255,255,.025), 0 0 0 76px rgba(255,255,255,.025);
+}
+
+.alertBannerContent {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+}
+
+.alertEyebrow {
+  margin: 0 0 4px;
+  color: #9fb1ac;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.alertBanner h2 {
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: clamp(20px, 2.5vw, 30px);
+  font-weight: 500;
+  line-height: 1.25;
+  margin: 8px 0 0;
+  color: #fff;
+}
+
+.alertEmpty {
+  margin-top: 18px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 10px;
+  padding: 14px 18px;
+  color: #9fb1ac;
+  font-size: 11px;
+}
+
+/* Dashboard 2-column layout */
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: 1.25fr .75fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.dashboardCol {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Panel card */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 22px;
+}
+
+.panelHeading {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.panelHeading > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.kicker {
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.panel h2 {
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 20px;
+  font-weight: 500;
+  margin: 3px 0 0;
+  color: var(--ink);
+}
+
+.panelAction {
+  border: 0;
+  background: transparent;
+  color: var(--script);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px;
+  white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
+}
+
+/* Today/week toggle (segmented control) */
+.viewToggle {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 3px;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
+.viewToggle button {
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.viewToggle button[aria-pressed="true"] {
+  background: var(--ink);
+  color: #fff;
+}
+
+/* Fixed-height content area inside a panel — prevents jumping on tab switch */
+.panelBody {
+  min-height: 186px;
+  display: flex;
+  flex-direction: column;
+}
+
+.panelSeeAll {
+  margin-top: auto;
+  padding-top: 12px;
+  font-size: 11px;
+  color: var(--script);
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.panelSeeAll:hover {
+  text-decoration: underline;
+}
+
+/* Timeline list (call times) */
+.timelineList {
+  display: flex;
+  flex-direction: column;
+}
+
+.timelineList button {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  min-height: 56px;
+  padding: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.timelineList button:first-child { border-top: 0; }
+.timelineList button:hover { opacity: .75; }
+
+.timelineList time {
+  width: 48px;
+  font-family: monospace;
+  color: var(--stage);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.timelineLabel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.timelineLabel b {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.timelineLabel small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Date separator (week view) */
+.dateSeparator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--line);
+}
+
+.dateSeparator:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.dateSeparator span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+/* Compact list (tasks, reports) */
+.compactList {
+  display: flex;
+  flex-direction: column;
+}
+
+.compactList button {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  min-height: 52px;
+  padding: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.compactList button:first-child { border-top: 0; }
+.compactList button:hover { opacity: .75; }
+
+.compactLabel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compactLabel b {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.compactLabel small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* Badge */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.badgeAmber { background: #f2e4d9; color: var(--stage); }
+.badgeBlue  { background: #dce9e9; color: var(--script); }
+.badgeGreen { background: var(--success-soft); color: var(--success); }
+
+/* Empty state */
+.emptyState {
+  padding: 20px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.emptyState small {
+  display: block;
+  margin-top: 4px;
+  color: #c0ccc9;
+  font-size: 10px;
+}
+
+/* Empty state dashed (for action-required panels) */
+.emptyDashed {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.emptyDashed small {
+  display: block;
+  margin-top: 4px;
+  color: #c0ccc9;
+  font-size: 10px;
+}
+
+/* Projects section */
+.projectsSection {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 22px;
+}
+
+.projectsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.projectList {
+  display: flex;
+  flex-direction: column;
+}
+
+.projectItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+}
+
+.projectItem:hover {
+  background: var(--paper);
+}
+
+.projectItemButton {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 10px 12px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.projectItemButton.archived {
+  color: var(--muted);
+}
+
+.archivedBadge {
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.projectDeleteButton {
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+
+.projectItem:hover .projectDeleteButton {
+  opacity: 1;
+}
+
+.projectDeleteButton:hover {
+  color: #a94b4b;
+}
+
+/* Sort mode items */
+.sortItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 8px;
+  margin-bottom: 4px;
+}
+
+.sortArrows {
+  display: flex;
+  flex-direction: column;
+}
+
+.sortArrows button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 4px;
+  line-height: 1;
+}
+
+.sortArrows button:disabled {
+  opacity: .2;
+}
+
+.sortArrows button:not(:disabled):hover {
+  color: var(--ink);
+}
+
+/* New project input */
+.newProjectInput {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 11px 14px;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+  margin-top: 8px;
+}
+
+.newProjectInput:focus {
+  border-color: var(--ink);
+}
+
+.newProjectInput::placeholder {
+  color: var(--muted);
+}
+
+.inputActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cancelButton {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.cancelButton:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.createButton {
+  flex: 1;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+}
+
+.createButton:hover {
+  background: #2b4140;
+}
+
+.createButton:disabled {
+  opacity: .3;
+}
+
+.addProjectButton {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.addProjectButton:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.errorText {
+  font-size: 11px;
+  color: #a94b4b;
+  margin-top: 5px;
+}
+
+@media (max-width: 680px) {
+  .workspace {
+    padding: 20px 14px 80px;
+  }
+  .dashboardGrid {
+    grid-template-columns: 1fr;
+  }
+  .alertBanner {
+    padding: 20px;
+  }
+  .alertBanner h2 {
+    font-size: 20px;
+  }
+}

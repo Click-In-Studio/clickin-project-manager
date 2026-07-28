@@ -59,43 +59,75 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-zinc-200 bg-white shadow-lg z-20"
+      style={{
+        position: "absolute", right: 0, top: "calc(100% + 6px)",
+        width: 220, borderRadius: 12,
+        border: "1px solid var(--line)", background: "var(--surface)",
+        boxShadow: "0 4px 20px rgba(24,42,42,.10)", zIndex: 20,
+      }}
     >
-      <div className="px-3 py-2 border-b border-zinc-100">
-        <p className="text-xs font-semibold text-zinc-600">列设置</p>
+      <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--line)" }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", letterSpacing: ".06em", textTransform: "uppercase" }}>
+          列设置
+        </p>
       </div>
-      <div className="py-1 max-h-80 overflow-y-auto">
-        {columnsByOrder.map((col) => (
-          <div
-            key={col.key}
-            draggable
-            onDragStart={() => handleDragStart(col.key)}
-            onDragEnter={() => handleDragEnter(col.key)}
-            onDragEnd={handleDragEnd}
-            onDragOver={(e) => e.preventDefault()}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-50 cursor-grab active:cursor-grabbing"
-          >
-            <span className="text-zinc-300 text-xs select-none">⋮⋮</span>
-            <input
-              type="checkbox"
-              checked={config.visibleColumns.includes(col.key)}
-              onChange={() => toggleColumn(col.key)}
-              className="rounded border-zinc-300 text-zinc-800 focus:ring-zinc-400"
-            />
-            <span className="text-xs text-zinc-600 flex-1">{col.label}</span>
-          </div>
-        ))}
+      <div style={{ padding: "4px 0", maxHeight: 320, overflowY: "auto" }}>
+        {columnsByOrder.map((col) => {
+          const checked = config.visibleColumns.includes(col.key);
+          return (
+            <div
+              key={col.key}
+              draggable
+              onDragStart={() => handleDragStart(col.key)}
+              onDragEnter={() => handleDragEnter(col.key)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => e.preventDefault()}
+              onClick={() => toggleColumn(col.key)}
+              style={{
+                display: "flex", alignItems: "center", gap: 9,
+                padding: "6px 14px", cursor: "grab",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+            >
+              <span style={{ fontSize: 10, color: "var(--line)", userSelect: "none", letterSpacing: 1 }}>⋮⋮</span>
+              {/* Custom checkbox */}
+              <span style={{
+                width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+                border: checked ? "none" : "1.5px solid var(--line)",
+                background: checked ? "var(--ink)" : "transparent",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background .1s",
+              }}>
+                {checked && (
+                  <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+                    <path d="M1 3l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </span>
+              <span style={{ fontSize: 12, color: "var(--ink)", flex: 1 }}>{col.label}</span>
+            </div>
+          );
+        })}
       </div>
-      <div className="px-3 py-2 border-t border-zinc-100 flex gap-2">
+      <div style={{ padding: "8px 14px", borderTop: "1px solid var(--line)", display: "flex", gap: 8 }}>
         <button
           onClick={() => onChange(getDefaultViewConfig())}
-          className="flex-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded transition-colors"
+          style={{
+            flex: 1, padding: "5px 8px", fontSize: 11, fontWeight: 700,
+            border: "1px solid var(--line)", borderRadius: 7, cursor: "pointer",
+            background: "transparent", color: "var(--muted)",
+          }}
         >
           重置
         </button>
         <button
           onClick={onClose}
-          className="flex-1 px-2 py-1 text-xs text-white bg-zinc-800 hover:bg-zinc-700 rounded transition-colors"
+          style={{
+            flex: 1, padding: "5px 8px", fontSize: 11, fontWeight: 700,
+            border: 0, borderRadius: 7, cursor: "pointer",
+            background: "var(--ink)", color: "#fff",
+          }}
         >
           关闭
         </button>

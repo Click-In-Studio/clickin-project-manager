@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
+import { getSession } from "@/lib/session";
+import { listMyProductionsWithRoles } from "@/lib/db";
+import { ROLE_TEMPLATE_PERMISSIONS } from "@/lib/permissions";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
+import AppShell from "@/components/AppShell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,11 +23,30 @@ export const metadata: Metadata = {
   description: "演出项目管理",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const session = getSession(cookieStore);
+
+  const rawProductions = session
+    ? await listMyProductionsWithRoles(session.userId, session.isAdmin)
+    : [];
+
+  const ADMIN_PERMS = new Set(["members:manage_overrides", "dept:create"]);
+  const productions = rawProductions.map((p) => ({
+    ...p,
+    canAdmin: session!.isAdmin || p.roles.some((role) =>
+      (ROLE_TEMPLATE_PERMISSIONS[role] ?? []).some((perm) => ADMIN_PERMS.has(perm))
+    ),
+  }));
+
+  const shellSession = session
+    ? { name: session.name, avatarUrl: session.avatarUrl }
+    : null;
+
   return (
     <html
       lang="zh"
@@ -44,9 +68,11 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="h-full overflow-hidden">
         <ManualSaveNotice />
-        {children}
+        <AppShell session={shellSession} productions={productions}>
+          {children}
+        </AppShell>
       </body>
     </html>
   );

@@ -17,7 +17,6 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, Version, VersionStatus, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
-import VersionSelector from "@/components/VersionSelector";
 import BlockMountAssets from "@/components/assets/BlockMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/DurationInput";
@@ -63,6 +62,30 @@ const SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM = 18;
 const SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM = 0.25;
 const SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM = 2.5;
 const SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX = 80;
+/** Returns the workspace scroll container element, or document.documentElement as fallback. */
+function getScrollEl(): HTMLElement {
+  return (typeof document !== 'undefined' ? document.getElementById('workspace-scroll') as HTMLElement | null : null)
+    ?? (typeof document !== 'undefined' ? document.documentElement : { scrollTop: 0, clientHeight: 720, getBoundingClientRect: () => ({ top: 0, bottom: 720 }) } as unknown as HTMLElement);
+}
+
+/** Computes visible bounds of the scroll container in viewport coordinates. */
+function getScrollMetrics() {
+  const el = getScrollEl();
+  const isRoot = el === document.documentElement;
+  if (isRoot) {
+    const ch = typeof window !== 'undefined' ? window.innerHeight : 720;
+    return { el, scrollTop: typeof window !== 'undefined' ? window.scrollY : 0, clientHeight: ch, viewTop: 0, viewBottom: ch };
+  }
+  const rect = el.getBoundingClientRect();
+  return { el, scrollTop: el.scrollTop, clientHeight: el.clientHeight, viewTop: rect.top, viewBottom: rect.bottom };
+}
+
+function scrollContainerBy(opts: ScrollToOptions) {
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById('workspace-scroll');
+  if (el) el.scrollBy(opts); else window.scrollBy(opts);
+}
+
 const REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM = 1.75;
 const REHEARSAL_MARKER_ROW_HEIGHT_SCALE = 0;
 const REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX = 1;
@@ -1521,19 +1544,14 @@ function ScenePanel({
       </button>
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-64" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-zinc-100 bg-white shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 18rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
             <div className="flex items-center gap-2">
-              {canImport && productionId && (
-                <Link href={`/production/${productionId}/import-scenes`} onNavigate={onNavigate} className="text-[11px] text-blue-400 hover:text-blue-600 transition-colors">
-                  导入
-                </Link>
-              )}
-              <Link href={`/production/${productionId}/scenes`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
-                管理页 →
+              <Link href={`/production/${productionId}/dramaturgy`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
+                构作 →
               </Link>
             </div>
           </div>
@@ -2093,7 +2111,7 @@ function BoundaryInsertMenu({
   );
 
   return (
-    <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-lg border border-zinc-100 bg-white py-1 text-left shadow-xl">
+    <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-lg border border-[var(--line)] bg-[var(--surface)] py-1 text-left shadow-xl">
       {actions.length > 0 && (
         <>
           <div className="px-3 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">在块前</div>
@@ -2380,8 +2398,8 @@ function CharacterPanel({
 
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-64" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-zinc-100 bg-white shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 18rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
@@ -2667,7 +2685,7 @@ function BlockCharacterSelector({
                 <FoldTriangle open={displayMenuOpen} />
               </button>
               {displayMenuOpen && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-xl border border-zinc-100 bg-white py-1 shadow-xl">
+                <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl">
                   <button
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -2724,7 +2742,7 @@ function BlockCharacterSelector({
         </div>
       )}
       {suggestions.length > 0 && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-zinc-100 bg-white py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(16rem, calc(100vh - 12rem))" }}>
+        <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(16rem, calc(100vh - 12rem))" }}>
           {suggestions.map((c, i) => (
             <button
               key={c.id}
@@ -2741,7 +2759,7 @@ function BlockCharacterSelector({
         </div>
       )}
       {suggestions.length === 0 && query && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-zinc-100 bg-white px-4 py-2 shadow-xl">
+        <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 shadow-xl">
           <p className="text-xs text-zinc-400">无匹配角色</p>
         </div>
       )}
@@ -3384,7 +3402,7 @@ function PrintHeaderModeMenu({
         <Chevron />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 w-36 rounded-xl border border-zinc-100 bg-white py-1 shadow-md">
+        <div className="absolute right-0 top-full z-30 w-36 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
           {PRINT_HEADER_MODES.map((mode) => (
             <button
               key={mode}
@@ -3927,7 +3945,7 @@ const COMMENT_BUBBLE_MIN_GUTTER_PX = 170;
 const SPEECH_TAIL_PIN_OFFSET_PX = 96;
 const SPEECH_TAIL_BASE_HALF_PX = 14;
 const SPEECH_TAIL_EDGE_INSET_PX = 24;
-const SIDE_PANEL_TOP_PX = 56;
+const SIDE_PANEL_TOP_PX = 120; // AppShell header (64px) + ScriptEditor toolbar (56px)
 const SIDE_PANEL_MIN_WIDTH_PX = 360;
 const SIDE_PANEL_MAX_WIDTH_PX = 576;
 const SIDE_PANEL_GUTTER_PADDING_PX = 15;
@@ -4056,10 +4074,11 @@ function useBlockSpeechTail(blockId: string) {
     };
     updatePointer();
     window.addEventListener("resize", updatePointer);
-    window.addEventListener("scroll", updatePointer, true);
+    const tailScrollEl = getScrollEl();
+    tailScrollEl.addEventListener("scroll", updatePointer, { passive: true });
     return () => {
       window.removeEventListener("resize", updatePointer);
-      window.removeEventListener("scroll", updatePointer, true);
+      tailScrollEl.removeEventListener("scroll", updatePointer);
     };
   }, [blockId]);
 
@@ -5016,6 +5035,7 @@ function ScriptBlock({
   onTagCopyClick,
   onTagPasteClick,
   onCharacterChangeFocus,
+  onMobileMenuOpen,
   contentPlaceholder,
 }: {
   block: Block;
@@ -5095,6 +5115,7 @@ function ScriptBlock({
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
   onCharacterChangeFocus?: () => void;
+  onMobileMenuOpen?: () => void;
   contentPlaceholder?: string;
 }) {
   const blockRootRef = useRef<HTMLDivElement | null>(null);
@@ -5418,7 +5439,7 @@ function ScriptBlock({
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
     : undefined;
-  const rightActionRowClass = `absolute z-20 flex items-center transition-opacity ${
+  const rightActionRowClass = `absolute z-20 hidden sm:flex items-center transition-opacity ${
     isStage || isCompactTextLayout || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
   } ${hasSceneLabel ? "right-8" : "right-2"}`;
   const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
@@ -5638,18 +5659,19 @@ function ScriptBlock({
                 if (e.shiftKey) e.preventDefault();
                 e.stopPropagation();
               }}
-              onClick={onToggleSelected}
-              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded opacity-0 outline-none transition-all focus:outline-none focus-visible:outline-none group-hover:opacity-100 ${
+              onClick={(e) => { onToggleSelected(e); onMobileMenuOpen?.(); }}
+              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
-                  : `cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
-                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] opacity-100" : "text-zinc-200"
+                  : `sm:cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
+                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
                     }`
               }`}
-              title="拖动调整位置"
-              aria-label="拖动调整位置"
+              title="更多操作"
+              aria-label="更多操作"
             >
-              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current" />
+              <span className="pointer-events-none flex items-center justify-center text-[13px] font-bold sm:hidden">⋮</span>
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current hidden sm:block" />
             </button>
           )}
         </div>
@@ -6049,7 +6071,6 @@ function SideBlockPanel({
   blockCaption,
   hasGutterSpace,
   gutterWidth,
-  viewportWidth,
   navigation,
   onClose,
   children,
@@ -6059,7 +6080,6 @@ function SideBlockPanel({
   blockCaption?: CommentBlockCaption | null;
   hasGutterSpace: boolean;
   gutterWidth: number;
-  viewportWidth: number;
   navigation?: SideBlockPanelNavigation;
   onClose: () => void;
   children: React.ReactNode;
@@ -6079,12 +6099,12 @@ function SideBlockPanel({
 
   return (
     <div
-      className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-zinc-200 bg-white shadow-xl"
+      className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full"
       style={{
         top: SIDE_PANEL_TOP_PX,
         width: hasGutterSpace
           ? Math.min(SIDE_PANEL_MAX_WIDTH_PX, Math.max(SIDE_PANEL_MIN_WIDTH_PX, gutterWidth - SIDE_PANEL_GUTTER_PADDING_PX))
-          : Math.min(SIDE_PANEL_MIN_WIDTH_PX, viewportWidth || SIDE_PANEL_MIN_WIDTH_PX),
+          : SIDE_PANEL_MIN_WIDTH_PX,
       }}
     >
       <SpeechTail top={pointerTop} offsetY={pointerOffsetY} fillClassName={tailUsesHeaderFill ? "fill-zinc-100" : "fill-white"} />
@@ -6150,7 +6170,6 @@ function CommentsPanel({
   onAdd, onEdit, onDelete, onClose, onNavigate,
   hasGutterSpace,
   gutterWidth,
-  viewportWidth,
   blockCaption,
   navigation,
 }: {
@@ -6161,7 +6180,6 @@ function CommentsPanel({
   onNavigate?: () => void;
   hasGutterSpace: boolean;
   gutterWidth: number;
-  viewportWidth: number;
   blockCaption?: CommentBlockCaption | null;
   navigation?: SideBlockPanelNavigation;
 }) {
@@ -6316,7 +6334,6 @@ function CommentsPanel({
       blockCaption={blockCaption}
       hasGutterSpace={hasGutterSpace}
       gutterWidth={gutterWidth}
-      viewportWidth={viewportWidth}
       navigation={navigation}
       onClose={onClose}
     >
@@ -6428,6 +6445,7 @@ function markerChangeFromOperations(changes: BlockChange[]): MarkerChange {
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
+  productionName,
   canEditText: canEditTextProp = true,
   canEditMetadata: canEditMetadataProp = true,
   canEditRehearsalMark = true,
@@ -6436,6 +6454,7 @@ export default function ScriptEditor({
 }: {
   scriptId?: string;
   productionId?: string;
+  productionName?: string;
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
@@ -6484,6 +6503,7 @@ export default function ScriptEditor({
   const [reorderNotice, setReorderNotice] = useState("");
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
+  const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
@@ -6820,12 +6840,12 @@ export default function ScriptEditor({
   const toggleMoreMenu = useCallback(() => {
     setMoreMenuOpen(prev => {
       const next = !prev;
-      if (!next) setOpenMenu(null);
+      setOpenMenu(null);
       return next;
     });
   }, []);
   const openNestedMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setMoreMenuOpen(true);
+    setMoreMenuOpen(false);
     setOpenMenu(name);
   }, []);
   const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
@@ -7346,14 +7366,15 @@ export default function ScriptEditor({
   const captureVirtualScrollAnchor = useCallback((): { id: string; top: number } | null => {
     const container = blocksContainerRef.current;
     if (!container) return null;
-    const anchorLine = Math.max(0, Math.min(window.innerHeight - 1, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX));
+    const { viewTop, viewBottom } = getScrollMetrics();
+    const anchorLine = Math.max(viewTop, Math.min(viewBottom - 1, viewTop + SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX));
     let fallback: { id: string; top: number } | null = null;
     for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
       const id = el.dataset.vitem;
       if (!id) continue;
       const rect = el.getBoundingClientRect();
-      if (rect.bottom < 0) continue;
-      if (rect.top > window.innerHeight) break;
+      if (rect.bottom < viewTop) continue;
+      if (rect.top > viewBottom) break;
       fallback ??= { id, top: rect.top };
       if (rect.bottom >= anchorLine) return { id, top: rect.top };
     }
@@ -7375,7 +7396,7 @@ export default function ScriptEditor({
     const delta = target.getBoundingClientRect().top - anchor.top;
     if (Math.abs(delta) < 0.5) return;
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-    window.scrollBy({ top: delta, behavior: "instant" });
+    scrollContainerBy({ top: delta, behavior: "instant" });
   }, []);
 
   const requestVirtualWindowRefresh = useCallback(() => {
@@ -7519,7 +7540,8 @@ export default function ScriptEditor({
       return false;
     }
 
-    const anchorY = SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX;
+    const { viewTop } = getScrollMetrics();
+    const anchorY = viewTop + SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX;
     let idx = -1;
     let previousIdx = -1;
     for (const el of container.querySelectorAll<HTMLElement>("[data-bwrap]")) {
@@ -7540,8 +7562,7 @@ export default function ScriptEditor({
     if (idx < 0 && previousIdx >= 0) idx = previousIdx;
 
     if (idx < 0) {
-      const containerTop = container.getBoundingClientRect().top + window.scrollY;
-      idx = blockAtOffset(Math.max(0, window.scrollY + anchorY - containerTop));
+      idx = blockAtOffset(Math.max(0, anchorY - container.getBoundingClientRect().top));
     }
 
     const nextSceneId = resolveActiveSceneIdForBlockIndex(idx) ?? activeSceneIdRef.current;
@@ -7560,14 +7581,15 @@ export default function ScriptEditor({
     const bl = blocksRef.current;
     if (!container || bl.length === 0) return false;
 
+    const { viewTop, viewBottom, clientHeight } = getScrollMetrics();
     let firstVisibleIdx = -1;
     let lastVisibleIdx = -1;
     for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
       const id = el.dataset.vitem;
       if (!id) continue;
       const rect = el.getBoundingClientRect();
-      if (rect.bottom < 0) continue;
-      if (rect.top > window.innerHeight) break;
+      if (rect.bottom < viewTop) continue;
+      if (rect.top > viewBottom) break;
       const idx = blockIndexByIdRef.current.get(id) ?? -1;
       if (idx < 0) continue;
       if (firstVisibleIdx < 0) firstVisibleIdx = idx;
@@ -7575,9 +7597,8 @@ export default function ScriptEditor({
     }
 
     if (firstVisibleIdx < 0 || lastVisibleIdx < 0) {
-      const containerTop = container.getBoundingClientRect().top + window.scrollY;
-      const viewStart = Math.max(0, window.scrollY - containerTop);
-      const viewEnd = viewStart + window.innerHeight;
+      const viewStart = Math.max(0, viewTop - container.getBoundingClientRect().top);
+      const viewEnd = viewStart + clientHeight;
       firstVisibleIdx = blockAtOffset(viewStart);
       lastVisibleIdx = blockAtOffset(viewEnd);
     }
@@ -7634,8 +7655,9 @@ export default function ScriptEditor({
       const container = blocksContainerRef.current;
       if (!container) return;
       let savedId: string | null = null;
+      const { viewTop: saveViewTop } = getScrollMetrics();
       for (const el of container.querySelectorAll<HTMLElement>("[data-bwrap]")) {
-        if (el.getBoundingClientRect().top <= 0) savedId = el.dataset.bwrap ?? null;
+        if (el.getBoundingClientRect().top <= saveViewTop) savedId = el.dataset.bwrap ?? null;
         else break;
       }
       if (savedId) {
@@ -7657,15 +7679,8 @@ export default function ScriptEditor({
       pendingNavigateRef.current = null;
       setScrollLocked(false);
     };
-    const onScroll = (e: Event) => {
+    const onScroll = () => {
       if (navigatingAwayRef.current) return;
-      const target = e.target;
-      const isDocumentScroll =
-        target === document ||
-        target === document.documentElement ||
-        target === document.scrollingElement ||
-        target === window;
-      if (!isDocumentScroll) return;
       if (suppressProgrammaticScrollRef.current) return;
       cancelAnimationFrame(rafId);
       const shouldRecenterToc = !didCenterForScrollGesture;
@@ -7684,17 +7699,18 @@ export default function ScriptEditor({
         saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
       }
     };
+    const scrollEl = getScrollEl();
     window.addEventListener('wheel', cancelPendingCorrectionForUserScroll, { passive: true });
     window.addEventListener('touchmove', cancelPendingCorrectionForUserScroll, { passive: true });
     window.addEventListener('keydown', cancelPendingCorrectionForUserScroll);
-    window.addEventListener('scroll', onScroll, { passive: true });
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
     recomputeWindow();
     updateActiveSceneFromScroll();
     return () => {
       window.removeEventListener('wheel', cancelPendingCorrectionForUserScroll);
       window.removeEventListener('touchmove', cancelPendingCorrectionForUserScroll);
       window.removeEventListener('keydown', cancelPendingCorrectionForUserScroll);
-      window.removeEventListener('scroll', onScroll);
+      scrollEl.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(rafId);
       clearTimeout(scrollGestureTimer);
       clearTimeout(saveTimer);
@@ -7983,7 +7999,8 @@ export default function ScriptEditor({
     const el = document.getElementById(`block-${blockId}`);
     if (!el) return false;
     const rect = el.getBoundingClientRect();
-    return rect.bottom > 0 && rect.top < window.innerHeight;
+    const { viewTop: rvt, viewBottom: rvb } = getScrollMetrics();
+    return rect.bottom > rvt && rect.top < rvb;
   }, []);
 
   useEffect(() => {
@@ -8545,13 +8562,27 @@ export default function ScriptEditor({
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState(0);
-
-  useEffect(() => {
-    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
-    updateViewportWidth();
-    window.addEventListener("resize", updateViewportWidth);
-    return () => window.removeEventListener("resize", updateViewportWidth);
+  const [leftGutterWidth, setLeftGutterWidth] = useState(0);
+  const [rightGutterWidth, setRightGutterWidth] = useState(0);
+  const leftGutterRoRef = useRef<ResizeObserver | null>(null);
+  const rightGutterRoRef = useRef<ResizeObserver | null>(null);
+  const setLeftGutterRef = useCallback((el: HTMLDivElement | null) => {
+    if (leftGutterRoRef.current) { leftGutterRoRef.current.disconnect(); leftGutterRoRef.current = null; }
+    if (!el) return;
+    const measure = () => setLeftGutterWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    leftGutterRoRef.current = ro;
+  }, []);
+  const setRightGutterRef = useCallback((el: HTMLDivElement | null) => {
+    if (rightGutterRoRef.current) { rightGutterRoRef.current.disconnect(); rightGutterRoRef.current = null; }
+    if (!el) return;
+    const measure = () => setRightGutterWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    rightGutterRoRef.current = ro;
   }, []);
 
   // Resolve Feishu display name and identity on mount
@@ -10157,7 +10188,7 @@ export default function ScriptEditor({
 
   if (loadState === "loading") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-100">
+      <div className="flex min-h-full items-center justify-center bg-[var(--paper)]">
         <span className="text-sm text-zinc-400">加载中...</span>
       </div>
     );
@@ -10165,7 +10196,7 @@ export default function ScriptEditor({
 
   if (loadState === "not-found") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100">
+      <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-[var(--paper)]">
         <p className="text-sm font-medium text-zinc-500">找不到文档</p>
         <p className="text-xs text-zinc-400">ID：{scriptId}</p>
         <Link href={productionId ? `/production/${productionId}` : "/"} className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
@@ -10177,7 +10208,7 @@ export default function ScriptEditor({
 
   if (loadState === "error") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100">
+      <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-[var(--paper)]">
         <p className="text-sm font-medium text-zinc-500">加载失败</p>
         {loadError && (
           <p className="max-w-sm whitespace-pre-wrap text-center text-xs text-zinc-400">
@@ -10212,48 +10243,22 @@ export default function ScriptEditor({
       ? "拖拽至此释放以移动至更上方区域"
       : "拖拽至此释放以移动至更下方区域")
     : "";
-  const effectiveViewportWidth = viewportWidth || (typeof window === "undefined" ? 0 : window.innerWidth);
   const rootFontSizePx = typeof window === "undefined"
     ? 16
     : parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
-  const scriptSideGutterWidth = Math.max(0, (effectiveViewportWidth - SCRIPT_EDITOR_MAX_WIDTH_PX) / 2);
-  const scriptTocRailGapPx = SCRIPT_TOC_RAIL_GAP_REM * rootFontSizePx;
   const scriptTocRailLayout = measureScriptTocRailLayout(tocScenes, rootFontSizePx);
-  const scriptTocRailFullWidthPx = scriptTocRailLayout.railWidthPx;
-  const scriptTocRailCompactWidthPx =
-    (SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
-  const scriptLeftPanelLeftPx = rootFontSizePx;
-  const scriptContentsMenuRightPx = scriptSideGutterWidth - scriptTocRailGapPx;
-  const scriptSceneDetailWidthPx = Math.max(0, scriptSideGutterWidth - scriptLeftPanelLeftPx);
   const scriptSceneDetailRailMinWidthPx = SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM * rootFontSizePx;
-  const scriptTocRailMode: "full" | "compact" | null =
-    effectiveViewportWidth <= 0
-      ? null
-      : scriptSideGutterWidth >= scriptTocRailFullWidthPx
-        ? "full"
-        : scriptSideGutterWidth >= scriptTocRailCompactWidthPx
-          ? "compact"
-          : null;
-  const scriptContentsMenuWidthPx = scriptTocRailMode === "compact"
-    ? scriptTocRailCompactWidthPx
-    : scriptTocRailFullWidthPx;
-  const showSceneDetailRail =
-    scriptTocRailMode === "full" &&
-    !!productionId &&
-    scriptSceneDetailWidthPx >= scriptSceneDetailRailMinWidthPx;
-  const scriptRailContainerWidthPx = showSceneDetailRail
-    ? scriptSceneDetailWidthPx
-    : scriptContentsMenuWidthPx;
-  const scriptRailContainerLeftPx = showSceneDetailRail
-    ? scriptLeftPanelLeftPx
-    : Math.max(scriptLeftPanelLeftPx, scriptContentsMenuRightPx - scriptContentsMenuWidthPx);
-  const scriptContentsMenuLeftPx = Math.max(scriptLeftPanelLeftPx, scriptContentsMenuRightPx - scriptContentsMenuWidthPx);
-  const scriptContentsMenuOffsetPx = showSceneDetailRail
-    ? scriptContentsMenuLeftPx - scriptRailContainerLeftPx
-    : 0;
-  const scriptSceneDetailScrollbarOffsetPx = showSceneDetailRail
-    ? Math.max(0, scriptContentsMenuRightPx - 0.875 * rootFontSizePx - scriptSideGutterWidth)
-    : 0;
+  const scriptTocRailMode: "full" | null = leftGutterWidth > 0 ? "full" : null;
+  const showSceneDetailRail = !!productionId && leftGutterWidth >= scriptSceneDetailRailMinWidthPx;
+  const asideTargetWidthPx = showSceneDetailRail
+    // scene detail 模式：gutter 宽度减去固定左边距 12px，但不低于组件最小宽度
+    ? Math.max(scriptSceneDetailRailMinWidthPx, leftGutterWidth - 12)
+    // TOC only 模式：恰好 TOC 内容宽 + pr-4，其余空间作为左边距实现右对齐
+    : scriptTocRailLayout.railWidthPx + 16;
+  const asideStyle: React.CSSProperties = {
+    width: `${asideTargetWidthPx}px`,
+    marginLeft: `${Math.max(0, leftGutterWidth - asideTargetWidthPx)}px`,
+  };
   const sceneIdForBlockAtIndex = (block: Block, index: number): string | null => {
     const markerId = isMarkerBlock(block) ? block.id : (ownedBlocks[index] ?? block).ownerMarkerId;
     return markerId ? markerContextById.get(markerId)?.sceneId ?? null : null;
@@ -10280,8 +10285,8 @@ export default function ScriptEditor({
   const activeSceneDetail = activeScene
     ? sceneDetailById.get(activeScene.id) ?? toSceneDetail(activeScene)
     : null;
-  const rightGutterCanShowComments = scriptSideGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
-  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, scriptSideGutterWidth - 24);
+  const rightGutterCanShowComments = rightGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
+  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, rightGutterWidth - 24);
   const activeCommentBlockIndex = activeCommentBlockId
     ? blocks.findIndex(block => block.id === activeCommentBlockId)
     : -1;
@@ -10298,44 +10303,44 @@ export default function ScriptEditor({
       ? "拖拽当前剧本块至指定位置松开以调整位置"
       : "";
   const rightMenuClass = `${
-    moreMenuOpen
-      ? "fixed right-2 top-64"
-      : toolbarCompact
-        ? "fixed right-2 top-14"
-        : "absolute right-0 top-full"
-  } z-30 mt-1 rounded-xl border border-zinc-100 bg-white py-1 shadow-md`;
+    toolbarCompact
+      ? "fixed right-2 top-[7.5rem]"
+      : "absolute right-0 top-full"
+  } z-30 mt-1 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
 
   return (
-    <div className="min-h-screen bg-zinc-100">
+    <div className="bg-[var(--paper)]">
       {/* Toolbar */}
-      <header className="sticky top-0 z-40 border-b border-zinc-100 bg-white shadow-sm">
+      <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm">
         <div
           ref={setToolbarElement}
-          className="relative mx-auto flex h-14 flex-nowrap items-center gap-1 px-4"
-          style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}
+          className="relative flex h-14 flex-nowrap items-center gap-3 px-6"
         >
-          <Link
-            href={productionId ? `/production/${productionId}` : "/"}
-            onNavigate={prepareForNavigation}
-            className="shrink-0 text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
-          >
-            ← 返回
-          </Link>
+          {productionName && !toolbarCompact && (
+            <>
+              <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {productionName}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>剧本</span>
+              </div>
+              <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+            </>
+          )}
           {!isLockedMode && (
             <>
-              <div className="h-4 w-px shrink-0 bg-zinc-100" />
 
               {/* 剧本▼ — 关于 + 元数据设置 */}
               <div className="relative shrink-0">
                 <button
                   onClick={() => toggleMenu("script")}
-                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                 >
                   剧本 <Chevron />
                 </button>
                 {openMenu === "script" && (
                   <div
-                    className={`${toolbarCompact ? "fixed left-2 top-14" : "absolute left-0 top-full"} z-30 mt-1 w-52 rounded-xl border border-zinc-100 bg-white py-1 shadow-md`}
+                    className={`${toolbarCompact ? "fixed left-2 top-[7.5rem]" : "absolute left-0 top-full"} z-30 mt-1 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`}
                     onMouseLeave={() => setOpenMenu(null)}
                   >
                     <button
@@ -10409,17 +10414,6 @@ export default function ScriptEditor({
                         >
                           清除空白内容
                         </button>
-                        {canImport && (
-                          <>
-                            <Link
-                              href={`/production/${productionId}/import-script`}
-                              onNavigate={prepareForNavigation}
-                              className="block w-full px-3 py-1.5 text-left text-sm text-blue-600 hover:bg-zinc-50"
-                            >
-                              导入
-                            </Link>
-                          </>
-                        )}
                       </>
                     )}
                   </div>
@@ -10427,27 +10421,9 @@ export default function ScriptEditor({
               </div>
             </>
           )}
-          <div className="flex shrink-0 items-center gap-1">
-            {versions.length > 0 && productionId && (
-              <>
-                <div className="h-4 w-px shrink-0 bg-zinc-100" />
-                <VersionSelector
-                  productionId={productionId}
-                  versions={versions}
-                  currentVersionId={activeVersionId}
-                  onNavigate={prepareForNavigation}
-                  onChange={(vid) => {
-                    setActiveVersionId(vid);
-                    const ver = versions.find(v => v.id === vid);
-                    setVersionStatus(ver?.status ?? null);
-                  }}
-                />
-              </>
-            )}
           <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
-              {canEdit ? "可编辑" : "只读"}
-            </span>
-          </div>
+            {canEdit ? "可编辑" : "只读"}
+          </span>
           {!baseCanEdit && (
             <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
               只读
@@ -10488,8 +10464,8 @@ export default function ScriptEditor({
                     onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
                     canImport={canImport}
                     onNavigate={prepareForNavigation}
-                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
-                    nestedFromMore={moreMenuOpen}
+                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+                    nestedFromMore={toolbarCompact}
                     label={toolbarShort ? "章" : "章节"}
                   />
                   <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
@@ -10508,12 +10484,12 @@ export default function ScriptEditor({
                 onOpenChange={handleCharacterPanelOpenChange}
                 onNavigate={prepareForNavigation}
                 readOnly={isLockedMode}
-                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
+                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm transition-colors ${
                   openMenu === "char"
                     ? "bg-zinc-100 text-zinc-800"
                     : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
                 }`}
-                nestedFromMore={moreMenuOpen}
+                nestedFromMore={toolbarCompact}
                 label={toolbarShort ? "角" : "角色"}
               />
               <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
@@ -10524,7 +10500,7 @@ export default function ScriptEditor({
           <div className="relative shrink-0">
             <button
               onClick={() => toggleMenu("edit")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <Chevron />
             </button>
@@ -10606,7 +10582,7 @@ export default function ScriptEditor({
           <div className="relative shrink-0">
             <button
               onClick={() => toggleMenu("display")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               {toolbarShort ? "显" : "显示"} <Chevron />
             </button>
@@ -10786,7 +10762,7 @@ export default function ScriptEditor({
           <div className="relative shrink-0">
             <button
               onClick={() => toggleMenu("export")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               导出 <Chevron />
             </button>
@@ -10805,17 +10781,23 @@ export default function ScriptEditor({
             )}
           </div>
           <div className={`${toolbarCompact ? "relative shrink-0" : "hidden"}`}>
+            {(moreMenuOpen || openMenu !== null) && (
+              <div
+                className="fixed inset-0 z-20"
+                onClick={() => { setMoreMenuOpen(false); setOpenMenu(null); }}
+              />
+            )}
             <button
               type="button"
               aria-label="更多工具"
               onClick={toggleMoreMenu}
-              className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
             >
               ⋮
             </button>
             {moreMenuOpen && (
               <div
-                className="fixed right-2 top-14 z-40 mt-1 w-40 rounded-xl border border-zinc-100 bg-white py-1 shadow-md"
+                className="fixed right-2 top-[7.5rem] z-40 mt-1 w-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
               >
                 {canEditMetadata && (
                   <button
@@ -10863,7 +10845,7 @@ export default function ScriptEditor({
 
         {/* 搜索栏 */}
         {searchOpen && (
-          <div className="border-t border-zinc-100 bg-white px-6 py-2 flex items-center gap-3">
+          <div className="border-t border-[var(--line)] bg-[var(--surface)] px-6 py-2 flex items-center gap-3">
             <input
               autoFocus
               value={searchQuery}
@@ -10909,7 +10891,7 @@ export default function ScriptEditor({
 
         {/* 跳转弹窗 */}
         {jumpTarget && (
-          <div className="border-t border-zinc-100 bg-white px-6 py-2 flex items-center gap-3">
+          <div className="border-t border-[var(--line)] bg-[var(--surface)] px-6 py-2 flex items-center gap-3">
             <span className="shrink-0 text-xs text-zinc-400">
               {jumpTarget === "line" ? "跳转到行" : "跳转到页"}
             </span>
@@ -10952,7 +10934,7 @@ export default function ScriptEditor({
       {edgeDragNotice && (
         <div
           className={`pointer-events-none fixed left-1/2 z-10 -translate-x-1/2 select-none text-center text-2xl font-semibold tracking-wide text-zinc-400/35 ${
-            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-24" : "bottom-12"
+            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-[8.5rem]" : "bottom-12"
           }`}
         >
           {edgeDragNotice}
@@ -10960,7 +10942,7 @@ export default function ScriptEditor({
       )}
 
       {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || largeSelectionNotice || selectionChangeNotice) && (
-        <div className="pointer-events-none fixed left-1/2 top-20 z-50 flex -translate-x-1/2 flex-col items-center gap-1">
+        <div className="pointer-events-none fixed left-1/2 top-[7.5rem] z-50 flex -translate-x-1/2 flex-col items-center gap-1">
           {dragInstructionNotice ? (
             <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
               {dragInstructionNotice}
@@ -11089,54 +11071,52 @@ export default function ScriptEditor({
         />
       )}
 
-      {/* Document */}
-      {scriptTocRailMode && (
-        <aside
-          className={`fixed top-20 z-20 ${showSceneDetailRail ? "bottom-6 flex min-h-0 flex-col" : "h-[calc((100vh-5rem)/3)] min-h-44 max-h-96"}`}
-          style={{
-            left: `${scriptRailContainerLeftPx}px`,
-            width: `${scriptRailContainerWidthPx}px`,
-          }}
-        >
-          <div className={showSceneDetailRail ? "h-[calc((100vh-5rem)/3)] min-h-44 max-h-96 shrink-0" : "h-full"}>
-            <div
-              className="h-full"
-              style={showSceneDetailRail
-                ? { width: `${scriptContentsMenuWidthPx}px`, marginLeft: `${scriptContentsMenuOffsetPx}px` }
-                : undefined}
-            >
-              <TableOfContents
-                scenes={tocScenes}
-                blocks={legacyProjectedBlocks}
-                onScrollToScene={scrollToScene}
-                activeSceneId={activeSceneId}
-                placement={scriptTocRailMode === "compact" ? "rail-compact" : "rail"}
-                chapterNumberSlotWidthPx={scriptTocRailLayout.chapterNumberSlotWidthPx}
-                sceneNumberSlotWidthPx={scriptTocRailLayout.sceneNumberSlotWidthPx}
-              />
-            </div>
-          </div>
-          {showSceneDetailRail && (
-            <div className="my-3 h-px w-full shrink-0 bg-zinc-300" />
+      {/* Document: 3-column flex — left gutter | script content | right gutter */}
+      <div className="flex items-start">
+        {/* Left gutter column (TOC + scene detail, sticky) */}
+        <div ref={setLeftGutterRef} className="hidden lg:flex flex-col flex-1 min-w-0 self-stretch">
+          {scriptTocRailMode && (
+            <aside style={asideStyle} className={`sticky top-14 pr-4 ${showSceneDetailRail ? "h-[calc(100vh-7.5rem)] flex min-h-0 flex-col" : "h-[calc((100vh-7.5rem)/3)] min-h-44 max-h-96"}`}>
+              <div className={`${showSceneDetailRail ? "h-[calc((100vh-7.5rem)/3)] min-h-44 max-h-96 shrink-0 flex justify-end" : "h-full"}`}>
+                <div
+                  className="h-full"
+                  style={showSceneDetailRail ? { width: `${scriptTocRailLayout.railWidthPx + 16}px` } : { width: "100%" }}
+                >
+                  <TableOfContents
+                    scenes={tocScenes}
+                    blocks={legacyProjectedBlocks}
+                    onScrollToScene={scrollToScene}
+                    activeSceneId={activeSceneId}
+                    placement="rail"
+                    chapterNumberSlotWidthPx={scriptTocRailLayout.chapterNumberSlotWidthPx}
+                    sceneNumberSlotWidthPx={scriptTocRailLayout.sceneNumberSlotWidthPx}
+                  />
+                </div>
+              </div>
+              {showSceneDetailRail && (
+                <div className="my-3 h-px w-full shrink-0 bg-zinc-300" />
+              )}
+              {showSceneDetailRail && productionId && (
+                <div className="flex-1 min-h-0 overflow-hidden pl-2">
+                  <ScriptSceneDetailRail
+                    scene={activeSceneDetail}
+                    scenes={sceneDetails}
+                    productionId={productionId}
+                    versionId={activeVersionId ?? null}
+                    canEdit={canEditMetadata}
+                    isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
+                    scrollbarOffsetPx={0}
+                    onUpdateIdentity={updateScene}
+                    onPatchMeta={patchSceneMeta}
+                  />
+                </div>
+              )}
+            </aside>
           )}
-          {showSceneDetailRail && productionId && (
-            <div className="min-h-0 flex-[2_1_67%]">
-              <ScriptSceneDetailRail
-                scene={activeSceneDetail}
-                scenes={sceneDetails}
-                productionId={productionId}
-                versionId={activeVersionId ?? null}
-                canEdit={canEditMetadata}
-                isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
-                scrollbarOffsetPx={scriptSceneDetailScrollbarOffsetPx}
-                onUpdateIdentity={updateScene}
-                onPatchMeta={patchSceneMeta}
-              />
-            </div>
-          )}
-        </aside>
-      )}
-      <main className="mx-auto px-4 py-8" style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}>
+        </div>
+
+        {/* Center column (script content) */}
+        <main className="w-full flex-none min-w-0 px-4 py-8" style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}>
         <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
           {display.lineNumbers && (
             <>
@@ -11748,6 +11728,7 @@ export default function ScriptEditor({
                   onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
                   onTagCopyClick={() => handleTagCopy(block.id)}
                   onTagPasteClick={() => handleTagPaste(block.id)}
+                  onMobileMenuOpen={() => setMobileBlockMenuBlockId(block.id)}
                 />
               </div>
             );
@@ -11785,10 +11766,16 @@ export default function ScriptEditor({
             Enter 新建块 · Shift+Enter 块内换行 · Backspace（行首）合并到上一块
           </p>
         )}
-      </main>
+        </main>
+
+        {/* Right gutter column (comment bubbles overflow into here) */}
+        <div ref={setRightGutterRef} className="hidden lg:block flex-1 min-w-0 self-stretch" aria-hidden="true" />
+      </div>
 
       {tagEditorOpen && productionId && (
-        <div className="fixed right-0 top-14 bottom-0 z-30 flex w-80 flex-col border-l border-zinc-200 bg-white shadow-xl">
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setTagEditorOpen(false)} />
+        <div className="fixed right-0 top-[7.5rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full">
           <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">标签设置</span>
             <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
@@ -11802,16 +11789,18 @@ export default function ScriptEditor({
             />
           </div>
         </div>
+        </>
       )}
 
       {activeAssetBlockId && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveAssetBlockId(null)} />
         <SideBlockPanel
           blockId={activeAssetBlockId}
           title="附件"
           blockCaption={activeAssetBlockCaption}
           hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={scriptSideGutterWidth}
-          viewportWidth={effectiveViewportWidth}
+          gutterWidth={rightGutterWidth}
           navigation={{
             hasPrevious: assetPanelNavigationTargets.previousBlockId !== null,
             hasNext: assetPanelNavigationTargets.nextBlockId !== null,
@@ -11833,9 +11822,12 @@ export default function ScriptEditor({
             />
           </div>
         </SideBlockPanel>
+        </>
       )}
 
       {activeCommentBlockId && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveCommentBlockId(null)} />
         <CommentsPanel
           blockId={activeCommentBlockId}
           productionId={productionId}
@@ -11848,8 +11840,7 @@ export default function ScriptEditor({
           onClose={() => setActiveCommentBlockId(null)}
           onNavigate={prepareForNavigation}
           hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={scriptSideGutterWidth}
-          viewportWidth={effectiveViewportWidth}
+          gutterWidth={rightGutterWidth}
           blockCaption={activeCommentBlockCaption}
           navigation={{
             hasPrevious: commentPanelNavigationTargets.previousBlockId !== null,
@@ -11858,6 +11849,7 @@ export default function ScriptEditor({
             onNext: () => navigateSidePanelBlock("comment", 1),
           }}
         />
+        </>
       )}
 
       {pendingLockedMode !== null && (
@@ -12362,6 +12354,83 @@ export default function ScriptEditor({
             </div>
         </ScriptDialog>
       )}
+
+      {/* Mobile block action bottom sheet */}
+      {mobileBlockMenuBlockId !== null && (() => {
+        const menuBlock = blocks.find(b => b.id === mobileBlockMenuBlockId);
+        if (!menuBlock) return null;
+        const isStageBlock = menuBlock.type === "stage";
+        const hasLyricBlock = !!menuBlock.lyric;
+        const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
+        const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
+        const isBatchMode = selectedBlockIds.has(mobileBlockMenuBlockId) && selectedBlockIds.size > 1;
+        const batchCount = selectedBlockIds.size;
+        const close = () => setMobileBlockMenuBlockId(null);
+        return (
+          <div className="sm:hidden fixed inset-0 z-50 flex items-end" onClick={close}>
+            <div
+              className="w-full rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-zinc-200" />
+              </div>
+              {isBatchMode && (
+                <p className="px-5 py-2 text-xs text-zinc-400">已选中 {batchCount} 行</p>
+              )}
+              <div className="flex flex-col">
+                {canEditText && !isStageBlock && !hasLyricCfg && (
+                  <button
+                    onClick={() => { toggleBlockLyric(mobileBlockMenuBlockId); close(); }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {hasLyricBlock ? "转为台词" : "转为歌词"}
+                  </button>
+                )}
+                {canEditText && (
+                  <button
+                    onClick={() => {
+                      if (isBatchMode) {
+                        setBlocksType(Array.from(selectedBlockIds), isStageBlock ? "dialogue" : "stage");
+                      } else {
+                        toggleBlockType(mobileBlockMenuBlockId);
+                      }
+                      close();
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {isStageBlock ? "转为台词" : "转为舞台提示"}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(mobileBlockMenuBlockId); close(); }}
+                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                >
+                  附件
+                </button>
+                <button
+                  onClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(mobileBlockMenuBlockId); close(); }}
+                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                >
+                  {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
+                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => {
+                      deleteBlocks(isBatchMode ? Array.from(selectedBlockIds) : [mobileBlockMenuBlockId]);
+                      close();
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-red-500 border-t border-zinc-100"
+                  >
+                    {isBatchMode ? `删除所选 ${batchCount} 行` : "删除此行"}
+                  </button>
+                )}
+              </div>
+              <div className="h-6" />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 关于 modal */}
       {aboutOpen && (

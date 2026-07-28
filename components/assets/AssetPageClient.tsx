@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
+import type { UploadResult } from "./AssetUploadPanel";
 import MountPointAssets from "./MountPointAssets";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
@@ -34,6 +35,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
   const [mounts, setMounts] = useState<Record<string, AssetMount[]>>({});
   const [loadingMounts, setLoadingMounts] = useState<Record<string, boolean>>({});
   const [view, setView] = useState<View>("all");
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<Asset | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<Asset | null>(null);
@@ -106,207 +108,217 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
     return `${m.mountType}:${m.mountId.slice(-6)}${mode}${m.folderPath ? ` — ${m.folderPath}` : ""}`;
   }
 
-  if (view === "upload-new-version" && uploadTarget) {
-    return (
-      <div className="min-h-screen bg-zinc-100 px-4 py-10">
-        <div className="w-full max-w-sm mx-auto">
+  // "新版本" 上传以模态框形式展示，不再整页切换
+  const uploadModal = view === "upload-new-version" && uploadTarget && (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(24,42,42,.3)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={() => { setView("all"); setUploadTarget(null); }}>
+      <div style={{ background: "var(--surface)", borderRadius: 16, padding: 24, width: 360, boxShadow: "0 8px 32px rgba(0,0,0,.15)" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>上传新版本</p>
           <button onClick={() => { setView("all"); setUploadTarget(null); }}
-            className="text-xs text-zinc-400 hover:text-zinc-600 mb-6 block">
-            ← 返回
-          </button>
-          <h1 className="text-sm font-bold tracking-widest text-zinc-400 uppercase mb-6">
-            上传新版本
-          </h1>
-          <div className="rounded-2xl bg-white shadow-sm p-5">
-            <p className="text-xs text-zinc-400 mb-4">
-              为 <span className="font-medium text-zinc-600">{uploadTarget.fileName}</span> 上传新版本
-            </p>
-            <AssetUploadPanel
-              productionId={productionId}
-              versionId={versionId}
-              onUploaded={() => { setView("all"); setUploadTarget(null); load(); }}
-              onCancel={() => { setView("all"); setUploadTarget(null); }}
-            />
-          </div>
+            style={{ fontSize: 18, color: "var(--muted)", background: "none", border: 0, cursor: "pointer", lineHeight: 1 }}>✕</button>
         </div>
+        <p style={{ fontSize: 11, color: "var(--muted)", marginBottom: 16 }}>
+          为 <span style={{ fontWeight: 600, color: "var(--ink)" }}>{uploadTarget.fileName}</span> 上传新版本
+        </p>
+        <AssetUploadPanel
+          productionId={productionId}
+          versionId={versionId}
+          onUploaded={() => { setView("all"); setUploadTarget(null); load(); }}
+          onCancel={() => { setView("all"); setUploadTarget(null); }}
+        />
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-zinc-100 px-4 py-10">
-      <div className="w-full max-w-sm mx-auto">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <Link href={`/production/${productionId}`}
-            className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
-            ← 返回
-          </Link>
-          <div>
-            <p className="text-xs font-bold tracking-[0.2em] text-zinc-400 uppercase text-right">Assets</p>
-            <p className="text-[10px] text-zinc-300 text-right">附件管理</p>
-          </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
+            Assets
+          </p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>数字资产</h1>
         </div>
+        <button onClick={() => setShowUploadModal(true)}
+          style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}>
+          + 上传新 Asset
+        </button>
+      </div>
 
-        {/* Production global mount */}
-        <div className="mb-4 rounded-2xl bg-white shadow-sm px-5 py-4">
-          <MountPointAssets
-            productionId={productionId}
-            mountType="production"
-            mountId={productionId}
-            label="项目全局"
-            canEdit={isAdmin}
-            display="panel"
-          />
+      {/* Production global mount */}
+      <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>
+        <MountPointAssets
+          productionId={productionId}
+          mountType="production"
+          mountId={productionId}
+          label="项目全局"
+          canEdit={isAdmin}
+          display="panel"
+        />
+      </div>
+
+      {/* Filter + Search */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="搜索文件名或类型…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", padding: "7px 12px", fontSize: 13, outline: "none", color: "var(--ink)" }}
+        />
+        <div style={{ display: "flex", borderRadius: 8, border: "1px solid var(--line)", overflow: "hidden", fontSize: 12 }}>
+          {(["all", "mine"] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              style={{ padding: "7px 16px", fontWeight: 600, cursor: "pointer", border: 0, transition: "all .1s",
+                background: filter === f ? "var(--ink)" : "white",
+                color: filter === f ? "#fff" : "var(--muted)" }}>
+              {f === "all" ? "全部" : "我的上传"}
+            </button>
+          ))}
         </div>
+      </div>
 
-        {/* Filter + Search */}
-        <div className="mb-4 space-y-2">
-          <input
-            type="text"
-            placeholder="搜索文件名或类型…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-400 shadow-sm"
-          />
-          <div className="flex rounded-xl overflow-hidden border border-zinc-200 text-xs shadow-sm">
-            {(["all", "mine"] as const).map(f => (
-              <button key={f} onClick={() => setFilter(f)}
-                className={`flex-1 py-2 font-medium transition-colors ${
-                  filter === f ? "bg-zinc-800 text-white" : "bg-white text-zinc-500 hover:bg-zinc-50"
-                }`}>
-                {f === "all" ? "全部 Asset" : "我的上传"}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Asset list */}
+      {loading ? (
+        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>加载中…</p>
+      ) : error ? (
+        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#dc2626" }}>{error}</p>
+      ) : displayedAssets.length === 0 ? (
+        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>暂无数字资产</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {displayedAssets.map(a => {
+            const isOwner = a.uploaderUserId === myUserId;
+            const canEdit = isOwner || isAdmin;
+            const isExp = expanded === a.id;
 
-        {/* Upload new */}
-        <div className="mb-4">
-          <Link href={`/production/${productionId}/assets/upload`}
-            className="flex items-center justify-center gap-2 w-full rounded-xl border-2 border-dashed border-zinc-300 py-3 text-sm text-zinc-400 hover:border-zinc-400 hover:text-zinc-600 transition-colors">
-            + 上传新 Asset
-          </Link>
-        </div>
+            return (
+              <div key={a.id} style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+                {/* Main row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+                  {/* Thumb / icon */}
+                  <div style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--paper)", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", overflow: "hidden" }}>
+                    {a.storageType === "feishu_link" ? (
+                      <span>飞</span>
+                    ) : a.mimeType?.startsWith("image/") ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`${BASE_PATH}/api/production/${productionId}/assets/${a.id}/thumb${versionId ? `?v=${versionId}` : ""}`}
+                        alt=""
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : (
+                      <span>{a.fileName.split(".").pop()?.slice(0, 4) ?? "?"}</span>
+                    )}
+                  </div>
 
-        {/* Asset list */}
-        {loading ? (
-          <p className="py-10 text-center text-xs text-zinc-400">加载中…</p>
-        ) : error ? (
-          <p className="py-10 text-center text-xs text-red-500">{error}</p>
-        ) : displayedAssets.length === 0 ? (
-          <p className="py-10 text-center text-xs text-zinc-400">暂无 Asset</p>
-        ) : (
-          <div className="space-y-2">
-            {displayedAssets.map(a => {
-              const isOwner = a.uploaderUserId === myUserId;
-              const canEdit = isOwner || isAdmin;
-              const isExp = expanded === a.id;
-
-              return (
-                <div key={a.id} className="rounded-2xl bg-white shadow-sm overflow-hidden">
-                  {/* Main row */}
-                  <div className="flex items-center gap-3 px-4 py-3">
-                    {/* Thumb / icon */}
-                    <div className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center bg-zinc-100 text-xs font-bold text-zinc-400 uppercase overflow-hidden">
-                      {a.storageType === "feishu_link" ? (
-                        <span>飞</span>
-                      ) : a.mimeType?.startsWith("image/") ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={`${BASE_PATH}/api/production/${productionId}/assets/${a.id}/thumb${versionId ? `?v=${versionId}` : ""}`}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      ) : (
-                        <span>{a.fileName.split(".").pop()?.slice(0, 4) ?? "?"}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <Link
+                      href={`/production/${productionId}/assets/${a.id}/preview${versionId ? `?v=${versionId}` : ""}`}
+                      style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--ink)", textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                      {a.name ?? a.fileName}
+                    </Link>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
+                      {a.name && <span style={{ fontSize: 10, color: "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</span>}
+                      <span style={{ fontSize: 10, color: "var(--muted)" }}>{ASSET_TYPE_LABELS[a.assetType]}</span>
+                      {!a.isUniversal && (
+                        <span style={{ borderRadius: 4, padding: "1px 5px", fontSize: 9, background: "#fffbeb", color: "#d97706", fontWeight: 600 }}>版本相关</span>
                       )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <Link
-                        href={`/production/${productionId}/assets/${a.id}/preview${versionId ? `?v=${versionId}` : ""}`}
-                        className="block text-sm font-medium text-zinc-800 hover:text-zinc-600 truncate transition-colors"
-                      >
-                        {a.name ?? a.fileName}
-                      </Link>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                        {a.name && <span className="text-[10px] text-zinc-300 truncate max-w-[120px]">{a.fileName}</span>}
-                        <span className="text-[10px] text-zinc-400">{ASSET_TYPE_LABELS[a.assetType]}</span>
-                        {!a.isUniversal && (
-                          <span className="rounded px-1 py-px text-[9px] bg-amber-50 text-amber-500 font-medium">版本相关</span>
-                        )}
-                        {a.storageType === "feishu_link" && (
-                          <span className="rounded px-1 py-px text-[9px] bg-blue-50 text-blue-500 font-medium">飞书</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => handleDownload(a.id)}
-                        className="rounded-lg px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-50 transition-colors">
-                        下载
-                      </button>
-                      <button onClick={() => setShareTarget(a)}
-                        className="rounded-lg px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-50 transition-colors">
-                        分享
-                      </button>
-                      {canEdit && (
-                        <button
-                          onClick={() => { setUploadTarget(a); setView("upload-new-version"); }}
-                          className="rounded-lg px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-50 transition-colors">
-                          新版本
-                        </button>
+                      {a.storageType === "feishu_link" && (
+                        <span style={{ borderRadius: 4, padding: "1px 5px", fontSize: 9, background: "#eff6ff", color: "#3b82f6", fontWeight: 600 }}>飞书</span>
                       )}
-                      {canEdit && (
-                        <button
-                          onClick={() => handleDeleteAsset(a.id)}
-                          disabled={deletingId === a.id}
-                          className="rounded-lg px-2 py-1 text-[10px] text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50">
-                          删除
-                        </button>
-                      )}
-                      <button onClick={() => toggleExpand(a.id)}
-                        className="rounded-lg px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-50 transition-colors">
-                        {isExp ? "▲" : "▼"}
-                      </button>
                     </div>
                   </div>
 
-                  {/* Expanded mounts */}
-                  {isExp && (
-                    <div className="border-t border-zinc-50 px-4 py-3">
-                      <p className="text-[10px] font-semibold tracking-widest text-zinc-300 uppercase mb-2">挂载点</p>
-                      {loadingMounts[a.id] ? (
-                        <p className="text-xs text-zinc-400">加载中…</p>
-                      ) : (mounts[a.id] ?? []).length === 0 ? (
-                        <p className="text-xs text-zinc-400">暂无挂载点</p>
-                      ) : (
-                        <div className="space-y-1">
-                          {(mounts[a.id] ?? []).map(m => (
-                            <div key={m.id} className="flex items-center justify-between gap-2">
-                              <p className="text-[11px] text-zinc-500 truncate">{mountLabel(m)}</p>
-                              {canEdit && (
-                                <button
-                                  onClick={() => handleDeleteMount(a.id, m.id)}
-                                  className="shrink-0 text-[10px] text-red-400 hover:text-red-600 transition-colors">
-                                  移除
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* Actions */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                    {(["下载", "分享"] as const).map(label => (
+                      <button key={label}
+                        onClick={() => label === "下载" ? handleDownload(a.id) : setShareTarget(a)}
+                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
+                        {label}
+                      </button>
+                    ))}
+                    {canEdit && (
+                      <button
+                        onClick={() => { setUploadTarget(a); setView("upload-new-version"); }}
+                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
+                        新版本
+                      </button>
+                    )}
+                    {canEdit && (
+                      <button
+                        onClick={() => handleDeleteAsset(a.id)}
+                        disabled={deletingId === a.id}
+                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#dc2626", background: "none", border: 0, cursor: "pointer", opacity: deletingId === a.id ? 0.5 : 1 }}>
+                        删除
+                      </button>
+                    )}
+                    <button onClick={() => toggleExpand(a.id)}
+                      style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
+                      {isExp ? "▲" : "▼"}
+                    </button>
+                  </div>
                 </div>
-              );
-            })}
+
+                {/* Expanded mounts */}
+                {isExp && (
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "12px 16px" }}>
+                    <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>挂载点</p>
+                    {loadingMounts[a.id] ? (
+                      <p style={{ fontSize: 12, color: "var(--muted)" }}>加载中…</p>
+                    ) : (mounts[a.id] ?? []).length === 0 ? (
+                      <p style={{ fontSize: 12, color: "var(--muted)" }}>暂无挂载点</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {(mounts[a.id] ?? []).map(m => (
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <p style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mountLabel(m)}</p>
+                            {canEdit && (
+                              <button
+                                onClick={() => handleDeleteMount(a.id, m.id)}
+                                style={{ flexShrink: 0, fontSize: 10, color: "#dc2626", background: "none", border: 0, cursor: "pointer" }}>
+                                移除
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showUploadModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(24,42,42,.3)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setShowUploadModal(false)}>
+          <div style={{ background: "var(--surface)", borderRadius: 16, padding: 24, width: 400, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,.15)" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>上传新 Asset</p>
+              <button onClick={() => setShowUploadModal(false)}
+                style={{ fontSize: 18, color: "var(--muted)", background: "none", border: 0, cursor: "pointer", lineHeight: 1 }}>✕</button>
+            </div>
+            <AssetUploadPanel
+              productionId={productionId}
+              versionId={versionId}
+              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, result as unknown as Asset]); load(); }}
+              onCancel={() => setShowUploadModal(false)}
+            />
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {uploadModal}
 
       {shareTarget && (
         <AssetShareModal

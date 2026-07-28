@@ -14,7 +14,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 function ReqLinkCard({ req }: { req: MyTechReqFullEntry }) {
-  const href = `/production/${req.productionId}/events/${req.eventId}/reqs/${req.id}`;
+  const href = `/production/${req.productionId}/tasks/${req.id}`;
   return (
     <Link href={href}
       className="bg-white rounded-2xl shadow-sm px-5 py-4 flex items-start gap-3 hover:shadow-md transition-shadow">

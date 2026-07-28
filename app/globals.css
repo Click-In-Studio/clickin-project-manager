@@ -25,6 +25,22 @@
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
   --font-stage: 'KaiTi', 'STKaiti', 'Kaiti SC', 'SourceHanSerif', 'Source Han Serif CN', serif;
   --font-lyric: 'STZhongsong', '华文中宋', 'SourceHanSerif', 'Source Han Serif CN', serif;
+
+  /* ── Design tokens ────────────────────────────────────────────────────────── */
+  --ink:          #182a2a;
+  --muted:        #667676;
+  --line:         #dedfdc; /* 中性灰边框 */
+  --paper:        #f3f4f3; /* 中性灰 canvas，neutral workspace */
+  --surface:      #fffefa; /* 暖白浮层，panel / toolbar */
+  --surface-2:    #f1f1ec; /* 暖白次级，chip / toggle */
+  --script:       #2f6670;
+  --stage:        #a55c32;
+  --danger:       #a94b4b;
+  --danger-soft:  #f5dddd;
+  --warn:         #8a5c1a;
+  --warn-soft:    #f5edda;
+  --success:      #3f735c;
+  --success-soft: #deeee5;
 }
 
 @theme inline {
@@ -102,6 +118,17 @@ span[data-stage-inline] {
 /* Legacy alias kept for existing usages */
 .font-kaiti {
   font-family: var(--font-stage);
+}
+
+/* Side panels: fill content area on mobile (below header, above bottom nav) */
+@media (max-width: 639px) {
+  .panel-mobile-full {
+    top: 7.5rem !important;
+    right: 0 !important;
+    bottom: 3.5rem !important;
+    left: 0 !important;
+    width: 100% !important;
+  }
 }
 
 @media print {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, Fragment } from "react";
+import React, { useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
@@ -2410,7 +2410,7 @@ function ReportsTab({
               </button>
             )}
             <Link
-              href={`/production/${productionId}/events/${eventId}/reports/${report.id}`}
+              href={`/production/${productionId}/reports/${report.id}`}
               onClick={e => e.stopPropagation()}
               className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-600 px-1"
             >
@@ -3101,197 +3101,196 @@ export default function EventDetailClient({
     }
   }, [event, productionId]);
 
-  return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="max-w-xl mx-auto px-4 pt-8 pb-16">
-        <div className="flex items-center gap-3 mb-5 flex-wrap">
-          <Link href={`/production/${productionId}/events`} className="text-xs text-zinc-400 hover:text-zinc-600">
-            ← Events
-          </Link>
-          <span className="text-zinc-200 text-xs">|</span>
-          <Link href={`/production/${productionId}/events/${event.id}/view`} className="text-xs text-zinc-400 hover:text-zinc-600">
-            关注者视角
-          </Link>
-          <Link href={`/production/${productionId}/events/${event.id}/callsheet`} className="text-xs text-zinc-400 hover:text-zinc-600">
-            Call Sheet
-          </Link>
-          <Link href={`/production/${productionId}/events/${event.id}/reqs`} className="text-xs text-zinc-400 hover:text-zinc-600">
-            技术需求
-          </Link>
-        </div>
+  const statusStyle: Record<string, { background: string; color: string }> = {
+    draft:     { background: "var(--paper)",  color: "var(--muted)" },
+    published: { background: "#eff6ff",       color: "#2563eb" },
+    completed: { background: "#f0fdf4",       color: "#16a34a" },
+    cancelled: { background: "#fff1f2",       color: "#e11d48" },
+  };
 
-        <div className="flex items-start justify-between gap-3 mb-6">
-          <div>
-            <div className="flex items-start gap-2">
-              <h1 className="text-lg font-bold text-zinc-800 leading-tight">{event.title}</h1>
-              <span className="shrink-0 rounded bg-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500">
-                {canEdit ? "可编辑" : "只读"}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-zinc-400">{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</span>
-              {event.startTime && <span className="text-xs text-zinc-400">{fmt(event.startTime)}</span>}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
+  const navLink: React.CSSProperties = { fontSize: 11, color: "var(--muted)", textDecoration: "none" };
+
+  return (
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+
+      {/* Eyebrow + utility links — outside the page sheet */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
+          Schedule
+        </p>
+        <div style={{ display: "flex", gap: 16 }}>
+          <Link href={`/production/${productionId}/events/${event.id}/view`} style={navLink}>关注者视角</Link>
+          <Link href={`/production/${productionId}/events/${event.id}/callsheet`} style={navLink}>Call Sheet</Link>
+          <Link href={`/production/${productionId}/events/${event.id}/reqs`} style={navLink}>技术需求</Link>
+        </div>
+      </div>
+
+      {/* Page sheet */}
+      <div style={{ background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "24px 28px" }}>
+
+        {/* Title row */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0, lineHeight: 1.2 }}>
+            {event.title}
+          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, paddingTop: 2 }}>
             {selfRole === "participant" ? (
-              <span className="text-[11px] text-zinc-400">已参与</span>
+              <span style={{ fontSize: 11, color: "var(--muted)", padding: "3px 8px" }}>已参与</span>
             ) : (
               <button
                 onClick={toggleFollow}
                 disabled={followBusy}
-                className={`text-xs px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 ${
-                  selfRole === "follower"
-                    ? "bg-blue-50 text-blue-500 hover:bg-blue-100"
-                    : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-                }`}
+                style={{
+                  fontSize: 11, padding: "3px 8px", borderRadius: 6, border: 0, cursor: "pointer",
+                  opacity: followBusy ? 0.5 : 1, transition: "all .1s",
+                  background: selfRole === "follower" ? "#eff6ff" : "var(--paper)",
+                  color: selfRole === "follower" ? "#2563eb" : "var(--muted)",
+                }}
               >
                 {selfRole === "follower" ? "已关注" : "关注"}
               </button>
             )}
-            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_COLORS[event.status] ?? "bg-zinc-100 text-zinc-400"}`}>
+            <span style={{ borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600, ...(statusStyle[event.status] ?? statusStyle.draft) }}>
               {STATUS_LABELS[event.status] ?? event.status}
             </span>
           </div>
         </div>
 
-        <div className="flex items-start mb-6 overflow-x-auto">
-          {TABS.map((t, idx) => (
-            <Fragment key={t.id}>
-              <button onClick={() => setTab(t.id)}
-                className="flex flex-col items-center gap-1.5 shrink-0 min-w-[52px]">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                  tab === t.id
-                    ? "bg-zinc-800 text-white"
-                    : "bg-white text-zinc-400 shadow-sm"
-                }`}>
-                  {idx + 1}
-                </div>
-                <span className={`text-[9px] font-medium text-center leading-tight whitespace-nowrap transition-colors ${
-                  tab === t.id ? "text-zinc-800" : "text-zinc-400"
-                }`}>
-                  {t.label}
-                </span>
-              </button>
-              {idx < TABS.length - 1 && (
-                <div className="flex-1 h-px bg-zinc-200 mt-3.5 min-w-2" />
-              )}
-            </Fragment>
+        {/* Event meta */}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px 12px", marginBottom: 20 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</span>
+          {event.startTime && <span style={{ fontSize: 12, color: "var(--muted)" }}>{fmt(event.startTime)}</span>}
+          {event.location && <span style={{ fontSize: 12, color: "var(--muted)" }}>{event.location}</span>}
+          <span style={{ fontSize: 11, borderRadius: 4, background: "var(--paper)", border: "1px solid var(--line)", padding: "1px 6px", color: "var(--muted)" }}>
+            {canEdit ? "可编辑" : "只读"}
+          </span>
+        </div>
+
+        {/* Tab bar */}
+        <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 20, overflowX: "auto", WebkitOverflowScrolling: "touch" as React.CSSProperties["WebkitOverflowScrolling"], scrollbarWidth: "none" }}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              padding: "8px 16px", fontSize: 12, fontWeight: 600, border: 0, background: "none",
+              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+              borderBottom: `2px solid ${tab === t.id ? "var(--ink)" : "transparent"}`,
+              color: tab === t.id ? "var(--ink)" : "var(--muted)",
+              marginBottom: -1, transition: "color .1s",
+            }}>
+              {t.label}
+            </button>
           ))}
         </div>
 
-        <div className="rounded-2xl bg-zinc-50 p-4">
-          {tab === "info" && (
-            <InfoTab
-              event={event} productionId={productionId} members={members} canEdit={canEdit}
-              departments={departments} versions={versions}
-              onUpdated={setEvent} onDeleted={handleDeleted}
-              onTechReqsCreated={handleTechReqsCreated}
-            />
+      {/* Tab content */}
+      {tab === "info" && (
+        <InfoTab
+          event={event} productionId={productionId} members={members} canEdit={canEdit}
+          departments={departments} versions={versions}
+          onUpdated={setEvent} onDeleted={handleDeleted}
+          onTechReqsCreated={handleTechReqsCreated}
+        />
+      )}
+      {tab === "schedule" && (
+        <ScheduleTab
+          eventId={event.id} productionId={productionId}
+          items={scheduleItems} onItemsChange={handleItemsChange}
+          canEdit={canScheduleEdit} canAssignPeople={canAssignPeople}
+          members={members}
+          eventStart={event.startTime} eventEnd={event.endTime}
+          singleDay={isSingleDayEvent(event)}
+          eventDate={toLocalDate(event.startTime)}
+          departments={departments}
+          onTechReqsCreated={handleTechReqsCreated}
+          versionId={event.versionId ?? null}
+        />
+      )}
+      {tab === "call" && (
+        <CallTimeTab
+          eventId={event.id} productionId={productionId}
+          callTimes={callTimes} eventPeople={eventPeople}
+          scheduleItems={scheduleItems} techReqs={techReqs}
+          members={members}
+          stageManagerUserIds={new Set(event.stageManagers.map(m => m.userId))}
+          canEdit={canCallEdit}
+          singleDay={isSingleDayEvent(event)}
+          eventDate={toLocalDate(event.startTime)}
+          onCallTimesChange={setCallTimes}
+          versionId={event.versionId ?? null}
+        />
+      )}
+      {tab === "tech" && (
+        <TechReqTab
+          eventId={event.id} productionId={productionId}
+          techReqs={techReqs} departments={departments} members={members}
+          scheduleItems={scheduleItems}
+          canEdit={canEditAnyTechReq} canDelete={canTechReqDelete}
+          pocDeptIds={pocDeptIds}
+          eventStatus={event.status}
+          onTechReqsChange={setTechReqs}
+          versionId={event.versionId ?? null}
+        />
+      )}
+      {tab === "publish" && (
+        <PublishTab
+          event={event} productionId={productionId}
+          scheduleItems={scheduleItems} callTimes={callTimes}
+          eventPeople={eventPeople}
+          techReqs={techReqs}
+          canEdit={canEdit}
+          onUpdated={setEvent}
+        />
+      )}
+      {tab === "publish_reports" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {reports.length === 0 && (
+            <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>暂无报告</p>
           )}
-          {tab === "schedule" && (
-            <ScheduleTab
-              eventId={event.id} productionId={productionId}
-              items={scheduleItems} onItemsChange={handleItemsChange}
-              canEdit={canScheduleEdit} canAssignPeople={canAssignPeople}
-              members={members}
-              eventStart={event.startTime} eventEnd={event.endTime}
-              singleDay={isSingleDayEvent(event)}
-              eventDate={toLocalDate(event.startTime)}
-              departments={departments}
-              onTechReqsCreated={handleTechReqsCreated}
-              versionId={event.versionId ?? null}
-            />
-          )}
-          {tab === "call" && (
-            <CallTimeTab
-              eventId={event.id} productionId={productionId}
-              callTimes={callTimes} eventPeople={eventPeople}
-              scheduleItems={scheduleItems} techReqs={techReqs}
-              members={members}
-              stageManagerUserIds={new Set(event.stageManagers.map(m => m.userId))}
-              canEdit={canCallEdit}
-              singleDay={isSingleDayEvent(event)}
-              eventDate={toLocalDate(event.startTime)}
-              onCallTimesChange={setCallTimes}
-              versionId={event.versionId ?? null}
-            />
-          )}
-          {tab === "tech" && (
-            <TechReqTab
-              eventId={event.id} productionId={productionId}
-              techReqs={techReqs} departments={departments} members={members}
-              scheduleItems={scheduleItems}
-              canEdit={canEditAnyTechReq} canDelete={canTechReqDelete}
-              pocDeptIds={pocDeptIds}
-              eventStatus={event.status}
-              onTechReqsChange={setTechReqs}
-              versionId={event.versionId ?? null}
-            />
-          )}
-          {tab === "publish" && (
-            <PublishTab
-              event={event} productionId={productionId}
-              scheduleItems={scheduleItems} callTimes={callTimes}
-              eventPeople={eventPeople}
-              techReqs={techReqs}
-              canEdit={canEdit}
-              onUpdated={setEvent}
-            />
-          )}
-          {tab === "publish_reports" && (
-            <div className="flex flex-col gap-3">
-              {reports.length === 0 && (
-                <p className="text-sm text-zinc-400 text-center py-6">暂无报告</p>
-              )}
-              {reports.map(r => {
-                const isPublished = !!r.publishedAt;
-                async function togglePublish() {
-                  const publishedAt = isPublished ? null : new Date().toISOString();
-                  const res = await fetch(
-                    `${BASE_PATH}/api/production/${productionId}/events/${event.id}/reports/${r.id}`,
-                    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ publishedAt }) }
-                  );
-                  const data = await res.json();
-                  if (data.report) setReports(prev => prev.map(x => x.id === r.id ? data.report : x));
-                }
-                return (
-                  <div key={r.id} className="flex items-center gap-3 rounded-xl bg-white shadow-sm px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium text-zinc-800 truncate block">{r.title}</span>
-                    </div>
-                    <span className={`shrink-0 text-[11px] rounded-full px-2 py-0.5 font-medium ${isPublished ? "bg-green-50 text-green-600" : "bg-zinc-100 text-zinc-500"}`}>
-                      {isPublished ? "已发布" : "草稿"}
-                    </span>
-                    {canWriteReport && (
-                      <button onClick={togglePublish}
-                        className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                          isPublished
-                            ? "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-                            : "bg-green-600 text-white hover:bg-green-700"
-                        }`}>
-                        {isPublished ? "撤回" : "发布"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {tab === "reports" && (
-            <ReportsTab
-              eventId={event.id} productionId={productionId}
-              reports={reports} departments={departments}
-              members={members.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
-              canWrite={canWriteReport}
-              currentUserId={currentUserId}
-              versionId={event.versionId ?? null}
-              onReportsChange={setReports}
-            />
-          )}
+          {reports.map(r => {
+            const isPublished = !!r.publishedAt;
+            async function togglePublish() {
+              const publishedAt = isPublished ? null : new Date().toISOString();
+              const res = await fetch(
+                `${BASE_PATH}/api/production/${productionId}/events/${event.id}/reports/${r.id}`,
+                { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ publishedAt }) }
+              );
+              const data = await res.json();
+              if (data.report) setReports(prev => prev.map(x => x.id === r.id ? data.report : x));
+            }
+            return (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "12px 16px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
+                </div>
+                <span style={{ flexShrink: 0, fontSize: 11, borderRadius: 20, padding: "2px 8px", fontWeight: 600,
+                  background: isPublished ? "#f0fdf4" : "var(--paper)", color: isPublished ? "#16a34a" : "var(--muted)" }}>
+                  {isPublished ? "已发布" : "草稿"}
+                </span>
+                {canWriteReport && (
+                  <button onClick={togglePublish}
+                    style={{ flexShrink: 0, padding: "5px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .1s",
+                      background: isPublished ? "white" : "#16a34a", color: isPublished ? "var(--ink)" : "#fff",
+                      border: isPublished ? "1px solid var(--line)" : "none" }}>
+                    {isPublished ? "撤回" : "发布"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
+      )}
+      {tab === "reports" && (
+        <ReportsTab
+          eventId={event.id} productionId={productionId}
+          reports={reports} departments={departments}
+          members={members.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
+          canWrite={canWriteReport}
+          currentUserId={currentUserId}
+          versionId={event.versionId ?? null}
+          onReportsChange={setReports}
+        />
+      )}
 
-      </div>
+      </div>{/* end page sheet */}
     </div>
   );
 }

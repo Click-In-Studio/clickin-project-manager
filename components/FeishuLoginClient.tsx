@@ -65,25 +65,31 @@ export default function FeishuLoginClient({ appId, basePath }: { appId: string; 
 
   if (!showButton) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-100">
-        <p className="text-sm text-zinc-400">正在登录...</p>
+      <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--paper)" }}>
+        <p style={{ fontSize: 12, color: "var(--muted)" }}>正在登录…</p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-100">
-      <div className="w-80 rounded-2xl bg-white px-8 py-10 shadow-sm text-center">
-        <h1 className="mb-2 text-sm font-bold tracking-[0.2em] text-zinc-400 uppercase">
-          项目管理器
+    <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--paper)" }}>
+      <div style={{ width: 320, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 16, padding: "48px 40px", textAlign: "center" }}>
+        <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--stage)" }}>
+          BACKSTAGE
+        </p>
+        <h1 style={{ margin: "0 0 32px", fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>
+          后台
         </h1>
-        <p className="mb-8 text-xs text-zinc-300">请使用飞书账号登录以继续</p>
         <a
           href={`${basePath}/api/auth/login`}
-          className="inline-block w-full rounded-lg bg-zinc-800 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-700"
+          className="block transition-opacity hover:opacity-75"
+          style={{ borderRadius: 9, padding: "10px 0", fontSize: 13, fontWeight: 700, background: "var(--ink)", color: "#fff", textDecoration: "none" }}
         >
           使用飞书登录
         </a>
+        <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--muted)" }}>
+          请使用飞书账号登录以继续
+        </p>
       </div>
     </div>
   );

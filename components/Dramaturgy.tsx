@@ -1,31 +1,23 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ScenesManager from "./ScenesManager";
-import CharactersManager from "./CharactersManager";
-import VersionSelector from "./VersionSelector";
+import styles from "./my-pages.module.css";
 import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
 import TableColumnSettings from "./TableColumnSettings";
 import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import { BASE_PATH } from "@/lib/base-path";
-import type { CharacterDetail, Version } from "@/lib/db";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 
-type Tab = "scenes" | "characters";
 type SceneViewMode = "list" | "table";
 
 type Props = {
   productionId: string;
   productionName: string;
-  versions: Version[];
   versionId: string | null;
   initialScenes: MarkerProjection[];
-  initialCharacters: CharacterDetail[];
   canEdit: boolean;
-  canImport?: boolean;
   initialSceneId?: string;
-  initialCharacterId?: string;
 };
 
 function isUpdatingResponse(payload: unknown): payload is { status: "updating" } {
@@ -35,35 +27,31 @@ function isUpdatingResponse(payload: unknown): payload is { status: "updating" }
 export default function Dramaturgy({
   productionId,
   productionName,
-  versions,
-  versionId: initialVersionId,
+  versionId,
   initialScenes,
-  initialCharacters,
   canEdit,
-  canImport,
   initialSceneId,
-  initialCharacterId,
 }: Props) {
-  const [tab, setTab] = useState<Tab>(
-    initialCharacterId && !initialSceneId ? "characters" : "scenes"
-  );
-  const [currentVersionId, setCurrentVersionId] = useState<string | null>(initialVersionId);
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
-  const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
-
   const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>("list");
 
   useEffect(() => {
     setSceneViewMode(window.innerWidth > 1920 ? "table" : "list");
   }, []);
+
   const [tableConfig, setTableConfig] = useState<TableViewConfigData>(getDefaultViewConfig());
   const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [showMobileViewMenu, setShowMobileViewMenu] = useState(false);
+  const [mobileCreatingView, setMobileCreatingView] = useState(false);
+  const [mobileNewName, setMobileNewName] = useState("");
+  const [mobileSaving, setMobileSaving] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewsLoaded, setViewsLoaded] = useState(false);
 
   useEffect(() => {
-    if (tab !== "scenes" || viewsLoaded) return;
+    if (viewsLoaded) return;
     (async () => {
       try {
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`);
@@ -83,193 +71,301 @@ export default function Dramaturgy({
         setViewsLoaded(true);
       }
     })();
-  }, [tab, productionId, viewsLoaded]);
-
-  const handleVersionChange = async (versionId: string) => {
-    const [scenePayload, charsData] = await Promise.all([
-      fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${versionId}`).then(r => r.json()),
-      fetch(`${BASE_PATH}/api/production/${productionId}/characters?versionId=${versionId}`).then(r => r.json()),
-    ]);
-    if (isUpdatingResponse(scenePayload) || isUpdatingResponse(charsData)) {
-      return;
-    }
-    setScenes(scenePayload);
-    setCharacters(charsData);
-    setCurrentVersionId(versionId);
-  };
-
-  const currentVersion = versions.find(v => v.id === currentVersionId);
-  const effectiveCanEdit = canEdit && (!currentVersion || currentVersion.status === "editing" || currentVersion.status === "committed");
+  }, [productionId, viewsLoaded]);
 
   const handleUpdateScene = useCallback(async (sceneId: string, name: string) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentVersionId ? { name, versionId: currentVersionId } : { name }),
+      body: JSON.stringify(versionId ? { name, versionId } : { name }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
     setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, name } : s));
-  }, [productionId, currentVersionId]);
+  }, [productionId, versionId]);
 
   const handlePatchMeta = useCallback(async (sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentVersionId ? { ...fields, versionId: currentVersionId } : fields),
+      body: JSON.stringify(versionId ? { ...fields, versionId } : fields),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
     setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, ...fields } : s));
-  }, [productionId, currentVersionId]);
+  }, [productionId, versionId]);
 
-  const handleConfigChange = (config: TableViewConfigData) => {
-    setTableConfig(config);
-  };
+  const handleConfigChange = (config: TableViewConfigData) => setTableConfig(config);
 
   const handleSelectView = (view: SavedView) => {
     setTableConfig(normalizeTableViewConfig(view.config));
     setActiveViewId(view.id || null);
   };
 
+  const handleMobileSaveView = async () => {
+    if (!activeViewId || mobileSaving) return;
+    setMobileSaving(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views/${activeViewId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: tableConfig }),
+      });
+      if (!res.ok) throw new Error("保存失败");
+      setSavedViews((prev) => prev.map((v) => v.id === activeViewId ? { ...v, config: tableConfig } : v));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  const handleMobileCreateView = async () => {
+    if (!mobileNewName.trim() || mobileSaving) return;
+    setMobileSaving(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: mobileNewName.trim(), config: tableConfig, isDefault: savedViews.length === 0 }),
+      });
+      if (!res.ok) throw new Error("创建失败");
+      const data = await res.json() as SavedView;
+      setSavedViews((prev) => [...prev, data]);
+      handleSelectView(data);
+      setMobileNewName("");
+      setMobileCreatingView(false);
+      setShowMobileViewMenu(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showMobileViewMenu) return;
+    const dismiss = (e: MouseEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setShowMobileViewMenu(false);
+        setMobileCreatingView(false);
+        setMobileNewName("");
+      }
+    };
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [showMobileViewMenu]);
+
   return (
-    <div className="min-h-screen bg-zinc-100 px-4 py-8">
-      <div className={`mx-auto ${sceneViewMode === "table" && tab === "scenes" ? "max-w-full px-2 xl:max-w-none" : "max-w-2xl"}`}>
-        <div className="mb-6 flex items-center justify-between">
-          <Link href={`/production/${productionId}`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
-            ← 返回
-          </Link>
-          <div className="text-right flex flex-col items-end gap-1">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Dramaturgy</p>
-            <p className="text-sm font-bold text-zinc-500">{productionName}</p>
-            <div className="flex items-center justify-end gap-1.5">
-              {versions.length > 0 && (
-                <VersionSelector
-                  productionId={productionId}
-                  versions={versions}
-                  currentVersionId={currentVersionId}
-                  onChange={handleVersionChange}
-                />
-              )}
-              <span className="shrink-0 rounded bg-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500">
-                {effectiveCanEdit ? "可编辑" : "只读"}
-              </span>
-            </div>
-            {canImport && tab === "scenes" && (
-              <Link href={`/production/${productionId}/import-script`} className="text-xs text-blue-500 hover:underline">
-                导入
-              </Link>
-            )}
-          </div>
+    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
+      {/* ── Frozen toolbar ── */}
+      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0">
+        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {productionName}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>构作</span>
+        </div>
+        <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+        <div className={styles.viewToggle}>
+          <button aria-selected={sceneViewMode === "list"} onClick={() => setSceneViewMode("list")}>
+            ☰ 列表
+          </button>
+          <button aria-selected={sceneViewMode === "table"} onClick={() => setSceneViewMode("table")}>
+            ⊞ 表格
+          </button>
         </div>
 
-        {/* Tabs */}
-        <div className="mb-4 flex gap-1 rounded-xl bg-white p-1 shadow-sm">
-          {(["scenes", "characters"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                tab === t
-                  ? "bg-zinc-800 text-white"
-                  : "text-zinc-400 hover:text-zinc-600"
-              }`}
-            >
-              {t === "scenes" ? "章节" : "角色"}
-            </button>
-          ))}
-        </div>
-
-        {tab === "scenes" ? (
+        {sceneViewMode === "table" && (
           <>
-            {/* Scene view mode toggle + view selector */}
-            <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div className="flex items-center gap-1 rounded-lg bg-white p-0.5 shadow-sm w-fit">
+            {/* Desktop: inline controls */}
+            <div className="ml-auto hidden sm:flex items-center gap-2">
+              <TableViewSelector
+                productionId={productionId}
+                views={savedViews}
+                activeViewId={activeViewId}
+                currentConfig={tableConfig}
+                onSelectView={handleSelectView}
+                onViewsChange={setSavedViews}
+              />
+              <div style={{ position: "relative" }}>
                 <button
-                  onClick={() => setSceneViewMode("list")}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    sceneViewMode === "list"
-                      ? "bg-zinc-100 text-zinc-700"
-                      : "text-zinc-400 hover:text-zinc-600"
-                  }`}
+                  onClick={() => setShowColumnSettings((v) => !v)}
+                  className="text-[11px] font-bold px-3 py-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
                 >
-                  ☰ 列表
+                  ⚙ 列设置
                 </button>
-                <button
-                  onClick={() => setSceneViewMode("table")}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    sceneViewMode === "table"
-                      ? "bg-zinc-100 text-zinc-700"
-                      : "text-zinc-400 hover:text-zinc-600"
-                  }`}
-                >
-                  ⊞ 表格
-                </button>
-              </div>
-
-              {sceneViewMode === "table" && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <TableViewSelector
-                    productionId={productionId}
-                    views={savedViews}
-                    activeViewId={activeViewId}
-                    currentConfig={tableConfig}
-                    onSelectView={handleSelectView}
-                    onViewsChange={setSavedViews}
+                {showColumnSettings && (
+                  <TableColumnSettings
+                    config={tableConfig}
+                    onChange={handleConfigChange}
+                    onClose={() => setShowColumnSettings(false)}
                   />
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowColumnSettings((v) => !v)}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors"
-                    >
-                      ⚙️ 列设置
-                    </button>
-                    {showColumnSettings && (
-                      <TableColumnSettings
-                        config={tableConfig}
-                        onChange={handleConfigChange}
-                        onClose={() => setShowColumnSettings(false)}
-                      />
+                )}
+              </div>
+            </div>
+
+            {/* Mobile: ⋮ menu */}
+            <div ref={mobileMenuRef} className="ml-auto sm:hidden" style={{ position: "relative" }}>
+              <button
+                onClick={() => setShowMobileViewMenu((v) => !v)}
+                className="flex items-center justify-center w-8 h-8 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-base font-bold"
+                title="视图设置"
+              >
+                ⋮
+              </button>
+              {showMobileViewMenu && (
+                <div style={{
+                  position: "absolute", right: 0, top: "calc(100% + 6px)",
+                  minWidth: 180, borderRadius: 12,
+                  border: "1px solid var(--line)", background: "var(--surface)",
+                  boxShadow: "0 4px 20px rgba(24,42,42,.12)", zIndex: 30,
+                  overflow: "hidden",
+                }}>
+                  {/* Saved views list */}
+                  {savedViews.length > 0 && (
+                    <>
+                      <div style={{ padding: "8px 14px 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
+                        切换视图
+                      </div>
+                      {savedViews.map((v) => (
+                        <button
+                          key={v.id}
+                          onClick={() => { handleSelectView(v); setShowMobileViewMenu(false); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, width: "100%",
+                            padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                            fontSize: 13, fontWeight: activeViewId === v.id ? 700 : 400,
+                            color: activeViewId === v.id ? "var(--ink)" : "var(--muted)",
+                            background: "transparent", border: "none",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                        >
+                          <span style={{ width: 12, fontSize: 9, color: "var(--script)" }}>{activeViewId === v.id ? "✓" : ""}</span>
+                          {v.name}
+                          {v.isDefault && <span style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)" }}>默认</span>}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {/* Save / create */}
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                    {activeViewId && (
+                      <button
+                        onClick={() => { void handleMobileSaveView(); }}
+                        disabled={mobileSaving}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                          fontSize: 13, fontWeight: 400, color: "var(--muted)",
+                          background: "transparent", border: "none", opacity: mobileSaving ? 0.5 : 1,
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                      >
+                        {mobileSaving ? "保存中…" : "↑ 保存到当前视图"}
+                      </button>
                     )}
+                    {mobileCreatingView ? (
+                      <div style={{ padding: "6px 14px", display: "flex", gap: 6 }}>
+                        <input
+                          autoFocus
+                          value={mobileNewName}
+                          onChange={(e) => setMobileNewName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { void handleMobileCreateView(); }
+                            if (e.key === "Escape") { setMobileCreatingView(false); setMobileNewName(""); }
+                          }}
+                          placeholder="视图名称"
+                          style={{
+                            flex: 1, fontSize: 12, padding: "4px 8px",
+                            border: "1px solid var(--line)", borderRadius: 6,
+                            outline: "none", background: "var(--paper)", color: "var(--ink)",
+                          }}
+                        />
+                        <button
+                          onClick={() => { void handleMobileCreateView(); }}
+                          disabled={mobileSaving || !mobileNewName.trim()}
+                          style={{
+                            padding: "4px 10px", fontSize: 12, fontWeight: 600,
+                            borderRadius: 6, border: "none", cursor: "pointer",
+                            background: "var(--ink)", color: "#fff", opacity: (!mobileNewName.trim() || mobileSaving) ? 0.4 : 1,
+                          }}
+                        >
+                          存
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setMobileCreatingView(true)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                          fontSize: 13, fontWeight: 400, color: "var(--muted)",
+                          background: "transparent", border: "none",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                      >
+                        + 另存为新视图
+                      </button>
+                    )}
+                  </div>
+                  {/* Column settings */}
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                    <button
+                      onClick={() => { setShowMobileViewMenu(false); setShowColumnSettings((v) => !v); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                        fontSize: 13, fontWeight: 400, color: "var(--muted)",
+                        background: "transparent", border: "none",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                    >
+                      ⚙ 列设置
+                    </button>
                   </div>
                 </div>
               )}
+              {showColumnSettings && (
+                <TableColumnSettings
+                  config={tableConfig}
+                  onChange={handleConfigChange}
+                  onClose={() => setShowColumnSettings(false)}
+                />
+              )}
             </div>
-
-            {sceneViewMode === "list" ? (
-              <ScenesManager
-                key={currentVersionId ?? ""}
-                productionId={productionId}
-                productionName={productionName}
-                initialScenes={scenes}
-                canEdit={effectiveCanEdit}
-                versionId={currentVersionId}
-                initialExpandedId={initialSceneId}
-                embedded
-              />
-            ) : (
-              <SceneTableView
-                key={currentVersionId ?? ""}
-                productionId={productionId}
-                scenes={scenes}
-                canEdit={effectiveCanEdit}
-                versionId={currentVersionId}
-                viewConfig={tableConfig}
-                onViewConfigChange={handleConfigChange}
-                onUpdateScene={handleUpdateScene}
-                onPatchMeta={handlePatchMeta}
-              />
-            )}
           </>
-        ) : (
-          <CharactersManager
-            key={currentVersionId ?? ""}
+        )}
+      </div>
+
+      {/* ── Scrollable content ── */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+        {sceneViewMode === "list" ? (
+          <ScenesManager
+            key={versionId ?? ""}
             productionId={productionId}
             productionName={productionName}
-            initialCharacters={characters}
-            canEdit={effectiveCanEdit}
-            initialExpandedId={initialCharacterId}
+            initialScenes={scenes}
+            canEdit={canEdit}
+            versionId={versionId}
+            initialExpandedId={initialSceneId}
             embedded
+          />
+        ) : (
+          <SceneTableView
+            key={versionId ?? ""}
+            productionId={productionId}
+            scenes={scenes}
+            canEdit={canEdit}
+            versionId={versionId}
+            viewConfig={tableConfig}
+            onViewConfigChange={handleConfigChange}
+            onUpdateScene={handleUpdateScene}
+            onPatchMeta={handlePatchMeta}
           />
         )}
       </div>

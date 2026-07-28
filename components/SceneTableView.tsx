@@ -498,7 +498,7 @@ export default function SceneTableView({
         return (
           <button
             onClick={() => toggleAssets(scene.id)}
-            className="text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded px-2 py-0.5 transition-colors"
+            className="text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded px-2 py-0.5 transition-colors whitespace-nowrap"
           >
             📎 附件
           </button>
@@ -513,7 +513,7 @@ export default function SceneTableView({
     const isExpanded = expandedAssets.has(scene.id);
     return (
       <React.Fragment key={scene.id}>
-        <tr className={`group border-b border-zinc-100 ${isChapter ? "bg-zinc-50/60" : ""}`}>
+        <tr className={`group border-b border-[var(--line)] ${isChapter ? "bg-zinc-50/60" : ""}`}>
           {visibleColumns.map((col) => (
             <td
               key={col.key}
@@ -526,7 +526,7 @@ export default function SceneTableView({
           <td />
         </tr>
         {isExpanded && (
-          <tr className="border-b border-zinc-100 bg-zinc-50/30">
+          <tr className="border-b border-[var(--line)] bg-zinc-50/30">
             <td colSpan={visibleColumns.length + 1} className="px-4 py-3">
               <MountPointAssets
                 productionId={productionId}
@@ -556,7 +556,7 @@ export default function SceneTableView({
         style={{ minWidth: totalWidth }}
       >
         <thead className="sticky top-0 z-10 bg-white">
-          <tr className="border-b border-zinc-200">
+          <tr className="border-b border-[var(--line)]">
             {visibleColumns.map((col) => (
               <th
                 key={col.key}
@@ -565,7 +565,7 @@ export default function SceneTableView({
               >
                 <span className="truncate block">{col.label}</span>
                 <div
-                  className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-zinc-300 transition-colors"
+                  className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-[var(--line)] transition-colors"
                   onMouseDown={(e) => handleResizeStart(e, col.key)}
                   title="拖动调整列宽"
                 />

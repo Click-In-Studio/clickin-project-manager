@@ -123,6 +123,7 @@ function SceneEditRow({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(initialExpanded ?? false);
+  const [mobileAction, setMobileAction] = useState<"convert" | "delete" | null>(null);
   const rowRef = useRef<HTMLTableRowElement>(null);
   const chapterDurationDisplay = expanded && childScenes
     ? getChapterDurationDisplay(childScenes)
@@ -166,12 +167,17 @@ function SceneEditRow({
         onClick={handleRowClick}
         className={`group cursor-pointer border-b ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}`}
       >
-        <td className={`py-3 w-24${indent ? " pl-8 pr-4" : " px-4"}`}>
-          <span className={`text-sm tabular-nums ${indent ? "text-zinc-400" : "font-semibold text-zinc-600"}`}>
-            {scene.number || "—"}
-          </span>
+        <td className={`py-3 w-16 sm:w-24${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
+          <div className="flex items-center gap-1">
+            <span className="sm:hidden flex-shrink-0 text-xs text-zinc-400 w-4">
+              {expanded ? "▼" : "▶"}
+            </span>
+            <span className={`text-sm tabular-nums ${indent ? "text-zinc-400" : "font-semibold text-zinc-600"}`}>
+              {scene.number || "—"}
+            </span>
+          </div>
         </td>
-        <td className="px-4 py-3">
+        <td className="px-2 sm:px-4 py-3">
           {editingName ? (
             <input
               autoFocus
@@ -203,7 +209,7 @@ function SceneEditRow({
             </div>
           )}
         </td>
-        <td className="w-72 px-4 py-3 text-right">
+        <td className="w-72 px-4 py-3 text-right hidden sm:table-cell">
           <div className="flex h-5 items-center justify-end gap-3">
             {canEdit && (
               <span className="inline-flex h-5 items-center">
@@ -287,6 +293,32 @@ function SceneEditRow({
                 onSave={(v) => onPatchMeta({ stageNotes: v })}
               />
             </div>
+            {canEdit && (
+              <div className="sm:hidden mt-3 pt-3 border-t border-zinc-100 flex items-center gap-4">
+                {mobileAction === "convert" ? (
+                  <>
+                    <button type="button" onClick={() => { void onConvert(); setMobileAction(null); }} className="text-xs text-blue-600/80 hover:text-blue-900/80">
+                      {scene.kind === "scene" ? "转为章节" : "转为段落"}
+                    </button>
+                    <button type="button" onClick={() => setMobileAction(null)} className="text-xs text-zinc-400">取消</button>
+                  </>
+                ) : mobileAction === "delete" ? (
+                  <>
+                    <button type="button" onClick={() => { void del(); setMobileAction(null); }} disabled={deleting} className="text-xs text-red-500 disabled:opacity-50">
+                      {deleting ? "删除中…" : "确认删除"}
+                    </button>
+                    <button type="button" onClick={() => setMobileAction(null)} className="text-xs text-zinc-400">取消</button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => setMobileAction("convert")} className="text-xs text-zinc-500 hover:text-zinc-700">转换类型</button>
+                    {canDelete && (
+                      <button type="button" onClick={() => setMobileAction("delete")} className="text-xs text-zinc-500 hover:text-red-500">删除</button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <div className="mt-3 pt-3 border-t border-zinc-100">
               <MountPointAssets
                 productionId={productionId}
@@ -569,13 +601,13 @@ export default function ScenesManager({ productionId, productionName, initialSce
               )}
             </div>
           ) : (
-            <table className="w-full table-fixed">
+            <table className="w-full table-auto sm:table-fixed">
               <thead>
                 <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
-                  <th className="px-4 py-3 font-medium w-24">编号</th>
-                  <th className="px-4 py-3 font-medium">名称</th>
+                  <th className="px-2 sm:px-4 py-3 font-medium w-16 sm:w-24">编号</th>
+                  <th className="px-2 sm:px-4 py-3 font-medium">名称</th>
                   <th className="px-4 py-3 font-medium">排练记号</th>
-                  <th className="w-72 px-4 py-3" />
+                  <th className="w-72 px-4 py-3 hidden sm:table-cell" />
                 </tr>
               </thead>
               <tbody>

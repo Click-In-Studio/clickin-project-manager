@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
@@ -22,11 +22,11 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   draft: "草稿", published: "已发布", completed: "已完成", cancelled: "已取消",
 };
-const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-zinc-100 text-zinc-500",
-  published: "bg-blue-50 text-blue-600",
-  completed: "bg-green-50 text-green-600",
-  cancelled: "bg-red-50 text-red-400",
+const STATUS_COLORS: Record<string, { background: string; color: string }> = {
+  draft:     { background: "var(--paper)",  color: "var(--muted)" },
+  published: { background: "#eff6ff",       color: "#2563eb" },
+  completed: { background: "#f0fdf4",       color: "#16a34a" },
+  cancelled: { background: "#fff1f2",       color: "#e11d48" },
 };
 
 function fmt(iso: string | null): string { return fmtDateTime(iso); }
@@ -75,147 +75,171 @@ export default function EventFollowerClient({
     }
   }
 
+  const curStatusStyle = STATUS_COLORS[event.status] ?? STATUS_COLORS.draft;
+
+  const navLink: React.CSSProperties = { fontSize: 11, color: "var(--muted)", textDecoration: "none" };
+  const rule: React.CSSProperties = { border: "none", borderTop: "1px solid var(--line)", margin: 0 };
+  const sectionBar: React.CSSProperties = {
+    fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase",
+    color: "var(--muted)", padding: "10px 0 10px",
+  };
+
   return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="max-w-xl mx-auto px-4 pt-8 pb-16">
-        {/* Nav */}
-        <div className="flex items-center justify-between mb-5">
-          <Link href={`/production/${productionId}/events`} className="text-xs text-zinc-400 hover:text-zinc-600">
-            ← Events
-          </Link>
-          <div className="flex items-center gap-3">
-            {canViewReqs && (
-              <Link href={`/production/${productionId}/events/${eventId}/reqs`}
-                className="text-xs text-zinc-400 hover:text-zinc-600">
-                技术需求 →
-              </Link>
-            )}
-            {canViewFull && (
-              <Link href={`/production/${productionId}/events/${eventId}`}
-                className="text-xs text-zinc-400 hover:text-zinc-600">
-                编辑视角 →
-              </Link>
-            )}
-          </div>
-        </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
 
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-800 leading-tight">{event.title}</h1>
-            <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
-              <span>{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</span>
-              {event.startTime && <span>{fmt(event.startTime)}</span>}
-              {event.location && <span>· {event.location}</span>}
-            </div>
-            {event.description && (
-              <SmartText content={event.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500 mt-2" productionId={productionId} />
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {selfRole === "participant" ? (
-              <span className="text-[11px] text-zinc-400">已参与</span>
-            ) : (
-              <button
-                onClick={toggleFollow}
-                disabled={followBusy}
-                className={`text-xs px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 ${
-                  selfRole === "follower"
-                    ? "bg-blue-50 text-blue-500 hover:bg-blue-100"
-                    : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-                }`}
-              >
-                {selfRole === "follower" ? "已关注" : "关注"}
-              </button>
-            )}
-            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_COLORS[event.status] ?? "bg-zinc-100 text-zinc-400"}`}>
-              {STATUS_LABELS[event.status] ?? event.status}
-            </span>
-          </div>
-        </div>
-
-        {/* Schedule */}
-        <section className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase">事件流程</h2>
-            {departments.length > 0 && sortedItems.length > 0 && (
-              <div className="flex gap-1">
-                <button onClick={() => setViewMode("list")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${viewMode === "list" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-700"}`}>
-                  流程
-                </button>
-                <button onClick={() => setViewMode("table")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${viewMode === "table" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-700"}`}>
-                  表格
-                </button>
-              </div>
-            )}
-          </div>
-
-          {sortedItems.length === 0 ? (
-            <p className="text-xs text-zinc-300 py-4 text-center">暂无流程</p>
-          ) : viewMode === "table" ? (
-            <FollowerScheduleTableView items={scheduleItems} departments={departments} />
-          ) : (
-            <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-zinc-50">
-              {sortedItems.map(item => (
-                <div key={item.id} className="px-5 py-3.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-zinc-800">{item.title}</span>
-                        {item.itemType !== "custom" && (
-                          <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500">
-                            {ITEM_TYPE_LABELS[item.itemType] ?? item.itemType}
-                          </span>
-                        )}
-                      </div>
-                      {item.location && (
-                        <p className="text-[11px] text-zinc-400 mt-0.5">{item.location}</p>
-                      )}
-                      {item.notes && (
-                        <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
-                      )}
-                    </div>
-                    {(item.startTime || item.endTime) && (
-                      <div className="shrink-0 text-right text-xs text-zinc-500 font-mono">
-                        {fmtTime(item.startTime)}
-                        {item.endTime && (
-                          <span className="text-zinc-300"> – {fmtTime(item.endTime)}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+      {/* Eyebrow + utility links — outside the page sheet, like other pages */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
+          Schedule
+        </p>
+        <div style={{ display: "flex", gap: 16 }}>
+          {canViewReqs && (
+            <Link href={`/production/${productionId}/events/${eventId}/reqs`} style={navLink}>技术需求</Link>
           )}
-        </section>
+          {canViewFull && (
+            <Link href={`/production/${productionId}/events/${eventId}`} style={navLink}>编辑视角</Link>
+          )}
+        </div>
+      </div>
 
-        {/* Reports */}
-        {reports.length > 0 && (
-          <section>
-            <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase mb-3">报告</h2>
-            <div className="flex flex-col gap-2">
-              {reports.map(report => (
-                <Link
-                  key={report.id}
-                  href={`/production/${productionId}/events/${eventId}/reports/${report.id}`}
-                  className="bg-white rounded-2xl shadow-sm px-5 py-4 flex items-center justify-between gap-3 hover:bg-zinc-50 transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-zinc-800">{report.title}</p>
-                    <p className="text-[11px] text-zinc-400 mt-0.5">
-                      {report.publishedAt ? fmtDate(report.publishedAt) : "草稿"}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-zinc-300 text-sm">›</span>
-                </Link>
-              ))}
-            </div>
-          </section>
+      {/* Page sheet — one white container, everything inside */}
+      <div style={{ background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "24px 28px" }}>
+
+      {/* Document title block */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 20 }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0, lineHeight: 1.2 }}>
+            {event.title}
+          </h1>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, paddingTop: 4 }}>
+          {selfRole === "participant" ? (
+            <span style={{ fontSize: 11, color: "var(--muted)", padding: "3px 8px" }}>已参与</span>
+          ) : (
+            <button
+              onClick={toggleFollow}
+              disabled={followBusy}
+              style={{
+                fontSize: 11, padding: "3px 8px", borderRadius: 6, border: 0, cursor: "pointer",
+                opacity: followBusy ? 0.5 : 1, transition: "all .1s",
+                background: selfRole === "follower" ? "#eff6ff" : "var(--paper)",
+                color: selfRole === "follower" ? "#2563eb" : "var(--muted)",
+              }}
+            >
+              {selfRole === "follower" ? "已关注" : "关注"}
+            </button>
+          )}
+          <span style={{ borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600, ...curStatusStyle }}>
+            {STATUS_LABELS[event.status] ?? event.status}
+          </span>
+        </div>
+      </div>
+
+      {/* ── Meta + description — same paper plane, no card ── */}
+      <hr style={rule} />
+      <div style={{ padding: "14px 0" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 16px", marginBottom: event.description ? 10 : 0 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</span>
+          {event.startTime && <span style={{ fontSize: 12, color: "var(--muted)" }}>{fmt(event.startTime)}</span>}
+          {event.location && <span style={{ fontSize: 12, color: "var(--muted)" }}>{event.location}</span>}
+        </div>
+        {event.description && (
+          <SmartText content={event.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500" productionId={productionId} />
         )}
       </div>
+
+      {/* ── Schedule section ── */}
+      <hr style={rule} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <p style={sectionBar}>事件流程</p>
+        {departments.length > 0 && sortedItems.length > 0 && (
+          <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+            {(["list", "table"] as const).map(v => (
+              <button key={v} onClick={() => setViewMode(v)} style={{
+                padding: "3px 10px", fontSize: 11, fontWeight: 600, border: 0, cursor: "pointer",
+                background: viewMode === v ? "var(--ink)" : "transparent",
+                color: viewMode === v ? "#fff" : "var(--muted)",
+              }}>
+                {v === "list" ? "流程" : "表格"}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <hr style={rule} />
+
+      {sortedItems.length === 0 ? (
+        <p style={{ fontSize: 12, color: "var(--muted)", padding: "20px 0", textAlign: "center" }}>暂无流程</p>
+      ) : viewMode === "table" ? (
+        <div style={{ paddingTop: 12 }}>
+          <FollowerScheduleTableView items={scheduleItems} departments={departments} />
+        </div>
+      ) : (
+        <div>
+          {sortedItems.map((item, i) => (
+            <div key={item.id} style={{ padding: "11px 0", borderBottom: "1px solid var(--line)" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{item.title}</span>
+                    {item.itemType !== "custom" && (
+                      <span style={{ flexShrink: 0, borderRadius: 4, background: "var(--line)", padding: "1px 6px", fontSize: 10, color: "var(--muted)", opacity: 0.8 }}>
+                        {ITEM_TYPE_LABELS[item.itemType] ?? item.itemType}
+                      </span>
+                    )}
+                  </div>
+                  {item.location && (
+                    <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.location}</p>
+                  )}
+                  {item.notes && (
+                    <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
+                  )}
+                </div>
+                {(item.startTime || item.endTime) && (
+                  <div style={{ flexShrink: 0, textAlign: "right", fontSize: 12, color: "var(--muted)", fontFamily: "monospace" }}>
+                    {fmtTime(item.startTime)}
+                    {item.endTime && <span style={{ color: "var(--line)" }}> – {fmtTime(item.endTime)}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Reports: appendices ── */}
+      {reports.length > 0 && (
+        <>
+          <div style={{ marginTop: 28 }}>
+            <hr style={rule} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <p style={sectionBar}>附件报告</p>
+              <span style={{ fontSize: 11, color: "var(--muted)", opacity: 0.6 }}>{reports.length}</span>
+            </div>
+            <hr style={rule} />
+          </div>
+          <div>
+            {reports.map((report, i) => (
+              <Link
+                key={report.id}
+                href={`/production/${productionId}/reports/${report.id}`}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid var(--line)", textDecoration: "none" }}
+              >
+                <span style={{ flexShrink: 0, fontSize: 11, color: "var(--line)", fontFamily: "monospace", minWidth: 22 }}>
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{report.title}</span>
+                <span style={{ flexShrink: 0, fontSize: 11, color: "var(--muted)" }}>
+                  {report.publishedAt ? fmtDate(report.publishedAt) : "草稿"}
+                </span>
+                <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: 14, marginLeft: 4 }}>›</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+
+      </div>{/* end page sheet */}
     </div>
   );
 }

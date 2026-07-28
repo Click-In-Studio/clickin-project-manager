@@ -1,8 +1,8 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import type { ProductionEvent, EventTechReq, EventDepartment } from "@/lib/event-db";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
@@ -18,12 +18,17 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: "进行中",
   done:        "完成",
 };
-const STATUS_COLORS: Record<string, string> = {
-  awaiting:    "bg-purple-50 text-purple-500",
-  pending:     "bg-amber-50 text-amber-600",
-  in_progress: "bg-blue-50 text-blue-600",
-  done:        "bg-green-50 text-green-600",
+const STATUS_COLOR_STYLES: Record<string, { background: string; color: string }> = {
+  awaiting:    { background: "#f5f3ff", color: "#8b5cf6" },
+  pending:     { background: "#fffbeb", color: "#d97706" },
+  in_progress: { background: "#eff6ff", color: "#2563eb" },
+  done:        { background: "#f0fdf4", color: "#16a34a" },
 };
+
+const card: CSSProperties = {
+  background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "20px 24px",
+};
+const rule: CSSProperties = { border: "none", borderTop: "1px solid var(--line)", margin: 0 };
 
 type Props = {
   productionId: string;
@@ -39,7 +44,7 @@ type Props = {
 // ─── Awaiting card for POC — links to detail page ────────────────────────────
 
 function AwaitingReqCard({
-  req, deptName, productionId, eventId,
+  req, deptName, productionId,
 }: {
   req: EventTechReq;
   deptName: string | undefined;
@@ -48,20 +53,20 @@ function AwaitingReqCard({
 }) {
   return (
     <Link
-      href={`/production/${productionId}/events/${eventId}/reqs/${req.id}`}
-      className="bg-white rounded-2xl shadow-sm px-5 py-4 flex items-start gap-3 hover:shadow-md transition-shadow"
+      href={`/production/${productionId}/tasks/${req.id}`}
+      style={{ ...card, display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}
     >
-      <div className="flex-1 min-w-0">
+      <div style={{ flex: 1, minWidth: 0 }}>
         {deptName && (
-          <span className="inline-block text-[11px] font-medium text-purple-500 bg-purple-50 rounded px-1.5 py-0.5 mb-1">
+          <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", ...STATUS_COLOR_STYLES.awaiting }}>
             {deptName} · 待确认
-          </span>
+          </p>
         )}
-        <p className={`text-sm font-medium ${req.title ? "text-zinc-800" : "text-zinc-400 italic"}`}>
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: req.title ? "var(--ink)" : "var(--muted)", fontStyle: req.title ? "normal" : "italic" }}>
           {req.title || "待填写需求名称…"}
         </p>
       </div>
-      <span className="shrink-0 text-zinc-300 text-xs mt-1">→</span>
+      <span style={{ flexShrink: 0, fontSize: 14, color: "var(--muted)" }}>›</span>
     </Link>
   );
 }
@@ -103,58 +108,70 @@ function ReqCard({
     }
   }
 
+  const statusStyle = STATUS_COLOR_STYLES[status] ?? { background: "var(--paper)", color: "var(--muted)" };
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm px-5 py-4">
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-semibold text-zinc-800">{req.title}</h3>
+    <div style={card}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           {deptName && (
-            <span className="text-[11px] text-zinc-400">{deptName}</span>
+            <p style={{ margin: "0 0 4px", fontSize: 11, color: "var(--muted)" }}>{deptName}</p>
           )}
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{req.title}</h3>
         </div>
         {isMyReq ? (
-          <div className="flex gap-1 shrink-0 flex-wrap justify-end">
-            {STATUS_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => changeStatus(opt.value)}
-                disabled={saving || status === opt.value}
-                className={`rounded-lg px-2 py-1 text-[11px] font-medium transition-colors disabled:cursor-default ${
-                  status === opt.value
-                    ? (STATUS_COLORS[opt.value] ?? "bg-zinc-100 text-zinc-500") + " ring-1 ring-current ring-opacity-30"
-                    : "bg-zinc-50 text-zinc-400 hover:bg-zinc-100 disabled:opacity-60"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {STATUS_OPTIONS.map(opt => {
+              const active = status === opt.value;
+              const optStyle = STATUS_COLOR_STYLES[opt.value] ?? { background: "var(--paper)", color: "var(--muted)" };
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => changeStatus(opt.value)}
+                  disabled={saving || active}
+                  style={{
+                    borderRadius: 8, padding: "3px 10px", fontSize: 11, fontWeight: 600, border: 0,
+                    cursor: active || saving ? "default" : "pointer",
+                    opacity: saving && !active ? 0.5 : 1,
+                    ...(active ? optStyle : { background: "var(--paper)", color: "var(--muted)" }),
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
         ) : (
-          <span className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium ${STATUS_COLORS[status] ?? "bg-zinc-100 text-zinc-500"}`}>
+          <span style={{ flexShrink: 0, borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600, ...statusStyle }}>
             {STATUS_LABELS[status] ?? status}
           </span>
         )}
       </div>
 
       {req.description && (
-        <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500 mb-2" productionId={productionId} />
+        <>
+          <hr style={{ ...rule, margin: "12px 0 10px" }} />
+          <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500" productionId={productionId} />
+        </>
       )}
 
       {req.assignees.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          <span className="text-[10px] text-zinc-400 mr-1 self-center">负责人:</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 10 }}>
+          <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center", marginRight: 2 }}>负责人:</span>
           {req.assignees.map(a => (
-            <span key={a.userId} className="text-[10px] bg-zinc-50 text-zinc-500 rounded px-1.5 py-0.5">
+            <span key={a.userId} style={{ fontSize: 11, background: "var(--paper)", color: "var(--muted)", borderRadius: 4, padding: "2px 8px" }}>
               {a.name}
             </span>
           ))}
         </div>
       )}
+
       {(canViewFull || isPocOfDept || isMyReq) && (
-        <div className="mt-3 flex justify-end">
+        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
           <Link
-            href={`/production/${productionId}/events/${eventId}/reqs/${req.id}`}
-            className="text-[11px] text-zinc-400 hover:text-zinc-600">
+            href={`/production/${productionId}/tasks/${req.id}`}
+            style={{ fontSize: 11, color: "var(--muted)", textDecoration: "none" }}
+          >
             详情 →
           </Link>
         </div>
@@ -173,86 +190,73 @@ export default function ReqsClient({
 
   const deptMap = new Map(departments.map(d => [d.id, d]));
 
-  // Depts where current user is POC
   const pocDeptIds = new Set(
     departments.filter(d => d.pocUserIds.includes(currentUserId)).map(d => d.id)
   );
-
-  // For each dept, compute eligible assignees (members + pocs of that dept)
-  function getDeptPeople(deptId: string | null): { userId: string; name: string }[] {
-    if (!deptId) return [];
-    const dept = deptMap.get(deptId);
-    if (!dept) return [];
-    const eligible = new Set([...dept.memberUserIds, ...dept.pocUserIds]);
-    return productionMembers.filter(m => eligible.has(m.userId));
-  }
-
-  function handleConfirmed(
-    reqId: string, newStatus: string,
-    title: string, description: string,
-    assignees: { userId: string; name: string }[],
-  ) {
-    setReqs(prev => prev.map(r =>
-      r.id === reqId ? { ...r, status: newStatus, title, description, assignees } : r
-    ));
-  }
 
   function handleStatusChange(reqId: string, newStatus: string) {
     setReqs(prev => prev.map(r => r.id === reqId ? { ...r, status: newStatus } : r));
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="max-w-xl mx-auto px-4 pt-8 pb-16">
-        <div className="flex items-center gap-3 mb-5 text-xs text-zinc-400">
-          <Link href={`/production/${productionId}/events/${eventId}/view`} className="hover:text-zinc-600">
-            ← 事件详情
-          </Link>
-        </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
 
-        <div className="mb-6">
-          <h1 className="text-lg font-bold text-zinc-800">技术需求</h1>
-          <p className="text-xs text-zinc-400 mt-1">{event.title}</p>
-        </div>
+      {/* Eyebrow + nav */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
+          Tech Reqs
+        </p>
+        <Link
+          href={`/production/${productionId}/events/${eventId}/view`}
+          style={{ fontSize: 11, color: "var(--muted)", textDecoration: "none" }}
+        >
+          ← 事件详情
+        </Link>
+      </div>
 
-        {reqs.length === 0 ? (
-          <p className="text-center text-sm text-zinc-400 py-12">暂无技术需求</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {reqs.map(req => {
-              const dept = req.departmentId ? deptMap.get(req.departmentId) : undefined;
-              const deptName = dept?.name;
-              const isPocOfDept = req.departmentId ? pocDeptIds.has(req.departmentId) : false;
+      {/* Page title */}
+      <h1 style={{ fontSize: 24, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: "0 0 4px" }}>
+        技术需求
+      </h1>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 20px" }}>{event.title}</p>
 
-              if (req.status === "awaiting" && isPocOfDept) {
-                return (
-                  <AwaitingReqCard
-                    key={req.id}
-                    req={req}
-                    deptName={deptName}
-                    productionId={productionId}
-                    eventId={eventId}
-                  />
-                );
-              }
+      {reqs.length === 0 ? (
+        <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "48px 0" }}>暂无技术需求</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {reqs.map(req => {
+            const dept = req.departmentId ? deptMap.get(req.departmentId) : undefined;
+            const deptName = dept?.name;
+            const isPocOfDept = req.departmentId ? pocDeptIds.has(req.departmentId) : false;
 
+            if (req.status === "awaiting" && isPocOfDept) {
               return (
-                <ReqCard
+                <AwaitingReqCard
                   key={req.id}
                   req={req}
                   deptName={deptName}
-                  isMyReq={req.assignees.some(a => a.userId === currentUserId)}
-                  isPocOfDept={isPocOfDept}
-                  canViewFull={canViewFull}
                   productionId={productionId}
                   eventId={eventId}
-                  onStatusChange={handleStatusChange}
                 />
               );
-            })}
-          </div>
-        )}
-      </div>
+            }
+
+            return (
+              <ReqCard
+                key={req.id}
+                req={req}
+                deptName={deptName}
+                isMyReq={req.assignees.some(a => a.userId === currentUserId)}
+                isPocOfDept={isPocOfDept}
+                canViewFull={canViewFull}
+                productionId={productionId}
+                eventId={eventId}
+                onStatusChange={handleStatusChange}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

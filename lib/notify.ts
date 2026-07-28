@@ -353,7 +353,7 @@ export async function dispatchReportNotification(
   const userIds = recipRes.rows.map((r) => r.user_id);
   const targets = await batchResolveNotificationTargets(userIds, productionId);
   const reportOptedOut = await getOptedOutUsers("report_broadcast");
-  const reportBasePath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}`;
+  const reportBasePath = `${BASE_PATH}/production/${productionId}/reports/${reportId}`;
   const reportTokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
   let sent = 0;
@@ -412,7 +412,7 @@ export async function dispatchMentionNotifications(
   const reportTitle = rptRes.rows[0]?.title ?? "报告";
   const eventTitle = evRes.rows[0]?.title ?? "";
 
-  const reportBasePath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}`;
+  const reportBasePath = `${BASE_PATH}/production/${productionId}/reports/${reportId}`;
   const tokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
   for (const userId of mentionedUserIds) {

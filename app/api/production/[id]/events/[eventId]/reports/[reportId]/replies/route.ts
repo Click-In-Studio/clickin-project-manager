@@ -86,7 +86,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // Fire-and-forget: notify @mentioned users via platform adapter
   if (mentions.length > 0) {
-    const replyPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reports/${reportId}#reply-${id}`;
+    const replyPath = `${BASE_PATH}/production/${productionId}/reports/${reportId}#reply-${id}`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
     const [optedOut, eventRow, targets] = await Promise.all([
       getOptedOutUsers("report_mention").catch(() => new Set<string>()),

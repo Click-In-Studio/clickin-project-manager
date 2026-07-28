@@ -2,18 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { match as pinyinMatch } from "pinyin-pro";
-import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
-import type { EventDepartment } from "@/lib/event-db";
 import { ROLE_GROUPS } from "@/lib/roles";
-import {
-  type Permission,
-  MEMBER_BASE_PERMISSIONS,
-  ROLE_TEMPLATE_PERMISSIONS,
-  ASSISTANT_ROLE_MIGRATION,
-  SENSITIVE_ADMIN_PERMISSIONS,
-} from "@/lib/permissions";
 // Search result returned by feishu-user-search API (local DB, includes raw contact info)
 type SearchResult = {
   userId: string;
@@ -26,54 +17,6 @@ type SearchResult = {
   phone?: string | null;
 };
 
-// ─── Permission UI constants (for PermissionsPanel override UI) ───────────────
-
-const UI_PERMISSION_GROUPS: { label: string; perms: Permission[] }[] = [
-  { label: "通讯录", perms: ["contacts:view", "contacts:import"] },
-  { label: "剧本", perms: ["script:view", "script:comment", "rehearsal_mark:create", "scene:rename", "script:edit", "script:manage"] },
-  { label: "Cue表", perms: ["cue_list:view", "cue_list:create"] },
-  { label: "事件", perms: ["event:follow", "event:view_call_sheet_any", "event:create", "event:edit", "event:publish", "event:edit_schedule", "event:assign_participants", "event:edit_call", "event:delete_tech_req_any"] },
-  { label: "管理", perms: ["dept:create", "members:manage_overrides"] },
-];
-
-const UI_PERMISSION_LABELS: Partial<Record<Permission, string>> = {
-  "contacts:view": "查看通讯录",
-  "contacts:import": "导入/更新人员",
-  "script:view": "查看剧本",
-  "script:comment": "剧本评论",
-  "rehearsal_mark:create": "排练记号",
-  "scene:rename": "场次/角色元数据",
-  "script:edit": "剧本文本编辑",
-  "script:manage": "剧本管理（含场次）",
-  "cue_list:view": "查看Cue表",
-  "cue_list:create": "创建Cue表",
-  "event:follow": "关注事件",
-  "event:view_call_sheet_any": "查看完整Call Sheet",
-  "event:create": "创建事件",
-  "event:edit": "编辑事件",
-  "event:publish": "发布事件",
-  "event:edit_schedule": "编辑子事件",
-  "event:assign_participants": "绑定参与人员",
-  "event:edit_call": "设置Call Time",
-  "event:delete_tech_req_any": "删除技术需求",
-  "dept:create": "管理部门",
-  "members:manage_overrides": "管理成员权限",
-};
-
-function computeRoleDefault(perm: Permission, member: MemberWithRoles): boolean {
-  if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) return false;
-  if (member.isAdmin) return true;
-  const memberPerms = new Set<Permission>(MEMBER_BASE_PERMISSIONS);
-  for (const role of member.roles) {
-    const perms = ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
-    if (perms) for (const p of perms) memberPerms.add(p);
-  }
-  // Handle rehearsal_mark implication from script operation permissions
-  if (perm === "rehearsal_mark:create") {
-    return memberPerms.has("script:manage") || memberPerms.has("script:edit") || memberPerms.has("script:annotate") || memberPerms.has(perm);
-  }
-  return memberPerms.has(perm);
-}
 
 const ROLE_ORDER = ROLE_GROUPS.flatMap((g) => g.roles);
 const ALL_ROLE_GROUPS = ROLE_GROUPS;
@@ -99,13 +42,11 @@ function MemberCard({
   member,
   canManage,
   isSelf,
-  onManage,
   onEdit,
 }: {
   member: MemberWithRoles;
   canManage: boolean;
   isSelf: boolean;
-  onManage: () => void;
   onEdit: () => void;
 }) {
   const photo = resolvePhoto(member.photoUrl) ?? member.avatarUrl;
@@ -133,14 +74,6 @@ function MemberCard({
                 编辑
               </button>
             )}
-            {canManage && (
-              <button
-                onClick={onManage}
-                className="rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:text-zinc-500 hover:bg-zinc-50 transition-colors"
-              >
-                权限
-              </button>
-            )}
           </div>
         </div>
 
@@ -164,109 +97,6 @@ function MemberCard({
             {member.phone}
           </a>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ─── PermissionsPanel ────────────────────────────────────────────────────────
-
-function PermissionsPanel({
-  productionId,
-  member,
-  overrides,
-  onClose,
-  onOverrideChange,
-}: {
-  productionId: string;
-  member: MemberWithRoles;
-  overrides: Record<string, boolean>;
-  onClose: () => void;
-  onOverrideChange: (perm: Permission, granted: boolean | null) => void;
-}) {
-  const [saving, setSaving] = useState<string | null>(null);
-
-  const setOverride = async (perm: Permission, granted: boolean | null) => {
-    setSaving(perm);
-    try {
-      await fetch(`${BASE_PATH}/api/production/${productionId}/permissions`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: member.userId, permission: perm, granted }),
-      });
-      onOverrideChange(perm, granted);
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div
-        className="relative h-full w-full max-w-sm bg-white shadow-2xl flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
-          <div>
-            <p className="text-sm font-semibold text-zinc-800">{member.name}</p>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              {member.roles.length ? member.roles.join("、") : "暂无职位"}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-zinc-300 hover:text-zinc-500 text-lg leading-none">×</button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {UI_PERMISSION_GROUPS.map((group) => (
-            <div key={group.label}>
-              <p className="mb-2 text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">
-                {group.label}
-              </p>
-              <div className="space-y-2">
-                {group.perms.map((perm) => {
-                  const roleValue = computeRoleDefault(perm, member);
-                  const override = perm in overrides ? overrides[perm] : null;
-                  const isSaving = saving === perm;
-
-                  return (
-                    <div key={perm} className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm text-zinc-700">{UI_PERMISSION_LABELS[perm] ?? perm}</p>
-                        <p className="text-[11px] text-zinc-400">
-                          职位默认：{roleValue ? "允许" : "禁止"}
-                        </p>
-                      </div>
-                      <div className="shrink-0 flex rounded-lg border border-zinc-200 overflow-hidden text-[11px] font-medium">
-                        {(["null", "true", "false"] as const).map((val) => {
-                          const v = val === "null" ? null : val === "true";
-                          const isActive = override === v;
-                          return (
-                            <button
-                              key={val}
-                              disabled={isSaving}
-                              onClick={() => !isActive && setOverride(perm, v)}
-                              className={`px-2 py-1 transition-colors ${
-                                isActive
-                                  ? val === "null"
-                                    ? "bg-zinc-700 text-white"
-                                    : val === "true"
-                                    ? "bg-green-600 text-white"
-                                    : "bg-red-500 text-white"
-                                  : "text-zinc-400 hover:bg-zinc-50"
-                              } disabled:opacity-50`}
-                            >
-                              {val === "null" ? "默认" : val === "true" ? "允许" : "禁止"}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -800,346 +630,6 @@ function ImportPanel({
   );
 }
 
-// ─── DepartmentPanel ──────────────────────────────────────────────────────────
-
-function DepartmentPanel({
-  productionId,
-  initialDepartments,
-  members,
-}: {
-  productionId: string;
-  initialDepartments: EventDepartment[];
-  members: MemberWithRoles[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [departments, setDepartments] = useState<EventDepartment[]>(initialDepartments);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [creatingKind, setCreatingKind] = useState<"dept" | "group" | null>(null);
-  const [newName, setNewName] = useState("");
-  const [search, setSearch] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const depts = departments.filter((d) => d.kind === "dept");
-  const groups = departments.filter((d) => d.kind === "group");
-
-  const handleCreate = async (kind: "dept" | "group") => {
-    if (!newName.trim() || saving) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/departments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim(), kind }),
-      });
-      const data = await res.json();
-      if (data.department) {
-        setDepartments((prev) => [...prev, data.department]);
-        setNewName("");
-        setCreatingKind(null);
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCreateDeptChat = async (dept: EventDepartment) => {
-    if (!confirm(`确定为「${dept.name}」创建飞书群吗？`)) return;
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/departments/${dept.id}/chat`, {
-      method: "POST",
-    });
-    const data = await res.json();
-    if (data.chatId) {
-      setDepartments(prev => prev.map(d => d.id === dept.id ? { ...d, chatId: data.chatId } : d));
-    } else {
-      alert(data.error ?? "建群失败");
-    }
-  };
-
-  const handleSaveName = async (id: string) => {
-    if (!editName.trim() || saving) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/departments/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim() }),
-      });
-      const data = await res.json();
-      if (data.department) {
-        setDepartments((prev) => prev.map((d) => (d.id === id ? data.department : d)));
-        setEditingId(null);
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("确定删除？删除后无法恢复。")) return;
-    await fetch(`${BASE_PATH}/api/production/${productionId}/departments/${id}`, { method: "DELETE" });
-    setDepartments((prev) => prev.filter((d) => d.id !== id));
-    if (expandedId === id) setExpandedId(null);
-    if (editingId === id) setEditingId(null);
-  };
-
-  const saveDeptMembers = async (dept: EventDepartment, newEntries: { userId: string; isMember: boolean; isPoc: boolean }[]) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/departments/${dept.id}/members`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ members: newEntries }),
-    });
-    const data = await res.json();
-    if (data.department) {
-      setDepartments((prev) => prev.map((d) => (d.id === dept.id ? data.department : d)));
-    }
-  };
-
-  function buildEntries(dept: EventDepartment) {
-    const allIds = new Set([...dept.memberUserIds, ...dept.pocUserIds]);
-    return new Map([...allIds].map(id => [id, {
-      userId: id,
-      isMember: dept.memberUserIds.includes(id),
-      isPoc: dept.pocUserIds.includes(id),
-    }]));
-  }
-
-  const handleToggleMember = (dept: EventDepartment, userId: string) => {
-    const entries = buildEntries(dept);
-    const isMember = dept.memberUserIds.includes(userId);
-    if (isMember) {
-      entries.delete(userId);
-    } else {
-      entries.set(userId, { userId, isMember: true, isPoc: false });
-    }
-    saveDeptMembers(dept, [...entries.values()]);
-  };
-
-  const handleTogglePoc = (dept: EventDepartment, userId: string) => {
-    const entries = buildEntries(dept);
-    const isPoc = dept.pocUserIds.includes(userId);
-    const current = entries.get(userId) ?? { userId, isMember: false, isPoc: false };
-    const newIsPoc = !isPoc;
-    if (!newIsPoc && !current.isMember) {
-      entries.delete(userId);
-    } else {
-      entries.set(userId, { ...current, isPoc: newIsPoc });
-    }
-    saveDeptMembers(dept, [...entries.values()]);
-  };
-
-  const renderRow = (dept: EventDepartment) => {
-    const isExpanded = expandedId === dept.id;
-    const isEditing = editingId === dept.id;
-    const summary = dept.memberUserIds.length > 0
-      ? `${dept.memberUserIds.length} 位成员${dept.pocUserIds.length > 0 ? `，${dept.pocUserIds.length} 位 POC` : ""}`
-      : "";
-    const filtered = search
-      ? members.filter((m) => m.name.includes(search) || m.roles.some((r) => r.includes(search)))
-      : members;
-
-    return (
-      <div key={dept.id} className="border-b border-zinc-100 last:border-0">
-        <div className="flex items-center gap-2 px-3 py-2.5">
-          {isEditing ? (
-            <>
-              <input
-                autoFocus
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveName(dept.id);
-                  if (e.key === "Escape") setEditingId(null);
-                }}
-                className="flex-1 rounded border border-zinc-300 px-2 py-0.5 text-sm outline-none focus:border-zinc-500"
-              />
-              <button
-                onClick={() => handleSaveName(dept.id)}
-                disabled={saving}
-                className="text-xs text-zinc-600 hover:text-zinc-800 disabled:opacity-30"
-              >
-                保存
-              </button>
-              <button onClick={() => setEditingId(null)} className="text-xs text-zinc-300 hover:text-zinc-500">
-                取消
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => { setExpandedId(isExpanded ? null : dept.id); setSearch(""); }}
-                className="flex-1 flex items-center gap-2 text-left min-w-0"
-              >
-                <span className="text-sm text-zinc-700 truncate">{dept.name}</span>
-                {summary && (
-                  <span className="shrink-0 text-[11px] text-zinc-400">{summary}</span>
-                )}
-                <span className="ml-auto shrink-0 text-zinc-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
-              </button>
-              <button
-                onClick={() => { setEditingId(dept.id); setEditName(dept.name); setExpandedId(null); }}
-                className="shrink-0 text-[11px] text-zinc-300 hover:text-zinc-500 px-1 transition-colors"
-              >
-                改名
-              </button>
-              {dept.chatId ? (
-                <span className="shrink-0 text-[10px] bg-blue-50 text-blue-500 rounded px-1.5 py-0.5">
-                  飞书群
-                </span>
-              ) : (
-                <button
-                  onClick={() => handleCreateDeptChat(dept)}
-                  className="shrink-0 text-[11px] text-zinc-300 hover:text-blue-500 px-1 transition-colors"
-                  title="创建飞书群"
-                >
-                  建群
-                </button>
-              )}
-              <button
-                onClick={() => handleDelete(dept.id)}
-                className="shrink-0 text-[11px] text-zinc-300 hover:text-red-400 px-1 transition-colors"
-              >
-                删除
-              </button>
-            </>
-          )}
-        </div>
-
-        {isExpanded && (
-          <div className="px-3 pb-3 border-t border-zinc-50">
-            <div className="flex items-center pt-2.5 pb-1.5 pr-1">
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索姓名或职位…"
-                className="flex-1 rounded border border-zinc-200 px-2 py-1.5 text-xs outline-none focus:border-zinc-400"
-              />
-              <div className="flex gap-3 ml-3 shrink-0">
-                <span className="text-[11px] font-medium text-zinc-400 w-8 text-center">成员</span>
-                <span className="text-[11px] font-medium text-zinc-400 w-8 text-center">POC</span>
-              </div>
-            </div>
-
-            <div className="space-y-0.5 max-h-52 overflow-y-auto mt-1">
-              {filtered.map((m) => {
-                const isMember = dept.memberUserIds.includes(m.userId);
-                const isPoc = dept.pocUserIds.includes(m.userId);
-                return (
-                  <div
-                    key={m.userId}
-                    className={`flex items-center gap-2 rounded-lg px-2.5 py-2 transition-colors ${
-                      isMember ? "bg-zinc-50" : ""
-                    }`}
-                  >
-                    <span className="flex-1 truncate text-sm text-zinc-700 font-medium">{m.name}</span>
-                    {m.roles.length > 0 && (
-                      <span className="text-[11px] text-zinc-400 shrink-0 mr-1">{m.roles[0]}</span>
-                    )}
-                    <button
-                      onClick={() => handleToggleMember(dept, m.userId)}
-                      className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
-                        isMember ? "bg-zinc-700" : "bg-zinc-200 hover:bg-zinc-300"
-                      }`}
-                      aria-label={isMember ? "移除成员" : "添加成员"}
-                    >
-                      <span className={`block w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform mx-auto ${
-                        isMember ? "translate-x-1.5" : "-translate-x-1.5"
-                      }`} />
-                    </button>
-                    <button
-                      onClick={() => handleTogglePoc(dept, m.userId)}
-                      className={`w-8 h-5 rounded-full transition-colors shrink-0 ${
-                        isPoc ? "bg-amber-500" : "bg-zinc-200 hover:bg-zinc-300"
-                      }`}
-                      aria-label={isPoc ? "取消 POC" : "设为 POC"}
-                    >
-                      <span className={`block w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform mx-auto ${
-                        isPoc ? "translate-x-1.5" : "-translate-x-1.5"
-                      }`} />
-                    </button>
-                  </div>
-                );
-              })}
-              {filtered.length === 0 && (
-                <p className="text-xs text-zinc-300 py-2 text-center">没有匹配的人员</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderSection = (label: string, kind: "dept" | "group", items: EventDepartment[]) => (
-    <div className="mb-5">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] font-semibold tracking-widest text-zinc-400 uppercase">{label}</p>
-        <button
-          onClick={() => { setCreatingKind(kind); setNewName(""); setExpandedId(null); }}
-          className="text-[11px] text-zinc-400 hover:text-zinc-700 transition-colors"
-        >
-          + 新建
-        </button>
-      </div>
-      <div className="rounded-xl border border-zinc-100 overflow-hidden bg-white">
-        {items.length === 0 && creatingKind !== kind && (
-          <p className="px-3 py-3 text-xs text-zinc-300">暂无{label}</p>
-        )}
-        {items.map(renderRow)}
-        {creatingKind === kind && (
-          <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreate(kind);
-                if (e.key === "Escape") setCreatingKind(null);
-              }}
-              placeholder={`${label}名称`}
-              className="flex-1 rounded border border-zinc-200 px-2 py-1.5 text-sm outline-none focus:border-zinc-400"
-            />
-            <button
-              onClick={() => handleCreate(kind)}
-              disabled={saving || !newName.trim()}
-              className="text-xs text-zinc-600 hover:text-zinc-800 disabled:opacity-30"
-            >
-              保存
-            </button>
-            <button onClick={() => setCreatingKind(null)} className="text-xs text-zinc-300 hover:text-zinc-500">
-              取消
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="rounded-2xl bg-white shadow-sm overflow-hidden mb-6">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-5 py-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
-      >
-        <span>
-          部门 & 用户组
-          {departments.length > 0 && (
-            <span className="ml-2 text-xs font-normal text-zinc-400">{departments.length} 个</span>
-          )}
-        </span>
-        <span className="text-zinc-300 text-base">{open ? "−" : "+"}</span>
-      </button>
-      {open && (
-        <div className="px-5 pb-5 border-t border-zinc-100 pt-4">
-          {renderSection("部门", "dept", depts)}
-          {renderSection("用户组", "group", groups)}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── ContactsClient ───────────────────────────────────────────────────────────
 
 type Props = {
@@ -1149,9 +639,6 @@ type Props = {
   canImport: boolean;
   canManage: boolean;
   myUserId: string;
-  initialOverrides: Record<string, Record<string, boolean>>;
-  canManageDepts: boolean;
-  initialDepartments: EventDepartment[];
 };
 
 export default function ContactsClient({
@@ -1161,49 +648,14 @@ export default function ContactsClient({
   canImport,
   canManage,
   myUserId,
-  initialOverrides,
-  canManageDepts,
-  initialDepartments,
 }: Props) {
   const [members, setMembers] = useState<MemberWithRoles[]>(initialMembers);
-  const [overrides, setOverrides] = useState<Record<string, Record<string, boolean>>>(initialOverrides);
-  const [managingUserId, setManagingOpenId] = useState<string | null>(null);
   const [editingUserId, setEditingOpenId] = useState<string | null>(null);
   const [showAddPanel, setShowAddPanel] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<string | null>(null);
-
-  const handleSyncAll = async () => {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/admin/sync-feishu-users`, { method: "POST" });
-      const data = await res.json();
-      if (data.ok) setSyncResult(`已同步 ${data.total} 位用户`);
-      else setSyncResult(data.error ?? "同步失败");
-    } catch {
-      setSyncResult("同步失败");
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const sorted = sortByFirstRole(members);
-  const managingMember = managingUserId ? members.find((m) => m.userId === managingUserId) ?? null : null;
   const editingMember = editingUserId ? members.find((m) => m.userId === editingUserId) ?? null : null;
   const existingUserIds = new Set(members.map((m) => m.userId));
-
-  const handleOverrideChange = (userId: string, perm: Permission, granted: boolean | null) => {
-    setOverrides((prev) => {
-      const next = { ...prev, [userId]: { ...prev[userId] } };
-      if (granted === null) {
-        delete next[userId][perm];
-      } else {
-        next[userId][perm] = granted;
-      }
-      return next;
-    });
-  };
 
   const handleMemberSaved = (userId: string, updated: Partial<MemberWithRoles>) => {
     setMembers((prev) => prev.map((m) => (m.userId === userId ? { ...m, ...updated } : m)));
@@ -1218,78 +670,49 @@ export default function ContactsClient({
   };
 
   return (
-    <div className="min-h-screen bg-zinc-100 px-4 py-8">
-      <div className="mx-auto max-w-3xl">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <Link href={`/production/${productionId}`} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
-            ← 返回
-          </Link>
-          <div className="flex items-center gap-2">
-            {canManage && (
-              <>
-                <button
-                  onClick={handleSyncAll}
-                  disabled={syncing}
-                  title={syncResult ?? "同步飞书全员到本地通讯录"}
-                  className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-500 hover:bg-zinc-200 disabled:opacity-40 transition-colors"
-                >
-                  {syncing ? "同步中…" : "同步通讯录"}
-                </button>
-                <button
-                  onClick={() => setShowAddPanel(true)}
-                  className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
-                >
-                  + 添加人员
-                </button>
-              </>
-            )}
-            <div className="text-right ml-2">
-              <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">People</p>
-              <p className="text-sm font-bold text-zinc-500">{productionName}</p>
-            </div>
-          </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
+            People
+          </p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", marginBottom: 20 }}>人员</h1>
         </div>
-
-        {canImport && (
-          <ImportPanel productionId={productionId} onImported={setMembers} />
+        {canManage && (
+          <button
+            onClick={() => setShowAddPanel(true)}
+            style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
+          >
+            + 添加人员
+          </button>
         )}
+      </div>
 
-        {canManageDepts && (
-          <DepartmentPanel
-            productionId={productionId}
-            initialDepartments={initialDepartments}
-            members={members}
-          />
-        )}
+      {canImport && (
+        <ImportPanel productionId={productionId} onImported={setMembers} />
+      )}
 
+      {/* Main card */}
+      <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "20px 24px", minHeight: "calc(100vh - 280px)" }}>
         {sorted.length === 0 ? (
-          <p className="text-center text-sm text-zinc-300 py-16">暂无人员</p>
+          <div style={{ padding: "48px 0", textAlign: "center" }}>
+            <p style={{ fontSize: 13, color: "var(--muted)" }}>暂无人员</p>
+          </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {sorted.map((m) => (
               <MemberCard
                 key={m.userId}
                 member={m}
                 canManage={canManage}
                 isSelf={m.userId === myUserId}
-                onManage={() => setManagingOpenId(m.userId)}
                 onEdit={() => setEditingOpenId(m.userId)}
               />
             ))}
           </div>
         )}
       </div>
-
-      {managingMember && (
-        <PermissionsPanel
-          productionId={productionId}
-          member={managingMember}
-          overrides={overrides[managingMember.userId] ?? {}}
-          onClose={() => setManagingOpenId(null)}
-          onOverrideChange={(perm, granted) => handleOverrideChange(managingMember.userId, perm, granted)}
-        />
-      )}
 
       {editingMember && (
         <EditInfoPanel

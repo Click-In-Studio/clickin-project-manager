@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const dept = await getEventDepartment(req.departmentId, productionId);
     if (!dept?.chatId || !dept.pocUserIds.length) continue;
 
-    const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs/${req.id}`;
+    const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${req.id}`;
     // Feishu open_ids still needed for @mention syntax inside the card body
     const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
     const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
