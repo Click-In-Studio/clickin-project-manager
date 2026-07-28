@@ -267,7 +267,7 @@ function CharacterEditRow({
               ) : (
                 <button
                   onClick={() => setConfirmDelete(true)}
-                  className="text-xs text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all"
+                  className="text-xs text-zinc-300 opacity-0 sm:opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all hidden sm:block"
                 >
                   删除
                 </button>
@@ -275,7 +275,7 @@ function CharacterEditRow({
             )}
             <button
               onClick={onToggleExpand}
-              className={`text-xs transition-all ${expanded ? "text-zinc-500" : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-600"}`}
+              className={`text-xs transition-all ${expanded ? "text-zinc-500" : "text-zinc-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-zinc-600"}`}
               title={expanded ? "收起" : "展开"}
             >
               {expanded ? "⌃" : "⌄"}
@@ -320,9 +320,9 @@ function CharacterEditRow({
             )}
 
             {canEdit && (
-              <div className="border-t border-[var(--line)] pt-3">
+              <div className="border-t border-[var(--line)] pt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
                 {confirmConvert ? (
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1">
                     <span className="text-xs text-zinc-500 flex-1">
                       {char.isAggregate ? "转为普通角色，聚合成员关系将清空，确认？" : "转为聚合角色，确认？"}
                     </span>
@@ -338,6 +338,23 @@ function CharacterEditRow({
                   >
                     {char.isAggregate ? "转为普通角色" : "转为聚合角色"}
                   </button>
+                )}
+                {/* Mobile-only delete */}
+                {!confirmConvert && (
+                  <div className="sm:hidden">
+                    {confirmDelete ? (
+                      <span className="flex items-center gap-2">
+                        <button onClick={del} disabled={deleting} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
+                          {deleting ? "删除中…" : "确认删除"}
+                        </button>
+                        <button onClick={() => setConfirmDelete(false)} className="text-xs text-zinc-400 hover:text-zinc-600">取消</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setConfirmDelete(true)} className="text-xs text-zinc-500 hover:text-red-500 transition-colors">
+                        删除
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

@@ -254,10 +254,11 @@ function PermissionGroup({
 // ─── RoleDetail (right panel) ─────────────────────────────────────────────────
 
 function RoleDetail({
-  role, productionId, onUpdated, onDeleted,
+  role, productionId, onUpdated, onDeleted, onMobileBack,
 }: {
   role: ProductionRole; productionId: string;
   onUpdated: (r: ProductionRole) => void; onDeleted: () => void;
+  onMobileBack?: () => void;
 }) {
   const [activePerms, setActivePerms] = useState<Set<string>>(() => new Set(role.permissions));
   const [saving, setSaving] = useState(false);
@@ -321,6 +322,13 @@ function RoleDetail({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      {onMobileBack && (
+        <div className="sm:hidden" style={{ padding: "8px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <button onClick={onMobileBack} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
+            ← 返回
+          </button>
+        </div>
+      )}
       {/* Header */}
       <div style={{ padding: "20px 24px 14px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -493,6 +501,7 @@ export default function AdminRolesClient({
   const [selectedId, setSelectedId] = useState<string | null>(roles[0]?.id ?? null);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
 
   const selected = roles.find((r) => r.id === selectedId) ?? null;
 
@@ -532,7 +541,10 @@ export default function AdminRolesClient({
   const handleDeleted = (id: string) => {
     setRoles((prev) => {
       const next = prev.filter((r) => r.id !== id);
-      setSelectedId((cur) => (cur === id ? (next[0]?.id ?? null) : cur));
+      setSelectedId((cur) => {
+        if (cur === id) { setMobileView("list"); return next[0]?.id ?? null; }
+        return cur;
+      });
       return next;
     });
   };
@@ -550,12 +562,14 @@ export default function AdminRolesClient({
       {/* Body */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", padding: "0 clamp(18px, 3vw, 52px) 40px" }}>
         {/* Left: role list */}
-        <div style={{
-          width: 220, flexShrink: 0,
-          background: "white", borderRadius: "12px 0 0 12px",
-          border: "1px solid var(--line)", borderRight: "none",
-          display: "flex", flexDirection: "column",
-        }}>
+        <div
+          className={`${mobileView === "detail" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} w-full sm:w-[220px] rounded-xl sm:rounded-r-none sm:!border-r-0 overflow-hidden`}
+          style={{
+            flexShrink: 0,
+            background: "white",
+            border: "1px solid var(--line)",
+          }}
+        >
           {/* List header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 12px 6px", borderBottom: "1px solid var(--line)" }}>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
@@ -593,7 +607,7 @@ export default function AdminRolesClient({
                 role={role}
                 productionId={productionId}
                 selected={selectedId === role.id}
-                onSelect={() => setSelectedId(role.id)}
+                onSelect={() => { setSelectedId(role.id); setMobileView("detail"); }}
                 onRename={(name) => setRoles((prev) => prev.map((r) => r.id === role.id ? { ...r, name } : r))}
                 onCopy={(name) => handleCopy(role.id, name)}
               />
@@ -602,12 +616,14 @@ export default function AdminRolesClient({
         </div>
 
         {/* Right: detail */}
-        <div style={{
-          flex: 1, minWidth: 0,
-          background: "white", borderRadius: "0 12px 12px 0",
-          border: "1px solid var(--line)",
-          display: "flex", flexDirection: "column",
-        }}>
+        <div
+          className={`${mobileView === "list" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} rounded-xl sm:rounded-l-none`}
+          style={{
+            flex: 1, minWidth: 0,
+            background: "white",
+            border: "1px solid var(--line)",
+          }}
+        >
           {selected ? (
             <RoleDetail
               key={selected.id}
@@ -615,6 +631,7 @@ export default function AdminRolesClient({
               productionId={productionId}
               onUpdated={(updated) => setRoles((prev) => prev.map((r) => r.id === updated.id ? updated : r))}
               onDeleted={() => handleDeleted(selected.id)}
+              onMobileBack={() => setMobileView("list")}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>

@@ -95,6 +95,23 @@ export default function AnnouncementsClient() {
     { key: "info", label: "通知" },
   ];
 
+  const severityBadgeStyle = (s: Severity) => ({
+    display: "inline-flex" as const,
+    alignItems: "center" as const,
+    gap: 5,
+    padding: "3px 10px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 700,
+    background: s === "danger" ? "var(--danger-soft)" : s === "warn" ? "var(--warn-soft)" : "var(--surface-2)",
+    color: s === "danger" ? "var(--danger)" : s === "warn" ? "var(--warn)" : "var(--script)",
+  });
+
+  const severityDotStyle = (s: Severity) => ({
+    width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+    background: s === "danger" ? "var(--danger)" : s === "warn" ? "var(--warn)" : "var(--script)",
+  });
+
   return (
     <div className={styles.workspace}>
       <div className={styles.pageHeader}>
@@ -102,6 +119,76 @@ export default function AnnouncementsClient() {
         <h1 className={styles.pageTitle}>公告与风险提醒</h1>
       </div>
 
+      {/* ── Mobile: single-column accordion ── */}
+      <div className={styles.mobileOnly}>
+        <div style={{ display: "flex", gap: 2 }}>
+          {filterDefs.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              style={{
+                flex: 1, border: 0, borderRadius: 7, padding: "7px 0",
+                fontSize: 11, fontWeight: 700, cursor: "pointer",
+                background: filter === f.key ? "var(--ink)" : "var(--surface-2)",
+                color: filter === f.key ? "#fff" : "var(--muted)",
+              }}
+            >
+              {f.label}{f.count !== undefined && f.count > 0 && ` (${f.count})`}
+            </button>
+          ))}
+        </div>
+
+        <div className={styles.mobileCardList}>
+          {filtered.map(item => {
+            const isExpanded = selected?.id === item.id;
+            return (
+              <div key={item.id} className={`${styles.mobileCard} ${styles[item.severity]}`}>
+                <button
+                  onClick={() => setSelected(isExpanded ? null : item)}
+                  className={styles.mobileCardBtn}
+                >
+                  <div className={styles.mobileCardHeader}>
+                    <span className={styles.mobileCardProduction}>{item.production}</span>
+                    <span className={styles.mobileCardTime}>{item.time}</span>
+                  </div>
+                  <p className={`${styles.mobileCardTitle} ${isExpanded ? "" : styles.mobileCardTitleClamp}`}>
+                    {item.title}
+                  </p>
+                  {!isExpanded && (
+                    <p className={styles.mobileCardPreview}>{item.body.split("\n")[0]}</p>
+                  )}
+                </button>
+
+                {isExpanded && (
+                  <div className={styles.mobileCardDetail}>
+                    <div className={styles.mobileCardMeta}>
+                      <span style={severityBadgeStyle(item.severity)}>
+                        <span style={severityDotStyle(item.severity)} />
+                        {SEVERITY_LABEL[item.severity]}
+                      </span>
+                      {item.author && (
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>{item.author} · {item.time}</span>
+                      )}
+                    </div>
+                    <SmartText
+                      content={item.body}
+                      markdown
+                      contentMention={{ productionId: item.productionId }}
+                      className={styles.bodyText}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <p style={{ marginTop: 20, fontSize: 11, color: "var(--muted)" }}>
+          Demo 数据 · 后端接入后显示实际公告
+        </p>
+      </div>
+
+      {/* ── Desktop: master-detail split ── */}
       <div className={styles.splitLayout}>
         {/* Left: list */}
         <div className={`${styles.splitPane} ${styles.splitList}`}>

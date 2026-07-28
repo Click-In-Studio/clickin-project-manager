@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ScenesManager from "./ScenesManager";
 import styles from "./my-pages.module.css";
 import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
@@ -41,6 +41,11 @@ export default function Dramaturgy({
 
   const [tableConfig, setTableConfig] = useState<TableViewConfigData>(getDefaultViewConfig());
   const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [showMobileViewMenu, setShowMobileViewMenu] = useState(false);
+  const [mobileCreatingView, setMobileCreatingView] = useState(false);
+  const [mobileNewName, setMobileNewName] = useState("");
+  const [mobileSaving, setMobileSaving] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewsLoaded, setViewsLoaded] = useState(false);
@@ -97,6 +102,60 @@ export default function Dramaturgy({
     setActiveViewId(view.id || null);
   };
 
+  const handleMobileSaveView = async () => {
+    if (!activeViewId || mobileSaving) return;
+    setMobileSaving(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views/${activeViewId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: tableConfig }),
+      });
+      if (!res.ok) throw new Error("保存失败");
+      setSavedViews((prev) => prev.map((v) => v.id === activeViewId ? { ...v, config: tableConfig } : v));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  const handleMobileCreateView = async () => {
+    if (!mobileNewName.trim() || mobileSaving) return;
+    setMobileSaving(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: mobileNewName.trim(), config: tableConfig, isDefault: savedViews.length === 0 }),
+      });
+      if (!res.ok) throw new Error("创建失败");
+      const data = await res.json() as SavedView;
+      setSavedViews((prev) => [...prev, data]);
+      handleSelectView(data);
+      setMobileNewName("");
+      setMobileCreatingView(false);
+      setShowMobileViewMenu(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showMobileViewMenu) return;
+    const dismiss = (e: MouseEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setShowMobileViewMenu(false);
+        setMobileCreatingView(false);
+        setMobileNewName("");
+      }
+    };
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [showMobileViewMenu]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
       {/* ── Frozen toolbar ── */}
@@ -118,22 +177,159 @@ export default function Dramaturgy({
         </div>
 
         {sceneViewMode === "table" && (
-          <div className="ml-auto flex items-center gap-2">
-            <TableViewSelector
-              productionId={productionId}
-              views={savedViews}
-              activeViewId={activeViewId}
-              currentConfig={tableConfig}
-              onSelectView={handleSelectView}
-              onViewsChange={setSavedViews}
-            />
-            <div style={{ position: "relative" }}>
+          <>
+            {/* Desktop: inline controls */}
+            <div className="ml-auto hidden sm:flex items-center gap-2">
+              <TableViewSelector
+                productionId={productionId}
+                views={savedViews}
+                activeViewId={activeViewId}
+                currentConfig={tableConfig}
+                onSelectView={handleSelectView}
+                onViewsChange={setSavedViews}
+              />
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setShowColumnSettings((v) => !v)}
+                  className="text-[11px] font-bold px-3 py-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                >
+                  ⚙ 列设置
+                </button>
+                {showColumnSettings && (
+                  <TableColumnSettings
+                    config={tableConfig}
+                    onChange={handleConfigChange}
+                    onClose={() => setShowColumnSettings(false)}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Mobile: ⋮ menu */}
+            <div ref={mobileMenuRef} className="ml-auto sm:hidden" style={{ position: "relative" }}>
               <button
-                onClick={() => setShowColumnSettings((v) => !v)}
-                className="text-[11px] font-bold px-3 py-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                onClick={() => setShowMobileViewMenu((v) => !v)}
+                className="flex items-center justify-center w-8 h-8 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-base font-bold"
+                title="视图设置"
               >
-                ⚙ 列设置
+                ⋮
               </button>
+              {showMobileViewMenu && (
+                <div style={{
+                  position: "absolute", right: 0, top: "calc(100% + 6px)",
+                  minWidth: 180, borderRadius: 12,
+                  border: "1px solid var(--line)", background: "var(--surface)",
+                  boxShadow: "0 4px 20px rgba(24,42,42,.12)", zIndex: 30,
+                  overflow: "hidden",
+                }}>
+                  {/* Saved views list */}
+                  {savedViews.length > 0 && (
+                    <>
+                      <div style={{ padding: "8px 14px 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
+                        切换视图
+                      </div>
+                      {savedViews.map((v) => (
+                        <button
+                          key={v.id}
+                          onClick={() => { handleSelectView(v); setShowMobileViewMenu(false); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, width: "100%",
+                            padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                            fontSize: 13, fontWeight: activeViewId === v.id ? 700 : 400,
+                            color: activeViewId === v.id ? "var(--ink)" : "var(--muted)",
+                            background: "transparent", border: "none",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                        >
+                          <span style={{ width: 12, fontSize: 9, color: "var(--script)" }}>{activeViewId === v.id ? "✓" : ""}</span>
+                          {v.name}
+                          {v.isDefault && <span style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)" }}>默认</span>}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {/* Save / create */}
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                    {activeViewId && (
+                      <button
+                        onClick={() => { void handleMobileSaveView(); }}
+                        disabled={mobileSaving}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                          fontSize: 13, fontWeight: 400, color: "var(--muted)",
+                          background: "transparent", border: "none", opacity: mobileSaving ? 0.5 : 1,
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                      >
+                        {mobileSaving ? "保存中…" : "↑ 保存到当前视图"}
+                      </button>
+                    )}
+                    {mobileCreatingView ? (
+                      <div style={{ padding: "6px 14px", display: "flex", gap: 6 }}>
+                        <input
+                          autoFocus
+                          value={mobileNewName}
+                          onChange={(e) => setMobileNewName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { void handleMobileCreateView(); }
+                            if (e.key === "Escape") { setMobileCreatingView(false); setMobileNewName(""); }
+                          }}
+                          placeholder="视图名称"
+                          style={{
+                            flex: 1, fontSize: 12, padding: "4px 8px",
+                            border: "1px solid var(--line)", borderRadius: 6,
+                            outline: "none", background: "var(--paper)", color: "var(--ink)",
+                          }}
+                        />
+                        <button
+                          onClick={() => { void handleMobileCreateView(); }}
+                          disabled={mobileSaving || !mobileNewName.trim()}
+                          style={{
+                            padding: "4px 10px", fontSize: 12, fontWeight: 600,
+                            borderRadius: 6, border: "none", cursor: "pointer",
+                            background: "var(--ink)", color: "#fff", opacity: (!mobileNewName.trim() || mobileSaving) ? 0.4 : 1,
+                          }}
+                        >
+                          存
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setMobileCreatingView(true)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                          fontSize: 13, fontWeight: 400, color: "var(--muted)",
+                          background: "transparent", border: "none",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                      >
+                        + 另存为新视图
+                      </button>
+                    )}
+                  </div>
+                  {/* Column settings */}
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                    <button
+                      onClick={() => { setShowMobileViewMenu(false); setShowColumnSettings((v) => !v); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "7px 14px", textAlign: "left", cursor: "pointer",
+                        fontSize: 13, fontWeight: 400, color: "var(--muted)",
+                        background: "transparent", border: "none",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                    >
+                      ⚙ 列设置
+                    </button>
+                  </div>
+                </div>
+              )}
               {showColumnSettings && (
                 <TableColumnSettings
                   config={tableConfig}
@@ -142,7 +338,7 @@ export default function Dramaturgy({
                 />
               )}
             </div>
-          </div>
+          </>
         )}
       </div>
 

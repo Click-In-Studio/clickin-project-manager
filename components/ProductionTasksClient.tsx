@@ -97,179 +97,313 @@ export default function ProductionTasksClient({
     );
   }
 
+  const statusFilters: StatusFilter[] = ["active", "awaiting", "pending", "in_progress", "done"];
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 380px", gap: 0, height: "calc(100vh - 220px)", minHeight: 400 }}>
-      {/* Left: filters */}
-      <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
-        {events.length > 1 && (
-          <>
-            <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>日程</h3>
-            <div className={styles.filterList}>
-              <button className={`${styles.filterItem} ${selectedEvent === "all" ? styles.active : ""}`} onClick={() => setSelectedEvent("all")}>
-                <span>全部</span>
-                <span className={styles.filterCount}>{countFor(statusFilter, "all", selectedDept)}</span>
-              </button>
+    <>
+      {/* ── Mobile: filter chips + accordion ── */}
+      <div className={styles.mobileOnly}>
+        <div className={styles.mobileTaskFilterBar}>
+          {events.length > 1 && (
+            <select
+              value={selectedEvent}
+              onChange={e => setSelectedEvent(e.target.value)}
+              style={{
+                width: "100%", border: "1px solid var(--line)", borderRadius: 8,
+                padding: "8px 12px", fontSize: 12, color: "var(--ink)",
+                background: "var(--surface)", outline: "none", cursor: "pointer",
+              }}
+            >
+              <option value="all">所有日程 ({countFor(statusFilter, "all", selectedDept)})</option>
               {events.map(([id, title]) => (
-                <button key={id} className={`${styles.filterItem} ${selectedEvent === id ? styles.active : ""}`} onClick={() => setSelectedEvent(id)}>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-                  <span className={styles.filterCount}>{countFor(statusFilter, id, selectedDept)}</span>
-                </button>
+                <option key={id} value={id}>{title} ({countFor(statusFilter, id, selectedDept)})</option>
               ))}
-            </div>
-          </>
-        )}
-
-        {depts.length > 0 && (
-          <>
-            <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "20px 0 8px" }}>部门</h3>
-            <div className={styles.filterList}>
-              <button className={`${styles.filterItem} ${selectedDept === "all" ? styles.active : ""}`} onClick={() => setSelectedDept("all")}>
-                <span>全部</span>
-                <span className={styles.filterCount}>{countFor(statusFilter, selectedEvent, "all")}</span>
-              </button>
+            </select>
+          )}
+          {depts.length > 0 && (
+            <select
+              value={selectedDept}
+              onChange={e => setSelectedDept(e.target.value)}
+              style={{
+                width: "100%", border: "1px solid var(--line)", borderRadius: 8,
+                padding: "8px 12px", fontSize: 12, color: "var(--ink)",
+                background: "var(--surface)", outline: "none", cursor: "pointer",
+              }}
+            >
+              <option value="all">所有部门 ({countFor(statusFilter, selectedEvent, "all")})</option>
               {depts.map(([id, name]) => (
-                <button key={id} className={`${styles.filterItem} ${selectedDept === id ? styles.active : ""}`} onClick={() => setSelectedDept(id)}>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-                  <span className={styles.filterCount}>{countFor(statusFilter, selectedEvent, id)}</span>
-                </button>
+                <option key={id} value={id}>{name} ({countFor(statusFilter, selectedEvent, id)})</option>
               ))}
-            </div>
-          </>
-        )}
-
-        <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "20px 0 8px" }}>状态</h3>
-        <div className={styles.filterList}>
-          {(["active", "awaiting", "pending", "in_progress", "done"] as StatusFilter[]).map(sf => (
-            <button key={sf} className={`${styles.filterItem} ${statusFilter === sf ? styles.active : ""}`} onClick={() => setStatusFilter(sf)}>
-              <span>{STATUS_FILTER_LABELS[sf]}</span>
-              <span className={styles.filterCount}>{countFor(sf)}</span>
-            </button>
-          ))}
+            </select>
+          )}
+          <div className={styles.mobileTaskStatusScroll}>
+            {statusFilters.map(sf => (
+              <button
+                key={sf}
+                onClick={() => setStatusFilter(sf)}
+                className={`${styles.mobileTaskChip} ${statusFilter === sf ? styles.active : ""}`}
+              >
+                {STATUS_FILTER_LABELS[sf]} ({countFor(sf)})
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Middle: task list */}
-      <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 0 24px 20px" }}>
         {filtered.length === 0 ? (
-          <div className={styles.emptyState} style={{ paddingTop: 60 }}>无匹配任务</div>
+          <div className={styles.emptyState}>无匹配任务</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div className={styles.mobileTaskList}>
             {filtered.map(t => {
-              const isSelected = visibleSelected?.id === t.id;
+              const isExpanded = selected?.id === t.id;
               return (
-                <button
-                  key={t.id}
-                  onClick={() => setSelected(t)}
-                  style={{
-                    border: "1px solid " + (isSelected ? "var(--ink)" : "transparent"),
-                    borderRadius: 10, padding: "13px 16px",
-                    background: isSelected ? "var(--ink)" : "transparent",
-                    cursor: "pointer", textAlign: "left", width: "100%",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{
-                        margin: "0 0 4px", fontSize: 10, fontWeight: 700,
-                        letterSpacing: ".08em", textTransform: "uppercase",
-                        color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
+                <div key={t.id} className={styles.mobileTaskCard}>
+                  <button
+                    onClick={() => setSelected(isExpanded ? null : t)}
+                    className={styles.mobileTaskCardBtn}
+                  >
+                    <div className={styles.mobileTaskCardMeta}>
+                      <span className={styles.mobileTaskCardKicker}>
                         {t.eventTitle}{t.departmentName && ` · ${t.departmentName}`}
-                      </p>
-                      <p style={{
-                        margin: 0, fontSize: 13, fontWeight: 600, lineHeight: 1.35,
-                        color: isSelected ? "#fff" : "var(--ink)",
-                        display: "-webkit-box", WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical", overflow: "hidden",
+                      </span>
+                      <span style={{
+                        flexShrink: 0, borderRadius: 6, padding: "3px 8px",
+                        fontSize: 10, fontWeight: 700, ...statusBadgeStyle(t.status),
                       }}>
-                        {t.title || "待填写需求名称…"}
+                        {STATUS_LABEL[t.status] ?? t.status}
+                      </span>
+                    </div>
+                    <p className={`${styles.mobileTaskCardTitle} ${isExpanded ? "" : styles.mobileTaskCardTitleClamp}`}>
+                      {t.title || "待填写需求名称…"}
+                    </p>
+                    {t.assignees.length > 0 && (
+                      <p className={styles.mobileTaskCardAssignees}>
+                        {t.assignees.map(a => a.name).join("、")}
                       </p>
+                    )}
+                  </button>
+
+                  {isExpanded && (
+                    <div className={styles.mobileTaskCardDetail}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>更新状态</span>
+                        <select
+                          disabled={updating}
+                          value={t.status}
+                          onChange={e => updateStatus(t, e.target.value)}
+                          style={{
+                            borderRadius: 6, padding: "4px 8px",
+                            fontSize: 11, fontWeight: 700, cursor: "pointer",
+                            border: "1px solid transparent", outline: "none",
+                            opacity: updating ? 0.5 : 1, ...statusBadgeStyle(t.status),
+                          }}
+                        >
+                          {VALID_STATUSES.map(s => (
+                            <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                          ))}
+                        </select>
+                      </div>
                       {t.assignees.length > 0 && (
-                        <p style={{ margin: "4px 0 0", fontSize: 11, color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)" }}>
-                          {t.assignees.map(a => a.name).join("、")}
+                        <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)" }}>
+                          负责人：{t.assignees.map(a => a.name).join("、")}
                         </p>
                       )}
+                      {t.description && (
+                        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
+                          <SmartText content={t.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                        </div>
+                      )}
+                      <Link
+                        href={`/production/${productionId}/tasks/${t.id}`}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          border: "1px solid var(--ink)", borderRadius: 8, padding: "9px 18px",
+                          fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
+                        }}
+                      >
+                        前往需求详情 →
+                      </Link>
                     </div>
-                    <span style={{
-                      flexShrink: 0, borderRadius: 6, padding: "3px 8px",
-                      fontSize: 10, fontWeight: 700,
-                      ...(isSelected
-                        ? { background: "rgba(255,255,255,.15)", color: "rgba(255,255,255,.8)" }
-                        : statusBadgeStyle(t.status)),
-                    }}>
-                      {STATUS_LABEL[t.status] ?? t.status}
-                    </span>
-                  </div>
-                </button>
+                  )}
+                </div>
               );
             })}
           </div>
         )}
       </div>
 
-      {/* Right: detail */}
-      <div style={{ overflowY: "auto", padding: "0 0 24px 24px" }}>
-        {!visibleSelected ? (
-          <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧任务查看详情</div>
-        ) : (
-          <div>
-            <div style={{ marginBottom: 18 }}>
-              <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
-                {visibleSelected.eventTitle}{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`}
-              </p>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                <h2 style={{
-                  margin: 0, flex: 1,
-                  fontFamily: 'Georgia, "Noto Serif SC", serif',
-                  fontSize: "clamp(18px, 1.8vw, 24px)", fontWeight: 500, color: "var(--ink)",
-                  lineHeight: 1.3,
-                }}>
-                  {visibleSelected.title || "待填写需求名称…"}
-                </h2>
-                <select
-                  disabled={updating}
-                  value={visibleSelected.status}
-                  onChange={e => updateStatus(visibleSelected, e.target.value)}
-                  style={{
-                    flexShrink: 0, borderRadius: 6, padding: "4px 8px",
-                    fontSize: 11, fontWeight: 700, cursor: "pointer",
-                    border: "1px solid transparent", outline: "none",
-                    opacity: updating ? 0.5 : 1,
-                    ...statusBadgeStyle(visibleSelected.status),
-                  }}
-                >
-                  {VALID_STATUSES.map(s => (
-                    <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+      {/* ── Desktop: 3-column layout ── */}
+      <div className={styles.desktopOnly}>
+        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 380px", gap: 0, height: "calc(100vh - 220px)", minHeight: 400 }}>
+          {/* Left: filters */}
+          <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
+            {events.length > 1 && (
+              <>
+                <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>日程</h3>
+                <div className={styles.filterList}>
+                  <button className={`${styles.filterItem} ${selectedEvent === "all" ? styles.active : ""}`} onClick={() => setSelectedEvent("all")}>
+                    <span>全部</span>
+                    <span className={styles.filterCount}>{countFor(statusFilter, "all", selectedDept)}</span>
+                  </button>
+                  {events.map(([id, title]) => (
+                    <button key={id} className={`${styles.filterItem} ${selectedEvent === id ? styles.active : ""}`} onClick={() => setSelectedEvent(id)}>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+                      <span className={styles.filterCount}>{countFor(statusFilter, id, selectedDept)}</span>
+                    </button>
                   ))}
-                </select>
-              </div>
-              {visibleSelected.assignees.length > 0 && (
-                <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
-                  负责人：{visibleSelected.assignees.map(a => a.name).join("、")}
-                </p>
-              )}
-            </div>
-
-            {visibleSelected.description && (
-              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 20 }}>
-                <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
-              </div>
+                </div>
+              </>
             )}
 
-            <Link
-              href={`/production/${productionId}/tasks/${visibleSelected.id}`}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                border: "1px solid var(--ink)", borderRadius: 8, padding: "9px 18px",
-                fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
-              }}
-            >
-              前往需求详情 →
-            </Link>
+            {depts.length > 0 && (
+              <>
+                <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "20px 0 8px" }}>部门</h3>
+                <div className={styles.filterList}>
+                  <button className={`${styles.filterItem} ${selectedDept === "all" ? styles.active : ""}`} onClick={() => setSelectedDept("all")}>
+                    <span>全部</span>
+                    <span className={styles.filterCount}>{countFor(statusFilter, selectedEvent, "all")}</span>
+                  </button>
+                  {depts.map(([id, name]) => (
+                    <button key={id} className={`${styles.filterItem} ${selectedDept === id ? styles.active : ""}`} onClick={() => setSelectedDept(id)}>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                      <span className={styles.filterCount}>{countFor(statusFilter, selectedEvent, id)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "20px 0 8px" }}>状态</h3>
+            <div className={styles.filterList}>
+              {statusFilters.map(sf => (
+                <button key={sf} className={`${styles.filterItem} ${statusFilter === sf ? styles.active : ""}`} onClick={() => setStatusFilter(sf)}>
+                  <span>{STATUS_FILTER_LABELS[sf]}</span>
+                  <span className={styles.filterCount}>{countFor(sf)}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        )}
+
+          {/* Middle: task list */}
+          <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 0 24px 20px" }}>
+            {filtered.length === 0 ? (
+              <div className={styles.emptyState} style={{ paddingTop: 60 }}>无匹配任务</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {filtered.map(t => {
+                  const isSelected = visibleSelected?.id === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelected(t)}
+                      style={{
+                        border: "1px solid " + (isSelected ? "var(--ink)" : "transparent"),
+                        borderRadius: 10, padding: "13px 16px",
+                        background: isSelected ? "var(--ink)" : "transparent",
+                        cursor: "pointer", textAlign: "left", width: "100%",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{
+                            margin: "0 0 4px", fontSize: 10, fontWeight: 700,
+                            letterSpacing: ".08em", textTransform: "uppercase",
+                            color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {t.eventTitle}{t.departmentName && ` · ${t.departmentName}`}
+                          </p>
+                          <p style={{
+                            margin: 0, fontSize: 13, fontWeight: 600, lineHeight: 1.35,
+                            color: isSelected ? "#fff" : "var(--ink)",
+                            display: "-webkit-box", WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical", overflow: "hidden",
+                          }}>
+                            {t.title || "待填写需求名称…"}
+                          </p>
+                          {t.assignees.length > 0 && (
+                            <p style={{ margin: "4px 0 0", fontSize: 11, color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)" }}>
+                              {t.assignees.map(a => a.name).join("、")}
+                            </p>
+                          )}
+                        </div>
+                        <span style={{
+                          flexShrink: 0, borderRadius: 6, padding: "3px 8px",
+                          fontSize: 10, fontWeight: 700,
+                          ...(isSelected
+                            ? { background: "rgba(255,255,255,.15)", color: "rgba(255,255,255,.8)" }
+                            : statusBadgeStyle(t.status)),
+                        }}>
+                          {STATUS_LABEL[t.status] ?? t.status}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Right: detail */}
+          <div style={{ overflowY: "auto", padding: "0 0 24px 24px" }}>
+            {!visibleSelected ? (
+              <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧任务查看详情</div>
+            ) : (
+              <div>
+                <div style={{ marginBottom: 18 }}>
+                  <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
+                    {visibleSelected.eventTitle}{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`}
+                  </p>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                    <h2 style={{
+                      margin: 0, flex: 1,
+                      fontFamily: 'Georgia, "Noto Serif SC", serif',
+                      fontSize: "clamp(18px, 1.8vw, 24px)", fontWeight: 500, color: "var(--ink)",
+                      lineHeight: 1.3,
+                    }}>
+                      {visibleSelected.title || "待填写需求名称…"}
+                    </h2>
+                    <select
+                      disabled={updating}
+                      value={visibleSelected.status}
+                      onChange={e => updateStatus(visibleSelected, e.target.value)}
+                      style={{
+                        flexShrink: 0, borderRadius: 6, padding: "4px 8px",
+                        fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        border: "1px solid transparent", outline: "none",
+                        opacity: updating ? 0.5 : 1, ...statusBadgeStyle(visibleSelected.status),
+                      }}
+                    >
+                      {VALID_STATUSES.map(s => (
+                        <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {visibleSelected.assignees.length > 0 && (
+                    <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
+                      负责人：{visibleSelected.assignees.map(a => a.name).join("、")}
+                    </p>
+                  )}
+                </div>
+                {visibleSelected.description && (
+                  <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 20 }}>
+                    <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                  </div>
+                )}
+                <Link
+                  href={`/production/${productionId}/tasks/${visibleSelected.id}`}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    border: "1px solid var(--ink)", borderRadius: 8, padding: "9px 18px",
+                    fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
+                  }}
+                >
+                  前往需求详情 →
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

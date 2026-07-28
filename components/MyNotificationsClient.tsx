@@ -159,138 +159,210 @@ export default function MyNotificationsClient() {
         ))}
       </div>
 
-      <div className={styles.splitLayout}>
-        {/* Left: list */}
-        <div className={`${styles.splitPane} ${styles.splitList}`}>
-          {filtered.length === 0 ? (
-            <div className={styles.emptyState} style={{ paddingTop: 40, paddingRight: 16 }}>
-              暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
-              <small>新的通知将在这里显示</small>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 16 }}>
-              {filtered.map(n => {
-                const isSelected = selected?.id === n.id;
-                return (
+      {/* ── Mobile: accordion list ── */}
+      <div className={styles.mobileOnly}>
+        {filtered.length === 0 ? (
+          <div className={styles.emptyState}>
+            暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
+            <small>新的通知将在这里显示</small>
+          </div>
+        ) : (
+          <div className={styles.mobileCardList}>
+            {filtered.map(n => {
+              const isExpanded = selected?.id === n.id;
+              return (
+                <div
+                  key={n.id}
+                  className={styles.mobileCard}
+                  style={{ borderLeftColor: dotColor(n) }}
+                >
                   <button
-                    key={n.id}
-                    onClick={() => setSelected(n)}
-                    style={{
-                      border: "1px solid " + (isSelected ? "var(--ink)" : "transparent"),
-                      borderRadius: 10,
-                      padding: "12px 14px",
-                      background: isSelected ? "var(--ink)" : "transparent",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 10,
-                    }}
+                    className={styles.mobileCardBtn}
+                    onClick={() => setSelected(isExpanded ? null : n)}
                   >
-                    <span style={{
-                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                      marginTop: 5,
-                      background: isSelected ? "rgba(255,255,255,.4)" : dotColor(n),
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{
-                        margin: "0 0 3px", fontSize: 13, fontWeight: 600,
-                        color: isSelected ? "#fff" : "var(--ink)",
-                        display: "-webkit-box", WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical", overflow: "hidden",
-                        lineHeight: 1.35,
-                      }}>
-                        {n.title}
-                      </p>
-                      <p style={{ margin: 0, fontSize: 11, color: isSelected ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
+                    <div className={styles.mobileCardHeader}>
+                      <span className={styles.mobileCardProduction}>
                         {n.production} · {n.meta}
-                      </p>
+                      </span>
+                      <span className={styles.mobileCardTime}>{n.time}</span>
                     </div>
-                    <span style={{
-                      fontSize: 10, color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)",
-                      whiteSpace: "nowrap", flexShrink: 0, marginTop: 2,
-                    }}>
-                      {n.time}
-                    </span>
+                    <p className={`${styles.mobileCardTitle} ${isExpanded ? "" : styles.mobileCardTitleClamp}`}>
+                      {n.title}
+                    </p>
                   </button>
-                );
-              })}
-            </div>
-          )}
 
-          <p style={{ marginTop: 20, paddingRight: 16, fontSize: 11, color: "var(--muted)" }}>
-            Demo 数据 · 后端接入后显示实际通知
-          </p>
-        </div>
-
-        {/* Right: detail */}
-        <div className={`${styles.splitPane} ${styles.splitDetail}`}>
-          {!selected ? (
-            <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-              选择左侧通知查看详情
-            </div>
-          ) : (
-            <div>
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                  <span style={{
-                    padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                    background: selected.kind === "action" ? "var(--warn-soft)" : "var(--surface-2)",
-                    color: selected.kind === "action" ? "var(--warn)" : "var(--script)",
-                  }}>
-                    {selected.kind === "action" ? "待确认" : "告知"}
-                  </span>
-                  {selected.status === "done" && (
-                    <span style={{
-                      padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                      background: "var(--success-soft)", color: "var(--success)",
-                    }}>
-                      已处理
-                    </span>
+                  {isExpanded && (
+                    <div className={styles.mobileCardDetail}>
+                      <div className={styles.mobileCardMeta}>
+                        <span style={{
+                          padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                          background: n.kind === "action" ? "var(--warn-soft)" : "var(--surface-2)",
+                          color: n.kind === "action" ? "var(--warn)" : "var(--script)",
+                        }}>
+                          {n.kind === "action" ? "待确认" : "告知"}
+                        </span>
+                        {n.status === "done" && (
+                          <span style={{
+                            padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                            background: "var(--success-soft)", color: "var(--success)",
+                          }}>
+                            已处理
+                          </span>
+                        )}
+                      </div>
+                      <SmartText
+                        content={n.body}
+                        markdown
+                        contentMention={{ productionId: n.productionId }}
+                        className={styles.bodyText}
+                      />
+                      {n.kind === "action" && n.status === "pending" && (
+                        <button
+                          onClick={() => markDone(n.id)}
+                          style={{
+                            marginTop: 16, border: "1px solid var(--ink)",
+                            background: "var(--ink)", borderRadius: 8,
+                            padding: "10px 24px", fontSize: 13, fontWeight: 700,
+                            color: "#fff", cursor: "pointer",
+                          }}
+                        >
+                          确认已收到
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
-                <h2 style={{
-                  margin: "0 0 6px",
-                  fontFamily: 'Georgia, "Noto Serif SC", serif',
-                  fontSize: "clamp(18px, 2vw, 24px)", fontWeight: 500, color: "var(--ink)",
-                  lineHeight: 1.3,
-                }}>
-                  {selected.title}
-                </h2>
-                <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                  {selected.production} · {selected.meta} · {selected.time}
-                </p>
-              </div>
+              );
+            })}
+          </div>
+        )}
+        <p style={{ marginTop: 20, fontSize: 11, color: "var(--muted)" }}>
+          Demo 数据 · 后端接入后显示实际通知
+        </p>
+      </div>
 
-              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20, marginBottom: 24 }}>
-                <SmartText
-                  content={selected.body}
-                  markdown
-                  contentMention={{ productionId: selected.productionId }}
-                  className={styles.bodyText}
-                />
+      {/* ── Desktop: master-detail split ── */}
+      <div className={styles.desktopOnly}>
+        <div className={styles.splitLayout}>
+          {/* Left: list */}
+          <div className={`${styles.splitPane} ${styles.splitList}`}>
+            {filtered.length === 0 ? (
+              <div className={styles.emptyState} style={{ paddingTop: 40, paddingRight: 16 }}>
+                暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
+                <small>新的通知将在这里显示</small>
               </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 16 }}>
+                {filtered.map(n => {
+                  const isSelected = selected?.id === n.id;
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => setSelected(n)}
+                      style={{
+                        border: "1px solid " + (isSelected ? "var(--ink)" : "transparent"),
+                        borderRadius: 10, padding: "12px 14px",
+                        background: isSelected ? "var(--ink)" : "transparent",
+                        cursor: "pointer", textAlign: "left", width: "100%",
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                      }}
+                    >
+                      <span style={{
+                        width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 5,
+                        background: isSelected ? "rgba(255,255,255,.4)" : dotColor(n),
+                      }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{
+                          margin: "0 0 3px", fontSize: 13, fontWeight: 600,
+                          color: isSelected ? "#fff" : "var(--ink)",
+                          display: "-webkit-box", WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.35,
+                        }}>
+                          {n.title}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 11, color: isSelected ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
+                          {n.production} · {n.meta}
+                        </p>
+                      </div>
+                      <span style={{
+                        fontSize: 10, color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)",
+                        whiteSpace: "nowrap", flexShrink: 0, marginTop: 2,
+                      }}>
+                        {n.time}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p style={{ marginTop: 20, paddingRight: 16, fontSize: 11, color: "var(--muted)" }}>
+              Demo 数据 · 后端接入后显示实际通知
+            </p>
+          </div>
 
-              {selected.kind === "action" && selected.status === "pending" && (
-                <button
-                  onClick={() => markDone(selected.id)}
-                  style={{
-                    border: "1px solid var(--ink)",
-                    background: "var(--ink)",
-                    borderRadius: 8,
-                    padding: "10px 24px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  确认已收到
-                </button>
-              )}
-            </div>
-          )}
+          {/* Right: detail */}
+          <div className={`${styles.splitPane} ${styles.splitDetail}`}>
+            {!selected ? (
+              <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+                选择左侧通知查看详情
+              </div>
+            ) : (
+              <div>
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <span style={{
+                      padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                      background: selected.kind === "action" ? "var(--warn-soft)" : "var(--surface-2)",
+                      color: selected.kind === "action" ? "var(--warn)" : "var(--script)",
+                    }}>
+                      {selected.kind === "action" ? "待确认" : "告知"}
+                    </span>
+                    {selected.status === "done" && (
+                      <span style={{
+                        padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                        background: "var(--success-soft)", color: "var(--success)",
+                      }}>
+                        已处理
+                      </span>
+                    )}
+                  </div>
+                  <h2 style={{
+                    margin: "0 0 6px",
+                    fontFamily: 'Georgia, "Noto Serif SC", serif',
+                    fontSize: "clamp(18px, 2vw, 24px)", fontWeight: 500, color: "var(--ink)",
+                    lineHeight: 1.3,
+                  }}>
+                    {selected.title}
+                  </h2>
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                    {selected.production} · {selected.meta} · {selected.time}
+                  </p>
+                </div>
+
+                <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20, marginBottom: 24 }}>
+                  <SmartText
+                    content={selected.body}
+                    markdown
+                    contentMention={{ productionId: selected.productionId }}
+                    className={styles.bodyText}
+                  />
+                </div>
+
+                {selected.kind === "action" && selected.status === "pending" && (
+                  <button
+                    onClick={() => markDone(selected.id)}
+                    style={{
+                      border: "1px solid var(--ink)", background: "var(--ink)",
+                      borderRadius: 8, padding: "10px 24px",
+                      fontSize: 13, fontWeight: 700, color: "#fff", cursor: "pointer",
+                    }}
+                  >
+                    确认已收到
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

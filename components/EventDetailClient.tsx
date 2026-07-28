@@ -3167,7 +3167,7 @@ export default function EventDetailClient({
         </div>
 
         {/* Tab bar */}
-        <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
+        <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 20, overflowX: "auto", WebkitOverflowScrolling: "touch" as React.CSSProperties["WebkitOverflowScrolling"], scrollbarWidth: "none" }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: "8px 16px", fontSize: 12, fontWeight: 600, border: 0, background: "none",

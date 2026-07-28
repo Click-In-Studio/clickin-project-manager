@@ -139,11 +139,13 @@ function DeptDetail({
   members,
   onUpdated,
   onDeleted,
+  onMobileBack,
 }: {
   dept: DeptNode;
   members: MemberWithRoles[];
   onUpdated: (d: EventDepartment) => void;
   onDeleted: () => void;
+  onMobileBack?: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -219,6 +221,13 @@ function DeptDetail({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      {onMobileBack && (
+        <div className="sm:hidden" style={{ padding: "8px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <button onClick={onMobileBack} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
+            ← 返回
+          </button>
+        </div>
+      )}
       {/* Detail header */}
       <div style={{ padding: "20px 24px 14px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -486,6 +495,7 @@ export default function AdminDepartmentsClient({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState<"dept" | "group" | null>(null);
   const [saving, setSaving] = useState(false);
+  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
 
   const deptNodes = buildTree(departments.filter((d) => d.kind === "dept"));
   const groupNodes = buildTree(departments.filter((d) => d.kind === "group"));
@@ -526,7 +536,7 @@ export default function AdminDepartmentsClient({
 
   const handleDeleted = (id: string) => {
     setDepartments((prev) => prev.filter((d) => d.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    if (selectedId === id) { setSelectedId(null); setMobileView("list"); }
   };
 
   const renderGroup = (nodes: DeptNode[], kind: "dept" | "group") => {
@@ -558,6 +568,7 @@ export default function AdminDepartmentsClient({
             onSelect={() => {
               setSelectedId(node.id);
               setExpandedIds((prev) => new Set([...prev, node.id]));
+              setMobileView("detail");
             }}
             onToggleExpand={() => toggleExpand(node.id)}
             onRename={(name) => setDepartments((prev) => prev.map((d) => d.id === node.id ? { ...d, name } : d))}
@@ -604,10 +615,11 @@ export default function AdminDepartmentsClient({
       >
         {/* Left: tree */}
         <div
+          className={`${mobileView === "detail" ? "hidden sm:block" : ""} w-full sm:w-[240px] rounded-xl sm:rounded-r-none sm:!border-r-0 overflow-hidden`}
           style={{
-            width: 240, flexShrink: 0,
-            background: "white", borderRadius: "12px 0 0 12px",
-            border: "1px solid var(--line)", borderRight: "none",
+            flexShrink: 0,
+            background: "white",
+            border: "1px solid var(--line)",
             overflowY: "auto", padding: "12px 8px",
           }}
         >
@@ -620,11 +632,12 @@ export default function AdminDepartmentsClient({
 
         {/* Right: detail */}
         <div
+          className={`${mobileView === "list" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} rounded-xl sm:rounded-l-none`}
           style={{
             flex: 1, minWidth: 0,
-            background: "white", borderRadius: "0 12px 12px 0",
+            background: "white",
             border: "1px solid var(--line)",
-            overflowY: "auto", display: "flex", flexDirection: "column",
+            overflowY: "auto",
           }}
         >
           {selectedNode ? (
@@ -633,6 +646,7 @@ export default function AdminDepartmentsClient({
               members={members}
               onUpdated={handleUpdated}
               onDeleted={() => handleDeleted(selectedNode.id)}
+              onMobileBack={() => setMobileView("list")}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>

@@ -143,14 +143,14 @@ function ImportContactsSection({ productionId, canImport }: {
         <LockedNotice reason="需要 contacts:import 权限（制作人 / 所有者）" />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             <input
               value={url}
               onChange={(e) => { setUrl(e.target.value); setResult(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") handleImport(); }}
               placeholder="粘贴飞书多维表格 Wiki 链接…"
               style={{
-                flex: 1, fontSize: 13, color: "var(--ink)",
+                flex: 1, minWidth: 0, fontSize: 13, color: "var(--ink)",
                 background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 8,
                 padding: "8px 12px", outline: "none", boxSizing: "border-box",
               }}
@@ -160,6 +160,7 @@ function ImportContactsSection({ productionId, canImport }: {
             <button
               onClick={handleImport}
               disabled={!url.trim() || loading}
+              className="w-full sm:w-auto"
               style={{
                 flexShrink: 0, fontSize: 13, fontWeight: 600, padding: "8px 16px",
                 borderRadius: 8, border: "none", cursor: url.trim() ? "pointer" : "default",
@@ -210,7 +211,7 @@ function ImportDataSection({ productionId, canScript, canScenes }: {
           <div
             key={item.label}
             style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
+              display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
               padding: "12px 14px", borderRadius: 8, border: "1px solid var(--line)",
               background: "var(--paper)",
             }}
@@ -222,10 +223,12 @@ function ImportDataSection({ productionId, canScript, canScenes }: {
             {item.can ? (
               <Link
                 href={item.href}
+                className="w-full sm:w-auto"
                 style={{
                   flexShrink: 0, fontSize: 12, fontWeight: 600, padding: "6px 14px",
                   borderRadius: 7, border: "1px solid var(--ink)", color: "var(--ink)",
                   background: "white", textDecoration: "none", transition: "all .12s",
+                  textAlign: "center",
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "var(--ink)"; e.currentTarget.style.color = "white"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "white"; e.currentTarget.style.color = "var(--ink)"; }}
@@ -297,8 +300,8 @@ function DangerSection({ productionId, productionName, isArchived, canArchive, c
     <Section title="敏感操作" subtitle="以下操作不可撤销或影响范围较大，请谨慎执行" danger>
       {/* Archive */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-          <div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
               {currentArchived ? "取消归档" : "归档项目"}
             </p>
@@ -317,6 +320,7 @@ function DangerSection({ productionId, productionName, isArchived, canArchive, c
             <button
               onClick={handleArchive}
               disabled={archiving}
+              className="w-full sm:w-auto"
               style={{
                 flexShrink: 0, fontSize: 13, fontWeight: 600, padding: "8px 16px",
                 borderRadius: 8, border: "1px solid", cursor: "pointer",
@@ -347,13 +351,13 @@ function DangerSection({ productionId, productionName, isArchived, canArchive, c
             <p style={{ fontSize: 12, color: "var(--muted)" }}>
               输入项目名称 <strong style={{ color: "var(--ink)" }}>「{productionName}」</strong> 以确认：
             </p>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <input
                 value={deleteInput}
                 onChange={(e) => setDeleteInput(e.target.value)}
                 placeholder={productionName}
                 style={{
-                  flex: 1, fontSize: 13, color: "var(--ink)",
+                  flex: 1, minWidth: 0, fontSize: 13, color: "var(--ink)",
                   background: "var(--paper)", border: "1px solid #fca5a5", borderRadius: 8,
                   padding: "8px 12px", outline: "none", boxSizing: "border-box",
                 }}
@@ -361,6 +365,7 @@ function DangerSection({ productionId, productionName, isArchived, canArchive, c
               <button
                 onClick={handleDelete}
                 disabled={deleteInput !== productionName || deleting}
+                className="w-full sm:w-auto"
                 style={{
                   flexShrink: 0, fontSize: 13, fontWeight: 700, padding: "8px 16px",
                   borderRadius: 8, border: "none", cursor: deleteInput === productionName ? "pointer" : "default",

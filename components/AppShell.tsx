@@ -48,6 +48,14 @@ const ADMIN_NAV_GROUPS = [
   },
 ] as const;
 
+const OVERVIEW_NAV = [
+  { label: "公告", hint: "演出公告与风险提醒", path: "/my/announcements", symbol: "⊟" },
+  { label: "日程", hint: "完整 Weekly Call", path: "/my/weekly-call", symbol: "◷" },
+  { label: "任务", hint: "需求 · 跟进 · 完成", path: "/my/tasks", symbol: "✓" },
+  { label: "通知提醒", hint: "确认与告知", path: "/my/notifications", symbol: "◉" },
+  { label: "报告", hint: "所有演出报告", path: "/my/reports", symbol: "≡" },
+] as const;
+
 function extractProductionId(pathname: string): string | null {
   const m = pathname.match(/^\/production\/([^/]+)/);
   return m ? m[1] : null;
@@ -78,16 +86,19 @@ function NavItem({
   label,
   hint,
   active,
+  onClick,
 }: {
   href: string;
   symbol: string;
   label: string;
   hint: string;
   active: boolean;
+  onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors ${
         active
           ? "bg-[var(--surface)] shadow-[inset_3px_0_0_#182a2a]"
@@ -120,37 +131,68 @@ function NavGroup({ label, color }: { label: string; color: "script" | "stage" }
   );
 }
 
-function BottomNavItem({
-  href,
+type DrawerType = "overview" | "creation" | "production" | "admin" | "me";
+
+function BottomDrawer({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-[#e8e8e1] rounded-t-2xl max-h-[75vh] overflow-y-auto">
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-8 h-1 bg-[#b0b8b4] rounded-full" />
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function MobileTab({
   label,
   symbol,
   active,
+  href,
+  onClick,
 }: {
-  href: string;
   label: string;
-  symbol: string;
+  symbol: React.ReactNode;
   active: boolean;
+  href?: string;
+  onClick?: () => void;
 }) {
-  return (
-    <Link
-      href={href}
-      className={`flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors ${
-        active ? "text-[#182a2a]" : "text-[#667676]"
-      }`}
-    >
-      <span className="text-base leading-none">{symbol}</span>
+  const cls = `flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors ${
+    active ? "text-[#182a2a]" : "text-[#667676]"
+  }`;
+  const inner = (
+    <>
+      <span className="h-[18px] flex items-center justify-center leading-none text-base">
+        {symbol}
+      </span>
       {label}
-    </Link>
+    </>
   );
+  if (href) return <Link href={href} className={cls}>{inner}</Link>;
+  return <button onClick={onClick} className={cls}>{inner}</button>;
 }
 
 export default function AppShell({ session, productions, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setDrawerOpen(null);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
 
@@ -193,6 +235,23 @@ export default function AppShell({ session, productions, children }: AppShellPro
     return (paths as string[]).includes(activeModule);
   }
 
+  const isCreationActive = CREATION_NAV.some((item) =>
+    isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)
+  );
+  const isProductionNavActive = PRODUCTION_NAV.some((item) => isModuleActive(item.path));
+  const isOverviewActive = OVERVIEW_NAV.some((item) => pathname.startsWith(item.path));
+
+  const closeDrawer = () => setDrawerOpen(null);
+  const toggleDrawer = (type: DrawerType) =>
+    setDrawerOpen((d) => (d === type ? null : type));
+
+  const userInitial = session.name.charAt(0);
+  const avatarSymbol = (
+    <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
+      {userInitial}
+    </span>
+  );
+
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
@@ -208,7 +267,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
         </Link>
 
         {/* Context controls */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           <label className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
             <span className="hidden lg:block shrink-0">机构 / 项目</span>
             <select
@@ -217,7 +276,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
                 if (e.target.value) router.push(`/production/${e.target.value}`);
                 else router.push("/");
               }}
-              className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a] max-w-[180px] lg:max-w-[240px]"
+              className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a] max-w-[150px] sm:max-w-[180px] lg:max-w-[240px]"
             >
               <option value="">— 选择项目 —</option>
               {activeProductions.map((p) => (
@@ -226,9 +285,10 @@ export default function AppShell({ session, productions, children }: AppShellPro
             </select>
           </label>
 
+          {/* Role badge: desktop only */}
           {productionId && currentProduction && currentProduction.roles.length > 0 && (
-            <div className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
-              <span className="hidden lg:block shrink-0">我的角色</span>
+            <div className="hidden lg:flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
+              <span className="shrink-0">我的角色</span>
               <span className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 px-2.5 text-[#182a2a] text-[12px]">
                 {currentProduction.roles.join(" · ")}
               </span>
@@ -238,15 +298,16 @@ export default function AppShell({ session, productions, children }: AppShellPro
 
         {/* Right actions */}
         <div className="ml-auto flex items-center gap-3">
+          {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className="w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] flex items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
+            className="hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
             title="通知"
           >
             ◉
           </Link>
 
-          {/* User dropdown */}
+          {/* User dropdown: sm+ only */}
           <div className="relative hidden sm:block" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
@@ -299,7 +360,6 @@ export default function AppShell({ session, productions, children }: AppShellPro
           {isAdminMode ? (
             /* ── Admin sidebar ── */
             <nav className="flex flex-col gap-0.5 flex-1">
-              {/* Admin mode header */}
               <div className="px-2.5 pt-1 pb-4">
                 <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[var(--stage)]">管理后台</p>
                 <p className="text-[11px] text-[#667676] mt-0.5 truncate">{currentProduction?.name}</p>
@@ -323,12 +383,9 @@ export default function AppShell({ session, productions, children }: AppShellPro
                 </div>
               ))}
 
-              {/* Spacer */}
               <div className="flex-1" />
-
               <div className="mx-2.5 mb-2 border-t border-[var(--line)]" />
 
-              {/* Exit admin */}
               <Link
                 href={`/production/${productionId}`}
                 className="flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors hover:bg-white/50"
@@ -396,26 +453,218 @@ export default function AppShell({ session, productions, children }: AppShellPro
 
       {/* Mobile bottom nav */}
       <nav className="lg:hidden shrink-0 bg-[var(--surface)] border-t border-[var(--line)] flex z-40 safe-area-bottom">
-        <BottomNavItem href="/" label="今日" symbol="⌂" active={isHome} />
-        <BottomNavItem
-          href={productionId ? `/production/${productionId}` : "/"}
-          label="项目"
-          symbol="◇"
-          active={!!productionId && activeModule === ""}
-        />
-        <BottomNavItem
-          href={productionId ? `/production/${productionId}/tasks` : "/"}
-          label="Task"
-          symbol="✓"
-          active={isModuleActive("tasks")}
-        />
-        <BottomNavItem
-          href="/my/notifications"
-          label="通知"
-          symbol="◉"
-          active={pathname.startsWith("/my/notifications")}
-        />
+        {productionId ? (
+          isAdminMode ? (
+            /* Admin mode */
+            <>
+              <MobileTab
+                label="返回"
+                symbol="←"
+                active={false}
+                href={`/production/${productionId}`}
+              />
+              <MobileTab
+                label="管理菜单"
+                symbol="⚙"
+                active={drawerOpen === "admin"}
+                onClick={() => toggleDrawer("admin")}
+              />
+              <div className="flex-1" />
+              <MobileTab
+                label="我"
+                symbol={avatarSymbol}
+                active={drawerOpen === "me"}
+                onClick={() => toggleDrawer("me")}
+              />
+            </>
+          ) : (
+            /* Production mode */
+            <>
+              <MobileTab
+                label="今日"
+                symbol="⌂"
+                active={activeModule === ""}
+                href={`/production/${productionId}`}
+              />
+              <MobileTab
+                label="创作"
+                symbol="✦"
+                active={isCreationActive || drawerOpen === "creation"}
+                onClick={() => toggleDrawer("creation")}
+              />
+              <MobileTab
+                label="制作"
+                symbol="◇"
+                active={isProductionNavActive || drawerOpen === "production"}
+                onClick={() => toggleDrawer("production")}
+              />
+              <MobileTab
+                label="我"
+                symbol={avatarSymbol}
+                active={drawerOpen === "me"}
+                onClick={() => toggleDrawer("me")}
+              />
+            </>
+          )
+        ) : (
+          /* Outside production */
+          <>
+            <MobileTab label="今日" symbol="⌂" active={isHome} href="/" />
+            <MobileTab
+              label="项目"
+              symbol="◈"
+              active={pathname.startsWith("/my/projects")}
+              href="/my/projects"
+            />
+            <MobileTab
+              label="概览"
+              symbol="≡"
+              active={isOverviewActive || drawerOpen === "overview"}
+              onClick={() => toggleDrawer("overview")}
+            />
+            <MobileTab
+              label="我"
+              symbol={avatarSymbol}
+              active={drawerOpen === "me"}
+              onClick={() => toggleDrawer("me")}
+            />
+          </>
+        )}
       </nav>
+
+      {/* ── Bottom Drawers ── */}
+
+      {/* 概览 drawer (outside production) */}
+      <BottomDrawer open={drawerOpen === "overview"} onClose={closeDrawer}>
+        <div className="px-3.5 pb-4">
+          <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676] px-2.5 pt-1 pb-2">
+            概览
+          </p>
+          {OVERVIEW_NAV.map((item) => (
+            <NavItem
+              key={item.path}
+              href={item.path}
+              symbol={item.symbol}
+              label={item.label}
+              hint={item.hint}
+              active={pathname.startsWith(item.path)}
+              onClick={closeDrawer}
+            />
+          ))}
+        </div>
+      </BottomDrawer>
+
+      {/* 创作 drawer */}
+      <BottomDrawer open={drawerOpen === "creation"} onClose={closeDrawer}>
+        <div className="px-3.5 pb-4">
+          <div className="flex items-center gap-1.5 px-2.5 pt-1 pb-2">
+            <span className="w-[7px] h-[7px] rounded-full bg-[#2f6670] shrink-0" />
+            <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">创作侧</span>
+          </div>
+          {CREATION_NAV.map((item) => (
+            <NavItem
+              key={item.path}
+              href={navHref(item.path)}
+              symbol={item.label.charAt(0)}
+              label={item.label}
+              hint={item.hint}
+              active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
+              onClick={closeDrawer}
+            />
+          ))}
+        </div>
+      </BottomDrawer>
+
+      {/* 制作 drawer */}
+      <BottomDrawer open={drawerOpen === "production"} onClose={closeDrawer}>
+        <div className="px-3.5 pb-4">
+          <div className="flex items-center gap-1.5 px-2.5 pt-1 pb-2">
+            <span className="w-[7px] h-[7px] rounded-full bg-[#a55c32] shrink-0" />
+            <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">制作侧</span>
+          </div>
+          {PRODUCTION_NAV.map((item) => (
+            <NavItem
+              key={item.path}
+              href={navHref(item.path)}
+              symbol={item.label.charAt(0)}
+              label={item.label}
+              hint={item.hint}
+              active={isModuleActive(item.path)}
+              onClick={closeDrawer}
+            />
+          ))}
+        </div>
+      </BottomDrawer>
+
+      {/* 管理菜单 drawer (admin mode mobile) */}
+      <BottomDrawer open={drawerOpen === "admin"} onClose={closeDrawer}>
+        <div className="px-3.5 pb-4">
+          <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[var(--stage)] px-2.5 pt-1 pb-2">
+            管理后台
+          </p>
+          {ADMIN_NAV_GROUPS.map((group, gi) => (
+            <div key={gi} className="flex flex-col gap-0.5">
+              {gi > 0 && <div className="mx-2.5 my-2 border-t border-[var(--line)]" />}
+              {group.items.map((item) => (
+                <NavItem
+                  key={item.path}
+                  href={adminHref(item.path)}
+                  symbol={item.label.charAt(0)}
+                  label={item.label}
+                  hint={item.hint}
+                  active={activeAdminModule === item.path}
+                  onClick={closeDrawer}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </BottomDrawer>
+
+      {/* 我 drawer */}
+      <BottomDrawer open={drawerOpen === "me"} onClose={closeDrawer}>
+        <div className="pb-4">
+          <div className="flex items-center gap-3 px-5 pt-1 pb-3">
+            <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+              {userInitial}
+            </span>
+            <span className="text-[14px] font-bold text-[#182a2a]">{session.name}</span>
+          </div>
+          <div className="mx-5 mb-2 border-t border-[var(--line)]" />
+          <div className="px-3.5 flex flex-col gap-0.5">
+            {currentProduction?.canAdmin && productionId && (
+              <NavItem
+                href={`/production/${productionId}/admin`}
+                symbol="⚙"
+                label="管理后台"
+                hint={currentProduction.name}
+                active={isAdminMode}
+                onClick={closeDrawer}
+              />
+            )}
+            <NavItem
+              href="/my/notification-settings"
+              symbol="◎"
+              label="通知偏好设置"
+              hint="管理通知与提醒"
+              active={pathname === "/my/notification-settings"}
+              onClick={closeDrawer}
+            />
+          </div>
+          <div className="mx-5 my-2 border-t border-[var(--line)]" />
+          <div className="px-5">
+            <form action={`${BASE_PATH}/api/auth/logout`} method="post">
+              <button
+                type="submit"
+                className="w-full text-left flex items-center gap-2 py-2.5 text-sm text-[#667676]"
+              >
+                <span className="text-[11px] opacity-40">→</span>
+                退出登录
+              </button>
+            </form>
+          </div>
+        </div>
+      </BottomDrawer>
     </div>
   );
 }

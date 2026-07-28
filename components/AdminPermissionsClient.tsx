@@ -120,12 +120,13 @@ function SinglePermGroup({
 // ─── Single-member right panel ────────────────────────────────────────────────
 
 function MemberDetail({
-  member, productionId, overrides, onOverrideChange,
+  member, productionId, overrides, onOverrideChange, onMobileBack,
 }: {
   member: MemberWithRoles;
   productionId: string;
   overrides: Overrides;
   onOverrideChange: (userId: string, perm: string, granted: boolean | null) => void;
+  onMobileBack?: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -169,6 +170,13 @@ function MemberDetail({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      {onMobileBack && (
+        <div className="sm:hidden" style={{ padding: "8px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <button onClick={onMobileBack} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
+            ← 返回
+          </button>
+        </div>
+      )}
       {/* Header */}
       <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -252,13 +260,14 @@ function MemberDetail({
 // ─── Bulk panel ───────────────────────────────────────────────────────────────
 
 function BulkPanel({
-  selectedIds, members, productionId, overrides, onOverrideChange,
+  selectedIds, members, productionId, overrides, onOverrideChange, onMobileBack,
 }: {
   selectedIds: string[];
   members: MemberWithRoles[];
   productionId: string;
   overrides: Overrides;
   onOverrideChange: (userId: string, perm: string, granted: boolean | null) => void;
+  onMobileBack?: () => void;
 }) {
   const [searchQ, setSearchQ] = useState("");
   const [saving, setSaving] = useState(false);
@@ -284,6 +293,13 @@ function BulkPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      {onMobileBack && (
+        <div className="sm:hidden" style={{ padding: "8px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <button onClick={onMobileBack} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
+            ← 返回
+          </button>
+        </div>
+      )}
       {/* Header */}
       <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
         <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 3 }}>批量操作</p>
@@ -339,13 +355,14 @@ function BulkPanel({
 // ─── Left panel: member list ──────────────────────────────────────────────────
 
 function MemberList({
-  members, overrides, selectedIds, onSelect, onToggleCheck,
+  members, overrides, selectedIds, onSelect, onToggleCheck, onGoToBulk,
 }: {
   members: MemberWithRoles[];
   overrides: Overrides;
   selectedIds: string[];
   onSelect: (userId: string) => void;
   onToggleCheck: (userId: string) => void;
+  onGoToBulk: () => void;
 }) {
   const [nameQ, setNameQ] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("");
@@ -368,7 +385,7 @@ function MemberList({
   const activeSingle = selectedIds.length === 1 ? selectedIds[0] : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* Filters */}
       <div style={{ padding: "10px 10px 6px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
         <input
@@ -388,14 +405,14 @@ function MemberList({
         </select>
       </div>
 
-      {/* Bulk hint */}
+      {/* Bulk hint (desktop only) */}
       {selectedIds.length > 1 && (
-        <div style={{ padding: "5px 10px", fontSize: 10, background: "#fef9c3", color: "#854d0e", borderBottom: "1px solid #fde68a" }}>
+        <div className="hidden sm:block" style={{ padding: "5px 10px", fontSize: 10, background: "#fef9c3", color: "#854d0e", borderBottom: "1px solid #fde68a" }}>
           已选 {selectedIds.length} 人 — 右侧可批量操作
         </div>
       )}
 
-      {/* Member rows */}
+      {/* Member rows (grows, scrollable) */}
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 6px" }}>
         {filtered.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)", padding: "8px 4px" }}>无匹配成员</p>}
         {filtered.map((m) => {
@@ -414,7 +431,6 @@ function MemberList({
               onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "rgba(0,0,0,.04)"; }}
               onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
             >
-              {/* Checkbox for multi-select */}
               <input
                 type="checkbox"
                 checked={isChecked}
@@ -442,6 +458,26 @@ function MemberList({
           );
         })}
       </div>
+
+      {/* Mobile: navigation button (always present, disabled when nothing selected) */}
+      <div className="sm:hidden" style={{ padding: "10px 12px", borderTop: "1px solid var(--line)", flexShrink: 0 }}>
+        <button
+          onClick={onGoToBulk}
+          disabled={selectedIds.length === 0}
+          style={{
+            width: "100%", padding: "10px", borderRadius: 10, border: "none",
+            background: selectedIds.length === 0 ? "var(--line)" : "var(--ink)",
+            color: selectedIds.length === 0 ? "var(--muted)" : "#fff",
+            fontSize: 13, fontWeight: 700,
+            cursor: selectedIds.length === 0 ? "default" : "pointer",
+            transition: "background .15s, color .15s",
+          }}
+        >
+          {selectedIds.length >= 2
+            ? `批量修改权限（${selectedIds.length} 人）`
+            : "修改权限"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -462,6 +498,7 @@ export default function AdminPermissionsClient({
   const [selectedIds, setSelectedIds] = useState<string[]>(
     initialMembers.length > 0 ? [initialMembers[0].userId] : [],
   );
+  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
 
   const handleOverrideChange = (userId: string, perm: string, granted: boolean | null) => {
     setOverrides((prev) => {
@@ -479,12 +516,17 @@ export default function AdminPermissionsClient({
 
   const handleSelect = (userId: string) => {
     setSelectedIds([userId]);
+    // Desktop: right panel auto-updates. Mobile: user taps the bottom button to navigate.
   };
 
   const handleToggleCheck = (userId: string) => {
     setSelectedIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
     );
+  };
+
+  const handleGoToBulk = () => {
+    setMobileView("detail");
   };
 
   const isBulk = selectedIds.length > 1;
@@ -503,7 +545,10 @@ export default function AdminPermissionsClient({
       {/* Body */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", padding: "0 clamp(18px, 3vw, 52px) 40px" }}>
         {/* Left: member list */}
-        <div style={{ width: 260, flexShrink: 0, background: "white", borderRadius: "12px 0 0 12px", border: "1px solid var(--line)", borderRight: "none", display: "flex", flexDirection: "column" }}>
+        <div
+          className={`${mobileView === "detail" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} w-full sm:w-[260px] rounded-xl sm:rounded-r-none sm:!border-r-0 overflow-hidden`}
+          style={{ flexShrink: 0, background: "white", border: "1px solid var(--line)" }}
+        >
           <div style={{ padding: "10px 10px 0", borderBottom: "none" }}>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
               成员 ({members.length})
@@ -515,11 +560,15 @@ export default function AdminPermissionsClient({
             selectedIds={selectedIds}
             onSelect={handleSelect}
             onToggleCheck={handleToggleCheck}
+            onGoToBulk={handleGoToBulk}
           />
         </div>
 
         {/* Right: detail / bulk */}
-        <div style={{ flex: 1, minWidth: 0, background: "white", borderRadius: "0 12px 12px 0", border: "1px solid var(--line)", display: "flex", flexDirection: "column" }}>
+        <div
+          className={`${mobileView === "list" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} rounded-xl sm:rounded-l-none`}
+          style={{ flex: 1, minWidth: 0, background: "white", border: "1px solid var(--line)" }}
+        >
           {isBulk ? (
             <BulkPanel
               selectedIds={selectedIds}
@@ -527,6 +576,7 @@ export default function AdminPermissionsClient({
               productionId={productionId}
               overrides={overrides}
               onOverrideChange={handleOverrideChange}
+              onMobileBack={() => setMobileView("list")}
             />
           ) : singleMember ? (
             <MemberDetail
@@ -535,6 +585,7 @@ export default function AdminPermissionsClient({
               productionId={productionId}
               overrides={overrides}
               onOverrideChange={handleOverrideChange}
+              onMobileBack={() => setMobileView("list")}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>

@@ -94,22 +94,24 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
       </div>
 
       {weekDays.length > 0 && (
-        <div className={styles.weekGrid}>
-          {weekDays.map(day => (
-            <div key={day.isoDate} className={styles.weekDay}>
-              <div className={styles.weekDayLabel}>{day.dow}</div>
-              <div className={`${styles.weekDayDate} ${day.isoDate === todayIso ? styles.today : ""}`}>
-                {day.date}
+        <div className={styles.weekGridScroll}>
+          <div className={styles.weekGrid}>
+            {weekDays.map(day => (
+              <div key={day.isoDate} className={styles.weekDay}>
+                <div className={styles.weekDayLabel}>{day.dow}</div>
+                <div className={`${styles.weekDayDate} ${day.isoDate === todayIso ? styles.today : ""}`}>
+                  {day.date}
+                </div>
+                {day.events.map(ev =>
+                  ev.calls.map((c, i) => (
+                    <span key={i} className={styles.weekCallPill}>
+                      {fmtTime(c.callAt)} <small>{ev.eventTitle}</small>
+                    </span>
+                  ))
+                )}
               </div>
-              {day.events.map(ev =>
-                ev.calls.map((c, i) => (
-                  <span key={i} className={styles.weekCallPill}>
-                    {fmtTime(c.callAt)} <small>{ev.eventTitle}</small>
-                  </span>
-                ))
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
@@ -119,7 +121,7 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
           <small>有新的 Call 时会在这里显示</small>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 14 }}>
+        <div className={styles.eventCardGrid}>
           {events.map(ev => (
             <div key={ev.eventId} className={styles.eventBlock}>
               <div className={styles.eventBlockHeader}>
