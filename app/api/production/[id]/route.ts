@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, getVersion } from "@/lib/db";
+import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { hasPermission } from "@/lib/permissions";
 
@@ -59,5 +59,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   if (!name?.trim()) return Response.json({ error: "名称不能为空" }, { status: 400 });
 
   await updateProductionName(id, name.trim());
+  return Response.json({ ok: true });
+}
+
+export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+
+  const { id } = await ctx.params;
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access || !hasPermission("production:delete", access.permCtx)) {
+    return Response.json({ error: "无权限，仅项目所有者可删除" }, { status: 403 });
+  }
+
+  await deleteProduction(id);
   return Response.json({ ok: true });
 }
