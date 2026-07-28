@@ -22,6 +22,7 @@ type View =
 
 type Role = "制作人 / 舞监" | "导演 / 构作" | "设计 / 技术" | "演员";
 type PlanningView = "calendar" | "gantt" | "timetable";
+type AccountPage = "profile" | "security" | "preferences" | "privacy" | "help";
 type ProjectOption = { id: string; organization: string; name: string; avatar: string };
 type PlanningEvent = {
   id: string; title: string; date: string; start: string; end: string;
@@ -38,6 +39,14 @@ type LinkedPlanTask = {
   id: string; eventId: string; scheduleItemId: string; title: string;
   ownerIds: string[]; due: string; status: "待开始" | "进行中" | "已完成" | "有风险";
 };
+
+const ACCOUNT_MENU_ITEMS: { id: AccountPage; label: string }[] = [
+  { id: "profile", label: "个人信息" },
+  { id: "security", label: "账号安全中心" },
+  { id: "preferences", label: "功能与设置" },
+  { id: "privacy", label: "信息隐私与权限" },
+  { id: "help", label: "帮助与反馈" },
+];
 
 const VIEW_META: Record<View, { label: string; eyebrow: string; side?: "script" | "stage" }> = {
   home: { label: "我的工作", eyebrow: "平台级" },
@@ -145,7 +154,6 @@ const NAV_GLYPHS: Record<View, string> = {
 };
 
 const STAGE_NAV: { id: View; label: string; hint: string }[] = [
-  { id: "people", label: "人员与角色", hint: "演员 · 部门 · 角色" },
   { id: "events", label: "Event", hint: "围读 · 排练 · 演出" },
   { id: "tasks", label: "Task", hint: "任务 · 节点 · 里程碑" },
   { id: "notifications", label: "Notification", hint: "告知 · 确认 · 处理" },
@@ -243,6 +251,7 @@ export default function PrototypeClient() {
   const [completedTasks, setCompletedTasks] = useState<string[]>(["t1"]);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [accountPage, setAccountPage] = useState<AccountPage | null>(null);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [joinProjectOpen, setJoinProjectOpen] = useState(false);
   const [projectAvatarUrl, setProjectAvatarUrl] = useState<string | null>(null);
@@ -315,6 +324,9 @@ export default function PrototypeClient() {
         </button>
       </div>
 
+      {accountPage ? (
+        <AccountCenter page={accountPage} setPage={setAccountPage} close={() => setAccountPage(null)} />
+      ) : (
       <div className={contentClass}>
         <header className={styles.topbar}>
           <div className={styles.brand}>
@@ -388,7 +400,7 @@ export default function PrototypeClient() {
               )}
             </div>
             <div className={styles.roleDisplay} title="角色与部门由项目管理员分配">
-              <span>当前角色</span><b>{role}</b><i>锁定</i>
+              <span>当前角色</span><b>{role}</b><i>正职</i>
             </div>
           </div>
           <div className={styles.topActions}>
@@ -418,8 +430,18 @@ export default function PrototypeClient() {
               {accountMenuOpen && (
                 <div className={`${styles.popoverMenu} ${styles.accountMenu}`}>
                   <div className={styles.accountSummary}><span>林</span><p><b>林淼</b><small>linmiao@click-in.cn</small></p></div>
-                  {["个人信息", "账号安全中心", "功能与设置", "管理后台", "信息隐私与权限", "帮助与反馈"].map((item) => (
-                    <button type="button" key={item} onClick={() => setAccountMenuOpen(false)}>{item}<span>›</span></button>
+                  {ACCOUNT_MENU_ITEMS.slice(0, 3).map((item) => (
+                    <button type="button" key={item.id} onClick={() => { setAccountMenuOpen(false); setAccountPage(item.id); }}>
+                      {item.label}<span>›</span>
+                    </button>
+                  ))}
+                  <button type="button" className={styles.deferredAdminButton} onClick={() => setAccountMenuOpen(false)} title="后台管理将在下一轮深化">
+                    <span>后台管理<small>下一轮</small></span><span>›</span>
+                  </button>
+                  {ACCOUNT_MENU_ITEMS.slice(3).map((item) => (
+                    <button type="button" key={item.id} onClick={() => { setAccountMenuOpen(false); setAccountPage(item.id); }}>
+                      {item.label}<span>›</span>
+                    </button>
                   ))}
                   <button type="button" className={styles.logoutButton} onClick={() => setAccountMenuOpen(false)}>退出登录</button>
                 </div>
@@ -480,19 +502,29 @@ export default function PrototypeClient() {
         <section className={styles.workspace}>
           <div className={styles.pageHeader}>
             <div>
-              {view !== "project" && <p className={styles.eyebrow}>{meta.eyebrow}</p>}
+              {view !== "project" && <p className={styles.eyebrow}>{view === "home" ? "2026 年 7 月 20 日 · 周一" : meta.eyebrow}</p>}
               <h1>{view === "project" ? currentProject.name : meta.label}</h1>
             </div>
             <div className={styles.headerActions}>
+              {view === "home" && (
+                <div className={styles.homeHeaderMeta} aria-label="今日项目概况">
+                  <span><b>联排期</b><small>项目阶段</small></span>
+                  <span><b>24 天</b><small>距首演</small></span>
+                  <span><b>18 人</b><small>今日协作</small></span>
+                </div>
+              )}
               {view === "events" && <button type="button" className={styles.primaryButton} onClick={() => { setEventWizard(true); setEventStep(1); }}>＋ 创建 Event</button>}
               {view === "tasks" && <button type="button" className={styles.primaryButton} onClick={() => setDrawer("task")}>＋ 新建 Task</button>}
-              {view !== "framework" && <button type="button" className={styles.secondaryButton} onClick={() => go("framework")}>查看设计说明</button>}
+              {view !== "framework" && view !== "home" && <button type="button" className={styles.secondaryButton} onClick={() => go("framework")}>查看设计说明</button>}
             </div>
           </div>
 
           {view === "home" && <HomeView role={role} roleInfo={roleInfo} go={go} setDrawer={setDrawer} acknowledged={acknowledged} />}
           {view === "project" && <ProjectView go={go} />}
-          {moduleCopy[view] && <ModuleView view={view} data={moduleCopy[view]!} go={go} setDrawer={setDrawer} />}
+          {view === "script" && <ScriptWorkspace go={go} />}
+          {view === "dramaturgy" && <DramaturgyWorkspace go={go} />}
+          {view === "cue" && <CueWorkspace go={go} setDrawer={setDrawer} />}
+          {moduleCopy[view] && !["script", "dramaturgy", "cue"].includes(view) && <ModuleView view={view} data={moduleCopy[view]!} go={go} setDrawer={setDrawer} />}
           {view === "events" && <EventsView published={published} openWizard={() => { setEventWizard(true); setEventStep(1); }} setDrawer={setDrawer} go={go} />}
           {view === "tasks" && <TasksView completed={completedTasks} completeTask={completeTask} progress={taskProgress} setDrawer={setDrawer} go={go} />}
           {view === "notifications" && <NotificationsView acknowledged={acknowledged} setAcknowledged={setAcknowledged} setDrawer={setDrawer} />}
@@ -509,8 +541,9 @@ export default function PrototypeClient() {
           <button type="button" aria-current={view === "notifications" ? "page" : undefined} onClick={() => go("notifications")}><span>◉</span>通知<em>3</em></button>
         </nav>
       </div>
+      )}
 
-      {eventWizard && (
+      {!accountPage && eventWizard && (
         <EventWizard
           step={eventStep}
           setStep={setEventStep}
@@ -518,8 +551,224 @@ export default function PrototypeClient() {
           publish={() => { setPublished(true); setEventWizard(false); setAcknowledged(false); }}
         />
       )}
-      {joinProjectOpen && <JoinProjectModal close={() => setJoinProjectOpen(false)} />}
+      {!accountPage && joinProjectOpen && <JoinProjectModal close={() => setJoinProjectOpen(false)} />}
     </main>
+  );
+}
+
+function AccountCenter({
+  page,
+  setPage,
+  close,
+}: {
+  page: AccountPage;
+  setPage: (page: AccountPage) => void;
+  close: () => void;
+}) {
+  const [saved, setSaved] = useState(false);
+  const [twoFactor, setTwoFactor] = useState(true);
+  const [desktopAlerts, setDesktopAlerts] = useState(true);
+  const [weeklyDigest, setWeeklyDigest] = useState(false);
+  const [activityVisible, setActivityVisible] = useState(true);
+  const [presenceVisible, setPresenceVisible] = useState(false);
+
+  const pageMeta: Record<AccountPage, { eyebrow: string; title: string; description: string }> = {
+    profile: { eyebrow: "ACCOUNT", title: "个人信息", description: "管理你的基础资料，以及在项目协作中向其他成员展示的信息。" },
+    security: { eyebrow: "SECURITY", title: "账号安全中心", description: "检查登录方式、双重验证和当前登录设备。" },
+    preferences: { eyebrow: "PREFERENCES", title: "功能与设置", description: "调整语言、界面密度以及消息提醒方式。" },
+    privacy: { eyebrow: "PRIVACY", title: "信息隐私与权限", description: "决定哪些账户信息和协作状态可以被其他成员看到。" },
+    help: { eyebrow: "SUPPORT", title: "帮助与反馈", description: "查找使用说明，或把你的问题与建议发送给产品团队。" },
+  };
+
+  function saveChanges() {
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 2200);
+  }
+
+  const toggle = (value: boolean, setValue: (value: boolean) => void, label: string) => (
+    <button
+      type="button"
+      className={`${styles.settingsToggle} ${value ? styles.settingsToggleOn : ""}`}
+      aria-pressed={value}
+      aria-label={label}
+      onClick={() => setValue(!value)}
+    >
+      <span />
+    </button>
+  );
+
+  return (
+    <section className={styles.accountSettingsShell}>
+      <header className={styles.accountSettingsTopbar}>
+        <button type="button" className={styles.settingsBackButton} onClick={close}>
+          <span>←</span> 返回工作区
+        </button>
+        <div className={styles.accountSettingsBrand}><i>林</i><b>CLICK-IN</b><span>个人中心</span></div>
+        <div className={styles.accountSettingsUser}><span>林淼</span><i>林</i></div>
+      </header>
+
+      <div className={styles.accountSettingsLayout}>
+        <aside className={styles.settingsSidebar}>
+          <div className={styles.settingsIdentity}>
+            <span>林</span>
+            <p><b>林淼</b><small>linmiao@click-in.cn</small></p>
+          </div>
+          <nav aria-label="个人中心导航">
+            <p>账户</p>
+            {ACCOUNT_MENU_ITEMS.slice(0, 2).map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className={page === item.id ? styles.settingsNavActive : ""}
+                onClick={() => setPage(item.id)}
+              >
+                <span>{item.id === "profile" ? "人" : "盾"}</span>{item.label}
+              </button>
+            ))}
+            <p>偏好与隐私</p>
+            {ACCOUNT_MENU_ITEMS.slice(2, 4).map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className={page === item.id ? styles.settingsNavActive : ""}
+                onClick={() => setPage(item.id)}
+              >
+                <span>{item.id === "preferences" ? "调" : "锁"}</span>{item.label}
+              </button>
+            ))}
+            <p>支持</p>
+            <button
+              type="button"
+              className={page === "help" ? styles.settingsNavActive : ""}
+              onClick={() => setPage("help")}
+            >
+              <span>?</span>帮助与反馈
+            </button>
+          </nav>
+          <div className={styles.settingsWorkspaceNote}>
+            <b>当前工作区</b>
+            <span>海边的罗密欧</span>
+            <small>个人设置对所有项目生效</small>
+          </div>
+        </aside>
+
+        <main className={styles.settingsMain}>
+          <div className={styles.settingsPageHeader}>
+            <p>{pageMeta[page].eyebrow}</p>
+            <h1>{pageMeta[page].title}</h1>
+            <span>{pageMeta[page].description}</span>
+          </div>
+
+          {page === "profile" && (
+            <>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>公开资料</h2><p>这些信息会出现在项目成员、任务和 Event 中。</p></div></div>
+                <div className={styles.profileEditor}>
+                  <div className={styles.settingsFormGrid}>
+                    <label><span>姓名</span><input defaultValue="林淼" /></label>
+                    <label><span>显示名称</span><input defaultValue="林淼 · 舞监" /></label>
+                    <label className={styles.settingsFullField}><span>个人简介</span><textarea defaultValue="制作人 / 舞台监督，负责跨部门排练协调与现场执行。" /></label>
+                    <label><span>所在城市</span><input defaultValue="上海" /></label>
+                    <label><span>联系电话</span><input defaultValue="+86 138 **** 6812" /></label>
+                  </div>
+                  <div className={styles.settingsAvatarEditor}>
+                    <span>林</span>
+                    <button type="button">更换头像</button>
+                    <small>JPG、PNG 或 WebP<br />最大 5 MB</small>
+                  </div>
+                </div>
+              </section>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>账户邮箱</h2><p>用于登录、接收安全提醒和找回账号。</p></div><Badge tone="green">已验证</Badge></div>
+                <label className={styles.settingsInlineField}><span>主邮箱</span><input defaultValue="linmiao@click-in.cn" /><button type="button">更换邮箱</button></label>
+              </section>
+            </>
+          )}
+
+          {page === "security" && (
+            <>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>密码与验证</h2><p>最近一次修改密码：2026 年 5 月 18 日</p></div><button type="button" className={styles.settingsOutlineButton}>修改密码</button></div>
+                <div className={styles.settingsPreferenceRow}>
+                  <div><b>双重验证</b><span>登录时需要密码和验证器动态码。</span></div>
+                  <div className={styles.settingsRowAction}><Badge tone="green">推荐</Badge>{toggle(twoFactor, setTwoFactor, "双重验证")}</div>
+                </div>
+                <div className={styles.settingsPreferenceRow}>
+                  <div><b>恢复方式</b><span>已保存 8 组恢复代码 · 安全邮箱已验证</span></div>
+                  <button type="button" className={styles.settingsTextButton}>管理恢复方式</button>
+                </div>
+              </section>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>登录设备</h2><p>如发现陌生设备，请立即退出并修改密码。</p></div></div>
+                <div className={styles.sessionRow}><span>桌</span><div><b>Windows · Chrome</b><small>上海 · 当前设备 · 刚刚活跃</small></div><Badge tone="green">当前</Badge></div>
+                <div className={styles.sessionRow}><span>手</span><div><b>iPhone · Click-In App</b><small>上海 · 7 月 27 日 22:18</small></div><button type="button" className={styles.settingsTextButton}>退出</button></div>
+              </section>
+            </>
+          )}
+
+          {page === "preferences" && (
+            <>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>界面偏好</h2><p>设置将同步至你登录的所有设备。</p></div></div>
+                <div className={styles.settingsFormGrid}>
+                  <label><span>语言</span><select defaultValue="zh"><option value="zh">简体中文</option><option value="en">English</option></select></label>
+                  <label><span>时区</span><select defaultValue="sh"><option value="sh">(UTC+08:00) 上海</option><option value="ld">(UTC+00:00) 伦敦</option></select></label>
+                  <label><span>界面主题</span><select defaultValue="system"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+                  <label><span>信息密度</span><select defaultValue="comfortable"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
+                </div>
+              </section>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>消息提醒</h2><p>控制跨项目通知的送达方式。</p></div></div>
+                <div className={styles.settingsPreferenceRow}><div><b>桌面提醒</b><span>重要 Task、Event 变更与 @提及</span></div>{toggle(desktopAlerts, setDesktopAlerts, "桌面提醒")}</div>
+                <div className={styles.settingsPreferenceRow}><div><b>每周工作摘要</b><span>每周一上午汇总待办、风险与里程碑</span></div>{toggle(weeklyDigest, setWeeklyDigest, "每周工作摘要")}</div>
+              </section>
+            </>
+          )}
+
+          {page === "privacy" && (
+            <>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>协作可见性</h2><p>项目管理员仍可按组织政策查看必要的审计信息。</p></div></div>
+                <div className={styles.settingsPreferenceRow}><div><b>展示协作动态</b><span>允许同项目成员查看你最近更新的 Task 与文件。</span></div>{toggle(activityVisible, setActivityVisible, "展示协作动态")}</div>
+                <div className={styles.settingsPreferenceRow}><div><b>展示在线状态</b><span>在头像旁显示当前在线或离开状态。</span></div>{toggle(presenceVisible, setPresenceVisible, "展示在线状态")}</div>
+              </section>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>数据与授权</h2><p>管理个人数据副本和第三方应用访问。</p></div></div>
+                <div className={styles.settingsPreferenceRow}><div><b>导出个人数据</b><span>生成你的个人资料、评论与操作记录副本。</span></div><button type="button" className={styles.settingsOutlineButton}>申请导出</button></div>
+                <div className={styles.settingsPreferenceRow}><div><b>已授权应用</b><span>当前没有第三方应用访问你的 Click-In 账号。</span></div><button type="button" className={styles.settingsTextButton}>查看详情</button></div>
+              </section>
+            </>
+          )}
+
+          {page === "help" && (
+            <>
+              <section className={`${styles.settingsCard} ${styles.helpSearchCard}`}>
+                <h2>有什么可以帮你？</h2>
+                <label><span>⌕</span><input type="search" placeholder="搜索功能、操作说明或常见问题" /></label>
+                <div className={styles.helpQuickLinks}>
+                  <button type="button"><b>入门指南</b><span>创建项目与加入团队</span></button>
+                  <button type="button"><b>协作手册</b><span>Event、Task 与通知</span></button>
+                  <button type="button"><b>账号问题</b><span>登录、安全与权限</span></button>
+                </div>
+              </section>
+              <section className={styles.settingsCard}>
+                <div className={styles.settingsCardTitle}><div><h2>发送反馈</h2><p>描述你遇到的问题或希望加入的能力。</p></div></div>
+                <div className={styles.settingsFormGrid}>
+                  <label><span>反馈类型</span><select><option>产品建议</option><option>使用问题</option><option>故障报告</option></select></label>
+                  <label><span>回复邮箱</span><input defaultValue="linmiao@click-in.cn" /></label>
+                  <label className={styles.settingsFullField}><span>详细描述</span><textarea placeholder="请尽量说明操作路径、预期结果和实际结果…" /></label>
+                </div>
+              </section>
+            </>
+          )}
+
+          <div className={styles.settingsActions}>
+            <span>{saved ? "✓ 更改已保存" : "设置仅影响你的个人账户"}</span>
+            <button type="button" onClick={saveChanges}>{page === "help" ? "发送反馈" : "保存更改"}</button>
+          </div>
+        </main>
+      </div>
+    </section>
   );
 }
 
@@ -555,9 +804,26 @@ function HomeView({ role, roleInfo, go, setDrawer, acknowledged }: {
 }) {
   return (
     <div className={styles.contentStack}>
-      <section className={styles.roleBanner}>
-        <div><Badge tone="blue">{role}</Badge><h2>{roleInfo.focus}</h2><p>{roleInfo.note}</p></div>
-        <div className={styles.roleSecondary}><span>默认关注</span><b>{roleInfo.secondary}</b></div>
+      <section className={styles.dashboardHero}>
+        <div className={styles.dashboardHeroIntro}>
+          <Badge tone="blue">{role}</Badge>
+          <span className={styles.dashboardHeroLabel}>TODAY&apos;S CONTROL DESK</span>
+          <h2>{roleInfo.focus}</h2>
+          <p>{roleInfo.note}</p>
+          <small>重点范围 · {roleInfo.secondary}</small>
+        </div>
+        <div className={styles.dashboardHeroData}>
+          <div className={styles.dashboardMetrics}>
+            <button type="button" onClick={() => go("notifications")}><strong>8</strong><span>待确认</span><small>较昨日 −3</small></button>
+            <button type="button" onClick={() => go("tasks")}><strong>2</strong><span>风险 Task</span><small>1 项今日截止</small></button>
+            <button type="button" onClick={() => go("events")}><strong>24</strong><span>距首演 / 天</span><small>3 个关键 Event</small></button>
+          </div>
+          <div className={styles.heroProjects}>
+            <span>项目进度</span>
+            <button type="button" onClick={() => go("project")}><b>海边的罗密欧</b><i><em style={{ width: "74%" }} /></i><strong>74%</strong></button>
+            <button type="button"><b>茶馆</b><i><em style={{ width: "28%" }} /></i><strong>28%</strong></button>
+          </div>
+        </div>
       </section>
       <div className={styles.dashboardGrid}>
         <section className={`${styles.panel} ${styles.todayPanel}`}>
@@ -576,7 +842,7 @@ function HomeView({ role, roleInfo, go, setDrawer, acknowledged }: {
             <button type="button" onClick={() => setDrawer("task")}><span className={styles.checkCircle}>○</span><span><b>首演 Call Sheet 复核</b><small>明天 · 需要 4 人确认</small></span></button>
           </div>
         </section>
-        <section className={styles.panel}>
+        <section className={`${styles.panel} ${styles.actionPanel}`}>
           <div className={styles.panelHeading}><div><p className={styles.kicker}>ACTION REQUIRED</p><h2>待确认</h2></div><button type="button" onClick={() => go("notifications")}>通知中心 →</button></div>
           <button type="button" className={styles.noticeCard} onClick={() => setDrawer("notification")}>
             <span className={styles.noticeIcon}>!</span><span><b>第三幕排练改至 13:30</b><small>{acknowledged ? "你已确认 · 仍有 3 人未确认" : "需要你的确认 · 8 人未确认"}</small></span><Badge tone={acknowledged ? "green" : "amber"}>{acknowledged ? "已确认" : "确认"}</Badge>
@@ -585,11 +851,12 @@ function HomeView({ role, roleInfo, go, setDrawer, acknowledged }: {
             <span className={styles.noticeIcon}>↗</span><span><b>你被指派了新的技术 Task</b><small>舞台右侧护栏加固 · 明天截止</small></span><Badge>查看</Badge>
           </button>
         </section>
-        <section className={styles.panel}>
-          <div className={styles.panelHeading}><div><p className={styles.kicker}>RECENT PROJECTS</p><h2>最近项目</h2></div></div>
-          <div className={styles.projectCards}>
-            <button type="button" onClick={() => go("project")}><span className={styles.projectPoster}>海</span><span><b>海边的罗密欧</b><small>棱镜剧团 · 联排期</small></span><strong>74%</strong></button>
-            <button type="button"><span className={`${styles.projectPoster} ${styles.posterAlt}`}>茶</span><span><b>茶馆</b><small>棱镜剧团 · 前期筹备</small></span><strong>28%</strong></button>
+        <section className={`${styles.panel} ${styles.eventRoadmapPanel}`}>
+          <div className={styles.panelHeading}><div><p className={styles.kicker}>KEY EVENTS</p><h2>关键 Event</h2></div><button type="button" onClick={() => go("events")}>全部 →</button></div>
+          <div className={styles.eventRoadmap}>
+            <button type="button" onClick={() => go("events")}><time><b>20</b><small>7 月</small></time><span><b>第三幕合成排练</b><small>今天 · 13:30 · 黑匣子 B</small></span><em>进行中</em></button>
+            <button type="button" onClick={() => go("events")}><time><b>27</b><small>7 月</small></time><span><b>第一次全本联排</b><small>7 天后 · 排练厅 A</small></span><em>待准备</em></button>
+            <button type="button" onClick={() => go("events")}><time><b>13</b><small>8 月</small></time><span><b>首演</b><small>24 天后 · 城市剧院</small></span><em>里程碑</em></button>
           </div>
         </section>
       </div>
@@ -618,6 +885,235 @@ function ProjectView({ go }: { go: (v: View) => void }) {
         <div><span>剧本台词</span><i>→</i><span>Cue</span><i>→</i><span>Event / Timetable</span></div>
         <div><span>场次 / 角色</span><i>→</i><span>人员与 Call</span><i>→</i><span>Notification</span></div>
         <div><span>长线 Task</span><i>↔</i><span>多个 Event</span><i>↔</i><span>里程碑 / Gantt</span></div>
+      </section>
+    </div>
+  );
+}
+
+function ScriptWorkspace({ go }: { go: (v: View) => void }) {
+  const [activeScene, setActiveScene] = useState("第三幕 · 海边重逢");
+  const [rehearsalMode, setRehearsalMode] = useState(false);
+  const [showNotes, setShowNotes] = useState(true);
+  const [saved, setSaved] = useState(true);
+  const scenes = [
+    { chapter: "第一幕", name: "旧城来信", page: 1, state: "已确认" },
+    { chapter: "第二幕", name: "潮汐之前", page: 18, state: "已确认" },
+    { chapter: "第三幕", name: "海边重逢", page: 37, state: "编辑中" },
+    { chapter: "第四幕", name: "告别与回声", page: 54, state: "待校对" },
+  ];
+  const lines = [
+    { no: 116, speaker: "舞台提示", text: "（海浪声渐强。远处的灯塔亮起，罗密欧从观众席右侧通道进入。）", note: "LX 34 · SD 18" },
+    { no: 117, speaker: "罗密欧", text: "我循着那束光走了很久，以为它会把我带回维罗纳。", note: "" },
+    { no: 118, speaker: "朱丽叶", text: "可这里没有维罗纳，只有潮水记得我们曾经说过的话。", note: "重点台词" },
+    { no: 119, speaker: "罗密欧", text: "那么，就让潮水替我们保守最后一个秘密。", note: "V 09" },
+    { no: 120, speaker: "舞台提示", text: "（两人相隔三步。灯光从冷蓝缓慢过渡至日落色。）", note: "LX 38 · 5s" },
+    { no: 121, speaker: "朱丽叶", text: "天亮之前，你还会离开吗？", note: "" },
+  ];
+
+  return (
+    <div className={`${styles.contentStack} ${styles.productionWorkspace}`}>
+      <section className={styles.productionToolbar}>
+        <div className={styles.toolbarContext}>
+          <span>工作版本</span>
+          <select defaultValue="v12"><option value="v12">V12 · 联排版</option><option value="v11">V11 · 导演修订</option></select>
+          <Badge tone="green">Editing</Badge>
+        </div>
+        <div className={styles.toolbarCenter}>
+          <button type="button" aria-pressed={rehearsalMode} onClick={() => setRehearsalMode((value) => !value)}>
+            <i className={rehearsalMode ? styles.toggleOn : ""}><span /></i>
+            {rehearsalMode ? "排练模式" : "编辑模式"}
+          </button>
+          <span>{saved ? "✓ 已同步" : "正在保存…"}</span>
+        </div>
+        <div className={styles.toolbarActions}>
+          <button type="button" onClick={() => setShowNotes((value) => !value)}>{showNotes ? "隐藏批注" : "显示批注"}</button>
+          <button type="button">⌕ 搜索</button>
+          <button type="button">显示 ⌄</button>
+        </div>
+      </section>
+
+      <section className={`${styles.productionFrame} ${!showNotes ? styles.productionFrameNoNotes : ""}`}>
+        <aside className={styles.scriptOutline}>
+          <div className={styles.railHeading}><span>目录</span><button type="button">＋</button></div>
+          <div className={styles.outlineProgress}><span><i /></span><small>剧本 74% 已确认</small></div>
+          {scenes.map((scene) => (
+            <button
+              type="button"
+              key={scene.name}
+              className={activeScene.includes(scene.name) ? styles.outlineActive : ""}
+              onClick={() => setActiveScene(`${scene.chapter} · ${scene.name}`)}
+            >
+              <small>{scene.chapter} · P.{scene.page}</small>
+              <b>{scene.name}</b>
+              <em>{scene.state}</em>
+            </button>
+          ))}
+          <button type="button" className={styles.outlineLink} onClick={() => go("dramaturgy")}>打开构作视图 →</button>
+        </aside>
+
+        <article className={`${styles.scriptPaper} ${rehearsalMode ? styles.scriptPaperRehearsal : ""}`}>
+          <header>
+            <div><p>ACT III · SCENE 04</p><h2>{activeScene}</h2></div>
+            <span>37 / 68 页</span>
+          </header>
+          <div className={styles.scriptSceneMeta}>
+            <span>地点：海边平台</span><span>预计：12 min</span><span>人物：罗密欧、朱丽叶</span>
+          </div>
+          <div className={styles.scriptLines}>
+            {lines.map((line) => (
+              <button type="button" key={line.no} onClick={() => { setSaved(false); window.setTimeout(() => setSaved(true), 700); }}>
+                <span>{line.no}</span>
+                <strong>{line.speaker}</strong>
+                <p>{line.text}</p>
+                {line.note && <em>{line.note}</em>}
+              </button>
+            ))}
+          </div>
+          <footer><span>V12 · 自动保存</span><span>字数 326 · 约 3 分钟</span></footer>
+        </article>
+
+        {showNotes && (
+          <aside className={styles.scriptInspector}>
+            <div className={styles.railHeading}><span>协作与批注</span><button type="button">•••</button></div>
+            <div className={styles.onlineEditors}><span>林</span><span>陈</span><span>王</span><small>3 人在线</small></div>
+            <article><div><b>林淼</b><time>10:24</time></div><p>这里的进场路径已经与第三幕排练 Event 同步，注意从观众席右侧进入。</p><button type="button">回复</button></article>
+            <article><div><b>陈洛华</b><time>昨天</time></div><p>第 118 行希望保留一次停顿，可否加排练记号？</p><button type="button">回复</button></article>
+            <div className={styles.relatedObjects}>
+              <span>关联对象</span>
+              <button type="button" onClick={() => go("cue")}><b>8</b><small>Cue</small></button>
+              <button type="button" onClick={() => go("events")}><b>2</b><small>Event</small></button>
+              <button type="button" onClick={() => go("tasks")}><b>4</b><small>Task</small></button>
+            </div>
+          </aside>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function DramaturgyWorkspace({ go }: { go: (v: View) => void }) {
+  const [tab, setTab] = useState<"scenes" | "characters">("scenes");
+  const [mode, setMode] = useState<"table" | "list">("table");
+  const [selected, setSelected] = useState("s3");
+  const scenes = [
+    { id: "s1", no: "01", name: "旧城来信", synopsis: "一封迟到的信打破平静", action: "收到消息 → 决定离开", chars: "罗密欧 · 劳伦斯", duration: "14 min", mark: "稳定" },
+    { id: "s2", no: "02", name: "潮汐之前", synopsis: "两条行动线在港口交汇", action: "寻找 → 错过 → 等待", chars: "朱丽叶 · 护士", duration: "18 min", mark: "待讨论" },
+    { id: "s3", no: "03", name: "海边重逢", synopsis: "重逢后确认彼此的选择", action: "试探 → 坦白 → 约定", chars: "罗密欧 · 朱丽叶", duration: "12 min", mark: "本周重点" },
+    { id: "s4", no: "04", name: "告别与回声", synopsis: "天亮前完成最后一次告别", action: "拖延 → 接受 → 离开", chars: "全体", duration: "16 min", mark: "待校对" },
+  ];
+  const characters = [
+    { name: "罗密欧", scenes: 12, lines: 184, relation: "核心行动线", state: "陈洛华" },
+    { name: "朱丽叶", scenes: 11, lines: 176, relation: "核心行动线", state: "周嘉" },
+    { name: "劳伦斯", scenes: 5, lines: 62, relation: "信息推动者", state: "徐宁" },
+    { name: "护士", scenes: 6, lines: 71, relation: "情感支点", state: "待定" },
+  ];
+
+  return (
+    <div className={`${styles.contentStack} ${styles.productionWorkspace}`}>
+      <section className={styles.productionToolbar}>
+        <div className={styles.toolbarContext}><span>结构版本</span><select defaultValue="v12"><option value="v12">V12 · 联排版</option></select><Badge tone="blue">可编辑</Badge></div>
+        <div className={styles.dramaturgyTabs}>
+          <button type="button" aria-pressed={tab === "scenes"} onClick={() => setTab("scenes")}>章节</button>
+          <button type="button" aria-pressed={tab === "characters"} onClick={() => setTab("characters")}>角色</button>
+        </div>
+        <div className={styles.toolbarActions}>
+          {tab === "scenes" && <><button type="button" aria-pressed={mode === "list"} onClick={() => setMode("list")}>☰ 列表</button><button type="button" aria-pressed={mode === "table"} onClick={() => setMode("table")}>⊞ 表格</button></>}
+          <button type="button">视图：构作总览 ⌄</button><button type="button">列设置</button>
+        </div>
+      </section>
+
+      {tab === "scenes" ? (
+        <section className={styles.dramaturgyFrame}>
+          <div className={styles.structureSummary}>
+            <div><strong>4</strong><span>章节</span><small>68 页</small></div>
+            <div><strong>60</strong><span>预计分钟</span><small>较 V11 −4 min</small></div>
+            <div><strong>8</strong><span>排练记号</span><small>3 个本周新增</small></div>
+            <div><strong>2</strong><span>待处理</span><small>时长 / 角色确认</small></div>
+          </div>
+          {mode === "table" ? (
+            <div className={styles.dramaturgyTableWrap}>
+              <table className={styles.dramaturgyTable}>
+                <thead><tr><th>章节</th><th>梗概</th><th>行动线</th><th>角色</th><th>预计时长</th><th>状态</th></tr></thead>
+                <tbody>{scenes.map((scene) => <tr key={scene.id} className={selected === scene.id ? styles.tableRowSelected : ""} onClick={() => setSelected(scene.id)}><td><small>{scene.no}</small><b>{scene.name}</b></td><td>{scene.synopsis}</td><td>{scene.action}</td><td>{scene.chars}</td><td>{scene.duration}</td><td><Badge tone={scene.mark === "本周重点" ? "amber" : scene.mark === "稳定" ? "green" : "neutral"}>{scene.mark}</Badge></td></tr>)}</tbody>
+              </table>
+            </div>
+          ) : (
+            <div className={styles.dramaturgyCards}>{scenes.map((scene) => <button type="button" key={scene.id} onClick={() => setSelected(scene.id)} className={selected === scene.id ? styles.dramaturgyCardActive : ""}><span>{scene.no}</span><div><h3>{scene.name}</h3><p>{scene.synopsis}</p><small>{scene.action}</small></div><time>{scene.duration}</time></button>)}</div>
+          )}
+          <aside className={styles.structureInspector}>
+            <div className={styles.railHeading}><span>章节详情</span><button type="button">编辑</button></div>
+            {(() => { const scene = scenes.find((item) => item.id === selected) ?? scenes[2]; return <><h3>{scene.no} · {scene.name}</h3><label><span>梗概</span><textarea defaultValue={scene.synopsis} /></label><label><span>行动线</span><input defaultValue={scene.action} /></label><label><span>音乐 / 舞台提示</span><input defaultValue="海浪主题 · 灯塔亮起" /></label><button type="button" onClick={() => go("script")}>在剧本中定位 →</button></>; })()}
+          </aside>
+        </section>
+      ) : (
+        <section className={styles.characterMatrix}>
+          <div className={styles.characterMatrixHeader}><div><p>CHARACTER MAP</p><h2>角色与行动线</h2></div><button type="button">＋ 新建角色</button></div>
+          <div className={styles.characterRows}>{characters.map((character, index) => <article key={character.name}><span>{character.name.slice(0, 1)}</span><div><h3>{character.name}</h3><p>{character.relation}</p></div><dl><div><dt>出现章节</dt><dd>{character.scenes}</dd></div><div><dt>台词</dt><dd>{character.lines}</dd></div><div><dt>演员</dt><dd>{character.state}</dd></div></dl><i style={{ "--character-width": `${92 - index * 14}%` } as React.CSSProperties} /></article>)}</div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function CueWorkspace({ go, setDrawer }: { go: (v: View) => void; setDrawer: (v: "cue") => void }) {
+  const [activeList, setActiveList] = useState("LX");
+  const [visibleLists, setVisibleLists] = useState<string[]>(["LX", "SD", "V"]);
+  const [selectedCue, setSelectedCue] = useState("LX 38");
+  const cueLists = [
+    { id: "LX", name: "灯光", count: 42, color: "teal" },
+    { id: "SD", name: "音响", count: 23, color: "amber" },
+    { id: "V", name: "多媒体", count: 12, color: "blue" },
+    { id: "STG", name: "舞台", count: 18, color: "brown" },
+  ];
+  const cues = [
+    { id: "LX 34", list: "LX", line: "116", title: "灯塔预亮", detail: "20% 冷白 · 3 秒", status: "已确认" },
+    { id: "SD 18", list: "SD", line: "116", title: "海浪声渐强", detail: "-18dB → -8dB · 8 秒", status: "已确认" },
+    { id: "V 09", list: "V", line: "119", title: "海面反光素材", detail: "循环播放 · 同步 LX 38", status: "待联调" },
+    { id: "LX 38", list: "LX", line: "120", title: "冷蓝转日落色", detail: "5 秒淡变 · GO on action", status: "有风险" },
+  ];
+  const activeCue = cues.find((cue) => cue.id === selectedCue) ?? cues[3];
+
+  function toggleVisible(id: string) {
+    setVisibleLists((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id]);
+  }
+
+  return (
+    <div className={`${styles.contentStack} ${styles.productionWorkspace}`}>
+      <section className={styles.productionToolbar}>
+        <div className={styles.cueListFilters}>{cueLists.map((list) => <button type="button" key={list.id} data-tone={list.color} aria-pressed={visibleLists.includes(list.id)} onClick={() => toggleVisible(list.id)}><b>{list.id}</b><span>{list.name}</span><small>{list.count}</small></button>)}</div>
+        <div className={styles.cueActiveSelector}><span>激活表</span><select value={activeList} onChange={(event) => setActiveList(event.target.value)}>{cueLists.map((list) => <option key={list.id}>{list.id}</option>)}</select><Badge tone="green">可编辑</Badge></div>
+        <div className={styles.toolbarActions}><button type="button">行</button><button type="button">页</button><button type="button">段落</button><button type="button">导出</button></div>
+      </section>
+
+      <section className={styles.cueFrame}>
+        <aside className={styles.cueIndex}>
+          <div className={styles.railHeading}><span>Cue 表</span><button type="button">＋</button></div>
+          <div className={styles.cueIndexSummary}><b>{activeList}</b><span>{cueLists.find((item) => item.id === activeList)?.name}</span><small>{cues.filter((cue) => cue.list === activeList).length} 个当前段落 Cue</small></div>
+          {cues.filter((cue) => visibleLists.includes(cue.list)).map((cue) => <button type="button" key={cue.id} className={selectedCue === cue.id ? styles.cueIndexActive : ""} onClick={() => setSelectedCue(cue.id)}><span>{cue.id}</span><div><b>{cue.title}</b><small>行 {cue.line} · {cue.status}</small></div></button>)}
+          <button type="button" className={styles.outlineLink} onClick={() => go("planning")}>查看演出执行表 →</button>
+        </aside>
+
+        <article className={styles.cueScript}>
+          <header><div><p>第三幕 · 海边重逢</p><h2>剧本锚点与部门 Cue</h2></div><span>滚动锁定</span></header>
+          <div className={styles.cueScriptRows}>
+            {[116,117,118,119,120,121].map((line) => {
+              const lineCues = cues.filter((cue) => cue.line === String(line) && visibleLists.includes(cue.list));
+              const text: Record<number,string> = {116:"（海浪声渐强。远处的灯塔亮起。）",117:"罗密欧　我循着那束光走了很久。",118:"朱丽叶　这里只有潮水记得我们。",119:"罗密欧　让潮水替我们保守最后一个秘密。",120:"（两人相隔三步。灯光缓慢过渡。）",121:"朱丽叶　天亮之前，你还会离开吗？"};
+              return <div key={line} className={lineCues.length ? styles.cueScriptRowMarked : ""}><span>{line}</span><p>{text[line]}</p><div>{lineCues.map((cue) => <button type="button" key={cue.id} data-list={cue.list} className={selectedCue === cue.id ? styles.cueChipActive : ""} onClick={() => setSelectedCue(cue.id)}><b>{cue.id}</b><small>{cue.title}</small></button>)}</div></div>;
+            })}
+          </div>
+          <button type="button" className={styles.insertCueButton}>＋ 在所选位置插入 {activeList} Cue</button>
+        </article>
+
+        <aside className={styles.cueInspector}>
+          <div className={styles.railHeading}><span>Cue 详情</span><button type="button" onClick={() => setDrawer("cue")}>•••</button></div>
+          <div className={styles.cueInspectorTitle}><Badge tone={activeCue.status === "有风险" ? "red" : "blue"}>{activeCue.status}</Badge><h3>{activeCue.id} · {activeCue.title}</h3><p>锚定行 {activeCue.line} · 第三幕 / 排练记号 C</p></div>
+          <label><span>执行说明</span><textarea defaultValue={activeCue.detail} /></label>
+          <label><span>触发方式</span><select defaultValue="action"><option value="action">GO on action</option><option value="line">GO on line</option><option value="time">按时间</option></select></label>
+          <label><span>负责人</span><input defaultValue={activeCue.list === "LX" ? "王恺镔 · 灯光" : activeCue.list === "SD" ? "周嘉 · 音响" : "韩松 · 多媒体"} /></label>
+          <div className={styles.cueComments}><span>评论 · 2</span><p><b>林淼</b> 淡变改为 5 秒，和视频尾帧对齐。</p><button type="button">打开讨论 →</button></div>
+          <button type="button" className={styles.cueSaveButton}>保存 Cue</button>
+        </aside>
       </section>
     </div>
   );
