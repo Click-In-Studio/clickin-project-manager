@@ -97,7 +97,11 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
         <div className={styles.weekGridScroll}>
           <div className={styles.weekGrid}>
             {weekDays.map(day => (
-              <div key={day.isoDate} className={styles.weekDay}>
+              <Link
+                key={day.isoDate}
+                href={`/my/daily-call?date=${day.isoDate}`}
+                className={`${styles.weekDay} ${styles.weekDayLink}`}
+              >
                 <div className={styles.weekDayLabel}>{day.dow}</div>
                 <div className={`${styles.weekDayDate} ${day.isoDate === todayIso ? styles.today : ""}`}>
                   {day.date}
@@ -109,7 +113,7 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
                     </span>
                   ))
                 )}
-              </div>
+              </Link>
             ))}
           </div>
         </div>

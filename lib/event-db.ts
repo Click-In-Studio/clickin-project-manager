@@ -1828,8 +1828,21 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
   }));
 }
 
+function currentCSTWeekRange(): { weekStart: Date; weekEnd: Date } {
+  const now = new Date(Date.now() + 8 * 3_600_000); // shift to CST
+  const dow = now.getUTCDay();
+  const afterSundayNoon = dow === 0 && (now.getUTCHours() > 12 || (now.getUTCHours() === 12 && now.getUTCMinutes() >= 0));
+  const daysFromMonday = dow === 0 ? 6 : dow - 1;
+  const weekOffset = afterSundayNoon ? 7 : 0;
+  const mondayCSTDate = now.getUTCDate() - daysFromMonday + weekOffset;
+  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), mondayCSTDate) - 8 * 3_600_000);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 3_600_000);
+  return { weekStart, weekEnd };
+}
+
 export async function listMyUpcomingCallTimes(userId: string, productionId?: string): Promise<MyCallTimeEntry[]> {
-  const params: unknown[] = [userId];
+  const { weekStart, weekEnd } = currentCSTWeekRange();
+  const params: unknown[] = [userId, weekStart.toISOString(), weekEnd.toISOString()];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     id: string; call_at: Date; notes: string;
@@ -1844,8 +1857,8 @@ export async function listMyUpcomingCallTimes(userId: string, productionId?: str
      JOIN production p ON p.id = pe.production_id
      WHERE ect.user_id = $1
        AND pe.status = 'published'
-       AND ect.call_at >= now()
-       AND ect.call_at <= now() + interval '7 days'
+       AND ect.call_at >= $2
+       AND ect.call_at < $3
        ${prodFilter}
      ORDER BY ect.call_at`,
     params

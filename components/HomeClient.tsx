@@ -36,9 +36,19 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
 
   const activeProductions = productions.filter(p => !p.archivedAt);
 
-  // Call times: filter for today or show full week
-  const todayCalls = myCallTimes.filter(ct => cstDateStr(ct.callAt) === today);
-  const displayCalls = callView === "today" ? todayCalls : myCallTimes;
+  // "即将到来": future calls today + (if after noon CST) tomorrow
+  const nowCST = new Date(Date.now() + 8 * 3_600_000);
+  const isAfterNoon = nowCST.getUTCHours() >= 12;
+  const tomorrowCST = new Date(nowCST.getTime() + 86_400_000);
+  const tomorrow = `${tomorrowCST.getUTCFullYear()}-${String(tomorrowCST.getUTCMonth() + 1).padStart(2, "0")}-${String(tomorrowCST.getUTCDate()).padStart(2, "0")}`;
+  const nowIso = new Date().toISOString();
+  const upcomingCalls = myCallTimes.filter(ct => {
+    if (ct.callAt <= nowIso) return false;
+    const d = cstDateStr(ct.callAt);
+    return d === today || (isAfterNoon && d === tomorrow);
+  });
+
+  const displayCalls = callView === "today" ? upcomingCalls : myCallTimes;
 
   const callsByDate = new Map<string, MyCallTimeEntry[]>();
   for (const ct of displayCalls) {
@@ -77,10 +87,10 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
             <div className={styles.panelHeading}>
               <div>
                 <p className={styles.kicker}>My Schedule</p>
-                <h2>{callView === "today" ? "今天" : "本周"}</h2>
+                <h2>{callView === "today" ? "即将到来" : "本周"}</h2>
               </div>
               <div className={styles.viewToggle}>
-                <button aria-pressed={callView === "today"} onClick={() => setCallView("today")}>今天</button>
+                <button aria-pressed={callView === "today"} onClick={() => setCallView("today")}>即将</button>
                 <button aria-pressed={callView === "week"} onClick={() => setCallView("week")}>本周</button>
               </div>
             </div>
@@ -88,7 +98,7 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
             <div className={styles.panelBody}>
               {displayCalls.length === 0 ? (
                 <div className={styles.emptyState}>
-                  {callView === "today" ? "今天暂无 Call" : "本周暂无 Call"}
+                  {callView === "today" ? "暂无即将到来的 Call" : "本周暂无 Call"}
                 </div>
               ) : (
                 <div className={styles.timelineList}>

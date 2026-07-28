@@ -230,10 +230,29 @@
   color: var(--ink);
   margin-bottom: 8px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
 }
 
 .weekDayDate.today {
-  color: var(--script);
+  border-radius: 50%;
+  background: var(--script);
+  color: #fff;
+  font-size: 18px;
+}
+
+.weekDayLink {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.weekDayLink:hover {
+  background: var(--surface-2);
 }
 
 .weekCallPill {
