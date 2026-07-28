@@ -6099,7 +6099,7 @@ function SideBlockPanel({
 
   return (
     <div
-      className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl"
+      className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full"
       style={{
         top: SIDE_PANEL_TOP_PX,
         width: hasGutterSpace
@@ -10781,6 +10781,12 @@ export default function ScriptEditor({
             )}
           </div>
           <div className={`${toolbarCompact ? "relative shrink-0" : "hidden"}`}>
+            {(moreMenuOpen || openMenu !== null) && (
+              <div
+                className="fixed inset-0 z-20"
+                onClick={() => { setMoreMenuOpen(false); setOpenMenu(null); }}
+              />
+            )}
             <button
               type="button"
               aria-label="更多工具"
@@ -11767,7 +11773,9 @@ export default function ScriptEditor({
       </div>
 
       {tagEditorOpen && productionId && (
-        <div className="fixed right-0 top-[7.5rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl">
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setTagEditorOpen(false)} />
+        <div className="fixed right-0 top-[7.5rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full">
           <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">标签设置</span>
             <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
@@ -11781,9 +11789,12 @@ export default function ScriptEditor({
             />
           </div>
         </div>
+        </>
       )}
 
       {activeAssetBlockId && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveAssetBlockId(null)} />
         <SideBlockPanel
           blockId={activeAssetBlockId}
           title="附件"
@@ -11811,9 +11822,12 @@ export default function ScriptEditor({
             />
           </div>
         </SideBlockPanel>
+        </>
       )}
 
       {activeCommentBlockId && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveCommentBlockId(null)} />
         <CommentsPanel
           blockId={activeCommentBlockId}
           productionId={productionId}
@@ -11835,6 +11849,7 @@ export default function ScriptEditor({
             onNext: () => navigateSidePanelBlock("comment", 1),
           }}
         />
+        </>
       )}
 
       {pendingLockedMode !== null && (

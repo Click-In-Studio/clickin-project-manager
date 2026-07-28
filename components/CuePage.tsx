@@ -2001,10 +2001,12 @@ export default function CuePage({
             ⋮
           </button>
           {cueMoreOpen && (
-            <div
-              className="fixed right-2 top-[3.75rem] z-50 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-2 shadow-lg"
-              onClick={e => e.stopPropagation()}
-            >
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setCueMoreOpen(false)} />
+              <div
+                className="fixed right-2 top-[3.75rem] z-50 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-2 shadow-lg"
+                onClick={e => e.stopPropagation()}
+              >
               <div className="px-3 py-1.5 flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
@@ -2044,6 +2046,7 @@ export default function CuePage({
                 导出
               </button>
             </div>
+            </>
           )}
         </div>
       </div>

@@ -120,6 +120,17 @@ span[data-stage-inline] {
   font-family: var(--font-stage);
 }
 
+/* Side panels: fill content area on mobile (below header, above bottom nav) */
+@media (max-width: 639px) {
+  .panel-mobile-full {
+    top: 7.5rem !important;
+    right: 0 !important;
+    bottom: 3.5rem !important;
+    left: 0 !important;
+    width: 100% !important;
+  }
+}
+
 @media print {
   @page {
     size: A4 portrait;
