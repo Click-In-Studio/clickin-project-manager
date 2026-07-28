@@ -51,14 +51,12 @@ export default async function DramaturgyPage({
     ?? versions[0]?.id
     ?? null;
 
-  const scenes = resolvedVersionId
-    ? await (async () => {
-        return Promise.all([
-          listMarkerProjectionByVersion(resolvedVersionId),
-          listCharactersByVersion(resolvedVersionId),
-        ]);
-      })()
-    : [];
+  const [scenes] = resolvedVersionId
+    ? await Promise.all([
+        listMarkerProjectionByVersion(resolvedVersionId),
+        listCharactersByVersion(resolvedVersionId),
+      ])
+    : [[]];
 
   return (
     <Suspense>
