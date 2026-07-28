@@ -8,7 +8,7 @@ const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/api/oath-callback"];
 // Paths that accept a card token (?t=...) in lieu of a session
 const TOKEN_ALLOWED_PREFIXES = ["/my/weekly-call", "/my/daily-call"];
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
   if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) return NextResponse.next();
