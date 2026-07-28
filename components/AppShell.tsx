@@ -262,6 +262,14 @@ export default function AppShell({ session, productions, children }: AppShellPro
                     管理后台
                   </Link>
                 )}
+                <Link
+                  href="/my/notifications"
+                  onClick={() => setDropdownOpen(false)}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
+                >
+                  <span className="text-[11px] opacity-40">🔔</span>
+                  通知偏好设置
+                </Link>
                 <div className="h-px bg-[var(--line)] mx-3 my-1" />
                 <form action={`${BASE_PATH}/api/auth/logout`} method="post">
                   <button
