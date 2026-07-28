@@ -566,7 +566,7 @@ export default function CharactersManager({ productionId, productionName, initia
   if (embedded) return card;
 
   return (
-    <div style={{ padding: "28px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div style={{ padding: "20px 20px 60px", minHeight: "100vh", background: "var(--paper)" }}>
       {card}
     </div>
   );

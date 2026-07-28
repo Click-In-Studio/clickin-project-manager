@@ -256,6 +256,7 @@ export default function CueListsManager({
         )}
       </div>
 
+      <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "20px 24px", minHeight: "calc(100vh - 280px)" }}>
       {/* Filter tab bar */}
       <div className={styles.tabBar} style={{ marginBottom: 20 }}>
         {(Object.keys(FILTER_LABELS) as Filter[]).map(f => (
@@ -267,7 +268,7 @@ export default function CueListsManager({
 
       {/* Card grid */}
       {filtered.length === 0 ? (
-        <div style={{ borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface)", padding: "48px 24px", textAlign: "center" }}>
+        <div style={{ padding: "48px 0", textAlign: "center" }}>
           <p style={{ fontSize: 13, color: "var(--muted)" }}>{lists.length === 0 ? "暂无 Cue 表" : "没有符合条件的 Cue 表"}</p>
         </div>
       ) : (
@@ -279,7 +280,7 @@ export default function CueListsManager({
               style={{
                 display: "block", width: "100%", textAlign: "left", cursor: "pointer",
                 borderRadius: 12, border: "1px solid var(--line)",
-                background: "var(--surface)", padding: "16px 18px",
+                background: "var(--surface-2)", padding: "16px 18px",
                 transition: "box-shadow .15s",
               }}
               onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 2px 10px rgba(24,42,42,.08)"; }}
@@ -312,6 +313,7 @@ export default function CueListsManager({
           ))}
         </div>
       )}
+      </div>
 
       {/* Create modal */}
       {creating && (

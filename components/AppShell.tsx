@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -61,7 +61,7 @@ function NavItem({
       href={href}
       className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors ${
         active
-          ? "bg-[#fffefa] shadow-[inset_3px_0_0_#182a2a]"
+          ? "bg-[var(--surface)] shadow-[inset_3px_0_0_#182a2a]"
           : "hover:bg-white/50"
       }`}
     >
@@ -118,6 +118,11 @@ function BottomNavItem({
 export default function AppShell({ session, productions, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+
+  useEffect(() => {
+    document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
+  }, [pathname]);
+
   if (!session || pathname.startsWith("/login")) {
     return <>{children}</>;
   }
@@ -141,9 +146,9 @@ export default function AppShell({ session, productions, children }: AppShellPro
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f2ec]">
+    <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
-      <header className="h-16 bg-[#fffefa] border-b border-[#dfe5e2] flex items-center gap-5 px-5 sticky top-0 z-40">
+      <header className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-40">
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[10px] font-bold flex items-center justify-center select-none">
@@ -164,7 +169,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
                 if (e.target.value) router.push(`/production/${e.target.value}`);
                 else router.push("/");
               }}
-              className="border border-[#dfe5e2] bg-[#f4f2ec] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a] max-w-[180px] lg:max-w-[240px]"
+              className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a] max-w-[180px] lg:max-w-[240px]"
             >
               <option value="">— 选择项目 —</option>
               {activeProductions.map((p) => (
@@ -176,7 +181,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
           {productionId && currentProduction && currentProduction.roles.length > 0 && (
             <div className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
               <span className="hidden lg:block shrink-0">我的角色</span>
-              <span className="border border-[#dfe5e2] bg-[#f4f2ec] rounded-lg py-2 px-2.5 text-[#182a2a] text-[12px]">
+              <span className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 px-2.5 text-[#182a2a] text-[12px]">
                 {currentProduction.roles.join(" · ")}
               </span>
             </div>
@@ -187,7 +192,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
         <div className="ml-auto flex items-center gap-3">
           <Link
             href="/my/notifications"
-            className="w-9 h-9 rounded-full border border-[#dfe5e2] bg-[#fffefa] flex items-center justify-center text-[#667676] hover:bg-[#f4f2ec] transition-colors text-sm shrink-0"
+            className="w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] flex items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
             title="通知"
           >
             ◉
@@ -205,9 +210,9 @@ export default function AppShell({ session, productions, children }: AppShellPro
       </header>
 
       {/* Body: sidebar + workspace */}
-      <div className="flex">
+      <div className="flex flex-1 min-h-0">
         {/* Sidebar (desktop only) */}
-        <aside className="hidden lg:flex w-[240px] shrink-0 flex-col sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto bg-[#e8e8e1] border-r border-[#dfe5e2] px-3.5 py-5">
+        <aside className="hidden lg:flex w-[240px] shrink-0 flex-col overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] px-3.5 py-5">
           <nav className="flex flex-col gap-0.5 flex-1">
             {!productionId && (
               <div className="mt-1 flex flex-col gap-0.5">
@@ -304,11 +309,11 @@ export default function AppShell({ session, productions, children }: AppShellPro
         </aside>
 
         {/* Workspace */}
-        <main className="flex-1 min-w-0 pb-16 lg:pb-0">{children}</main>
+        <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-[#fffefa] border-t border-[#dfe5e2] flex z-40 safe-area-bottom">
+      <nav className="lg:hidden shrink-0 bg-[var(--surface)] border-t border-[var(--line)] flex z-40 safe-area-bottom">
         <BottomNavItem href="/" label="今日" symbol="⌂" active={isHome} />
         <BottomNavItem
           href={productionId ? `/production/${productionId}` : "/"}

@@ -116,9 +116,6 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
             </div>
           </section>
 
-          </div>{/* end left col */}
-          <div className={styles.dashboardCol}>
-
           {/* 3. 我的 Task */}
           <section className={styles.panel}>
             <div className={styles.panelHeading}>
@@ -154,6 +151,9 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
               </Link>
             </div>
           </section>
+
+          </div>{/* end left col */}
+          <div className={styles.dashboardCol}>
 
           {/* 4. 待确认 */}
           <section className={styles.panel}>
@@ -210,39 +210,39 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
             </div>
           </section>
 
-          {/* 6. 我的项目 */}
-          <section className={styles.panel}>
-            <div className={styles.panelHeading}>
-              <div>
-                <p className={styles.kicker}>My Productions</p>
-                <h2>我的项目</h2>
-              </div>
-            </div>
-            <div className={styles.panelBody}>
-              {activeProductions.length === 0 ? (
-                <div className={styles.emptyState}>暂无进行中项目</div>
-              ) : (
-                <div className={styles.compactList}>
-                  {activeProductions.slice(0, 3).map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => router.push(`/production/${p.id}`)}
-                    >
-                      <span className={styles.compactLabel}>
-                        <b>{p.name}</b>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <Link href="/my/projects" className={styles.panelSeeAll}>
-                {activeProductions.length > 3 ? `查看全部 ${productions.length} 个项目 →` : "管理项目 →"}
-              </Link>
-            </div>
-          </section>
-
           </div>{/* end right col */}
         </div>{/* end dashboardGrid */}
+
+        {/* 6. 我的项目 — full width */}
+        <section className={styles.panel} style={{ marginTop: 18 }}>
+          <div className={styles.panelHeading}>
+            <div>
+              <p className={styles.kicker}>My Productions</p>
+              <h2>我的项目</h2>
+            </div>
+          </div>
+          <div className={styles.panelBody}>
+            {activeProductions.length === 0 ? (
+              <div className={styles.emptyState}>暂无进行中项目</div>
+            ) : (
+              <div className={styles.compactList}>
+                {activeProductions.slice(0, 3).map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => router.push(`/production/${p.id}`)}
+                  >
+                    <span className={styles.compactLabel}>
+                      <b>{p.name}</b>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Link href="/my/projects" className={styles.panelSeeAll}>
+              {activeProductions.length > 3 ? `查看全部 ${productions.length} 个项目 →` : "管理项目 →"}
+            </Link>
+          </div>
+        </section>
 
       </div>
     </div>

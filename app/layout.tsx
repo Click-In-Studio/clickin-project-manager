@@ -59,7 +59,7 @@ export default async function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="min-h-full">
+      <body className="h-full overflow-hidden">
         <ManualSaveNotice />
         <AppShell session={shellSession} productions={productions}>
           {children}
