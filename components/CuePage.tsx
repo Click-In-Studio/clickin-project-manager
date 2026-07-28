@@ -331,7 +331,7 @@ function CueCommentsPanel({
 
   return (
     <div
-      className="fixed right-0 top-[108px] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl"
+      className="fixed inset-0 sm:top-[108px] sm:right-0 sm:bottom-0 sm:left-auto sm:w-80 z-50 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl"
       onClick={e => e.stopPropagation()}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
@@ -865,6 +865,8 @@ export default function CuePage({
   const [cues, setCues] = useState<Cue[]>(initialCues);
   const [copiedCue, setCopiedCue] = useState<Cue | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [cueMoreOpen, setCueMoreOpen] = useState(false);
+  const [mobileChipSheetCueId, setMobileChipSheetCueId] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activeCommentCueId, setActiveCommentCueId] = useState<string | null>(null);
   const [visibleListIds, setVisibleListIds] = useState<Set<string>>(
@@ -975,11 +977,9 @@ export default function CuePage({
       .catch(() => {});
   }, [productionId]);
 
-  // Comment panel follows cue selection: auto-open on select, close on deselect
+  // Close comment panel when cue is deselected
   useEffect(() => {
-    if (selection.kind === "cue") {
-      setActiveCommentCueId(selection.cueId);
-    } else if (selection.kind === "none") {
+    if (selection.kind === "none") {
       setActiveCommentCueId(null);
     }
   }, [selection]);
@@ -1901,21 +1901,23 @@ export default function CuePage({
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]" onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
-      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0" onClick={e => e.stopPropagation()}>
-        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+      <div className="relative flex items-center gap-2 sm:gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0" onClick={e => e.stopPropagation()}>
+        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue</span>
         </div>
         <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
-        <div className="flex gap-1.5 flex-wrap">
+
+        {/* List chips — scrollable on mobile */}
+        <div className="flex gap-1.5 flex-nowrap overflow-x-auto sm:flex-wrap flex-1 sm:flex-none" style={{ scrollbarWidth: "none" }}>
           {cueLists.map((cl, i) => {
             const c = colorFor(i);
             const on = visibleListIds.has(cl.id);
             const lp = presenceForList.get(cl.id) ?? [];
             return (
-              <div key={cl.id} className="flex flex-col items-center gap-0.5">
+              <div key={cl.id} className="flex flex-col items-center gap-0.5 shrink-0">
                 <button
                   onClick={() => setVisibleListIds(prev => {
                     const next = new Set(prev);
@@ -1929,16 +1931,9 @@ export default function CuePage({
                   {cl.name}
                 </button>
                 {lp.length > 0 && (
-                  <div
-                    className="flex -space-x-0.5"
-                    title={lp.map(p => p.userName).join("、")}
-                  >
+                  <div className="flex -space-x-0.5" title={lp.map(p => p.userName).join("、")}>
                     {lp.slice(0, 4).map(p => (
-                      <div
-                        key={p.clientId}
-                        style={{ backgroundColor: p.color }}
-                        className="h-2 w-2 rounded-full ring-1 ring-white"
-                      />
+                      <div key={p.clientId} style={{ backgroundColor: p.color }} className="h-2 w-2 rounded-full ring-1 ring-white" />
                     ))}
                   </div>
                 )}
@@ -1946,8 +1941,10 @@ export default function CuePage({
             );
           })}
         </div>
-        <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
-        <div className="flex items-center gap-1.5">
+
+        {/* Desktop: 激活 + 设置 */}
+        <div className="hidden sm:block shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+        <div className="hidden sm:flex items-center gap-1.5">
           <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
           <select
             value={activeListId ?? ""}
@@ -1961,21 +1958,14 @@ export default function CuePage({
           </select>
           <Link
             href={`/production/${productionId}/cuelists`}
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "var(--ink)",
-              border: "1px solid var(--line)",
-              borderRadius: 6,
-              padding: "2px 8px",
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
+            style={{ fontSize: 11, fontWeight: 600, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 8px", textDecoration: "none", whiteSpace: "nowrap" }}
           >
             Cue 表设置
           </Link>
         </div>
-        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+
+        {/* Desktop: right controls */}
+        <div className="hidden sm:flex ml-auto items-center gap-1.5 shrink-0">
           <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
             {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
           </span>
@@ -1990,21 +1980,72 @@ export default function CuePage({
             </button>
           ))}
           <span className="text-zinc-200 mx-0.5">|</span>
-          <button
-            onClick={() => setShowExport(true)}
-            className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
-          >
-            导出
-          </button>
+          <button onClick={() => setShowExport(true)} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">导出</button>
         </div>
         {selection.kind === "pending" && activeListId && canEditActive && (
           <button
             onClick={e => { e.stopPropagation(); insertCue(); }}
-            className="rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-900 shrink-0"
+            className="hidden sm:block rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-900 shrink-0"
           >
             插入 Cue
           </button>
         )}
+
+        {/* Mobile: ⋮ button */}
+        <div className="sm:hidden relative shrink-0 ml-auto">
+          <button
+            type="button"
+            onClick={() => setCueMoreOpen(v => !v)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
+          >
+            ⋮
+          </button>
+          {cueMoreOpen && (
+            <div
+              className="fixed right-2 top-[3.75rem] z-50 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-2 shadow-lg"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
+                  <select
+                    value={activeListId ?? ""}
+                    onChange={e => { setActiveListId(e.target.value || null); setCueMoreOpen(false); }}
+                    className="flex-1 text-xs bg-zinc-50 border border-zinc-200 rounded px-1.5 py-0.5 outline-none"
+                  >
+                    <option value="">—</option>
+                    {cueLists.filter(cl => editableListIds.includes(cl.id)).map(cl => (
+                      <option key={cl.id} value={cl.id}>{cl.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <span className="rounded bg-[var(--surface-2)] px-2 py-1 text-[11px] text-zinc-400 text-center">
+                  {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
+                </span>
+              </div>
+              <div className="my-1 border-t border-zinc-100" />
+              {(["line", "page", "scene"] as const).map(t => (
+                <button key={t}
+                  onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); setCueMoreOpen(false); }}
+                  className="w-full px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  {t === "line" ? "跳转到行…" : t === "page" ? "跳转到页…" : "跳转到段落…"}
+                </button>
+              ))}
+              <div className="my-1 border-t border-zinc-100" />
+              <Link
+                href={`/production/${productionId}/cuelists`}
+                className="block w-full px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                onClick={() => setCueMoreOpen(false)}
+              >
+                Cue 表设置
+              </Link>
+              <button onClick={() => { setShowExport(true); setCueMoreOpen(false); }} className="w-full px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50">
+                导出
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Jump bar panel ── */}
@@ -2100,23 +2141,35 @@ export default function CuePage({
                     onMouseDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); handleGapClick(gapBlockId!); }}
                   >
-                    <div className="w-44 shrink-0 flex gap-1 flex-wrap px-2 py-1">
-                      {gapChips.map(({ cue, listIdx }) => (
-                        <CueChip
-                          key={cue.id}
-                          cue={cue}
-                          colorIdx={listIdx}
-                          selected={selection.kind === "cue" && selection.cueId === cue.id}
-                          warning={cue.warning}
-                          editable={canEditCue(cue)}
-                          presenceUsers={presenceForCue.get(cue.id) ?? []}
-                          onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                          onCommitNumber={v => updateCueField(cue, { number: v })}
-                          onCommitName={v => updateCueField(cue, { name: v })}
-                          highlighted={highlightedCueId === cue.id}
-                          onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
-                        />
-                      ))}
+                    <div className="w-8 sm:w-44 shrink-0 flex gap-1 flex-wrap px-1 sm:px-2 py-1">
+                      {gapChips.map(({ cue, listIdx }) => {
+                        const c = colorFor(listIdx);
+                        return (
+                          <React.Fragment key={cue.id}>
+                            <button
+                              className={`sm:hidden flex items-center justify-center w-6 h-6 rounded-full text-white text-[9px] font-bold shrink-0 ${c.bg} ${cue.warning ? "ring-2 ring-amber-400" : ""}`}
+                              onClick={e => { e.stopPropagation(); setMobileChipSheetCueId(cue.id); setSelection({ kind: "cue", cueId: cue.id }); }}
+                            >
+                              {cue.number || "Q"}
+                            </button>
+                            <div className="hidden sm:block">
+                              <CueChip
+                                cue={cue}
+                                colorIdx={listIdx}
+                                selected={selection.kind === "cue" && selection.cueId === cue.id}
+                                warning={cue.warning}
+                                editable={canEditCue(cue)}
+                                presenceUsers={presenceForCue.get(cue.id) ?? []}
+                                onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
+                                onCommitNumber={v => updateCueField(cue, { number: v })}
+                                onCommitName={v => updateCueField(cue, { name: v })}
+                                highlighted={highlightedCueId === cue.id}
+                                onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
+                              />
+                            </div>
+                          </React.Fragment>
+                        );
+                      })}
                     </div>
                     <div className="flex-1 flex items-center gap-2 pr-2">
                       <div className="h-px flex-1 bg-zinc-200 group-hover:bg-zinc-300 transition-colors" />
@@ -2147,7 +2200,7 @@ export default function CuePage({
                 >
                   {/* SVG guide lines: Bezier curves from chip right edge to inline mark */}
                   {(guideLines.get(block.id) ?? []).length > 0 && (
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ zIndex: 1 }}>
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible hidden sm:block" style={{ zIndex: 1 }}>
                       {(guideLines.get(block.id)!).map(line => {
                         const sel = selection.kind === "cue" && selection.cueId === line.cueId;
                         const mx = (line.chipX + line.markX) / 2;
@@ -2165,29 +2218,44 @@ export default function CuePage({
                       })}
                     </svg>
                   )}
-                  <div className="w-44 shrink-0 flex flex-col gap-1 pt-0.5 px-2" data-chip-col-for={block.id}>
+                  <div className="w-8 sm:w-44 shrink-0 flex flex-col gap-1 pt-0.5 px-1 sm:px-2" data-chip-col-for={block.id}>
                     {chipsHere
                       .filter(({ cue }) => cue.start.kind === "block")
-                      .map(({ cue, listIdx }) => (
-                        <CueChip
-                          key={cue.id}
-                          cue={cue}
-                          colorIdx={listIdx}
-                          selected={selection.kind === "cue" && selection.cueId === cue.id}
-                          warning={cue.warning}
-                          editable={canEditCue(cue)}
-                          presenceUsers={presenceForCue.get(cue.id) ?? []}
-                          onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                          onCommitNumber={v => updateCueField(cue, { number: v })}
-                          onCommitName={v => updateCueField(cue, { name: v })}
-                          highlighted={highlightedCueId === cue.id}
-                          onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
-                        />
-                      ))
+                      .map(({ cue, listIdx }) => {
+                        const c = colorFor(listIdx);
+                        const isSel = selection.kind === "cue" && selection.cueId === cue.id;
+                        return (
+                          <React.Fragment key={cue.id}>
+                            {/* Mobile handle: colored circle */}
+                            <button
+                              className={`sm:hidden flex items-center justify-center w-6 h-6 rounded-full text-white text-[9px] font-bold shrink-0 ${c.bg} ${cue.warning ? "ring-2 ring-amber-400" : ""}`}
+                              onClick={e => { e.stopPropagation(); setMobileChipSheetCueId(cue.id); setSelection({ kind: "cue", cueId: cue.id }); }}
+                            >
+                              {cue.number || "Q"}
+                            </button>
+                            {/* Desktop: full CueChip */}
+                            <div className="hidden sm:block">
+                              <CueChip
+                                cue={cue}
+                                colorIdx={listIdx}
+                                selected={isSel}
+                                warning={cue.warning}
+                                editable={canEditCue(cue)}
+                                presenceUsers={presenceForCue.get(cue.id) ?? []}
+                                onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
+                                onCommitNumber={v => updateCueField(cue, { number: v })}
+                                onCommitName={v => updateCueField(cue, { name: v })}
+                                highlighted={highlightedCueId === cue.id}
+                                onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
+                              />
+                            </div>
+                          </React.Fragment>
+                        );
+                      })
                     }
                   </div>
 
-                  <div className="w-[520px] min-w-0 pr-4">
+                  <div className="flex-1 min-w-0 sm:w-[520px] sm:flex-none pr-4">
                     {block.characterIds.length > 0 && (
                       <p className="text-[10px] font-semibold text-zinc-400 mb-0.5">
                         {blockCharLabel(block)}
@@ -2218,7 +2286,7 @@ export default function CuePage({
                   </div>
 
                   {/* Line / page / rehearsal mark info */}
-                  <div className="shrink-0 flex flex-col items-end justify-start pt-0.5 pr-2 gap-0.5 w-14 select-none">
+                  <div className="shrink-0 hidden sm:flex flex-col items-end justify-start pt-0.5 pr-2 gap-0.5 w-14 select-none">
                     {rehearsalLabel && (
                       <span className="text-[10px] font-bold text-zinc-500 leading-none">{rehearsalLabel}</span>
                     )}
@@ -2242,22 +2310,34 @@ export default function CuePage({
               onMouseDown={e => e.stopPropagation()}
               onClick={e => { e.stopPropagation(); handleGapClick(lastBlock.id); }}
             >
-              <div className="w-44 shrink-0 flex gap-1 flex-wrap px-2 py-1">
-                {lastGapChips.map(({ cue, listIdx }) => (
-                  <CueChip
-                    key={cue.id}
-                    cue={cue}
-                    colorIdx={listIdx}
-                    selected={selection.kind === "cue" && selection.cueId === cue.id}
-                    warning={cue.warning}
-                    editable={canEditCue(cue)}
-                    presenceUsers={presenceForCue.get(cue.id) ?? []}
-                    onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                    onCommitNumber={v => updateCueField(cue, { number: v })}
-                    onCommitName={v => updateCueField(cue, { name: v })}
-                    onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
-                  />
-                ))}
+              <div className="w-8 sm:w-44 shrink-0 flex gap-1 flex-wrap px-1 sm:px-2 py-1">
+                {lastGapChips.map(({ cue, listIdx }) => {
+                  const c = colorFor(listIdx);
+                  return (
+                    <React.Fragment key={cue.id}>
+                      <button
+                        className={`sm:hidden flex items-center justify-center w-6 h-6 rounded-full text-white text-[9px] font-bold shrink-0 ${c.bg} ${cue.warning ? "ring-2 ring-amber-400" : ""}`}
+                        onClick={e => { e.stopPropagation(); setMobileChipSheetCueId(cue.id); setSelection({ kind: "cue", cueId: cue.id }); }}
+                      >
+                        {cue.number || "Q"}
+                      </button>
+                      <div className="hidden sm:block">
+                        <CueChip
+                          cue={cue}
+                          colorIdx={listIdx}
+                          selected={selection.kind === "cue" && selection.cueId === cue.id}
+                          warning={cue.warning}
+                          editable={canEditCue(cue)}
+                          presenceUsers={presenceForCue.get(cue.id) ?? []}
+                          onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
+                          onCommitNumber={v => updateCueField(cue, { number: v })}
+                          onCommitName={v => updateCueField(cue, { name: v })}
+                          onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
+                        />
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
               </div>
               <div className="flex-1 flex items-center gap-2 pr-2">
                 <div className="h-px flex-1 bg-zinc-200 group-hover:bg-zinc-300 transition-colors" />
@@ -2329,13 +2409,13 @@ export default function CuePage({
         </div>
       )}
 
-      {/* ── Bottom bar: selected cue inspector ── */}
+      {/* ── Bottom bar: selected cue inspector (desktop only) ── */}
       {selectedCue && (() => {
         const canEdit = canEditCue(selectedCue);
         const commentCount = comments.filter(c => c.contextId === selectedCue.id).length;
         return (
           <div
-            className="shrink-0 bg-[var(--surface)] border-t border-[var(--line)] px-4 py-2.5 flex items-center gap-3"
+            className="shrink-0 hidden sm:flex bg-[var(--surface)] border-t border-[var(--line)] px-4 py-2.5 items-center gap-3"
             onClick={e => e.stopPropagation()}
           >
             {selectedCue.warning && (
@@ -2386,6 +2466,98 @@ export default function CuePage({
           </div>
         );
       })()}
+
+      {/* ── Mobile: Cue detail bottom sheet (opened via circle handle) ── */}
+      {mobileChipSheetCueId !== null && (() => {
+        const sheetCue = effectiveCues.find(c => c.id === mobileChipSheetCueId);
+        if (!sheetCue) return null;
+        const canEdit = canEditCue(sheetCue);
+        const commentCount = comments.filter(c => c.contextId === sheetCue.id).length;
+        const close = () => setMobileChipSheetCueId(null);
+        return (
+          <div className="sm:hidden fixed inset-0 z-50 flex items-end" onClick={close}>
+            <div
+              className="w-full rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-zinc-200" />
+              </div>
+              {sheetCue.warning && (
+                <p className="px-5 py-1 text-xs text-amber-500">⚠ 位置可能已偏移</p>
+              )}
+              <div className="px-5 py-3 flex flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400 w-10 shrink-0">Q#</span>
+                  {canEdit ? (
+                    <InlineField value={sheetCue.number} onCommit={v => { updateCueField(sheetCue, { number: v }); }}
+                      placeholder="编号" className="flex-1 text-sm border border-zinc-200 rounded px-3 py-2 outline-none focus:border-zinc-400" />
+                  ) : (
+                    <span className="flex-1 text-sm text-zinc-700">{sheetCue.number || "—"}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400 w-10 shrink-0">名称</span>
+                  {canEdit ? (
+                    <InlineField value={sheetCue.name} onCommit={v => { updateCueField(sheetCue, { name: v }); }}
+                      placeholder="—" className="flex-1 text-sm border border-zinc-200 rounded px-3 py-2 outline-none focus:border-zinc-400" />
+                  ) : (
+                    <span className="flex-1 text-sm text-zinc-700">{sheetCue.name || "—"}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400 w-10 shrink-0">内容</span>
+                  {canEdit ? (
+                    <InlineField value={sheetCue.content} onCommit={v => { updateCueField(sheetCue, { content: v }); }}
+                      placeholder="—" className="flex-1 text-sm border border-zinc-200 rounded px-3 py-2 outline-none focus:border-zinc-400" />
+                  ) : (
+                    <span className="flex-1 text-sm text-zinc-700">{sheetCue.content || "—"}</span>
+                  )}
+                </div>
+              </div>
+              <div className="border-t border-zinc-100 flex flex-col">
+                <button
+                  onClick={() => { setActiveCommentCueId(prev => prev === sheetCue.id ? null : sheetCue.id); close(); }}
+                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-b border-zinc-100"
+                >
+                  {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
+                </button>
+                {canEdit && sheetCue.warning && (
+                  <button
+                    onClick={() => { dismissWarning(sheetCue); close(); }}
+                    disabled={savingCueId === sheetCue.id}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-amber-500 border-b border-zinc-100 disabled:opacity-50"
+                  >
+                    清除偏移警告
+                  </button>
+                )}
+                {canEdit && (
+                  <button
+                    onClick={() => { deleteCue(sheetCue); close(); }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-red-500"
+                  >
+                    删除此 Cue
+                  </button>
+                )}
+              </div>
+              <div className="h-6" />
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Mobile: floating insert Cue button (when pending selection) ── */}
+      {selection.kind === "pending" && activeListId && canEditActive && (
+        <div className="sm:hidden fixed bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+          <button
+            onClick={e => { e.stopPropagation(); insertCue(); }}
+            className="pointer-events-auto rounded-full bg-zinc-800 px-6 py-3 text-sm font-medium text-white shadow-2xl hover:bg-zinc-900 flex items-center gap-2"
+          >
+            <span>＋</span>
+            <span>插入 Cue</span>
+          </button>
+        </div>
+      )}
 
       {showExport && (
         <ExportModal
