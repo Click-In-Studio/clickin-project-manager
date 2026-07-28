@@ -263,7 +263,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
                   </Link>
                 )}
                 <Link
-                  href="/my/notifications"
+                  href="/my/notification-settings"
                   onClick={() => setDropdownOpen(false)}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
                 >
