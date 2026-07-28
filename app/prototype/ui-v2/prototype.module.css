@@ -1,18 +1,6 @@
 .prototypeRoot {
-  --ink: #182a2a;
-  --muted: #667676;
-  --line: #dfe5e2;
-  --paper: #f4f2ec;
-  --surface: #fffefa;
-  --surface-2: #eeeee8;
-  --script: #2f6670;
   --script-soft: #dce9e9;
-  --stage: #a55c32;
   --stage-soft: #f2e4d9;
-  --danger: #a94b4b;
-  --danger-soft: #f5dddd;
-  --success: #3f735c;
-  --success-soft: #deeee5;
   min-height: 100vh;
   background: #202827;
   color: var(--ink);

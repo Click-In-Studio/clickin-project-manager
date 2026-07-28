@@ -28,6 +28,7 @@ type DrawerData = {
 
 type Props = {
   productionId: string;
+  productionName: string;
   initialCueLists: CueList[];
   canCreate: boolean;
   availableTemplates: CueListTemplate[];
@@ -189,6 +190,7 @@ function CreateModal({
 
 export default function CueListsManager({
   productionId,
+  productionName,
   initialCueLists,
   canCreate,
   availableTemplates,
@@ -237,25 +239,28 @@ export default function CueListsManager({
   }, [drawerListId, creating]);
 
   return (
-    <div style={{ padding: "28px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Page header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
-            Cue
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>Cue 表</h1>
+    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
+      {/* Frozen toolbar */}
+      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0">
+        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {productionName}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue 表</span>
         </div>
-        {canCreate && (
-          <button
-            onClick={() => setCreating(true)}
-            style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
-          >
-            + 新建
-          </button>
-        )}
+        <div className="ml-auto">
+          {canCreate && (
+            <button
+              onClick={() => setCreating(true)}
+              style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
+            >
+              + 新建
+            </button>
+          )}
+        </div>
       </div>
 
+      <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "20px 24px", minHeight: "calc(100vh - 280px)" }}>
       {/* Filter tab bar */}
       <div className={styles.tabBar} style={{ marginBottom: 20 }}>
@@ -371,6 +376,7 @@ export default function CueListsManager({
           </div>
         </>
       )}
+    </div>
     </div>
   );
 }

@@ -16,14 +16,16 @@ export default async function NotificationsModulePage({ params }: { params: Prom
   if (!name) redirect("/");
 
   return (
-    <div className="px-8 py-10">
-      <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-[#667676] mb-1">舞台侧 · {name}</p>
-      <h1 className="font-serif text-3xl font-medium text-[#182a2a] tracking-tight mb-8" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>
-        Notification
-      </h1>
-      <div className="rounded-2xl border border-[#dfe5e2] bg-white px-8 py-10 text-center max-w-sm">
-        <p className="text-sm font-medium text-[#182a2a] mb-1">功能即将上线</p>
-        <p className="text-xs text-[#667676]">告知 · 确认 · 处理 正在开发中</p>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <div>
+        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
+          Notifications
+        </p>
+        <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", marginBottom: 20 }}>通知</h1>
+      </div>
+      <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "48px 32px", textAlign: "center", color: "var(--muted)" }}>
+        <p style={{ fontSize: 13, marginBottom: 6 }}>告知 · 确认 · 处理</p>
+        <p style={{ fontSize: 11 }}>功能建设中</p>
       </div>
     </div>
   );

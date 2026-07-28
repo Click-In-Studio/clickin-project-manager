@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "剧本" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import ScriptEditor from "@/components/ScriptEditor";
 
@@ -21,7 +21,10 @@ export default async function ProductionScriptPage({
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  const [access, name] = await Promise.all([
+    getProductionPermissionContext(session.userId, session.isAdmin, id),
+    getProductionName(id),
+  ]);
   if (!access) redirect("/");
 
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
@@ -33,6 +36,7 @@ export default async function ProductionScriptPage({
   return (
     <ScriptEditor
       productionId={id}
+      productionName={name ?? undefined}
       canEditText={p("script:edit")}
       canEditMetadata={p("scene:rename")}
       canEditRehearsalMark={p("rehearsal_mark:create")}

@@ -6442,6 +6442,7 @@ function markerChangeFromOperations(changes: BlockChange[]): MarkerChange {
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
+  productionName,
   canEditText: canEditTextProp = true,
   canEditMetadata: canEditMetadataProp = true,
   canEditRehearsalMark = true,
@@ -6450,6 +6451,7 @@ export default function ScriptEditor({
 }: {
   scriptId?: string;
   productionId?: string;
+  productionName?: string;
   canEditText?: boolean;
   canEditMetadata?: boolean;
   canEditRehearsalMark?: boolean;
@@ -10312,6 +10314,17 @@ export default function ScriptEditor({
           ref={setToolbarElement}
           className="relative flex h-14 flex-nowrap items-center gap-3 px-6"
         >
+          {productionName && !toolbarCompact && (
+            <>
+              <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {productionName}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>剧本</span>
+              </div>
+              <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+            </>
+          )}
           {!isLockedMode && (
             <>
 

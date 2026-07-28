@@ -239,7 +239,7 @@ export default function AppShell({ session, productions, children }: AppShellPro
         {/* Right actions */}
         <div className="ml-auto flex items-center gap-3">
           <Link
-            href="/my/notifications"
+            href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
             className="w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] flex items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
             title="通知"
           >

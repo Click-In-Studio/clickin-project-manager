@@ -1901,16 +1901,14 @@ export default function CuePage({
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]" onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--line)] shrink-0" onClick={e => e.stopPropagation()}>
-        <div className="flex shrink-0 gap-0.5 rounded-lg bg-[var(--surface-2)] p-0.5">
-          <Link
-            href={`/production/${productionId}/cuelists`}
-            className="rounded-md px-3 py-1 text-[11px] font-bold text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] hover:shadow-sm transition-all"
-          >
-            Cue 表
-          </Link>
+      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0" onClick={e => e.stopPropagation()}>
+        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {productionName}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue</span>
         </div>
-        <span className="text-zinc-200">|</span>
+        <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
         <div className="flex gap-1.5 flex-wrap">
           {cueLists.map((cl, i) => {
             const c = colorFor(i);
@@ -1948,7 +1946,7 @@ export default function CuePage({
             );
           })}
         </div>
-        <span className="text-zinc-200">|</span>
+        <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
           <select
@@ -1961,6 +1959,21 @@ export default function CuePage({
               <option key={cl.id} value={cl.id}>{cl.name}</option>
             ))}
           </select>
+          <Link
+            href={`/production/${productionId}/cuelists`}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--ink)",
+              border: "1px solid var(--line)",
+              borderRadius: 6,
+              padding: "2px 8px",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Cue 表设置
+          </Link>
         </div>
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
           <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">

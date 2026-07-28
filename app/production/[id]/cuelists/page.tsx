@@ -44,6 +44,7 @@ export default async function CueListsPage({
   return (
     <CueListsManager
       productionId={id}
+      productionName={name}
       initialCueLists={cueListsWithAccess}
       canCreate={canCreate}
       availableTemplates={availableTemplates}
