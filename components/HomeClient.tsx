@@ -37,7 +37,7 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
   const activeProductions = productions.filter(p => !p.archivedAt);
 
   // "即将到来": future calls today + (if after noon CST) tomorrow
-  const nowCST = new Date(Date.now() + 8 * 3_600_000);
+  const nowCST = new Date(new Date().getTime() + 8 * 3_600_000);
   const isAfterNoon = nowCST.getUTCHours() >= 12;
   const tomorrowCST = new Date(nowCST.getTime() + 86_400_000);
   const tomorrow = `${tomorrowCST.getUTCFullYear()}-${String(tomorrowCST.getUTCMonth() + 1).padStart(2, "0")}-${String(tomorrowCST.getUTCDate()).padStart(2, "0")}`;
