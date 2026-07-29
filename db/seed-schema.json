@@ -574,6 +574,39 @@
       "nullable": false
     }
   ],
+  "email_otp": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "email",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "used_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "event_call_time": [
     {
       "column": "id",

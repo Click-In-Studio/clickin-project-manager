@@ -1,6 +1,7 @@
+import { randomInt } from "node:crypto";
 import { signMagicToken, verifyMagicToken } from "../auth-email";
 import { sendEmail } from "../email";
-import { upsertEmailUser, getUserProfile } from "../db";
+import { upsertEmailUser, getUserProfile, createEmailOtp } from "../db";
 import type {
   PersonalChannel,
   PersonalCapabilities,
@@ -13,6 +14,7 @@ import type {
 } from "./types";
 
 const MAGIC_LINK_PATH = "/api/auth/email/callback";
+const OTP_TTL_MS = 15 * 60 * 1000;
 
 class EmailPlatform implements PersonalChannel, InboundGateway {
   readonly platformId = "email" as const;
@@ -45,20 +47,40 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
     if (!email) throw new Error("email: missing email param");
 
     const { userId } = await upsertEmailUser(email, name);
-    const token = signMagicToken(userId, email);
 
+    // Generate magic link (stateless JWT)
+    const token = signMagicToken(userId, email);
     const baseUrl = context?.baseUrl ?? "";
     const magicLink = `${baseUrl}${MAGIC_LINK_PATH}?token=${encodeURIComponent(token)}`;
+
+    // Generate OTP (6-digit, stored in DB)
+    const otp = randomInt(100000, 1000000).toString();
+    await createEmailOtp(userId, email, otp, OTP_TTL_MS);
 
     await sendEmail({
       to: email,
       subject: "登录 Click-In 后台",
       html: `
-        <p>点击下方链接登录 Click-In 后台管理系统：</p>
-        <p><a href="${magicLink}" style="font-size:16px;font-weight:bold">点击登录</a></p>
-        <p style="color:#888;font-size:12px">链接 15 分钟内有效，请勿转发。</p>
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+          <h2 style="margin:0 0 16px;font-size:18px;color:#182a2a">登录 Click-In 后台</h2>
+          <p style="margin:0 0 20px;color:#667676;font-size:14px">两种方式均可完成登录，15 分钟内有效：</p>
+
+          <div style="margin-bottom:20px">
+            <p style="margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#a55c32">方式一：点击链接</p>
+            <a href="${magicLink}" style="display:inline-block;padding:10px 20px;font-size:14px;font-weight:700;background:#182a2a;color:#fff;text-decoration:none;border-radius:8px">点击此处登录</a>
+            <p style="margin:6px 0 0;font-size:11px;color:#999">在收到邮件的设备上点击</p>
+          </div>
+
+          <div style="padding:16px;background:#f3f4f3;border-radius:10px">
+            <p style="margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#a55c32">方式二：输入验证码</p>
+            <p style="margin:0 0 4px;font-size:32px;font-weight:800;letter-spacing:.2em;color:#182a2a;font-family:monospace">${otp}</p>
+            <p style="margin:0;font-size:11px;color:#999">在登录页面输入此 6 位数字</p>
+          </div>
+
+          <p style="margin:20px 0 0;font-size:11px;color:#bbb">请勿将验证码分享给他人。</p>
+        </div>
       `,
-      text: `点击以下链接登录 Click-In 后台（15 分钟内有效）：\n\n${magicLink}`,
+      text: `登录 Click-In 后台\n\n方式一：点击链接（在收到邮件的设备上使用）\n${magicLink}\n\n方式二：在登录页输入 6 位验证码\n${otp}\n\n链接和验证码均在 15 分钟内有效，请勿转发。`,
     });
   }
 
@@ -108,10 +130,7 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
     return headers["authorization"] === `Bearer ${secret}`;
   }
 
-  async process(
-    payload: unknown,
-  ): Promise<GatewayResult> {
-    // Inbound email: no routing logic yet — discard
+  async process(payload: unknown): Promise<GatewayResult> {
     return { type: "discarded", reason: "email inbound routing not implemented", raw: payload };
   }
 }

@@ -5,9 +5,10 @@ import { useState, useEffect, type FormEvent } from "react";
 const AUTO_LOGIN_KEY = "feishu_auto_login_attempted";
 
 export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
-  const [mode, setMode] = useState<"idle" | "email_sent" | "loading">("idle");
+  const [mode, setMode] = useState<"idle" | "email_sent" | "loading" | "otp_loading">("idle");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
 
@@ -88,6 +89,33 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
     }
   }
 
+  async function handleOtpSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    const code = otp.trim();
+    if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+      setError("请输入 6 位数字验证码");
+      return;
+    }
+    setMode("otp_loading");
+    try {
+      const res = await fetch("/api/auth/email/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code }),
+      });
+      if (res.ok) {
+        window.location.href = "/";
+      } else {
+        setMode("email_sent");
+        setError("验证码错误或已过期");
+      }
+    } catch {
+      setMode("email_sent");
+      setError("网络错误，请重试");
+    }
+  }
+
   if (!showForm) {
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--paper)" }}>
@@ -95,6 +123,13 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
       </div>
     );
   }
+
+  const inp: React.CSSProperties = {
+    display: "block", width: "100%", boxSizing: "border-box",
+    padding: "8px 12px", fontSize: 13,
+    border: "1px solid var(--line)", borderRadius: 8,
+    background: "var(--paper)", color: "var(--ink)",
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--paper)" }}>
@@ -106,52 +141,80 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
           后台
         </h1>
 
-        {mode === "email_sent" ? (
-          <div style={{ textAlign: "center" }}>
-            <p style={{ fontSize: 14, color: "var(--ink)", margin: "0 0 8px" }}>登录链接已发送</p>
-            <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
-              请检查 <strong>{email}</strong> 的收件箱，链接 15 分钟内有效。
+        {mode === "email_sent" || mode === "otp_loading" ? (
+          /* OTP entry state */
+          <div>
+            <p style={{ fontSize: 13, color: "var(--ink)", margin: "0 0 4px" }}>
+              验证码已发送至
             </p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", margin: "0 0 20px", wordBreak: "break-all" }}>
+              {email.trim().toLowerCase()}
+            </p>
+
+            <form onSubmit={handleOtpSubmit} style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
+                6 位验证码
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="\d{6}"
+                maxLength={6}
+                value={otp}
+                onChange={e => { setOtp(e.target.value.replace(/\D/g, "")); setError(""); }}
+                placeholder="000000"
+                autoFocus
+                style={{ ...inp, fontSize: 22, fontWeight: 700, letterSpacing: ".2em", textAlign: "center", marginBottom: 14 }}
+              />
+              {error && <p style={{ fontSize: 12, color: "#c53030", margin: "0 0 10px" }}>{error}</p>}
+              <button
+                type="submit"
+                disabled={mode === "otp_loading"}
+                style={{ display: "block", width: "100%", padding: "10px 0", fontSize: 13, fontWeight: 700, borderRadius: 9, background: "var(--ink)", color: "#fff", border: "none", cursor: mode === "otp_loading" ? "default" : "pointer", opacity: mode === "otp_loading" ? 0.6 : 1 }}
+              >
+                {mode === "otp_loading" ? "验证中…" : "确认登录"}
+              </button>
+            </form>
+
+            <p style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", margin: "0 0 12px" }}>
+              也可点击邮件中的登录链接直接完成
+            </p>
+
             <button
-              onClick={() => { setMode("idle"); setError(""); }}
-              style={{ marginTop: 20, fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}
+              onClick={() => { setMode("idle"); setOtp(""); setError(""); }}
+              style={{ display: "block", width: "100%", fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textAlign: "center" }}
             >
-              重新发送
+              重新发送 / 更换邮箱
             </button>
           </div>
         ) : (
+          /* Email entry state */
           <>
             <form onSubmit={handleEmailSubmit} style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
-                邮箱
-              </label>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>邮箱</label>
               <input
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
-                style={{ display: "block", width: "100%", boxSizing: "border-box", padding: "8px 12px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", marginBottom: 10 }}
+                style={{ ...inp, marginBottom: 10 }}
               />
-              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
-                姓名（选填）
-              </label>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>姓名（选填）</label>
               <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="你的名字"
-                style={{ display: "block", width: "100%", boxSizing: "border-box", padding: "8px 12px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", marginBottom: 14 }}
+                style={{ ...inp, marginBottom: 14 }}
               />
-              {error && (
-                <p style={{ fontSize: 12, color: "#e53e3e", margin: "0 0 10px" }}>{error}</p>
-              )}
+              {error && <p style={{ fontSize: 12, color: "#c53030", margin: "0 0 10px" }}>{error}</p>}
               <button
                 type="submit"
                 disabled={mode === "loading"}
                 style={{ display: "block", width: "100%", padding: "10px 0", fontSize: 13, fontWeight: 700, borderRadius: 9, background: "var(--ink)", color: "#fff", border: "none", cursor: mode === "loading" ? "default" : "pointer", opacity: mode === "loading" ? 0.6 : 1 }}
               >
-                {mode === "loading" ? "发送中…" : "发送登录链接"}
+                {mode === "loading" ? "发送中…" : "获取验证码"}
               </button>
             </form>
 

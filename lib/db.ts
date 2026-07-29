@@ -2365,6 +2365,27 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
   }
 }
 
+// ─── Email OTP ────────────────────────────────────────────────────────────────
+
+export async function createEmailOtp(userId: string, email: string, code: string, ttlMs: number): Promise<void> {
+  await getPool().query(
+    `INSERT INTO email_otp (user_id, email, code, expires_at) VALUES ($1, $2, $3, now() + $4::interval)`,
+    [userId, email, code, `${ttlMs} milliseconds`],
+  );
+}
+
+// Consume an OTP: marks it used and returns the userId, or null if invalid/expired.
+export async function consumeEmailOtp(email: string, code: string): Promise<string | null> {
+  const res = await getPool().query<{ user_id: string }>(
+    `UPDATE email_otp
+     SET used_at = now()
+     WHERE email = $1 AND code = $2 AND used_at IS NULL AND expires_at > now()
+     RETURNING user_id`,
+    [email, code],
+  );
+  return res.rows[0]?.user_id ?? null;
+}
+
 export async function upsertEmailUser(
   email: string,
   name: string,
