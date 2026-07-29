@@ -17,7 +17,10 @@ CREATE TABLE IF NOT EXISTS user_notification (
   action_required BOOLEAN NOT NULL DEFAULT false,
   actions         JSONB NOT NULL DEFAULT '[]',
   acted_at        TIMESTAMPTZ,
-  action_result   JSONB
+  action_result   JSONB,
+  category        TEXT NOT NULL DEFAULT 'info'
+                  CHECK (category IN ('info', 'action', 'warning')),
+  expired_at      TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS user_notification_user_created_idx
@@ -42,8 +45,3 @@ ALTER TABLE event_call_time
   ADD COLUMN IF NOT EXISTS rsvp_at      TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 
--- Notification expiry: set when a superseding notification is sent for the
--- same entity (e.g. call time modified after the first notification was sent).
--- Expired notifications render their action buttons as disabled in the UI.
-ALTER TABLE user_notification
-  ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
