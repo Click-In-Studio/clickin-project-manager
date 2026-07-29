@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { listMyProductionsWithRoles } from "@/lib/db";
+import { countUnreadNotifications } from "@/lib/inbox-db";
 import { ROLE_TEMPLATE_PERMISSIONS } from "@/lib/permissions";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
 import AppShell from "@/components/AppShell";
@@ -31,9 +32,10 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const rawProductions = session
-    ? await listMyProductionsWithRoles(session.userId, session.isAdmin)
-    : [];
+  const [rawProductions, unreadNotificationCount] = await Promise.all([
+    session ? listMyProductionsWithRoles(session.userId, session.isAdmin) : Promise.resolve([]),
+    session ? countUnreadNotifications(session.userId) : Promise.resolve(0),
+  ]);
 
   const ADMIN_PERMS = new Set(["members:manage_overrides", "dept:create"]);
   const productions = rawProductions.map((p) => ({
@@ -70,7 +72,7 @@ export default async function RootLayout({
       </head>
       <body className="h-full overflow-hidden">
         <ManualSaveNotice />
-        <AppShell session={shellSession} productions={productions}>
+        <AppShell session={shellSession} productions={productions} initialUnreadCount={unreadNotificationCount}>
           {children}
         </AppShell>
       </body>

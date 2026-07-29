@@ -37,7 +37,7 @@ function PrefRow({
         <p className="text-sm font-medium text-zinc-800">{pref.label}</p>
         <p className="text-xs text-zinc-400 mt-0.5">{pref.description}</p>
       </div>
-      <Toggle enabled={pref.enabled} onChange={(v) => onToggle(pref.type, v)} />
+      <Toggle enabled={pref.externalEnabled} onChange={(v) => onToggle(pref.type, v)} />
     </div>
   );
 }
@@ -50,7 +50,7 @@ export default function NotificationsClient({ prefs: initialPrefs }: { prefs: No
   async function handleToggle(type: string, enabled: boolean) {
     setSaving(type);
     setError(null);
-    setPrefs((prev) => prev.map((p) => (p.type === type ? { ...p, enabled } : p)));
+    setPrefs((prev) => prev.map((p) => (p.type === type ? { ...p, externalEnabled: enabled } : p)));
     try {
       const res = await fetch(`${BASE_PATH}/api/my/notification-prefs`, {
         method: "PATCH",
@@ -59,15 +59,15 @@ export default function NotificationsClient({ prefs: initialPrefs }: { prefs: No
       });
       if (!res.ok) throw new Error("保存失败");
     } catch {
-      setPrefs((prev) => prev.map((p) => (p.type === type ? { ...p, enabled: !enabled } : p)));
+      setPrefs((prev) => prev.map((p) => (p.type === type ? { ...p, externalEnabled: !enabled } : p)));
       setError("保存失败，请重试");
     } finally {
       setSaving(null);
     }
   }
 
-  const dmPrefs = prefs.filter((p) => p.channel === "dm");
-  const groupPrefs = prefs.filter((p) => p.channel === "group");
+  const dmPrefs = prefs.filter((p) => p.externalChannel === "dm");
+  const groupPrefs = prefs.filter((p) => p.externalChannel === "group");
 
   return (
     <div className="min-h-screen bg-zinc-50">

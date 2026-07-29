@@ -1,4 +1,5 @@
 import { getAppAccessToken, getTenantAccessToken } from "./feishu-auth";
+import type { WeeklyCallEntry, DailyCallScheduleItem } from "./event-db";
 
 const BASE = "https://open.feishu.cn/open-apis";
 
@@ -74,17 +75,6 @@ function makeCard(title: string, template: string, bodyMd: string, url: string, 
 
 // ─── Weekly call ──────────────────────────────────────────────────────────────
 
-export type WeeklyCallEntry = {
-  callAt: string;
-  eventId: string;
-  eventTitle: string;
-  eventLocation: string;
-  callNotes: string;
-  productionId: string;
-  scheduleItems: { title: string; startTime: string | null }[];
-  myTechReqs: { title: string }[];
-};
-
 export function buildWeeklyCallCard(entries: WeeklyCallEntry[], pageUrl: string): object {
   const byEvent = new Map<string, WeeklyCallEntry[]>();
   for (const e of entries) {
@@ -120,12 +110,6 @@ export function buildWeeklyCallCard(entries: WeeklyCallEntry[], pageUrl: string)
 }
 
 // ─── Daily call ───────────────────────────────────────────────────────────────
-
-export type DailyCallScheduleItem = {
-  title: string;
-  startTime: string | null;
-  participants: string[];
-};
 
 export function buildDailyCallCard(
   eventTitle: string,

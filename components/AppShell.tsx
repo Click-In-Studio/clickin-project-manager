@@ -12,6 +12,8 @@ interface AppShellProps {
   session: ShellSession | null;
   productions: Production[];
   children: React.ReactNode;
+  /** Server-rendered initial unread notification count for the bell badge. */
+  initialUnreadCount?: number;
 }
 
 const CREATION_NAV = [
@@ -184,17 +186,57 @@ function MobileTab({
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }
 
-export default function AppShell({ session, productions, children }: AppShellProps) {
+export default function AppShell({ session, productions, children, initialUnreadCount = 0 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
 
   useEffect(() => {
     setDrawerOpen(null);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
+
+  // Keep badge fresh:
+  // 1. Re-fetch when tab becomes visible (like GitHub) or window regains focus.
+  // 2. Listen for custom 'notif-read' events dispatched by the notifications page
+  //    so the badge decrements instantly without waiting for the next poll.
+  // 3. 60 s poll as a backstop for long-lived focused tabs.
+  useEffect(() => {
+    if (!session) return;
+
+    const fetchCount = () =>
+      fetch("/api/my/notifications/unread-count")
+        .then((r) => r.json())
+        .then((d: { count?: number }) => {
+          if (typeof d.count === "number") setUnreadCount(d.count);
+        })
+        .catch(() => {});
+
+    const onVisible = () => { if (!document.hidden) fetchCount(); };
+    const onRead = (e: Event) => {
+      const delta = (e as CustomEvent<{ delta?: number }>).detail?.delta;
+      if (typeof delta === "number") {
+        setUnreadCount((c) => Math.max(0, c - delta));
+      } else {
+        fetchCount();
+      }
+    };
+
+    const id = setInterval(fetchCount, 60_000);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("notif-read", onRead);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("notif-read", onRead);
+    };
+  }, [session]);
 
   useEffect(() => {
     if (!dropdownOpen) return;
@@ -247,8 +289,13 @@ export default function AppShell({ session, productions, children }: AppShellPro
 
   const userInitial = session.name.charAt(0);
   const avatarSymbol = (
-    <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
-      {userInitial}
+    <span className="relative">
+      <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
+        {userInitial}
+      </span>
+      {unreadCount > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#c0392b] border border-[var(--paper)]" />
+      )}
     </span>
   );
 
@@ -301,10 +348,16 @@ export default function AppShell({ session, productions, children }: AppShellPro
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className="hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
+            className="relative hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
             title="通知"
+            onClick={() => setUnreadCount(0)}
           >
             ◉
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
           </Link>
 
           {/* User dropdown: sm+ only */}

@@ -2109,3 +2109,23 @@ export async function getDeptReqsWithChat(
   );
   return res.rows.map(r => ({ id: r.id, chatId: r.chat_id }));
 }
+
+// ─── Call schedule types (shared between notify and platform card builders) ───
+
+export type WeeklyCallEntry = {
+  callAt: string;
+  eventId: string;
+  eventTitle: string;
+  eventDescription: string;
+  eventLocation: string;
+  callNotes: string;
+  productionId: string;
+  scheduleItems: { title: string; startTime: string | null }[];
+  myTechReqs: { title: string }[];
+};
+
+export type DailyCallScheduleItem = {
+  title: string;
+  startTime: string | null;
+  participants: string[];
+};

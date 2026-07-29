@@ -5,9 +5,8 @@ import { getProductionPermissionContext, getCueList, updateCue, deleteCue,
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/feishu-bot";
-import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 import { BASE_PATH } from "@/lib/base-path";
-import { getOptedOutUsers } from "@/lib/notification-prefs";
+import { notifyUsers } from "@/lib/notify";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -101,29 +100,31 @@ async function notifyCueWarning(
   ]);
   if (!cueList) return;
 
-  const recipients = new Set<string>([cueList.createdBy, ...roleEditorUserIds]);
-
-  if (recipients.size === 0) return;
+  const recipients = [...new Set([cueList.createdBy, ...roleEditorUserIds])];
+  if (!recipients.length) return;
 
   const cuePath = `${BASE_PATH}/production/${productionId}/cuelists/${cueListId}`;
-  const [optedOut, targets] = await Promise.all([
-    getOptedOutUsers("cue_warning"),
-    batchResolveNotificationTargets([...recipients], productionId),
-  ]);
-
-  for (const userId of recipients) {
-    if (optedOut.has(userId)) continue;
-    const target = targets.get(userId);
-    if (!target) continue;
-    const actionUrl = target.adapter.buildActionUrl(cuePath);
-    const card = buildCueWarningCard(productionName ?? "制作", cueList.name, cueNumber, cueName, actionUrl);
-    target.adapter.sendDirectMessage(target.platformUserId, {
-      text: `你负责的 Cue #${cueNumber}${cueName ? ` ${cueName}` : ""} 被标记为报警`,
-      title: "Cue 报警",
-      primaryUrl: actionUrl,
-      richContent: card,
-    }).catch(e => console.error(`[cue-warning] dm failed for ${target.platformUserId}:`, (e as Error).message));
-  }
+  await notifyUsers({
+    userIds: recipients,
+    kind: "cue_warning",
+    productionId,
+    entityType: "cue_list",
+    entityId: cueListId,
+    title: `Cue 报警 — #${cueNumber}${cueName ? ` ${cueName}` : ""}`,
+    body: `《${productionName ?? "制作"}》${cueList.name}`,
+    viewHref: cuePath,
+    category: "warning",
+    buildExternalMessage: async (_userId, target) => {
+      const actionUrl = target.adapter.buildActionUrl(cuePath);
+      const card = buildCueWarningCard(productionName ?? "制作", cueList.name, cueNumber, cueName, actionUrl);
+      return {
+        text: `你负责的 Cue #${cueNumber}${cueName ? ` ${cueName}` : ""} 被标记为报警`,
+        title: "Cue 报警",
+        primaryUrl: actionUrl,
+        richContent: card,
+      };
+    },
+  });
 }
 
 export async function DELETE(

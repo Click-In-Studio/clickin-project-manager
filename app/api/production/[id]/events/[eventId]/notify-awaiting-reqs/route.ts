@@ -1,8 +1,9 @@
 /**
  * POST /api/production/[id]/events/[eventId]/notify-awaiting-reqs
  *
- * Sends an urge card to each dept group chat that has unconfirmed (awaiting)
- * tech reqs for this event. One card per dept, listing all its pending reqs.
+ * Urges POCs to confirm their unconfirmed (awaiting) tech reqs for this event.
+ * Sends one inbox notification per awaiting req so each can be individually acted.
+ * Also sends a Feishu group card per dept as a summary (secondary, chatId-gated).
  * Permission: event:create (same as publishing).
  */
 
@@ -12,10 +13,9 @@ import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db"
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
 import { buildUrgeReqCard } from "@/lib/feishu-bot";
-import { getOptedInUsers } from "@/lib/notification-prefs";
 import { BASE_PATH } from "@/lib/base-path";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
+import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -46,37 +46,44 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   for (const [deptId, reqs] of byDept) {
     const dept = await getEventDepartment(deptId, productionId);
-    if (!dept?.chatId || !dept.pocUserIds.length) continue;
+    if (!dept?.pocUserIds.length) continue;
 
-    // Feishu open_ids still needed for @mention syntax inside the card body
-    const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
-    const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
-
-    const reqPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs`;
-    const groupActionUrl = feishuPlatform.buildActionUrl(reqPath);
-    const card = buildUrgeReqCard(event.title, dept.name, reqs.map(r => r.title), pocOpenIds, groupActionUrl);
-
-    await feishuPlatform.sendGroupMessage(dept.chatId, {
-      text: `需求确认催办 — ${dept.name}，${reqs.length} 个需求待处理`,
-      richContent: card,
-    }).catch(e => console.error(`[notify-awaiting] dept ${deptId} failed:`, e));
-
-    // Personal DM copies for opted-in POCs — routed through platform adapter
-    const [optedIn, targets] = await Promise.all([
-      getOptedInUsers("tech_req_poc"),
-      batchResolveNotificationTargets(dept.pocUserIds, productionId),
-    ]);
-    for (const userId of dept.pocUserIds) {
-      if (!optedIn.has(userId)) continue;
-      const target = targets.get(userId);
-      if (!target) continue;
-      const dmActionUrl = target.adapter.buildActionUrl(reqPath);
-      const dmCard = buildUrgeReqCard(event.title, dept.name, reqs.map(r => r.title), pocOpenIds, dmActionUrl);
-      target.adapter.sendDirectMessage(target.platformUserId, {
-        text: `需求确认催办 — ${dept.name}，${reqs.length} 个需求待处理，查看：${dmActionUrl}`,
-        richContent: dmCard,
-      }).catch(e => console.error("[notify-awaiting] personal dm failed:", e));
+    // One inbox notification per awaiting req so each can be individually acted.
+    for (const techReq of reqs) {
+      const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${techReq.id}`;
+      await notifyUsers({
+        userIds: dept.pocUserIds,
+        kind: "tech_req_poc",
+        productionId,
+        entityType: "tech_req",
+        entityId: techReq.id,
+        title: `需求确认催办 — ${dept.name}`,
+        body: `${techReq.title || dept.name}（${event.title}）`,
+        viewHref: reqPath,
+        category: "action",
+        actionRequired: true,
+        buildExternalMessage: async (_userId, target) => {
+          const dmActionUrl = target.adapter.buildActionUrl(reqPath);
+          return {
+            text: `需求确认催办：${techReq.title || dept.name}（${event.title}），查看：${dmActionUrl}`,
+          };
+        },
+      }).catch(e => console.error("[notify-awaiting] inbox/dm failed:", e));
     }
+
+    // Feishu group card — secondary summary, only if dept has a chatId.
+    if (dept.chatId) {
+      const listPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs`;
+      const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
+      const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
+      const groupActionUrl = feishuPlatform.buildActionUrl(listPath);
+      const card = buildUrgeReqCard(event.title, dept.name, reqs.map(r => r.title), pocOpenIds, groupActionUrl);
+      await feishuPlatform.sendGroupMessage(dept.chatId, {
+        text: `需求确认催办 — ${dept.name}，${reqs.length} 个需求待处理`,
+        richContent: card,
+      }).catch(e => console.error(`[notify-awaiting] group chat ${deptId} failed:`, e));
+    }
+
     notified++;
   }
 

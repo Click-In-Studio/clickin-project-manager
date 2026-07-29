@@ -12,9 +12,8 @@ import {
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
 import { buildReplyMentionCard } from "@/lib/feishu-bot";
-import { getOptedOutUsers } from "@/lib/notification-prefs";
-import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
 import { BASE_PATH } from "@/lib/base-path";
+import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 
@@ -84,29 +83,33 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     mentions,
   });
 
-  // Fire-and-forget: notify @mentioned users via platform adapter
+  // Fire-and-forget: notify @mentioned users via unified interface (inbox + optional DM).
   if (mentions.length > 0) {
     const replyPath = `${BASE_PATH}/production/${productionId}/reports/${reportId}#reply-${id}`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
-    const [optedOut, eventRow, targets] = await Promise.all([
-      getOptedOutUsers("report_mention").catch(() => new Set<string>()),
-      getProductionEvent(eventId, productionId).catch(() => null),
-      batchResolveNotificationTargets(mentionUserIds, productionId),
-    ]);
+    const eventRow = await getProductionEvent(eventId, productionId).catch(() => null);
     const eventTitle = eventRow?.title ?? "";
-    for (const m of mentions) {
-      if (optedOut.has(m.userId)) continue;
-      const target = targets.get(m.userId);
-      if (!target) continue;
-      const actionUrl = target.adapter.buildActionUrl(replyPath);
-      const card = buildReplyMentionCard(session.name, report.title, eventTitle, body.content.trim(), actionUrl);
-      target.adapter.sendDirectMessage(target.platformUserId, {
-        text: `${session.name} 在报告「${report.title}」中提到了你`,
-        title: "评论提及",
-        primaryUrl: actionUrl,
-        richContent: card,
-      }).catch(e => console.error(`[reply-mention] notify failed for ${m.userId}:`, (e as Error).message));
-    }
+    void notifyUsers({
+      userIds: mentionUserIds,
+      kind: "comment_mention",
+      productionId,
+      entityType: "report_reply",
+      entityId: id,
+      title: `${session.name} 在报告「${report.title}」中提到了你`,
+      body: body.content.trim(),
+      viewHref: replyPath,
+      category: "info",
+      buildExternalMessage: async (_userId, target) => {
+        const actionUrl = target.adapter.buildActionUrl(replyPath);
+        const card = buildReplyMentionCard(session.name, report.title, eventTitle, body.content.trim(), actionUrl);
+        return {
+          text: `${session.name} 在报告「${report.title}」中提到了你`,
+          title: "评论提及",
+          primaryUrl: actionUrl,
+          richContent: card,
+        };
+      },
+    }).catch(e => console.error("[reply-mention] notify failed:", e));
   }
 
   return Response.json({ reply }, { status: 201 });

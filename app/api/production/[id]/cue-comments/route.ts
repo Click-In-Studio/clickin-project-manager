@@ -3,8 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
-import { getOptedOutUsers } from "@/lib/notification-prefs";
-import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
+import { notifyUsers } from "@/lib/notify";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -58,21 +57,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   if (mentions.length > 0) {
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
-    Promise.all([
-      getProductionName(productionId).catch(() => null),
-      getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
-      batchResolveNotificationTargets(mentionUserIds, productionId).catch(() => new Map<string, import("@/lib/platform/notification-router").NotificationTarget>()),
-    ]).then(([productionName, optedOut, targets]) => {
+    getProductionName(productionId).catch(() => null).then(productionName => {
       const prefix = productionName ? `《${productionName}》` : "制作";
-      const notifyText = `${session.name} 在${prefix}的 Cue 评论中提到了你：\n${text}`;
-      for (const m of mentions) {
-        if (optedOut.has(m.userId)) continue;
-        const target = targets.get(m.userId);
-        if (!target) continue;
-        target.adapter.sendDirectMessage(target.platformUserId, { text: notifyText }).catch((e: unknown) =>
-          console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message)
-        );
-      }
+      void notifyUsers({
+        userIds: mentionUserIds,
+        kind: "comment_mention",
+        productionId,
+        entityType: "comment",
+        entityId: comment.id,
+        title: `${session.name} 在${prefix}的 Cue 评论中提到了你`,
+        body: text,
+        category: "info",
+        buildExternalMessage: async (_userId, target) => ({
+          text: `${session.name} 在${prefix}的 Cue 评论中提到了你：\n${text}`,
+        }),
+      }).catch((e: unknown) => console.error("[mention] notify failed:", e));
     }).catch(() => {});
   }
 
