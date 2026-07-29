@@ -731,6 +731,42 @@ describe("POST /api/my/notifications/[id]/act", () => {
     expect(row.rows[0].confirmed_at).not.toBeNull();
   });
 
+  it("external sentinel — marks notification as acted without executing any effects", async () => {
+    // A notification with no actions; external sentinel must not error on that.
+    const n = await createUserNotification({
+      userId: TEST_USER, kind: "tech_req", entityType: "tech_req", entityId: "ext-1",
+      title: "外部模式通知", actionRequired: true,
+      actions: [],
+    });
+    const res = await actHandler(
+      req(`/api/my/notifications/${n.id}/act`, {
+        method: "POST", session: session(), body: { actionId: "external" },
+      }),
+      ctx({ id: n.id }),
+    );
+    expect(res.status).toBe(200);
+    const updated = await getUserNotification(n.id, TEST_USER);
+    expect(updated!.actedAt).not.toBeNull();
+  });
+
+  it("set_status with disallowed value → 500 (status allowlist)", async () => {
+    const n = await createUserNotification({
+      userId: TEST_USER, kind: "test", entityType: "tech_req", entityId: "x",
+      title: "状态注入测试", actionRequired: true,
+      actions: [{
+        id: "bad", presentation: "primary_button", label: "设置",
+        effects: [{ type: "set_status", entityType: "tech_req", entityId: "x", to: "'; DROP TABLE event_tech_req; --" }],
+      }],
+    });
+    const res = await actHandler(
+      req(`/api/my/notifications/${n.id}/act`, {
+        method: "POST", session: session(), body: { actionId: "bad" },
+      }),
+      ctx({ id: n.id }),
+    );
+    expect(res.status).toBe(500);
+  });
+
   it("set_field with disallowed entityType → 500 (security allowlist)", async () => {
     const n = await createUserNotification({
       userId: TEST_USER, kind: "test", entityType: "evil_table", entityId: "x",

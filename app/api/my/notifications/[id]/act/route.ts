@@ -94,11 +94,12 @@ async function executeEffect(
     }
 
     case "set_status": {
-      const ALLOWED_STATUS: Record<string, { table: string; column: string }> = {
-        tech_req: { table: "event_tech_req", column: "status" },
+      const ALLOWED_STATUS: Record<string, { table: string; column: string; values: string[] }> = {
+        tech_req: { table: "event_tech_req", column: "status", values: ["awaiting", "pending", "in_progress", "done", "cancelled"] },
       };
       const meta = ALLOWED_STATUS[effect.entityType];
       if (!meta) throw new Error(`Unknown entityType for set_status: ${effect.entityType}`);
+      if (!meta.values.includes(effect.to)) throw new Error(`Disallowed status value: ${effect.to}`);
       await client.query(
         `UPDATE ${meta.table} SET ${meta.column} = $1 WHERE id = $2`,
         [effect.to, effect.entityId],
