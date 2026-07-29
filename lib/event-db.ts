@@ -2110,6 +2110,70 @@ export async function getDeptReqsWithChat(
   return res.rows.map(r => ({ id: r.id, chatId: r.chat_id }));
 }
 
+/**
+ * Reports badge count:
+ *   Condition 1 — published AND unread AND
+ *     (user is participant OR has call_time OR is mentioned in report)
+ *   Condition 2 — draft AND event completed AND
+ *     (user created the event OR is stage manager)
+ */
+export async function countUnreadReportsForUser(userId: string): Promise<number> {
+  const res = await getPool().query<{ count: string }>(
+    `SELECT COUNT(DISTINCT er.id) AS count
+     FROM event_report er
+     JOIN production_event pe ON pe.id = er.event_id
+     WHERE (
+       er.published_at IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM event_report_read err
+         WHERE err.report_id = er.id AND err.user_id = $1
+       )
+       AND (
+         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
+         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+       )
+     ) OR (
+       er.published_at IS NULL
+       AND pe.status = 'completed'
+       AND (
+         pe.created_by = $1
+         OR EXISTS (SELECT 1 FROM event_stage_manager WHERE event_id = pe.id AND user_id = $1)
+       )
+     )`,
+    [userId],
+  );
+  return parseInt(res.rows[0].count, 10);
+}
+
+/**
+ * Tasks that still need the user's attention:
+ *   (POC of dept OR assignee) AND status IN ('pending', 'in_progress')
+ *   OR POC of dept AND status = 'awaiting'
+ */
+export async function countPendingTasksForUser(userId: string): Promise<number> {
+  const res = await getPool().query<{ count: string }>(
+    `SELECT COUNT(DISTINCT etr.id) AS count
+     FROM event_tech_req etr
+     LEFT JOIN event_department_member edm_poc
+       ON edm_poc.department_id = etr.department_id
+      AND edm_poc.user_id = $1
+      AND edm_poc.is_poc = true
+     LEFT JOIN event_tech_assignee eta
+       ON eta.req_id = etr.id
+      AND eta.user_id = $1
+     WHERE (
+       (edm_poc.user_id IS NOT NULL OR eta.user_id IS NOT NULL)
+       AND etr.status IN ('pending', 'in_progress')
+     ) OR (
+       edm_poc.user_id IS NOT NULL
+       AND etr.status = 'awaiting'
+     )`,
+    [userId],
+  );
+  return parseInt(res.rows[0].count, 10);
+}
+
 // ─── Call schedule types (shared between notify and platform card builders) ───
 
 export type WeeklyCallEntry = {

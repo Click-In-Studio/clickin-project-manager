@@ -12,8 +12,10 @@ interface AppShellProps {
   session: ShellSession | null;
   productions: Production[];
   children: React.ReactNode;
-  /** Server-rendered initial unread notification count for the bell badge. */
+  /** Server-rendered initial counts for sidebar badges. */
   initialUnreadCount?: number;
+  initialPendingTasks?: number;
+  initialUnreadReports?: number;
 }
 
 const CREATION_NAV = [
@@ -88,6 +90,7 @@ function NavItem({
   label,
   hint,
   active,
+  badge,
   onClick,
 }: {
   href: string;
@@ -95,6 +98,7 @@ function NavItem({
   label: string;
   hint: string;
   active: boolean;
+  badge?: number;
   onClick?: () => void;
 }) {
   return (
@@ -110,8 +114,15 @@ function NavItem({
       <span className="w-[27px] h-[27px] rounded-[7px] border border-[#cbd2cf] flex items-center justify-center text-[11px] text-[#667676] shrink-0 leading-none">
         {symbol}
       </span>
-      <span className="flex flex-col min-w-0">
-        <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
+      <span className="flex flex-col min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
+          {badge != null && badge > 0 && (
+            <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
+              {badge > 99 ? "99+" : badge}
+            </span>
+          )}
+        </span>
         <span className="text-[9px] text-[#667676] mt-0.5 truncate">{hint}</span>
       </span>
     </Link>
@@ -186,13 +197,15 @@ function MobileTab({
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }
 
-export default function AppShell({ session, productions, children, initialUnreadCount = 0 }: AppShellProps) {
+export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
+  const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
+  const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
 
   useEffect(() => {
     setDrawerOpen(null);
@@ -207,25 +220,28 @@ export default function AppShell({ session, productions, children, initialUnread
   useEffect(() => {
     if (!session) return;
 
-    const fetchCount = () =>
-      fetch("/api/my/notifications/unread-count")
+    const fetchCounts = () =>
+      fetch("/api/my/pending-counts")
         .then((r) => r.json())
-        .then((d: { count?: number }) => {
-          if (typeof d.count === "number") setUnreadCount(d.count);
+        .then((d: { notifications?: number; tasks?: number; reports?: number }) => {
+          if (typeof d.notifications === "number") setUnreadCount(d.notifications);
+          if (typeof d.tasks === "number") setPendingTasks(d.tasks);
+          if (typeof d.reports === "number") setUnreadReports(d.reports);
         })
         .catch(() => {});
 
-    const onVisible = () => { if (!document.hidden) fetchCount(); };
+    const onVisible = () => { if (!document.hidden) fetchCounts(); };
     const onRead = (e: Event) => {
       const delta = (e as CustomEvent<{ delta?: number }>).detail?.delta;
       if (typeof delta === "number") {
         setUnreadCount((c) => Math.max(0, c - delta));
       } else {
-        fetchCount();
+        fetchCounts();
       }
     };
 
-    const id = setInterval(fetchCount, 60_000);
+    fetchCounts();
+    const id = setInterval(fetchCounts, 60_000);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     window.addEventListener("notif-read", onRead);
@@ -461,9 +477,9 @@ export default function AppShell({ session, productions, children, initialUnread
                   <NavItem href="/my/projects" symbol="◈" label="我的项目" hint="管理与新建项目" active={pathname.startsWith("/my/projects")} />
                   <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} />
                   <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} />
-                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} />
-                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} />
-                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} />
+                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} />
+                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} />
+                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} />
                 </div>
               )}
 
@@ -492,6 +508,12 @@ export default function AppShell({ session, productions, children, initialUnread
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path)}
+                      badge={
+                        item.path === "notifications" ? unreadCount :
+                        item.path === "tasks" ? pendingTasks :
+                        item.path === "reports" ? unreadReports :
+                        undefined
+                      }
                     />
                   ))}
                 </>

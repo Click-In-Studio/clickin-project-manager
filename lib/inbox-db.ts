@@ -202,9 +202,14 @@ export async function batchCreateUserNotifications(
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 export async function countUnreadNotifications(userId: string): Promise<number> {
+  // Mirrors the frontend isDone() logic: a notification is "done" when either
+  // acted_at is set, OR it's view-mode (action_required=false) and already read.
+  // Badge counts everything NOT done.
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM user_notification
-     WHERE user_id = $1 AND read_at IS NULL`,
+     WHERE user_id = $1
+       AND acted_at IS NULL
+       AND (action_required = true OR read_at IS NULL)`,
     [userId],
   );
   return parseInt(res.rows[0].count, 10);
