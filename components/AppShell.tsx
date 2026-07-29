@@ -212,10 +212,29 @@ export default function AppShell({ session, productions, children, initialUnread
   const currentProductionIdRef = useRef<string | null>(extractProductionId(pathname));
   currentProductionIdRef.current = extractProductionId(pathname);
 
+  // Expose fetchCounts via ref so the production-switch effect can call it.
+  const fetchCountsRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     setDrawerOpen(null);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
+
+  // When the user switches to a different production, clear badges immediately so
+  // stale counts from the previous context don't briefly show.
+  const prevProductionIdRef = useRef<string | null>(currentProductionIdRef.current);
+  useEffect(() => {
+    const pid = extractProductionId(pathname);
+    if (pid !== prevProductionIdRef.current) {
+      prevProductionIdRef.current = pid;
+      if (session) {
+        setUnreadCount(0);
+        setPendingTasks(0);
+        setUnreadReports(0);
+        fetchCountsRef.current?.();
+      }
+    }
+  }, [pathname, session]);
 
   // Keep badge fresh:
   // 1. Re-fetch when tab becomes visible (like GitHub) or window regains focus.
@@ -239,6 +258,8 @@ export default function AppShell({ session, productions, children, initialUnread
         })
         .catch(() => {});
     };
+
+    fetchCountsRef.current = fetchCounts;
 
     const onVisible = () => { if (!document.hidden) fetchCounts(); };
     const onRead = (e: Event) => {
