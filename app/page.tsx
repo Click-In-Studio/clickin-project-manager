@@ -4,17 +4,18 @@ import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = { title: "首页" };
 import { listProductions } from "@/lib/db";
-import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/event-db";
+import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/event-db";
 import HomeClient from "@/components/HomeClient";
 
 export default async function Home() {
   const cookieStore = await cookies();
   const session = getSession(cookieStore)!;
 
-  const [productions, myCallTimes, myPendingReqs, myFollowedEvents, myUnreadReports] = await Promise.all([
+  const [productions, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports] = await Promise.all([
     listProductions({ userId: session.userId, isAdmin: session.isAdmin }),
     listMyUpcomingCallTimes(session.userId),
     listMyPendingTechReqs(session.userId),
+    listMyPocAwaitingReqs(session.userId),
     listMyFollowedUpcomingEvents(session.userId),
     listUnreadFollowedReports(session.userId),
   ]);
@@ -25,6 +26,7 @@ export default async function Home() {
       isAdmin={session.isAdmin}
       myCallTimes={myCallTimes}
       myPendingReqs={myPendingReqs}
+      myAwaitingReqs={myAwaitingReqs}
       myFollowedEvents={myFollowedEvents}
       myUnreadReports={myUnreadReports}
     />

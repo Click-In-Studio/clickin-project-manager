@@ -5,7 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr, fmtDate } from "@/lib/tz";
-import type { MyCallTimeEntry, MyPendingTechReqEntry, MyFollowedEventEntry, UnreadReportEntry } from "@/lib/event-db";
+import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, MyFollowedEventEntry, UnreadReportEntry } from "@/lib/event-db";
 import styles from "./home.module.css";
 
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
@@ -18,6 +18,7 @@ type Props = {
   isAdmin: boolean;
   myCallTimes: MyCallTimeEntry[];
   myPendingReqs: MyPendingTechReqEntry[];
+  myAwaitingReqs: MyPocAwaitingReqEntry[];
   myFollowedEvents: MyFollowedEventEntry[];
   myUnreadReports: UnreadReportEntry[];
 };
@@ -27,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = {
   in_progress: "进行中",
 };
 
-export default function HomeClient({ productions: initial, isAdmin, myCallTimes, myPendingReqs, myFollowedEvents, myUnreadReports }: Props) {
+export default function HomeClient({ productions: initial, isAdmin, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports }: Props) {
   const router = useRouter();
   const [productions, setProductions] = useState<Production[]>(initial);
   const [callView, setCallView] = useState<"today" | "week">("today");
@@ -174,12 +175,28 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
               </div>
             </div>
             <div className={styles.panelBody}>
-              <div className={styles.emptyDashed}>
-                暂无待确认事项
-                <small>通知回复与审批流开发中</small>
-              </div>
+              {myAwaitingReqs.length === 0 ? (
+                <div className={styles.emptyState}>暂无待确认事项</div>
+              ) : (
+                <div className={styles.compactList}>
+                  {myAwaitingReqs.slice(0, 3).map(req => (
+                    <button
+                      key={req.id}
+                      onClick={() => router.push(`/production/${req.productionId}/tasks/${req.id}`)}
+                    >
+                      <span className={styles.compactLabel}>
+                        <b>{req.departmentName ?? "（无部门）"}</b>
+                        <small>{req.eventTitle}</small>
+                      </span>
+                      <span className={styles.badge} style={{ background: "#f3eeff", color: "#7c3aed" }}>
+                        待确认
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <Link href="/my/notifications" className={styles.panelSeeAll}>
-                查看通知 →
+                {myAwaitingReqs.length > 3 ? `查看全部 ${myAwaitingReqs.length} 条 →` : "查看通知 →"}
               </Link>
             </div>
           </section>
@@ -188,14 +205,14 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
           <section className={styles.panel}>
             <div className={styles.panelHeading}>
               <div>
-                <p className={styles.kicker}>Unread Reports</p>
-                <h2>未读报告</h2>
+                <p className={styles.kicker}>Reports</p>
+                <h2>报告</h2>
               </div>
             </div>
 
             <div className={styles.panelBody}>
               {myUnreadReports.length === 0 ? (
-                <div className={styles.emptyState}>暂无未读报告</div>
+                <div className={styles.emptyState}>暂无报告</div>
               ) : (
                 <div className={styles.compactList}>
                   {myUnreadReports.slice(0, 3).map(r => (
@@ -208,7 +225,7 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
                         <small>{r.eventTitle} · {r.productionName}</small>
                       </span>
                       <span style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                        {fmtDate(r.publishedAt)}
+                        {r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}
                       </span>
                     </button>
                   ))}

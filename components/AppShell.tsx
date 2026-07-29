@@ -207,6 +207,11 @@ export default function AppShell({ session, productions, children, initialUnread
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
 
+  // Track current productionId via ref so fetchCounts always uses the latest value
+  // without needing to be in the effect dependency array.
+  const currentProductionIdRef = useRef<string | null>(extractProductionId(pathname));
+  currentProductionIdRef.current = extractProductionId(pathname);
+
   useEffect(() => {
     setDrawerOpen(null);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
@@ -220,8 +225,12 @@ export default function AppShell({ session, productions, children, initialUnread
   useEffect(() => {
     if (!session) return;
 
-    const fetchCounts = () =>
-      fetch("/api/my/pending-counts")
+    const fetchCounts = () => {
+      const pid = currentProductionIdRef.current;
+      const url = pid
+        ? `/api/my/pending-counts?productionId=${encodeURIComponent(pid)}`
+        : "/api/my/pending-counts";
+      return fetch(url)
         .then((r) => r.json())
         .then((d: { notifications?: number; tasks?: number; reports?: number }) => {
           if (typeof d.notifications === "number") setUnreadCount(d.notifications);
@@ -229,6 +238,7 @@ export default function AppShell({ session, productions, children, initialUnread
           if (typeof d.reports === "number") setUnreadReports(d.reports);
         })
         .catch(() => {});
+    };
 
     const onVisible = () => { if (!document.hidden) fetchCounts(); };
     const onRead = (e: Event) => {

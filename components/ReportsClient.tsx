@@ -49,7 +49,7 @@ export default function ReportsClient() {
     return true;
   });
 
-  const unreadCount = reports.filter(r => !r.isRead).length;
+  const unreadCount = reports.filter(r => r.publishedAt !== null && !r.isRead).length;
 
   if (loading) {
     return (
@@ -130,7 +130,7 @@ export default function ReportsClient() {
                   <Link
                     key={r.reportId}
                     href={`/production/${r.productionId}/reports/${r.reportId}`}
-                    className={`${styles.mobileReportItem} ${!r.isRead ? styles.unread : ""}`}
+                    className={`${styles.mobileReportItem} ${r.publishedAt !== null && !r.isRead ? styles.unread : ""}`}
                   >
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 5 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -141,10 +141,10 @@ export default function ReportsClient() {
                       </span>
                     </div>
                     <p style={{ margin: "0 0 5px", fontSize: 13, fontWeight: !r.isRead ? 700 : 600, color: "var(--ink)", lineHeight: 1.35, display: "flex", alignItems: "center", gap: 7 }}>
-                      {!r.isRead && <span className={styles.unreadDot} />}
+                      {r.publishedAt !== null && !r.isRead && <span className={styles.unreadDot} />}
                       {r.title}
                     </p>
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{fmtDate(r.publishedAt)}</span>
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}</span>
                   </Link>
                 ))}
               </div>
@@ -220,10 +220,10 @@ export default function ReportsClient() {
                         <Link
                           key={r.reportId}
                           href={`/production/${r.productionId}/reports/${r.reportId}`}
-                          className={`${styles.reportRow} ${!r.isRead ? styles.unread : ""}`}
+                          className={`${styles.reportRow} ${r.publishedAt !== null && !r.isRead ? styles.unread : ""}`}
                         >
                           <div className={styles.reportTitle}>
-                            {!r.isRead && <span className={styles.unreadDot} />}
+                            {r.publishedAt !== null && !r.isRead && <span className={styles.unreadDot} />}
                             <span>{r.title}</span>
                           </div>
                           <div className={styles.reportEvent}>{r.eventTitle}</div>
@@ -232,7 +232,7 @@ export default function ReportsClient() {
                               {TYPE_LABEL[r.reportType] ?? r.reportType}
                             </span>
                           </div>
-                          <div className={styles.reportDate}>{fmtDate(r.publishedAt)}</div>
+                          <div className={styles.reportDate}>{r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}</div>
                         </Link>
                       ))}
                     </div>

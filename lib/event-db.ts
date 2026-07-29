@@ -120,7 +120,8 @@ export type EventReportNote = {
 export type UnreadReportEntry = {
   reportId: string;
   reportTitle: string;
-  publishedAt: string;
+  /** null for draft reports awaiting publication */
+  publishedAt: string | null;
   eventId: string;
   eventTitle: string;
   productionId: string;
@@ -1344,7 +1345,7 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
   const params: unknown[] = [userId];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
-    report_id: string; report_title: string; published_at: Date;
+    report_id: string; report_title: string; published_at: Date | null;
     event_id: string; event_title: string; production_id: string; production_name: string;
   }>(
     `SELECT er.id AS report_id, er.title AS report_title, er.published_at,
@@ -1353,25 +1354,35 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
      FROM event_report er
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE er.published_at IS NOT NULL
-       AND pe.status IN ('published', 'completed')
-       ${prodFilter}
-       AND (
-         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
-         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-       )
+     WHERE (
+       er.published_at IS NOT NULL
        AND NOT EXISTS (
          SELECT 1 FROM event_report_read err
          WHERE err.report_id = er.id AND err.user_id = $1
        )
-     ORDER BY er.published_at DESC
+       AND (
+         EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
+         OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+       )
+       ${prodFilter}
+     ) OR (
+       er.published_at IS NULL
+       AND pe.status = 'completed'
+       AND (
+         pe.created_by = $1
+         OR EXISTS (SELECT 1 FROM event_stage_manager WHERE event_id = pe.id AND user_id = $1)
+       )
+       ${prodFilter}
+     )
+     ORDER BY er.published_at DESC NULLS LAST
      LIMIT 20`,
     params
   );
   return res.rows.map(r => ({
     reportId: r.report_id,
     reportTitle: r.report_title,
-    publishedAt: r.published_at.toISOString(),
+    publishedAt: r.published_at ? r.published_at.toISOString() : null,
     eventId: r.event_id,
     eventTitle: r.event_title,
     productionId: r.production_id,
@@ -1383,7 +1394,8 @@ export type MyReportEntry = {
   reportId: string;
   title: string;
   reportType: string;
-  publishedAt: string;
+  /** null for draft reports */
+  publishedAt: string | null;
   eventId: string;
   eventTitle: string;
   productionId: string;
@@ -1393,7 +1405,7 @@ export type MyReportEntry = {
 
 export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
   const res = await getPool().query<{
-    report_id: string; report_title: string; report_type: string; published_at: Date;
+    report_id: string; report_title: string; report_type: string; published_at: Date | null;
     event_id: string; event_title: string; production_id: string; production_name: string;
     is_read: boolean;
   }>(
@@ -1408,12 +1420,22 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
      FROM event_report er
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
-     WHERE er.published_at IS NOT NULL
+     WHERE (
+       er.published_at IS NOT NULL
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
+         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
-     ORDER BY er.published_at DESC
+     ) OR (
+       er.published_at IS NULL
+       AND pe.status = 'completed'
+       AND (
+         pe.created_by = $1
+         OR EXISTS (SELECT 1 FROM event_stage_manager WHERE event_id = pe.id AND user_id = $1)
+       )
+     )
+     ORDER BY er.published_at DESC NULLS LAST
      LIMIT 100`,
     [userId],
   );
@@ -1421,7 +1443,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
     reportId: r.report_id,
     title: r.report_title,
     reportType: r.report_type,
-    publishedAt: r.published_at.toISOString(),
+    publishedAt: r.published_at ? r.published_at.toISOString() : null,
     eventId: r.event_id,
     eventTitle: r.event_title,
     productionId: r.production_id,
@@ -1798,6 +1820,7 @@ export type MyPocAwaitingReqEntry = {
   id: string;
   eventId: string;
   eventTitle: string;
+  productionId: string;
   departmentName: string | null;
 };
 
@@ -1805,9 +1828,9 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
   const params: unknown[] = [userId];
   const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
-    id: string; event_id: string; event_title: string; department_name: string | null;
+    id: string; event_id: string; event_title: string; production_id: string; department_name: string | null;
   }>(
-    `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, ed.name AS department_name
+    `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, pe.production_id, ed.name AS department_name
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
      LEFT JOIN event_department ed ON ed.id = etr.department_id
@@ -1824,6 +1847,7 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
     id: r.id,
     eventId: r.event_id,
     eventTitle: r.event_title,
+    productionId: r.production_id,
     departmentName: r.department_name,
   }));
 }
@@ -2117,7 +2141,9 @@ export async function getDeptReqsWithChat(
  *   Condition 2 — draft AND event completed AND
  *     (user created the event OR is stage manager)
  */
-export async function countUnreadReportsForUser(userId: string): Promise<number> {
+export async function countUnreadReportsForUser(userId: string, productionId?: string): Promise<number> {
+  const params: unknown[] = [userId];
+  const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(DISTINCT er.id) AS count
      FROM event_report er
@@ -2133,6 +2159,7 @@ export async function countUnreadReportsForUser(userId: string): Promise<number>
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
          OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
+       ${prodFilter}
      ) OR (
        er.published_at IS NULL
        AND pe.status = 'completed'
@@ -2140,8 +2167,9 @@ export async function countUnreadReportsForUser(userId: string): Promise<number>
          pe.created_by = $1
          OR EXISTS (SELECT 1 FROM event_stage_manager WHERE event_id = pe.id AND user_id = $1)
        )
+       ${prodFilter}
      )`,
-    [userId],
+    params,
   );
   return parseInt(res.rows[0].count, 10);
 }
@@ -2151,10 +2179,13 @@ export async function countUnreadReportsForUser(userId: string): Promise<number>
  *   (POC of dept OR assignee) AND status IN ('pending', 'in_progress')
  *   OR POC of dept AND status = 'awaiting'
  */
-export async function countPendingTasksForUser(userId: string): Promise<number> {
+export async function countPendingTasksForUser(userId: string, productionId?: string): Promise<number> {
+  const params: unknown[] = [userId];
+  const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(DISTINCT etr.id) AS count
      FROM event_tech_req etr
+     JOIN production_event pe ON pe.id = etr.event_id
      LEFT JOIN event_department_member edm_poc
        ON edm_poc.department_id = etr.department_id
       AND edm_poc.user_id = $1
@@ -2165,11 +2196,13 @@ export async function countPendingTasksForUser(userId: string): Promise<number> 
      WHERE (
        (edm_poc.user_id IS NOT NULL OR eta.user_id IS NOT NULL)
        AND etr.status IN ('pending', 'in_progress')
+       ${prodFilter}
      ) OR (
        edm_poc.user_id IS NOT NULL
        AND etr.status = 'awaiting'
+       ${prodFilter}
      )`,
-    [userId],
+    params,
   );
   return parseInt(res.rows[0].count, 10);
 }

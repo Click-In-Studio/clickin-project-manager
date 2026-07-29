@@ -14,10 +14,12 @@ export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ notifications: 0, tasks: 0, reports: 0 });
 
+  const productionId = req.nextUrl.searchParams.get("productionId") ?? undefined;
+
   const [notifications, tasks, reports] = await Promise.all([
-    countUnreadNotifications(session.userId),
-    countPendingTasksForUser(session.userId),
-    countUnreadReportsForUser(session.userId),
+    countUnreadNotifications(session.userId, productionId),
+    countPendingTasksForUser(session.userId, productionId),
+    countUnreadReportsForUser(session.userId, productionId),
   ]);
 
   return Response.json({ notifications, tasks, reports });
