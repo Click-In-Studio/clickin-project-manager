@@ -1908,6 +1908,55 @@
       "default": "now()"
     }
   ],
+  "user_profile": [
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "display_name",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "bio",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "avatar_url",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "phone",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "preferred_platform",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "version": [
     {
       "column": "id",

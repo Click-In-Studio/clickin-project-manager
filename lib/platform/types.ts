@@ -97,6 +97,15 @@ export interface OrgCapabilities {
   supportsRichMessages: boolean;
 }
 
+export interface LoginResult {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  // Platform-specific cookies to set after login (e.g. Feishu access token)
+  extraCookies?: { name: string; value: string; opts: Record<string, unknown> }[];
+}
+
 // ── PersonalChannel: user-scoped I/O ─────────────────────────────────────────
 // Decision maker: the user themselves.
 // Config source: notification_preference → user_platform_identity.
@@ -109,6 +118,11 @@ export interface PersonalChannel {
   handleAuthCallback(code: string): Promise<PlatformIdentity>;
   refreshAuth?(refreshToken: string): Promise<AuthToken>;
   getBotIdentity?(): Promise<PlatformIdentity>;
+  // Credential-based login initiation (magic link, OTP, etc.)
+  // OAuth platforms use generateAuthUrl instead.
+  initiateLogin?(params: Record<string, string>, context?: { baseUrl: string }): Promise<void>;
+  // Exchange code/token for session data; handles DB upsert internally.
+  performLogin(code: string): Promise<LoginResult>;
 
   // === User lookup ===
   getUserInfo(platformUserId: string): Promise<PlatformUserInfo>;

@@ -2199,6 +2199,12 @@ export async function upsertFeishuUser(
         [openId, name, avatarUrl, isAdmin, userId],
       );
     }
+    await client.query(
+      `INSERT INTO user_profile (user_id, name, avatar_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, updated_at = now()`,
+      [userId, name, avatarUrl],
+    );
     await client.query("COMMIT");
     return { userId, name, avatarUrl, isAdmin };
   } catch (e) {
@@ -2242,6 +2248,76 @@ export async function listAllUsers(): Promise<UserInfo[]> {
     "SELECT user_id, open_id, name, avatar_url, is_super_admin FROM feishu_user ORDER BY name",
   );
   return res.rows.map(r => ({ userId: r.user_id, openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
+}
+
+// ─── user_profile ──────────────────────────────────────────────────────────────
+
+export async function upsertUserProfile(
+  userId: string,
+  name: string,
+  avatarUrl: string | null,
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO user_profile (user_id, name, avatar_url)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, updated_at = now()`,
+    [userId, name, avatarUrl],
+  );
+}
+
+export async function getUserProfile(
+  userId: string,
+): Promise<{ name: string; avatarUrl: string | null; isAdmin: boolean } | null> {
+  const res = await getPool().query<{ name: string; avatar_url: string | null; is_super_admin: boolean | null }>(
+    `SELECT up.name, up.avatar_url, fu.is_super_admin
+     FROM user_profile up
+     LEFT JOIN feishu_user fu ON fu.user_id = up.user_id
+     WHERE up.user_id = $1`,
+    [userId],
+  );
+  if (!res.rows.length) return null;
+  const r = res.rows[0];
+  return { name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin ?? false };
+}
+
+export async function upsertEmailUser(
+  email: string,
+  name: string,
+): Promise<{ userId: string }> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query<{ user_id: string }>(
+      "SELECT user_id FROM user_platform_identity WHERE platform_id = 'email' AND platform_user_id = $1",
+      [email],
+    );
+    let userId: string;
+    if (existing.rows.length > 0) {
+      userId = existing.rows[0].user_id;
+    } else {
+      const { rows } = await client.query<{ id: string }>(
+        "INSERT INTO app_user DEFAULT VALUES RETURNING id",
+      );
+      userId = rows[0].id;
+      await client.query(
+        `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method)
+         VALUES ($1, 'email', $2, true)`,
+        [userId, email],
+      );
+      await client.query(
+        `INSERT INTO user_profile (user_id, name) VALUES ($1, $2)`,
+        [userId, name],
+      );
+    }
+    await client.query("COMMIT");
+    return { userId };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 

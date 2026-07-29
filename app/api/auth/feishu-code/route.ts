@@ -1,41 +1,32 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { exchangeCode, getUserInfo, checkIsTenantManager, TOKEN_COOKIE } from "@/lib/feishu-auth";
-import { upsertFeishuUser } from "@/lib/db";
+import { feishuPlatform } from "@/lib/platform/feishu";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
 
+// Feishu in-app JS SDK auth code (not OAuth web flow)
 export async function POST(req: NextRequest) {
   const body = await req.json() as { code?: string };
   if (!body.code) return Response.json({ error: "missing code" }, { status: 400 });
 
-  let tokenData;
+  let loginResult;
   try {
-    tokenData = await exchangeCode(body.code);
+    loginResult = await feishuPlatform.performLogin(body.code);
   } catch {
-    return Response.json({ error: "code exchange failed" }, { status: 502 });
+    return Response.json({ error: "Feishu 授权失败" }, { status: 502 });
   }
 
-  const userInfo = await getUserInfo(tokenData.userAccessToken);
-  if (!userInfo) return Response.json({ error: "user info failed" }, { status: 502 });
-
-  const isAdmin = await checkIsTenantManager(userInfo.openId);
-  const { userId } = await upsertFeishuUser(userInfo.openId, userInfo.name, userInfo.avatarUrl, isAdmin);
-
   const sessionId = createSession({
-    userId,
-    name: userInfo.name,
-    avatarUrl: userInfo.avatarUrl,
-    isAdmin,
+    userId: loginResult.userId,
+    name: loginResult.name,
+    avatarUrl: loginResult.avatarUrl,
+    isAdmin: loginResult.isAdmin,
   });
 
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, sessionId, SESSION_COOKIE_OPTS);
-  cookieStore.set(TOKEN_COOKIE, tokenData.userAccessToken, {
-    httpOnly: true,
-    path: "/",
-    sameSite: "lax",
-    maxAge: Math.max(1, Math.floor((tokenData.expiry - Date.now()) / 1000)),
-  });
+  for (const c of loginResult.extraCookies ?? []) {
+    cookieStore.set(c.name, c.value, c.opts as Parameters<typeof cookieStore.set>[2]);
+  }
 
   return Response.json({ ok: true });
 }

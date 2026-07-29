@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS feishu_user (
   user_id        UUID NOT NULL UNIQUE REFERENCES app_user(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS user_profile (
+  user_id            UUID PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
+  name               TEXT NOT NULL,
+  display_name       TEXT,
+  bio                TEXT,
+  avatar_url         TEXT,
+  phone              TEXT,
+  preferred_platform TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ── Productions ───────────────────────────────────────────────────────────────
 -- active_version_id FK is added after version table (circular dependency).
 

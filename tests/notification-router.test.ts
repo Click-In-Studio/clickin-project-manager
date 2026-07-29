@@ -11,6 +11,7 @@ const emailStub: PersonalChannel = {
   capabilities: { canLogin: false, canSendDirect: true, supportsInteractiveMessages: false, supportsRichMessages: false },
   generateAuthUrl: () => "",
   handleAuthCallback: async () => ({ platformUserId: "", name: "" }),
+  performLogin: async () => ({ userId: "", name: "", avatarUrl: null, isAdmin: false }),
   getUserInfo: async (id) => ({ platformUserId: id, name: id }),
   sendDirectMessage: async () => {},
   buildActionUrl: (path) => path,
