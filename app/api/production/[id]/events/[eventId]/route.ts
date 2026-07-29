@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
-import { maybeSendLatePublishDailyCall } from "@/lib/notify";
+import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -71,6 +71,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     await completeAllEventTechReqs(eventId);
   }
   if (body.status === "published" && existing.status !== "published") {
+    // Always send event_publish RSVP notifications to call_time recipients.
+    void dispatchEventPublishNotifications(eventId).catch((e: unknown) =>
+      console.error("[notify] event-publish notifications error:", e),
+    );
+    // If published late in the day (past noon CST) and event is tomorrow,
+    // also send daily-call confirmations.
     void maybeSendLatePublishDailyCall(eventId).catch((e: unknown) =>
       console.error("[notify] late-publish daily call error:", e),
     );

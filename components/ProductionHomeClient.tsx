@@ -157,10 +157,10 @@ export default function ProductionHomeClient({
                 </div>
               )}
               <Link
-                href={`/production/${productionId}/events`}
+                href={`/production/${productionId}/notifications`}
                 className={styles.panelSeeAll}
               >
-                {awaitingReqs.length > 3 ? `查看全部 ${awaitingReqs.length} 条 →` : "查看所有 Event →"}
+                {awaitingReqs.length > 3 ? `查看全部 ${awaitingReqs.length} 条 →` : "查看通知 →"}
               </Link>
             </div>
           </section>
@@ -212,15 +212,15 @@ export default function ProductionHomeClient({
           <section className={styles.panel}>
             <div className={styles.panelHeading}>
               <div>
-                <p className={styles.kicker}>Unread Reports</p>
-                <h2>未读报告</h2>
+                <p className={styles.kicker}>Reports</p>
+                <h2>报告</h2>
               </div>
             </div>
             <div className={styles.panelBody}>
               {loading ? (
                 <div className={styles.emptyState}>加载中…</div>
               ) : unreadReports.length === 0 ? (
-                <div className={styles.emptyState}>暂无未读报告</div>
+                <div className={styles.emptyState}>暂无报告</div>
               ) : (
                 <div className={styles.compactList}>
                   {unreadReports.slice(0, 3).map(r => (
@@ -233,7 +233,7 @@ export default function ProductionHomeClient({
                         <small>{r.eventTitle}</small>
                       </span>
                       <span style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                        {fmtDate(r.publishedAt)}
+                        {r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}
                       </span>
                     </button>
                   ))}

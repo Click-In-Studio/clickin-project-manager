@@ -489,7 +489,10 @@ CREATE TABLE IF NOT EXISTS event_call_time (
   department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
   call_at          TIMESTAMPTZ NOT NULL,
   schedule_item_id TEXT REFERENCES event_schedule_item(id) ON DELETE SET NULL,
-  notes            TEXT NOT NULL DEFAULT ''
+  notes            TEXT NOT NULL DEFAULT '',
+  rsvp             TEXT CHECK (rsvp IN ('yes', 'no', 'tentative')),
+  rsvp_at          TIMESTAMPTZ,
+  confirmed_at     TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS event_call_time_event_idx ON event_call_time(event_id);
@@ -621,6 +624,37 @@ CREATE TABLE IF NOT EXISTS notification_subscription (
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, notification_type)
 );
+
+CREATE TABLE IF NOT EXISTS user_notification (
+  id              TEXT PRIMARY KEY,
+  user_id         UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  production_id   TEXT REFERENCES production(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL,
+  entity_type     TEXT NOT NULL,
+  entity_id       TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL DEFAULT '',
+  view_href       TEXT,
+  category        TEXT NOT NULL DEFAULT 'info' CHECK (category IN ('info', 'action', 'warning')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  read_at         TIMESTAMPTZ,
+  action_required BOOLEAN NOT NULL DEFAULT false,
+  actions         JSONB NOT NULL DEFAULT '[]',
+  acted_at        TIMESTAMPTZ,
+  action_result   JSONB,
+  expired_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS user_notification_user_created_idx
+  ON user_notification(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS user_notification_user_unread_idx
+  ON user_notification(user_id, read_at)
+  WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS user_notification_user_pending_idx
+  ON user_notification(user_id, created_at DESC)
+  WHERE action_required = true AND acted_at IS NULL;
+CREATE INDEX IF NOT EXISTS user_notification_entity_idx
+  ON user_notification(entity_type, entity_id);
 
 -- ── Bot testers ───────────────────────────────────────────────────────────────
 -- Intentionally uses open_id: this is a Feishu-layer control table used for

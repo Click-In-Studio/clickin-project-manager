@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -63,17 +64,19 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const allPeople = productionMembers.map(m => ({ userId: m.userId, name: m.name }));
 
   return (
-    <ReqDetailClient
-      req={req}
-      event={event}
-      scheduleItems={scheduleItems}
-      deptName={dept?.name ?? null}
-      deptPeople={deptPeople}
-      allPeople={allPeople}
-      isPocOfDept={isPocOfDept}
-      isAssignee={isAssignee}
-      canViewFull={canViewFull}
-      productionId={productionId}
-    />
+    <Suspense>
+      <ReqDetailClient
+        req={req}
+        event={event}
+        scheduleItems={scheduleItems}
+        deptName={dept?.name ?? null}
+        deptPeople={deptPeople}
+        allPeople={allPeople}
+        isPocOfDept={isPocOfDept}
+        isAssignee={isAssignee}
+        canViewFull={canViewFull}
+        productionId={productionId}
+      />
+    </Suspense>
   );
 }

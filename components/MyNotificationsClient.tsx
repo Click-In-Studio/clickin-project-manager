@@ -1,103 +1,83 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
+import type { UserNotification, NotificationAction } from "@/lib/inbox-db";
 
-type NotifKind = "action" | "info";
-type NotifStatus = "pending" | "read" | "done";
+// ─── Props ────────────────────────────────────────────────────────────────────
 
-type Notification = {
-  id: string;
-  kind: NotifKind;
-  status: NotifStatus;
-  title: string;
-  meta: string;
-  productionId: string;
-  production: string;
-  body: string;
-  time: string;
-};
+interface Props {
+  productions?: { id: string; name: string }[];
+  productionId?: string;
+}
 
-const DEMO: Notification[] = [
-  {
-    id: "1",
-    kind: "action",
-    status: "pending",
-    title: "请确认：7 月 30 日联排 Call Time",
-    meta: "联排 01",
-    productionId: "demo-prod-1",
-    production: "《碎片》2025 首演",
-    body: '你的 Call Time 为 14:00，地点为排练厅 B。请点击「确认已收到」以让制作方知晓你已收到此通知。\n\n如有任何冲突，请直接联系舞台监督。',
-    time: "今天 10:22",
-  },
-  {
-    id: "2",
-    kind: "action",
-    status: "pending",
-    title: "请确认：灯光 Cue List v3 更新",
-    meta: "技术需求",
-    productionId: "demo-prod-1",
-    production: "《碎片》2025 首演",
-    body: "灯光设计已提交 Cue List v3，对第三幕时序进行了重要修改。请在 7 月 28 日 12:00 前确认收到并完成内部对稿。",
-    time: "今天 09:05",
-  },
-  {
-    id: "3",
-    kind: "info",
-    status: "pending",
-    title: "Call Sheet 已更新：8 月 1 日演出",
-    meta: "Event 003",
-    productionId: "demo-prod-1",
-    production: "《碎片》2025 首演",
-    body: "8 月 1 日演出 Call Sheet 已更新，Call Time 部分有变动。请查阅最新版本。",
-    time: "昨天 18:40",
-  },
-  {
-    id: "4",
-    kind: "action",
-    status: "done",
-    title: "请确认：7 月 25 日联排 Call Time",
-    meta: "联排 00",
-    productionId: "demo-prod-1",
-    production: "《碎片》2025 首演",
-    body: "你的 Call Time 为 10:00，地点为排练厅 A。",
-    time: "07-25 10:00",
-  },
-  {
-    id: "5",
-    kind: "info",
-    status: "read",
-    title: "报告已发布：7 月 22 日演出 Production Report",
-    meta: "Event 007",
-    productionId: "demo-prod-2",
-    production: "《盲目飞行》2025",
-    body: "7 月 22 日演出 Production Report 已发布，请前往查阅。",
-    time: "07-22 23:15",
-  },
-  {
-    id: "6",
-    kind: "info",
-    status: "read",
-    title: "服装部门提交了物料清单",
-    meta: "物料",
-    productionId: "demo-prod-2",
-    production: "《盲目飞行》2025",
-    body: "服装部门已完成物料清单提交，共 47 项。如有疑问请联系服装统筹。",
-    time: "07-21 14:30",
-  },
-  {
-    id: "7",
-    kind: "action",
-    status: "done",
-    title: "请确认：场地变更通知",
-    meta: "运营",
-    productionId: "demo-prod-2",
-    production: "《盲目飞行》2025",
-    body: "演出场地已从主厅调换至小黑匣子，详情请见公告。",
-    time: "07-20 09:00",
-  },
-];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Three act modes, derived from existing fields — no extra DB column needed:
+ *
+ *   button   actions.length > 0            → acted when inline button clicked
+ *   view     !actionRequired               → acted when notification is read
+ *   external actionRequired && no actions  → destination page calls act API via ?notif=
+ */
+type ActMode = "button" | "view" | "external";
+
+function actMode(n: UserNotification): ActMode {
+  if (n.actions.length > 0) return "button";
+  if (!n.actionRequired) return "view";
+  return "external";
+}
+
+function isDone(n: UserNotification): boolean {
+  if (n.actedAt) return true;
+  const mode = actMode(n);
+  if (mode === "view") return !!n.readAt;
+  return false;
+}
+
+type DisplayStatus = "pending" | "read" | "done" | "expired";
+
+function getStatus(n: UserNotification): DisplayStatus {
+  if (n.expiredAt && !n.actedAt) return "expired";
+  if (isDone(n)) return "done";
+  if (n.readAt) return "read";
+  return "pending";
+}
+
+function dotColor(n: UserNotification): string {
+  const mode = actMode(n);
+  const status = getStatus(n);
+  if (status === "done" || status === "read") return "var(--line)";
+  if (mode === "button" || mode === "external") return "var(--stage)";
+  return "var(--script)";
+}
+
+/** Append ?notif=<id> to any viewHref so destination pages can optionally call act. */
+function withNotifParam(href: string, notifId: string): string {
+  try {
+    const u = new URL(href, "http://x");
+    u.searchParams.set("notif", notifId);
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return href;
+  }
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterdayStart = new Date(todayStart.getTime() - 86400_000);
+
+  const hhmm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (d >= todayStart) return `今天 ${hhmm}`;
+  if (d >= yesterdayStart) return `昨天 ${hhmm}`;
+  return `${d.getMonth() + 1 < 10 ? "0" : ""}${d.getMonth() + 1}-${d.getDate() < 10 ? "0" : ""}${d.getDate()} ${hhmm}`;
+}
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
 
 type Tab = "all" | "action" | "info" | "done";
 
@@ -108,42 +88,362 @@ const TAB_LABELS: Record<Tab, string> = {
   done: "已处理",
 };
 
-export default function MyNotificationsClient() {
-  const [tab, setTab] = useState<Tab>("all");
-  const [items, setItems] = useState<Notification[]>(DEMO);
-  const [selected, setSelected] = useState<Notification | null>(DEMO[0]);
+function filterByTab(items: UserNotification[], tab: Tab): UserNotification[] {
+  switch (tab) {
+    // "全部": everything not yet done — includes read-but-unacted (external-mode) items.
+    case "all":
+      return items.filter((n) => !isDone(n));
+    // "待确认": actionRequired and not yet acted (button + external modes).
+    case "action":
+      return items.filter((n) => n.actionRequired && !n.actedAt);
+    // "仅告知": view-mode items not yet read.
+    case "info":
+      return items.filter((n) => actMode(n) === "view" && !n.readAt);
+    // "已处理": anything that passes isDone.
+    case "done":
+      return items.filter(isDone);
+    default:
+      return items;
+  }
+}
 
-  const filtered = items.filter(n => {
-    if (tab === "all") return n.status !== "done";
-    if (tab === "action") return n.kind === "action" && n.status === "pending";
-    if (tab === "info") return n.kind === "info" && n.status !== "done";
-    if (tab === "done") return n.status === "done";
-    return true;
-  });
+// ─── Action button ────────────────────────────────────────────────────────────
 
-  const pendingActionCount = items.filter(n => n.kind === "action" && n.status === "pending").length;
+function ActionButtons({
+  notifId,
+  actions,
+  expired,
+  onActed,
+}: {
+  notifId: string;
+  actions: NotificationAction[];
+  expired: boolean;
+  onActed: (notifId: string, actionId: string) => void;
+}) {
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const markDone = (id: string) => {
-    setItems(prev => prev.map(n => n.id === id ? { ...n, status: "done" } : n));
-    if (selected?.id === id) setSelected(prev => prev ? { ...prev, status: "done" } : null);
+  if (!actions.length) return null;
+
+  const handleClick = async (action: NotificationAction) => {
+    if (loading || expired) return;
+    setLoading(action.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/my/notifications/${notifId}/act`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actionId: action.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(d.error ?? "操作失败");
+      }
+      onActed(notifId, action.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(null);
+    }
   };
 
-  function dotColor(n: Notification) {
-    if (n.kind === "action" && n.status === "pending") return "var(--stage)";
-    if (n.status === "pending") return "var(--script)";
-    return "var(--line)";
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+      {actions.map((action) => {
+        const isPrimary = action.presentation === "primary_button";
+        const isLoading = loading === action.id;
+        return (
+          <button
+            key={action.id}
+            onClick={() => handleClick(action)}
+            disabled={!!loading || expired}
+            style={{
+              border: `1px solid ${isPrimary ? "var(--ink)" : "var(--line)"}`,
+              background: isPrimary ? (expired ? "var(--muted)" : "var(--ink)") : "transparent",
+              borderRadius: 8,
+              padding: "9px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              color: isPrimary ? "#fff" : "var(--ink)",
+              cursor: loading || expired ? "not-allowed" : "pointer",
+              opacity: expired ? 0.5 : isLoading ? 0.7 : 1,
+              transition: "opacity 0.15s",
+            }}
+          >
+            {isLoading ? "处理中…" : action.label}
+          </button>
+        );
+      })}
+      {expired && (
+        <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center" }}>
+          此通知已被新通知覆盖
+        </span>
+      )}
+      {error && (
+        <span style={{ fontSize: 11, color: "var(--stage)", alignSelf: "center" }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function MyNotificationsClient({ productions = [], productionId }: Props) {
+  const [tab, setTab] = useState<Tab>("all");
+  const [items, setItems] = useState<UserNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<UserNotification | null>(null);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+
+  // When the tab changes, deselect if the current selection falls outside the new filter.
+  const handleTabChange = (t: Tab) => {
+    setTab(t);
+    setSelected((prev) => {
+      if (!prev) return null;
+      const inNewTab = filterByTab(items, t).some((n) => n.id === prev.id);
+      return inNewTab ? prev : null;
+    });
+  };
+
+  const prodMap = Object.fromEntries(productions.map((p) => [p.id, p.name]));
+
+  const load = useCallback(async () => {
+    const params = new URLSearchParams({ limit: "60" });
+    if (productionId) params.set("productionId", productionId);
+    const res = await fetch(`/api/my/notifications?${params}`).then((r) => r.json()) as {
+      notifications?: UserNotification[];
+    };
+    const notifs = res.notifications ?? [];
+    // Only auto-select and auto-read the first item visible in the initial "all" tab.
+    const first = filterByTab(notifs, "all")[0] ?? null;
+    const autoRead = first && !first.readAt;
+
+    // Optimistically mark first item as read so the detail panel opens in "read" state.
+    const display = autoRead
+      ? notifs.map((n) => n.id === first.id ? { ...n, readAt: new Date().toISOString() } : n)
+      : notifs;
+
+    setItems(display);
+    if (first && !selected) {
+      setSelected(autoRead ? { ...first, readAt: new Date().toISOString() } : first);
+    }
+
+    if (autoRead) {
+      fetch("/api/my/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [first.id] }),
+      }).catch(() => {});
+      window.dispatchEvent(new CustomEvent("notif-read", { detail: { delta: 1 } }));
+    }
+  }, [productionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setLoading(true);
+    load().finally(() => setLoading(false));
+  }, [load]);
+
+  const markRead = useCallback(async (id: string) => {
+    await fetch("/api/my/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [id] }),
+    }).catch(() => {});
+    setItems((prev) =>
+      prev.map((n) => n.id === id ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)
+    );
+    window.dispatchEvent(new CustomEvent("notif-read", { detail: { delta: 1 } }));
+  }, []);
+
+  const handleSelect = (n: UserNotification) => {
+    setSelected(n);
+    if (!n.readAt) markRead(n.id);
+  };
+
+  const handleActed = (notifId: string, _actionId: string) => {
+    setItems((prev) =>
+      prev.map((n) =>
+        n.id === notifId
+          ? { ...n, actedAt: new Date().toISOString(), readAt: n.readAt ?? new Date().toISOString() }
+          : n
+      )
+    );
+    setSelected((prev) =>
+      prev?.id === notifId
+        ? { ...prev, actedAt: new Date().toISOString(), readAt: prev.readAt ?? new Date().toISOString() }
+        : prev
+    );
+  };
+
+  const handleMarkAllRead = async () => {
+    setMarkingAllRead(true);
+    const wasUnread = unreadUndoneCount;
+    await fetch("/api/my/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productionId ? { productionId } : {}),
+    }).catch(() => {});
+    const now = new Date().toISOString();
+    setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? now })));
+    if (wasUnread > 0) {
+      window.dispatchEvent(new CustomEvent("notif-read", { detail: { delta: wasUnread } }));
+    }
+    setMarkingAllRead(false);
+  };
+
+  const filtered = filterByTab(items, tab);
+  const pendingActionCount = items.filter((n) => n.actionRequired && !n.actedAt).length;
+  // Items not yet done and not yet read — used for badge decrement in "全部已读".
+  const unreadUndoneCount = items.filter((n) => !isDone(n) && !n.readAt).length;
+
+  function renderDetail(n: UserNotification) {
+    const status = getStatus(n);
+    const mode = actMode(n);
+    const prodName = n.productionId ? (prodMap[n.productionId] ?? n.productionId) : null;
+    const viewLink = n.viewHref ? withNotifParam(n.viewHref, n.id) : null;
+
+    return (
+      <div>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+            {/* Category tag */}
+            {status === "pending" && mode === "button" && (
+              <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                background: "var(--warn-soft)", color: "var(--warn)" }}>
+                待确认
+              </span>
+            )}
+            {status === "pending" && mode === "external" && (
+              <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                background: "var(--warn-soft)", color: "var(--warn)" }}>
+                待处理
+              </span>
+            )}
+            {mode === "view" && !isDone(n) && (
+              <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                background: "var(--surface-2)", color: "var(--script)" }}>
+                告知
+              </span>
+            )}
+            {status === "expired" && (
+              <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                background: "var(--surface-2)", color: "var(--muted)" }}>
+                已失效
+              </span>
+            )}
+            {isDone(n) && (
+              <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                background: "var(--success-soft)", color: "var(--success)" }}>
+                {n.actedAt ? "已处理" : "已读"}
+              </span>
+            )}
+          </div>
+          <h2 style={{
+            margin: "0 0 6px",
+            fontFamily: 'Georgia, "Noto Serif SC", serif',
+            fontSize: "clamp(18px, 2vw, 24px)", fontWeight: 500, color: "var(--ink)",
+            lineHeight: 1.3,
+          }}>
+            {n.title}
+          </h2>
+          <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+            {[prodName, formatTime(n.createdAt)].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+
+        {n.body && (
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20, marginBottom: 24 }}>
+            <SmartText
+              content={n.body}
+              markdown
+              contentMention={n.productionId ? { productionId: n.productionId } : undefined}
+              className={styles.bodyText}
+            />
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+          {viewLink && (
+            <Link
+              href={viewLink}
+              style={{
+                fontSize: 13, color: "var(--script)", textDecoration: "underline",
+                textUnderlineOffset: 3,
+              }}
+            >
+              查看详情 →
+            </Link>
+          )}
+
+          {n.actionRequired && !n.actedAt && n.actions.length > 0 && (
+            <ActionButtons
+              notifId={n.id}
+              actions={n.actions}
+              expired={!!n.expiredAt}
+              onActed={handleActed}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderListItem(n: UserNotification, isSelected: boolean, onClick: () => void) {
+    const prodName = n.productionId ? (prodMap[n.productionId] ?? null) : null;
+    const status = getStatus(n);
+    return (
+      <button
+        key={n.id}
+        onClick={onClick}
+        style={{
+          border: "1px solid " + (isSelected ? "var(--ink)" : "transparent"),
+          borderRadius: 10, padding: "12px 14px",
+          background: isSelected ? "var(--ink)" : "transparent",
+          cursor: "pointer", textAlign: "left", width: "100%",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}
+      >
+        <span style={{
+          width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 5,
+          background: isSelected ? "rgba(255,255,255,.4)" : dotColor(n),
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{
+            margin: "0 0 3px", fontSize: 13, fontWeight: status === "pending" ? 700 : 500,
+            color: isSelected ? "#fff" : "var(--ink)",
+            display: "-webkit-box", WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.35,
+          }}>
+            {n.title}
+          </p>
+          <p style={{ margin: 0, fontSize: 11, color: isSelected ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
+            {prodName ?? n.kind}
+          </p>
+        </div>
+        <span style={{
+          fontSize: 10, color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)",
+          whiteSpace: "nowrap", flexShrink: 0, marginTop: 2,
+        }}>
+          {formatTime(n.createdAt)}
+        </span>
+      </button>
+    );
   }
 
   return (
     <div className={styles.workspace}>
       <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>Platform · 通知</p>
+        <p className={styles.eyebrow}>
+          {productionId ? "演出 · 通知" : "Platform · 通知"}
+        </p>
         <h1 className={styles.pageTitle}>通知提醒</h1>
       </div>
 
-      <div className={styles.tabBar}>
-        {(["all", "action", "info", "done"] as Tab[]).map(t => (
-          <button key={t} aria-selected={tab === t} onClick={() => setTab(t)}>
+      <div className={styles.tabBar} style={{ display: "flex", alignItems: "center", gap: 0 }}>
+        {(["all", "action", "info", "done"] as Tab[]).map((t) => (
+          <button key={t} aria-selected={tab === t} onClick={() => handleTabChange(t)}>
             {TAB_LABELS[t]}
             {t === "action" && pendingActionCount > 0 && (
               <span style={{
@@ -157,19 +457,37 @@ export default function MyNotificationsClient() {
             )}
           </button>
         ))}
+        <div style={{ flex: 1 }} />
+        {unreadUndoneCount > 0 && (
+          <button
+            onClick={handleMarkAllRead}
+            disabled={markingAllRead}
+            style={{
+              fontSize: 11, color: "var(--muted)", cursor: "pointer",
+              border: "none", background: "transparent", padding: "4px 8px",
+              opacity: markingAllRead ? 0.5 : 1,
+            }}
+          >
+            全部标为已读
+          </button>
+        )}
       </div>
 
       {/* ── Mobile: accordion list ── */}
       <div className={styles.mobileOnly}>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className={styles.emptyState}>加载中…</div>
+        ) : filtered.length === 0 ? (
           <div className={styles.emptyState}>
             暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
             <small>新的通知将在这里显示</small>
           </div>
         ) : (
           <div className={styles.mobileCardList}>
-            {filtered.map(n => {
+            {filtered.map((n) => {
               const isExpanded = selected?.id === n.id;
+              const status = getStatus(n);
+              const prodName = n.productionId ? (prodMap[n.productionId] ?? null) : null;
               return (
                 <div
                   key={n.id}
@@ -178,13 +496,16 @@ export default function MyNotificationsClient() {
                 >
                   <button
                     className={styles.mobileCardBtn}
-                    onClick={() => setSelected(isExpanded ? null : n)}
+                    onClick={() => {
+                      setSelected(isExpanded ? null : n);
+                      if (!n.readAt && !isExpanded) markRead(n.id);
+                    }}
                   >
                     <div className={styles.mobileCardHeader}>
                       <span className={styles.mobileCardProduction}>
-                        {n.production} · {n.meta}
+                        {prodName ?? n.kind}
                       </span>
-                      <span className={styles.mobileCardTime}>{n.time}</span>
+                      <span className={styles.mobileCardTime}>{formatTime(n.createdAt)}</span>
                     </div>
                     <p className={`${styles.mobileCardTitle} ${isExpanded ? "" : styles.mobileCardTitleClamp}`}>
                       {n.title}
@@ -194,41 +515,51 @@ export default function MyNotificationsClient() {
                   {isExpanded && (
                     <div className={styles.mobileCardDetail}>
                       <div className={styles.mobileCardMeta}>
-                        <span style={{
-                          padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                          background: n.kind === "action" ? "var(--warn-soft)" : "var(--surface-2)",
-                          color: n.kind === "action" ? "var(--warn)" : "var(--script)",
-                        }}>
-                          {n.kind === "action" ? "待确认" : "告知"}
-                        </span>
-                        {n.status === "done" && (
-                          <span style={{
-                            padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                            background: "var(--success-soft)", color: "var(--success)",
-                          }}>
-                            已处理
-                          </span>
+                        {(() => {
+                          const mode = actMode(n);
+                          const done = isDone(n);
+                          if (status === "expired") return (
+                            <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "var(--surface-2)", color: "var(--muted)" }}>已失效</span>
+                          );
+                          if (done) return (
+                            <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "var(--success-soft)", color: "var(--success)" }}>{n.actedAt ? "已处理" : "已读"}</span>
+                          );
+                          if (mode === "button" || mode === "external") return (
+                            <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "var(--warn-soft)", color: "var(--warn)" }}>{mode === "button" ? "待确认" : "待处理"}</span>
+                          );
+                          return (
+                            <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "var(--surface-2)", color: "var(--script)" }}>告知</span>
+                          );
+                        })()}
+                      </div>
+
+                      {n.body && (
+                        <SmartText
+                          content={n.body}
+                          markdown
+                          contentMention={n.productionId ? { productionId: n.productionId } : undefined}
+                          className={styles.bodyText}
+                        />
+                      )}
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+                        {n.viewHref && (
+                          <Link
+                            href={withNotifParam(n.viewHref, n.id)}
+                            style={{ fontSize: 13, color: "var(--script)", textDecoration: "underline", textUnderlineOffset: 3 }}
+                          >
+                            查看详情 →
+                          </Link>
+                        )}
+                        {n.actionRequired && !n.actedAt && n.actions.length > 0 && (
+                          <ActionButtons
+                            notifId={n.id}
+                            actions={n.actions}
+                            expired={!!n.expiredAt}
+                            onActed={handleActed}
+                          />
                         )}
                       </div>
-                      <SmartText
-                        content={n.body}
-                        markdown
-                        contentMention={{ productionId: n.productionId }}
-                        className={styles.bodyText}
-                      />
-                      {n.kind === "action" && n.status === "pending" && (
-                        <button
-                          onClick={() => markDone(n.id)}
-                          style={{
-                            marginTop: 16, border: "1px solid var(--ink)",
-                            background: "var(--ink)", borderRadius: 8,
-                            padding: "10px 24px", fontSize: 13, fontWeight: 700,
-                            color: "#fff", cursor: "pointer",
-                          }}
-                        >
-                          确认已收到
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>
@@ -236,9 +567,6 @@ export default function MyNotificationsClient() {
             })}
           </div>
         )}
-        <p style={{ marginTop: 20, fontSize: 11, color: "var(--muted)" }}>
-          Demo 数据 · 后端接入后显示实际通知
-        </p>
       </div>
 
       {/* ── Desktop: master-detail split ── */}
@@ -246,58 +574,20 @@ export default function MyNotificationsClient() {
         <div className={styles.splitLayout}>
           {/* Left: list */}
           <div className={`${styles.splitPane} ${styles.splitList}`}>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <div className={styles.emptyState} style={{ paddingTop: 40 }}>加载中…</div>
+            ) : filtered.length === 0 ? (
               <div className={styles.emptyState} style={{ paddingTop: 40, paddingRight: 16 }}>
                 暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
                 <small>新的通知将在这里显示</small>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 16 }}>
-                {filtered.map(n => {
-                  const isSelected = selected?.id === n.id;
-                  return (
-                    <button
-                      key={n.id}
-                      onClick={() => setSelected(n)}
-                      style={{
-                        border: "1px solid " + (isSelected ? "var(--ink)" : "transparent"),
-                        borderRadius: 10, padding: "12px 14px",
-                        background: isSelected ? "var(--ink)" : "transparent",
-                        cursor: "pointer", textAlign: "left", width: "100%",
-                        display: "flex", alignItems: "flex-start", gap: 10,
-                      }}
-                    >
-                      <span style={{
-                        width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 5,
-                        background: isSelected ? "rgba(255,255,255,.4)" : dotColor(n),
-                      }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{
-                          margin: "0 0 3px", fontSize: 13, fontWeight: 600,
-                          color: isSelected ? "#fff" : "var(--ink)",
-                          display: "-webkit-box", WebkitLineClamp: 2,
-                          WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.35,
-                        }}>
-                          {n.title}
-                        </p>
-                        <p style={{ margin: 0, fontSize: 11, color: isSelected ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
-                          {n.production} · {n.meta}
-                        </p>
-                      </div>
-                      <span style={{
-                        fontSize: 10, color: isSelected ? "rgba(255,255,255,.5)" : "var(--muted)",
-                        whiteSpace: "nowrap", flexShrink: 0, marginTop: 2,
-                      }}>
-                        {n.time}
-                      </span>
-                    </button>
-                  );
-                })}
+                {filtered.map((n) =>
+                  renderListItem(n, selected?.id === n.id, () => handleSelect(n))
+                )}
               </div>
             )}
-            <p style={{ marginTop: 20, paddingRight: 16, fontSize: 11, color: "var(--muted)" }}>
-              Demo 数据 · 后端接入后显示实际通知
-            </p>
           </div>
 
           {/* Right: detail */}
@@ -307,60 +597,7 @@ export default function MyNotificationsClient() {
                 选择左侧通知查看详情
               </div>
             ) : (
-              <div>
-                <div style={{ marginBottom: 20 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                    <span style={{
-                      padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                      background: selected.kind === "action" ? "var(--warn-soft)" : "var(--surface-2)",
-                      color: selected.kind === "action" ? "var(--warn)" : "var(--script)",
-                    }}>
-                      {selected.kind === "action" ? "待确认" : "告知"}
-                    </span>
-                    {selected.status === "done" && (
-                      <span style={{
-                        padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                        background: "var(--success-soft)", color: "var(--success)",
-                      }}>
-                        已处理
-                      </span>
-                    )}
-                  </div>
-                  <h2 style={{
-                    margin: "0 0 6px",
-                    fontFamily: 'Georgia, "Noto Serif SC", serif',
-                    fontSize: "clamp(18px, 2vw, 24px)", fontWeight: 500, color: "var(--ink)",
-                    lineHeight: 1.3,
-                  }}>
-                    {selected.title}
-                  </h2>
-                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                    {selected.production} · {selected.meta} · {selected.time}
-                  </p>
-                </div>
-
-                <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20, marginBottom: 24 }}>
-                  <SmartText
-                    content={selected.body}
-                    markdown
-                    contentMention={{ productionId: selected.productionId }}
-                    className={styles.bodyText}
-                  />
-                </div>
-
-                {selected.kind === "action" && selected.status === "pending" && (
-                  <button
-                    onClick={() => markDone(selected.id)}
-                    style={{
-                      border: "1px solid var(--ink)", background: "var(--ink)",
-                      borderRadius: 8, padding: "10px 24px",
-                      fontSize: 13, fontWeight: 700, color: "#fff", cursor: "pointer",
-                    }}
-                  >
-                    确认已收到
-                  </button>
-                )}
-              </div>
+              renderDetail(selected)
             )}
           </div>
         </div>

@@ -12,6 +12,10 @@ interface AppShellProps {
   session: ShellSession | null;
   productions: Production[];
   children: React.ReactNode;
+  /** Server-rendered initial counts for sidebar badges. */
+  initialUnreadCount?: number;
+  initialPendingTasks?: number;
+  initialUnreadReports?: number;
 }
 
 const CREATION_NAV = [
@@ -86,6 +90,7 @@ function NavItem({
   label,
   hint,
   active,
+  badge,
   onClick,
 }: {
   href: string;
@@ -93,6 +98,7 @@ function NavItem({
   label: string;
   hint: string;
   active: boolean;
+  badge?: number;
   onClick?: () => void;
 }) {
   return (
@@ -108,8 +114,15 @@ function NavItem({
       <span className="w-[27px] h-[27px] rounded-[7px] border border-[#cbd2cf] flex items-center justify-center text-[11px] text-[#667676] shrink-0 leading-none">
         {symbol}
       </span>
-      <span className="flex flex-col min-w-0">
-        <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
+      <span className="flex flex-col min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
+          {badge != null && badge > 0 && (
+            <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
+              {badge > 99 ? "99+" : badge}
+            </span>
+          )}
+        </span>
         <span className="text-[9px] text-[#667676] mt-0.5 truncate">{hint}</span>
       </span>
     </Link>
@@ -184,17 +197,93 @@ function MobileTab({
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }
 
-export default function AppShell({ session, productions, children }: AppShellProps) {
+export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
+  const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
+  const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
+
+  // Track current productionId via ref so fetchCounts always uses the latest value
+  // without needing to be in the effect dependency array.
+  const currentProductionIdRef = useRef<string | null>(extractProductionId(pathname));
+  currentProductionIdRef.current = extractProductionId(pathname);
+
+  // Expose fetchCounts via ref so the production-switch effect can call it.
+  const fetchCountsRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     setDrawerOpen(null);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
+
+  // When the user switches to a different production, clear badges immediately so
+  // stale counts from the previous context don't briefly show.
+  const prevProductionIdRef = useRef<string | null>(currentProductionIdRef.current);
+  useEffect(() => {
+    const pid = extractProductionId(pathname);
+    if (pid !== prevProductionIdRef.current) {
+      prevProductionIdRef.current = pid;
+      if (session) {
+        setUnreadCount(0);
+        setPendingTasks(0);
+        setUnreadReports(0);
+        fetchCountsRef.current?.();
+      }
+    }
+  }, [pathname, session]);
+
+  // Keep badge fresh:
+  // 1. Re-fetch when tab becomes visible (like GitHub) or window regains focus.
+  // 2. Listen for custom 'notif-read' events dispatched by the notifications page
+  //    so the badge decrements instantly without waiting for the next poll.
+  // 3. 60 s poll as a backstop for long-lived focused tabs.
+  useEffect(() => {
+    if (!session) return;
+
+    const fetchCounts = () => {
+      const pid = currentProductionIdRef.current;
+      const url = pid
+        ? `/api/my/pending-counts?productionId=${encodeURIComponent(pid)}`
+        : "/api/my/pending-counts";
+      return fetch(url)
+        .then((r) => r.json())
+        .then((d: { notifications?: number; tasks?: number; reports?: number }) => {
+          if (typeof d.notifications === "number") setUnreadCount(d.notifications);
+          if (typeof d.tasks === "number") setPendingTasks(d.tasks);
+          if (typeof d.reports === "number") setUnreadReports(d.reports);
+        })
+        .catch(() => {});
+    };
+
+    fetchCountsRef.current = fetchCounts;
+
+    const onVisible = () => { if (!document.hidden) fetchCounts(); };
+    const onRead = (e: Event) => {
+      const delta = (e as CustomEvent<{ delta?: number }>).detail?.delta;
+      if (typeof delta === "number") {
+        setUnreadCount((c) => Math.max(0, c - delta));
+      } else {
+        fetchCounts();
+      }
+    };
+
+    fetchCounts();
+    const id = setInterval(fetchCounts, 60_000);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("notif-read", onRead);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("notif-read", onRead);
+    };
+  }, [session]);
 
   useEffect(() => {
     if (!dropdownOpen) return;
@@ -247,8 +336,13 @@ export default function AppShell({ session, productions, children }: AppShellPro
 
   const userInitial = session.name.charAt(0);
   const avatarSymbol = (
-    <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
-      {userInitial}
+    <span className="relative">
+      <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
+        {userInitial}
+      </span>
+      {unreadCount > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#c0392b] border border-[var(--paper)]" />
+      )}
     </span>
   );
 
@@ -301,10 +395,16 @@ export default function AppShell({ session, productions, children }: AppShellPro
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className="hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
+            className="relative hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
             title="通知"
+            onClick={() => setUnreadCount(0)}
           >
             ◉
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
           </Link>
 
           {/* User dropdown: sm+ only */}
@@ -408,9 +508,9 @@ export default function AppShell({ session, productions, children }: AppShellPro
                   <NavItem href="/my/projects" symbol="◈" label="我的项目" hint="管理与新建项目" active={pathname.startsWith("/my/projects")} />
                   <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} />
                   <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} />
-                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} />
-                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} />
-                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} />
+                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} />
+                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} />
+                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} />
                 </div>
               )}
 
@@ -439,6 +539,12 @@ export default function AppShell({ session, productions, children }: AppShellPro
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path)}
+                      badge={
+                        item.path === "notifications" ? unreadCount :
+                        item.path === "tasks" ? pendingTasks :
+                        item.path === "reports" ? unreadReports :
+                        undefined
+                      }
                     />
                   ))}
                 </>

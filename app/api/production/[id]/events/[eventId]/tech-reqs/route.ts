@@ -8,6 +8,7 @@ import { buildAwaitingReqCard } from "@/lib/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { BASE_PATH } from "@/lib/base-path";
+import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -66,21 +67,44 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     assignees: body.assignees ?? [],
   });
 
-  // Notify dept group chat when a new awaiting req is created
+  // Notify POCs when a new awaiting req is created for their department.
   if (techReq.status === "awaiting" && techReq.departmentId) {
     const dept = await getEventDepartment(techReq.departmentId, productionId);
-    if (dept?.chatId && dept.pocUserIds.length) {
+    if (dept?.pocUserIds.length) {
       const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${techReq.id}`;
-      // Feishu open_ids still needed for @mention syntax inside the card body
-      batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
-        const pocOpenIds = dept.pocUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);
-        const url = feishuPlatform.buildActionUrl(reqPath);
-        const card = buildAwaitingReqCard(techReq.title, event.title, dept.name, pocOpenIds, url);
-        feishuPlatform.sendGroupMessage(dept.chatId!, {
-          text: `新需求待确认：${techReq.title}（${event.title}）`,
-          richContent: card,
-        }).catch(e => console.error("[tech-req] notify failed:", e));
+
+      // 1. Inbox + optional DM — always fires (no group chat required).
+      void notifyUsers({
+        userIds: dept.pocUserIds,
+        kind: "tech_req_poc",
+        productionId,
+        entityType: "tech_req",
+        entityId: techReq.id,
+        title: `新技术需求待确认 — ${dept.name}`,
+        body: `${techReq.title}（${event.title}）`,
+        viewHref: reqPath,
+        category: "action",
+        actionRequired: true,
+        buildExternalMessage: async (_userId, target) => {
+          const actionUrl = target.adapter.buildActionUrl(reqPath);
+          return {
+            text: `新需求待确认：${techReq.title}（${event.title}），查看：${actionUrl}`,
+          };
+        },
       }).catch(e => console.error("[tech-req] notify failed:", e));
+
+      // 2. Feishu group chat — secondary, only if dept has a chatId.
+      if (dept.chatId) {
+        batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
+          const pocOpenIds = dept.pocUserIds.map(id => m.get(id)).filter((v): v is string => !!v);
+          const url = feishuPlatform.buildActionUrl(reqPath);
+          const card = buildAwaitingReqCard(techReq.title, event.title, dept.name, pocOpenIds, url);
+          feishuPlatform.sendGroupMessage(dept.chatId!, {
+            text: `新需求待确认：${techReq.title}（${event.title}）`,
+            richContent: card,
+          }).catch(e => console.error("[tech-req] group notify failed:", e));
+        }).catch(e => console.error("[tech-req] group notify failed:", e));
+      }
     }
   }
 

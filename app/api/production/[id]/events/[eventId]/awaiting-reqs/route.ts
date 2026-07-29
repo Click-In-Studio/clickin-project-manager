@@ -4,11 +4,10 @@ import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db"
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
 import { buildAwaitingReqCard } from "@/lib/feishu-bot";
-import { getOptedInUsers } from "@/lib/notification-prefs";
 import { BASE_PATH } from "@/lib/base-path";
 import { getPool } from "@/lib/pg";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
+import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -42,36 +41,41 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   for (const req of techReqs) {
     if (!req.departmentId || alreadyExisting.has(req.departmentId)) continue;
     const dept = await getEventDepartment(req.departmentId, productionId);
-    if (!dept?.chatId || !dept.pocUserIds.length) continue;
+    if (!dept?.pocUserIds.length) continue;
 
     const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${req.id}`;
-    // Feishu open_ids still needed for @mention syntax inside the card body
-    const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
-    const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
-    const groupActionUrl = feishuPlatform.buildActionUrl(reqPath);
-    const card = buildAwaitingReqCard(req.title || dept.name, event.title, dept.name, pocOpenIds, groupActionUrl);
 
-    // Group notification via adapter
-    feishuPlatform.sendGroupMessage(dept.chatId, {
-      text: `新需求待确认：${req.title || dept.name}（${event.title}）`,
-      richContent: card,
-    }).catch(e => console.error("[awaiting-req] group notify failed:", e));
+    // Inbox + optional DM — always fires regardless of group chat.
+    void notifyUsers({
+      userIds: dept.pocUserIds,
+      kind: "tech_req_poc",
+      productionId,
+      entityType: "tech_req",
+      entityId: req.id,
+      title: `新技术需求待确认 — ${dept.name}`,
+      body: `${req.title || dept.name}（${event.title}）`,
+      viewHref: reqPath,
+      category: "action",
+      actionRequired: true,
+      buildExternalMessage: async (_userId, target) => {
+        const dmActionUrl = target.adapter.buildActionUrl(reqPath);
+        return {
+          text: `新需求待确认：${req.title || dept.name}（${event.title}），查看：${dmActionUrl}`,
+        };
+      },
+    }).catch(e => console.error("[awaiting-req] notify failed:", e));
 
-    // Personal DM copies for opted-in POCs — routed through platform adapter
-    const [optedIn, targets] = await Promise.all([
-      getOptedInUsers("tech_req_poc"),
-      batchResolveNotificationTargets(dept.pocUserIds, productionId),
-    ]);
-    for (const userId of dept.pocUserIds) {
-      if (!optedIn.has(userId)) continue;
-      const target = targets.get(userId);
-      if (!target) continue;
-      const dmActionUrl = target.adapter.buildActionUrl(reqPath);
-      const dmCard = buildAwaitingReqCard(req.title || dept.name, event.title, dept.name, pocOpenIds, dmActionUrl);
-      target.adapter.sendDirectMessage(target.platformUserId, {
-        text: `新需求待确认：${req.title || dept.name}（${event.title}），查看：${dmActionUrl}`,
-        richContent: dmCard,
-      }).catch(e => console.error("[awaiting-req] personal dm failed:", e));
+    // Feishu group card — secondary, only if dept has a chatId.
+    if (dept.chatId) {
+      batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
+        const pocOpenIds = dept.pocUserIds.map(id => m.get(id)).filter((v): v is string => !!v);
+        const groupActionUrl = feishuPlatform.buildActionUrl(reqPath);
+        const card = buildAwaitingReqCard(req.title || dept.name, event.title, dept.name, pocOpenIds, groupActionUrl);
+        feishuPlatform.sendGroupMessage(dept.chatId!, {
+          text: `新需求待确认：${req.title || dept.name}（${event.title}）`,
+          richContent: card,
+        }).catch(e => console.error("[awaiting-req] group notify failed:", e));
+      }).catch(e => console.error("[awaiting-req] group notify failed:", e));
     }
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartTextarea from "@/components/SmartTextarea";
@@ -177,6 +178,26 @@ export default function ReqDetailClient({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const searchParams = useSearchParams();
+  const notifId = searchParams.get("notif");
+  const notifActed = useRef(false);
+
+  function actNotif() {
+    if (!notifId || notifActed.current) return;
+    notifActed.current = true;
+    fetch(`${BASE_PATH}/api/my/notifications/${notifId}/act`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actionId: "external" }),
+    }).catch(() => {});
+  }
+
+  // Auto-act on mount if req is already not awaiting (case B: someone else confirmed it).
+  useEffect(() => {
+    if (notifId && initialReq.status !== "awaiting") actNotif();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const singleDay = isSingleDay(event);
   const linkedIds = new Set(req.scheduleItemIds);
   const canEdit = req.status === "awaiting" && isPocOfDept;
@@ -223,6 +244,7 @@ export default function ReqDetailClient({
       });
       if (!res.ok) { setError("状态更新失败"); return; }
       setReq(r => ({ ...r, title: title.trim(), description, assignees, status: newStatus }));
+      actNotif();
     } finally {
       setSaving(false);
     }

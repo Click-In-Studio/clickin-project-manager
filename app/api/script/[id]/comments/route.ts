@@ -5,8 +5,7 @@ import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { buildScriptCommentMentionCard } from "@/lib/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
-import { getOptedOutUsers } from "@/lib/notification-prefs";
-import { batchResolveNotificationTargets } from "@/lib/platform/notification-router";
+import { notifyUsers } from "@/lib/notify";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -58,28 +57,32 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     session.userId, session.name, text, mentions,
   );
 
-  // Fire-and-forget: notify mentioned users via platform adapter
+  // Fire-and-forget: notify mentioned users via unified interface (inbox + optional DM).
   if (mentions.length > 0) {
     const blockPath = `${BASE_PATH}/production/${productionId}/script#block-${blockId}?open_comment=true`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
-    const [optedOut, productionName, targets] = await Promise.all([
-      getOptedOutUsers("comment_mention").catch(() => new Set<string>()),
-      getProductionName(productionId).catch(() => null),
-      batchResolveNotificationTargets(mentionUserIds, productionId),
-    ]);
-    for (const m of mentions) {
-      if (optedOut.has(m.userId)) continue;
-      const target = targets.get(m.userId);
-      if (!target) continue;
-      const actionUrl = target.adapter.buildActionUrl(blockPath);
-      const card = buildScriptCommentMentionCard(session.name, productionName ?? "制作", text, actionUrl);
-      target.adapter.sendDirectMessage(target.platformUserId, {
-        text: `${session.name} 在剧本评论中提到了你`,
-        title: "评论提及",
-        primaryUrl: actionUrl,
-        richContent: card,
-      }).catch(e => console.error(`[mention] notify failed for ${m.userId}:`, (e as Error).message));
-    }
+    const productionName = await getProductionName(productionId).catch(() => null);
+    void notifyUsers({
+      userIds: mentionUserIds,
+      kind: "comment_mention",
+      productionId,
+      entityType: "comment",
+      entityId: comment.id,
+      title: `${session.name} 在剧本评论中提到了你`,
+      body: text,
+      viewHref: blockPath,
+      category: "info",
+      buildExternalMessage: async (_userId, target) => {
+        const actionUrl = target.adapter.buildActionUrl(blockPath);
+        const card = buildScriptCommentMentionCard(session.name, productionName ?? "制作", text, actionUrl);
+        return {
+          text: `${session.name} 在剧本评论中提到了你`,
+          title: "评论提及",
+          primaryUrl: actionUrl,
+          richContent: card,
+        };
+      },
+    }).catch(e => console.error("[mention] notify failed:", e));
   }
 
   return Response.json({ comment }, { status: 201 });
