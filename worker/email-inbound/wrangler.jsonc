@@ -1,0 +1,13 @@
+{
+  "name": "email-inbound",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "clickinmusical.com/cf-email-inbound", "zone_name": "clickinmusical.com" }
+  ]
+
+  // Secrets — set via:
+  //   npx wrangler secret put EMAIL_INBOUND_SECRET
+  //   npx wrangler secret put NEXT_INBOUND_URL
+}
