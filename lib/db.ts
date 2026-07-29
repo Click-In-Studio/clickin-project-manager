@@ -2280,6 +2280,91 @@ export async function getUserProfile(
   return { name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin ?? false };
 }
 
+export async function getUserIdentities(
+  userId: string,
+): Promise<{ id: string; platformId: string; platformUserId: string; label: string | null; isLoginMethod: boolean }[]> {
+  const res = await getPool().query<{ id: string; platform_id: string; platform_user_id: string; label: string | null; is_login_method: boolean }>(
+    "SELECT id, platform_id, platform_user_id, label, is_login_method FROM user_platform_identity WHERE user_id = $1 ORDER BY created_at",
+    [userId],
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    platformId: r.platform_id,
+    platformUserId: r.platform_user_id,
+    label: r.label,
+    isLoginMethod: r.is_login_method,
+  }));
+}
+
+export async function getUserByPlatformIdentity(
+  platformId: string,
+  platformUserId: string,
+): Promise<string | null> {
+  const res = await getPool().query<{ user_id: string }>(
+    "SELECT user_id FROM user_platform_identity WHERE platform_id = $1 AND platform_user_id = $2",
+    [platformId, platformUserId],
+  );
+  return res.rows[0]?.user_id ?? null;
+}
+
+// Add a new platform identity to an existing user. Returns 'bound' or 'conflict' (identity already belongs to a DIFFERENT user).
+export async function bindPlatformIdentity(
+  userId: string,
+  platformId: string,
+  platformUserId: string,
+): Promise<{ result: "bound" } | { result: "conflict"; existingUserId: string }> {
+  const pool = getPool();
+  const existing = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM user_platform_identity WHERE platform_id = $1 AND platform_user_id = $2",
+    [platformId, platformUserId],
+  );
+  if (existing.rows.length > 0) {
+    const existingUserId = existing.rows[0].user_id;
+    if (existingUserId === userId) return { result: "bound" }; // already bound
+    return { result: "conflict", existingUserId };
+  }
+  await pool.query(
+    `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method)
+     VALUES ($1, $2, $3, true)`,
+    [userId, platformId, platformUserId],
+  );
+  return { result: "bound" };
+}
+
+// Merge deleteUserId INTO keepUserId. keepUserId's profile is preserved.
+export async function mergeAccounts(keepUserId: string, deleteUserId: string): Promise<void> {
+  if (keepUserId === deleteUserId) return;
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Transfer platform identities
+    await client.query(
+      `UPDATE user_platform_identity SET user_id = $1 WHERE user_id = $2`,
+      [keepUserId, deleteUserId],
+    );
+    // Transfer feishu_user rows
+    await client.query(
+      `UPDATE feishu_user SET user_id = $1 WHERE user_id = $2`,
+      [keepUserId, deleteUserId],
+    );
+    // Transfer notifications
+    await client.query(
+      `UPDATE user_notification SET user_id = $1 WHERE user_id = $2`,
+      [keepUserId, deleteUserId],
+    );
+    // Delete deleteUserId's dependent rows (production_member, notification_preference have no xfer logic needed)
+    await client.query("DELETE FROM user_profile WHERE user_id = $1", [deleteUserId]);
+    await client.query("DELETE FROM app_user WHERE id = $1", [deleteUserId]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function upsertEmailUser(
   email: string,
   name: string,

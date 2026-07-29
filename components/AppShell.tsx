@@ -430,6 +430,14 @@ export default function AppShell({ session, productions, children, initialUnread
                   </Link>
                 )}
                 <Link
+                  href="/account"
+                  onClick={() => setDropdownOpen(false)}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
+                >
+                  <span className="text-[11px] opacity-40">◎</span>
+                  个人中心
+                </Link>
+                <Link
                   href="/my/notification-settings"
                   onClick={() => setDropdownOpen(false)}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
@@ -749,8 +757,16 @@ export default function AppShell({ session, productions, children, initialUnread
               />
             )}
             <NavItem
-              href="/my/notification-settings"
+              href="/account"
               symbol="◎"
+              label="个人中心"
+              hint="个人信息 · 登录方式"
+              active={pathname === "/account"}
+              onClick={closeDrawer}
+            />
+            <NavItem
+              href="/my/notification-settings"
+              symbol="🔔"
               label="通知偏好设置"
               hint="管理通知与提醒"
               active={pathname === "/my/notification-settings"}
