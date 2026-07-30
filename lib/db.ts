@@ -2271,6 +2271,34 @@ export async function upsertUserProfile(
   );
 }
 
+// Upsert or clear the global notification_preference for a user.
+// Called whenever the user changes their preferred_platform in profile settings.
+export async function syncGlobalNotificationPreference(
+  userId: string,
+  platformId: string | null,
+): Promise<void> {
+  const pool = getPool();
+  if (!platformId) {
+    await pool.query(
+      `DELETE FROM notification_preference WHERE user_id = $1 AND scope_type = 'global' AND scope_id = ''`,
+      [userId],
+    );
+    return;
+  }
+  const upiRes = await pool.query<{ id: string }>(
+    `SELECT id FROM user_platform_identity WHERE user_id = $1 AND platform_id = $2 LIMIT 1`,
+    [userId, platformId],
+  );
+  const upiId = upiRes.rows[0]?.id;
+  if (!upiId) return; // platform not bound yet — silently skip
+  await pool.query(
+    `INSERT INTO notification_preference (user_id, scope_type, scope_id, platform_identity_id)
+     VALUES ($1, 'global', '', $2)
+     ON CONFLICT (user_id, scope_type, scope_id) DO UPDATE SET platform_identity_id = EXCLUDED.platform_identity_id`,
+    [userId, upiId],
+  );
+}
+
 export async function getUserProfile(
   userId: string,
 ): Promise<{ name: string; displayName: string | null; bio: string | null; preferredPlatform: string | null; avatarUrl: string | null; isAdmin: boolean } | null> {

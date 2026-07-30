@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getUserProfile, upsertUserProfile } from "@/lib/db";
+import { getUserProfile, upsertUserProfile, syncGlobalNotificationPreference } from "@/lib/db";
 
 export async function GET() {
   const cookieStore = await cookies();
@@ -32,5 +32,11 @@ export async function PATCH(req: NextRequest) {
     bio: body.bio,
     preferredPlatform: body.preferredPlatform,
   });
+
+  // Sync global notification_preference when preferred platform changes
+  if (body.preferredPlatform !== undefined) {
+    await syncGlobalNotificationPreference(session.userId, body.preferredPlatform ?? null);
+  }
+
   return Response.json({ ok: true });
 }

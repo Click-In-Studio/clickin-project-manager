@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "技术需求" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
@@ -25,10 +25,10 @@ export default async function ReqsPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
-  if (!event) redirect(`/production/${productionId}/events`);
+  if (!event) notFound();
 
   const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
 

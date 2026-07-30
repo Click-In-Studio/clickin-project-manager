@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
@@ -47,7 +47,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
     if (!tokenData) redirect("/login");
 
     const report = await getReportByProduction(reportId, productionId);
-    if (!report || !report.publishedAt) redirect("/login");
+    if (!report || !report.publishedAt) notFound();
 
     const eventId = report.eventId;
     const [event, notes, departments, replies, allMembers] = await Promise.all([
@@ -57,7 +57,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
       listReportReplies(reportId),
       listProductionMembers(productionId),
     ]);
-    if (!event) redirect(`/production/${productionId}/events`);
+    if (!event) notFound();
 
     await markReportRead(reportId, tokenData.userId);
 
@@ -82,16 +82,16 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   }
 
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!_prodAccess) redirect("/");
+  if (!_prodAccess) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect("/");
+  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=${encodeURIComponent("项目演出报告")}&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
-  if (!report) redirect(`/production/${productionId}/reports`);
+  if (!report) notFound();
 
   const eventId = report.eventId;
   const event = await getProductionEvent(eventId, productionId);
-  if (!event) redirect(`/production/${productionId}/reports`);
+  if (!event) notFound();
 
   const canViewFull = hasPermission("event:edit", prodPermCtx);
   const canViewReportUnpublished = isReportViewer(prodPermCtx);
