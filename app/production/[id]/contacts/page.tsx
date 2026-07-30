@@ -23,7 +23,7 @@ export default async function ContactsPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!access) redirect(`/unauthorized?id=${id}`);
 
   const canManage = hasPermission("members:manage_overrides", access.permCtx);
   const canImport = hasPermission("contacts:import", access.permCtx);

@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { template: "%s | Click-In", default: "Click-In" },
+  title: { template: "%s | Backstage", default: "Backstage" },
   description: "演出项目管理",
 };
 

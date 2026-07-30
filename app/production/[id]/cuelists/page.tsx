@@ -20,9 +20,9 @@ export default async function CueListsPage({
   if (!session) redirect("/login");
 
   const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!_access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!_access) redirect(`/unauthorized?id=${id}`);
   const { permCtx } = _access;
-  if (!hasPermission("cue_list:view", permCtx)) redirect(`/unauthorized?resource=${encodeURIComponent("Cue 表")}&id=${id}`);
+  if (!hasPermission("cue_list:view", permCtx)) redirect(`/unauthorized?resource=cue_list%3Aview&id=${id}`);
 
   const canCreate = hasPermission("cue_list:create", permCtx);
   const canCreateAny = hasPermission("cue_list:create_any", permCtx);

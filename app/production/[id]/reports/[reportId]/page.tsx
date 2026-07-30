@@ -82,9 +82,9 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   }
 
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!_prodAccess) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=${encodeURIComponent("项目演出报告")}&id=${productionId}`);
+  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
   if (!report) notFound();

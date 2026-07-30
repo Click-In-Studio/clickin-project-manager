@@ -20,7 +20,7 @@ export default async function ProductionReportsPage({ params }: { params: Promis
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     getProductionName(productionId),
   ]);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!access) redirect(`/unauthorized?id=${productionId}`);
   if (!productionName) notFound();
 
   const canViewDrafts = isReportViewer(access.permCtx);

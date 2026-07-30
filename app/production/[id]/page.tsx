@@ -20,7 +20,7 @@ export default async function ProductionDashboard({ params }: { params: Promise<
     getProductionName(id),
     getProductionPermissionContext(session.userId, session.isAdmin, id),
   ]);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!access) redirect(`/unauthorized?id=${id}`);
   if (!name) notFound();
 
   return <ProductionHomeClient productionId={id} productionName={name} />;

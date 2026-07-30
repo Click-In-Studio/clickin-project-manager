@@ -20,7 +20,7 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     getProductionName(productionId),
   ]);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!access) redirect(`/unauthorized?id=${productionId}`);
   if (!productionName) notFound();
 
   const canViewAll = hasPermission("event:view_tech_req_any", access.permCtx);

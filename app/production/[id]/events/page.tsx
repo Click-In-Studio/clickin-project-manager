@@ -16,7 +16,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!access) redirect(`/unauthorized?id=${id}`);
 
   const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
   const canCreate = hasPermission("event:create", access.permCtx);

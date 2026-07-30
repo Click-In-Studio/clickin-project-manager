@@ -1,18 +1,37 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getProductionName } from "@/lib/db";
+import { getTechReqByProduction } from "@/lib/event-db";
 
 export const metadata: Metadata = { title: "无访问权限" };
 
-type Ctx = { searchParams: Promise<{ resource?: string; id?: string }> };
+type Ctx = { searchParams: Promise<{ resource?: string; id?: string; taskId?: string }> };
+
+// Maps atomic permission strings to human-readable descriptions
+const PERMISSION_LABELS: Record<string, string> = {
+  "cue_list:view": "查看 Cue 表",
+  "cue_list:edit": "编辑 Cue 表",
+  "event:follow": "跟踪日程",
+  "event:edit": "编辑日程",
+  "event:view_tech_req": "查看技术需求",
+  "event:edit_call": "编辑 Call 时间",
+  "event:edit_schedule": "编辑日程安排",
+  "event:assign_participants": "分配参与者",
+  "event:delete_tech_req_any": "删除技术需求",
+};
 
 export default async function UnauthorizedPage({ searchParams }: Ctx) {
-  const { resource, id } = await searchParams;
+  const { resource, id, taskId } = await searchParams;
 
-  const productionName = id ? await getProductionName(id) : null;
+  const [productionName, taskReq] = await Promise.all([
+    id ? getProductionName(id) : Promise.resolve(null),
+    taskId && id ? getTechReqByProduction(taskId, id) : Promise.resolve(null),
+  ]);
 
   const backHref = id ? `/production/${id}` : "/";
   const backLabel = productionName ? `返回《${productionName}》` : "返回首页";
+
+  const permLabel = resource ? (PERMISSION_LABELS[resource] ?? resource) : null;
 
   return (
     <div style={{
@@ -44,53 +63,77 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
         color: "var(--ink)",
         letterSpacing: "-.01em",
       }}>
-        无访问权限
+        {resource ? "权限不足" : "无访问权限"}
       </h1>
       <p style={{
-        margin: "0 0 8px",
+        margin: "0 0 20px",
         fontSize: 14,
         color: "var(--muted)",
         maxWidth: 360,
         lineHeight: 1.6,
       }}>
-        你没有访问这个页面的权限。
+        {resource
+          ? "你没有访问这个功能所需的权限，请联系项目管理员申请授权。"
+          : "你不是这个项目的成员，请联系项目管理员。"}
       </p>
 
-      {/* 项目上下文 */}
-      {productionName && (
-        <p style={{
-          margin: "0 0 6px",
-          fontSize: 13,
-          color: "var(--muted)",
-          background: "var(--surface)",
-          border: "1px solid var(--line)",
-          borderRadius: 8,
-          padding: "6px 16px",
-          display: "inline-block",
-        }}>
-          项目：<b style={{ color: "var(--ink)" }}>《{productionName}》</b>
-        </p>
-      )}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginBottom: 32 }}>
+        {/* 项目上下文 */}
+        {productionName && (
+          <p style={{
+            margin: 0,
+            fontSize: 13,
+            color: "var(--muted)",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: "6px 16px",
+            display: "inline-block",
+          }}>
+            项目：<b style={{ color: "var(--ink)" }}>《{productionName}》</b>
+          </p>
+        )}
 
-      {/* 所需权限 */}
-      {resource && (
-        <p style={{
-          margin: "0 0 32px",
-          fontSize: 13,
-          color: "var(--muted)",
-          background: "var(--surface)",
-          border: "1px solid var(--line)",
-          borderRadius: 8,
-          padding: "6px 16px",
-          display: "inline-block",
-        }}>
-          所需权限：<b style={{ color: "var(--ink)" }}>{resource}</b>
-        </p>
-      )}
-      {!resource && <div style={{ marginBottom: 32 }} />}
+        {/* 具体资源上下文（如技术需求） */}
+        {taskReq && (
+          <p style={{
+            margin: 0,
+            fontSize: 13,
+            color: "var(--muted)",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: "6px 16px",
+            display: "inline-block",
+          }}>
+            技术需求：<b style={{ color: "var(--ink)" }}>{taskReq.title}</b>
+          </p>
+        )}
+
+        {/* 所需原子权限 */}
+        {permLabel && (
+          <p style={{
+            margin: 0,
+            fontSize: 13,
+            color: "var(--muted)",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: "6px 16px",
+            display: "inline-block",
+          }}>
+            所需权限：<b style={{ color: "var(--ink)" }}>{permLabel}</b>
+            {resource && resource !== permLabel && (
+              <span style={{ marginLeft: 6, fontFamily: "monospace", fontSize: 11, opacity: 0.5 }}>
+                ({resource})
+              </span>
+            )}
+          </p>
+        )}
+      </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        {/* Placeholder — wire up to approval flow when ready */}
+        {/* 申请权限 — placeholder until approval flow is ready */}
         {resource && (
           <button
             disabled

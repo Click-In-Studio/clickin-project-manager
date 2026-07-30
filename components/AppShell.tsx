@@ -301,8 +301,11 @@ export default function AppShell({ session, productions, children, initialUnread
     return <>{children}</>;
   }
 
-  const productionId = extractProductionId(pathname);
-  const activeModule = productionId ? extractModule(pathname, productionId) : null;
+  const isUnauthorizedPage = pathname.startsWith("/unauthorized");
+  const productionId = extractProductionId(pathname) ?? (isUnauthorizedPage ? searchParams.get("id") : null);
+  const activeModule = productionId && pathname.startsWith(`/production/${productionId}`)
+    ? extractModule(pathname, productionId)
+    : null;
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)

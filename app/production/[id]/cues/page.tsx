@@ -27,8 +27,8 @@ export default async function CuesPage({
   if (!session) redirect("/login");
 
   const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!_access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
-  if (!hasPermission("cue_list:view", _access.permCtx)) redirect(`/unauthorized?resource=${encodeURIComponent("Cue 表")}&id=${id}`);
+  if (!_access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("cue_list:view", _access.permCtx)) redirect(`/unauthorized?resource=cue_list%3Aview&id=${id}`);
 
   const versions = await listVersions(id);
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;

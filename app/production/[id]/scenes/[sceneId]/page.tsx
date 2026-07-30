@@ -32,7 +32,7 @@ export default async function SceneDetailPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!access) redirect(`/unauthorized?id=${id}`);
 
   const canEdit = hasPermission("scene:rename", access.permCtx);
 

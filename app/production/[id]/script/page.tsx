@@ -25,7 +25,7 @@ export default async function ProductionScriptPage({
     getProductionPermissionContext(session.userId, session.isAdmin, id),
     getProductionName(id),
   ]);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!access) redirect(`/unauthorized?id=${id}`);
 
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
     hasPermission(perm, access.permCtx);
