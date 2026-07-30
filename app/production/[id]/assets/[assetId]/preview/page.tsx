@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { getAsset } from "@/lib/asset-db";
 import AssetPreviewClient from "@/components/assets/AssetPreviewClient";
 
@@ -32,6 +33,7 @@ export default async function AssetPreviewPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("asset:view", access.permCtx)) redirect(`/unauthorized?resource=asset%3Aview&id=${id}`);
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) notFound();

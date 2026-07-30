@@ -35,6 +35,8 @@ export default async function CallSheetPage({
   ]);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
+  if (!hasPermission("event:view_call_sheet", prodPermCtx) && !hasPermission("event:view_call_sheet_any", prodPermCtx))
+    redirect(`/unauthorized?resource=event%3Aview_call_sheet&id=${productionId}`);
   const canViewFull = hasPermission("event:edit", prodPermCtx);
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);

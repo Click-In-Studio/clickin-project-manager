@@ -26,6 +26,7 @@ export default async function ProductionScriptPage({
     getProductionName(id),
   ]);
   if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("script:view", access.permCtx)) redirect(`/unauthorized?resource=script%3Aview&id=${id}`);
 
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
     hasPermission(perm, access.permCtx);

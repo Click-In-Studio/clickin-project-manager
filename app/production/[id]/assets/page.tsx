@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import AssetPageClient from "@/components/assets/AssetPageClient";
 
 export default async function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -15,6 +16,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("asset:view", access.permCtx)) redirect(`/unauthorized?resource=asset%3Aview&id=${id}`);
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 

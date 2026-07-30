@@ -17,6 +17,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("event:view", access.permCtx)) redirect(`/unauthorized?resource=event%3Aview&id=${id}`);
 
   const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
   const canCreate = hasPermission("event:create", access.permCtx);

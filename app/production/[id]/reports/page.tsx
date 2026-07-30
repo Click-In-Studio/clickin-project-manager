@@ -7,6 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionReports } from "@/lib/event-db";
 import { isReportViewer } from "@/lib/event-permissions";
+import { hasPermission } from "@/lib/permissions";
 import ProductionReportsClient from "@/components/ProductionReportsClient";
 
 
@@ -21,6 +22,7 @@ export default async function ProductionReportsPage({ params }: { params: Promis
     getProductionName(productionId),
   ]);
   if (!access) redirect(`/unauthorized?id=${productionId}`);
+  if (!hasPermission("report:view", access.permCtx)) redirect(`/unauthorized?resource=report%3Aview&id=${productionId}`);
   if (!productionName) notFound();
 
   const canViewDrafts = isReportViewer(access.permCtx);

@@ -24,6 +24,7 @@ export default async function ContactsPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("contacts:view", access.permCtx)) redirect(`/unauthorized?resource=contacts%3Aview&id=${id}`);
 
   const canManage = hasPermission("members:manage_overrides", access.permCtx);
   const canImport = hasPermission("contacts:import", access.permCtx);
