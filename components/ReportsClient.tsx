@@ -126,27 +126,33 @@ export default function ReportsClient() {
               <div className={styles.emptyState}>无匹配报告</div>
             ) : (
               <div className={styles.mobileTaskList}>
-                {filtered.map(r => (
-                  <Link
-                    key={r.reportId}
-                    href={`/production/${r.productionId}/reports/${r.reportId}`}
-                    className={`${styles.mobileReportItem} ${r.publishedAt !== null && !r.isRead ? styles.unread : ""}`}
-                  >
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 5 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.eventTitle}
+                {filtered.map(r => {
+                  const isPendingDraft = r.publishedAt === null;
+                  return (
+                    <Link
+                      key={r.reportId}
+                      href={`/production/${r.productionId}/reports/${r.reportId}`}
+                      className={`${styles.mobileReportItem} ${r.publishedAt !== null && !r.isRead ? styles.unread : ""}`}
+                    >
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 5 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {r.eventTitle}
+                        </span>
+                        <span className={styles.badge} style={typeBadgeStyle(r.reportType)}>
+                          {TYPE_LABEL[r.reportType] ?? r.reportType}
+                        </span>
+                      </div>
+                      <p style={{ margin: "0 0 5px", fontSize: 13, fontWeight: (!r.isRead || isPendingDraft) ? 700 : 600, color: "var(--ink)", lineHeight: 1.35, display: "flex", alignItems: "center", gap: 7 }}>
+                        {r.publishedAt !== null && !r.isRead && <span className={styles.unreadDot} />}
+                        {isPendingDraft && <span className={styles.pendingDraftDot} />}
+                        {r.title}
+                      </p>
+                      <span style={{ fontSize: 11, color: isPendingDraft ? "var(--stage)" : "var(--muted)", fontWeight: isPendingDraft ? 700 : 400 }}>
+                        {isPendingDraft ? "待完成" : fmtDate(r.publishedAt!)}
                       </span>
-                      <span className={styles.badge} style={typeBadgeStyle(r.reportType)}>
-                        {TYPE_LABEL[r.reportType] ?? r.reportType}
-                      </span>
-                    </div>
-                    <p style={{ margin: "0 0 5px", fontSize: 13, fontWeight: !r.isRead ? 700 : 600, color: "var(--ink)", lineHeight: 1.35, display: "flex", alignItems: "center", gap: 7 }}>
-                      {r.publishedAt !== null && !r.isRead && <span className={styles.unreadDot} />}
-                      {r.title}
-                    </p>
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}</span>
-                  </Link>
-                ))}
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -216,25 +222,31 @@ export default function ReportsClient() {
                       <span>发布时间</span>
                     </div>
                     <div>
-                      {filtered.map(r => (
-                        <Link
-                          key={r.reportId}
-                          href={`/production/${r.productionId}/reports/${r.reportId}`}
-                          className={`${styles.reportRow} ${r.publishedAt !== null && !r.isRead ? styles.unread : ""}`}
-                        >
-                          <div className={styles.reportTitle}>
-                            {r.publishedAt !== null && !r.isRead && <span className={styles.unreadDot} />}
-                            <span>{r.title}</span>
-                          </div>
-                          <div className={styles.reportEvent}>{r.eventTitle}</div>
-                          <div>
-                            <span className={styles.badge} style={typeBadgeStyle(r.reportType)}>
-                              {TYPE_LABEL[r.reportType] ?? r.reportType}
-                            </span>
-                          </div>
-                          <div className={styles.reportDate}>{r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}</div>
-                        </Link>
-                      ))}
+                      {filtered.map(r => {
+                        const isPendingDraft = r.publishedAt === null;
+                        return (
+                          <Link
+                            key={r.reportId}
+                            href={`/production/${r.productionId}/reports/${r.reportId}`}
+                            className={`${styles.reportRow} ${r.publishedAt !== null && !r.isRead ? styles.unread : ""}`}
+                          >
+                            <div className={styles.reportTitle}>
+                              {r.publishedAt !== null && !r.isRead && <span className={styles.unreadDot} />}
+                              {isPendingDraft && <span className={styles.pendingDraftDot} />}
+                              <span style={{ fontWeight: isPendingDraft ? 700 : undefined }}>{r.title}</span>
+                            </div>
+                            <div className={styles.reportEvent}>{r.eventTitle}</div>
+                            <div>
+                              <span className={styles.badge} style={typeBadgeStyle(r.reportType)}>
+                                {TYPE_LABEL[r.reportType] ?? r.reportType}
+                              </span>
+                            </div>
+                            <div className={styles.reportDate} style={{ color: isPendingDraft ? "var(--stage)" : undefined, fontWeight: isPendingDraft ? 700 : undefined }}>
+                              {isPendingDraft ? "待完成" : fmtDate(r.publishedAt!)}
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

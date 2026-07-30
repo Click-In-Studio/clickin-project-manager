@@ -154,6 +154,14 @@
   flex-shrink: 0;
 }
 
+.pendingDraftDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--stage);
+  flex-shrink: 0;
+}
+
 .reportEvent {
   font-size: 12px;
   color: var(--muted);
