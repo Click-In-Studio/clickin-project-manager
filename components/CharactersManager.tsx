@@ -365,6 +365,236 @@ function CharacterEditRow({
   );
 }
 
+// ─── Table mode components ────────────────────────────────────────────────────
+
+function TextCell({
+  value,
+  onSave,
+  multiline,
+  readOnly,
+  placeholder = "—",
+}: {
+  value: string;
+  onSave: (v: string) => void;
+  multiline?: boolean;
+  readOnly?: boolean;
+  placeholder?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  const commit = () => { if (draft !== value) onSave(draft); setEditing(false); };
+  const cancel = () => { setDraft(value); setEditing(false); };
+
+  if (editing) {
+    if (multiline) {
+      return (
+        <textarea
+          autoFocus
+          value={draft}
+          rows={4}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
+          }}
+          className="w-full resize-none rounded border border-[var(--line)] px-2 py-1.5 text-sm outline-none focus:border-zinc-400"
+          style={{ minWidth: 200 }}
+        />
+      );
+    }
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+        className="w-full border-b border-zinc-400 text-sm text-zinc-800 outline-none"
+      />
+    );
+  }
+
+  return (
+    <div
+      onDoubleClick={() => !readOnly && setEditing(true)}
+      className={`text-sm leading-relaxed min-h-[1.25em] whitespace-pre-wrap ${value ? "text-zinc-700" : "text-zinc-300"} ${!readOnly ? "cursor-text" : ""}`}
+    >
+      {value || placeholder}
+    </div>
+  );
+}
+
+function CharacterTableRow({
+  char,
+  allChars,
+  canEdit,
+  onRename,
+  onDelete,
+  onPatchMeta,
+  onUpdateMembers,
+}: {
+  char: CharacterDetail;
+  allChars: CharacterDetail[];
+  canEdit: boolean;
+  onRename: (name: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+  onPatchMeta: (fields: Partial<{ gender: string; biography: string; roleType: string }>) => Promise<void>;
+  onUpdateMembers: (memberIds: string[]) => Promise<void>;
+}) {
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(char.name);
+  const [savingName, setSavingName] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (!editingName) setNameDraft(char.name); }, [char.name, editingName]);
+
+  const commitName = async () => {
+    const t = nameDraft.trim();
+    if (!t || t === char.name) { setNameDraft(char.name); setEditingName(false); return; }
+    setSavingName(true);
+    try { await onRename(t); } finally { setSavingName(false); setEditingName(false); }
+  };
+
+  const del = async () => {
+    setDeleting(true);
+    try { await onDelete(); } finally { setDeleting(false); }
+  };
+
+  const toggleMember = async (memberId: string) => {
+    if (!canEdit || saving) return;
+    const next = char.memberIds.includes(memberId)
+      ? char.memberIds.filter((id) => id !== memberId)
+      : [...char.memberIds, memberId];
+    setSaving(true);
+    try { await onUpdateMembers(next); } finally { setSaving(false); }
+  };
+
+  const candidates = allChars.filter((c) => !c.isAggregate && c.id !== char.id);
+
+  return (
+    <tr className="group border-b border-[var(--line)] hover:bg-zinc-50/30">
+      {/* 姓名 */}
+      <td className="px-4 py-3 align-top" style={{ width: 140 }}>
+        <div className="flex items-center gap-2">
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitName();
+                if (e.key === "Escape") { setNameDraft(char.name); setEditingName(false); }
+              }}
+              disabled={savingName}
+              className="min-w-0 flex-1 border-b border-zinc-400 text-sm text-zinc-800 outline-none disabled:opacity-50"
+            />
+          ) : (
+            <span
+              onClick={() => canEdit && setEditingName(true)}
+              className={`text-sm font-medium text-zinc-700 ${canEdit ? "cursor-text hover:text-zinc-900" : ""}`}
+            >
+              {char.name}
+            </span>
+          )}
+          {char.isAggregate && (
+            <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-600">聚合</span>
+          )}
+        </div>
+      </td>
+
+      {/* 性别 */}
+      <td className="px-4 py-3 align-top" style={{ width: 80 }}>
+        {char.isAggregate ? (
+          <span className="text-zinc-300 text-sm">—</span>
+        ) : (
+          <TextCell value={char.gender} onSave={(v) => onPatchMeta({ gender: v })} readOnly={!canEdit} placeholder="—" />
+        )}
+      </td>
+
+      {/* 角色属性 / 聚合成员 */}
+      <td className="px-4 py-3 align-top" style={{ width: 240 }}>
+        {char.isAggregate ? (
+          candidates.length === 0 ? (
+            <span className="text-xs text-zinc-300">暂无可选角色</span>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {candidates.map((c) => {
+                const active = char.memberIds.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => toggleMember(c.id)}
+                    disabled={!canEdit || saving}
+                    className={`rounded px-2 py-0.5 text-xs transition-colors disabled:cursor-default ${active ? "bg-violet-600 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 disabled:hover:bg-zinc-100"}`}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          <div className="flex gap-1 flex-wrap">
+            {ROLE_TYPES.map((rt) => (
+              <button
+                key={rt}
+                onClick={() => canEdit && onPatchMeta({ roleType: char.roleType === rt ? "" : rt })}
+                disabled={!canEdit}
+                className={`rounded px-2 py-0.5 text-xs transition-colors disabled:cursor-default ${char.roleType === rt ? "bg-zinc-700 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 disabled:hover:bg-zinc-100"}`}
+              >
+                {rt}
+              </button>
+            ))}
+          </div>
+        )}
+      </td>
+
+      {/* 人物小传 */}
+      <td className="px-4 py-3 align-top">
+        {char.isAggregate ? (
+          <span className="text-zinc-300 text-sm">—</span>
+        ) : (
+          <TextCell
+            value={char.biography}
+            onSave={(v) => onPatchMeta({ biography: v })}
+            multiline
+            readOnly={!canEdit}
+            placeholder={canEdit ? "双击添加人物小传…" : "—"}
+          />
+        )}
+      </td>
+
+      {/* Actions */}
+      <td className="px-4 py-3 align-top" style={{ width: 64 }}>
+        {canEdit && (
+          confirmDelete ? (
+            <span className="flex items-center gap-2 whitespace-nowrap">
+              <button onClick={del} disabled={deleting} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
+                {deleting ? "…" : "确认"}
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="text-xs text-zinc-400 hover:text-zinc-600">取消</button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="text-xs text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all"
+            >
+              删除
+            </button>
+          )
+        )}
+      </td>
+    </tr>
+  );
+}
+
 // ─── Add form ─────────────────────────────────────────────────────────────────
 
 function AddCharacterForm({
@@ -474,8 +704,10 @@ function AddCharacterForm({
 export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded, versionId, initialExpandedId }: Props) {
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
+  const [view, setView] = useState<"list" | "table">("list");
 
   useEffect(() => {
+    setView(window.innerWidth > 1920 ? "table" : "list");
     if (!embedded) window.scrollTo(0, 0);
   }, [embedded]);
 
@@ -535,6 +767,52 @@ export default function CharactersManager({ productionId, productionName, initia
     setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, isAggregate: toAggregate, memberIds: [] } : c));
   };
 
+  const addForm = canEdit && (
+    <AddCharacterForm
+      productionId={productionId}
+      allChars={characters}
+      onAdd={(char) => setCharacters((prev) => [...prev, char])}
+      versionId={versionId}
+    />
+  );
+
+  const tableView = (
+    <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
+      {characters.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无角色</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full" style={{ minWidth: 640 }}>
+            <thead>
+              <tr className="border-b border-[var(--line)] text-left text-xs text-zinc-400">
+                <th className="px-4 py-3 font-medium" style={{ width: 140 }}>姓名</th>
+                <th className="px-4 py-3 font-medium" style={{ width: 80 }}>性别</th>
+                <th className="px-4 py-3 font-medium" style={{ width: 240 }}>角色属性</th>
+                <th className="px-4 py-3 font-medium">人物小传</th>
+                <th className="px-4 py-3" style={{ width: 64 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {characters.map((c) => (
+                <CharacterTableRow
+                  key={c.id}
+                  char={c}
+                  allChars={characters}
+                  canEdit={canEdit}
+                  onRename={(name) => rename(c.id, name)}
+                  onDelete={() => del(c.id)}
+                  onPatchMeta={(fields) => patchMeta(c.id, fields)}
+                  onUpdateMembers={(ids) => updateMembers(c.id, ids)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {addForm}
+    </div>
+  );
+
   const card = (
     <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
       {characters.length === 0 ? (
@@ -569,14 +847,7 @@ export default function CharactersManager({ productionId, productionName, initia
         </table>
       )}
 
-      {canEdit && (
-        <AddCharacterForm
-          productionId={productionId}
-          allChars={characters}
-          onAdd={(char) => setCharacters((prev) => [...prev, char])}
-          versionId={versionId}
-        />
-      )}
+      {addForm}
     </div>
   );
 
@@ -592,10 +863,33 @@ export default function CharactersManager({ productionId, productionName, initia
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>角色</span>
         </div>
+        <div style={{ marginLeft: "auto", display: "inline-flex", gap: 2, background: "var(--surface-2)", borderRadius: 8, padding: 3 }}>
+          {(["list", "table"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              style={{
+                border: 0,
+                background: view === v ? "var(--surface)" : "transparent",
+                borderRadius: 6,
+                padding: "5px 13px",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+                color: view === v ? "var(--ink)" : "var(--muted)",
+                boxShadow: view === v ? "0 1px 3px rgba(24,42,42,.08)" : "none",
+                transition: "background .1s, color .1s",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {v === "list" ? "列表" : "表格"}
+            </button>
+          ))}
+        </div>
       </div>
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {card}
+        {view === "table" ? tableView : card}
       </div>
     </div>
   );
