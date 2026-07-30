@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect, type FormEvent } from "react";
+import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./account.module.css";
+import type { NotifPref } from "@/lib/notification-prefs";
 
 type Identity = {
   id: string;
@@ -42,9 +43,10 @@ type Props = {
     avatarUrl: string | null;
   };
   initialIdentities: Identity[];
+  initialNotifPrefs: NotifPref[];
 };
 
-type Page = "profile" | "security";
+type Page = "profile" | "security" | "preferences";
 
 const PLATFORM_LABEL: Record<string, string> = {
   feishu: "飞书",
@@ -58,27 +60,46 @@ const PLATFORM_ICON: Record<string, string> = {
 
 const PAGE_META: Record<Page, { eyebrow: string; title: string; description: string }> = {
   profile: { eyebrow: "ACCOUNT", title: "个人信息", description: "管理你的基础资料，以及在项目协作中向其他成员展示的信息。" },
-  security: { eyebrow: "SECURITY", title: "登录方式", description: "管理登录账号的邮箱、飞书等身份，以及账号安全设置。" },
+  security: { eyebrow: "SECURITY", title: "账号安全中心", description: "管理登录账号的邮箱、飞书等身份，以及账号安全设置。" },
+  preferences: { eyebrow: "PREFERENCES", title: "功能与设置", description: "调整消息提醒方式，控制各类通知的开关。" },
 };
 
 function initial(name: string) {
   return name.trim().charAt(0) || "?";
 }
 
-export default function AccountClient({ userId, initialProfile, initialIdentities }: Props) {
+/** Returns the URL to use in <img src> for a given avatarUrl value from the DB. */
+function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
+  if (!avatarUrl) return null;
+  // Feishu and other HTTP URLs — use directly
+  if (avatarUrl.startsWith("http")) return avatarUrl;
+  // R2 key stored as a relative path — route through our proxy
+  return `/api/user/avatar/${userId}`;
+}
+
+export default function AccountClient({ userId, initialProfile, initialIdentities, initialNotifPrefs }: Props) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [page, setPage] = useState<Page>("profile");
+  const tabParam = searchParams.get("tab");
+  const [page, setPage] = useState<Page>(
+    tabParam === "security" || tabParam === "preferences" ? tabParam : "profile"
+  );
 
   // Profile state
   const [name, setName] = useState(initialProfile.name);
   const [displayName, setDisplayName] = useState(initialProfile.displayName ?? "");
   const [bio, setBio] = useState(initialProfile.bio ?? "");
   const [preferredPlatform, setPreferredPlatform] = useState(initialProfile.preferredPlatform ?? "");
+  const [avatarUrl, setAvatarUrl] = useState(initialProfile.avatarUrl);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [saveMsgOk, setSaveMsgOk] = useState(false);
+
+  // Avatar upload state
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarCacheBust, setAvatarCacheBust] = useState(0);
 
   // Security state
   const [identities, setIdentities] = useState<Identity[]>(initialIdentities);
@@ -93,6 +114,11 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   const [mergePreviewLoading, setMergePreviewLoading] = useState(false);
   const [mergeKeepUserId, setMergeKeepUserId] = useState<string | null>(null);
   const [merging, setMerging] = useState(false);
+
+  // Notification prefs state
+  const [notifPrefs, setNotifPrefs] = useState<NotifPref[]>(initialNotifPrefs);
+  const [notifSaving, setNotifSaving] = useState<string | null>(null);
+  const [notifError, setNotifError] = useState<string | null>(null);
 
   useEffect(() => {
     const bound = searchParams.get("bound");
@@ -136,6 +162,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
           displayName: displayName.trim() || null,
           bio: bio.trim() || null,
           preferredPlatform: preferredPlatform || null,
+          avatarUrl: avatarUrl,
         }),
       });
       setSaveMsgOk(res.ok);
@@ -145,6 +172,64 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       setSaveMsg("网络错误");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleAvatarChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveMsg("图片不能超过 5 MB");
+      setSaveMsgOk(false);
+      return;
+    }
+    setAvatarUploading(true);
+    setSaveMsg("");
+    try {
+      // 1. Get presigned PUT URL
+      const presignRes = await fetch("/api/account/avatar/presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mimeType: file.type }),
+      });
+      if (!presignRes.ok) throw new Error("presign failed");
+      const { uploadUrl, r2Key } = await presignRes.json() as { uploadUrl: string; r2Key: string };
+
+      // 2. Upload directly to R2
+      const putRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error("upload failed");
+
+      // 3. Save the R2 key (stored as-is; proxy route serves it)
+      const patchRes = await fetch("/api/account/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim() || name,
+          avatarUrl: r2Key,
+        }),
+      });
+      if (!patchRes.ok) throw new Error("profile update failed");
+
+      // 4. Refresh session cookie so AppShell picks up the new avatarUrl
+      await fetch("/api/account/session/refresh", { method: "POST" });
+
+      // 5. Update local display via the proxy URL (cache-busted)
+      setAvatarUrl(r2Key);
+      setAvatarCacheBust(v => v + 1);
+      setSaveMsg("✓ 头像已更新");
+      setSaveMsgOk(true);
+      router.refresh();
+    } catch {
+      setSaveMsg("头像上传失败，请重试");
+      setSaveMsgOk(false);
+    } finally {
+      setAvatarUploading(false);
+      // Reset file input so same file can be picked again
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -183,7 +268,6 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       });
       if (res.ok) {
         if (keepUserId !== userId) {
-          // Session user was deleted — need full reload to pick up new session
           window.location.href = "/account";
           return;
         }
@@ -239,7 +323,6 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       if (res.ok) {
         setIdentities(prev => {
           const next = prev.filter(i => i.id !== upiId);
-          // If we removed the primary, auto-mark the first remaining email as primary
           const hasPrimary = next.some(i => i.platformId === "email" && i.isPrimary);
           if (!hasPrimary) {
             const firstEmail = next.find(i => i.platformId === "email");
@@ -260,13 +343,31 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
     }
   }
 
+  async function handleNotifToggle(type: string, enabled: boolean) {
+    setNotifSaving(type);
+    setNotifError(null);
+    setNotifPrefs(prev => prev.map(p => p.type === type ? { ...p, externalEnabled: enabled } : p));
+    try {
+      const res = await fetch("/api/my/notification-prefs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, enabled }),
+      });
+      if (!res.ok) throw new Error("保存失败");
+    } catch {
+      setNotifPrefs(prev => prev.map(p => p.type === type ? { ...p, externalEnabled: !enabled } : p));
+      setNotifError("保存失败，请重试");
+    } finally {
+      setNotifSaving(null);
+    }
+  }
+
   const hasFeishu = identities.some(i => i.platformId === "feishu");
   const hasEmail = identities.some(i => i.platformId === "email");
   const primaryEmail = identities.find(i => i.platformId === "email" && i.isPrimary)
     ?? identities.find(i => i.platformId === "email");
   const emailIdentities = identities.filter(i => i.platformId === "email");
 
-  // Options for 主要通道 — dedupe by platformId, email uses primary one
   const channelOptions = identities
     .filter(i => i.isLoginMethod && (i.platformId !== "email" || i.isPrimary || !identities.some(x => x.platformId === "email" && x.isPrimary)))
     .reduce<{ value: string; label: string }[]>((acc, i) => {
@@ -275,6 +376,11 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       return acc;
     }, []);
 
+  const dmPrefs = notifPrefs.filter(p => p.externalChannel === "dm");
+  const groupPrefs = notifPrefs.filter(p => p.externalChannel === "group");
+
+  const avatarSrc = resolveAvatarSrc(userId, avatarUrl);
+
   return (
     <div className={styles.shell}>
       <header className={styles.topbar}>
@@ -282,20 +388,26 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
           <span>←</span> 返回工作区
         </Link>
         <div className={styles.brand}>
-          <i>{initial(name)}</i>
-          <b>CLICK-IN</b>
+          {avatarSrc
+            ? <img src={avatarSrc} alt={name} className={styles.topbarAvatar} />
+            : <i>{initial(name)}</i>}
+          <b>Backstage</b>
           <span>个人中心</span>
         </div>
         <div className={styles.userChip}>
           <span>{name}</span>
-          <i>{initial(name)}</i>
+          {avatarSrc
+            ? <img src={avatarSrc} alt={name} className={styles.topbarAvatarSm} />
+            : <i>{initial(name)}</i>}
         </div>
       </header>
 
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
           <div className={styles.identity}>
-            <span>{initial(name)}</span>
+            {avatarSrc
+              ? <img src={avatarSrc} alt={name} className={styles.identityAvatar} />
+              : <span>{initial(name)}</span>}
             <p>
               <b>{name}</b>
               {primaryEmail && <small>{primaryEmail.platformUserId}</small>}
@@ -314,6 +426,15 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                 {PAGE_META[id].title}
               </button>
             ))}
+            <p>偏好与隐私</p>
+            <button
+              type="button"
+              className={page === "preferences" ? styles.navActive : ""}
+              onClick={() => setPage("preferences")}
+            >
+              <span>调</span>
+              {PAGE_META.preferences.title}
+            </button>
           </nav>
         </aside>
 
@@ -380,8 +501,26 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                     )}
                   </div>
                   <div className={styles.avatarEditor}>
-                    <span>{initial(name)}</span>
-                    <p className={styles.avatarLabel}>头像功能<br />即将上线</p>
+                    {avatarSrc
+                      ? <img src={`${avatarSrc}?t=${avatarCacheBust}`} alt={name} className={styles.avatarImg} key={avatarCacheBust} />
+                      : <span>{initial(name)}</span>}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      className={styles.avatarFileInput}
+                      onChange={handleAvatarChange}
+                      disabled={avatarUploading}
+                    />
+                    <button
+                      type="button"
+                      className={styles.avatarUploadButton}
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={avatarUploading}
+                    >
+                      {avatarUploading ? "上传中…" : "更换头像"}
+                    </button>
+                    <small className={styles.avatarHint}>JPG、PNG 或 WebP<br />最大 5 MB</small>
                   </div>
                 </div>
               </section>
@@ -399,7 +538,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
             </form>
           )}
 
-          {/* ── 登录方式 ── */}
+          {/* ── 账号安全中心 ── */}
           {page === "security" && (
             <>
               {pendingMerge && (
@@ -540,7 +679,6 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   </div>
                 )}
 
-                {/* Email identities */}
                 {emailIdentities.map(em => (
                   <div key={em.id} className={styles.row}>
                     <span className={styles.rowIcon}>邮</span>
@@ -568,7 +706,6 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   </div>
                 ))}
 
-                {/* Bind new email */}
                 <div className={styles.row} style={{ flexWrap: "wrap" }}>
                   <span className={styles.rowIcon}>+</span>
                   <div className={styles.rowInfo}>
@@ -596,6 +733,76 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   {bindMsg}
                 </p>
               )}
+            </>
+          )}
+
+          {/* ── 功能与设置（通知偏好） ── */}
+          {page === "preferences" && (
+            <>
+              {notifError && (
+                <div className={styles.errorBanner}>{notifError}</div>
+              )}
+
+              <section className={styles.card}>
+                <div className={styles.cardTitle}>
+                  <div>
+                    <h2>消息提醒</h2>
+                    <p>控制各类通知的外部推送方式（飞书消息 / 邮件），收件箱通知始终开启。</p>
+                  </div>
+                </div>
+
+                {dmPrefs.length > 0 && (
+                  <>
+                    <p className={styles.prefGroupLabel}>可以关闭的通知</p>
+                    <p className={styles.prefGroupHint}>以下通知默认开启，你可以选择关闭。</p>
+                    {dmPrefs.map(p => (
+                      <div key={p.type} className={styles.prefRow}>
+                        <div className={styles.prefRowInfo}>
+                          <b>{p.label}</b>
+                          <span>{p.description}</span>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={p.externalEnabled}
+                          aria-label={p.label}
+                          className={`${styles.toggle} ${p.externalEnabled ? styles.toggleOn : ""}`}
+                          onClick={() => handleNotifToggle(p.type, !p.externalEnabled)}
+                          disabled={notifSaving === p.type}
+                        >
+                          <span />
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {groupPrefs.length > 0 && (
+                  <>
+                    <p className={styles.prefGroupLabel} style={{ marginTop: 22 }}>可以额外订阅的群通知</p>
+                    <p className={styles.prefGroupHint}>以下通知默认发送至群，开启后机器人也会额外私信你一份。</p>
+                    {groupPrefs.map(p => (
+                      <div key={p.type} className={styles.prefRow}>
+                        <div className={styles.prefRowInfo}>
+                          <b>{p.label}</b>
+                          <span>{p.description}</span>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={p.externalEnabled}
+                          aria-label={p.label}
+                          className={`${styles.toggle} ${p.externalEnabled ? styles.toggleOn : ""}`}
+                          onClick={() => handleNotifToggle(p.type, !p.externalEnabled)}
+                          disabled={notifSaving === p.type}
+                        >
+                          <span />
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </section>
             </>
           )}
         </main>

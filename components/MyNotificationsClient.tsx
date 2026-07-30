@@ -433,13 +433,20 @@ export default function MyNotificationsClient({ productions = [], productionId }
   }
 
   return (
-    <div className={styles.workspace}>
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>
-          {productionId ? "演出 · 通知" : "Platform · 通知"}
-        </p>
-        <h1 className={styles.pageTitle}>通知提醒</h1>
-      </div>
+    <div className={productionId ? undefined : styles.workspace} style={productionId ? { padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" } : undefined}>
+      {productionId ? (
+        <div style={{ marginBottom: 20 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4, margin: "0 0 4px" }}>
+            Notifications
+          </p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>通知提醒</h1>
+        </div>
+      ) : (
+        <div className={styles.pageHeader}>
+          <p className={styles.eyebrow}>Platform · 通知</p>
+          <h1 className={styles.pageTitle}>通知提醒</h1>
+        </div>
+      )}
 
       <div className={styles.tabBar} style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {(["all", "action", "info", "done"] as Tab[]).map((t) => (

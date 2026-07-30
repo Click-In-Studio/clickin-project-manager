@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getProductionName } from "@/lib/db";
 import MyNotificationsClient from "@/components/MyNotificationsClient";
@@ -14,7 +14,7 @@ export default async function NotificationsModulePage({ params }: { params: Prom
 
   const { id } = await params;
   const name = await getProductionName(id);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   const productions = [{ id, name }];
 

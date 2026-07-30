@@ -208,45 +208,50 @@ export default function ProductionHomeClient({
             </div>
           </section>
 
-          {/* 未读报告 */}
-          <section className={styles.panel}>
-            <div className={styles.panelHeading}>
-              <div>
-                <p className={styles.kicker}>Reports</p>
-                <h2>报告</h2>
-              </div>
-            </div>
-            <div className={styles.panelBody}>
-              {loading ? (
-                <div className={styles.emptyState}>加载中…</div>
-              ) : unreadReports.length === 0 ? (
-                <div className={styles.emptyState}>暂无报告</div>
-              ) : (
-                <div className={styles.compactList}>
-                  {unreadReports.slice(0, 3).map(r => (
-                    <button
-                      key={r.reportId}
-                      onClick={() => router.push(`/production/${productionId}/reports/${r.reportId}`)}
-                    >
-                      <span className={styles.compactLabel}>
-                        <b>{r.reportTitle}</b>
-                        <small>{r.eventTitle}</small>
-                      </span>
-                      <span style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                        {r.publishedAt ? fmtDate(r.publishedAt) : "草稿"}
-                      </span>
-                    </button>
-                  ))}
+          {/* 待完成报告 */}
+          {(() => {
+            const pendingDrafts = unreadReports.filter(r => !r.publishedAt);
+            return (
+              <section className={styles.panel}>
+                <div className={styles.panelHeading}>
+                  <div>
+                    <p className={styles.kicker}>Reports</p>
+                    <h2>报告</h2>
+                  </div>
                 </div>
-              )}
-              <Link
-                href={`/production/${productionId}/events`}
-                className={styles.panelSeeAll}
-              >
-                {unreadReports.length > 3 ? `查看全部 ${unreadReports.length} 篇 →` : "查看所有报告 →"}
-              </Link>
-            </div>
-          </section>
+                <div className={styles.panelBody}>
+                  {loading ? (
+                    <div className={styles.emptyState}>加载中…</div>
+                  ) : pendingDrafts.length === 0 ? (
+                    <div className={styles.emptyState}>暂无待完成报告</div>
+                  ) : (
+                    <div className={styles.compactList}>
+                      {pendingDrafts.slice(0, 3).map(r => (
+                        <button
+                          key={r.reportId}
+                          onClick={() => router.push(`/production/${productionId}/reports/${r.reportId}`)}
+                        >
+                          <span className={styles.compactLabel}>
+                            <b>{r.reportTitle}</b>
+                            <small>{r.eventTitle}</small>
+                          </span>
+                          <span style={{ fontSize: 10, color: "var(--stage)", fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}>
+                            待完成
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <Link
+                    href={`/production/${productionId}/reports`}
+                    className={styles.panelSeeAll}
+                  >
+                    {pendingDrafts.length > 3 ? `查看全部 ${pendingDrafts.length} 篇待完成 →` : "查看所有报告 →"}
+                  </Link>
+                </div>
+              </section>
+            );
+          })()}
 
         </div>
       </div>

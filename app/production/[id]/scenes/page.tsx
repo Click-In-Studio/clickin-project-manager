@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "场景" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion } from "@/lib/db";
@@ -19,14 +19,15 @@ export default async function ScenesPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("scene:view", access.permCtx)) redirect(`/unauthorized?resource=scene%3Aview&id=${id}`);
 
   const canEdit = hasPermission("scene:rename", access.permCtx);
   const canImport = hasPermission("dramaturgy:import", access.permCtx);
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
   const [name, versions] = await Promise.all([getProductionName(id), listVersions(id)]);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   const validCookieVersionId = cookieVersionId && versions.some(v => v.id === cookieVersionId)
     ? cookieVersionId

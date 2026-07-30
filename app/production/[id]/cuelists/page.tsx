@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "CUE表" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listCueListsWithAccess, getUserAllowedCueTypes, listProductionMembersWithRoles } from "@/lib/db";
@@ -20,9 +20,9 @@ export default async function CueListsPage({
   if (!session) redirect("/login");
 
   const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!_access) redirect("/");
+  if (!_access) redirect(`/unauthorized?id=${id}`);
   const { permCtx } = _access;
-  if (!hasPermission("cue_list:view", permCtx)) redirect("/");
+  if (!hasPermission("cue_list:view", permCtx)) redirect(`/unauthorized?resource=cue_list%3Aview&id=${id}`);
 
   const canCreate = hasPermission("cue_list:create", permCtx);
   const canCreateAny = hasPermission("cue_list:create_any", permCtx);
@@ -33,7 +33,7 @@ export default async function CueListsPage({
     canCreate && !canCreateAny ? getUserAllowedCueTypes(session.userId, id) : Promise.resolve(null),
     listProductionMembersWithRoles(id),
   ]);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   const availableTemplates = canCreateAny
     ? CUE_LIST_TEMPLATES

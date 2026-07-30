@@ -30,7 +30,8 @@ export default async function CharacterDetailPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("character:view", access.permCtx)) redirect(`/unauthorized?resource=character%3Aview&id=${id}`);
 
   const canEdit = hasPermission("scene:rename", access.permCtx);
 

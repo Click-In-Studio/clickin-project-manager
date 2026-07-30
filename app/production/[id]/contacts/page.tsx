@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "人员" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
@@ -23,7 +23,8 @@ export default async function ContactsPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("contacts:view", access.permCtx)) redirect(`/unauthorized?resource=contacts%3Aview&id=${id}`);
 
   const canManage = hasPermission("members:manage_overrides", access.permCtx);
   const canImport = hasPermission("contacts:import", access.permCtx);
@@ -32,7 +33,7 @@ export default async function ContactsPage({
     getProductionName(id),
     listProductionMembersWithRoles(id),
   ]);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   return (
     <ContactsClient

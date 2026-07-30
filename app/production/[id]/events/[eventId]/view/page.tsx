@@ -34,9 +34,9 @@ export default async function EventViewPage({
   if (!session) redirect("/login");
 
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!_prodAccess) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=${encodeURIComponent("日程跟踪")}&id=${productionId}`);
+  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();

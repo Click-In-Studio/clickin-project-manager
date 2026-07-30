@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { template: "%s | Click-In", default: "Click-In" },
+  title: { template: "%s | Backstage", default: "Backstage" },
   description: "演出项目管理",
 };
 
@@ -49,7 +49,7 @@ export default async function RootLayout({
   }));
 
   const shellSession = session
-    ? { name: session.name, avatarUrl: session.avatarUrl }
+    ? { userId: session.userId, name: session.name, avatarUrl: session.avatarUrl }
     : null;
 
   return (

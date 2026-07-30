@@ -1,12 +1,13 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import SearchBar from "./SearchBar";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean };
-type ShellSession = { name: string; avatarUrl: string | null };
+type ShellSession = { userId: string; name: string; avatarUrl: string | null };
 
 interface AppShellProps {
   session: ShellSession | null;
@@ -60,6 +61,11 @@ const OVERVIEW_NAV = [
   { label: "报告", hint: "所有演出报告", path: "/my/reports", symbol: "≡" },
 ] as const;
 
+function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
+  if (!avatarUrl) return null;
+  return `/api/user/avatar/${userId}`;
+}
+
 function extractProductionId(pathname: string): string | null {
   const m = pathname.match(/^\/production\/([^/]+)/);
   return m ? m[1] : null;
@@ -91,6 +97,7 @@ function NavItem({
   hint,
   active,
   badge,
+  warningBadge,
   onClick,
 }: {
   href: string;
@@ -99,6 +106,7 @@ function NavItem({
   hint: string;
   active: boolean;
   badge?: number;
+  warningBadge?: number;
   onClick?: () => void;
 }) {
   return (
@@ -122,6 +130,11 @@ function NavItem({
               {badge > 99 ? "99+" : badge}
             </span>
           )}
+          {warningBadge != null && warningBadge > 0 && (
+            <span className="min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
+              {warningBadge > 99 ? "99+" : warningBadge}
+            </span>
+          )}
         </span>
         <span className="text-[9px] text-[#667676] mt-0.5 truncate">{hint}</span>
       </span>
@@ -141,6 +154,18 @@ function NavGroup({ label, color }: { label: string; color: "script" | "stage" }
         {label}
       </span>
     </div>
+  );
+}
+
+function DropdownItem({ href, onClick, children }: { href: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex items-center gap-2 px-2.5 py-2 rounded-[7px] text-[11px] text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
+    >
+      {children}
+    </Link>
   );
 }
 
@@ -200,12 +225,14 @@ function MobileTab({
 export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
+  const [cueWarnings, setCueWarnings] = useState(0);
 
   // Track current productionId via ref so fetchCounts always uses the latest value
   // without needing to be in the effect dependency array.
@@ -231,6 +258,7 @@ export default function AppShell({ session, productions, children, initialUnread
         setUnreadCount(0);
         setPendingTasks(0);
         setUnreadReports(0);
+        setCueWarnings(0);
         fetchCountsRef.current?.();
       }
     }
@@ -251,10 +279,11 @@ export default function AppShell({ session, productions, children, initialUnread
         : "/api/my/pending-counts";
       return fetch(url)
         .then((r) => r.json())
-        .then((d: { notifications?: number; tasks?: number; reports?: number }) => {
+        .then((d: { notifications?: number; tasks?: number; reports?: number; cueWarnings?: number }) => {
           if (typeof d.notifications === "number") setUnreadCount(d.notifications);
           if (typeof d.tasks === "number") setPendingTasks(d.tasks);
           if (typeof d.reports === "number") setUnreadReports(d.reports);
+          if (typeof d.cueWarnings === "number") setCueWarnings(d.cueWarnings);
         })
         .catch(() => {});
     };
@@ -300,8 +329,11 @@ export default function AppShell({ session, productions, children, initialUnread
     return <>{children}</>;
   }
 
-  const productionId = extractProductionId(pathname);
-  const activeModule = productionId ? extractModule(pathname, productionId) : null;
+  const isUnauthorizedPage = pathname.startsWith("/unauthorized");
+  const productionId = extractProductionId(pathname) ?? (isUnauthorizedPage ? searchParams.get("id") : null);
+  const activeModule = productionId && pathname.startsWith(`/production/${productionId}`)
+    ? extractModule(pathname, productionId)
+    : null;
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -335,11 +367,20 @@ export default function AppShell({ session, productions, children, initialUnread
     setDrawerOpen((d) => (d === type ? null : type));
 
   const userInitial = session.name.charAt(0);
+  const avatarSrc = resolveAvatarSrc(session.userId, session.avatarUrl);
   const avatarSymbol = (
     <span className="relative">
-      <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
-        {userInitial}
-      </span>
+      {avatarSrc ? (
+        <img
+          src={avatarSrc}
+          alt=""
+          className="w-5 h-5 rounded-full object-cover"
+        />
+      ) : (
+        <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
+          {userInitial}
+        </span>
+      )}
       {unreadCount > 0 && (
         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#c0392b] border border-[var(--paper)]" />
       )}
@@ -353,10 +394,10 @@ export default function AppShell({ session, productions, children, initialUnread
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[10px] font-bold flex items-center justify-center select-none">
-            CI
+            BS
           </span>
-          <span className="text-[13px] font-bold tracking-[0.18em] text-[#182a2a] hidden md:block">
-            CLICK-IN
+          <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
+            Backstage
           </span>
         </Link>
 
@@ -392,6 +433,9 @@ export default function AppShell({ session, productions, children, initialUnread
 
         {/* Right actions */}
         <div className="ml-auto flex items-center gap-3">
+          {/* Search bar: only when inside a production */}
+          <SearchBar productionId={productionId} />
+
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
@@ -407,52 +451,67 @@ export default function AppShell({ session, productions, children, initialUnread
             )}
           </Link>
 
-          {/* User dropdown: sm+ only */}
+          {/* User avatar + dropdown: sm+ only */}
           <div className="relative hidden sm:block" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
-              className="flex items-center gap-1 text-sm text-[#667676] hover:text-[#182a2a] transition-colors"
+              aria-label="个人中心"
+              aria-expanded={dropdownOpen}
+              className="relative w-9 h-9 rounded-full border border-[var(--line)] overflow-hidden bg-[#182a2a] flex items-center justify-center hover:opacity-90 transition-opacity shrink-0"
             >
-              {session.name}
-              <span className="text-[10px] opacity-50 ml-0.5">{dropdownOpen ? "▲" : "▼"}</span>
+              {avatarSrc ? (
+                <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white text-[11px] font-bold">{userInitial}</span>
+              )}
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-[#c0392b] border-2 border-[var(--surface)]" />
+              )}
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-44 bg-[var(--surface)] border border-[var(--line)] rounded-xl shadow-lg z-50 overflow-hidden py-1">
+              <div className="absolute right-0 top-full mt-2.5 w-[240px] bg-[var(--surface)] border border-[var(--line)] rounded-[13px] shadow-[0_18px_55px_rgba(24,42,42,.18)] z-50 overflow-hidden p-2">
+                {/* ── 用户概要 ── */}
+                <div className="flex items-center gap-2.5 px-2 py-2 mb-1 border-b border-[var(--line)]">
+                  <span className="w-9 h-9 rounded-full bg-[#182a2a] overflow-hidden shrink-0 flex items-center justify-center">
+                    {avatarSrc ? (
+                      <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-white text-[11px] font-bold">{userInitial}</span>
+                    )}
+                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[11px] font-bold text-[#182a2a] truncate">{session.name}</span>
+                  </div>
+                </div>
+
+                {/* ── 账户 ── */}
+                <DropdownItem href="/account?tab=profile" onClick={() => setDropdownOpen(false)}>个人信息</DropdownItem>
+                <DropdownItem href="/account?tab=security" onClick={() => setDropdownOpen(false)}>账号安全中心</DropdownItem>
+
+                {/* ── 偏好 ── */}
+                <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
+                <DropdownItem href="/account?tab=preferences" onClick={() => setDropdownOpen(false)}>功能与设置</DropdownItem>
+
+                {/* ── 管理后台 ── */}
                 {currentProduction?.canAdmin && productionId && (
-                  <Link
-                    href={`/production/${productionId}/admin`}
-                    onClick={() => setDropdownOpen(false)}
-                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
-                  >
-                    <span className="text-[11px] opacity-40">⚙</span>
-                    管理后台
-                  </Link>
+                  <>
+                    <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
+                    <DropdownItem href={`/production/${productionId}/admin`} onClick={() => setDropdownOpen(false)}>
+                      管理后台
+                      <span className="ml-auto text-[10px] text-[#667676] truncate max-w-[90px]">{currentProduction.name}</span>
+                    </DropdownItem>
+                  </>
                 )}
-                <Link
-                  href="/account"
-                  onClick={() => setDropdownOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
-                >
-                  <span className="text-[11px] opacity-40">◎</span>
-                  个人中心
-                </Link>
-                <Link
-                  href="/my/notification-settings"
-                  onClick={() => setDropdownOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
-                >
-                  <span className="text-[11px] opacity-40">🔔</span>
-                  通知偏好设置
-                </Link>
-                <div className="h-px bg-[var(--line)] mx-3 my-1" />
+
+                {/* ── 退出 ── */}
+                <div className="h-px bg-[var(--line)] mx-1 mt-1.5 mb-1" />
                 <form action={`${BASE_PATH}/api/auth/logout`} method="post">
                   <button
                     type="submit"
-                    className="w-full text-left flex items-center gap-2 px-4 py-2.5 text-sm text-[#667676] hover:bg-[var(--paper)] transition-colors"
+                    className="w-full text-left flex items-center px-2.5 py-2 rounded-[7px] text-[11px] text-[#c0392b] hover:bg-[var(--paper)] transition-colors"
                   >
-                    <span className="text-[11px] opacity-40">→</span>
-                    退出
+                    退出登录
                   </button>
                 </form>
               </div>
@@ -535,6 +594,7 @@ export default function AppShell({ session, productions, children, initialUnread
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
+                      warningBadge={item.path === "cues" ? cueWarnings : undefined}
                     />
                   ))}
 
@@ -738,49 +798,77 @@ export default function AppShell({ session, productions, children, initialUnread
       {/* 我 drawer */}
       <BottomDrawer open={drawerOpen === "me"} onClose={closeDrawer}>
         <div className="pb-4">
+          {/* 用户概要 */}
           <div className="flex items-center gap-3 px-5 pt-1 pb-3">
-            <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-              {userInitial}
+            <span className="w-10 h-10 rounded-full bg-[#182a2a] overflow-hidden shrink-0 flex items-center justify-center">
+              {avatarSrc ? (
+                <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white text-[13px] font-bold">{userInitial}</span>
+              )}
             </span>
             <span className="text-[14px] font-bold text-[#182a2a]">{session.name}</span>
           </div>
-          <div className="mx-5 mb-2 border-t border-[var(--line)]" />
-          <div className="px-3.5 flex flex-col gap-0.5">
-            {currentProduction?.canAdmin && productionId && (
-              <NavItem
-                href={`/production/${productionId}/admin`}
-                symbol="⚙"
-                label="管理后台"
-                hint={currentProduction.name}
-                active={isAdminMode}
-                onClick={closeDrawer}
-              />
-            )}
+          <div className="mx-5 border-t border-[var(--line)]" />
+
+          {/* 账户 */}
+          <div className="px-3.5 pt-1 flex flex-col gap-0.5">
             <NavItem
-              href="/account"
-              symbol="◎"
-              label="个人中心"
-              hint="个人信息 · 登录方式"
-              active={pathname === "/account"}
+              href="/account?tab=profile"
+              symbol="人"
+              label="个人信息"
+              hint="头像 · 姓名 · 简介"
+              active={pathname === "/account" && searchParams.get("tab") !== "security" && searchParams.get("tab") !== "preferences"}
               onClick={closeDrawer}
             />
             <NavItem
-              href="/my/notification-settings"
-              symbol="🔔"
-              label="通知偏好设置"
-              hint="管理通知与提醒"
-              active={pathname === "/my/notification-settings"}
+              href="/account?tab=security"
+              symbol="盾"
+              label="账号安全中心"
+              hint="登录方式 · 绑定身份"
+              active={pathname === "/account" && searchParams.get("tab") === "security"}
               onClick={closeDrawer}
             />
           </div>
+
+          {/* 偏好 */}
+          <div className="mx-5 my-1.5 border-t border-[var(--line)]" />
+          <div className="px-3.5 flex flex-col gap-0.5">
+            <NavItem
+              href="/account?tab=preferences"
+              symbol="调"
+              label="功能与设置"
+              hint="通知 · 消息提醒"
+              active={pathname === "/account" && searchParams.get("tab") === "preferences"}
+              onClick={closeDrawer}
+            />
+          </div>
+
+          {/* 管理后台 */}
+          {currentProduction?.canAdmin && productionId && (
+            <>
+              <div className="mx-5 my-1.5 border-t border-[var(--line)]" />
+              <div className="px-3.5 flex flex-col gap-0.5">
+                <NavItem
+                  href={`/production/${productionId}/admin`}
+                  symbol="⚙"
+                  label="管理后台"
+                  hint={currentProduction.name}
+                  active={isAdminMode}
+                  onClick={closeDrawer}
+                />
+              </div>
+            </>
+          )}
+
+          {/* 退出 */}
           <div className="mx-5 my-2 border-t border-[var(--line)]" />
           <div className="px-5">
             <form action={`${BASE_PATH}/api/auth/logout`} method="post">
               <button
                 type="submit"
-                className="w-full text-left flex items-center gap-2 py-2.5 text-sm text-[#667676]"
+                className="w-full text-left flex items-center gap-2 py-2.5 text-sm text-[#c0392b]"
               >
-                <span className="text-[11px] opacity-40">→</span>
                 退出登录
               </button>
             </form>

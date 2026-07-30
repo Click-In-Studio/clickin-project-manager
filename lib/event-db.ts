@@ -1731,6 +1731,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
 export type ProductionReportEntry = EventReport & {
   eventTitle: string;
   eventStartTime: string | null;
+  eventStatus: "draft" | "published" | "completed" | "cancelled";
   isMentioned: boolean;
   isFollower: boolean;
   isParticipant: boolean;
@@ -1744,12 +1745,12 @@ export async function listProductionReports(
   includeDrafts: boolean,
 ): Promise<ProductionReportEntry[]> {
   const res = await getPool().query<ReportRow & {
-    event_title: string; event_start_time: string | null;
+    event_title: string; event_start_time: string | null; event_status: string;
     is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
   }>(
     `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
             er.created_at, er.updated_at, er.published_at, er.mentions,
-            pe.title AS event_title, pe.start_time AS event_start_time,
+            pe.title AS event_title, pe.start_time AS event_start_time, pe.status AS event_status,
             (er.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
             EXISTS (
               SELECT 1 FROM event_participant ep
@@ -1770,6 +1771,7 @@ export async function listProductionReports(
     ...rowToReport(r),
     eventTitle: r.event_title,
     eventStartTime: r.event_start_time,
+    eventStatus: r.event_status as ProductionReportEntry["eventStatus"],
     isMentioned: r.is_mentioned,
     isFollower: r.is_follower,
     isParticipant: r.is_participant,

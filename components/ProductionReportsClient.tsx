@@ -114,6 +114,7 @@ export default function ProductionReportsClient({
           <div className={styles.mobileTaskList}>
             {filtered.map(r => {
               const isExpanded = selected?.id === r.id;
+              const isPendingDraft = !r.publishedAt && r.eventStatus === "completed";
               const tags: string[] = [];
               if (r.isMentioned) tags.push("提到我");
               if (r.isParticipant) tags.push("参与");
@@ -129,12 +130,14 @@ export default function ProductionReportsClient({
                       <span style={{
                         flexShrink: 0, borderRadius: 6, padding: "3px 8px",
                         fontSize: 10, fontWeight: 700,
-                        ...(r.publishedAt ? { background: "#f0fdf4", color: "#16a34a" } : { background: "var(--paper)", color: "var(--muted)" }),
+                        ...(r.publishedAt ? { background: "#f0fdf4", color: "#16a34a" } : { background: "#f2e4d9", color: "var(--stage)" }),
                       }}>
-                        {r.publishedAt ? "已发布" : "草稿"}
+                        {r.publishedAt ? "已发布" : isPendingDraft ? "待完成" : "草稿"}
                       </span>
                     </div>
-                    <p className={`${styles.mobileTaskCardTitle} ${isExpanded ? "" : styles.mobileTaskCardTitleClamp}`}>
+                    <p className={`${styles.mobileTaskCardTitle} ${isExpanded ? "" : styles.mobileTaskCardTitleClamp}`}
+                       style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      {isPendingDraft && <span className={styles.pendingDraftDot} style={{ flexShrink: 0 }} />}
                       {r.title || "未命名报告"}
                     </p>
                     {tags.length > 0 && (
@@ -212,6 +215,7 @@ export default function ProductionReportsClient({
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 {filtered.map(r => {
                   const isSelected = visibleSelected?.id === r.id;
+                  const isPendingDraft = !r.publishedAt && r.eventStatus === "completed";
                   const tags: string[] = [];
                   if (r.isMentioned) tags.push("提到我");
                   if (r.isParticipant) tags.push("参与");
@@ -240,10 +244,15 @@ export default function ProductionReportsClient({
                           <p style={{
                             margin: 0, fontSize: 13, fontWeight: 600, lineHeight: 1.35,
                             color: isSelected ? "#fff" : "var(--ink)",
-                            display: "-webkit-box", WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical", overflow: "hidden",
+                            display: "flex", alignItems: "center", gap: 7,
                           }}>
-                            {r.title || "未命名报告"}
+                            {isPendingDraft && !isSelected && <span className={styles.pendingDraftDot} style={{ flexShrink: 0 }} />}
+                            <span style={{
+                              display: "-webkit-box", WebkitLineClamp: 2,
+                              WebkitBoxOrient: "vertical", overflow: "hidden",
+                            }}>
+                              {r.title || "未命名报告"}
+                            </span>
                           </p>
                           {tags.length > 0 && (
                             <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
@@ -264,9 +273,9 @@ export default function ProductionReportsClient({
                               ? { background: "rgba(255,255,255,.15)", color: "rgba(255,255,255,.8)" }
                               : r.publishedAt
                                 ? { background: "#f0fdf4", color: "#16a34a" }
-                                : { background: "var(--paper)", color: "var(--muted)" }),
+                                : { background: "#f2e4d9", color: "var(--stage)" }),
                           }}>
-                            {r.publishedAt ? "已发布" : "草稿"}
+                            {r.publishedAt ? "已发布" : isPendingDraft ? "待完成" : "草稿"}
                           </span>
                           {r.publishedAt && (
                             <span style={{ display: "block", marginTop: 3, fontSize: 10, color: isSelected ? "rgba(255,255,255,.4)" : "var(--muted)" }}>
@@ -302,9 +311,11 @@ export default function ProductionReportsClient({
                     borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 600,
                     ...(visibleSelected.publishedAt
                       ? { background: "#f0fdf4", color: "#16a34a" }
-                      : { background: "var(--paper)", color: "var(--muted)" }),
+                      : { background: "#f2e4d9", color: "var(--stage)" }),
                   }}>
-                    {visibleSelected.publishedAt ? `已发布 · ${fmtDate(visibleSelected.publishedAt)}` : "草稿"}
+                    {visibleSelected.publishedAt
+                      ? `已发布 · ${fmtDate(visibleSelected.publishedAt)}`
+                      : visibleSelected.eventStatus === "completed" ? "待完成" : "草稿"}
                   </span>
                 </div>
                 {visibleSelected.body && (

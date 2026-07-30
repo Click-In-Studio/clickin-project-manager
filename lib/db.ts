@@ -3109,9 +3109,14 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
     email: string | null; phone: string | null; roles: string[]; photo_url: string | null;
   }>(
     `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
-            fu.email, fu.phone, pm.roles, pm.photo_url
+            COALESCE(upi.platform_user_id, fu.email) AS email,
+            fu.phone, pm.roles, pm.photo_url
      FROM production_member pm
      JOIN feishu_user fu ON fu.user_id = pm.user_id
+     LEFT JOIN user_platform_identity upi
+       ON upi.user_id = pm.user_id
+      AND upi.platform_id = 'email'
+      AND upi.is_primary = true
      WHERE pm.production_id = $1
      ORDER BY fu.name`,
     [productionId],
@@ -4068,6 +4073,24 @@ export async function countWarningCues(cueListIds: string[]): Promise<number> {
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM cue WHERE cue_list_id = ANY($1::text[]) AND warning = TRUE`,
     [cueListIds]
+  );
+  return parseInt(res.rows[0].count, 10);
+}
+
+export async function countCueWarningsForProduction(
+  productionId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<number> {
+  const res = await getPool().query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM cue c
+     JOIN cue_list cl ON c.cue_list_id = cl.id
+     WHERE cl.production_id = $1 AND c.warning = TRUE
+       AND ($2 OR EXISTS (
+         SELECT 1 FROM production_member pm
+         WHERE pm.production_id = cl.production_id AND pm.user_id = $3
+       ))`,
+    [productionId, isAdmin, userId]
   );
   return parseInt(res.rows[0].count, 10);
 }

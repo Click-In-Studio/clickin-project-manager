@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "剧本" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
@@ -13,10 +13,10 @@ export default async function ProductionScriptPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string }>;
+  searchParams: Promise<{ v?: string; q?: string }>;
 }) {
   const { id } = await params;
-  const { v } = await searchParams;
+  const { v, q } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -25,7 +25,8 @@ export default async function ProductionScriptPage({
     getProductionPermissionContext(session.userId, session.isAdmin, id),
     getProductionName(id),
   ]);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("script:view", access.permCtx)) redirect(`/unauthorized?resource=script%3Aview&id=${id}`);
 
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
     hasPermission(perm, access.permCtx);
@@ -42,6 +43,7 @@ export default async function ProductionScriptPage({
       canEditRehearsalMark={p("rehearsal_mark:create")}
       canImport={p("script:import")}
       versionId={versionId}
+      initialSearchQuery={q}
     />
   );
 }

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "CUE" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
@@ -27,7 +27,8 @@ export default async function CuesPage({
   if (!session) redirect("/login");
 
   const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!_access || !hasPermission("cue_list:view", _access.permCtx)) redirect("/");
+  if (!_access) redirect(`/unauthorized?id=${id}`);
+  if (!hasPermission("cue_list:view", _access.permCtx)) redirect(`/unauthorized?resource=cue_list%3Aview&id=${id}`);
 
   const versions = await listVersions(id);
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -51,7 +52,8 @@ export default async function CuesPage({
     listCuesByProduction(id, resolvedVersionId ?? undefined),
     resolvedVersionId ? getVersion(resolvedVersionId) : Promise.resolve(null),
   ]);
-  if (!name || !production) redirect("/");
+  if (!name) notFound();
+  if (!production) notFound();
 
   const editableListIds = new Set<string>(
     (await Promise.all(cueLists.map(async (cl) => ({

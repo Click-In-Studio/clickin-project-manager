@@ -33,8 +33,10 @@ export default async function CallSheetPage({
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     loadEventPermContext(session.userId, eventId),
   ]);
-  if (!_prodAccess) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
+  if (!hasPermission("event:view_call_sheet", prodPermCtx) && !hasPermission("event:view_call_sheet_any", prodPermCtx))
+    redirect(`/unauthorized?resource=event%3Aview_call_sheet&id=${productionId}`);
   const canViewFull = hasPermission("event:edit", prodPermCtx);
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);

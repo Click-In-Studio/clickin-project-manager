@@ -28,7 +28,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!access) redirect(`/unauthorized?id=${productionId}`);
 
   const req = await getTechReqByProduction(taskId, productionId);
   if (!req) notFound();
@@ -52,7 +52,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const isAssignee = req.assignees.some(a => a.userId === session.userId);
 
   if (!canViewFull && !isPocOfDept && !isAssignee)
-    redirect(`/unauthorized?resource=${encodeURIComponent("技术需求")}&id=${taskId}`);
+    redirect(`/unauthorized?resource=event%3Aview_tech_req&id=${productionId}&taskId=${taskId}`);
 
   const dept = departments.find(d => d.id === req.departmentId);
   const deptPeople = dept

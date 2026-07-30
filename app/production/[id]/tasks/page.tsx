@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "任务" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
@@ -20,7 +20,8 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     getProductionName(productionId),
   ]);
-  if (!access || !productionName) redirect("/");
+  if (!access) redirect(`/unauthorized?id=${productionId}`);
+  if (!productionName) notFound();
 
   const canViewAll = hasPermission("event:view_tech_req_any", access.permCtx);
 

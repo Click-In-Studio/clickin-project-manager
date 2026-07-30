@@ -25,7 +25,7 @@ export default async function ReqsPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!access) redirect(`/unauthorized?id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();

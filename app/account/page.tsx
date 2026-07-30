@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getUserProfile, getUserIdentities } from "@/lib/db";
+import { getUserPrefs } from "@/lib/notification-prefs";
 import AccountClient from "./AccountClient";
 
 export const metadata: Metadata = { title: "个人中心" };
@@ -12,9 +13,10 @@ export default async function AccountPage() {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const [profile, identities] = await Promise.all([
+  const [profile, identities, notifPrefs] = await Promise.all([
     getUserProfile(session.userId),
     getUserIdentities(session.userId),
+    getUserPrefs(session.userId),
   ]);
 
   return (
@@ -28,6 +30,7 @@ export default async function AccountPage() {
         avatarUrl: profile?.avatarUrl ?? session.avatarUrl,
       }}
       initialIdentities={identities}
+      initialNotifPrefs={notifPrefs}
     />
   );
 }
