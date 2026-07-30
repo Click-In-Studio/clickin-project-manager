@@ -4077,12 +4077,20 @@ export async function countWarningCues(cueListIds: string[]): Promise<number> {
   return parseInt(res.rows[0].count, 10);
 }
 
-export async function countCueWarningsForProduction(productionId: string): Promise<number> {
+export async function countCueWarningsForProduction(
+  productionId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<number> {
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM cue c
      JOIN cue_list cl ON c.cue_list_id = cl.id
-     WHERE cl.production_id = $1 AND c.warning = TRUE`,
-    [productionId]
+     WHERE cl.production_id = $1 AND c.warning = TRUE
+       AND ($2 OR EXISTS (
+         SELECT 1 FROM production_member pm
+         WHERE pm.production_id = cl.production_id AND pm.user_id = $3
+       ))`,
+    [productionId, isAdmin, userId]
   );
   return parseInt(res.rows[0].count, 10);
 }

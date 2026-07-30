@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return new Response(stream.body, {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "private, max-age=0, must-revalidate",
       },
     });
   }

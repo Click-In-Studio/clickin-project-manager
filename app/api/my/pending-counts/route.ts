@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     countUnreadNotifications(session.userId, productionId),
     countPendingTasksForUser(session.userId, productionId),
     countUnreadReportsForUser(session.userId, productionId),
-    productionId ? countCueWarningsForProduction(productionId) : Promise.resolve(0),
+    productionId ? countCueWarningsForProduction(productionId, session.userId, session.isAdmin) : Promise.resolve(0),
   ]);
 
   return Response.json({ notifications, tasks, reports, cueWarnings });

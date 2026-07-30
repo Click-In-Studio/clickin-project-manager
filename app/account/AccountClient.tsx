@@ -99,6 +99,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
 
   // Avatar upload state
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarCacheBust, setAvatarCacheBust] = useState(0);
 
   // Security state
   const [identities, setIdentities] = useState<Identity[]>(initialIdentities);
@@ -218,6 +219,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
 
       // 5. Update local display via the proxy URL (cache-busted)
       setAvatarUrl(r2Key);
+      setAvatarCacheBust(v => v + 1);
       setSaveMsg("✓ 头像已更新");
       setSaveMsgOk(true);
       router.refresh();
@@ -500,7 +502,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   </div>
                   <div className={styles.avatarEditor}>
                     {avatarSrc
-                      ? <img src={`${avatarSrc}?t=${Date.now()}`} alt={name} className={styles.avatarImg} key={avatarUrl} />
+                      ? <img src={`${avatarSrc}?t=${avatarCacheBust}`} alt={name} className={styles.avatarImg} key={avatarCacheBust} />
                       : <span>{initial(name)}</span>}
                     <input
                       ref={fileInputRef}
