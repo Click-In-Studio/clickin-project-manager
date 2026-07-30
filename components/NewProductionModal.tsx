@@ -127,7 +127,7 @@ export default function NewProductionModal({ onClose, onCreated }: Props) {
               margin: "0 0 4px", fontSize: 9, fontWeight: 700,
               letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)",
             }}>
-              NEW PROJECT
+              NEW PRODUCTION
             </p>
             <h2 id="new-prod-title" style={{
               margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif',
