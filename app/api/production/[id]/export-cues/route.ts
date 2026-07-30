@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { TOKEN_COOKIE } from "@/lib/feishu-auth";
+import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getProductionPermissionContext, listCues, loadProduction, getActiveVersionId } from "@/lib/db";
-import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/feishu-sheet";
+import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/platform/feishu/feishu-sheet";
 import { formatCuePosition } from "@/lib/cue-export";
 import type { CueAnchor } from "@/lib/cue-types";
 import { textBlocksWithMarkerOwnership } from "@/lib/script-marker-blocks";

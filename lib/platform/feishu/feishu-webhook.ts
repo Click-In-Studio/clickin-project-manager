@@ -1,5 +1,5 @@
 import { getTenantAccessToken } from "./feishu-auth";
-import { getPool } from "./pg";
+import { getPool } from "../../pg";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 

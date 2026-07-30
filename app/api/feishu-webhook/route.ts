@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTenantAccessToken, getBotOpenId } from "@/lib/feishu-auth";
-import { getUserName } from "@/lib/feishu-webhook";
+import { getTenantAccessToken, getBotOpenId } from "@/lib/platform/feishu/feishu-auth";
+import { getUserName } from "@/lib/platform/feishu/feishu-webhook";
 import { upsertContactUser } from "@/lib/db";
 import { resolveUserId } from "@/agent/db";
 import { processMessage as agentProcessMessage, processButtonClick } from "@/agent/index";

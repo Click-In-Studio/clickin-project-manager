@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
-import { TOKEN_COOKIE } from "@/lib/feishu-auth";
+import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getActiveVersionId, getVersion,

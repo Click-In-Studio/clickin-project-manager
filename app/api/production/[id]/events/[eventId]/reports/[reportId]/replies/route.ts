@@ -11,7 +11,7 @@ import {
   loadEventPermContext,
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
-import { buildReplyMentionCard } from "@/lib/feishu-bot";
+import { buildReplyMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { notifyUsers } from "@/lib/notify";
 

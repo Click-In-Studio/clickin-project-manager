@@ -13,7 +13,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionDeptChatIds } from "@/lib/event-db";
-import { searchChats, getChatMemberOpenIds } from "@/lib/feishu-chat";
+import { searchChats, getChatMemberOpenIds } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string }> };
 

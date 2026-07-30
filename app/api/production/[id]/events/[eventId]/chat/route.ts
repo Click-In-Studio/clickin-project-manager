@@ -17,7 +17,7 @@ import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent, setEventChatId, clearEventChatId, getEventChatTargets, getProductionDeptChatIds,
 } from "@/lib/event-db";
-import { createChat, addChatMembers, isUserInChat } from "@/lib/feishu-chat";
+import { createChat, addChatMembers, isUserInChat } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

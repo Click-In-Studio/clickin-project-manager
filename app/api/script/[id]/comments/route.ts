@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
-import { buildScriptCommentMentionCard } from "@/lib/feishu-bot";
+import { buildScriptCommentMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { notifyUsers } from "@/lib/notify";
 

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { TOKEN_COOKIE } from "@/lib/feishu-auth";
+import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";

@@ -1,8 +1,8 @@
 import { randomInt } from "node:crypto";
-import { signMagicToken, verifyMagicToken } from "../auth-email";
-import { sendEmail } from "../email";
-import { upsertEmailUser, getUserProfile, createEmailOtp } from "../db";
-import { buildNotificationEmail } from "../email-templates";
+import { signMagicToken, verifyMagicToken } from "./email-tokens";
+import { sendEmail } from "./email-send";
+import { upsertEmailUser, getUserProfile, createEmailOtp } from "../../db";
+import { buildNotificationEmail } from "./email-templates";
 import type {
   PersonalChannel,
   PersonalCapabilities,
@@ -12,7 +12,7 @@ import type {
   PlatformMessage,
   PlatformUserInfo,
   LoginResult,
-} from "./types";
+} from "../types";
 
 const MAGIC_LINK_PATH = "/api/auth/email/callback";
 const OTP_TTL_MS = 15 * 60 * 1000;

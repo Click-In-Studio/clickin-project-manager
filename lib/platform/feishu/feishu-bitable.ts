@@ -1,5 +1,5 @@
-import type { Block, Character, Scene, ScriptState } from "./script-types";
-import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
+import type { Block, Character, Scene, ScriptState } from "../../script-types";
+import { DEFAULT_SCRIPT_CONFIG } from "../../script-types";
 
 const BASE = "https://open.feishu.cn/open-apis";
 

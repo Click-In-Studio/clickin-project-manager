@@ -18,7 +18,7 @@ import {
   getProductionEvent, getEventTechReq, setTechReqChatId,
   getReqChatTargets, getProductionDeptChatIds, isUserDeptPoc,
 } from "@/lib/event-db";
-import { createChat, addChatMembers, isUserInChat } from "@/lib/feishu-chat";
+import { createChat, addChatMembers, isUserInChat } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 

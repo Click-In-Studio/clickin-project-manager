@@ -6,7 +6,7 @@
  * Body: { wikiUrl: string; name: string }
  */
 import { type NextRequest } from "next/server";
-import { getAppAccessToken } from "@/lib/feishu-auth";
+import { getAppAccessToken } from "@/lib/platform/feishu/feishu-auth";
 import {
   parseWikiUrl,
   resolveWikiToken,
@@ -15,7 +15,7 @@ import {
   validateSchema,
   getAllRecords,
   toScriptState,
-} from "@/lib/feishu-bitable";
+} from "@/lib/platform/feishu/feishu-bitable";
 import { createProduction, flushToDBVersioned, getActiveVersionId, savePageMap } from "@/lib/db";
 import { computePageMap, PAGE_CONFIGS } from "@/lib/script-page";
 import { initialKeys } from "@/lib/lex-order";

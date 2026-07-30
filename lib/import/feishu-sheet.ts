@@ -1,5 +1,5 @@
 import type { SheetMeta, SheetData, SheetCell } from "./types";
-import { extractFeishuText } from "@/lib/feishu-bitable";
+import { extractFeishuText } from "@/lib/platform/feishu/feishu-bitable";
 
 const BASE = "https://open.feishu.cn/open-apis";
 

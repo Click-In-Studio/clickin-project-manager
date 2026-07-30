@@ -1,5 +1,5 @@
 import { getAppAccessToken, getTenantAccessToken } from "./feishu-auth";
-import type { WeeklyCallEntry, DailyCallScheduleItem } from "./event-db";
+import type { WeeklyCallEntry, DailyCallScheduleItem } from "../../event-db";
 
 const BASE = "https://open.feishu.cn/open-apis";
 

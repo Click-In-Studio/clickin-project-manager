@@ -10,13 +10,13 @@ import {
   checkIsTenantManager,
   TOKEN_COOKIE,
   type FeishuRawUser,
-} from "../feishu-auth";
-import { upsertFeishuUser } from "../db";
+} from "./feishu-auth";
+import { upsertFeishuUser } from "../../db";
 import {
   sendBotDm,
   sendCard,
   sendChatCard,
-} from "../feishu-bot";
+} from "./feishu-bot";
 import {
   createChat,
   addChatMembers,
@@ -24,7 +24,7 @@ import {
   getChatMemberOpenIds,
   updateChatName,
   searchChats,
-} from "../feishu-chat";
+} from "./feishu-chat";
 import type {
   PersonalChannel,
   PersonalCapabilities,
@@ -44,7 +44,7 @@ import type {
   InteractionOption,
   AuthToken,
   LoginResult,
-} from "./types";
+} from "../types";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 

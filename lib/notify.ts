@@ -22,17 +22,17 @@ import { getPool } from "./pg";
 import { BASE_PATH } from "./base-path";
 import {
   buildWeeklyCallCard, buildDailyCallCard, buildReportCard, buildMentionCard,
-} from "./feishu-bot";
+} from "./platform/feishu/feishu-bot";
 import {
   listAllReportMentionedUserIds,
   type WeeklyCallEntry, type DailyCallScheduleItem,
 } from "./event-db";
 import { createCardToken } from "./card-token";
-import { signRsvpToken } from "./auth-email";
+import { signRsvpToken } from "./platform/email/email-tokens";
 import {
   buildEventPublishEmail, buildWeeklyCallEmail, buildDailyCallEmail,
   buildReportEmail, buildMentionEmail,
-} from "./email-templates";
+} from "./platform/email/email-templates";
 import {
   getOptedOutUsers, isExternalEnabled,
   shouldDeliverExternal, resolveDeliveryPolicy,

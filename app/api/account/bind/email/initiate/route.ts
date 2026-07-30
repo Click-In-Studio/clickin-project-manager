@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { signBindingToken } from "@/lib/auth-email";
-import { sendEmail } from "@/lib/email";
+import { signBindingToken } from "@/lib/platform/email/email-tokens";
+import { sendEmail } from "@/lib/platform/email/email-send";
 
 function requestBaseUrl(req: NextRequest): string {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";

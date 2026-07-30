@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { verifyConflictToken } from "@/lib/auth-email";
+import { verifyConflictToken } from "@/lib/platform/email/email-tokens";
 import { getAccountSummary, getSharedProductions } from "@/lib/db";
 
 export async function GET(req: NextRequest) {

@@ -4,7 +4,7 @@ import { getProductionPermissionContext, getCueList, updateCue, deleteCue,
          getCue, listCueListRoleMembers, getProductionName, getVersion, hasListAccess } from "@/lib/db";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
-import { buildCueWarningCard } from "@/lib/feishu-bot";
+import { buildCueWarningCard } from "@/lib/platform/feishu/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { notifyUsers } from "@/lib/notify";
 

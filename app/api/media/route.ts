@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getAppAccessToken } from "@/lib/feishu-auth";
+import { getAppAccessToken } from "@/lib/platform/feishu/feishu-auth";
 
 const BASE = "https://open.feishu.cn/open-apis";
 

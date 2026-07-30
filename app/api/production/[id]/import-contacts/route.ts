@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { getAppAccessToken, searchUsersByName, getUserContactInfo } from "@/lib/feishu-auth";
+import { getAppAccessToken, searchUsersByName, getUserContactInfo } from "@/lib/platform/feishu/feishu-auth";
 import {
   parseWikiUrl,
   resolveWikiToken,
@@ -8,7 +8,7 @@ import {
   getAllRecords,
   validateContactSchema,
   toContactRows,
-} from "@/lib/feishu-bitable";
+} from "@/lib/platform/feishu/feishu-bitable";
 import {
   findUserByName,
   upsertContactUser,
