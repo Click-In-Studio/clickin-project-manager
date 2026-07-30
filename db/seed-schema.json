@@ -1,4 +1,22 @@
 {
+  "announcement_read": [
+    {
+      "column": "announcement_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "read_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "app_user": [
     {
       "column": "id",
@@ -1148,6 +1166,40 @@
       "nullable": false
     }
   ],
+  "milestone": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "end_date",
+      "type": "date",
+      "nullable": false
+    },
+    {
+      "column": "sort_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "notification_preference": [
     {
       "column": "user_id",
@@ -1238,6 +1290,78 @@
       "type": "integer",
       "nullable": false,
       "default": "0"
+    },
+    {
+      "column": "description",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "avatar_url",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "type",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "type_label",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "language",
+      "type": "text",
+      "nullable": true
+    }
+  ],
+  "production_announcement": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "is_pinned",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "production_event": [

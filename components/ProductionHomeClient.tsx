@@ -5,11 +5,24 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
-import { fmtCallAt, fmtDate } from "@/lib/tz";
+import { fmtCallAt } from "@/lib/tz";
 import styles from "@/components/home.module.css";
 
 const REQ_STATUS_LABEL: Record<string, string> = {
   pending: "待处理", in_progress: "进行中",
+};
+
+type Announcement = {
+  id: string;
+  title: string;
+  content: string;
+  isPinned: boolean;
+};
+
+type Milestone = {
+  id: string;
+  name: string;
+  endDate: string;
 };
 
 type MyWorkData = {
@@ -18,7 +31,125 @@ type MyWorkData = {
   awaitingReqs: MyPocAwaitingReqEntry[];
   unreadReports: UnreadReportEntry[];
   isArchived: boolean;
+  pinnedAnnouncement: Announcement | null;
+  nextMilestone: Milestone | null;
+  cueWarningCount: number;
 };
+
+function daysUntil(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr);
+  return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function plainSnippet(md: string, maxLen = 120): string {
+  return md
+    .replace(/^#+\s+/gm, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/!\[.*?\]\(.*?\)/g, "")
+    .replace(/\[(.+?)\]\(.*?\)/g, "$1")
+    .replace(/\n+/g, " ")
+    .trim()
+    .slice(0, maxLen);
+}
+
+// ── 项目进展 hero ─────────────────────────────────────────────────────────────
+
+function ProjectProgressHero({
+  data,
+  productionId,
+}: {
+  data: MyWorkData;
+  productionId: string;
+}) {
+  const { pinnedAnnouncement, nextMilestone, cueWarningCount, awaitingReqs } = data;
+
+  useEffect(() => {
+    if (!pinnedAnnouncement) return;
+    fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${pinnedAnnouncement.id}/read`, {
+      method: "POST",
+    }).catch(() => {});
+  }, [pinnedAnnouncement?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const days = nextMilestone ? daysUntil(nextMilestone.endDate) : null;
+
+  const milestoneLabel = (() => {
+    if (days === null) return "暂无里程碑";
+    if (days < 0) return `已过 ${Math.abs(days)} 天`;
+    if (days === 0) return "今天";
+    return `${days} 天`;
+  })();
+
+  const milestoneSubLabel = nextMilestone
+    ? `距「${nextMilestone.name}」`
+    : "尚未设置里程碑";
+
+  const snippet = pinnedAnnouncement?.content ? plainSnippet(pinnedAnnouncement.content) : "";
+  const hasMore = (pinnedAnnouncement?.content ?? "").replace(/\s/g, "").length > 120;
+
+  return (
+    <section className={styles.progressHero}>
+      {/* 左：置顶公告 */}
+      <div className={styles.progressHeroIntro}>
+        <p className={styles.progressEyebrow}>PROJECT PROGRESS · 项目进展</p>
+        {pinnedAnnouncement ? (
+          <>
+            <h2 className={styles.progressHeroTitle}>{pinnedAnnouncement.title}</h2>
+            {snippet && (
+              <p className={styles.progressHeroText}>
+                {snippet}{hasMore ? "…" : ""}
+              </p>
+            )}
+          </>
+        ) : (
+          <h2 className={styles.progressHeroTitle} style={{ opacity: 0.45 }}>
+            暂无置顶公告
+          </h2>
+        )}
+        <Link
+          href={`/production/${productionId}/announcements`}
+          className={styles.progressHeroLink}
+        >
+          查看项目公告 →
+        </Link>
+      </div>
+
+      {/* 右：三格指标 */}
+      <div className={styles.progressHeroMetrics}>
+        {/* 里程碑倒计时 */}
+        <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 ? styles.progressMetricUrgent : ""}`}>
+          <strong>{milestoneLabel}</strong>
+          <span>{milestoneSubLabel}</span>
+          {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
+        </div>
+
+        {/* 待处理通知 */}
+        <Link
+          href={`/production/${productionId}/notifications`}
+          className={`${styles.progressMetricCard} ${styles.progressMetricLink} ${awaitingReqs.length > 0 ? styles.progressMetricActive : ""}`}
+        >
+          <strong>{awaitingReqs.length}</strong>
+          <span>待处理通知</span>
+          {awaitingReqs.length > 0 && <small>需要你的确认</small>}
+        </Link>
+
+        {/* Cue 风险 */}
+        <Link
+          href={`/production/${productionId}/cues`}
+          className={`${styles.progressMetricCard} ${styles.progressMetricLink} ${cueWarningCount > 0 ? styles.progressMetricWarn : ""}`}
+        >
+          <strong>{cueWarningCount}</strong>
+          <span>Cue 风险提示</span>
+          {cueWarningCount > 0 && <small>有待处理风险</small>}
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 export default function ProductionHomeClient({
   productionId,
@@ -61,26 +192,16 @@ export default function ProductionHomeClient({
         </div>
       )}
 
-      {/* Announcements banner */}
-      <section className={styles.alertBanner} style={{ marginBottom: 18 }}>
-        <div className={styles.alertBannerContent}>
-          <p className={styles.alertEyebrow}>Alerts · Announcements</p>
-          <h2>公告与风险提醒</h2>
-          <div className={styles.alertEmpty}>
-            暂无风险提醒或公告 · 公告与演出风险警告将在这里汇总
-          </div>
+      {/* 项目进展 hero */}
+      {loading ? (
+        <div className={styles.progressHero} style={{ minHeight: 180, alignItems: "center", justifyContent: "center" }}>
+          <div style={{ color: "rgba(255,255,255,.4)", fontSize: 12 }}>加载中…</div>
         </div>
-        <Link
-          href={`/my/announcements`}
-          style={{
-            flexShrink: 0, fontSize: 11, color: "rgba(255,255,255,.5)",
-            textDecoration: "none", alignSelf: "flex-start",
-          }}
-        >
-          全部公告 →
-        </Link>
-      </section>
+      ) : (
+        <ProjectProgressHero data={data!} productionId={productionId} />
+      )}
 
+      {/* Dashboard panels */}
       <div className={styles.dashboardGrid}>
         <div className={styles.dashboardCol}>
 
@@ -116,10 +237,7 @@ export default function ProductionHomeClient({
                   ))}
                 </div>
               )}
-              <Link
-                href={`/production/${productionId}/events`}
-                className={styles.panelSeeAll}
-              >
+              <Link href={`/production/${productionId}/events`} className={styles.panelSeeAll}>
                 {callTimes.length > 3 ? `查看全部 ${callTimes.length} 条 →` : "查看所有 Event →"}
               </Link>
             </div>
@@ -149,17 +267,14 @@ export default function ProductionHomeClient({
                         <b>{req.departmentName ?? "（无部门）"}</b>
                         <small>{req.eventTitle}</small>
                       </span>
-                      <span className={`${styles.badge}`} style={{ background: "#f3eeff", color: "#7c3aed" }}>
+                      <span className={styles.badge} style={{ background: "#f3eeff", color: "#7c3aed" }}>
                         待确认
                       </span>
                     </button>
                   ))}
                 </div>
               )}
-              <Link
-                href={`/production/${productionId}/notifications`}
-                className={styles.panelSeeAll}
-              >
+              <Link href={`/production/${productionId}/notifications`} className={styles.panelSeeAll}>
                 {awaitingReqs.length > 3 ? `查看全部 ${awaitingReqs.length} 条 →` : "查看通知 →"}
               </Link>
             </div>
@@ -168,7 +283,7 @@ export default function ProductionHomeClient({
         </div>
         <div className={styles.dashboardCol}>
 
-          {/* 我的 Task */}
+          {/* 我的任务 */}
           <section className={styles.panel}>
             <div className={styles.panelHeading}>
               <div>
@@ -199,16 +314,13 @@ export default function ProductionHomeClient({
                   ))}
                 </div>
               )}
-              <Link
-                href={`/my/tasks`}
-                className={styles.panelSeeAll}
-              >
+              <Link href={`/my/tasks`} className={styles.panelSeeAll}>
                 {pendingReqs.length > 3 ? `查看全部 ${pendingReqs.length} 条 →` : "查看所有任务 →"}
               </Link>
             </div>
           </section>
 
-          {/* 待完成报告 */}
+          {/* 报告 */}
           {(() => {
             const pendingDrafts = unreadReports.filter(r => !r.publishedAt);
             return (
@@ -242,10 +354,7 @@ export default function ProductionHomeClient({
                       ))}
                     </div>
                   )}
-                  <Link
-                    href={`/production/${productionId}/reports`}
-                    className={styles.panelSeeAll}
-                  >
+                  <Link href={`/production/${productionId}/reports`} className={styles.panelSeeAll}>
                     {pendingDrafts.length > 3 ? `查看全部 ${pendingDrafts.length} 篇待完成 →` : "查看所有报告 →"}
                   </Link>
                 </div>

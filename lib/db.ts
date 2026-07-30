@@ -2082,33 +2082,71 @@ export async function deleteProduction(id: string): Promise<void> {
   await getPool().query("DELETE FROM production WHERE id = $1", [id]);
 }
 
-export async function listProductions(opts: { userId: string; isAdmin: boolean }): Promise<{ id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number }[]> {
-  const orderBy = "CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END, sort_order ASC, created_at ASC";
-  let res;
-  if (opts.isAdmin) {
-    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null; sort_order: number }>(
-      `SELECT id, name, created_at, archived_at, sort_order FROM production ORDER BY ${orderBy}`
-    );
-  } else {
-    res = await getPool().query<{ id: string; name: string; created_at: Date; archived_at: Date | null; sort_order: number }>(
-      `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order FROM production p
-       JOIN production_member pm ON pm.production_id = p.id
-       WHERE pm.user_id = $1 ORDER BY ${orderBy}`,
-      [opts.userId]
-    );
-  }
-  return res.rows.map(r => ({
+export type ProductionListEntry = {
+  id: string;
+  name: string;
+  createdAt: string;
+  archivedAt: string | null;
+  sortOrder: number;
+  description: string;
+  avatarUrl: string | null;
+  type: string | null;
+  typeLabel: string | null;
+  language: string | null;
+};
+
+type ProductionRow = {
+  id: string;
+  name: string;
+  created_at: Date;
+  archived_at: Date | null;
+  sort_order: number;
+  description: string;
+  avatar_url: string | null;
+  type: string | null;
+  type_label: string | null;
+  language: string | null;
+};
+
+function mapProductionRow(r: ProductionRow): ProductionListEntry {
+  return {
     id: r.id,
     name: r.name,
     createdAt: r.created_at.toISOString(),
     archivedAt: r.archived_at?.toISOString() ?? null,
     sortOrder: r.sort_order,
-  }));
+    description: r.description,
+    avatarUrl: r.avatar_url ?? null,
+    type: r.type ?? null,
+    typeLabel: r.type_label ?? null,
+    language: r.language ?? null,
+  };
+}
+
+const PROD_COLS = "id, name, created_at, archived_at, sort_order, description, avatar_url, type, type_label, language";
+const PROD_COLS_P = "p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.description, p.avatar_url, p.type, p.type_label, p.language";
+
+export async function listProductions(opts: { userId: string; isAdmin: boolean }): Promise<ProductionListEntry[]> {
+  const orderBy = "CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END, sort_order ASC, created_at ASC";
+  let res;
+  if (opts.isAdmin) {
+    res = await getPool().query<ProductionRow>(
+      `SELECT ${PROD_COLS} FROM production ORDER BY ${orderBy}`
+    );
+  } else {
+    res = await getPool().query<ProductionRow>(
+      `SELECT ${PROD_COLS_P} FROM production p
+       JOIN production_member pm ON pm.production_id = p.id
+       WHERE pm.user_id = $1 ORDER BY ${orderBy}`,
+      [opts.userId]
+    );
+  }
+  return res.rows.map(mapProductionRow);
 }
 
 export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
-  sortOrder: number; roles: string[];
+  sortOrder: number; roles: string[]; avatarUrl: string | null;
 };
 
 export async function listMyProductionsWithRoles(
@@ -2117,9 +2155,9 @@ export async function listMyProductionsWithRoles(
   const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
   const res = await getPool().query<{
     id: string; name: string; created_at: Date; archived_at: Date | null;
-    sort_order: number; roles: string[] | null;
+    sort_order: number; roles: string[] | null; avatar_url: string | null;
   }>(
-    `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order,
+    `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.avatar_url,
             pm.roles
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
@@ -2133,6 +2171,7 @@ export async function listMyProductionsWithRoles(
     archivedAt: r.archived_at?.toISOString() ?? null,
     sortOrder: r.sort_order,
     roles: r.roles ?? [],
+    avatarUrl: r.avatar_url ?? null,
   }));
 }
 
@@ -3085,6 +3124,39 @@ export async function getProductionName(id: string): Promise<string | null> {
     [id]
   );
   return res.rows[0]?.name ?? null;
+}
+
+export type ProductionMeta = {
+  name: string;
+  description: string;
+  avatarUrl: string | null;
+  type: string | null;
+  typeLabel: string | null;
+  language: string | null;
+};
+
+export async function getProductionMeta(id: string): Promise<ProductionMeta | null> {
+  const res = await getPool().query<{
+    name: string;
+    description: string;
+    avatar_url: string | null;
+    type: string | null;
+    type_label: string | null;
+    language: string | null;
+  }>(
+    "SELECT name, description, avatar_url, type, type_label, language FROM production WHERE id = $1",
+    [id]
+  );
+  const r = res.rows[0];
+  if (!r) return null;
+  return {
+    name: r.name,
+    description: r.description,
+    avatarUrl: r.avatar_url,
+    type: r.type,
+    typeLabel: r.type_label,
+    language: r.language,
+  };
 }
 
 export async function updateProductionName(id: string, name: string): Promise<void> {
@@ -5877,4 +5949,458 @@ export async function applyPatchToDB(
     void scheduleEstimatedPageMapSave(productionId, versionId, dirty)
       .catch(err => console.error("[page-map] update error:", err));
   }
+}
+
+// ── Production meta ───────────────────────────────────────────────────────────
+
+export async function updateProductionMeta(
+  id: string,
+  fields: { description?: string; avatarUrl?: string | null; language?: string | null },
+): Promise<void> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.description !== undefined) { sets.push(`description = $${vals.push(fields.description)}`); }
+  if ("avatarUrl" in fields) { sets.push(`avatar_url = $${vals.push(fields.avatarUrl ?? null)}`); }
+  if ("language" in fields) { sets.push(`language = $${vals.push(fields.language ?? null)}`); }
+  if (!sets.length) return;
+  vals.push(id);
+  await getPool().query(`UPDATE production SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
+}
+
+export async function updateProductionType(
+  id: string,
+  type: string | null,
+  typeLabel: string | null,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE production SET type = $1, type_label = $2 WHERE id = $3",
+    [type, typeLabel, id],
+  );
+}
+
+// ── Milestones ────────────────────────────────────────────────────────────────
+
+export type Milestone = {
+  id: string;
+  productionId: string;
+  name: string;
+  endDate: string;
+  sortOrder: number;
+  createdAt: string;
+};
+
+type MilestoneRow = {
+  id: string;
+  production_id: string;
+  name: string;
+  end_date: string;
+  sort_order: number;
+  created_at: Date;
+};
+
+function mapMilestoneRow(r: MilestoneRow): Milestone {
+  return {
+    id: r.id,
+    productionId: r.production_id,
+    name: r.name,
+    endDate: r.end_date,
+    sortOrder: r.sort_order,
+    createdAt: r.created_at.toISOString(),
+  };
+}
+
+export async function listMilestones(productionId: string): Promise<Milestone[]> {
+  const res = await getPool().query<MilestoneRow>(
+    "SELECT id, production_id, name, end_date::text AS end_date, sort_order, created_at FROM milestone WHERE production_id = $1 ORDER BY end_date ASC, sort_order ASC",
+    [productionId],
+  );
+  return res.rows.map(mapMilestoneRow);
+}
+
+export async function createMilestone(
+  id: string,
+  productionId: string,
+  name: string,
+  endDate: string,
+  sortOrder: number,
+): Promise<Milestone> {
+  const res = await getPool().query<MilestoneRow>(
+    `INSERT INTO milestone (id, production_id, name, end_date, sort_order)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, production_id, name, end_date::text AS end_date, sort_order, created_at`,
+    [id, productionId, name, endDate, sortOrder],
+  );
+  return mapMilestoneRow(res.rows[0]);
+}
+
+export async function updateMilestone(
+  id: string,
+  fields: { name?: string; endDate?: string; sortOrder?: number },
+): Promise<void> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.name !== undefined) { sets.push(`name = $${vals.push(fields.name)}`); }
+  if (fields.endDate !== undefined) { sets.push(`end_date = $${vals.push(fields.endDate)}`); }
+  if (fields.sortOrder !== undefined) { sets.push(`sort_order = $${vals.push(fields.sortOrder)}`); }
+  if (!sets.length) return;
+  vals.push(id);
+  await getPool().query(`UPDATE milestone SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
+}
+
+export async function deleteMilestone(id: string): Promise<void> {
+  await getPool().query("DELETE FROM milestone WHERE id = $1", [id]);
+}
+
+export async function getMilestone(id: string): Promise<Milestone | null> {
+  const res = await getPool().query<MilestoneRow>(
+    "SELECT id, production_id, name, end_date::text AS end_date, sort_order, created_at FROM milestone WHERE id = $1",
+    [id],
+  );
+  return res.rows[0] ? mapMilestoneRow(res.rows[0]) : null;
+}
+
+// ── Announcements ─────────────────────────────────────────────────────────────
+
+export type ProductionAnnouncement = {
+  id: string;
+  productionId: string;
+  title: string;
+  content: string;
+  isPinned: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AnnouncementRow = {
+  id: string;
+  production_id: string;
+  title: string;
+  content: string;
+  is_pinned: boolean;
+  created_by: string;
+  created_at: Date;
+  updated_at: Date;
+};
+
+function mapAnnouncementRow(r: AnnouncementRow): ProductionAnnouncement {
+  return {
+    id: r.id,
+    productionId: r.production_id,
+    title: r.title,
+    content: r.content,
+    isPinned: r.is_pinned,
+    createdBy: r.created_by,
+    createdAt: r.created_at.toISOString(),
+    updatedAt: r.updated_at.toISOString(),
+  };
+}
+
+export async function listAnnouncements(productionId: string): Promise<ProductionAnnouncement[]> {
+  const res = await getPool().query<AnnouncementRow>(
+    `SELECT id, production_id, title, content, is_pinned, created_by, created_at, updated_at
+     FROM production_announcement WHERE production_id = $1 ORDER BY created_at DESC`,
+    [productionId],
+  );
+  return res.rows.map(mapAnnouncementRow);
+}
+
+export async function createAnnouncement(
+  id: string,
+  productionId: string,
+  title: string,
+  content: string,
+  createdBy: string,
+): Promise<ProductionAnnouncement> {
+  const res = await getPool().query<AnnouncementRow>(
+    `INSERT INTO production_announcement (id, production_id, title, content, created_by)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, production_id, title, content, is_pinned, created_by, created_at, updated_at`,
+    [id, productionId, title, content, createdBy],
+  );
+  return mapAnnouncementRow(res.rows[0]);
+}
+
+export async function getAnnouncement(id: string): Promise<ProductionAnnouncement | null> {
+  const res = await getPool().query<AnnouncementRow>(
+    `SELECT id, production_id, title, content, is_pinned, created_by, created_at, updated_at
+     FROM production_announcement WHERE id = $1`,
+    [id],
+  );
+  return res.rows[0] ? mapAnnouncementRow(res.rows[0]) : null;
+}
+
+export async function updateAnnouncement(
+  id: string,
+  productionId: string,
+  fields: { title?: string; content?: string; isPinned?: boolean },
+): Promise<void> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (fields.isPinned === true) {
+      await client.query(
+        "UPDATE production_announcement SET is_pinned = false WHERE production_id = $1 AND is_pinned = true AND id != $2",
+        [productionId, id],
+      );
+    }
+    const sets: string[] = ["updated_at = now()"];
+    const vals: unknown[] = [];
+    if (fields.title !== undefined) { sets.push(`title = $${vals.push(fields.title)}`); }
+    if (fields.content !== undefined) { sets.push(`content = $${vals.push(fields.content)}`); }
+    if (fields.isPinned !== undefined) { sets.push(`is_pinned = $${vals.push(fields.isPinned)}`); }
+    vals.push(id);
+    await client.query(
+      `UPDATE production_announcement SET ${sets.join(", ")} WHERE id = $${vals.length}`,
+      vals,
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteAnnouncement(id: string): Promise<void> {
+  await getPool().query("DELETE FROM production_announcement WHERE id = $1", [id]);
+}
+
+// ── Cross-project queries ─────────────────────────────────────────────────────
+
+export type CrossProjectAnnouncement = {
+  id: string;
+  productionId: string;
+  productionName: string;
+  title: string;
+  content: string;
+  isPinned: boolean;
+  createdAt: string;
+};
+
+export async function listAnnouncementsForUser(
+  userId: string,
+  isAdmin: boolean,
+): Promise<CrossProjectAnnouncement[]> {
+  const res = await getPool().query<{
+    id: string; production_id: string; production_name: string;
+    title: string; content: string; is_pinned: boolean; created_at: Date;
+  }>(
+    `SELECT pa.id, pa.production_id, p.name AS production_name,
+            pa.title, pa.content, pa.is_pinned, pa.created_at
+     FROM production_announcement pa
+     JOIN production p ON pa.production_id = p.id
+     WHERE p.archived_at IS NULL
+       AND ($1 OR EXISTS (
+         SELECT 1 FROM production_member pm
+         WHERE pm.production_id = pa.production_id AND pm.user_id = $2
+       ))
+     ORDER BY pa.is_pinned DESC, pa.created_at DESC
+     LIMIT 50`,
+    [isAdmin, userId],
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    productionId: r.production_id,
+    productionName: r.production_name,
+    title: r.title,
+    content: r.content,
+    isPinned: r.is_pinned,
+    createdAt: r.created_at.toISOString(),
+  }));
+}
+
+// ── Announcement read tracking ────────────────────────────────────────────────
+
+export async function markAnnouncementRead(announcementId: string, userId: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO announcement_read (announcement_id, user_id)
+     VALUES ($1, $2)
+     ON CONFLICT (announcement_id, user_id) DO NOTHING`,
+    [announcementId, userId],
+  );
+}
+
+export type AnnouncementReadMember = {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  readAt: string | null;
+};
+
+export async function getAnnouncementReadStatus(
+  announcementId: string,
+  productionId: string,
+): Promise<AnnouncementReadMember[]> {
+  const res = await getPool().query<{
+    user_id: string;
+    name: string;
+    avatar_url: string | null;
+    read_at: Date | null;
+  }>(
+    `SELECT fu.user_id, fu.name, fu.avatar_url, ar.read_at
+     FROM production_member pm
+     JOIN feishu_user fu ON fu.user_id = pm.user_id
+     LEFT JOIN announcement_read ar
+       ON ar.announcement_id = $1 AND ar.user_id = pm.user_id
+     WHERE pm.production_id = $2
+     ORDER BY ar.read_at NULLS LAST, fu.name`,
+    [announcementId, productionId],
+  );
+  return res.rows.map(r => ({
+    userId: r.user_id,
+    name: r.name,
+    avatarUrl: r.avatar_url,
+    readAt: r.read_at ? r.read_at.toISOString() : null,
+  }));
+}
+
+export async function getUserAllReadAnnouncementIds(userId: string): Promise<string[]> {
+  const res = await getPool().query<{ announcement_id: string }>(
+    `SELECT announcement_id FROM announcement_read WHERE user_id = $1`,
+    [userId],
+  );
+  return res.rows.map(r => r.announcement_id);
+}
+
+export async function getUserAnnouncementReadIds(
+  productionId: string,
+  userId: string,
+): Promise<string[]> {
+  const res = await getPool().query<{ announcement_id: string }>(
+    `SELECT ar.announcement_id
+     FROM announcement_read ar
+     JOIN production_announcement pa ON pa.id = ar.announcement_id
+     WHERE pa.production_id = $1 AND ar.user_id = $2`,
+    [productionId, userId],
+  );
+  return res.rows.map(r => r.announcement_id);
+}
+
+export async function getUnreadMemberIds(
+  announcementId: string,
+  productionId: string,
+): Promise<string[]> {
+  const res = await getPool().query<{ user_id: string }>(
+    `SELECT pm.user_id
+     FROM production_member pm
+     WHERE pm.production_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM announcement_read ar
+         WHERE ar.announcement_id = $2 AND ar.user_id = pm.user_id
+       )`,
+    [productionId, announcementId],
+  );
+  return res.rows.map(r => r.user_id);
+}
+
+export type CueWarningEntry = {
+  id: string;
+  cueListId: string;
+  cueListAbbr: string;
+  number: string;
+  name: string;
+  productionId: string;
+  productionName: string;
+  startKind: "block" | "gap";
+  endKind: "block" | "gap";
+  warningType: "orphaned" | "adjusted";
+};
+
+export async function listCueWarningsForUser(
+  userId: string,
+  isAdmin: boolean,
+): Promise<CueWarningEntry[]> {
+  const res = await getPool().query<{
+    id: string; cue_list_id: string; cue_list_abbr: string;
+    number: string; name: string; production_id: string; production_name: string;
+    start_kind: string; end_kind: string;
+  }>(
+    `SELECT c.id, c.cue_list_id, cl.abbr AS cue_list_abbr,
+            c.number, c.name, cl.production_id, p.name AS production_name,
+            c.start_kind, c.end_kind
+     FROM cue c
+     JOIN cue_list cl ON c.cue_list_id = cl.id
+     JOIN production p ON cl.production_id = p.id
+     WHERE c.warning = TRUE
+       AND p.archived_at IS NULL
+       AND ($1 OR EXISTS (
+         SELECT 1 FROM production_member pm
+         WHERE pm.production_id = cl.production_id AND pm.user_id = $2
+       ))
+     ORDER BY p.name, cl.abbr, c.number`,
+    [isAdmin, userId],
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    cueListId: r.cue_list_id,
+    cueListAbbr: r.cue_list_abbr,
+    number: r.number,
+    name: r.name,
+    productionId: r.production_id,
+    productionName: r.production_name,
+    startKind: r.start_kind as "block" | "gap",
+    endKind: r.end_kind as "block" | "gap",
+    warningType: (r.start_kind === "gap" || r.end_kind === "gap") ? "orphaned" : "adjusted",
+  }));
+}
+
+export type UpcomingMilestoneEntry = {
+  id: string;
+  name: string;
+  endDate: string;
+  productionId: string;
+  productionName: string;
+};
+
+export async function listUpcomingMilestonesForUser(
+  userId: string,
+  isAdmin: boolean,
+): Promise<UpcomingMilestoneEntry[]> {
+  const res = await getPool().query<{
+    id: string; name: string; end_date: string;
+    production_id: string; production_name: string;
+  }>(
+    `SELECT m.id, m.name, m.end_date::text AS end_date,
+            m.production_id, p.name AS production_name
+     FROM milestone m
+     JOIN production p ON m.production_id = p.id
+     WHERE m.end_date >= CURRENT_DATE
+       AND p.archived_at IS NULL
+       AND ($1 OR EXISTS (
+         SELECT 1 FROM production_member pm
+         WHERE pm.production_id = m.production_id AND pm.user_id = $2
+       ))
+     ORDER BY m.end_date ASC, m.sort_order ASC
+     LIMIT 10`,
+    [isAdmin, userId],
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    endDate: r.end_date,
+    productionId: r.production_id,
+    productionName: r.production_name,
+  }));
+}
+
+export async function countCueWarningsForUser(
+  userId: string,
+  isAdmin: boolean,
+): Promise<number> {
+  const res = await getPool().query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM cue c
+     JOIN cue_list cl ON c.cue_list_id = cl.id
+     JOIN production p ON cl.production_id = p.id
+     WHERE c.warning = TRUE
+       AND p.archived_at IS NULL
+       AND ($1 OR EXISTS (
+         SELECT 1 FROM production_member pm
+         WHERE pm.production_id = cl.production_id AND pm.user_id = $2
+       ))`,
+    [isAdmin, userId],
+  );
+  return parseInt(res.rows[0].count, 10);
 }

@@ -52,7 +52,9 @@ export async function POST(req: NextRequest) {
     if (cached) return Response.json({ id: cached }, { status: 201 });
   }
 
-  const { name } = (await req.json()) as { name?: string };  // async gap
+  const { name, description, type, typeLabel, language } = (await req.json()) as {
+    name?: string; description?: string; type?: string; typeLabel?: string; language?: string;
+  };  // async gap
   if (!name?.trim()) return Response.json({ error: "剧名不能为空" }, { status: 400 });
 
   // Re-check after the async body parse: a concurrent request with the same key
@@ -68,7 +70,13 @@ export async function POST(req: NextRequest) {
   if (ikey) storeIdem(ikey, id);
 
   try {
+    const { updateProductionMeta, updateProductionType } = await import("@/lib/db");
     await createProduction(id, name.trim());
+    const metaFields: Parameters<typeof updateProductionMeta>[1] = {};
+    if (description?.trim()) metaFields.description = description.trim();
+    if (language?.trim()) metaFields.language = language.trim();
+    if (Object.keys(metaFields).length) await updateProductionMeta(id, metaFields);
+    if (type) await updateProductionType(id, type, type === "other" ? (typeLabel?.trim() ?? null) : null);
     return Response.json({ id }, { status: 201 });
   } catch (err) {
     // Remove reservation so the client can retry with a fresh key.

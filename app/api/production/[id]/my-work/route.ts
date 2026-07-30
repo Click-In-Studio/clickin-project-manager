@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext, listAnnouncements, listMilestones, countCueWarningsForProduction } from "@/lib/db";
 import {
   listMyUpcomingCallTimes,
   listMyPendingTechReqs,
@@ -18,12 +18,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [callTimes, pendingReqs, awaitingReqs, unreadReports] = await Promise.all([
+  const [callTimes, pendingReqs, awaitingReqs, unreadReports, announcements, milestones, cueWarningCount] = await Promise.all([
     listMyUpcomingCallTimes(session.userId, productionId),
     listMyPendingTechReqs(session.userId, productionId),
     listMyPocAwaitingReqs(session.userId, productionId),
     listUnreadFollowedReports(session.userId, productionId),
+    listAnnouncements(productionId),
+    listMilestones(productionId),
+    countCueWarningsForProduction(productionId, session.userId, session.isAdmin),
   ]);
 
-  return NextResponse.json({ callTimes, pendingReqs, awaitingReqs, unreadReports, isArchived: access.isArchived });
+  const pinnedAnnouncement = announcements.find(a => a.isPinned) ?? announcements[0] ?? null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const nextMilestone = milestones.find(m => new Date(m.endDate) >= today) ?? null;
+
+  return NextResponse.json({
+    callTimes, pendingReqs, awaitingReqs, unreadReports,
+    isArchived: access.isArchived,
+    pinnedAnnouncement,
+    nextMilestone,
+    cueWarningCount,
+  });
 }

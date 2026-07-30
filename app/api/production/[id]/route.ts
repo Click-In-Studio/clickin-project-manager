@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, getVersion, deleteProduction } from "@/lib/db";
+import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { hasPermission } from "@/lib/permissions";
 
@@ -51,14 +51,58 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
 
   const { id } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !hasPermission("production:rename", access.permCtx)) {
-    return Response.json({ error: "无权修改" }, { status: 403 });
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+
+  const body = await req.json() as {
+    name?: string;
+    description?: string;
+    avatarUrl?: string | null;
+    language?: string | null;
+    type?: string | null;
+    typeLabel?: string | null;
+  };
+
+  const jobs: Promise<void>[] = [];
+
+  if (body.name !== undefined) {
+    if (!hasPermission("production:rename", access.permCtx)) {
+      return Response.json({ error: "无权修改名称" }, { status: 403 });
+    }
+    if (!body.name.trim()) return Response.json({ error: "名称不能为空" }, { status: 400 });
+    jobs.push(updateProductionName(id, body.name.trim()));
   }
 
-  const { name } = await req.json() as { name?: string };
-  if (!name?.trim()) return Response.json({ error: "名称不能为空" }, { status: 400 });
+  if ("description" in body) {
+    if (!hasPermission("production:edit_description", access.permCtx)) {
+      return Response.json({ error: "无权修改项目简介" }, { status: 403 });
+    }
+    jobs.push(updateProductionMeta(id, { description: body.description }));
+  }
 
-  await updateProductionName(id, name.trim());
+  if ("avatarUrl" in body) {
+    if (!hasPermission("production:change_avatar", access.permCtx)) {
+      return Response.json({ error: "无权修改项目头像" }, { status: 403 });
+    }
+    jobs.push(updateProductionMeta(id, { avatarUrl: body.avatarUrl }));
+  }
+
+  if ("language" in body) {
+    if (!hasPermission("production:change_language", access.permCtx)) {
+      return Response.json({ error: "无权修改项目语言" }, { status: 403 });
+    }
+    jobs.push(updateProductionMeta(id, { language: body.language }));
+  }
+
+  if ("type" in body || "typeLabel" in body) {
+    if (!hasPermission("production:change_type", access.permCtx)) {
+      return Response.json({ error: "无权修改项目类型" }, { status: 403 });
+    }
+    jobs.push(updateProductionType(id, body.type ?? null, body.typeLabel ?? null));
+  }
+
+  if (!jobs.length) return Response.json({ error: "无有效字段" }, { status: 400 });
+
+  await Promise.all(jobs);
   return Response.json({ ok: true });
 }
 

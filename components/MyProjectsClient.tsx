@@ -1,14 +1,28 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { MyProductionEntry } from "@/lib/db";
 import { BASE_PATH } from "@/lib/base-path";
 import styles from "@/components/my-pages.module.css";
+import NewProductionModal from "@/components/NewProductionModal";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function ProductionAvatar({ productionId, name }: { productionId: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{name.charAt(0)}</>;
+  return (
+    <img
+      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      alt={name}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 export default function MyProjectsClient() {
@@ -18,11 +32,7 @@ export default function MyProjectsClient() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"active" | "archived" | "all">("active");
-  const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [createError, setCreateError] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/my/projects`)
@@ -30,10 +40,6 @@ export default function MyProjectsClient() {
       .then((data: MyProductionEntry[]) => { setProjects(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    if (showCreate) inputRef.current?.focus();
-  }, [showCreate]);
 
   const allRoles = Array.from(new Set(projects.flatMap(p => p.roles))).sort();
 
@@ -47,26 +53,6 @@ export default function MyProjectsClient() {
 
   const activeCount = projects.filter(p => !p.archivedAt).length;
   const archivedCount = projects.filter(p => p.archivedAt).length;
-
-  async function createProject() {
-    if (!newName.trim() || creating) return;
-    setCreating(true);
-    setCreateError("");
-    try {
-      const res = await fetch(`${BASE_PATH}/api/productions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ name: newName.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setCreateError(data.error ?? "创建失败"); return; }
-      router.push(`/production/${data.id}`);
-    } catch {
-      setCreateError("网络错误，请重试");
-    } finally {
-      setCreating(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -100,51 +86,11 @@ export default function MyProjectsClient() {
         </button>
       </div>
 
-      {/* Create project inline form */}
       {showCreate && (
-        <div style={{
-          background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12,
-          padding: "20px 24px", marginBottom: 20,
-        }}>
-          <p style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>新建项目</p>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <input
-              ref={inputRef}
-              value={newName}
-              onChange={e => { setNewName(e.target.value); setCreateError(""); }}
-              onKeyDown={e => e.key === "Enter" && createProject()}
-              placeholder="输入项目名称"
-              style={{
-                flex: 1, minWidth: 220, border: "1px solid var(--line)", borderRadius: 8,
-                padding: "10px 14px", fontSize: 13, color: "var(--ink)",
-                background: "var(--paper)", outline: "none",
-              }}
-            />
-            <button
-              onClick={createProject}
-              disabled={!newName.trim() || creating}
-              style={{
-                border: "1px solid var(--ink)", borderRadius: 8, padding: "10px 20px",
-                background: "var(--ink)", color: "#fff",
-                fontSize: 12, fontWeight: 700, cursor: "pointer",
-                opacity: !newName.trim() || creating ? 0.4 : 1,
-              }}
-            >
-              {creating ? "创建中…" : "创建"}
-            </button>
-            <button
-              onClick={() => { setShowCreate(false); setNewName(""); setCreateError(""); }}
-              style={{
-                border: "1px solid var(--line)", borderRadius: 8, padding: "10px 16px",
-                background: "transparent", color: "var(--muted)",
-                fontSize: 12, cursor: "pointer",
-              }}
-            >
-              取消
-            </button>
-          </div>
-          {createError && <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--danger)" }}>{createError}</p>}
-        </div>
+        <NewProductionModal
+          onClose={() => setShowCreate(false)}
+          onCreated={id => router.push(`/production/${id}`)}
+        />
       )}
 
       {/* Toolbar: search + filters */}
@@ -234,9 +180,13 @@ export default function MyProjectsClient() {
                   width: 36, height: 36, borderRadius: 9, background: "var(--ink)",
                   color: "#fff", fontSize: 13, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, letterSpacing: "-.02em",
+                  flexShrink: 0, letterSpacing: "-.02em", overflow: "hidden",
                 }}>
-                  {p.name.charAt(0)}
+                  {p.avatarUrl ? (
+                    <ProductionAvatar productionId={p.id} name={p.name} />
+                  ) : (
+                    p.name.charAt(0)
+                  )}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3 }}>

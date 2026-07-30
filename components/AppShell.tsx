@@ -5,8 +5,9 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
+import NewProductionModal from "./NewProductionModal";
 
-type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean };
+type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
 
 interface AppShellProps {
@@ -48,6 +49,7 @@ const ADMIN_NAV_GROUPS = [
   {
     items: [
       { label: "项目管理", hint: "基本信息 · 集成", path: "settings" },
+      { label: "里程碑", hint: "阶段 · 节点", path: "milestones" },
       { label: "通知公告", hint: "公告 · 群消息", path: "announcements" },
     ],
   },
@@ -61,9 +63,31 @@ const OVERVIEW_NAV = [
   { label: "报告", hint: "所有演出报告", path: "/my/reports", symbol: "≡" },
 ] as const;
 
+const PUNCTUATION_RE = /^[\s《》「」【】『』〈〉（）()"'""''・·—–…、。，。！？]+/u;
+
+function firstContentChar(str: string): string {
+  const stripped = str.replace(PUNCTUATION_RE, "");
+  return (stripped.charAt(0) || str.charAt(0)).toUpperCase();
+}
+
 function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
   if (!avatarUrl) return null;
   return `/api/user/avatar/${userId}`;
+}
+
+function ProdAvatarIcon({ productionId, name }: { productionId: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className="text-white text-[11px] font-bold select-none">{firstContentChar(name)}</span>;
+  }
+  return (
+    <img
+      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      alt={name}
+      className="w-full h-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function extractProductionId(pathname: string): string | null {
@@ -222,6 +246,253 @@ function MobileTab({
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }
 
+function MenuProdAvatar({ productionId, name }: { productionId: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{firstContentChar(name)}</>;
+  return (
+    <img
+      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      alt=""
+      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function ProjectSwitcher({
+  activeProductions,
+  currentProduction,
+  currentProductionId,
+  onOpen,
+}: {
+  activeProductions: Production[];
+  currentProduction: Production | null;
+  currentProductionId: string | null;
+  onOpen?: () => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [btnHovered, setBtnHovered] = useState(false);
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [newProdOpen, setNewProdOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const navigate = (id: string | null) => {
+    setOpen(false);
+    if (id) router.push(`/production/${id}`);
+    else router.push("/");
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) onOpen?.();
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      {/* Switcher button */}
+      <button
+        onClick={toggle}
+        aria-expanded={open}
+        onMouseEnter={() => setBtnHovered(true)}
+        onMouseLeave={() => setBtnHovered(false)}
+        style={{
+          height: 44,
+          padding: "8px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          border: `1px solid ${btnHovered || open ? "var(--ink)" : "var(--line)"}`,
+          borderRadius: 10,
+          background: "var(--paper)",
+          cursor: "pointer",
+          textAlign: "left",
+          minWidth: 180,
+          maxWidth: 280,
+          transition: "border-color .12s",
+        }}
+      >
+        <span style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column" }}>
+          {currentProduction ? (
+            <>
+              {currentProduction.roles.length > 0 && (
+                <small style={{
+                  color: "var(--muted)", fontSize: 10, lineHeight: 1.2,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {currentProduction.roles.slice(0, 2).join(" · ")}
+                </small>
+              )}
+              <b style={{
+                fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                marginTop: currentProduction.roles.length > 0 ? 2 : 0,
+              }}>
+                {currentProduction.name}
+              </b>
+            </>
+          ) : (
+            <b style={{ fontSize: 13, color: "var(--muted)", fontWeight: 400 }}>选择项目</b>
+          )}
+        </span>
+        <span style={{ color: "var(--muted)", fontSize: 11, flexShrink: 0 }}>
+          {open ? "⌃" : "⌄"}
+        </span>
+      </button>
+
+      {/* Popover dropdown */}
+      {open && (
+        <div style={{
+          position: "absolute",
+          zIndex: 40,
+          top: "calc(100% + 10px)",
+          left: 0,
+          minWidth: 270,
+          padding: 8,
+          border: "1px solid var(--line)",
+          borderRadius: 13,
+          background: "var(--surface)",
+          boxShadow: "0 18px 55px rgba(24,42,42,.18)",
+        }}>
+          {/* Caret arrow */}
+          <div style={{
+            position: "absolute",
+            top: -5,
+            left: 20,
+            width: 9,
+            height: 9,
+            transform: "rotate(45deg)",
+            borderLeft: "1px solid var(--line)",
+            borderTop: "1px solid var(--line)",
+            background: "var(--surface)",
+          }} />
+
+          {/* Platform home */}
+          <button
+            onClick={() => navigate(null)}
+            onMouseEnter={() => setHoveredItem("__home__")}
+            onMouseLeave={() => setHoveredItem(null)}
+            style={{
+              width: "100%", minHeight: 44, padding: "7px 9px",
+              display: "flex", alignItems: "center", gap: 10,
+              border: 0, borderRadius: 9,
+              background: !currentProductionId || hoveredItem === "__home__" ? "var(--paper)" : "transparent",
+              textAlign: "left", cursor: "pointer",
+            }}
+          >
+            <span style={{
+              width: 31, height: 31, display: "grid", placeItems: "center", flexShrink: 0,
+              borderRadius: "50%", background: "var(--ink)", color: "#fff", fontSize: 13,
+            }}>
+              ⌂
+            </span>
+            <span style={{ display: "flex", flex: 1, flexDirection: "column" }}>
+              <b style={{ fontSize: 13 }}>平台首页</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 10 }}>跨项目总览</small>
+            </span>
+            {!currentProductionId && (
+              <span style={{ color: "var(--success)", fontSize: 13, flexShrink: 0 }}>✓</span>
+            )}
+          </button>
+
+          {activeProductions.length > 0 && (
+            <p style={{
+              margin: "8px 10px 4px", color: "var(--muted)",
+              fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
+            }}>
+              我的项目
+            </p>
+          )}
+
+          {activeProductions.map(p => (
+            <button
+              key={p.id}
+              onClick={() => navigate(p.id)}
+              onMouseEnter={() => setHoveredItem(p.id)}
+              onMouseLeave={() => setHoveredItem(null)}
+              style={{
+                width: "100%", minHeight: 49, padding: "7px 9px",
+                display: "flex", alignItems: "center", gap: 10,
+                border: 0, borderRadius: 9,
+                background: p.id === currentProductionId || hoveredItem === p.id ? "var(--paper)" : "transparent",
+                textAlign: "left", cursor: "pointer",
+              }}
+            >
+              <span style={{
+                width: 34, height: 34, display: "grid", placeItems: "center", flexShrink: 0,
+                borderRadius: 9, overflow: "hidden",
+                background: "var(--script-soft)", color: "var(--script)",
+                fontFamily: "Georgia, serif", fontSize: 14, fontWeight: 700,
+              }}>
+                <MenuProdAvatar productionId={p.id} name={p.name} />
+              </span>
+              <span style={{ display: "flex", flex: 1, flexDirection: "column", minWidth: 0 }}>
+                <b style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.name}
+                </b>
+                {p.roles.length > 0 && (
+                  <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 10 }}>
+                    {p.roles.slice(0, 2).join(" · ")}
+                  </small>
+                )}
+              </span>
+              {p.id === currentProductionId && (
+                <span style={{ color: "var(--success)", fontSize: 13, flexShrink: 0 }}>✓</span>
+              )}
+            </button>
+          ))}
+
+          {activeProductions.length === 0 && (
+            <p style={{ padding: "12px 9px", fontSize: 13, color: "var(--muted)", textAlign: "center" }}>
+              暂无活跃项目
+            </p>
+          )}
+
+          {/* New project */}
+          <button
+            onClick={() => { setOpen(false); setNewProdOpen(true); }}
+            onMouseEnter={() => setHoveredItem("__new__")}
+            onMouseLeave={() => setHoveredItem(null)}
+            style={{
+              width: "100%", minHeight: 44, padding: "7px 9px",
+              display: "flex", alignItems: "center", gap: 10,
+              border: 0, borderTop: "1px solid var(--line)",
+              borderRadius: "0 0 9px 9px",
+              background: hoveredItem === "__new__" ? "var(--paper)" : "transparent",
+              textAlign: "left", cursor: "pointer", marginTop: 4,
+            }}
+          >
+            <span style={{
+              width: 31, height: 31, display: "grid", placeItems: "center", flexShrink: 0,
+              borderRadius: 9, border: "1.5px dashed var(--line)",
+              color: "var(--script)", fontSize: 18, lineHeight: 1,
+            }}>
+              +
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--script)" }}>新建项目</span>
+          </button>
+        </div>
+      )}
+
+      {newProdOpen && (
+        <NewProductionModal
+          onClose={() => setNewProdOpen(false)}
+          onCreated={id => { setNewProdOpen(false); router.push(`/production/${id}`); }}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -366,7 +637,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const toggleDrawer = (type: DrawerType) =>
     setDrawerOpen((d) => (d === type ? null : type));
 
-  const userInitial = session.name.charAt(0);
+  const userInitial = firstContentChar(session.name);
   const avatarSrc = resolveAvatarSrc(session.userId, session.avatarUrl);
   const avatarSymbol = (
     <span className="relative">
@@ -391,45 +662,31 @@ export default function AppShell({ session, productions, children, initialUnread
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
       <header className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-40">
-        {/* Brand */}
+        {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
-          <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[10px] font-bold flex items-center justify-center select-none">
-            BS
+          <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
+            {productionId && currentProduction ? (
+              currentProduction.avatarUrl ? (
+                <ProdAvatarIcon productionId={productionId} name={currentProduction.name} />
+              ) : (
+                <span className="text-white text-[11px] font-bold select-none">{firstContentChar(currentProduction.name)}</span>
+              )
+            ) : (
+              <span className="text-white text-[10px] font-bold select-none">BS</span>
+            )}
           </span>
           <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
             Backstage
           </span>
         </Link>
 
-        {/* Context controls */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <label className="flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
-            <span className="hidden lg:block shrink-0">机构 / 项目</span>
-            <select
-              value={productionId ?? ""}
-              onChange={(e) => {
-                if (e.target.value) router.push(`/production/${e.target.value}`);
-                else router.push("/");
-              }}
-              className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 pl-2.5 pr-7 text-[#182a2a] text-[12px] cursor-pointer outline-none focus:border-[#182a2a] max-w-[150px] sm:max-w-[180px] lg:max-w-[240px]"
-            >
-              <option value="">— 选择项目 —</option>
-              {activeProductions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
-
-          {/* Role badge: desktop only */}
-          {productionId && currentProduction && currentProduction.roles.length > 0 && (
-            <div className="hidden lg:flex items-center gap-2 text-[10px] text-[#667676] uppercase tracking-[0.08em]">
-              <span className="shrink-0">我的角色</span>
-              <span className="border border-[var(--line)] bg-[var(--paper)] rounded-lg py-2 px-2.5 text-[#182a2a] text-[12px]">
-                {currentProduction.roles.join(" · ")}
-              </span>
-            </div>
-          )}
-        </div>
+        {/* Project switcher */}
+        <ProjectSwitcher
+          activeProductions={activeProductions}
+          currentProduction={currentProduction ?? null}
+          currentProductionId={productionId}
+          onOpen={() => setDropdownOpen(false)}
+        />
 
         {/* Right actions */}
         <div className="ml-auto flex items-center gap-3">
@@ -584,6 +841,7 @@ export default function AppShell({ session, productions, children, initialUnread
               {productionId ? (
                 <>
                   <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} />
+                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} />
 
                   <NavGroup label="创作侧" color="script" />
                   {CREATION_NAV.map((item) => (

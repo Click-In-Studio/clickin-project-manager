@@ -79,7 +79,12 @@ CREATE TABLE IF NOT EXISTS production (
   script_config     JSONB NOT NULL DEFAULT '{}',
   page_map          JSONB NOT NULL DEFAULT '{}',
   active_version_id TEXT,   -- FK to version(id) added below
-  sort_order        INTEGER NOT NULL DEFAULT 0
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  description       TEXT NOT NULL DEFAULT '',
+  avatar_url        TEXT,
+  type              TEXT,
+  type_label        TEXT,
+  language          TEXT
 );
 
 -- ── Versions ──────────────────────────────────────────────────────────────────
@@ -790,3 +795,46 @@ CREATE INDEX IF NOT EXISTS scene_table_view_user_prod_idx
 
 CREATE UNIQUE INDEX IF NOT EXISTS scene_table_view_one_default_idx
   ON scene_table_view_config (user_id, production_id) WHERE is_default;
+
+-- ── Milestones ────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS milestone (
+  id            TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  end_date      DATE NOT NULL,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS milestone_production_idx ON milestone(production_id, end_date);
+
+-- ── Announcements ─────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS production_announcement (
+  id            TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  content       TEXT NOT NULL DEFAULT '',
+  is_pinned     BOOLEAN NOT NULL DEFAULT false,
+  created_by    UUID NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS production_announcement_production_idx
+  ON production_announcement(production_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS production_announcement_pinned_unique
+  ON production_announcement(production_id) WHERE is_pinned = true;
+
+-- 公告已读追踪
+CREATE TABLE IF NOT EXISTS announcement_read (
+  announcement_id TEXT NOT NULL REFERENCES production_announcement(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  read_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (announcement_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS announcement_read_announcement_idx
+  ON announcement_read(announcement_id);

@@ -12,7 +12,9 @@ type PermGroup = { label: string; perms: string[] };
 const PERM_GROUPS: PermGroup[] = [
   { label: "成员管理", perms: ["members:invite", "members:kick", "members:change_role", "members:manage_overrides"] },
   { label: "部门管理", perms: ["dept:create", "dept:dismiss", "dept:rename", "dept:change_type", "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc"] },
-  { label: "项目配置", perms: ["production:manage_config", "production:mount", "production:unmount"] },
+  { label: "项目配置", perms: ["production:rename", "production:archive", "production:manage_config", "production:mount", "production:unmount", "production:change_avatar", "production:edit_description", "production:change_type", "production:change_language"] },
+  { label: "里程碑", perms: ["milestone:create", "milestone:manage", "milestone:delete"] },
+  { label: "通知公告", perms: ["announcement:create", "announcement:edit", "announcement:delete"] },
   { label: "剧本操作", perms: ["script:import", "script:manage", "script:edit", "script:annotate", "script:create_block", "script:delete_block", "script:edit_block", "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount", "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move"] },
   { label: "场次 & 构作", perms: ["scene:create", "scene:delete", "scene:rename", "scene:renumber", "scene:change_type", "scene:edit_synopsis", "scene:edit_action_line", "scene:edit_music", "scene:edit_stage_notes", "scene:edit_expected_duration", "scene:mount", "dramaturgy:import", "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite", "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public"] },
   { label: "角色人物", perms: ["character:create", "character:rename", "character:change_type", "character:set_members", "character:edit_gender", "character:edit_biography", "character:edit_role_type", "character:delete"] },

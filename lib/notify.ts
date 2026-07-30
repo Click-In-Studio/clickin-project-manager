@@ -818,6 +818,47 @@ export async function dispatchMentionNotifications(
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Announcement remind
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Send "催读" reminder to unread members for an announcement.
+ * Each user gets an inbox entry + DM (if not opted out).
+ */
+export async function notifyAnnouncementRemind(params: {
+  unreadUserIds: string[];
+  announcementId: string;
+  announcementTitle: string;
+  productionId: string;
+  productionName: string;
+}): Promise<{ inboxCount: number; externalSent: number; errors: string[] }> {
+  const { unreadUserIds, announcementId, announcementTitle, productionId, productionName } = params;
+  if (!unreadUserIds.length) return { inboxCount: 0, externalSent: 0, errors: [] };
+
+  const viewHref = `${BASE_PATH}/production/${productionId}/announcements`;
+
+  return notifyUsers({
+    userIds: unreadUserIds,
+    kind: "announcement_remind",
+    productionId,
+    entityType: "announcement",
+    entityId: announcementId,
+    title: `${productionName} 有一条公告待阅读`,
+    body: announcementTitle,
+    viewHref,
+    category: "info",
+    buildExternalMessage: async (_userId, target) => {
+      const actionUrl = target.adapter.buildActionUrl(viewHref);
+      return {
+        text: `【${productionName}】请查阅项目公告：「${announcementTitle}」\n点击查看：${actionUrl}`,
+        title: "公告催读",
+        primaryUrl: actionUrl,
+      };
+    },
+  });
+}
+
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
 export { resolveNotificationTarget } from "./platform/notification-router";

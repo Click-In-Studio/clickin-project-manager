@@ -81,6 +81,12 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  announcement_remind: {
+    label: "公告催读",
+    description: "有你尚未阅读的项目公告时收到提醒",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
 } as const;
 
 export type NotificationType = keyof typeof NOTIFICATION_CONFIG;
