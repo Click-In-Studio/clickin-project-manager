@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getProductionName } from "@/lib/db";
 
 export const metadata: Metadata = { title: "无访问权限" };
 
@@ -7,6 +8,11 @@ type Ctx = { searchParams: Promise<{ resource?: string; id?: string }> };
 
 export default async function UnauthorizedPage({ searchParams }: Ctx) {
   const { resource, id } = await searchParams;
+
+  const productionName = id ? await getProductionName(id) : null;
+
+  const backHref = id ? `/production/${id}` : "/";
+  const backLabel = productionName ? `返回《${productionName}》` : "返回首页";
 
   return (
     <div style={{
@@ -49,6 +55,24 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
       }}>
         你没有访问这个页面的权限。
       </p>
+
+      {/* 项目上下文 */}
+      {productionName && (
+        <p style={{
+          margin: "0 0 6px",
+          fontSize: 13,
+          color: "var(--muted)",
+          background: "var(--surface)",
+          border: "1px solid var(--line)",
+          borderRadius: 8,
+          padding: "6px 16px",
+          display: "inline-block",
+        }}>
+          项目：<b style={{ color: "var(--ink)" }}>《{productionName}》</b>
+        </p>
+      )}
+
+      {/* 所需权限 */}
       {resource && (
         <p style={{
           margin: "0 0 32px",
@@ -61,7 +85,6 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
           display: "inline-block",
         }}>
           所需权限：<b style={{ color: "var(--ink)" }}>{resource}</b>
-          {id && <span style={{ marginLeft: 6, opacity: 0.5 }}>({id})</span>}
         </p>
       )}
       {!resource && <div style={{ marginBottom: 32 }} />}
@@ -87,7 +110,7 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
           </button>
         )}
         <Link
-          href="/"
+          href={backHref}
           style={{
             display: "inline-block",
             padding: "9px 22px",
@@ -99,7 +122,7 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
             textDecoration: "none",
           }}
         >
-          返回首页
+          {backLabel}
         </Link>
       </div>
 
