@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import SearchBar from "./SearchBar";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -423,6 +424,9 @@ export default function AppShell({ session, productions, children, initialUnread
 
         {/* Right actions */}
         <div className="ml-auto flex items-center gap-3">
+          {/* Search bar: only when inside a production */}
+          <SearchBar productionId={productionId} />
+
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
