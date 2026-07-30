@@ -184,132 +184,135 @@ export default function SearchBar({ productionId }: SearchBarProps) {
       {showDropdown && (
         <div className="absolute left-0 top-full mt-2 w-[320px] bg-[var(--surface)] border border-[var(--line)] rounded-[13px] shadow-[0_18px_55px_rgba(24,42,42,.18)] z-50 overflow-hidden max-h-[70vh] overflow-y-auto">
           {!loading && !hasAnyResults && query.trim().length >= 1 && (
-            <div className="px-4 py-6 text-center text-[12px] text-[#667676]">
+            <div className="px-4 py-4 text-center text-[12px] text-[#667676]">
               没有找到「{query}」相关内容
             </div>
           )}
 
-          {!loading && hasAnyResults && (
+          {!loading && (
             <div className="py-1.5">
-              {/* 日程 */}
-              {results!.events.length > 0 && (
-                <ResultSection label={results!.dateQuery ? `${results!.dateQuery} 的日程` : "日程"}>
-                  {results!.events.map((e) => (
-                    <ResultRow
-                      key={e.id}
-                      onClick={() => navigate(`/production/${productionId}/events/${e.id}`)}
-                      primary={e.title}
-                      secondary={[fmtDate(e.startTime), e.location].filter(Boolean).join(" · ")}
-                      tag={EVENT_TYPE_LABEL[e.eventType] ?? e.eventType}
-                    />
-                  ))}
-                </ResultSection>
-              )}
-
-              {/* 技术需求 */}
-              {results!.techReqs.length > 0 && (
+              {hasAnyResults && (
                 <>
-                  {results!.events.length > 0 && <div className="mx-3 my-1 border-t border-[var(--line)]" />}
-                  <ResultSection label="技术需求">
-                    {results!.techReqs.map((r) => (
-                      <ResultRow
-                        key={r.id}
-                        onClick={() => navigate(`/production/${productionId}/tasks/${r.id}`)}
-                        primary={r.title}
-                        secondary={[r.deptName, r.eventTitle].filter(Boolean).join(" · ")}
-                      />
-                    ))}
-                  </ResultSection>
-                </>
-              )}
-
-              {/* 人员 */}
-              {results!.contacts.length > 0 && (
-                <>
-                  {(results!.events.length > 0 || results!.techReqs.length > 0) && (
-                    <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                  {/* 日程 */}
+                  {results!.events.length > 0 && (
+                    <ResultSection label={results!.dateQuery ? `${results!.dateQuery} 的日程` : "日程"}>
+                      {results!.events.map((e) => (
+                        <ResultRow
+                          key={e.id}
+                          onClick={() => navigate(`/production/${productionId}/events/${e.id}`)}
+                          primary={e.title}
+                          secondary={[fmtDate(e.startTime), e.location].filter(Boolean).join(" · ")}
+                          tag={EVENT_TYPE_LABEL[e.eventType] ?? e.eventType}
+                        />
+                      ))}
+                    </ResultSection>
                   )}
-                  <ResultSection label="人员">
-                    {results!.contacts.map((c) => (
-                      <ResultRow
-                        key={c.userId}
-                        onClick={() => navigate(`/production/${productionId}/contacts`)}
-                        primary={c.name}
-                        secondary={c.matchHint ?? (c.roles.slice(0, 2).join(" · ") || undefined)}
-                      />
-                    ))}
-                  </ResultSection>
-                </>
-              )}
 
-              {/* 章节/段落 */}
-              {results!.scenes.length > 0 && (
-                <>
-                  {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0) && (
-                    <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                  {/* 技术需求 */}
+                  {results!.techReqs.length > 0 && (
+                    <>
+                      {results!.events.length > 0 && <div className="mx-3 my-1 border-t border-[var(--line)]" />}
+                      <ResultSection label="技术需求">
+                        {results!.techReqs.map((r) => (
+                          <ResultRow
+                            key={r.id}
+                            onClick={() => navigate(`/production/${productionId}/tasks/${r.id}`)}
+                            primary={r.title}
+                            secondary={[r.deptName, r.eventTitle].filter(Boolean).join(" · ")}
+                          />
+                        ))}
+                      </ResultSection>
+                    </>
                   )}
-                  <ResultSection label="章节/段落">
-                    {results!.scenes.map((s) => (
-                      <ResultRow
-                        key={s.id}
-                        onClick={() => navigate(`/production/${productionId}/scenes/${s.id}`)}
-                        primary={s.name}
-                        secondary={s.matchHint ?? undefined}
-                      />
-                    ))}
-                  </ResultSection>
-                </>
-              )}
 
-              {/* 角色 */}
-              {results!.characters.length > 0 && (
-                <>
-                  {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0 || results!.scenes.length > 0) && (
-                    <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                  {/* 人员 */}
+                  {results!.contacts.length > 0 && (
+                    <>
+                      {(results!.events.length > 0 || results!.techReqs.length > 0) && (
+                        <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                      )}
+                      <ResultSection label="人员">
+                        {results!.contacts.map((c) => (
+                          <ResultRow
+                            key={c.userId}
+                            onClick={() => navigate(`/production/${productionId}/contacts`)}
+                            primary={c.name}
+                            secondary={c.matchHint ?? (c.roles.slice(0, 2).join(" · ") || undefined)}
+                          />
+                        ))}
+                      </ResultSection>
+                    </>
                   )}
-                  <ResultSection label="角色">
-                    {results!.characters.map((c) => (
-                      <ResultRow
-                        key={c.id}
-                        onClick={() => navigate(`/production/${productionId}/characters/${c.id}`)}
-                        primary={c.name}
-                        secondary={c.matchHint ?? undefined}
-                      />
-                    ))}
-                  </ResultSection>
-                </>
-              )}
 
-              {/* 数字资产 */}
-              {results!.assets.length > 0 && (
-                <>
-                  {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0 || results!.scenes.length > 0 || results!.characters.length > 0) && (
-                    <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                  {/* 章节/段落 */}
+                  {results!.scenes.length > 0 && (
+                    <>
+                      {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0) && (
+                        <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                      )}
+                      <ResultSection label="章节/段落">
+                        {results!.scenes.map((s) => (
+                          <ResultRow
+                            key={s.id}
+                            onClick={() => navigate(`/production/${productionId}/scenes/${s.id}`)}
+                            primary={s.name}
+                            secondary={s.matchHint ?? undefined}
+                          />
+                        ))}
+                      </ResultSection>
+                    </>
                   )}
-                  <ResultSection label="数字资产">
-                    {results!.assets.map((a) => (
-                      <ResultRow
-                        key={a.id}
-                        onClick={() => navigate(`/production/${productionId}/assets/${a.id}/preview`)}
-                        primary={a.name ?? a.fileName}
-                        secondary={a.name ? a.fileName : undefined}
-                        tag={a.assetType}
-                      />
-                    ))}
-                  </ResultSection>
+
+                  {/* 角色 */}
+                  {results!.characters.length > 0 && (
+                    <>
+                      {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0 || results!.scenes.length > 0) && (
+                        <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                      )}
+                      <ResultSection label="角色">
+                        {results!.characters.map((c) => (
+                          <ResultRow
+                            key={c.id}
+                            onClick={() => navigate(`/production/${productionId}/characters/${c.id}`)}
+                            primary={c.name}
+                            secondary={c.matchHint ?? undefined}
+                          />
+                        ))}
+                      </ResultSection>
+                    </>
+                  )}
+
+                  {/* 数字资产 */}
+                  {results!.assets.length > 0 && (
+                    <>
+                      {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0 || results!.scenes.length > 0 || results!.characters.length > 0) && (
+                        <div className="mx-3 my-1 border-t border-[var(--line)]" />
+                      )}
+                      <ResultSection label="数字资产">
+                        {results!.assets.map((a) => (
+                          <ResultRow
+                            key={a.id}
+                            onClick={() => navigate(`/production/${productionId}/assets/${a.id}/preview`)}
+                            primary={a.name ?? a.fileName}
+                            secondary={a.name ? a.fileName : undefined}
+                            tag={a.assetType}
+                          />
+                        ))}
+                      </ResultSection>
+                    </>
+                  )}
                 </>
               )}
 
-              {/* 更多搜索入口（剧本文本等，预留） */}
-              <div className="mx-3 mt-1.5 mb-1 border-t border-[var(--line)]" />
+              {/* 剧本文本搜索入口 */}
+              {hasAnyResults && <div className="mx-3 mt-1.5 mb-1 border-t border-[var(--line)]" />}
               <button
                 type="button"
-                disabled
-                title="剧本文本搜索即将支持"
-                className="w-full flex items-center justify-between px-3 py-2 text-[10px] text-[#667676] cursor-not-allowed"
+                onClick={() => navigate(`/production/${productionId}/script?q=${encodeURIComponent(query.trim())}`)}
+                className="w-full flex items-center justify-between px-3 py-2 text-[10px] text-[#667676] hover:bg-[var(--paper)] hover:text-[#182a2a] transition-colors rounded-[7px]"
               >
-                <span>在剧本文本中搜索…</span>
-                <span className="text-[8px] border border-[var(--line)] rounded px-1.5 py-0.5">即将支持</span>
+                <span>在剧本文本中搜索「{query.trim()}」</span>
+                <span className="text-[8px] border border-[var(--line)] rounded px-1.5 py-0.5">剧本</span>
               </button>
             </div>
           )}

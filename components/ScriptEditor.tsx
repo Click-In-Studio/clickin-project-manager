@@ -6451,6 +6451,7 @@ export default function ScriptEditor({
   canEditRehearsalMark = true,
   canImport = false,
   versionId: initialVersionId,
+  initialSearchQuery,
 }: {
   scriptId?: string;
   productionId?: string;
@@ -6460,6 +6461,7 @@ export default function ScriptEditor({
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
   versionId?: string | null;
+  initialSearchQuery?: string;
 }) {
   const effectiveScriptId = productionId ?? scriptId;
 
@@ -6816,6 +6818,9 @@ export default function ScriptEditor({
   const [searchExact, setSearchExact] = useState(false);
   const [searchCurrentPage, setSearchCurrentPage] = useState(false);
   const [searchIdx, setSearchIdx] = useState(0);
+
+  // initialSearchQueryRef — consumed after load (see effect below, after loadState declaration)
+  const initialSearchQueryRef = useRef(initialSearchQuery);
 
   // ── Jump (line / page) ──────────────────────────────────────────────────────
   const [jumpTarget, setJumpTarget] = useState<"line" | "page" | null>(null);
@@ -7626,6 +7631,16 @@ export default function ScriptEditor({
   type LoadState = "loading" | "ready" | "not-found" | "error";
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string>("");
+
+  // Auto-open search when arriving from appshell search with a query
+  useEffect(() => {
+    const q = initialSearchQueryRef.current;
+    if (!q || loadState !== "ready") return;
+    initialSearchQueryRef.current = undefined;
+    setSearchOpen(true);
+    setSearchQuery(q);
+    setSearchIdx(0);
+  }, [loadState]);
 
   // Keep scrollLockedRef in sync
   useEffect(() => { scrollLockedRef.current = scrollLocked; }, [scrollLocked]);

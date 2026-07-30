@@ -13,10 +13,10 @@ export default async function ProductionScriptPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string }>;
+  searchParams: Promise<{ v?: string; q?: string }>;
 }) {
   const { id } = await params;
-  const { v } = await searchParams;
+  const { v, q } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -43,6 +43,7 @@ export default async function ProductionScriptPage({
       canEditRehearsalMark={p("rehearsal_mark:create")}
       canImport={p("script:import")}
       versionId={versionId}
+      initialSearchQuery={q}
     />
   );
 }
