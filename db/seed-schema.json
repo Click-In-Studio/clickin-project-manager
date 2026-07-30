@@ -1939,6 +1939,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "is_primary",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "user_profile": [
