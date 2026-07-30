@@ -354,10 +354,10 @@ export default function AppShell({ session, productions, children, initialUnread
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[10px] font-bold flex items-center justify-center select-none">
-            CI
+            BS
           </span>
-          <span className="text-[13px] font-bold tracking-[0.18em] text-[#182a2a] hidden md:block">
-            CLICK-IN
+          <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
+            Backstage
           </span>
         </Link>
 

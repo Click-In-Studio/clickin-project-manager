@@ -385,7 +385,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
           {avatarSrc
             ? <img src={avatarSrc} alt={name} className={styles.topbarAvatar} />
             : <i>{initial(name)}</i>}
-          <b>CLICK-IN</b>
+          <b>Backstage</b>
           <span>个人中心</span>
         </div>
         <div className={styles.userChip}>
