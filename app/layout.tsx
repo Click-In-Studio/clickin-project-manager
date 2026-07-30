@@ -49,7 +49,7 @@ export default async function RootLayout({
   }));
 
   const shellSession = session
-    ? { name: session.name, avatarUrl: session.avatarUrl }
+    ? { userId: session.userId, name: session.name, avatarUrl: session.avatarUrl }
     : null;
 
   return (
