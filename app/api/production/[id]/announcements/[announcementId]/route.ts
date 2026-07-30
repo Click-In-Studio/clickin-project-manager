@@ -34,8 +34,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   return Response.json({ ok: true });
 }
 
-export async function DELETE(_req: NextRequest, ctx: Ctx) {
-  const req = _req;
+export async function DELETE(req: NextRequest, ctx: Ctx) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
