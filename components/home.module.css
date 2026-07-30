@@ -30,62 +30,162 @@
   gap: 18px;
 }
 
-/* Alert banner (replacing role banner) */
-.alertBanner {
-  border-radius: 14px;
-  padding: 28px;
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  background: var(--ink);
-  color: #fff;
-  overflow: hidden;
+/* ── 项目进展 hero ─────────────────────────────────────────────────────────── */
+
+.progressHero {
   position: relative;
+  min-height: 200px;
+  padding: 24px 26px;
+  display: grid;
+  grid-template-columns: minmax(220px, .7fr) minmax(320px, 1.3fr);
+  gap: 20px;
+  overflow: hidden;
+  border-radius: 15px;
+  margin-bottom: 18px;
+  background:
+    radial-gradient(circle at 102% 118%, rgba(255,255,255,.09) 0 20%, transparent 20.5%),
+    linear-gradient(120deg, #142b2b 0%, var(--ink) 58%, #223e3d 100%);
+  color: #fff;
 }
 
-.alertBanner::after {
+.progressHero::after {
   content: "";
   position: absolute;
-  width: 240px;
-  height: 240px;
-  right: -90px;
-  bottom: -150px;
-  border: 1px solid rgba(255,255,255,.18);
+  right: 36%;
+  bottom: -105px;
+  width: 200px;
+  height: 200px;
+  border: 1px solid rgba(255,255,255,.08);
   border-radius: 50%;
-  box-shadow: 0 0 0 38px rgba(255,255,255,.025), 0 0 0 76px rgba(255,255,255,.025);
+  pointer-events: none;
 }
 
-.alertBannerContent {
+.progressHeroIntro {
   position: relative;
   z-index: 1;
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 4px 4px 6px;
 }
 
-.alertEyebrow {
-  margin: 0 0 4px;
-  color: #9fb1ac;
-  font-size: 10px;
+.progressEyebrow {
+  margin: 0;
+  color: #91aaa5;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: .14em;
   text-transform: uppercase;
 }
 
-.alertBanner h2 {
+.progressHeroTitle {
+  margin: 0;
   font-family: Georgia, "Noto Serif SC", serif;
-  font-size: clamp(20px, 2.5vw, 30px);
+  font-size: clamp(18px, 2vw, 26px);
   font-weight: 500;
   line-height: 1.25;
-  margin: 8px 0 0;
   color: #fff;
 }
 
-.alertEmpty {
-  margin-top: 18px;
-  border: 1px solid rgba(255,255,255,.15);
-  border-radius: 10px;
-  padding: 14px 18px;
-  color: #9fb1ac;
+.progressHeroText {
+  margin: 0;
+  color: #c3d0cc;
   font-size: 11px;
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.progressHeroLink {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #91aaa5;
+  text-decoration: none;
+  letter-spacing: .04em;
+  align-self: flex-start;
+}
+
+.progressHeroLink:hover {
+  color: #fff;
+}
+
+.progressHeroMetrics {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-content: center;
+}
+
+.progressMetricCard {
+  min-height: 100px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid rgba(255,255,255,.13);
+  border-radius: 11px;
+  background: rgba(255,255,255,.06);
+  color: #fff;
+  text-decoration: none;
+}
+
+.progressMetricLink {
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+
+.progressMetricLink:hover {
+  border-color: rgba(255,255,255,.35);
+  background: rgba(255,255,255,.1);
+}
+
+.progressMetricCard strong {
+  font-family: Georgia, serif;
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.progressMetricCard span {
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #c3d0cc;
+}
+
+.progressMetricCard small {
+  margin-top: auto;
+  font-size: 8px;
+  color: #9fb4af;
+}
+
+.progressMetricUrgent {
+  border-color: rgba(246,194,106,.5);
+  background: rgba(246,194,106,.1);
+}
+
+.progressMetricUrgent strong {
+  color: #f6c26a;
+}
+
+.progressMetricActive {
+  border-color: rgba(160,188,200,.4);
+}
+
+.progressMetricWarn {
+  border-color: rgba(220,100,100,.4);
+  background: rgba(220,100,100,.08);
+}
+
+.progressMetricWarn strong {
+  color: #f08080;
 }
 
 /* Dashboard 2-column layout */
@@ -575,10 +675,12 @@
   .dashboardGrid {
     grid-template-columns: 1fr;
   }
-  .alertBanner {
+  .progressHero {
+    grid-template-columns: 1fr;
+    min-height: auto;
     padding: 20px;
   }
-  .alertBanner h2 {
-    font-size: 20px;
+  .progressHeroMetrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = { title: "首页" };
-import { listProductions } from "@/lib/db";
+import { listProductions, listUpcomingMilestonesForUser, countCueWarningsForUser } from "@/lib/db";
 import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/event-db";
 import HomeClient from "@/components/HomeClient";
 
@@ -11,13 +11,15 @@ export default async function Home() {
   const cookieStore = await cookies();
   const session = getSession(cookieStore)!;
 
-  const [productions, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports] = await Promise.all([
+  const [productions, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports, upcomingMilestones, totalCueWarnings] = await Promise.all([
     listProductions({ userId: session.userId, isAdmin: session.isAdmin }),
     listMyUpcomingCallTimes(session.userId),
     listMyPendingTechReqs(session.userId),
     listMyPocAwaitingReqs(session.userId),
     listMyFollowedUpcomingEvents(session.userId),
     listUnreadFollowedReports(session.userId),
+    listUpcomingMilestonesForUser(session.userId, session.isAdmin),
+    countCueWarningsForUser(session.userId, session.isAdmin),
   ]);
 
   return (
@@ -29,6 +31,8 @@ export default async function Home() {
       myAwaitingReqs={myAwaitingReqs}
       myFollowedEvents={myFollowedEvents}
       myUnreadReports={myUnreadReports}
+      upcomingMilestones={upcomingMilestones}
+      totalCueWarnings={totalCueWarnings}
     />
   );
 }

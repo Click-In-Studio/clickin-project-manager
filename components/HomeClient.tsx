@@ -1,15 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import Link from "next/link";
-import { BASE_PATH } from "@/lib/base-path";
-import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr, fmtDate } from "@/lib/tz";
+import { useState } from "react";
+import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr } from "@/lib/tz";
 import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, MyFollowedEventEntry, UnreadReportEntry } from "@/lib/event-db";
+import type { UpcomingMilestoneEntry } from "@/lib/db";
 import styles from "./home.module.css";
 
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
 function todayCSTStr(): string { return tzTodayCSTStr(); }
+
+function daysUntil(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((new Date(dateStr).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
 
 type Production = { id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number };
 
@@ -21,6 +27,8 @@ type Props = {
   myAwaitingReqs: MyPocAwaitingReqEntry[];
   myFollowedEvents: MyFollowedEventEntry[];
   myUnreadReports: UnreadReportEntry[];
+  upcomingMilestones: UpcomingMilestoneEntry[];
+  totalCueWarnings: number;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -28,7 +36,7 @@ const STATUS_LABEL: Record<string, string> = {
   in_progress: "进行中",
 };
 
-export default function HomeClient({ productions: initial, isAdmin, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports }: Props) {
+export default function HomeClient({ productions: initial, isAdmin, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports, upcomingMilestones, totalCueWarnings }: Props) {
   const router = useRouter();
   const [productions, setProductions] = useState<Production[]>(initial);
   const [callView, setCallView] = useState<"today" | "week">("today");
@@ -68,16 +76,47 @@ export default function HomeClient({ productions: initial, isAdmin, myCallTimes,
 
       <div className={styles.contentStack}>
 
-        {/* 1. 项目风险与未确认事项 */}
-        <section className={styles.alertBanner}>
-          <div className={styles.alertBannerContent}>
-            <p className={styles.alertEyebrow}>Alerts · Announcements</p>
-            <h2>项目风险与未确认事项</h2>
-            <div className={styles.alertEmpty}>
-              暂无风险提醒或公告 · 风险警告与演出公告将在这里汇总
-            </div>
-          </div>
-        </section>
+        {/* 1. 项目进展 hero */}
+        {(() => {
+          const next = upcomingMilestones[0] ?? null;
+          const days = next ? daysUntil(next.endDate) : null;
+          const milestoneLabel = days === null ? "—" : days === 0 ? "今天" : days < 0 ? `已过 ${Math.abs(days)} 天` : `${days} 天`;
+          const milestoneSubLabel = next ? `距「${next.name}」· ${next.productionName}` : "各项目暂无里程碑";
+          return (
+            <section className={styles.progressHero}>
+              <div className={styles.progressHeroIntro}>
+                <p className={styles.progressEyebrow}>OVERVIEW · 项目进展</p>
+                <h2 className={styles.progressHeroTitle}>项目风险与未确认事项</h2>
+                <p className={styles.progressHeroText}>
+                  跨项目风险提示与待确认事项汇总
+                </p>
+                <Link href="/my/announcements" className={styles.progressHeroLink}>
+                  查看公告 →
+                </Link>
+              </div>
+              <div className={styles.progressHeroMetrics}>
+                <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 && days >= 0 ? styles.progressMetricUrgent : ""}`}>
+                  <strong>{milestoneLabel}</strong>
+                  <span>{milestoneSubLabel}</span>
+                  {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
+                </div>
+                <Link
+                  href="/my/notifications"
+                  className={`${styles.progressMetricCard} ${styles.progressMetricLink} ${myAwaitingReqs.length > 0 ? styles.progressMetricActive : ""}`}
+                >
+                  <strong>{myAwaitingReqs.length}</strong>
+                  <span>待处理通知</span>
+                  {myAwaitingReqs.length > 0 && <small>跨项目汇总</small>}
+                </Link>
+                <div className={`${styles.progressMetricCard} ${totalCueWarnings > 0 ? styles.progressMetricWarn : ""}`}>
+                  <strong>{totalCueWarnings}</strong>
+                  <span>Cue 风险提示</span>
+                  {totalCueWarnings > 0 && <small>跨项目汇总</small>}
+                </div>
+              </div>
+            </section>
+          );
+        })()}
 
         {/* Dashboard: left (wide) + right (narrow) columns */}
         <div className={styles.dashboardGrid}>

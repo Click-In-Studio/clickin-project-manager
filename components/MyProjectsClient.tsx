@@ -11,6 +11,19 @@ function fmtDate(iso: string) {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function ProductionAvatar({ productionId, name }: { productionId: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{name.charAt(0)}</>;
+  return (
+    <img
+      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      alt={name}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function MyProjectsClient() {
   const router = useRouter();
   const [projects, setProjects] = useState<MyProductionEntry[]>([]);
@@ -234,9 +247,13 @@ export default function MyProjectsClient() {
                   width: 36, height: 36, borderRadius: 9, background: "var(--ink)",
                   color: "#fff", fontSize: 13, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, letterSpacing: "-.02em",
+                  flexShrink: 0, letterSpacing: "-.02em", overflow: "hidden",
                 }}>
-                  {p.name.charAt(0)}
+                  {p.avatarUrl ? (
+                    <ProductionAvatar productionId={p.id} name={p.name} />
+                  ) : (
+                    p.name.charAt(0)
+                  )}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3 }}>

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
 
-type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean };
+type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
 
 interface AppShellProps {
@@ -48,6 +48,7 @@ const ADMIN_NAV_GROUPS = [
   {
     items: [
       { label: "项目管理", hint: "基本信息 · 集成", path: "settings" },
+      { label: "里程碑", hint: "阶段 · 节点", path: "milestones" },
       { label: "通知公告", hint: "公告 · 群消息", path: "announcements" },
     ],
   },
@@ -64,6 +65,21 @@ const OVERVIEW_NAV = [
 function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
   if (!avatarUrl) return null;
   return `/api/user/avatar/${userId}`;
+}
+
+function ProdAvatarIcon({ productionId, name }: { productionId: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className="text-white text-[11px] font-bold select-none">{name.charAt(0)}</span>;
+  }
+  return (
+    <img
+      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      alt={name}
+      className="w-full h-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function extractProductionId(pathname: string): string | null {
@@ -391,14 +407,24 @@ export default function AppShell({ session, productions, children, initialUnread
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
       <header className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-40">
-        {/* Brand */}
+        {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
-          <span className="w-8 h-8 rounded-full bg-[#182a2a] text-white text-[10px] font-bold flex items-center justify-center select-none">
-            BS
+          <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
+            {productionId && currentProduction ? (
+              currentProduction.avatarUrl ? (
+                <ProdAvatarIcon productionId={productionId} name={currentProduction.name} />
+              ) : (
+                <span className="text-white text-[11px] font-bold select-none">{currentProduction.name.charAt(0)}</span>
+              )
+            ) : (
+              <span className="text-white text-[10px] font-bold select-none">BS</span>
+            )}
           </span>
-          <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
-            Backstage
-          </span>
+          {!productionId && (
+            <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
+              Backstage
+            </span>
+          )}
         </Link>
 
         {/* Context controls */}
@@ -584,6 +610,7 @@ export default function AppShell({ session, productions, children, initialUnread
               {productionId ? (
                 <>
                   <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} />
+                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} />
 
                   <NavGroup label="创作侧" color="script" />
                   {CREATION_NAV.map((item) => (

@@ -25,6 +25,14 @@ const PERM_GROUPS: PermGroup[] = [
     perms: ["production:manage_config", "production:mount", "production:unmount"],
   },
   {
+    label: "里程碑",
+    perms: ["milestone:create", "milestone:manage", "milestone:delete"],
+  },
+  {
+    label: "通知公告",
+    perms: ["announcement:create", "announcement:edit", "announcement:delete"],
+  },
+  {
     label: "剧本操作",
     perms: [
       "script:import", "script:manage", "script:edit", "script:annotate",

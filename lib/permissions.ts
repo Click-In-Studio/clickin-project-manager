@@ -8,7 +8,10 @@ export type Permission =
   // ─── 敏感管理 (owner default; producer needs explicit grant) ──────────────────
   | "production:archive"
   | "production:rename"
+  | "production:change_avatar"
+  | "production:edit_description"
   | "production:change_type"
+  | "production:change_language"
   | "production:manage_integrations"
   | "production:import_members"
   | "production:producer_invite"
@@ -97,6 +100,14 @@ export type Permission =
   | "report:delete_comment_any"
   | "note:edit_comment_any"
   | "note:delete_comment_any"
+  // ─── 普通管理 - 里程碑 ────────────────────────────────────────────────────────
+  | "milestone:create"
+  | "milestone:manage"
+  | "milestone:delete"
+  // ─── 普通管理 - 公告 ──────────────────────────────────────────────────────────
+  | "announcement:create"
+  | "announcement:edit"
+  | "announcement:delete"
   // ─── 普通管理 - 其他 ──────────────────────────────────────────────────────────
   | "production:manage_config"
   // ─── 写权限 - 剧本操作权限（bundle，含 implication 层级）────────────────────
@@ -250,7 +261,10 @@ export const ROOT_PERMISSIONS = new Set<Permission>([
 export const SENSITIVE_ADMIN_PERMISSIONS = new Set<Permission>([
   "production:archive",
   "production:rename",
+  "production:change_avatar",
+  "production:edit_description",
   "production:change_type",
+  "production:change_language",
   "production:manage_integrations",
   "production:import_members",
   "production:producer_invite",
@@ -502,6 +516,12 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "report:revoke",
   "event:delete_tech_req_any",
   "character:delete",
+  "milestone:create",
+  "milestone:manage",
+  "milestone:delete",
+  "announcement:create",
+  "announcement:edit",
+  "announcement:delete",
   "tag_group:create",
   "tag_group:delete",
   "tag_group:rename",
