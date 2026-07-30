@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
@@ -200,6 +200,7 @@ function MobileTab({
 export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -430,20 +431,28 @@ export default function AppShell({ session, productions, children, initialUnread
                   </Link>
                 )}
                 <Link
-                  href="/account"
+                  href="/account?tab=profile"
                   onClick={() => setDropdownOpen(false)}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
                 >
-                  <span className="text-[11px] opacity-40">◎</span>
-                  个人中心
+                  <span className="text-[11px] opacity-40">人</span>
+                  个人信息
                 </Link>
                 <Link
-                  href="/my/notification-settings"
+                  href="/account?tab=security"
                   onClick={() => setDropdownOpen(false)}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
                 >
-                  <span className="text-[11px] opacity-40">🔔</span>
-                  通知偏好设置
+                  <span className="text-[11px] opacity-40">盾</span>
+                  账号安全中心
+                </Link>
+                <Link
+                  href="/account?tab=preferences"
+                  onClick={() => setDropdownOpen(false)}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#182a2a] hover:bg-[var(--paper)] transition-colors"
+                >
+                  <span className="text-[11px] opacity-40">调</span>
+                  功能与设置
                 </Link>
                 <div className="h-px bg-[var(--line)] mx-3 my-1" />
                 <form action={`${BASE_PATH}/api/auth/logout`} method="post">
@@ -757,19 +766,27 @@ export default function AppShell({ session, productions, children, initialUnread
               />
             )}
             <NavItem
-              href="/account"
-              symbol="◎"
-              label="个人中心"
-              hint="个人信息 · 登录方式"
-              active={pathname === "/account"}
+              href="/account?tab=profile"
+              symbol="人"
+              label="个人信息"
+              hint="头像 · 姓名 · 简介"
+              active={pathname === "/account" && searchParams.get("tab") !== "security" && searchParams.get("tab") !== "preferences"}
               onClick={closeDrawer}
             />
             <NavItem
-              href="/my/notification-settings"
-              symbol="🔔"
-              label="通知偏好设置"
-              hint="管理通知与提醒"
-              active={pathname === "/my/notification-settings"}
+              href="/account?tab=security"
+              symbol="盾"
+              label="账号安全中心"
+              hint="登录方式 · 绑定身份"
+              active={pathname === "/account" && searchParams.get("tab") === "security"}
+              onClick={closeDrawer}
+            />
+            <NavItem
+              href="/account?tab=preferences"
+              symbol="调"
+              label="功能与设置"
+              hint="通知 · 消息提醒"
+              active={pathname === "/account" && searchParams.get("tab") === "preferences"}
               onClick={closeDrawer}
             />
           </div>
