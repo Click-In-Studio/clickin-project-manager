@@ -4077,6 +4077,16 @@ export async function countWarningCues(cueListIds: string[]): Promise<number> {
   return parseInt(res.rows[0].count, 10);
 }
 
+export async function countCueWarningsForProduction(productionId: string): Promise<number> {
+  const res = await getPool().query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM cue c
+     JOIN cue_list cl ON c.cue_list_id = cl.id
+     WHERE cl.production_id = $1 AND c.warning = TRUE`,
+    [productionId]
+  );
+  return parseInt(res.rows[0].count, 10);
+}
+
 export async function createCue(data: {
   id: string; cueListId: string; number: string; name: string; content: string;
   start: CueAnchor; end: CueAnchor; versionId?: string;

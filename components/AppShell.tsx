@@ -98,6 +98,7 @@ function NavItem({
   hint,
   active,
   badge,
+  warningBadge,
   onClick,
 }: {
   href: string;
@@ -106,6 +107,7 @@ function NavItem({
   hint: string;
   active: boolean;
   badge?: number;
+  warningBadge?: number;
   onClick?: () => void;
 }) {
   return (
@@ -127,6 +129,11 @@ function NavItem({
           {badge != null && badge > 0 && (
             <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
               {badge > 99 ? "99+" : badge}
+            </span>
+          )}
+          {warningBadge != null && warningBadge > 0 && (
+            <span className="min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
+              {warningBadge > 99 ? "99+" : warningBadge}
             </span>
           )}
         </span>
@@ -226,6 +233,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
+  const [cueWarnings, setCueWarnings] = useState(0);
 
   // Track current productionId via ref so fetchCounts always uses the latest value
   // without needing to be in the effect dependency array.
@@ -251,6 +259,7 @@ export default function AppShell({ session, productions, children, initialUnread
         setUnreadCount(0);
         setPendingTasks(0);
         setUnreadReports(0);
+        setCueWarnings(0);
         fetchCountsRef.current?.();
       }
     }
@@ -271,10 +280,11 @@ export default function AppShell({ session, productions, children, initialUnread
         : "/api/my/pending-counts";
       return fetch(url)
         .then((r) => r.json())
-        .then((d: { notifications?: number; tasks?: number; reports?: number }) => {
+        .then((d: { notifications?: number; tasks?: number; reports?: number; cueWarnings?: number }) => {
           if (typeof d.notifications === "number") setUnreadCount(d.notifications);
           if (typeof d.tasks === "number") setPendingTasks(d.tasks);
           if (typeof d.reports === "number") setUnreadReports(d.reports);
+          if (typeof d.cueWarnings === "number") setCueWarnings(d.cueWarnings);
         })
         .catch(() => {});
     };
@@ -585,6 +595,7 @@ export default function AppShell({ session, productions, children, initialUnread
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
+                      warningBadge={item.path === "cues" ? cueWarnings : undefined}
                     />
                   ))}
 
