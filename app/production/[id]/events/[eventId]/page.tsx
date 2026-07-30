@@ -48,7 +48,7 @@ export default async function EventDetailPage({
   if (!canViewFull) redirect(`/production/${productionId}/events/${eventId}/view`);
 
   const name = await getProductionName(productionId);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 

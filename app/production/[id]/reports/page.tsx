@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "报告" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
@@ -20,7 +20,8 @@ export default async function ProductionReportsPage({ params }: { params: Promis
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     getProductionName(productionId),
   ]);
-  if (!access || !productionName) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
+  if (!productionName) notFound();
 
   const canViewDrafts = isReportViewer(access.permCtx);
   const reports = await listProductionReports(productionId, session.userId, canViewDrafts);

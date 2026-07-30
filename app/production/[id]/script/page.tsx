@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "剧本" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
@@ -25,7 +25,7 @@ export default async function ProductionScriptPage({
     getProductionPermissionContext(session.userId, session.isAdmin, id),
     getProductionName(id),
   ]);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
 
   const p = (perm: Parameters<typeof hasPermission>[0]) =>
     hasPermission(perm, access.permCtx);

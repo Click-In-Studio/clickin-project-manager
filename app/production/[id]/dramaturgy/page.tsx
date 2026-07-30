@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "戏剧构作" };
 
 import { Suspense } from "react";
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import {
@@ -29,7 +29,7 @@ export default async function DramaturgyPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
 
   const canEdit = hasPermission("scene:rename", access.permCtx);
 
@@ -39,7 +39,7 @@ export default async function DramaturgyPage({
     getProductionName(id),
     listVersions(id),
   ]);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   const validCookieVersionId = cookieVersionId && versions.some(ver => ver.id === cookieVersionId)
     ? cookieVersionId

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionName } from "@/lib/db";
@@ -13,7 +13,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
 
   const { id } = await params;
   const name = await getProductionName(id);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   return (
     <div className="px-8 py-10">

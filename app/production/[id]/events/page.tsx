@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "事件" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
@@ -16,7 +16,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
 
   const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
   const canCreate = hasPermission("event:create", access.permCtx);
@@ -27,7 +27,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
     listUserEventParticipations(session.userId, id),
     listEventDepartments(id),
   ]);
-  if (!name) redirect("/");
+  if (!name) notFound();
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   const events = canViewFull

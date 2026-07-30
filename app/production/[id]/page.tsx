@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
@@ -20,7 +20,8 @@ export default async function ProductionDashboard({ params }: { params: Promise<
     getProductionName(id),
     getProductionPermissionContext(session.userId, session.isAdmin, id),
   ]);
-  if (!access || !name) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
+  if (!name) notFound();
 
   return <ProductionHomeClient productionId={id} productionName={name} />;
 }

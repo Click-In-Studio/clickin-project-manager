@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "角色" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
@@ -19,7 +19,7 @@ export default async function CharactersPage({
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${id}`);
 
   const canEdit = hasPermission("scene:rename", access.permCtx);
 
@@ -29,7 +29,7 @@ export default async function CharactersPage({
     getProductionName(id),
     listVersions(id),
   ]);
-  if (!name) redirect("/");
+  if (!name) notFound();
   const versionId = (cookieVersionId && versions.some(v => v.id === cookieVersionId) ? cookieVersionId : null)
     ?? versions.find(v => v.status === "editing")?.id
     ?? versions[0]?.id
