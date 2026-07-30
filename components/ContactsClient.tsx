@@ -53,7 +53,7 @@ function MemberCard({
 
   return (
     <div className="rounded-2xl bg-white shadow-sm overflow-hidden flex flex-col">
-      <div className="aspect-[3/4] bg-zinc-100 flex items-center justify-center overflow-hidden">
+      <div className="aspect-[4/5] bg-zinc-100 flex items-center justify-center overflow-hidden">
         {photo ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={photo} alt={member.name} className="w-full h-full object-cover" />
@@ -62,7 +62,7 @@ function MemberCard({
         )}
       </div>
 
-      <div className="px-3 py-3 flex flex-col gap-1.5">
+      <div className="px-2 py-2 flex flex-col gap-1">
         <div className="flex items-center justify-between gap-1">
           <p className="text-sm font-semibold text-zinc-800 truncate">{member.name}</p>
           <div className="shrink-0 flex gap-0.5">
@@ -700,7 +700,7 @@ export default function ContactsClient({
             <p style={{ fontSize: 13, color: "var(--muted)" }}>暂无人员</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8">
             {sorted.map((m) => (
               <MemberCard
                 key={m.userId}
