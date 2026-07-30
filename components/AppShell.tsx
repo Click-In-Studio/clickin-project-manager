@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
+import NewProductionModal from "./NewProductionModal";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -273,6 +274,7 @@ function ProjectSwitcher({
   const [open, setOpen] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [newProdOpen, setNewProdOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -454,7 +456,38 @@ function ProjectSwitcher({
               暂无活跃项目
             </p>
           )}
+
+          {/* New project */}
+          <button
+            onClick={() => { setOpen(false); setNewProdOpen(true); }}
+            onMouseEnter={() => setHoveredItem("__new__")}
+            onMouseLeave={() => setHoveredItem(null)}
+            style={{
+              width: "100%", minHeight: 44, padding: "7px 9px",
+              display: "flex", alignItems: "center", gap: 10,
+              border: 0, borderTop: "1px solid var(--line)",
+              borderRadius: "0 0 9px 9px",
+              background: hoveredItem === "__new__" ? "var(--paper)" : "transparent",
+              textAlign: "left", cursor: "pointer", marginTop: 4,
+            }}
+          >
+            <span style={{
+              width: 31, height: 31, display: "grid", placeItems: "center", flexShrink: 0,
+              borderRadius: 9, border: "1.5px dashed var(--line)",
+              color: "var(--script)", fontSize: 18, lineHeight: 1,
+            }}>
+              +
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--script)" }}>新建项目</span>
+          </button>
         </div>
+      )}
+
+      {newProdOpen && (
+        <NewProductionModal
+          onClose={() => setNewProdOpen(false)}
+          onCreated={id => { setNewProdOpen(false); router.push(`/production/${id}`); }}
+        />
       )}
     </div>
   );
