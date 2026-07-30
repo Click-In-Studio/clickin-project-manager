@@ -235,25 +235,26 @@ export default function SearchBar({ productionId }: SearchBarProps) {
                         key={c.userId}
                         onClick={() => navigate(`/production/${productionId}/contacts`)}
                         primary={c.name}
-                        secondary={c.roles.slice(0, 2).join(" · ")}
+                        secondary={c.matchHint ?? (c.roles.slice(0, 2).join(" · ") || undefined)}
                       />
                     ))}
                   </ResultSection>
                 </>
               )}
 
-              {/* 场次 */}
+              {/* 章节/段落 */}
               {results!.scenes.length > 0 && (
                 <>
                   {(results!.events.length > 0 || results!.techReqs.length > 0 || results!.contacts.length > 0) && (
                     <div className="mx-3 my-1 border-t border-[var(--line)]" />
                   )}
-                  <ResultSection label="场次">
+                  <ResultSection label="章节/段落">
                     {results!.scenes.map((s) => (
                       <ResultRow
                         key={s.id}
                         onClick={() => navigate(`/production/${productionId}/scenes/${s.id}`)}
                         primary={s.name}
+                        secondary={s.matchHint ?? undefined}
                       />
                     ))}
                   </ResultSection>
@@ -272,6 +273,7 @@ export default function SearchBar({ productionId }: SearchBarProps) {
                         key={c.id}
                         onClick={() => navigate(`/production/${productionId}/characters/${c.id}`)}
                         primary={c.name}
+                        secondary={c.matchHint ?? undefined}
                       />
                     ))}
                   </ResultSection>

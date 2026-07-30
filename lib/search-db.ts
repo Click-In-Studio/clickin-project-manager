@@ -24,16 +24,19 @@ export type ContactSearchResult = {
   userId: string;
   name: string;
   roles: string[];
+  matchHint: string | null;
 };
 
 export type SceneSearchResult = {
   id: string;
   name: string;
+  matchHint: string | null;
 };
 
 export type CharacterSearchResult = {
   id: string;
   name: string;
+  matchHint: string | null;
 };
 
 export type AssetSearchResult = {
@@ -142,36 +145,93 @@ export async function searchProduction(
       [productionId, like],
     ),
 
-    // ── Contacts (production members) ─────────────────────────────────────────
-    pool.query<{ user_id: string; name: string; roles: string[] }>(
-      `SELECT pm.user_id, fu.name, pm.roles
+    // ── Contacts (name / roles array / department name) ───────────────────────
+    pool.query<{ user_id: string; name: string; roles: string[]; match_hint: string | null }>(
+      `SELECT pm.user_id, fu.name, pm.roles,
+              CASE
+                WHEN fu.name ILIKE $2 THEN NULL
+                WHEN EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2) THEN NULL
+                ELSE (
+                  SELECT '部门: ' || ed.name
+                  FROM event_department_member edm
+                  JOIN event_department ed ON ed.id = edm.department_id
+                  WHERE edm.user_id = pm.user_id
+                    AND ed.production_id = $1
+                    AND ed.name ILIKE $2
+                  LIMIT 1
+                )
+              END AS match_hint
        FROM production_member pm
        JOIN feishu_user fu ON fu.user_id = pm.user_id
        WHERE pm.production_id = $1
-         AND fu.name ILIKE $2
+         AND (
+           fu.name ILIKE $2
+           OR EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2)
+           OR EXISTS (
+             SELECT 1 FROM event_department_member edm
+             JOIN event_department ed ON ed.id = edm.department_id
+             WHERE edm.user_id = pm.user_id
+               AND ed.production_id = $1
+               AND ed.name ILIKE $2
+           )
+         )
        ORDER BY fu.name
        LIMIT 5`,
       [productionId, like],
     ),
 
-    // ── Scenes (active version) ───────────────────────────────────────────────
-    pool.query<{ id: string; name: string }>(
-      `SELECT sv.scene_id AS id, sv.name
+    // ── Scenes (active version, name + dramaturgy fields) ─────────────────────
+    pool.query<{ id: string; name: string; match_hint: string | null }>(
+      `SELECT sv.scene_id AS id, sv.name,
+              CASE
+                WHEN sv.name ILIKE $2 THEN NULL
+                WHEN sv.synopsis ILIKE $2 THEN '简介 · ' || LEFT(sv.synopsis, 35)
+                WHEN sv.action_line ILIKE $2 THEN '行动线 · ' || LEFT(sv.action_line, 35)
+                WHEN sv.music ILIKE $2 THEN '音乐 · ' || LEFT(sv.music, 35)
+                WHEN sv.stage_notes ILIKE $2 THEN '舞台呈现 · ' || LEFT(sv.stage_notes, 35)
+              END AS match_hint
        FROM scene_version sv
        WHERE sv.version_id = (SELECT active_version_id FROM production WHERE id = $1)
-         AND sv.name ILIKE $2
+         AND (
+           sv.name ILIKE $2
+           OR COALESCE(sv.synopsis, '') ILIKE $2
+           OR COALESCE(sv.action_line, '') ILIKE $2
+           OR COALESCE(sv.music, '') ILIKE $2
+           OR COALESCE(sv.stage_notes, '') ILIKE $2
+         )
        ORDER BY sv.sort_order
        LIMIT 5`,
       [productionId, like],
     ),
 
-    // ── Characters (active version, non-aggregate) ────────────────────────────
-    pool.query<{ id: string; name: string }>(
-      `SELECT cv.character_id AS id, cv.name
+    // ── Characters (active version, including aggregates; metadata + constituent names) ──
+    pool.query<{ id: string; name: string; match_hint: string | null }>(
+      `SELECT cv.character_id AS id, cv.name,
+              CASE
+                WHEN cv.name ILIKE $2 THEN NULL
+                WHEN COALESCE(cv.biography, '') ILIKE $2 THEN '人物小传 · ' || LEFT(cv.biography, 35)
+                ELSE '包含角色: ' || (
+                  SELECT mcv.name FROM character_aggregate ca
+                  JOIN character_version mcv ON mcv.character_id = ca.member_id
+                    AND mcv.version_id = cv.version_id
+                  WHERE ca.aggregate_id = cv.character_id
+                    AND mcv.name ILIKE $2
+                  LIMIT 1
+                )
+              END AS match_hint
        FROM character_version cv
        WHERE cv.version_id = (SELECT active_version_id FROM production WHERE id = $1)
-         AND cv.name ILIKE $2
-         AND cv.is_aggregate = false
+         AND (
+           cv.name ILIKE $2
+           OR COALESCE(cv.biography, '') ILIKE $2
+           OR EXISTS (
+             SELECT 1 FROM character_aggregate ca
+             JOIN character_version mcv ON mcv.character_id = ca.member_id
+               AND mcv.version_id = cv.version_id
+             WHERE ca.aggregate_id = cv.character_id
+               AND mcv.name ILIKE $2
+           )
+         )
        ORDER BY cv.sort_order
        LIMIT 5`,
       [productionId, like],
@@ -191,9 +251,9 @@ export async function searchProduction(
 
   type EventRow = { id: string; title: string; event_type: string; start_time: Date | null; location: string; status: string };
   type TechReqRow = { id: string; title: string; status: string; event_id: string; event_title: string; dept_name: string | null };
-  type ContactRow = { user_id: string; name: string; roles: string[] };
-  type SceneRow = { id: string; name: string };
-  type CharRow = { id: string; name: string };
+  type ContactRow = { user_id: string; name: string; roles: string[]; match_hint: string | null };
+  type SceneRow = { id: string; name: string; match_hint: string | null };
+  type CharRow = { id: string; name: string; match_hint: string | null };
   type AssetRow = { id: string; name: string | null; file_name: string; asset_type: string };
 
   return {
@@ -218,9 +278,10 @@ export async function searchProduction(
       userId: r.user_id,
       name: r.name,
       roles: r.roles,
+      matchHint: r.match_hint,
     })),
-    scenes: (scenes.rows as SceneRow[]).map((r) => ({ id: r.id, name: r.name })),
-    characters: (characters.rows as CharRow[]).map((r) => ({ id: r.id, name: r.name })),
+    scenes: (scenes.rows as SceneRow[]).map((r) => ({ id: r.id, name: r.name, matchHint: r.match_hint })),
+    characters: (characters.rows as CharRow[]).map((r) => ({ id: r.id, name: r.name, matchHint: r.match_hint })),
     assets: (assets.rows as AssetRow[]).map((r) => ({
       id: r.id,
       name: r.name,
