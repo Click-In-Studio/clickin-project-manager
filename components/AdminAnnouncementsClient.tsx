@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import SmartText from "@/components/SmartText";
 import SmartTextarea from "@/components/SmartTextarea";
 import { BASE_PATH } from "@/lib/base-path";
@@ -12,6 +12,19 @@ type Announcement = {
   isPinned: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+type ReadMember = {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  readAt: string | null;
+};
+
+type ReadStatus = {
+  read: ReadMember[];
+  unread: ReadMember[];
+  total: number;
 };
 
 type Props = {
@@ -27,6 +40,36 @@ type Mode = { kind: "view"; id: string } | { kind: "edit"; id: string } | { kind
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" });
+}
+
+// ── 成员名片 ──────────────────────────────────────────────────────────────────
+
+function MemberChip({ member }: { member: ReadMember }) {
+  const initial = member.name.charAt(0).toUpperCase();
+  return (
+    <div
+      title={member.readAt ? `已读于 ${new Date(member.readAt).toLocaleString("zh-CN")}` : member.name}
+      style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: "3px 10px 3px 4px", borderRadius: 999,
+        background: "var(--surface-2)", fontSize: 12, color: "var(--ink)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <div style={{
+        width: 20, height: 20, borderRadius: "50%",
+        background: "var(--line)", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 10, fontWeight: 700, color: "var(--ink)",
+        overflow: "hidden",
+      }}>
+        {member.avatarUrl
+          ? <img src={member.avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          : initial}
+      </div>
+      {member.name}
+    </div>
+  );
 }
 
 // ── 编辑/新建表单 ─────────────────────────────────────────────────────────────
@@ -157,8 +200,25 @@ export default function AdminAnnouncementsClient({ productionId, initialAnnounce
   const [announcements, setAnnouncements] = useState<Announcement[]>(initialAnnouncements);
   const [mode, setMode] = useState<Mode | null>(null);
   const [saving, setSaving] = useState(false);
+  const [readStatus, setReadStatus] = useState<ReadStatus | null>(null);
+  const [readStatusLoading, setReadStatusLoading] = useState(false);
+  const [reminding, setReminding] = useState(false);
+  const [remindResult, setRemindResult] = useState<string | null>(null);
 
   const selected = mode?.kind !== "new" && mode ? announcements.find(a => a.id === mode.id) ?? null : null;
+
+  // 切换到 view 时加载已读状态
+  useEffect(() => {
+    if (mode?.kind !== "view" || !mode.id) { setReadStatus(null); return; }
+    const id = mode.id;
+    setReadStatus(null);
+    setReadStatusLoading(true);
+    setRemindResult(null);
+    fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${id}/read-status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setReadStatus(data as ReadStatus); })
+      .finally(() => setReadStatusLoading(false));
+  }, [mode?.kind === "view" ? mode.id : null, productionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNew = () => setMode({ kind: "new" });
   const handleSelect = (id: string) => setMode({ kind: "view", id });
@@ -226,6 +286,18 @@ export default function AdminAnnouncementsClient({ productionId, initialAnnounce
         }))
       );
     }
+  }, [productionId]);
+
+  const handleRemind = useCallback(async (id: string) => {
+    setReminding(true);
+    setRemindResult(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${id}/remind`, { method: "POST" });
+      const data = await res.json() as { ok?: boolean; sent?: number; message?: string };
+      if (res.ok && data.ok) {
+        setRemindResult(data.message ?? `已发送催读通知给 ${data.sent} 位成员`);
+      }
+    } finally { setReminding(false); }
   }, [productionId]);
 
   // Pinned first, then by date desc
@@ -426,6 +498,74 @@ export default function AdminAnnouncementsClient({ productionId, initialAnnounce
             ) : (
               <p style={{ color: "var(--muted)", fontSize: 13 }}>（无内容）</p>
             )}
+
+            {/* Read status panel */}
+            <div style={{ marginTop: 32, borderTop: "1px solid var(--line)", paddingTop: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em", margin: 0 }}>
+                  阅读状态
+                </p>
+                {readStatusLoading && (
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>加载中…</span>
+                )}
+                {readStatus && !readStatusLoading && (
+                  <>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                      <span style={{ color: "#16a34a", fontWeight: 600 }}>{readStatus.read.length}</span> 已读 ·{" "}
+                      <span style={{ color: readStatus.unread.length > 0 ? "#dc2626" : "var(--muted)", fontWeight: 600 }}>{readStatus.unread.length}</span> 未读 / 共 {readStatus.total} 人
+                    </span>
+                    {canEdit && readStatus.unread.length > 0 && (
+                      <button
+                        onClick={() => handleRemind(selected.id)}
+                        disabled={reminding}
+                        style={{
+                          marginLeft: "auto", fontSize: 12, fontWeight: 600,
+                          padding: "5px 14px", borderRadius: 7, border: "none",
+                          background: reminding ? "var(--line)" : "var(--ink)",
+                          color: reminding ? "var(--muted)" : "white",
+                          cursor: reminding ? "default" : "pointer", transition: "all .15s",
+                        }}
+                      >
+                        {reminding ? "发送中…" : `催读（${readStatus.unread.length} 人）`}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              {remindResult && (
+                <p style={{ fontSize: 12, color: "#16a34a", marginBottom: 12 }}>{remindResult}</p>
+              )}
+              {readStatus && (
+                <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                  {/* 未读列表 */}
+                  {readStatus.unread.length > 0 && (
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                        未读 ({readStatus.unread.length})
+                      </p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {readStatus.unread.map(m => (
+                          <MemberChip key={m.userId} member={m} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 已读列表 */}
+                  {readStatus.read.length > 0 && (
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: "#16a34a", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                        已读 ({readStatus.read.length})
+                      </p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {readStatus.read.map(m => (
+                          <MemberChip key={m.userId} member={m} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

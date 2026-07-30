@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "项目公告" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listAnnouncements } from "@/lib/db";
+import { getProductionPermissionContext, listAnnouncements, getUserAnnouncementReadIds, getProductionName } from "@/lib/db";
 import ProductionAnnouncementsClient from "@/components/ProductionAnnouncementsClient";
 
 export default async function ProductionAnnouncementsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -16,7 +16,11 @@ export default async function ProductionAnnouncementsPage({ params }: { params: 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) notFound();
 
-  const announcements = await listAnnouncements(id);
+  const [announcements, readIds, productionName] = await Promise.all([
+    listAnnouncements(id),
+    getUserAnnouncementReadIds(id, session.userId),
+    getProductionName(id),
+  ]);
 
   const sorted = [...announcements].sort((a, b) => {
     if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
@@ -26,6 +30,7 @@ export default async function ProductionAnnouncementsPage({ params }: { params: 
   return (
     <ProductionAnnouncementsClient
       productionId={id}
+      productionName={productionName ?? ""}
       initialAnnouncements={sorted.map(a => ({
         id: a.id,
         title: a.title,
@@ -33,6 +38,7 @@ export default async function ProductionAnnouncementsPage({ params }: { params: 
         isPinned: a.isPinned,
         createdAt: a.createdAt,
       }))}
+      initialReadIds={readIds}
     />
   );
 }

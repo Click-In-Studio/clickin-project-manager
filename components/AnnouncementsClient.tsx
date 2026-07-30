@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
+import { BASE_PATH } from "@/lib/base-path";
 import type { CrossProjectAnnouncement, CueWarningEntry } from "@/lib/db";
 
 function fmtDate(iso: string): string {
@@ -29,12 +30,42 @@ type Tab = "announcements" | "risks";
 type Props = {
   announcements: CrossProjectAnnouncement[];
   cueWarnings: CueWarningEntry[];
+  initialReadIds: string[];
 };
 
-export default function AnnouncementsClient({ announcements, cueWarnings }: Props) {
+export default function AnnouncementsClient({ announcements, cueWarnings, initialReadIds }: Props) {
   const [tab, setTab] = useState<Tab>("announcements");
   const [selected, setSelected] = useState<CrossProjectAnnouncement | null>(announcements[0] ?? null);
   const [expandedId, setExpandedId] = useState<string | null>(announcements[0]?.id ?? null);
+  const [readIds, setReadIds] = useState<Set<string>>(new Set(initialReadIds));
+  const markingRef = useRef<Set<string>>(new Set());
+
+  // Auto-mark first announcement as read on mount
+  useEffect(() => {
+    const first = announcements[0];
+    if (first) doMarkRead(first.id, first.productionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function doMarkRead(announcementId: string, productionId: string) {
+    if (readIds.has(announcementId) || markingRef.current.has(announcementId)) return;
+    markingRef.current.add(announcementId);
+    setReadIds(prev => { const s = new Set(prev); s.add(announcementId); return s; });
+    fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${announcementId}/read`, {
+      method: "POST",
+    }).catch(() => {});
+  }
+
+  function handleSelect(item: CrossProjectAnnouncement) {
+    setSelected(item);
+    doMarkRead(item.id, item.productionId);
+  }
+
+  function handleMobileToggle(item: CrossProjectAnnouncement) {
+    const next = expandedId === item.id ? null : item.id;
+    setExpandedId(next);
+    if (next === item.id) doMarkRead(item.id, item.productionId);
+  }
 
   const orphaned = cueWarnings.filter(c => c.warningType === "orphaned");
   const adjusted = cueWarnings.filter(c => c.warningType === "adjusted");
@@ -72,7 +103,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings }: Prop
                   return (
                     <div key={item.id} className={`${styles.mobileCard} ${styles.info}`}>
                       <button
-                        onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                        onClick={() => handleMobileToggle(item)}
                         className={styles.mobileCardBtn}
                       >
                         <div className={styles.mobileCardHeader}>
@@ -120,7 +151,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings }: Prop
                     return (
                       <button
                         key={item.id}
-                        onClick={() => setSelected(item)}
+                        onClick={() => handleSelect(item)}
                         style={{
                           border: `1px solid ${isSelected ? "var(--ink)" : "var(--line)"}`,
                           borderRadius: 10,

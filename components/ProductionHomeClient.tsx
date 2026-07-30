@@ -66,6 +66,13 @@ function ProjectProgressHero({
   productionId: string;
 }) {
   const { pinnedAnnouncement, nextMilestone, cueWarningCount, awaitingReqs } = data;
+
+  useEffect(() => {
+    if (!pinnedAnnouncement) return;
+    fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${pinnedAnnouncement.id}/read`, {
+      method: "POST",
+    }).catch(() => {});
+  }, [pinnedAnnouncement?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const days = nextMilestone ? daysUntil(nextMilestone.endDate) : null;
 
   const milestoneLabel = (() => {

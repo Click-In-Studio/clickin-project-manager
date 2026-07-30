@@ -827,3 +827,14 @@ CREATE INDEX IF NOT EXISTS production_announcement_production_idx
 
 CREATE UNIQUE INDEX IF NOT EXISTS production_announcement_pinned_unique
   ON production_announcement(production_id) WHERE is_pinned = true;
+
+-- 公告已读追踪
+CREATE TABLE IF NOT EXISTS announcement_read (
+  announcement_id TEXT NOT NULL REFERENCES production_announcement(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  read_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (announcement_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS announcement_read_announcement_idx
+  ON announcement_read(announcement_id);

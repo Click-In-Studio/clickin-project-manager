@@ -6212,6 +6212,90 @@ export async function listAnnouncementsForUser(
   }));
 }
 
+// ── Announcement read tracking ────────────────────────────────────────────────
+
+export async function markAnnouncementRead(announcementId: string, userId: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO announcement_read (announcement_id, user_id)
+     VALUES ($1, $2)
+     ON CONFLICT (announcement_id, user_id) DO NOTHING`,
+    [announcementId, userId],
+  );
+}
+
+export type AnnouncementReadMember = {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  readAt: string | null;
+};
+
+export async function getAnnouncementReadStatus(
+  announcementId: string,
+  productionId: string,
+): Promise<AnnouncementReadMember[]> {
+  const res = await getPool().query<{
+    user_id: string;
+    name: string;
+    avatar_url: string | null;
+    read_at: Date | null;
+  }>(
+    `SELECT fu.user_id, fu.name, fu.avatar_url, ar.read_at
+     FROM production_member pm
+     JOIN feishu_user fu ON fu.user_id = pm.user_id
+     LEFT JOIN announcement_read ar
+       ON ar.announcement_id = $1 AND ar.user_id = pm.user_id
+     WHERE pm.production_id = $2
+     ORDER BY ar.read_at NULLS LAST, fu.name`,
+    [announcementId, productionId],
+  );
+  return res.rows.map(r => ({
+    userId: r.user_id,
+    name: r.name,
+    avatarUrl: r.avatar_url,
+    readAt: r.read_at ? r.read_at.toISOString() : null,
+  }));
+}
+
+export async function getUserAllReadAnnouncementIds(userId: string): Promise<string[]> {
+  const res = await getPool().query<{ announcement_id: string }>(
+    `SELECT announcement_id FROM announcement_read WHERE user_id = $1`,
+    [userId],
+  );
+  return res.rows.map(r => r.announcement_id);
+}
+
+export async function getUserAnnouncementReadIds(
+  productionId: string,
+  userId: string,
+): Promise<string[]> {
+  const res = await getPool().query<{ announcement_id: string }>(
+    `SELECT ar.announcement_id
+     FROM announcement_read ar
+     JOIN production_announcement pa ON pa.id = ar.announcement_id
+     WHERE pa.production_id = $1 AND ar.user_id = $2`,
+    [productionId, userId],
+  );
+  return res.rows.map(r => r.announcement_id);
+}
+
+export async function getUnreadMemberIds(
+  announcementId: string,
+  productionId: string,
+): Promise<string[]> {
+  const res = await getPool().query<{ user_id: string }>(
+    `SELECT pm.user_id
+     FROM production_member pm
+     WHERE pm.production_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM announcement_read ar
+         WHERE ar.announcement_id = $2 AND ar.user_id = pm.user_id
+       )`,
+    [productionId, announcementId],
+  );
+  return res.rows.map(r => r.user_id);
+}
+
 export type CueWarningEntry = {
   id: string;
   cueListId: string;
