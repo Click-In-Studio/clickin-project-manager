@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { signMagicToken, verifyMagicToken } from "../auth-email";
 import { sendEmail } from "../email";
 import { upsertEmailUser, getUserProfile, createEmailOtp } from "../db";
+import { buildNotificationEmail } from "../email-templates";
 import type {
   PersonalChannel,
   PersonalCapabilities,
@@ -106,7 +107,14 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
   // ── Direct message output ─────────────────────────────────────────────────
 
   async sendDirectMessage(platformUserId: string, msg: PlatformMessage): Promise<void> {
-    const html = typeof msg.richContent === "string" ? msg.richContent : `<p>${msg.text}</p>`;
+    const html = typeof msg.richContent === "string"
+      ? msg.richContent
+      : buildNotificationEmail({
+          title: msg.title ?? "Click-In 通知",
+          body: msg.text,
+          ctaLabel: msg.primaryUrl ? "查看详情" : undefined,
+          ctaUrl: msg.primaryUrl,
+        });
     await sendEmail({
       to: platformUserId,
       subject: msg.title ?? "Click-In 通知",

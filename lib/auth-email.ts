@@ -58,14 +58,32 @@ export function verifyBindingToken(token: string): { sourceUserId: string; email
   return { sourceUserId: data.sourceUserId, email: data.email };
 }
 
-// ── Merge token (confirm merging two accounts) ────────────────────────────────
+// ── Conflict token (two accounts share an identity — direction chosen later by UI) ──
 
-export function signMergeToken(keepUserId: string, deleteUserId: string): string {
-  return sign({ intent: "merge", keepUserId, deleteUserId, exp: Date.now() + TTL_MS });
+export function signConflictToken(userIdA: string, userIdB: string): string {
+  return sign({ intent: "conflict", userIdA, userIdB, exp: Date.now() + TTL_MS });
 }
 
-export function verifyMergeToken(token: string): { keepUserId: string; deleteUserId: string } | null {
-  const data = verify<{ intent: string; keepUserId: string; deleteUserId: string }>(token);
-  if (!data || data.intent !== "merge") return null;
-  return { keepUserId: data.keepUserId, deleteUserId: data.deleteUserId };
+export function verifyConflictToken(token: string): { userIdA: string; userIdB: string } | null {
+  const data = verify<{ intent: string; userIdA: string; userIdB: string }>(token);
+  if (!data || data.intent !== "conflict") return null;
+  return { userIdA: data.userIdA, userIdB: data.userIdB };
+}
+
+// ── RSVP token (email inline RSVP without active session) ────────────────────
+// 48h TTL: covers daily-call emails sent the evening before.
+
+const RSVP_TTL_MS = 48 * 60 * 60 * 1000;
+
+export type RsvpAction = "yes" | "no" | "tentative" | "confirm";
+
+export function signRsvpToken(userId: string, callTimeId: string, action: RsvpAction): string {
+  return sign({ intent: "rsvp", userId, callTimeId, action, exp: Date.now() + RSVP_TTL_MS });
+}
+
+export function verifyRsvpToken(token: string): { userId: string; callTimeId: string; action: RsvpAction } | null {
+  const data = verify<{ intent: string; userId: string; callTimeId: string; action: string }>(token);
+  if (!data || data.intent !== "rsvp") return null;
+  if (!["yes", "no", "tentative", "confirm"].includes(data.action)) return null;
+  return { userId: data.userId, callTimeId: data.callTimeId, action: data.action as RsvpAction };
 }

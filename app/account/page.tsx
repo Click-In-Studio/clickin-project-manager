@@ -19,8 +19,12 @@ export default async function AccountPage() {
 
   return (
     <AccountClient
+      userId={session.userId}
       initialProfile={{
         name: profile?.name ?? session.name,
+        displayName: profile?.displayName ?? null,
+        bio: profile?.bio ?? null,
+        preferredPlatform: profile?.preferredPlatform ?? null,
         avatarUrl: profile?.avatarUrl ?? session.avatarUrl,
       }}
       initialIdentities={identities}

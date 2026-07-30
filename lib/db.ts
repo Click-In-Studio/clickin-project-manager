@@ -2256,20 +2256,26 @@ export async function upsertUserProfile(
   userId: string,
   name: string,
   avatarUrl: string | null,
+  extra?: { displayName?: string | null; bio?: string | null; preferredPlatform?: string | null },
 ): Promise<void> {
+  const sets: string[] = ["name = EXCLUDED.name", "avatar_url = EXCLUDED.avatar_url", "updated_at = now()"];
+  const vals: unknown[] = [userId, name, avatarUrl];
+  if (extra?.displayName !== undefined) { sets.push(`display_name = $${vals.push(extra.displayName)}`); }
+  if (extra?.bio !== undefined) { sets.push(`bio = $${vals.push(extra.bio)}`); }
+  if (extra?.preferredPlatform !== undefined) { sets.push(`preferred_platform = $${vals.push(extra.preferredPlatform)}`); }
   await getPool().query(
     `INSERT INTO user_profile (user_id, name, avatar_url)
      VALUES ($1, $2, $3)
-     ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, updated_at = now()`,
-    [userId, name, avatarUrl],
+     ON CONFLICT (user_id) DO UPDATE SET ${sets.join(", ")}`,
+    vals,
   );
 }
 
 export async function getUserProfile(
   userId: string,
-): Promise<{ name: string; avatarUrl: string | null; isAdmin: boolean } | null> {
-  const res = await getPool().query<{ name: string; avatar_url: string | null; is_super_admin: boolean | null }>(
-    `SELECT up.name, up.avatar_url, fu.is_super_admin
+): Promise<{ name: string; displayName: string | null; bio: string | null; preferredPlatform: string | null; avatarUrl: string | null; isAdmin: boolean } | null> {
+  const res = await getPool().query<{ name: string; display_name: string | null; bio: string | null; preferred_platform: string | null; avatar_url: string | null; is_super_admin: boolean | null }>(
+    `SELECT up.name, up.display_name, up.bio, up.preferred_platform, up.avatar_url, fu.is_super_admin
      FROM user_profile up
      LEFT JOIN feishu_user fu ON fu.user_id = up.user_id
      WHERE up.user_id = $1`,
@@ -2277,14 +2283,29 @@ export async function getUserProfile(
   );
   if (!res.rows.length) return null;
   const r = res.rows[0];
-  return { name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin ?? false };
+  return {
+    name: r.name,
+    displayName: r.display_name,
+    bio: r.bio,
+    preferredPlatform: r.preferred_platform,
+    avatarUrl: r.avatar_url,
+    isAdmin: r.is_super_admin ?? false,
+  };
 }
 
 export async function getUserIdentities(
   userId: string,
-): Promise<{ id: string; platformId: string; platformUserId: string; label: string | null; isLoginMethod: boolean }[]> {
-  const res = await getPool().query<{ id: string; platform_id: string; platform_user_id: string; label: string | null; is_login_method: boolean }>(
-    "SELECT id, platform_id, platform_user_id, label, is_login_method FROM user_platform_identity WHERE user_id = $1 ORDER BY created_at",
+): Promise<{ id: string; platformId: string; platformUserId: string; label: string | null; isLoginMethod: boolean; displayName: string | null; avatarUrl: string | null }[]> {
+  const res = await getPool().query<{
+    id: string; platform_id: string; platform_user_id: string; label: string | null;
+    is_login_method: boolean; fu_name: string | null; fu_avatar: string | null;
+  }>(
+    `SELECT upi.id, upi.platform_id, upi.platform_user_id, upi.label, upi.is_login_method,
+            fu.name AS fu_name, fu.avatar_url AS fu_avatar
+     FROM user_platform_identity upi
+     LEFT JOIN feishu_user fu ON fu.user_id = upi.user_id AND upi.platform_id = 'feishu'
+     WHERE upi.user_id = $1
+     ORDER BY upi.created_at`,
     [userId],
   );
   return res.rows.map(r => ({
@@ -2293,6 +2314,8 @@ export async function getUserIdentities(
     platformUserId: r.platform_user_id,
     label: r.label,
     isLoginMethod: r.is_login_method,
+    displayName: r.fu_name ?? null,
+    avatarUrl: r.fu_avatar ?? null,
   }));
 }
 
@@ -2331,31 +2354,169 @@ export async function bindPlatformIdentity(
   return { result: "bound" };
 }
 
-// Merge deleteUserId INTO keepUserId. keepUserId's profile is preserved.
+export interface AccountSummary {
+  userId: string;
+  name: string | null;
+  identities: { platformId: string; label: string | null }[];
+  productionCount: number;
+}
+
+export async function getAccountSummary(userId: string): Promise<AccountSummary | null> {
+  const pool = getPool();
+  const [nameRow, idRows, countRow] = await Promise.all([
+    pool.query<{ name: string | null }>(
+      `SELECT name FROM user_profile WHERE user_id = $1`,
+      [userId],
+    ),
+    pool.query<{ platform_id: string; label: string | null; fu_name: string | null }>(
+      `SELECT upi.platform_id,
+              upi.label,
+              fu.name AS fu_name
+         FROM user_platform_identity upi
+         LEFT JOIN feishu_user fu ON fu.user_id = upi.user_id AND upi.platform_id = 'feishu'
+        WHERE upi.user_id = $1`,
+      [userId],
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM production_member WHERE user_id = $1`,
+      [userId],
+    ),
+  ]);
+  if (nameRow.rows.length === 0 && idRows.rows.length === 0) return null;
+  return {
+    userId,
+    name: nameRow.rows[0]?.name ?? null,
+    identities: idRows.rows.map(r => ({
+      platformId: r.platform_id,
+      label: r.fu_name ?? r.label,
+    })),
+    productionCount: parseInt(countRow.rows[0]?.count ?? "0", 10),
+  };
+}
+
+export async function getSharedProductions(
+  userId1: string,
+  userId2: string,
+): Promise<{ id: string; name: string }[]> {
+  const res = await getPool().query<{ id: string; name: string }>(
+    `SELECT p.id, p.name
+       FROM production_member pm1
+       JOIN production_member pm2 ON pm1.production_id = pm2.production_id
+       JOIN production p ON p.id = pm1.production_id
+      WHERE pm1.user_id = $1 AND pm2.user_id = $2`,
+    [userId1, userId2],
+  );
+  return res.rows;
+}
+
+// Merge deleteUserId INTO keepUserId.
+// Precondition: no shared productions (call getSharedProductions first).
+// Transfers all user-linked data. Non-CASCADE FKs are updated before deletion.
 export async function mergeAccounts(keepUserId: string, deleteUserId: string): Promise<void> {
   if (keepUserId === deleteUserId) return;
+
+  const shared = await getSharedProductions(keepUserId, deleteUserId);
+  if (shared.length > 0) {
+    throw new Error(`Cannot merge: both accounts are in ${shared.map(p => p.name).join(", ")}`);
+  }
+
   const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // Transfer platform identities
+
+    // 1. Update RESTRICT (non-CASCADE) FKs — must happen before DELETE
+    await client.query(`UPDATE cue_list SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE production_event SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE event_report SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE event_report_note SET author_user_id = $1 WHERE author_user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE asset_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+
+    // 2. Transfer production memberships (safe: no shared productions)
+    await client.query(
+      `INSERT INTO production_member (production_id, user_id, roles, photo_url, added_at)
+       SELECT production_id, $1, roles, photo_url, added_at FROM production_member WHERE user_id = $2
+       ON CONFLICT DO NOTHING`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM production_member WHERE user_id = $1`, [deleteUserId]);
+    await client.query(
+      `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
+       SELECT production_id, $1, permission, granted FROM production_member_permission WHERE user_id = $2
+       ON CONFLICT DO NOTHING`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM production_member_permission WHERE user_id = $1`, [deleteUserId]);
+
+    // 3. Transfer event-scoped data (no shared productions → no PK conflicts)
+    await client.query(`UPDATE event_call_time SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(
+      `INSERT INTO event_participant (id, event_id, user_id, name, department_id, role)
+       SELECT id, event_id, $1, name, department_id, role FROM event_participant WHERE user_id = $2
+       ON CONFLICT (event_id, user_id) DO NOTHING`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM event_participant WHERE user_id = $1`, [deleteUserId]);
+    await client.query(`UPDATE event_department_member SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE event_stage_manager SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE schedule_item_participant SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE event_tech_assignee SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(
+      `INSERT INTO cue_list_permission (cue_list_id, user_id, can_edit)
+       SELECT cue_list_id, $1, can_edit FROM cue_list_permission WHERE user_id = $2
+       ON CONFLICT DO NOTHING`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM cue_list_permission WHERE user_id = $1`, [deleteUserId]);
+
+    // 4. Transfer platform identities (before notification_preference, which FK-references them)
     await client.query(
       `UPDATE user_platform_identity SET user_id = $1 WHERE user_id = $2`,
       [keepUserId, deleteUserId],
     );
-    // Transfer feishu_user rows
+
+    // 5. Transfer notification settings (may conflict regardless of productions)
+    await client.query(
+      `INSERT INTO notification_preference (user_id, scope_type, scope_id, platform_identity_id)
+       SELECT $1, scope_type, scope_id, platform_identity_id FROM notification_preference WHERE user_id = $2
+       ON CONFLICT DO NOTHING`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM notification_preference WHERE user_id = $1`, [deleteUserId]);
+    await client.query(
+      `INSERT INTO notification_subscription (user_id, notification_type, enabled, updated_at)
+       SELECT $1, notification_type, enabled, updated_at FROM notification_subscription WHERE user_id = $2
+       ON CONFLICT DO NOTHING`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM notification_subscription WHERE user_id = $1`, [deleteUserId]);
+
+    // 6. Transfer feishu_user (keep keepUserId's row if both exist)
+    await client.query(
+      `DELETE FROM feishu_user WHERE user_id = $1
+         AND EXISTS (SELECT 1 FROM feishu_user WHERE user_id = $2)`,
+      [deleteUserId, keepUserId],
+    );
     await client.query(
       `UPDATE feishu_user SET user_id = $1 WHERE user_id = $2`,
       [keepUserId, deleteUserId],
     );
-    // Transfer notifications
+
+    // 7. Transfer notifications
     await client.query(
       `UPDATE user_notification SET user_id = $1 WHERE user_id = $2`,
       [keepUserId, deleteUserId],
     );
-    // Delete deleteUserId's dependent rows (production_member, notification_preference have no xfer logic needed)
-    await client.query("DELETE FROM user_profile WHERE user_id = $1", [deleteUserId]);
-    await client.query("DELETE FROM app_user WHERE id = $1", [deleteUserId]);
+
+    // 8. Delete old profile then user (CASCADE handles email_otp and any remaining rows)
+    await client.query(`DELETE FROM user_profile WHERE user_id = $1`, [deleteUserId]);
+    await client.query(`DELETE FROM app_user WHERE id = $1`, [deleteUserId]);
+
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK");

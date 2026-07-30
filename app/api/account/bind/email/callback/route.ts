@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { verifyBindingToken, signMergeToken } from "@/lib/auth-email";
+import { verifyBindingToken, signConflictToken } from "@/lib/auth-email";
 import { bindPlatformIdentity, getUserProfile } from "@/lib/db";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
 
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const bindResult = await bindPlatformIdentity(sourceUserId, "email", email);
 
   if (bindResult.result === "conflict") {
-    const mergeToken = signMergeToken(sourceUserId, bindResult.existingUserId);
+    const mergeToken = signConflictToken(sourceUserId, bindResult.existingUserId);
     const url = new URL("/account", base);
     url.searchParams.set("pending_merge", mergeToken);
     url.searchParams.set("merge_platform", "email");

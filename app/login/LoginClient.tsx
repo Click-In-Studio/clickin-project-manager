@@ -69,13 +69,14 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedName = name.trim();
     if (!trimmedEmail) { setError("请输入邮箱地址"); return; }
+    if (!trimmedName) { setError("请输入你的姓名"); return; }
 
     setMode("loading");
     try {
       const res = await fetch("/api/auth/email/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, name: trimmedName || trimmedEmail }),
+        body: JSON.stringify({ email: trimmedEmail, name: trimmedName }),
       });
       if (res.ok) {
         setMode("email_sent");
@@ -200,12 +201,13 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
                 required
                 style={{ ...inp, marginBottom: 10 }}
               />
-              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>姓名（选填）</label>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>姓名</label>
               <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="你的名字"
+                required
                 style={{ ...inp, marginBottom: 14 }}
               />
               {error && <p style={{ fontSize: 12, color: "#c53030", margin: "0 0 10px" }}>{error}</p>}

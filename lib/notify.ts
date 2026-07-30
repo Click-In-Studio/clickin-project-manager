@@ -28,6 +28,11 @@ import {
   type WeeklyCallEntry, type DailyCallScheduleItem,
 } from "./event-db";
 import { createCardToken } from "./card-token";
+import { signRsvpToken } from "./auth-email";
+import {
+  buildEventPublishEmail, buildWeeklyCallEmail, buildDailyCallEmail,
+  buildReportEmail, buildMentionEmail,
+} from "./email-templates";
 import {
   getOptedOutUsers, isExternalEnabled,
   shouldDeliverExternal, resolveDeliveryPolicy,
@@ -289,6 +294,33 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
         const policy = await resolveDeliveryPolicy(event.production_id, "event_publish", row.user_id);
         if (!shouldDeliverExternal(userEnabled, "dm", policy)) return null;
         const actionUrl = resolvedTarget.adapter.buildActionUrl(viewHref);
+        if (resolvedTarget.platformId === "email") {
+          const confirmToken = signRsvpToken(row.user_id, row.id, "confirm");
+          const rsvpUrls = isPastDispatchWindow ? undefined : {
+            yes:      signRsvpToken(row.user_id, row.id, "yes"),
+            no:       signRsvpToken(row.user_id, row.id, "no"),
+            tentative: signRsvpToken(row.user_id, row.id, "tentative"),
+          };
+          const rsvpBaseUrl = `${BASE_PATH}/api/rsvp?token=`;
+          return {
+            text: `Event 已发布 — ${event.title}，你的 Call 时间：${callTimeStr}，查看：${actionUrl}`,
+            title: `Event 已发布 — ${event.title}`,
+            primaryUrl: actionUrl,
+            richContent: buildEventPublishEmail({
+              eventTitle: event.title,
+              callTimeStr,
+              viewUrl: actionUrl,
+              rsvpUrls: rsvpUrls ? {
+                yes:      `${rsvpBaseUrl}${encodeURIComponent(rsvpUrls.yes)}`,
+                no:       `${rsvpBaseUrl}${encodeURIComponent(rsvpUrls.no)}`,
+                tentative: `${rsvpBaseUrl}${encodeURIComponent(rsvpUrls.tentative)}`,
+              } : undefined,
+              confirmUrl: isPastDispatchWindow
+                ? `${rsvpBaseUrl}${encodeURIComponent(confirmToken)}`
+                : undefined,
+            }),
+          };
+        }
         return {
           text: `Event 已发布 — ${event.title}，你的 Call 时间：${callTimeStr}，查看：${actionUrl}`,
           title: `Event 已发布 — ${event.title}`,
@@ -359,16 +391,21 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
         const policy = await resolveDeliveryPolicy(null, "weekly_call", userId);
         if (!shouldDeliverExternal(userEnabled, "dm", policy)) return null;
         const actionUrl = target.adapter.buildActionUrl(viewHref);
-        const card = buildWeeklyCallCard(entries, actionUrl);
+        let richContent: unknown;
+        if (target.platformId === "email") {
+          richContent = buildWeeklyCallEmail(entries, actionUrl);
+        } else {
+          richContent = buildWeeklyCallCard(entries, actionUrl);
+        }
         const message: PlatformMessage = {
           text: `你本周有 ${entries.length} 场 Call，点击查看：${actionUrl}`,
           title: "本周 Call 安排",
           primaryUrl: actionUrl,
-          richContent: card,
+          richContent,
         };
         if (dryRun) {
           dryMessages.push({ platformUserId: target.platformUserId, platformId: target.platformId, message });
-          return null; // don't actually send in dry run
+          return null;
         }
         return message;
       },
@@ -592,15 +629,32 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
         const policy = await resolveDeliveryPolicy(event.production_id, "daily_call", row.user_id);
         if (!shouldDeliverExternal(userEnabled, "dm", policy)) return null;
         const actionUrl = target.adapter.buildActionUrl(viewHref);
-        const card = buildDailyCallCard(
-          event.title, event.location, event.start_time!,
-          row.call_at, row.notes, scheduleItems, allCalls, actionUrl,
-        );
+        let richContent: unknown;
+        if (target.platformId === "email") {
+          const confirmToken = signRsvpToken(row.user_id, row.id, "confirm");
+          const rsvpBaseUrl = `${BASE_PATH}/api/rsvp?token=`;
+          richContent = buildDailyCallEmail({
+            eventTitle: event.title,
+            eventLocation: event.location,
+            startTime: event.start_time!,
+            myCallAt: row.call_at,
+            myCallNotes: row.notes,
+            scheduleItems,
+            allCalls,
+            viewUrl: actionUrl,
+            confirmUrl: `${rsvpBaseUrl}${encodeURIComponent(confirmToken)}`,
+          });
+        } else {
+          richContent = buildDailyCallCard(
+            event.title, event.location, event.start_time!,
+            row.call_at, row.notes, scheduleItems, allCalls, actionUrl,
+          );
+        }
         const message: PlatformMessage = {
           text: `明日 Call — ${event.title}，你的 Call 时间：${row.call_at}，查看：${actionUrl}`,
           title: `明日 Call Sheet — ${event.title}`,
           primaryUrl: actionUrl,
-          richContent: card,
+          richContent,
         };
         if (dryRun) {
           dryMessages.push({ platformUserId: target.platformUserId, platformId: target.platformId, message });
@@ -677,12 +731,17 @@ export async function dispatchReportNotification(
     buildExternalMessage: async (userId, target) => {
       const token = createCardToken(userId, `report:${reportId}`, reportTokenExp);
       const actionUrl = target.adapter.buildActionUrl(`${viewHref}/${token}`);
-      const card = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, actionUrl);
+      let richContent: unknown;
+      if (target.platformId === "email") {
+        richContent = buildReportEmail({ reportTitle: report.title, eventTitle, reportBody: report.body, notes, viewUrl: actionUrl });
+      } else {
+        richContent = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, actionUrl);
+      }
       const message: PlatformMessage = {
         text: `新报告：${report.title}（${eventTitle}），查看：${actionUrl}`,
         title: `新报告 — ${report.title}`,
         primaryUrl: actionUrl,
-        richContent: card,
+        richContent,
       };
       if (dryRun) {
         dryMessages.push({ platformUserId: target.platformUserId, platformId: target.platformId, message });
@@ -734,12 +793,14 @@ export async function dispatchMentionNotifications(
     buildExternalMessage: async (userId, target) => {
       const token = createCardToken(userId, `report:${reportId}`, tokenExp);
       const actionUrl = target.adapter.buildActionUrl(`${viewHref}/${token}`);
-      const card = buildMentionCard(reportTitle, eventTitle, actionUrl);
+      const richContent = target.platformId === "email"
+        ? buildMentionEmail({ reportTitle, eventTitle, viewUrl: actionUrl })
+        : buildMentionCard(reportTitle, eventTitle, actionUrl);
       return {
         text: `${eventTitle} 的报告「${reportTitle}」中提到了你，查看：${actionUrl}`,
         title: "报告提及",
         primaryUrl: actionUrl,
-        richContent: card,
+        richContent,
       };
     },
   });

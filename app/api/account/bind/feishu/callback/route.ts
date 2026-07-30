@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCode, getUserInfo, TOKEN_COOKIE } from "@/lib/feishu-auth";
 import { bindPlatformIdentity, getUserProfile, upsertFeishuUser, getFeishuUser } from "@/lib/db";
-import { signMergeToken } from "@/lib/auth-email";
+import { signConflictToken } from "@/lib/auth-email";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, OAUTH_STATE_COOKIE } from "@/lib/session";
 
 const BIND_SOURCE_COOKIE = "bind_source_user_id";
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (bindResult.result === "conflict") {
-    const mergeToken = signMergeToken(sourceUserId, bindResult.existingUserId);
+    const mergeToken = signConflictToken(sourceUserId, bindResult.existingUserId);
     const url = new URL("/account", base);
     url.searchParams.set("pending_merge", mergeToken);
     url.searchParams.set("merge_platform", "feishu");
