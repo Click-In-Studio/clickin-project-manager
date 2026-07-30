@@ -60,10 +60,10 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
 
     await sendEmail({
       to: email,
-      subject: "登录 Click-In 后台",
+      subject: "登录「后台」",
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-          <h2 style="margin:0 0 16px;font-size:18px;color:#182a2a">登录 Click-In 后台</h2>
+          <h2 style="margin:0 0 16px;font-size:18px;color:#182a2a">登录「后台」</h2>
           <p style="margin:0 0 20px;color:#667676;font-size:14px">两种方式均可完成登录，15 分钟内有效：</p>
 
           <div style="margin-bottom:20px">
@@ -81,7 +81,7 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
           <p style="margin:20px 0 0;font-size:11px;color:#bbb">请勿将验证码分享给他人。</p>
         </div>
       `,
-      text: `登录 Click-In 后台\n\n方式一：点击链接（在收到邮件的设备上使用）\n${magicLink}\n\n方式二：在登录页输入 6 位验证码\n${otp}\n\n链接和验证码均在 15 分钟内有效，请勿转发。`,
+      text: `登录「后台」\n\n方式一：点击链接（在收到邮件的设备上使用）\n${magicLink}\n\n方式二：在登录页输入 6 位验证码\n${otp}\n\n链接和验证码均在 15 分钟内有效，请勿转发。`,
     });
   }
 
@@ -110,14 +110,14 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
     const html = typeof msg.richContent === "string"
       ? msg.richContent
       : buildNotificationEmail({
-          title: msg.title ?? "Click-In 通知",
+          title: msg.title ?? "后台通知",
           body: msg.text,
           ctaLabel: msg.primaryUrl ? "查看详情" : undefined,
           ctaUrl: msg.primaryUrl,
         });
     await sendEmail({
       to: platformUserId,
-      subject: msg.title ?? "Click-In 通知",
+      subject: msg.title ?? "后台通知",
       html,
       text: msg.text,
     });

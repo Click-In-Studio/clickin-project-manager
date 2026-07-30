@@ -11,7 +11,7 @@ const LINE   = "#dde3e1";
 function base(bodyHtml: string): string {
   return `<!DOCTYPE html>
 <html lang="zh">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Click-In</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>后台</title></head>
 <body style="margin:0;padding:0;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:${BG}">
 <tr><td align="center" style="padding:40px 16px">
@@ -25,7 +25,7 @@ function base(bodyHtml: string): string {
     <tr><td style="padding:28px">${bodyHtml}</td></tr>
     <!-- footer -->
     <tr><td style="padding:16px 28px;border-top:1px solid ${LINE};background:#f9faf9">
-      <p style="margin:0;font-size:10px;color:${MUTED}">你收到此邮件是因为你的账号已与 Click-In 后台绑定。请勿转发此邮件中的任何链接。</p>
+      <p style="margin:0;font-size:10px;color:${MUTED}">你收到此邮件是因为你的账号已与「后台」绑定。请勿转发此邮件中的任何链接。</p>
     </td></tr>
   </table>
 </td></tr>
@@ -46,6 +46,17 @@ function divider(): string {
 
 function label(text: string): string {
   return `<p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${SCRIPT}">${text}</p>`;
+}
+
+function smartTextToHtml(text: string): string {
+  let s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // [#label](href) script refs → code-style label
+  s = s.replace(/\[#([^\]]+)\]\([^)]*\)/g, (_, lbl) =>
+    `<code style="font-size:11px;color:${SCRIPT}">#${lbl}</code>`);
+  // [#kind:id] DB-format content mentions → strip
+  s = s.replace(/\[#[^\]]+\]/g, "");
+  s = s.replace(/\n/g, "<br>");
+  return s;
 }
 
 // ── Generic notification email ─────────────────────────────────────────────────
@@ -69,12 +80,14 @@ export function buildNotificationEmail(params: {
 
 export function buildEventPublishEmail(params: {
   eventTitle: string;
+  eventDescription?: string | null;
   callTimeStr: string;
+  callTimeNotes?: string | null;
   viewUrl: string;
   rsvpUrls?: { yes: string; no: string; tentative: string };
   confirmUrl?: string;
 }): string {
-  const { eventTitle, callTimeStr, viewUrl, rsvpUrls, confirmUrl } = params;
+  const { eventTitle, eventDescription, callTimeStr, callTimeNotes, viewUrl, rsvpUrls, confirmUrl } = params;
 
   const rsvpSection = confirmUrl
     ? `${divider()}
@@ -90,13 +103,23 @@ export function buildEventPublishEmail(params: {
          </tr></table>`
       : "";
 
+  const descHtml = eventDescription?.trim()
+    ? `<p style="margin:0 0 20px;font-size:13px;color:${MUTED};line-height:1.6">${smartTextToHtml(eventDescription.trim())}</p>`
+    : "";
+
+  const notesHtml = callTimeNotes?.trim()
+    ? `<p style="margin:4px 0 0;font-size:12px;color:${MUTED};line-height:1.5">${smartTextToHtml(callTimeNotes.trim())}</p>`
+    : "";
+
   const bodyHtml = `
     ${label("EVENT 已发布")}
-    <h1 style="margin:0 0 20px;font-size:22px;font-weight:700;color:${INK};line-height:1.3">${eventTitle}</h1>
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:${INK};line-height:1.3">${eventTitle}</h1>
+    ${descHtml}
     <table cellpadding="0" cellspacing="0" style="background:${BG};border-radius:8px;padding:14px 16px;margin-bottom:20px">
       <tr><td>
         <p style="margin:0 0 4px;font-size:10px;font-weight:700;color:${MUTED};letter-spacing:.06em;text-transform:uppercase">你的 Call 时间</p>
         <p style="margin:0;font-size:18px;font-weight:700;color:${INK}">${callTimeStr}</p>
+        ${notesHtml}
       </td></tr>
     </table>
     ${rsvpSection}

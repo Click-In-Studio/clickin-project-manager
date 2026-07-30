@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 
-const FROM = "Click-In <noreply@clickinmusical.com>";
+const FROM = "后台 Backstage <noreply@clickinmusical.com>";
 
 function client(): Resend {
   const key = process.env.RESEND_API_KEY;
