@@ -213,10 +213,14 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       });
       if (!patchRes.ok) throw new Error("profile update failed");
 
-      // 4. Update local display via the proxy URL (cache-busted)
+      // 4. Refresh session cookie so AppShell picks up the new avatarUrl
+      await fetch("/api/account/session/refresh", { method: "POST" });
+
+      // 5. Update local display via the proxy URL (cache-busted)
       setAvatarUrl(r2Key);
       setSaveMsg("✓ 头像已更新");
       setSaveMsgOk(true);
+      router.refresh();
     } catch {
       setSaveMsg("头像上传失败，请重试");
       setSaveMsgOk(false);

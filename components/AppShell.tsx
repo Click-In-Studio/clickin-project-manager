@@ -63,7 +63,6 @@ const OVERVIEW_NAV = [
 
 function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
   if (!avatarUrl) return null;
-  if (avatarUrl.startsWith("http")) return avatarUrl;
   return `/api/user/avatar/${userId}`;
 }
 
