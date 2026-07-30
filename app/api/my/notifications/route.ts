@@ -15,7 +15,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import {
   listUserNotifications, markAllNotificationsRead,
-  markNotificationRead,
+  markNotificationRead, autoCompleteDeadNotifications,
 } from "@/lib/inbox-db";
 
 export async function GET(req: NextRequest) {
@@ -31,6 +31,9 @@ export async function GET(req: NextRequest) {
   const before = url.searchParams.get("before") ?? undefined;
   const limitRaw = parseInt(url.searchParams.get("limit") ?? "40", 10);
   const limit = Math.min(isNaN(limitRaw) ? 40 : limitRaw, 100);
+
+  // Clean up notifications whose entity was deleted (fire-and-forget, non-blocking)
+  autoCompleteDeadNotifications(session.userId).catch(() => {});
 
   const notifications = await listUserNotifications(session.userId, {
     productionId,

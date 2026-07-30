@@ -574,6 +574,39 @@
       "nullable": false
     }
   ],
+  "email_otp": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "email",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "used_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "event_call_time": [
     {
       "column": "id",
@@ -1903,6 +1936,61 @@
     },
     {
       "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "is_primary",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    }
+  ],
+  "user_profile": [
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "display_name",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "bio",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "avatar_url",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "phone",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "preferred_platform",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"

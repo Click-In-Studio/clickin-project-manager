@@ -336,6 +336,32 @@ export async function confirmCallTime(
 }
 
 /**
+ * Auto-complete action_required notifications whose underlying entity has been deleted.
+ * Called on every notification list fetch so the inbox stays clean without a background job.
+ *
+ * Covered entity types:
+ *   tech_req  — event_tech_req (CASCADE-deleted when production_event is deleted)
+ *   call_time — event_call_time (CASCADE-deleted when production_event is deleted)
+ */
+export async function autoCompleteDeadNotifications(userId: string): Promise<void> {
+  await getPool().query(
+    `UPDATE user_notification
+     SET acted_at   = now(),
+         read_at    = COALESCE(read_at, now()),
+         action_result = '{"auto_expired":"entity_deleted"}'
+     WHERE user_id        = $1
+       AND action_required = true
+       AND acted_at        IS NULL
+       AND (
+         (entity_type = 'tech_req'  AND NOT EXISTS (SELECT 1 FROM event_tech_req  WHERE id = user_notification.entity_id))
+         OR
+         (entity_type = 'call_time' AND NOT EXISTS (SELECT 1 FROM event_call_time WHERE id = user_notification.entity_id))
+       )`,
+    [userId],
+  );
+}
+
+/**
  * Expire all unacted notifications for a given entity (and optionally a specific user).
  *
  * Call this when a superseding event occurs — e.g. a call time is modified after

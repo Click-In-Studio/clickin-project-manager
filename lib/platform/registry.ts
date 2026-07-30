@@ -1,9 +1,16 @@
 import type { PersonalChannel, OrgChannel, InboundGateway, PlatformId } from "./types";
 import { feishuPlatform } from "./feishu";
+import { emailPlatform } from "./email";
 
-const personalChannels = new Map<PlatformId, PersonalChannel>([["feishu", feishuPlatform]]);
-const orgChannels      = new Map<PlatformId, OrgChannel>([["feishu", feishuPlatform]]);
-const gateways         = new Map<PlatformId, InboundGateway>([["feishu", feishuPlatform]]);
+const personalChannels = new Map<PlatformId, PersonalChannel>([
+  ["feishu", feishuPlatform],
+  ["email", emailPlatform],
+]);
+const orgChannels = new Map<PlatformId, OrgChannel>([["feishu", feishuPlatform]]);
+const gateways    = new Map<PlatformId, InboundGateway>([
+  ["feishu", feishuPlatform],
+  ["email", emailPlatform],
+]);
 
 export function getPersonalChannel(platformId: string): PersonalChannel {
   const ch = personalChannels.get(platformId as PlatformId);

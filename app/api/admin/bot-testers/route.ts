@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
-import { getUserName as fetchFeishuName } from "@/lib/feishu-webhook";
+import { getUserName as fetchFeishuName } from "@/lib/platform/feishu/feishu-webhook";
 
 function adminOnly() {
   return NextResponse.json({ error: "forbidden" }, { status: 403 });

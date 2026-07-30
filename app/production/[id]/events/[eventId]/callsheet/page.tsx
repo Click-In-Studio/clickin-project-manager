@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "Call Sheet" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
@@ -26,14 +26,14 @@ export default async function CallSheetPage({
   if (!session) redirect("/login");
 
   const event = await getProductionEvent(eventId, productionId);
-  if (!event) redirect("/");
+  if (!event) notFound();
 
   // Check access: event:edit (production member with full view) OR in the call
   const [_prodAccess, eventPermCtx] = await Promise.all([
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     loadEventPermContext(session.userId, eventId),
   ]);
-  if (!_prodAccess) redirect("/");
+  if (!_prodAccess) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
   const canViewFull = hasPermission("event:edit", prodPermCtx);
 

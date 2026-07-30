@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
-import { buildAwaitingReqCard } from "@/lib/feishu-bot";
+import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { getPool } from "@/lib/pg";
 import { feishuPlatform } from "@/lib/platform/feishu";

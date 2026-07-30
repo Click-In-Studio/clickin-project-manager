@@ -5,7 +5,7 @@ import { hasPermission } from "@/lib/permissions";
 import type { SceneColMap, SceneConflict, ImportScenePreview } from "@/lib/import/types";
 import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
 import type { SceneRow } from "@/lib/import/scene-builder";
-import { TOKEN_COOKIE } from "@/lib/feishu-auth";
+import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 
 async function guard(req: NextRequest, productionId: string) {

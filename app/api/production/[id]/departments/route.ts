@@ -8,7 +8,7 @@ import {
   getEventDepartment,
   setDepartmentChatId,
 } from "@/lib/event-db";
-import { createChat } from "@/lib/feishu-chat";
+import { createChat } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string }> };
 

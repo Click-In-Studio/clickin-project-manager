@@ -47,7 +47,7 @@ export async function resolveNotificationTarget(
     `SELECT platform_id, platform_user_id
      FROM user_platform_identity
      WHERE user_id = $1
-     ORDER BY is_login_method DESC, created_at ASC
+     ORDER BY is_primary DESC, is_login_method DESC, created_at ASC
      LIMIT 1`,
     [userId],
   );

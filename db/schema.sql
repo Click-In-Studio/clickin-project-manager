@@ -45,6 +45,29 @@ CREATE TABLE IF NOT EXISTS feishu_user (
   user_id        UUID NOT NULL UNIQUE REFERENCES app_user(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS user_profile (
+  user_id            UUID PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
+  name               TEXT NOT NULL,
+  display_name       TEXT,
+  bio                TEXT,
+  avatar_url         TEXT,
+  phone              TEXT,
+  preferred_platform TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS email_otp (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  email      TEXT NOT NULL,
+  code       TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at    TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS email_otp_lookup ON email_otp(email, code) WHERE used_at IS NULL;
+
 -- ── Productions ───────────────────────────────────────────────────────────────
 -- active_version_id FK is added after version table (circular dependency).
 
@@ -589,9 +612,15 @@ CREATE TABLE IF NOT EXISTS user_platform_identity (
   platform_user_id TEXT NOT NULL,
   label            TEXT,
   is_login_method  BOOLEAN NOT NULL DEFAULT false,
+  is_primary       BOOLEAN NOT NULL DEFAULT false,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (platform_id, platform_user_id)
 );
+
+-- At most one primary email per user
+CREATE UNIQUE INDEX IF NOT EXISTS upi_primary_email_uniq
+  ON user_platform_identity(user_id)
+  WHERE platform_id = 'email' AND is_primary = true;
 
 CREATE INDEX IF NOT EXISTS upi_user_id_idx ON user_platform_identity(user_id);
 

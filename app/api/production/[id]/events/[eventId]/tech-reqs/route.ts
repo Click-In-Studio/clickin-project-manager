@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
 import { loadEventPermContext, canEditTechReq } from "@/lib/event-permissions";
-import { buildAwaitingReqCard } from "@/lib/feishu-bot";
+import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { BASE_PATH } from "@/lib/base-path";

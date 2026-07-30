@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, selfFollowEvent, selfUnfollowEvent, getSelfParticipantRole } from "@/lib/event-db";
-import { addChatMembers } from "@/lib/feishu-chat";
+import { addChatMembers } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

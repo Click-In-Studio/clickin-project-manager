@@ -12,7 +12,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
-import { buildUrgeReqCard } from "@/lib/feishu-bot";
+import { buildUrgeReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { notifyUsers } from "@/lib/notify";

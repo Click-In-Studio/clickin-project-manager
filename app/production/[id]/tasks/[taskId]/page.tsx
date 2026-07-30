@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
@@ -28,10 +28,10 @@ export default async function TaskDetailPage({ params }: Ctx) {
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) redirect("/");
+  if (!access) redirect(`/unauthorized?resource=${encodeURIComponent("项目")}&id=${productionId}`);
 
   const req = await getTechReqByProduction(taskId, productionId);
-  if (!req) redirect(`/production/${productionId}/tasks`);
+  if (!req) notFound();
 
   const eventId = req.eventId;
 
@@ -42,7 +42,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
     listProductionMembersWithRoles(productionId),
   ]);
 
-  if (!event) redirect(`/production/${productionId}/tasks`);
+  if (!event) notFound();
 
   const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
   const pocDeptIds = departments
@@ -52,7 +52,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const isAssignee = req.assignees.some(a => a.userId === session.userId);
 
   if (!canViewFull && !isPocOfDept && !isAssignee)
-    redirect(`/production/${productionId}/tasks`);
+    redirect(`/unauthorized?resource=${encodeURIComponent("技术需求")}&id=${taskId}`);
 
   const dept = departments.find(d => d.id === req.departmentId);
   const deptPeople = dept

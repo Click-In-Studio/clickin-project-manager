@@ -7,13 +7,16 @@ import {
   getTenantAccessToken,
   fetchAllTenantUsersRaw,
   searchUsersByName,
+  checkIsTenantManager,
+  TOKEN_COOKIE,
   type FeishuRawUser,
-} from "../feishu-auth";
+} from "./feishu-auth";
+import { upsertFeishuUser } from "../../db";
 import {
   sendBotDm,
   sendCard,
   sendChatCard,
-} from "../feishu-bot";
+} from "./feishu-bot";
 import {
   createChat,
   addChatMembers,
@@ -21,7 +24,7 @@ import {
   getChatMemberOpenIds,
   updateChatName,
   searchChats,
-} from "../feishu-chat";
+} from "./feishu-chat";
 import type {
   PersonalChannel,
   PersonalCapabilities,
@@ -40,7 +43,8 @@ import type {
   ReceivedMessage,
   InteractionOption,
   AuthToken,
-} from "./types";
+  LoginResult,
+} from "../types";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 
@@ -96,6 +100,30 @@ export class FeishuPlatform implements PersonalChannel, OrgChannel, InboundGatew
         accessToken: tokenData.userAccessToken,
         expiresAt: tokenData.expiry,
       },
+    };
+  }
+
+  async performLogin(code: string): Promise<LoginResult> {
+    const tokenData = await exchangeCode(code);
+    const info = await feishuGetUserInfo(tokenData.userAccessToken);
+    if (!info) throw new Error("feishu: failed to fetch user info");
+    const isAdmin = await checkIsTenantManager(info.openId);
+    const { userId } = await upsertFeishuUser(info.openId, info.name, info.avatarUrl ?? null, isAdmin);
+    return {
+      userId,
+      name: info.name,
+      avatarUrl: info.avatarUrl ?? null,
+      isAdmin,
+      extraCookies: [{
+        name: TOKEN_COOKIE,
+        value: tokenData.userAccessToken,
+        opts: {
+          httpOnly: true,
+          path: "/",
+          sameSite: "lax",
+          maxAge: Math.max(1, Math.floor((tokenData.expiry - Date.now()) / 1000)),
+        },
+      }],
     };
   }
 

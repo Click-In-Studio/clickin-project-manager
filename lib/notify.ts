@@ -22,12 +22,17 @@ import { getPool } from "./pg";
 import { BASE_PATH } from "./base-path";
 import {
   buildWeeklyCallCard, buildDailyCallCard, buildReportCard, buildMentionCard,
-} from "./feishu-bot";
+} from "./platform/feishu/feishu-bot";
 import {
   listAllReportMentionedUserIds,
   type WeeklyCallEntry, type DailyCallScheduleItem,
 } from "./event-db";
 import { createCardToken } from "./card-token";
+import { signRsvpToken } from "./platform/email/email-tokens";
+import {
+  buildEventPublishEmail, buildWeeklyCallEmail, buildDailyCallEmail,
+  buildReportEmail, buildMentionEmail,
+} from "./platform/email/email-templates";
 import {
   getOptedOutUsers, isExternalEnabled,
   shouldDeliverExternal, resolveDeliveryPolicy,
@@ -187,18 +192,21 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
   const pool = getPool();
 
   const [eventRes, callsRes] = await Promise.all([
-    pool.query<{ title: string; production_id: string; start_time: string | null }>(
-      `SELECT title, production_id, start_time FROM production_event WHERE id = $1`,
+    pool.query<{ title: string; description: string | null; production_id: string; start_time: string | null }>(
+      `SELECT title, description, production_id, start_time FROM production_event WHERE id = $1`,
       [eventId],
     ),
-    pool.query<{ id: string; user_id: string; call_at: string; name: string }>(
-      `SELECT id, user_id, call_at, name FROM event_call_time WHERE event_id = $1 ORDER BY call_at`,
+    pool.query<{ id: string; user_id: string; call_at: string; name: string; notes: string | null }>(
+      `SELECT id, user_id, call_at, name, notes FROM event_call_time WHERE event_id = $1 ORDER BY call_at`,
       [eventId],
     ),
   ]);
 
   const event = eventRes.rows[0];
   if (!event || !callsRes.rows.length) return;
+
+  const prodNameRes = await pool.query<{ name: string }>(`SELECT name FROM production WHERE id = $1`, [event.production_id]);
+  const productionName = prodNameRes.rows[0]?.name ?? "后台";
 
   // Determine whether we're inside the daily-call dispatch window:
   // after this window, RSVP degrades to hard confirm-only (同 daily-call 行为).
@@ -289,6 +297,35 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
         const policy = await resolveDeliveryPolicy(event.production_id, "event_publish", row.user_id);
         if (!shouldDeliverExternal(userEnabled, "dm", policy)) return null;
         const actionUrl = resolvedTarget.adapter.buildActionUrl(viewHref);
+        if (resolvedTarget.platformId === "email") {
+          const confirmToken = signRsvpToken(row.user_id, row.id, "confirm");
+          const rsvpUrls = isPastDispatchWindow ? undefined : {
+            yes:      signRsvpToken(row.user_id, row.id, "yes"),
+            no:       signRsvpToken(row.user_id, row.id, "no"),
+            tentative: signRsvpToken(row.user_id, row.id, "tentative"),
+          };
+          const rsvpBaseUrl = `${BASE_PATH}/api/rsvp?token=`;
+          return {
+            text: `Event 已发布 — ${event.title}，你的 Call 时间：${callTimeStr}，查看：${actionUrl}`,
+            title: `${productionName}通知`,
+            primaryUrl: actionUrl,
+            richContent: buildEventPublishEmail({
+              eventTitle: event.title,
+              eventDescription: event.description,
+              callTimeStr,
+              callTimeNotes: row.notes,
+              viewUrl: actionUrl,
+              rsvpUrls: rsvpUrls ? {
+                yes:      `${rsvpBaseUrl}${encodeURIComponent(rsvpUrls.yes)}`,
+                no:       `${rsvpBaseUrl}${encodeURIComponent(rsvpUrls.no)}`,
+                tentative: `${rsvpBaseUrl}${encodeURIComponent(rsvpUrls.tentative)}`,
+              } : undefined,
+              confirmUrl: isPastDispatchWindow
+                ? `${rsvpBaseUrl}${encodeURIComponent(confirmToken)}`
+                : undefined,
+            }),
+          };
+        }
         return {
           text: `Event 已发布 — ${event.title}，你的 Call 时间：${callTimeStr}，查看：${actionUrl}`,
           title: `Event 已发布 — ${event.title}`,
@@ -359,16 +396,21 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
         const policy = await resolveDeliveryPolicy(null, "weekly_call", userId);
         if (!shouldDeliverExternal(userEnabled, "dm", policy)) return null;
         const actionUrl = target.adapter.buildActionUrl(viewHref);
-        const card = buildWeeklyCallCard(entries, actionUrl);
+        let richContent: unknown;
+        if (target.platformId === "email") {
+          richContent = buildWeeklyCallEmail(entries, actionUrl);
+        } else {
+          richContent = buildWeeklyCallCard(entries, actionUrl);
+        }
         const message: PlatformMessage = {
           text: `你本周有 ${entries.length} 场 Call，点击查看：${actionUrl}`,
-          title: "本周 Call 安排",
+          title: target.platformId === "email" ? "后台通知" : "本周 Call 安排",
           primaryUrl: actionUrl,
-          richContent: card,
+          richContent,
         };
         if (dryRun) {
           dryMessages.push({ platformUserId: target.platformUserId, platformId: target.platformId, message });
-          return null; // don't actually send in dry run
+          return null;
         }
         return message;
       },
@@ -512,6 +554,9 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
   const event = eventRes.rows[0];
   if (!event || !event.start_time) return { sent: 0, errors: [] };
 
+  const dailyProdNameRes = await pool.query<{ name: string }>(`SELECT name FROM production WHERE id = $1`, [event.production_id]);
+  const dailyProductionName = dailyProdNameRes.rows[0]?.name ?? "后台";
+
   const callsRes = await pool.query<{
     id: string; user_id: string; name: string; call_at: string; notes: string;
   }>(
@@ -592,15 +637,32 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
         const policy = await resolveDeliveryPolicy(event.production_id, "daily_call", row.user_id);
         if (!shouldDeliverExternal(userEnabled, "dm", policy)) return null;
         const actionUrl = target.adapter.buildActionUrl(viewHref);
-        const card = buildDailyCallCard(
-          event.title, event.location, event.start_time!,
-          row.call_at, row.notes, scheduleItems, allCalls, actionUrl,
-        );
+        let richContent: unknown;
+        if (target.platformId === "email") {
+          const confirmToken = signRsvpToken(row.user_id, row.id, "confirm");
+          const rsvpBaseUrl = `${BASE_PATH}/api/rsvp?token=`;
+          richContent = buildDailyCallEmail({
+            eventTitle: event.title,
+            eventLocation: event.location,
+            startTime: event.start_time!,
+            myCallAt: row.call_at,
+            myCallNotes: row.notes,
+            scheduleItems,
+            allCalls,
+            viewUrl: actionUrl,
+            confirmUrl: `${rsvpBaseUrl}${encodeURIComponent(confirmToken)}`,
+          });
+        } else {
+          richContent = buildDailyCallCard(
+            event.title, event.location, event.start_time!,
+            row.call_at, row.notes, scheduleItems, allCalls, actionUrl,
+          );
+        }
         const message: PlatformMessage = {
           text: `明日 Call — ${event.title}，你的 Call 时间：${row.call_at}，查看：${actionUrl}`,
-          title: `明日 Call Sheet — ${event.title}`,
+          title: target.platformId === "email" ? `${dailyProductionName}通知` : `明日 Call Sheet — ${event.title}`,
           primaryUrl: actionUrl,
-          richContent: card,
+          richContent,
         };
         if (dryRun) {
           dryMessages.push({ platformUserId: target.platformUserId, platformId: target.platformId, message });
@@ -635,7 +697,7 @@ export async function dispatchReportNotification(
   const report = rptRes.rows[0];
   if (!report?.published_at) return { sent: 0, errors: [] };
 
-  const [evRes, notesRes] = await Promise.all([
+  const [evRes, notesRes, rptProdNameRes] = await Promise.all([
     pool.query<{ title: string }>(`SELECT title FROM production_event WHERE id = $1`, [eventId]),
     pool.query<{ dept_name: string; content: string }>(
       `SELECT ed.name AS dept_name, ern.content
@@ -644,8 +706,10 @@ export async function dispatchReportNotification(
        WHERE ern.report_id = $1 ORDER BY ed.display_order, ern.created_at`,
       [reportId],
     ),
+    pool.query<{ name: string }>(`SELECT name FROM production WHERE id = $1`, [productionId]),
   ]);
   const eventTitle = evRes.rows[0]?.title ?? "";
+  const rptProductionName = rptProdNameRes.rows[0]?.name ?? "后台";
   const notes = notesRes.rows.map((r) => ({ deptName: r.dept_name, content: r.content }));
 
   const recipRes = await pool.query<{ user_id: string }>(
@@ -677,12 +741,17 @@ export async function dispatchReportNotification(
     buildExternalMessage: async (userId, target) => {
       const token = createCardToken(userId, `report:${reportId}`, reportTokenExp);
       const actionUrl = target.adapter.buildActionUrl(`${viewHref}/${token}`);
-      const card = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, actionUrl);
+      let richContent: unknown;
+      if (target.platformId === "email") {
+        richContent = buildReportEmail({ reportTitle: report.title, eventTitle, reportBody: report.body, notes, viewUrl: actionUrl });
+      } else {
+        richContent = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, actionUrl);
+      }
       const message: PlatformMessage = {
         text: `新报告：${report.title}（${eventTitle}），查看：${actionUrl}`,
-        title: `新报告 — ${report.title}`,
+        title: target.platformId === "email" ? `${rptProductionName}通知` : `新报告 — ${report.title}`,
         primaryUrl: actionUrl,
-        richContent: card,
+        richContent,
       };
       if (dryRun) {
         dryMessages.push({ platformUserId: target.platformUserId, platformId: target.platformId, message });
@@ -712,12 +781,14 @@ export async function dispatchMentionNotifications(
   if (!mentionedUserIds.length) return;
 
   const pool = getPool();
-  const [rptRes, evRes] = await Promise.all([
+  const [rptRes, evRes, mentionProdNameRes] = await Promise.all([
     pool.query<{ title: string }>("SELECT title FROM event_report WHERE id = $1", [reportId]),
     pool.query<{ title: string }>("SELECT title FROM production_event WHERE id = $1", [eventId]),
+    pool.query<{ name: string }>("SELECT name FROM production WHERE id = $1", [productionId]),
   ]);
   const reportTitle = rptRes.rows[0]?.title ?? "报告";
   const eventTitle = evRes.rows[0]?.title ?? "";
+  const mentionProductionName = mentionProdNameRes.rows[0]?.name ?? "后台";
   const viewHref = `${BASE_PATH}/production/${productionId}/reports/${reportId}`;
   const tokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
@@ -734,12 +805,14 @@ export async function dispatchMentionNotifications(
     buildExternalMessage: async (userId, target) => {
       const token = createCardToken(userId, `report:${reportId}`, tokenExp);
       const actionUrl = target.adapter.buildActionUrl(`${viewHref}/${token}`);
-      const card = buildMentionCard(reportTitle, eventTitle, actionUrl);
+      const richContent = target.platformId === "email"
+        ? buildMentionEmail({ reportTitle, eventTitle, viewUrl: actionUrl })
+        : buildMentionCard(reportTitle, eventTitle, actionUrl);
       return {
         text: `${eventTitle} 的报告「${reportTitle}」中提到了你，查看：${actionUrl}`,
-        title: "报告提及",
+        title: target.platformId === "email" ? `${mentionProductionName}通知` : "报告提及",
         primaryUrl: actionUrl,
-        richContent: card,
+        richContent,
       };
     },
   });
