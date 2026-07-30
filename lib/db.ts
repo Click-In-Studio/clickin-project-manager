@@ -2323,17 +2323,17 @@ export async function getUserProfile(
 
 export async function getUserIdentities(
   userId: string,
-): Promise<{ id: string; platformId: string; platformUserId: string; label: string | null; isLoginMethod: boolean; displayName: string | null; avatarUrl: string | null }[]> {
+): Promise<{ id: string; platformId: string; platformUserId: string; label: string | null; isLoginMethod: boolean; isPrimary: boolean; displayName: string | null; avatarUrl: string | null }[]> {
   const res = await getPool().query<{
     id: string; platform_id: string; platform_user_id: string; label: string | null;
-    is_login_method: boolean; fu_name: string | null; fu_avatar: string | null;
+    is_login_method: boolean; is_primary: boolean; fu_name: string | null; fu_avatar: string | null;
   }>(
-    `SELECT upi.id, upi.platform_id, upi.platform_user_id, upi.label, upi.is_login_method,
+    `SELECT upi.id, upi.platform_id, upi.platform_user_id, upi.label, upi.is_login_method, upi.is_primary,
             fu.name AS fu_name, fu.avatar_url AS fu_avatar
      FROM user_platform_identity upi
      LEFT JOIN feishu_user fu ON fu.user_id = upi.user_id AND upi.platform_id = 'feishu'
      WHERE upi.user_id = $1
-     ORDER BY upi.created_at`,
+     ORDER BY upi.platform_id, upi.is_primary DESC, upi.created_at`,
     [userId],
   );
   return res.rows.map(r => ({
@@ -2342,6 +2342,7 @@ export async function getUserIdentities(
     platformUserId: r.platform_user_id,
     label: r.label,
     isLoginMethod: r.is_login_method,
+    isPrimary: r.is_primary,
     displayName: r.fu_name ?? null,
     avatarUrl: r.fu_avatar ?? null,
   }));
@@ -2374,12 +2375,93 @@ export async function bindPlatformIdentity(
     if (existingUserId === userId) return { result: "bound" }; // already bound
     return { result: "conflict", existingUserId };
   }
-  await pool.query(
-    `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method)
-     VALUES ($1, $2, $3, true)`,
-    [userId, platformId, platformUserId],
-  );
+  if (platformId === "email") {
+    const hasPrimary = await pool.query(
+      `SELECT 1 FROM user_platform_identity WHERE user_id = $1 AND platform_id = 'email' AND is_primary = true`,
+      [userId],
+    );
+    await pool.query(
+      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+       VALUES ($1, $2, $3, true, $4)`,
+      [userId, platformId, platformUserId, hasPrimary.rows.length === 0],
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method)
+       VALUES ($1, $2, $3, true)`,
+      [userId, platformId, platformUserId],
+    );
+  }
   return { result: "bound" };
+}
+
+export async function setPrimaryEmail(userId: string, upiId: string): Promise<void> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Verify the target UPI belongs to this user and is an email identity
+    const check = await client.query<{ id: string }>(
+      `SELECT id FROM user_platform_identity WHERE id = $1 AND user_id = $2 AND platform_id = 'email'`,
+      [upiId, userId],
+    );
+    if (!check.rows.length) throw new Error("identity not found");
+    await client.query(
+      `UPDATE user_platform_identity SET is_primary = false WHERE user_id = $1 AND platform_id = 'email'`,
+      [userId],
+    );
+    await client.query(
+      `UPDATE user_platform_identity SET is_primary = true WHERE id = $1`,
+      [upiId],
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function unbindEmail(userId: string, upiId: string): Promise<void> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const upi = await client.query<{ is_primary: boolean }>(
+      `SELECT is_primary FROM user_platform_identity WHERE id = $1 AND user_id = $2 AND platform_id = 'email'`,
+      [upiId, userId],
+    );
+    if (!upi.rows.length) throw new Error("identity not found");
+
+    // Count remaining login methods after removal
+    const remaining = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM user_platform_identity WHERE user_id = $1 AND id != $2 AND is_login_method = true`,
+      [userId, upiId],
+    );
+    if (Number(remaining.rows[0].count) === 0) throw new Error("last login method");
+
+    // If removing primary and other emails exist, auto-promote the oldest other email
+    if (upi.rows[0].is_primary) {
+      await client.query(
+        `UPDATE user_platform_identity SET is_primary = true
+         WHERE id = (
+           SELECT id FROM user_platform_identity
+           WHERE user_id = $1 AND platform_id = 'email' AND id != $2
+           ORDER BY created_at ASC LIMIT 1
+         )`,
+        [userId, upiId],
+      );
+    }
+
+    await client.query(`DELETE FROM user_platform_identity WHERE id = $1`, [upiId]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export interface AccountSummary {
@@ -2596,8 +2678,8 @@ export async function upsertEmailUser(
       );
       userId = rows[0].id;
       await client.query(
-        `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method)
-         VALUES ($1, 'email', $2, true)`,
+        `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+         VALUES ($1, 'email', $2, true, true)`,
         [userId, email],
       );
       await client.query(

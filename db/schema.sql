@@ -612,9 +612,15 @@ CREATE TABLE IF NOT EXISTS user_platform_identity (
   platform_user_id TEXT NOT NULL,
   label            TEXT,
   is_login_method  BOOLEAN NOT NULL DEFAULT false,
+  is_primary       BOOLEAN NOT NULL DEFAULT false,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (platform_id, platform_user_id)
 );
+
+-- At most one primary email per user
+CREATE UNIQUE INDEX IF NOT EXISTS upi_primary_email_uniq
+  ON user_platform_identity(user_id)
+  WHERE platform_id = 'email' AND is_primary = true;
 
 CREATE INDEX IF NOT EXISTS upi_user_id_idx ON user_platform_identity(user_id);
 

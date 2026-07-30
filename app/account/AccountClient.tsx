@@ -11,6 +11,7 @@ type Identity = {
   platformUserId: string;
   label: string | null;
   isLoginMethod: boolean;
+  isPrimary: boolean;
   displayName: string | null;
   avatarUrl: string | null;
 };
@@ -206,14 +207,73 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
     }
   }
 
+  async function handleSetPrimary(upiId: string) {
+    setBindMsg("");
+    try {
+      const res = await fetch("/api/account/email/set-primary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upiId }),
+      });
+      if (res.ok) {
+        setIdentities(prev => prev.map(i => i.platformId === "email" ? { ...i, isPrimary: i.id === upiId } : i));
+      } else {
+        setBindMsg("设置失败，请重试");
+        setBindMsgOk(false);
+      }
+    } catch {
+      setBindMsg("网络错误");
+      setBindMsgOk(false);
+    }
+  }
+
+  async function handleUnbindEmail(upiId: string, email: string) {
+    if (!confirm(`确认解绑邮箱 ${email}？`)) return;
+    setBindMsg("");
+    try {
+      const res = await fetch("/api/account/email/unbind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upiId }),
+      });
+      if (res.ok) {
+        setIdentities(prev => {
+          const next = prev.filter(i => i.id !== upiId);
+          // If we removed the primary, auto-mark the first remaining email as primary
+          const hasPrimary = next.some(i => i.platformId === "email" && i.isPrimary);
+          if (!hasPrimary) {
+            const firstEmail = next.find(i => i.platformId === "email");
+            if (firstEmail) return next.map(i => i.id === firstEmail.id ? { ...i, isPrimary: true } : i);
+          }
+          return next;
+        });
+        setBindMsg(`已解绑 ${email}`);
+        setBindMsgOk(true);
+      } else {
+        const body = await res.json() as { error?: string };
+        setBindMsg(body.error === "last login method" ? "无法解绑：这是你唯一的登录方式" : "解绑失败，请重试");
+        setBindMsgOk(false);
+      }
+    } catch {
+      setBindMsg("网络错误");
+      setBindMsgOk(false);
+    }
+  }
+
   const hasFeishu = identities.some(i => i.platformId === "feishu");
   const hasEmail = identities.some(i => i.platformId === "email");
-  const emailIdentity = identities.find(i => i.platformId === "email");
+  const primaryEmail = identities.find(i => i.platformId === "email" && i.isPrimary)
+    ?? identities.find(i => i.platformId === "email");
+  const emailIdentities = identities.filter(i => i.platformId === "email");
 
-  // Options for 主要通道 — only bound platforms
+  // Options for 主要通道 — dedupe by platformId, email uses primary one
   const channelOptions = identities
-    .filter(i => i.isLoginMethod)
-    .map(i => ({ value: i.platformId, label: PLATFORM_LABEL[i.platformId] ?? i.platformId }));
+    .filter(i => i.isLoginMethod && (i.platformId !== "email" || i.isPrimary || !identities.some(x => x.platformId === "email" && x.isPrimary)))
+    .reduce<{ value: string; label: string }[]>((acc, i) => {
+      if (!acc.some(o => o.value === i.platformId))
+        acc.push({ value: i.platformId, label: PLATFORM_LABEL[i.platformId] ?? i.platformId });
+      return acc;
+    }, []);
 
   return (
     <div className={styles.shell}>
@@ -238,7 +298,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
             <span>{initial(name)}</span>
             <p>
               <b>{name}</b>
-              {emailIdentity && <small>{emailIdentity.platformUserId}</small>}
+              {primaryEmail && <small>{primaryEmail.platformUserId}</small>}
             </p>
           </div>
           <nav className={styles.sidebarNav} aria-label="个人中心导航">
@@ -451,7 +511,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   <p style={{ fontSize: 11, color: "var(--muted)", margin: 0 }}>暂无绑定的登录方式</p>
                 )}
 
-                {identities.map(id => (
+                {identities.filter(id => id.platformId !== "email").map(id => (
                   <div key={id.id} className={styles.row}>
                     <span className={styles.rowIcon}>
                       {PLATFORM_ICON[id.platformId] ?? id.platformId.slice(0, 1)}
@@ -480,28 +540,55 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   </div>
                 )}
 
-                {!hasEmail && (
-                  <div className={styles.row} style={{ flexWrap: "wrap" }}>
+                {/* Email identities */}
+                {emailIdentities.map(em => (
+                  <div key={em.id} className={styles.row}>
                     <span className={styles.rowIcon}>邮</span>
                     <div className={styles.rowInfo}>
-                      <b>邮箱</b>
-                      <span>绑定后可使用邮箱验证码登录</span>
+                      <b>
+                        邮箱
+                        {em.isPrimary && (
+                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: "var(--stage)", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 4, padding: "1px 6px" }}>主</span>
+                        )}
+                      </b>
+                      <span>{em.platformUserId}</span>
                     </div>
-                    <form onSubmit={handleBindEmail} className={styles.bindForm} style={{ margin: 0 }}>
-                      <input
-                        type="email"
-                        value={bindEmail}
-                        onChange={e => setBindEmail(e.target.value)}
-                        placeholder="输入邮箱地址"
-                        required
-                        className={styles.bindInput}
-                      />
-                      <button type="submit" className={styles.outlineButton} disabled={bindingEmail}>
-                        {bindingEmail ? "发送中…" : "发送链接"}
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      {!em.isPrimary && (
+                        <button type="button" className={styles.outlineButton} style={{ fontSize: 12 }}
+                          onClick={() => handleSetPrimary(em.id)}>
+                          设为主邮箱
+                        </button>
+                      )}
+                      <button type="button" className={styles.outlineButton} style={{ fontSize: 12, color: "var(--muted)" }}
+                        onClick={() => handleUnbindEmail(em.id, em.platformUserId)}>
+                        解绑
                       </button>
-                    </form>
+                    </div>
                   </div>
-                )}
+                ))}
+
+                {/* Bind new email */}
+                <div className={styles.row} style={{ flexWrap: "wrap" }}>
+                  <span className={styles.rowIcon}>+</span>
+                  <div className={styles.rowInfo}>
+                    <b>{hasEmail ? "绑定新邮箱" : "邮箱"}</b>
+                    <span>{hasEmail ? "可绑定多个邮箱，均可用于登录" : "绑定后可使用邮箱验证码登录"}</span>
+                  </div>
+                  <form onSubmit={handleBindEmail} className={styles.bindForm} style={{ margin: 0 }}>
+                    <input
+                      type="email"
+                      value={bindEmail}
+                      onChange={e => setBindEmail(e.target.value)}
+                      placeholder="输入邮箱地址"
+                      required
+                      className={styles.bindInput}
+                    />
+                    <button type="submit" className={styles.outlineButton} disabled={bindingEmail}>
+                      {bindingEmail ? "发送中…" : "发送链接"}
+                    </button>
+                  </form>
+                </div>
               </section>
 
               {bindMsg && (
