@@ -128,7 +128,7 @@ function computeWeekSlots(week: Date[], events: ProductionEvent[]): CalEventSlot
 
 // ─── Calendar: week row ──────────────────────────────────────────────────────
 
-const DAY_H    = 34;   // px — date-number header area
+const DAY_H    = 26;   // px — date-number header area
 const EVT_H    = 22;   // px — height per event row
 const MAX_ROWS = 3;    // max visible event rows before overflow
 const GAP      = 2;    // px — gap between chip edge and cell border
@@ -155,29 +155,31 @@ function CalWeekRow({
       position: "relative",
       display: "grid",
       gridTemplateColumns: "repeat(7, 1fr)",
-      borderTop: "1px solid var(--line)",
       minHeight: totalH,
     }}>
       {/* Date number cells */}
       {week.map((day, col) => {
-        const isToday     = dayTs(day) === todayTs;
-        const isCurMonth  = day.getMonth() === month;
+        const isToday    = dayTs(day) === todayTs;
+        const isCurMonth = day.getMonth() === month;
         return (
           <div key={col} style={{
-            borderLeft: col > 0 ? "1px solid var(--line)" : "none",
-            padding: "5px 6px 0",
-            height: totalH,
+            borderRight: "1px solid var(--line)",
+            borderBottom: "1px solid var(--line)",
+            padding: 7,
+            height: Math.max(totalH, 93),
             boxSizing: "border-box",
+            background: isToday ? "#f8f0e7" : undefined,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
           }}>
-            <span style={{
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              width: 22, height: 22, borderRadius: "50%",
-              fontSize: 12, fontWeight: isToday ? 700 : 400,
-              background: isToday ? "var(--ink)" : "transparent",
-              color: isToday ? "#fff" : isCurMonth ? "var(--ink)" : "var(--muted)",
+            <b style={{
+              fontSize: 9,
+              fontWeight: 700,
+              color: isCurMonth ? "var(--muted)" : "var(--line)",
             }}>
               {day.getDate()}
-            </span>
+            </b>
           </div>
         );
       })}
@@ -293,49 +295,55 @@ function CalendarView({
   }
 
   const navBtn: React.CSSProperties = {
-    width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 18, lineHeight: 1, background: "none", border: "1px solid var(--line)",
-    borderRadius: 7, cursor: "pointer", color: "var(--ink)", flexShrink: 0,
+    width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: 14, lineHeight: 1, background: "none", border: "1px solid var(--line)",
+    borderRadius: 5, cursor: "pointer", color: "var(--ink)", flexShrink: 0,
   };
 
   return (
-    <div>
-      {/* Month navigation */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
-        <button onClick={prevMonth} style={navBtn}>‹</button>
-        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", minWidth: 90, textAlign: "center" }}>
-          {year}年{MONTH_NAMES[month]}
-        </span>
-        <button onClick={nextMonth} style={navBtn}>›</button>
-        <button onClick={goToday} style={{
-          marginLeft: 4, padding: "4px 10px", fontSize: 11, fontWeight: 600,
-          background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 6,
-          cursor: "pointer", color: "var(--muted)",
-        }}>
-          今天
-        </button>
+    <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>
+      {/* Panel heading */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+            <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
+              {year}年{MONTH_NAMES[month]}
+            </p>
+            <button onClick={prevMonth} style={navBtn}>‹</button>
+            <button onClick={nextMonth} style={navBtn}>›</button>
+            <button onClick={goToday} style={{
+              padding: "2px 8px", fontSize: 9, fontWeight: 700,
+              background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 5,
+              cursor: "pointer", color: "var(--muted)",
+            }}>今天</button>
+          </div>
+          <h2 style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, margin: "5px 0 0" }}>项目日历</h2>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 12, color: "var(--muted)", fontSize: 9, alignItems: "center", paddingTop: 4 }}>
+          {(["rehearsal", "performance", "meeting"] as const).map(type => {
+            const chip = TYPE_CHIP[type];
+            const label = type === "rehearsal" ? "排练" : type === "performance" ? "演出" : "会议";
+            return (
+              <span key={type} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <i style={{ width: 7, height: 7, borderRadius: 2, background: chip.fg, flexShrink: 0, display: "inline-block" }} />
+                {label}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Day-of-week header */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+        {DAY_NAMES.map((d, i) => (
+          <span key={i} style={{ padding: 7, color: "var(--muted)", fontSize: 9, textAlign: "center", display: "block" }}>
+            {d}
+          </span>
+        ))}
       </div>
 
       {/* Calendar grid */}
-      <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
-        {/* Day-of-week header */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", background: "var(--paper)", borderBottom: "1px solid var(--line)" }}>
-          {DAY_NAMES.map((d, i) => (
-            <div key={i} style={{
-              borderLeft: i > 0 ? "1px solid var(--line)" : "none",
-              padding: "6px 0",
-              textAlign: "center",
-              fontSize: 11,
-              fontWeight: 600,
-              color: i >= 5 ? "var(--stage)" : "var(--muted)",
-              letterSpacing: ".02em",
-            }}>
-              {d}
-            </div>
-          ))}
-        </div>
-
-        {/* Week rows */}
+      <div style={{ borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)" }}>
         {weeks.map((week, wi) => (
           <CalWeekRow
             key={wi}
@@ -349,7 +357,7 @@ function CalendarView({
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
