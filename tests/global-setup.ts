@@ -17,6 +17,12 @@ import {
   CUE_LIST_ROLE_SNAPSHOT_PATH,
   type CueListRoleSnapshot,
 } from "./cue-list-role-snapshot";
+import {
+  isMemberRolesPreMigrationSchema,
+  createMemberRolesPreMigrationData,
+  MEMBER_ROLES_SNAPSHOT_PATH,
+  type MemberRolesSnapshot,
+} from "./member-roles-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -68,6 +74,18 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isMemberRolesPreMigrationSchema(pool)) {
+    // Migration path: production_member_role table doesn't exist yet.
+    // TEST_USER already inserted above; use it as the factory member.
+    const memberRolesSnapshot = await createMemberRolesPreMigrationData(pool, TEST_USER);
+    await writeFile(MEMBER_ROLES_SNAPSHOT_PATH, JSON.stringify(memberRolesSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-member-roles.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -77,6 +95,23 @@ export async function teardown() {
   // cue_list.created_by and production_event.created_by need explicit deletes first.
   await pool.query("DELETE FROM cue_list WHERE created_by = $1", [TEST_USER]);
   await pool.query("DELETE FROM production_event WHERE created_by = $1", [TEST_USER]);
+
+  // Clean up member-roles migration factory data (migration path only; no-op otherwise).
+  let memberRolesSnapshot: MemberRolesSnapshot | null = null;
+  try {
+    memberRolesSnapshot = JSON.parse(
+      await readFile(MEMBER_ROLES_SNAPSHOT_PATH, "utf8"),
+    ) as MemberRolesSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (memberRolesSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [memberRolesSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(MEMBER_ROLES_SNAPSHOT_PATH).catch(() => {});
+  }
 
   // Clean up cue-list-role migration factory data (migration path only; no-op otherwise).
   let cueListRoleSnapshot: CueListRoleSnapshot | null = null;

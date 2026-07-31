@@ -2805,14 +2805,12 @@ export async function getProductionPermissionContext(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
       [userId, productionId],
     ),
-    // Try DB-backed permissions first (production_role populated after creation/backfill)
+    // Try FK-backed permissions first (production_member_role populated after migration/setMemberRoles)
     pool.query<{ permission_key: string }>(
       `SELECT DISTINCT prp.permission_key
-       FROM production_member pm
-       JOIN production_role pr
-         ON pr.production_id = pm.production_id AND pr.name = ANY(pm.roles)
-       JOIN production_role_permission prp ON prp.role_id = pr.id
-       WHERE pm.user_id = $1 AND pm.production_id = $2`,
+       FROM production_member_role pmr
+       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+       WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
     // Personal overrides (permission key column stores new atomic keys post-migration,
@@ -2977,10 +2975,54 @@ export async function setMemberRoles(
   userId: string,
   roles: string[],
 ): Promise<void> {
-  await getPool().query(
-    "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND user_id = $2",
-    [productionId, userId, roles],
-  );
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Keep TEXT[] in sync for backward compat (dropped in Phase 3)
+    await client.query(
+      "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId, roles],
+    );
+
+    // Rebuild production_member_role FK rows
+    await client.query(
+      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    );
+    if (roles.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_role (production_id, user_id, role_id)
+         SELECT $1, $2, pr.id
+         FROM production_role pr
+         WHERE pr.production_id = $1 AND pr.name = ANY($3::text[])
+         ON CONFLICT DO NOTHING`,
+        [productionId, userId, roles],
+      );
+    }
+
+    // Cascade-revoke self_confirmed grants that are no longer covered by new roles.
+    // Phase 2: resource_grant is empty, so this is a no-op in practice.
+    // Phase 4+ will add selective per-permission revocation here.
+    await client.query(
+      `UPDATE resource_grant
+       SET is_revoked = true, revoked_reason = 'role_change'
+       WHERE production_id = $1
+         AND grantee_type = 'user'
+         AND grantee_id = $2::text
+         AND grant_source = 'self_confirmed'
+         AND is_revoked = false`,
+      [productionId, userId],
+    );
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateUserContact(
@@ -4638,14 +4680,43 @@ export async function upsertProductionMemberWithRoles(
   roles: string[],
   photoUrl: string | null,
 ): Promise<void> {
-  await getPool().query(
-    `INSERT INTO production_member (production_id, user_id, roles, photo_url)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (production_id, user_id) DO UPDATE
-       SET roles     = EXCLUDED.roles,
-           photo_url = EXCLUDED.photo_url`,
-    [productionId, userId, roles, photoUrl],
-  );
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO production_member (production_id, user_id, roles, photo_url)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (production_id, user_id) DO UPDATE
+         SET roles     = EXCLUDED.roles,
+             photo_url = EXCLUDED.photo_url`,
+      [productionId, userId, roles, photoUrl],
+    );
+
+    // Rebuild production_member_role FK rows
+    await client.query(
+      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    );
+    if (roles.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_role (production_id, user_id, role_id)
+         SELECT $1, $2, pr.id
+         FROM production_role pr
+         WHERE pr.production_id = $1 AND pr.name = ANY($3::text[])
+         ON CONFLICT DO NOTHING`,
+        [productionId, userId, roles],
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Block Tags ───────────────────────────────────────────────────────────────

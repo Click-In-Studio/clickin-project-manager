@@ -838,3 +838,120 @@ CREATE TABLE IF NOT EXISTS announcement_read (
 
 CREATE INDEX IF NOT EXISTS announcement_read_announcement_idx
   ON announcement_read(announcement_id);
+
+-- ── Phase 2 (#137): 成员关系模型 ─────────────────────────────────────────────
+
+-- production_member 新增字段（supervisor_id、status）
+ALTER TABLE production_member
+  ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES app_user(id) NULL,
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'pending_exit', 'disputed', 'exited', 'suspended'));
+
+-- production_member_role：用 role_id FK 替代 roles TEXT[] 字符串数组
+CREATE TABLE IF NOT EXISTS production_member_role (
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  role_id       TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
+  PRIMARY KEY (production_id, user_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS pmr_user_prod_idx ON production_member_role (production_id, user_id);
+
+-- production_dept：新部门表（替代 event_department，数据迁移在 Phase 3）
+CREATE TABLE IF NOT EXISTS production_dept (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name            TEXT        NOT NULL,
+  parent_id       UUID        REFERENCES production_dept(id) NULL,
+  permissions     TEXT[]      NOT NULL DEFAULT '{}',
+  allowed_cue_types TEXT[]    NOT NULL DEFAULT '{}',
+  display_order   INTEGER     NOT NULL DEFAULT 0,
+  chat_id         TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS production_dept_name_unique_idx
+  ON production_dept (production_id, name, COALESCE(parent_id::text, ''));
+
+CREATE INDEX IF NOT EXISTS production_dept_production_idx
+  ON production_dept (production_id, display_order);
+
+CREATE INDEX IF NOT EXISTS production_dept_parent_idx
+  ON production_dept (parent_id);
+
+-- production_dept_member
+CREATE TABLE IF NOT EXISTS production_dept_member (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  is_poc          BOOLEAN     NOT NULL DEFAULT false,
+  poc_extra_permissions   TEXT[] NOT NULL DEFAULT '{}',
+  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',
+  poc_block_write_from_children BOOLEAN NOT NULL DEFAULT false,
+  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, dept_id)
+);
+
+CREATE INDEX IF NOT EXISTS pdm_prod_user_idx ON production_dept_member (production_id, user_id);
+CREATE INDEX IF NOT EXISTS pdm_dept_idx      ON production_dept_member (dept_id);
+
+-- production_member_tag（系统预设 + 演出自定义标签定义）
+CREATE TABLE IF NOT EXISTS production_member_tag (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT REFERENCES production(id) ON DELETE CASCADE NULL,
+  name          TEXT NOT NULL,
+  is_system     BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS pmt_system_name_idx
+  ON production_member_tag (name) WHERE production_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS pmt_prod_name_idx
+  ON production_member_tag (production_id, name) WHERE production_id IS NOT NULL;
+
+INSERT INTO production_member_tag (name, is_system)
+VALUES ('正式', true), ('副', true), ('助理', true), ('实习', true), ('顾问', true), ('外包', true)
+ON CONFLICT (name) WHERE production_id IS NULL DO NOTHING;
+
+-- production_member_tag_assignment（成员-标签关联）
+CREATE TABLE IF NOT EXISTS production_member_tag_assignment (
+  production_id TEXT NOT NULL REFERENCES production(id)            ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id)              ON DELETE CASCADE,
+  tag_id        UUID NOT NULL REFERENCES production_member_tag(id) ON DELETE CASCADE,
+  PRIMARY KEY (production_id, user_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS pmta_user_prod_idx
+  ON production_member_tag_assignment (production_id, user_id);
+
+-- ── Resource Grant（Phase 1 #158）─────────────────────────────────────────────
+-- 所有实际权限的单一权威来源。approval_id FK 等 Phase 6 approval_request 表建好后补。
+
+CREATE TABLE IF NOT EXISTS resource_grant (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  grantee_type    TEXT        NOT NULL CHECK (grantee_type IN ('user', 'dept')),
+  grantee_id      TEXT        NOT NULL,
+  resource_type   TEXT        NOT NULL,
+  resource_id     TEXT        NULL,
+  permission_level TEXT       NOT NULL CHECK (permission_level IN ('view', 'write', 'manage')),
+  grant_source    TEXT        NOT NULL CHECK (grant_source IN ('self_confirmed', 'approval', 'direct')),
+  confirmed_by    UUID        NOT NULL REFERENCES app_user(id),
+  approval_id     UUID        NULL,
+  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
+  revoked_reason  TEXT        NULL CHECK (revoked_reason IN ('role_change', 'dept_change', 'manual')),
+  expires_at      TIMESTAMPTZ NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
+  ON resource_grant (production_id, grantee_type, grantee_id, resource_type,
+                     COALESCE(resource_id, ''), permission_level)
+  WHERE is_revoked = false;
+
+CREATE INDEX IF NOT EXISTS resource_grant_grantee_idx
+  ON resource_grant (production_id, grantee_type, grantee_id);
+
+CREATE INDEX IF NOT EXISTS resource_grant_resource_idx
+  ON resource_grant (production_id, resource_type, resource_id);

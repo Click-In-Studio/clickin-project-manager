@@ -372,6 +372,11 @@ export function hasMountPermission(
 
 // ─── Member Base Permissions ───────────────────────────────────────────────────
 // All members receive these regardless of job title.
+//
+// Phase 1 设计意图（#158）：最终目标是将此列表缩减至 3 项隐式权限（成员身份感知、
+// 个人档案查看、演出基本信息查看），其余全部移入 role/dept permissions[] 配置。
+// 实际缩减等 resource_grant 系统在 Phase 4 完全接管访问控制后再执行，以保证
+// 在此之前"无 UX 变化"。
 
 export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "scene:view",
@@ -800,3 +805,46 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "script:comment", "cue:comment", "report:reply", "note:comment",
   "org:assign_member", "org:recall_member",
 ];
+
+// ─── Phase 1 (#158): Resource Grant 基础设施 ──────────────────────────────────
+
+// 资源域类型（与 resource_grant.resource_type 对应）
+export type ResourceType = "cue_list" | "script" | "note" | "tech_req" | "*";
+
+// resource_grant.permission_level 的三级
+export type PermissionLevel = "view" | "write" | "manage";
+
+// canAccess() 返回结果。Phase 1 只会返回 allowed: true/false。
+// Phase 2+ 开始返回 needs_self_confirm / needs_approval，驱动前端 UX。
+export type AccessResult =
+  | { allowed: true }
+  | { allowed: false; reason: "needs_self_confirm" }
+  | { allowed: false; reason: "needs_approval" };
+
+// ─── Dept-Assignable Permissions ──────────────────────────────────────────────
+// 可写入 production_dept.permissions[] 的权限集合。
+// 排除 root-only、sensitive-admin 以及组织级权限（不属于演出内权限配置范围）。
+
+const DEPT_EXCLUDED: Set<Permission> = new Set<Permission>([
+  ...ROOT_PERMISSIONS,
+  ...SENSITIVE_ADMIN_PERMISSIONS,
+  "org:assign_member",
+  "org:recall_member",
+]);
+
+export const DEPT_ASSIGNABLE_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.filter(
+  (p) => !DEPT_EXCLUDED.has(p),
+);
+
+// ─── canAccess ─────────────────────────────────────────────────────────────────
+// Phase 1：内部调用 hasPermission() 作为回落，用户无感知变化。
+// Phase 4+ 起，先查 resource_grant 表，未命中再查免审批区间，最终走申请流。
+
+export function canAccess(
+  ctx: PermissionContext,
+  perm: Permission,
+  _resource?: { type: ResourceType; id?: string },
+): AccessResult {
+  if (hasPermission(perm, ctx)) return { allowed: true };
+  return { allowed: false, reason: "needs_approval" };
+}
