@@ -882,7 +882,8 @@ export default function CuePage({
     () => new Set(editableListIds),
   );
   const [localManageIds, setLocalManageIds] = useState<Set<string>>(
-    () => new Set(manageListIds),
+    // creator always has implicit manage permission regardless of resource_grant state
+    () => new Set([...manageListIds, ...cueLists.filter(cl => cl.createdBy === myUserId).map(cl => cl.id)]),
   );
   const [shareModalListId, setShareModalListId] = useState<string | null>(null);
   // Phase 4: Access modal state — shown when user activates a list they don't yet have edit access to.

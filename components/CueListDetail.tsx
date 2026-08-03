@@ -141,7 +141,6 @@ function CollaboratorSection({
   const addedDeptIds = new Set(deptAccess.map(d => d.deptId));
   const availableDepts = productionDepts.filter(d => !addedDeptIds.has(d.id));
   const availableMembers = members.filter(m =>
-    m.userId !== myUserId &&
     !grantedUserIds.has(m.userId) &&
     (userSearch === "" || m.name.includes(userSearch))
   );
