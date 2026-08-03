@@ -3777,8 +3777,8 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
 export async function listCueListsWithAccess(
   productionId: string,
   userId: string,
-): Promise<(CueList & { canEdit: boolean })[]> {
-  const res = await getPool().query<CueListRow & { can_edit: boolean }>(
+): Promise<(CueList & { canEdit: boolean; canManage: boolean })[]> {
+  const res = await getPool().query<CueListRow & { can_edit: boolean; can_manage: boolean }>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.created_by, fu.name AS created_by_name, cl.created_at,
             EXISTS (
@@ -3789,14 +3789,33 @@ export async function listCueListsWithAccess(
                 AND rg.user_id = $2
                 AND rg.permission_level IN ('edit', 'manage')
                 AND NOT rg.is_revoked
-            ) AS can_edit
+            ) AS can_edit,
+            EXISTS (
+              SELECT 1 FROM resource_grant rg
+              WHERE rg.production_id = cl.production_id
+                AND rg.resource_type = 'cue_list'
+                AND rg.resource_id = cl.id
+                AND rg.user_id = $2
+                AND rg.permission_level = 'manage'
+                AND NOT rg.is_revoked
+            ) AS can_manage
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
      ORDER BY cl.created_at`,
     [productionId, userId],
   );
-  return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit }));
+  return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit, canManage: r.can_manage }));
+}
+
+export async function listProductionDepts(
+  productionId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const { rows } = await getPool().query<{ id: string; name: string }>(
+    `SELECT id, name FROM production_dept WHERE production_id = $1 ORDER BY display_order, name`,
+    [productionId],
+  );
+  return rows;
 }
 
 export async function createCueList(data: {

@@ -100,6 +100,7 @@ type Props = {
   cueLists: CueList[];
   initialCues: Cue[];
   editableListIds: string[];
+  manageListIds: string[];
   myUserId: string;
   isAdmin: boolean;
   pageMap: Record<string, number>;
@@ -844,7 +845,7 @@ function ExportModal({
 
 export default function CuePage({
   productionId, productionName, blocks: rawBlocks, characters, scenes,
-  cueLists, initialCues, editableListIds, myUserId, isAdmin, pageMap,
+  cueLists, initialCues, editableListIds, manageListIds, myUserId, isAdmin, pageMap,
   versions = [], versionId, versionStatus,
 }: Props) {
   const router = useRouter();
@@ -880,6 +881,10 @@ export default function CuePage({
   const [localEditableIds, setLocalEditableIds] = useState<Set<string>>(
     () => new Set(editableListIds),
   );
+  const [localManageIds, setLocalManageIds] = useState<Set<string>>(
+    () => new Set(manageListIds),
+  );
+  const [shareModalListId, setShareModalListId] = useState<string | null>(null);
   // Phase 4: Access modal state — shown when user activates a list they don't yet have edit access to.
   type AccessModal =
     | { listId: string; listName: string; status: "loading" }
@@ -1080,6 +1085,9 @@ export default function CuePage({
         | { canAccess: false; canSelfConfirm: false };
       if (data.canAccess) {
         setLocalEditableIds(prev => new Set([...prev, listId]));
+        if ((data as { level?: string }).level === "manage") {
+          setLocalManageIds(prev => new Set([...prev, listId]));
+        }
         setAccessModal(null);
       } else if (data.canSelfConfirm) {
         setAccessModal({ listId, listName: list.name, status: "can_self_confirm", selfConfirmLevel: data.selfConfirmLevel });
@@ -2001,6 +2009,14 @@ export default function CuePage({
               <option key={cl.id} value={cl.id}>{cl.name}{localEditableIds.has(cl.id) ? "" : " (只读)"}</option>
             ))}
           </select>
+          {activeListId && localManageIds.has(activeListId) && (
+            <button
+              onClick={() => setShareModalListId(activeListId)}
+              style={{ fontSize: 11, fontWeight: 600, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 8px", background: "transparent", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              分享
+            </button>
+          )}
           <Link
             href={`/production/${productionId}/cuelists`}
             style={{ fontSize: 11, fontWeight: 600, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 8px", textDecoration: "none", whiteSpace: "nowrap" }}
@@ -2677,6 +2693,9 @@ export default function CuePage({
                         );
                         if (res.ok) {
                           setLocalEditableIds(prev => new Set([...prev, accessModal.listId]));
+                          if (accessModal.selfConfirmLevel === "manage") {
+                            setLocalManageIds(prev => new Set([...prev, accessModal.listId]));
+                          }
                           setAccessModal(null);
                         }
                       } finally {
@@ -2713,6 +2732,180 @@ export default function CuePage({
           </div>
         </div>
       )}
+
+      {shareModalListId && (
+        <ShareModal
+          productionId={productionId}
+          cueListId={shareModalListId}
+          cueListName={cueLists.find(cl => cl.id === shareModalListId)?.name ?? ""}
+          onClose={() => setShareModalListId(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── ShareModal ───────────────────────────────────────────────────────────────
+
+import type { CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
+import type { MemberWithRoles } from "@/lib/db";
+
+function ShareModal({
+  productionId, cueListId, cueListName, onClose,
+}: {
+  productionId: string;
+  cueListId: string;
+  cueListName: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [grants, setGrants] = useState<CueListGrant[]>([]);
+  const [deptAccess, setDeptAccess] = useState<CueListDeptAccess[]>([]);
+  const [productionDepts, setProductionDepts] = useState<{ id: string; name: string }[]>([]);
+  const [members, setMembers] = useState<MemberWithRoles[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showAddDept, setShowAddDept] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+
+  const COLLAB_BASE = `${BASE_PATH}/api/production/${productionId}/cuelists/${cueListId}/collaborators`;
+
+  useEffect(() => {
+    void (async () => {
+      const [collabRes, membersRes] = await Promise.all([
+        fetch(COLLAB_BASE, { credentials: "include" }),
+        fetch(`${BASE_PATH}/api/production/${productionId}/contacts`, { credentials: "include" }),
+      ]);
+      if (collabRes.ok) {
+        const d = await collabRes.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[]; productionDepts: { id: string; name: string }[] };
+        setGrants(d.grants); setDeptAccess(d.deptAccess); setProductionDepts(d.productionDepts);
+      }
+      if (membersRes.ok) setMembers(await membersRes.json() as MemberWithRoles[]);
+      setLoading(false);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const postCollaborator = async (body: object) => {
+    setSaving(true);
+    try {
+      const res = await fetch(COLLAB_BASE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+      if (res.ok) { const d = await res.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[] }; setGrants(d.grants); setDeptAccess(d.deptAccess); }
+    } finally { setSaving(false); }
+  };
+
+  const deleteCollaborator = async (body: object) => {
+    setSaving(true);
+    try {
+      const res = await fetch(COLLAB_BASE, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+      if (res.ok) { const d = await res.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[] }; setGrants(d.grants); setDeptAccess(d.deptAccess); }
+    } finally { setSaving(false); }
+  };
+
+  const grantedUserIds = new Set(grants.map(g => g.userId));
+  const addedDeptIds = new Set(deptAccess.map(d => d.deptId));
+  const availableDepts = productionDepts.filter(d => !addedDeptIds.has(d.id));
+  const availableMembers = members.filter(m =>
+    !grantedUserIds.has(m.userId) &&
+    (userSearch === "" || m.name.includes(userSearch))
+  );
+
+  const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--line)" };
+  const removeBtnStyle: React.CSSProperties = { marginLeft: "auto", flexShrink: 0, border: 0, background: "transparent", fontSize: 11, color: "var(--muted)", cursor: saving ? "default" : "pointer", padding: "2px 6px", borderRadius: 5 };
+  const addBtnStyle: React.CSSProperties = { border: "1px dashed var(--line)", background: "transparent", borderRadius: 7, padding: "5px 10px", fontSize: 11, color: "var(--muted)", cursor: "pointer", width: "100%", textAlign: "left" as const, marginTop: 4 };
+  const labelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" as const, color: "var(--muted)", marginBottom: 6 };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(24,42,42,.25)", zIndex: 70 }} />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+        width: "min(480px, calc(100vw - 32px))", maxHeight: "calc(100vh - 80px)",
+        background: "var(--surface)", borderRadius: 16, border: "1px solid var(--line)",
+        boxShadow: "0 12px 40px rgba(24,42,42,.18)", zIndex: 71,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 2 }}>分享协作</p>
+            <h2 style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)" }}>{cueListName}</h2>
+          </div>
+          <button onClick={onClose} style={{ border: 0, background: "transparent", fontSize: 18, cursor: "pointer", color: "var(--muted)", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8 }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
+          {loading ? (
+            <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>加载中…</p>
+          ) : (
+            <>
+              <div>
+                <p style={labelStyle}>部门自助访问</p>
+                {deptAccess.length === 0 && <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", marginBottom: 4 }}>暂无部门</p>}
+                {deptAccess.map(d => (
+                  <div key={d.deptId} style={rowStyle}>
+                    <span style={{ fontSize: 12, color: "var(--ink)" }}>{d.deptName}</span>
+                    <button style={removeBtnStyle} disabled={saving} onClick={() => deleteCollaborator({ type: "dept", deptId: d.deptId })}>移除</button>
+                  </div>
+                ))}
+                {!showAddDept && availableDepts.length > 0 && (
+                  <button style={addBtnStyle} onClick={() => setShowAddDept(true)}>+ 添加部门</button>
+                )}
+                {showAddDept && (
+                  <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {availableDepts.map(d => (
+                      <button key={d.id} disabled={saving}
+                        style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
+                        onClick={async () => { await postCollaborator({ type: "dept", deptId: d.id }); setShowAddDept(false); }}>
+                        {d.name}
+                      </button>
+                    ))}
+                    <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => setShowAddDept(false)}>取消</button>
+                  </div>
+                )}
+                <p style={{ fontSize: 10, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>添加部门后，该部门符合条件的成员可自助确认访问</p>
+              </div>
+
+              <div>
+                <p style={labelStyle}>个人直接授权</p>
+                {grants.length === 0 && <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", marginBottom: 4 }}>暂无个人授权</p>}
+                {grants.map(g => (
+                  <div key={g.userId + g.level} style={rowStyle}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 12, color: "var(--ink)" }}>{g.userName}</span>
+                      <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>{g.level === "manage" ? "管理" : "编辑"}</span>
+                    </div>
+                    {g.level !== "manage" && (
+                      <button style={removeBtnStyle} disabled={saving} onClick={() => deleteCollaborator({ type: "user", userId: g.userId })}>移除</button>
+                    )}
+                  </div>
+                ))}
+                {!showAddUser && (
+                  <button style={addBtnStyle} onClick={() => { setShowAddUser(true); setUserSearch(""); }}>+ 添加成员</button>
+                )}
+                {showAddUser && (
+                  <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <input
+                      autoFocus placeholder="搜索姓名…" value={userSearch} onChange={e => setUserSearch(e.target.value)}
+                      style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", background: "var(--surface)", color: "var(--ink)", marginBottom: 2 }}
+                    />
+                    {availableMembers.length === 0
+                      ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>无匹配成员</p>
+                      : availableMembers.slice(0, 6).map(m => (
+                        <button key={m.userId} disabled={saving}
+                          style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
+                          onClick={async () => { await postCollaborator({ type: "user", userId: m.userId }); setShowAddUser(false); setUserSearch(""); }}>
+                          <span>{m.name}</span>
+                          {m.roles.length > 0 && <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>{m.roles.slice(0, 2).join("、")}</span>}
+                        </button>
+                      ))
+                    }
+                    <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => { setShowAddUser(false); setUserSearch(""); }}>取消</button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

@@ -3,9 +3,8 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import styles from "./my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import type { CueList, CueListTemplate } from "@/lib/cue-list-types";
+import type { CueList, CueListTemplate, CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
 import { TEMPLATE_ABBR_HINTS } from "@/lib/cue-list-types";
-import type { CueListPermissionRow } from "@/lib/cue-list-types";
 import type { MemberWithRoles } from "@/lib/db";
 import CueListDetail from "./CueListDetail";
 
@@ -20,10 +19,11 @@ const FILTER_LABELS: Record<Filter, string> = {
 
 type DrawerData = {
   cueList: CueList;
-  permissions: CueListPermissionRow[];
+  grants: CueListGrant[];
+  deptAccess: CueListDeptAccess[];
+  productionDepts: { id: string; name: string }[];
   canEdit: boolean;
   canManage: boolean;
-  roleEditorUserIds: string[];
 };
 
 type Props = {
@@ -352,9 +352,10 @@ export default function CueListsManager({
               <CueListDetail
                 productionId={productionId}
                 cueList={drawerData.cueList}
-                permissions={drawerData.permissions}
+                grants={drawerData.grants}
+                deptAccess={drawerData.deptAccess}
+                productionDepts={drawerData.productionDepts}
                 members={members}
-                roleEditorUserIds={drawerData.roleEditorUserIds}
                 canEdit={drawerData.canEdit}
                 canManage={drawerData.canManage}
                 myUserId={myUserId}

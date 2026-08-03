@@ -137,26 +137,76 @@ export async function getCueListAccess(
 }
 
 /**
- * Returns all active resource_grant rows (user_id + level) for a cue list.
- * Used for the permission management panel (who can edit/manage).
+ * Returns all active resource_grant rows for a cue list, with user display name.
+ * Used for the collaborator management panel.
  */
 export async function listCueListGrants(
   cueListId: string,
-): Promise<Array<{ userId: string; level: CueListLevel }>> {
-  const { rows } = await getPool().query<{ user_id: string; permission_level: string }>(
-    `SELECT rg.user_id, rg.permission_level
+): Promise<Array<{ userId: string; userName: string; level: CueListLevel }>> {
+  const { rows } = await getPool().query<{ user_id: string; user_name: string; permission_level: string }>(
+    `SELECT rg.user_id, COALESCE(fu.name, rg.user_id::text) AS user_name, rg.permission_level
      FROM resource_grant rg
+     LEFT JOIN feishu_user fu ON fu.user_id = rg.user_id
      JOIN resource_permission_level rpl
        ON rpl.resource_type = rg.resource_type
        AND rpl.permission_level = rg.permission_level
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND NOT rg.is_revoked
-     GROUP BY rg.user_id, rg.permission_level, rpl.sort_order
+     GROUP BY rg.user_id, fu.name, rg.permission_level, rpl.sort_order
      ORDER BY rpl.sort_order DESC`,
     [cueListId],
   );
-  return rows.map((r) => ({ userId: r.user_id, level: r.permission_level as CueListLevel }));
+  return rows.map((r) => ({ userId: r.user_id, userName: r.user_name, level: r.permission_level as CueListLevel }));
+}
+
+/**
+ * Returns all resource_dept_manage entries for a cue list (which depts are in the free-approval zone).
+ */
+export async function listCueListDeptAccess(
+  cueListId: string,
+): Promise<Array<{ deptId: string; deptName: string }>> {
+  const { rows } = await getPool().query<{ dept_id: string; dept_name: string }>(
+    `SELECT rdm.dept_id, pd.name AS dept_name
+     FROM resource_dept_manage rdm
+     JOIN production_dept pd ON pd.id = rdm.dept_id
+     WHERE rdm.resource_type = 'cue_list' AND rdm.resource_id = $1
+     ORDER BY pd.name`,
+    [cueListId],
+  );
+  return rows.map((r) => ({ deptId: r.dept_id, deptName: r.dept_name }));
+}
+
+/**
+ * Adds a resource_dept_manage entry for a dept on a cue list (idempotent).
+ */
+export async function addCueListDeptAccess(
+  cueListId: string,
+  productionId: string,
+  deptId: string,
+  establishedBy: string,
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO resource_dept_manage
+       (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
+     VALUES ($1, $2, 'cue_list', $3, '*', $4)
+     ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+    [productionId, deptId, cueListId, establishedBy],
+  );
+}
+
+/**
+ * Removes a resource_dept_manage entry for a dept on a cue list.
+ */
+export async function removeCueListDeptAccess(
+  cueListId: string,
+  deptId: string,
+): Promise<void> {
+  await getPool().query(
+    `DELETE FROM resource_dept_manage
+     WHERE resource_type = 'cue_list' AND resource_id = $1 AND dept_id = $2`,
+    [cueListId, deptId],
+  );
 }
 
 /**

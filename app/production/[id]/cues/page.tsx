@@ -7,7 +7,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getProductionName,
   loadProduction, listCueLists, listCuesByProduction,
-  getActiveVersionId, getVersion, listVersions, hasListAccess,
+  getActiveVersionId, getVersion, listVersions, listCueListsWithAccess,
 } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { computePageMap } from "@/lib/script-page";
@@ -45,22 +45,19 @@ export default async function CuesPage({
   if (resolvedVersionId) {
   }
 
-  const [name, production, cueLists, allCues, version] = await Promise.all([
+  const [name, production, cueListsWithAccess, allCues, version] = await Promise.all([
     getProductionName(id),
     resolvedVersionId ? loadProduction(id, resolvedVersionId) : Promise.resolve(null),
-    listCueLists(id),
+    listCueListsWithAccess(id, session.userId),
     listCuesByProduction(id, resolvedVersionId ?? undefined),
     resolvedVersionId ? getVersion(resolvedVersionId) : Promise.resolve(null),
   ]);
   if (!name) notFound();
   if (!production) notFound();
 
-  const editableListIds = new Set<string>(
-    (await Promise.all(cueLists.map(async (cl) => ({
-      id: cl.id,
-      canEdit: await hasListAccess(cl.id, session.userId),
-    })))).filter(r => r.canEdit).map(r => r.id)
-  );
+  const cueLists = cueListsWithAccess;
+  const editableListIds = cueListsWithAccess.filter(cl => cl.canEdit).map(cl => cl.id);
+  const manageListIds = cueListsWithAccess.filter(cl => cl.canManage).map(cl => cl.id);
 
   const pageLayout = production.state.config.pageLayout;
   const pageMap: Record<string, number> = computePageMap(production.state.blocks, pageLayout);
@@ -74,7 +71,8 @@ export default async function CuesPage({
       scenes={production.state.scenes}
       cueLists={cueLists}
       initialCues={allCues}
-      editableListIds={[...editableListIds]}
+      editableListIds={editableListIds}
+      manageListIds={manageListIds}
       myUserId={session.userId}
       isAdmin={session.isAdmin}
       pageMap={pageMap}

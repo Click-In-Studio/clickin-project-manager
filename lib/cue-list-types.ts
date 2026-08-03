@@ -41,9 +41,21 @@ export type CueList = {
   createdAt: string;
 };
 
+/** @deprecated Phase 4: replaced by CueListGrant */
 export type CueListPermissionRow = {
   userId: string;
   canEdit: boolean;
+};
+
+export type CueListGrant = {
+  userId: string;
+  userName: string;
+  level: "manage" | "edit";
+};
+
+export type CueListDeptAccess = {
+  deptId: string;
+  deptName: string;
 };
 
 /** Returns templates whose creatorRoles match the user's production roles (UI filter, not a gate). */
