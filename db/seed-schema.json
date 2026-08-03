@@ -254,6 +254,66 @@
       "nullable": false
     }
   ],
+  "atomic_permission_grant": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "permission_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "grant_source",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "confirmed_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "approval_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "is_revoked",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "revoked_reason",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "block_tag": [
     {
       "column": "block_id",
@@ -1457,12 +1517,6 @@
       "default": "'{}'::text[]"
     },
     {
-      "column": "poc_block_write_from_children",
-      "type": "boolean",
-      "nullable": false,
-      "default": "false"
-    },
-    {
       "column": "joined_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -1761,13 +1815,8 @@
       "nullable": false
     },
     {
-      "column": "grantee_type",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "grantee_id",
-      "type": "text",
+      "column": "user_id",
+      "type": "uuid",
       "nullable": false
     },
     {
@@ -1778,7 +1827,14 @@
     {
       "column": "resource_id",
       "type": "text",
-      "nullable": true
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "resource_sub",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
     },
     {
       "column": "permission_level",
@@ -1793,7 +1849,7 @@
     {
       "column": "confirmed_by",
       "type": "uuid",
-      "nullable": false
+      "nullable": true
     },
     {
       "column": "approval_id",
@@ -1821,6 +1877,24 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    }
+  ],
+  "resource_permission_level": [
+    {
+      "column": "resource_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "permission_level",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "sort_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
     }
   ],
   "scene": [

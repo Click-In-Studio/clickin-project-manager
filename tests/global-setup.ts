@@ -23,6 +23,12 @@ import {
   MEMBER_ROLES_SNAPSHOT_PATH,
   type MemberRolesSnapshot,
 } from "./member-roles-snapshot";
+import {
+  isDeptPocCleanupPreMigrationSchema,
+  createDeptPocCleanupPreMigrationData,
+  DEPT_POC_CLEANUP_SNAPSHOT_PATH,
+  type DeptPocCleanupSnapshot,
+} from "./dept-poc-cleanup-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -86,6 +92,18 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isDeptPocCleanupPreMigrationSchema(pool)) {
+    // Migration path: poc_block_write_from_children column still exists.
+    // TEST_USER already inserted above; use it as the factory dept member.
+    const deptPocSnapshot = await createDeptPocCleanupPreMigrationData(pool, TEST_USER);
+    await writeFile(DEPT_POC_CLEANUP_SNAPSHOT_PATH, JSON.stringify(deptPocSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-dept-member-poc-cleanup.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -95,6 +113,23 @@ export async function teardown() {
   // cue_list.created_by and production_event.created_by need explicit deletes first.
   await pool.query("DELETE FROM cue_list WHERE created_by = $1", [TEST_USER]);
   await pool.query("DELETE FROM production_event WHERE created_by = $1", [TEST_USER]);
+
+  // Clean up dept-poc-cleanup migration factory data (migration path only; no-op otherwise).
+  let deptPocCleanupSnapshot: DeptPocCleanupSnapshot | null = null;
+  try {
+    deptPocCleanupSnapshot = JSON.parse(
+      await readFile(DEPT_POC_CLEANUP_SNAPSHOT_PATH, "utf8"),
+    ) as DeptPocCleanupSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (deptPocCleanupSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [deptPocCleanupSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(DEPT_POC_CLEANUP_SNAPSHOT_PATH).catch(() => {});
+  }
 
   // Clean up member-roles migration factory data (migration path only; no-op otherwise).
   let memberRolesSnapshot: MemberRolesSnapshot | null = null;
