@@ -1033,3 +1033,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS atomic_permission_grant_active_unique_idx
 CREATE INDEX IF NOT EXISTS atomic_permission_grant_lookup_idx
   ON atomic_permission_grant (production_id, user_id)
   WHERE is_revoked = false;
+
+-- ── Resource Dept Manage（Phase 3）────────────────────────────────────────────
+-- 部门-资源结构性管理权（信号表，非 grant 表）。
+CREATE TABLE IF NOT EXISTS resource_dept_manage (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id       UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  resource_type TEXT        NOT NULL,
+  resource_id   TEXT        NOT NULL DEFAULT '*',
+  resource_sub  TEXT        NOT NULL DEFAULT '*',
+  established_by UUID       NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (production_id, dept_id, resource_type, resource_id, resource_sub)
+);
+
+CREATE INDEX IF NOT EXISTS rdm_production_resource_idx
+  ON resource_dept_manage (production_id, resource_type, resource_id);
+
+CREATE INDEX IF NOT EXISTS rdm_dept_idx
+  ON resource_dept_manage (dept_id);
+
+-- ── Production Approval Config（Phase 3）──────────────────────────────────────
+-- 演出级审批 TTL 配置，演出创建时自动写入默认行。
+CREATE TABLE IF NOT EXISTS production_approval_config (
+  production_id TEXT        PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
+  ttl_hours     INTEGER     NOT NULL DEFAULT 24
+                            CHECK (ttl_hours > 0 AND ttl_hours <= 720),
+  updated_by    UUID        NULL REFERENCES app_user(id),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

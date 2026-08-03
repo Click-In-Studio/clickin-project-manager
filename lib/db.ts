@@ -9,6 +9,7 @@ export type ProductionAccess = {
   isArchived: boolean;
 };
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION } from "./permissions";
+import { computeUserDeptFreeApprovalZone } from "./dept-db";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -2010,7 +2011,13 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
 // ─── Production management ────────────────────────────────────────────────────
 
 export async function createProduction(id: string, name: string): Promise<void> {
-  await getPool().query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
+  const pool = getPool();
+  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
+  // Phase 3: ensure approval config row exists (default 24h TTL)
+  await pool.query(
+    "INSERT INTO production_approval_config (production_id, ttl_hours) VALUES ($1, 24) ON CONFLICT DO NOTHING",
+    [id],
+  );
   await createInitialVersion(id);
   await seedProductionRoles(id);
 }
@@ -2819,12 +2826,11 @@ export async function getProductionPermissionContext(
       "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
       [productionId, userId],
     ),
-    // Department memberships
-    pool.query<{ department_id: string; is_poc: boolean }>(
-      `SELECT edm.department_id, edm.is_poc
-       FROM event_department_member edm
-       JOIN event_department ed ON ed.id = edm.department_id
-       WHERE edm.user_id = $1 AND ed.production_id = $2 AND edm.is_member = true`,
+    // Department memberships (Phase 3: use production_dept instead of event_department)
+    pool.query<{ dept_id: string; is_poc: boolean }>(
+      `SELECT pdm.dept_id, pdm.is_poc
+       FROM production_dept_member pdm
+       WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
       [userId, productionId],
     ),
     pool.query<{ archived_at: Date | null }>(
@@ -2867,12 +2873,15 @@ export async function getProductionPermissionContext(
   const deptIds: string[] = [];
   const pocDeptIds: string[] = [];
   for (const row of deptRow.rows) {
-    deptIds.push(row.department_id);
-    if (row.is_poc) pocDeptIds.push(row.department_id);
+    deptIds.push(row.dept_id);
+    if (row.is_poc) pocDeptIds.push(row.dept_id);
   }
 
+  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone)
+  const deptFreeApprovalZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
+
   return {
-    permCtx: { userId, isAdmin, memberPermissions, overrides, deptIds, pocDeptIds },
+    permCtx: { userId, isAdmin, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone },
     isArchived: archivedRow.rows[0]?.archived_at != null,
   };
 }
@@ -3009,8 +3018,7 @@ export async function setMemberRoles(
       `UPDATE resource_grant
        SET is_revoked = true, revoked_reason = 'role_change'
        WHERE production_id = $1
-         AND grantee_type = 'user'
-         AND grantee_id = $2::text
+         AND user_id = $2
          AND grant_source = 'self_confirmed'
          AND is_revoked = false`,
       [productionId, userId],

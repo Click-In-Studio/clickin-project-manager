@@ -246,6 +246,9 @@ export type PermissionContext = {
   // Department membership in this production.
   deptIds: string[];
   pocDeptIds: string[];
+  // Atomic permissions the user can self-confirm without waiting for approval.
+  // Computed from dept.permissions[] inheritance + POC zone (Phase 3).
+  deptFreeApprovalZone: Set<Permission>;
 };
 
 // ─── Permission Tier Constants ─────────────────────────────────────────────────
@@ -855,5 +858,7 @@ export function canAccess(
   _resource?: { type: ResourceType; id?: string },
 ): AccessResult {
   if (hasPermission(perm, ctx)) return { allowed: true };
+  // Phase 3: atomic permission is in the dept free-approval zone → user can self-confirm.
+  if (ctx.deptFreeApprovalZone.has(perm)) return { allowed: false, reason: "needs_self_confirm" };
   return { allowed: false, reason: "needs_approval" };
 }
