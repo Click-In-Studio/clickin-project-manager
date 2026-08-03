@@ -2751,6 +2751,14 @@ export default function CuePage({
 import type { CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
 import type { MemberWithRoles } from "@/lib/db";
 
+const SM_GRANT_LEVELS = [
+  { value: "view",  label: "查看" },
+  { value: "mount", label: "挂载资产" },
+  { value: "edit",  label: "编辑" },
+  { value: "manage", label: "管理" },
+] as const;
+const SM_LEVEL_LABEL: Record<string, string> = Object.fromEntries(SM_GRANT_LEVELS.map(l => [l.value, l.label]));
+
 function ShareModal({
   productionId, cueListId, cueListName, onClose,
 }: {
@@ -2768,6 +2776,7 @@ function ShareModal({
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddDept, setShowAddDept] = useState(false);
   const [userSearch, setUserSearch] = useState("");
+  const [pendingUser, setPendingUser] = useState<{ userId: string; name: string } | null>(null);
 
   const COLLAB_BASE = `${BASE_PATH}/api/production/${productionId}/cuelists/${cueListId}/collaborators`;
 
@@ -2870,38 +2879,66 @@ function ShareModal({
                 {grants.length === 0 && <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", marginBottom: 4 }}>暂无个人授权</p>}
                 {grants.map(g => (
                   <div key={g.userId + g.level} style={rowStyle}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 12, color: "var(--ink)" }}>{g.userName}</span>
-                      <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>{g.level === "manage" ? "管理" : "编辑"}</span>
-                    </div>
-                    {g.level !== "manage" && (
-                      <button style={removeBtnStyle} disabled={saving} onClick={() => deleteCollaborator({ type: "user", userId: g.userId })}>移除</button>
-                    )}
+                    <span style={{ fontSize: 12, color: "var(--ink)", flex: 1, minWidth: 0 }}>{g.userName}</span>
+                    <select
+                      value={g.level}
+                      disabled={saving}
+                      onChange={async (e) => { await postCollaborator({ type: "user", userId: g.userId, level: e.target.value }); }}
+                      style={{ fontSize: 11, border: "1px solid var(--line)", borderRadius: 5, padding: "2px 4px", background: "var(--surface)", color: "var(--ink)", cursor: saving ? "default" : "pointer" }}>
+                      {SM_GRANT_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    </select>
+                    <button style={removeBtnStyle} disabled={saving}
+                      onClick={() => deleteCollaborator({ type: "user", userId: g.userId })}>
+                      移除
+                    </button>
                   </div>
                 ))}
                 {!showAddUser && (
-                  <button style={addBtnStyle} onClick={() => { setShowAddUser(true); setUserSearch(""); }}>+ 添加成员</button>
+                  <button style={addBtnStyle} onClick={() => { setShowAddUser(true); setUserSearch(""); setPendingUser(null); }}>+ 添加成员</button>
                 )}
                 {showAddUser && (
                   <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
-                    <input
-                      autoFocus placeholder="搜索姓名…" value={userSearch} onChange={e => setUserSearch(e.target.value)}
-                      style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", background: "var(--surface)", color: "var(--ink)", marginBottom: 2 }}
-                    />
-                    {userSearch === ""
-                      ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>输入姓名搜索成员…</p>
-                      : availableMembers.length === 0
-                      ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>无匹配成员</p>
-                      : availableMembers.map(m => (
-                        <button key={m.userId} disabled={saving}
-                          style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
-                          onClick={async () => { await postCollaborator({ type: "user", userId: m.userId }); setShowAddUser(false); setUserSearch(""); }}>
-                          <span>{m.name}</span>
-                          {m.roles.length > 0 && <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>{m.roles.slice(0, 2).join("、")}</span>}
-                        </button>
-                      ))
-                    }
-                    <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => { setShowAddUser(false); setUserSearch(""); }}>取消</button>
+                    {!pendingUser ? (
+                      <>
+                        <input
+                          autoFocus placeholder="搜索姓名…" value={userSearch} onChange={e => setUserSearch(e.target.value)}
+                          style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", background: "var(--surface)", color: "var(--ink)", marginBottom: 2 }}
+                        />
+                        {userSearch === ""
+                          ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>输入姓名搜索成员…</p>
+                          : availableMembers.length === 0
+                          ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>无匹配成员</p>
+                          : availableMembers.map(m => (
+                            <button key={m.userId} disabled={saving}
+                              style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
+                              onClick={() => setPendingUser({ userId: m.userId, name: m.name })}>
+                              <span>{m.name}</span>
+                              {m.roles.length > 0 && <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>{m.roles.slice(0, 2).join("、")}</span>}
+                            </button>
+                          ))
+                        }
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: 12, color: "var(--ink)", padding: "4px 2px", fontWeight: 600 }}>
+                          {pendingUser.name} — 选择权限
+                        </p>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 2 }}>
+                          {SM_GRANT_LEVELS.map(l => (
+                            <button key={l.value} disabled={saving}
+                              style={{ borderRadius: 6, border: "1px solid var(--line)", padding: "4px 12px", fontSize: 11, cursor: saving ? "default" : "pointer", background: "var(--surface-2)", color: "var(--ink)" }}
+                              onClick={async () => {
+                                await postCollaborator({ type: "user", userId: pendingUser.userId, level: l.value });
+                                setShowAddUser(false); setUserSearch(""); setPendingUser(null);
+                              }}>
+                              {l.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button style={{ ...addBtnStyle, marginTop: 0 }} onClick={() => setPendingUser(null)}>← 返回</button>
+                      </>
+                    )}
+                    <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => { setShowAddUser(false); setUserSearch(""); setPendingUser(null); }}>取消</button>
                   </div>
                 )}
               </div>

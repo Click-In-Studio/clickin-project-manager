@@ -4,7 +4,7 @@ import { getProductionPermissionContext, getCueList, listProductionDepts } from 
 import {
   listCueListGrants, listCueListDeptAccess,
   addCueListDeptAccess, removeCueListDeptAccess,
-  setCueListGrant,
+  setCueListGrant, type CueListLevel,
 } from "@/lib/resource-grant-db";
 import { hasPermission, hasScopedPermission } from "@/lib/permissions";
 
@@ -43,12 +43,14 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   if (!mc.canManage) return Response.json({ error: "无管理权限" }, { status: 403 });
   if (mc.isArchived) return Response.json({ error: "已归档" }, { status: 403 });
 
-  const body = await req.json() as { type: "user" | "dept"; userId?: string; deptId?: string };
+  const body = await req.json() as { type: "user" | "dept"; userId?: string; deptId?: string; level?: CueListLevel };
+  const VALID_LEVELS: CueListLevel[] = ["view", "mount", "edit", "manage"];
 
   if (body.type === "dept" && body.deptId) {
     await addCueListDeptAccess(cueListId, id, body.deptId, mc.session.userId);
   } else if (body.type === "user" && body.userId) {
-    await setCueListGrant(cueListId, id, body.userId, true, mc.session.userId);
+    const level: CueListLevel = body.level && VALID_LEVELS.includes(body.level) ? body.level : "edit";
+    await setCueListGrant(cueListId, id, body.userId, true, mc.session.userId, level);
   } else {
     return Response.json({ error: "参数错误" }, { status: 400 });
   }

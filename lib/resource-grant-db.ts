@@ -11,7 +11,7 @@
  */
 import { getPool } from "./pg";
 
-export type CueListLevel = "manage" | "edit" | "view";
+export type CueListLevel = "manage" | "edit" | "mount" | "view";
 
 export type CueListAccessResult =
   | { canAccess: true; level: CueListLevel }
@@ -210,10 +210,9 @@ export async function removeCueListDeptAccess(
 }
 
 /**
- * Grants or revokes a user's direct access to a cue list.
- * grant=true  → upsert resource_grant(edit, direct)
- * grant=false → revoke active grants for this user on this cue list
- * grant=null  → same as false (revoke)
+ * Grants or revokes a user's direct access to a cue list at a specific level.
+ * grant=true  → upsert resource_grant(level, direct)
+ * grant=false/null → revoke ALL active grants for this user on this cue list
  */
 export async function setCueListGrant(
   cueListId: string,
@@ -221,18 +220,34 @@ export async function setCueListGrant(
   userId: string,
   grant: boolean | null,
   grantedBy: string,
+  level: CueListLevel = "edit",
 ): Promise<void> {
   if (grant === true) {
-    await getPool().query(
-      `INSERT INTO resource_grant
-         (production_id, user_id, resource_type, resource_id, resource_sub,
-          permission_level, grant_source, confirmed_by)
-       VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'direct', $4)
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-         WHERE is_revoked = false
-       DO NOTHING`,
-      [productionId, userId, cueListId, grantedBy],
-    );
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE resource_grant
+         SET is_revoked = true, revoked_reason = 'manual'
+         WHERE production_id = $1 AND user_id = $2
+           AND resource_type = 'cue_list' AND resource_id = $3
+           AND NOT is_revoked`,
+        [productionId, userId, cueListId],
+      );
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         VALUES ($1, $2, 'cue_list', $3, '*', $4, 'direct', $5)`,
+        [productionId, userId, cueListId, level, grantedBy],
+      );
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
   } else {
     await getPool().query(
       `UPDATE resource_grant

@@ -50,7 +50,7 @@ export type CueListPermissionRow = {
 export type CueListGrant = {
   userId: string;
   userName: string;
-  level: "manage" | "edit";
+  level: "manage" | "edit" | "mount" | "view";
 };
 
 export type CueListDeptAccess = {
