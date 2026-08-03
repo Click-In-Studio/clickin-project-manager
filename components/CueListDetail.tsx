@@ -241,9 +241,11 @@ function CollaboratorSection({
               onChange={e => setUserSearch(e.target.value)}
               style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", background: "var(--surface)", color: "var(--ink)", marginBottom: 2 }}
             />
-            {availableMembers.length === 0 ? (
+            {userSearch === "" ? (
+              <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>输入姓名搜索成员…</p>
+            ) : availableMembers.length === 0 ? (
               <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>无匹配成员</p>
-            ) : availableMembers.slice(0, 6).map(m => (
+            ) : availableMembers.map(m => (
               <button key={m.userId} disabled={saving}
                 style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
                 onClick={async () => {
