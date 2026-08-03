@@ -720,6 +720,11 @@ CREATE TABLE script_view_block (
 
 **平权原则**：所有个人 manage grant 持有者同时收到通知，**任一人批准即生效**（first-action-wins）。第一个 approve/deny 后，其余持有者的待处理通知标记为"已由他人处理"，不再可操作。
 
+**First-action-wins 实现要点**：
+- 审批 API 使用原子操作：`UPDATE approval_request SET status='approved' WHERE id=$1 AND status='pending' RETURNING id`，无返回则说明已被他人抢先处理，返回 409
+- `user_notification` 表须包含 `approval_request_id UUID REFERENCES approval_request(id)` 字段，以支持批量查找同一申请的所有通知并标记状态
+- 通知内容模板：批准方处理后，其余通知更新为「[姓名] 已批准 / 已拒绝此申请」，状态改为 `superseded`（新增通知状态值）
+
 **TTL 与升级**：每级通知的 TTL 由 `production_approval_config.ttl_hours` 配置（见 Schema 章节），默认 **24h**，制作人及以上可修改。TTL 内无人响应 → 自动升级至上一级，完整升级链为：
 
 ```
@@ -916,20 +921,24 @@ CREATE TABLE approval_request (
                   'owner_transfer',   -- #139 owner 转让确认
                   'resource_access'   -- 资源访问申请（本次新增）
                 )),
-  entity_id     TEXT NOT NULL,        -- production_id（或 org_id）
+  entity_id     TEXT NOT NULL,        -- production_id（或 org_id）；无 FK 以兼容 org 级操作，production 删除时应用层显式清理
   subject_id    UUID NOT NULL REFERENCES app_user(id),  -- 申请人
 
-  -- 资源访问申请专用字段（type = 'resource_access' 时非 NULL）
+  -- 资源访问申请专用字段（type = 'resource_access' 时非 NULL，DB CHECK 见下方）
   resource_type       TEXT NULL,      -- 'cue_list' | 'script' | 'note' | 'tech_req' | ...
-  resource_id         TEXT NULL,      -- 申请的实例 ID（NULL = 类型级；对应 resource_grant.resource_id，'*' 时此处存 NULL）
-  resource_sub        TEXT NULL,      -- 申请的子类型（NULL = 全部；对应 resource_grant.resource_sub 的 '*'）
+  resource_id         TEXT NULL,      -- 申请的实例 ID；统一用 '*' 表示通配符（与 resource_grant 一致）
+  resource_sub        TEXT NULL,      -- 申请的子类型；'*' 表示全部（与 resource_grant 一致）
   permission_level    TEXT NULL,      -- 无枚举约束，与 resource_grant.permission_level 保持一致（含资源专属词汇如 publish/revoke）
   -- 申请人即受益人（subject_id）；制作人主动给他人授权走 grant_source='direct' 直接授权，不经 approval_request
+  CONSTRAINT approval_resource_fields_required
+    CHECK (type != 'resource_access' OR (resource_type IS NOT NULL AND permission_level IS NOT NULL)),
 
   -- 授权结果
   status        TEXT NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'auto_approved', 'disputed')),
-  grant_type    TEXT CHECK (grant_type IN ('permanent', 'one_time', 'ttl')) NULL,
+  grant_type    TEXT CHECK (grant_type IN ('permanent', 'ttl')) NULL,
+  -- 注：不设 'one_time'——一次性访问无误操作缓冲，体验差且无撤销空间
+  -- ttl_duration 为审批时用户填写的期望时长；expires_at = granted_at + ttl_duration，以 expires_at 为准
   ttl_duration  INTERVAL NULL,
   granted_at    TIMESTAMPTZ NULL,
   expires_at    TIMESTAMPTZ NULL,
@@ -939,6 +948,10 @@ CREATE TABLE approval_request (
   resolved_at   TIMESTAMPTZ NULL,
   resolved_by   UUID REFERENCES app_user(id) NULL
 );
+
+-- 按 entity（production）查询 pending 审批的索引
+CREATE INDEX approval_request_entity_status_idx
+  ON approval_request (entity_id, status, type);
 ```
 
 #### `production_approval_config`（演出级审批 TTL 配置）
@@ -1060,6 +1073,8 @@ ALTER TABLE production_member
 
 ### Phase 3（#164 + #163 + event_department 迁移）部门系统
 **后端：**
+- `add-resource-dept-manage.sql`：新建 `resource_dept_manage` 表（部门-资源结构性管理权，见「资源域权限模型」章节）
+- `add-production-approval-config.sql`：新建 `production_approval_config` 表（演出级 TTL 配置），演出创建时自动插入默认行（`ttl_hours=24`）
 - `migrate-event-department.sql`：`event_department` / `event_department_member` 数据迁移至 `production_dept` / `production_dept_member`，迁移 `chat_id`
 - 部门对资源类型的归属关系通过 `resource_dept_manage` 表达，`production_dept` 无需额外字段
 - 废弃 `event_department` 相关 API，新建 `/api/production/[id]/depts` 路由
@@ -1078,8 +1093,8 @@ ALTER TABLE production_member
 ### Phase 4（cue list + 最小权限模型首次对用户可见）
 **后端：**
 - `add-cue-list-dept.sql`：`production_dept` 新增 `allowed_cue_types[]`（`cue_list` 不新增 `owner_dept_id`）
-- 枚举迁移：`production_role_cue_type` → `production_dept.allowed_cue_types`（role→dept 映射，手动确认后写入）
-- 回填：现有 `cue_list_permission` 和 `cue_list_role` 数据迁移为 `resource_grant` 记录（`grant_source='direct'`）
+- 枚举迁移：`production_role_cue_type` → `production_dept.allowed_cue_types`（**操作流程**：在生产服务器上分析现有 role，人工确认 role→dept 映射后，由 migration 脚本按确认结果写入；Phase 0 核对清单中应提前产出此映射表）
+- 回填：现有 `cue_list_permission` 和 `cue_list_role` 数据迁移为 `resource_grant` 记录（`grant_source='migrated'`，`confirmed_by=NULL`；不使用 `'direct'`，因历史记录无操作人信息）
 - 新建 cue list 时写入 `resource_dept_manage`（创建者部门 + allowed_cue_types 匹配部门）+ 创建者本人的 `resource_grant(grant_source='self_confirmed', permission_level='manage')`
 - `canAccess()` 对 cue_list 类型完全切换为 resource_grant 查询（移除 hasPermission 回落）
 - 废弃 `cue_list_role`、`cue_list_permission` 表

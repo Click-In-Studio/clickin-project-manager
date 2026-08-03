@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS resource_grant (
                     'auto',            -- 仅用于加入演出时的 3 条基础 grant（无用户触发行为）
                     'approval',        -- 申请流审批通过后系统写入
                     'direct',          -- 制作人或 Production Owner 直接授权
-                    'assigned'         -- 操作触发型：指定行为本身即授权，接收方无需确认
+                    'assigned',        -- 操作触发型：指定行为本身即授权，接收方无需确认
+                    'migrated'         -- 历史数据回填（如 cue_list_permission 迁移），confirmed_by 可为 NULL
                   )),
   confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto grant 时为 NULL
   approval_id     UUID        NULL,      -- 待 approval_request 表（Phase 6）创建后加 FK 约束

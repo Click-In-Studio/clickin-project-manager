@@ -985,9 +985,9 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   permission_level TEXT       NOT NULL REFERENCES resource_permission_level (resource_type, permission_level)
                               DEFERRABLE INITIALLY DEFERRED,
   grant_source    TEXT        NOT NULL CHECK (grant_source IN (
-                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned'
+                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
                   )),
-  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto grant 时为 NULL
+  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
@@ -1014,9 +1014,9 @@ CREATE TABLE IF NOT EXISTS atomic_permission_grant (
   user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   permission_key  TEXT        NOT NULL,
   grant_source    TEXT        NOT NULL CHECK (grant_source IN (
-                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned'
+                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
                   )),
-  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto grant 时为 NULL
+  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
