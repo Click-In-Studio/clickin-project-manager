@@ -887,8 +887,7 @@ CREATE TABLE IF NOT EXISTS production_dept_member (
   dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   is_poc          BOOLEAN     NOT NULL DEFAULT false,
   poc_extra_permissions   TEXT[] NOT NULL DEFAULT '{}',
-  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',
-  poc_block_write_from_children BOOLEAN NOT NULL DEFAULT false,
+  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',  -- 含原 poc_block_write_from_children 语义
   joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, dept_id)
 );
@@ -925,33 +924,112 @@ CREATE TABLE IF NOT EXISTS production_member_tag_assignment (
 CREATE INDEX IF NOT EXISTS pmta_user_prod_idx
   ON production_member_tag_assignment (production_id, user_id);
 
--- ── Resource Grant（Phase 1 #158）─────────────────────────────────────────────
--- 所有实际权限的单一权威来源。approval_id FK 等 Phase 6 approval_request 表建好后补。
+-- ── Resource Permission Level（Phase 2c）──────────────────────────────────────
+-- resource_grant.permission_level 的合法值 lookup 表。
+-- 引入新 resource_type 的 migration 必须先在此表插入对应行，再写 grant 数据。
+
+CREATE TABLE IF NOT EXISTS resource_permission_level (
+  resource_type    TEXT    NOT NULL,
+  permission_level TEXT    NOT NULL,
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (resource_type, permission_level)
+);
+
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('cue_list',    'view',           1),
+  ('cue_list',    'mount',          2),
+  ('cue_list',    'edit',           3),
+  ('cue_list',    'manage',         4),
+  ('scene',       'view',           1),
+  ('scene',       'mount',          2),
+  ('scene',       'edit',           3),
+  ('scene',       'manage',         4),
+  ('event',       'view',           1),
+  ('event',       'edit',           2),
+  ('event',       'publish',        3),
+  ('event',       'edit_published', 4),
+  ('event',       'revoke',         5),
+  ('event',       'manage',         6),
+  ('report',      'view',           1),
+  ('report',      'edit',           2),
+  ('report',      'publish',        3),
+  ('report',      'edit_published', 4),
+  ('report',      'revoke',         5),
+  ('report',      'manage',         6),
+  ('tech_req',    'view',           1),
+  ('tech_req',    'edit',           2),
+  ('tech_req',    'assign',         3),
+  ('tech_req',    'manage',         4),
+  ('note',        'view',           1),
+  ('note',        'edit',           2),
+  ('note',        'manage',         3),
+  ('script_view', 'view',           1),
+  ('script_view', 'edit',           2),
+  ('script_view', 'manage',         3),
+  ('asset',       'view',           1),
+  ('asset',       'mount',          2),
+  ('asset',       'edit',           3),
+  ('asset',       'manage',         4)
+ON CONFLICT DO NOTHING;
+
+-- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
+-- 所有实际资源权限的单一权威来源。approval_id FK 等 Phase 6 approval_request 表建好后补。
 
 CREATE TABLE IF NOT EXISTS resource_grant (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  grantee_type    TEXT        NOT NULL CHECK (grantee_type IN ('user', 'dept')),
-  grantee_id      TEXT        NOT NULL,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   resource_type   TEXT        NOT NULL,
-  resource_id     TEXT        NULL,
-  permission_level TEXT       NOT NULL CHECK (permission_level IN ('view', 'write', 'manage')),
-  grant_source    TEXT        NOT NULL CHECK (grant_source IN ('self_confirmed', 'approval', 'direct')),
-  confirmed_by    UUID        NOT NULL REFERENCES app_user(id),
+  resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
+  resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
+  permission_level TEXT       NOT NULL REFERENCES resource_permission_level (resource_type, permission_level)
+                              DEFERRABLE INITIALLY DEFERRED,
+  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
+                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned'
+                  )),
+  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto grant 时为 NULL
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
-  revoked_reason  TEXT        NULL CHECK (revoked_reason IN ('role_change', 'dept_change', 'manual')),
+  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
+                    'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual'
+                  )),
   expires_at      TIMESTAMPTZ NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
-  ON resource_grant (production_id, grantee_type, grantee_id, resource_type,
-                     COALESCE(resource_id, ''), permission_level)
+  ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false;
 
-CREATE INDEX IF NOT EXISTS resource_grant_grantee_idx
-  ON resource_grant (production_id, grantee_type, grantee_id);
+CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
+  ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)
+  WHERE is_revoked = false;
 
-CREATE INDEX IF NOT EXISTS resource_grant_resource_idx
-  ON resource_grant (production_id, resource_type, resource_id);
+-- ── Atomic Permission Grant（Phase 2c）────────────────────────────────────────
+-- 原子权限 key 的个人 grant 记录。approval_id FK 等 Phase 6 approval_request 表建好后补。
+
+CREATE TABLE IF NOT EXISTS atomic_permission_grant (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  permission_key  TEXT        NOT NULL,
+  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
+                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned'
+                  )),
+  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto grant 时为 NULL
+  approval_id     UUID        NULL,
+  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
+  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
+                    'role_change', 'dept_change', 'poc_change', 'manual'
+                  )),
+  expires_at      TIMESTAMPTZ NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS atomic_permission_grant_active_unique_idx
+  ON atomic_permission_grant (production_id, user_id, permission_key)
+  WHERE is_revoked = false;
+
+CREATE INDEX IF NOT EXISTS atomic_permission_grant_lookup_idx
+  ON atomic_permission_grant (production_id, user_id)
+  WHERE is_revoked = false;

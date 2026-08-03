@@ -809,10 +809,19 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
 // ─── Phase 1 (#158): Resource Grant 基础设施 ──────────────────────────────────
 
 // 资源域类型（与 resource_grant.resource_type 对应）
-export type ResourceType = "cue_list" | "script" | "note" | "tech_req" | "*";
+export type ResourceType =
+  | "cue_list"
+  | "scene"
+  | "event"
+  | "report"
+  | "tech_req"
+  | "note"
+  | "script_view"
+  | "asset";
 
-// resource_grant.permission_level 的三级
-export type PermissionLevel = "view" | "write" | "manage";
+// resource_grant.permission_level 标准线性层级（高级包含低级，由代码约定，非 DB 强制）。
+// event/report 使用资源专属词汇（publish/edit_published/revoke），由应用层按 resource_type 定义。
+export type PermissionLevel = "view" | "mount" | "edit" | "manage";
 
 // canAccess() 返回结果。Phase 1 只会返回 allowed: true/false。
 // Phase 2+ 开始返回 needs_self_confirm / needs_approval，驱动前端 UX。

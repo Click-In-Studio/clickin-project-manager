@@ -33,8 +33,7 @@ CREATE TABLE IF NOT EXISTS production_dept_member (
   dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   is_poc          BOOLEAN     NOT NULL DEFAULT false,
   poc_extra_permissions   TEXT[] NOT NULL DEFAULT '{}',       -- POC 额外获得的权限
-  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',       -- POC 被屏蔽的权限
-  poc_block_write_from_children BOOLEAN NOT NULL DEFAULT false, -- 屏蔽来自子部门的 write 类权限
+  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',       -- POC 被屏蔽的权限（含原 poc_block_write_from_children 语义）
   joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, dept_id)
 );
