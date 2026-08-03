@@ -1,60 +1,19 @@
 export type CueListTemplate = {
   key: string;
   label: string;
+  /** Role names that historically could create this type; informational only (Phase 4+: use dept.allowed_cue_types). */
   creatorRoles: string[];
-  /** Role names seeded into cue_list_role at creation time. */
-  defaultRoles: string[];
 };
 
 export const CUE_LIST_TEMPLATES: CueListTemplate[] = [
-  {
-    key: "灯光",
-    label: "灯光",
-    creatorRoles: ["灯光设计"],
-    defaultRoles: ["灯光设计", "灯光设计助理"],
-  },
-  {
-    key: "追光",
-    label: "追光",
-    creatorRoles: ["灯光设计"],
-    defaultRoles: ["灯光设计", "灯光设计助理"],
-  },
-  {
-    key: "音效",
-    label: "音效",
-    creatorRoles: ["音响设计"],
-    defaultRoles: ["音响设计", "音响设计助理"],
-  },
-  {
-    key: "音乐",
-    label: "音乐",
-    creatorRoles: ["音响设计", "作曲", "编曲"],
-    defaultRoles: ["音响设计", "音响设计助理", "作曲", "作曲助理", "编曲"],
-  },
-  {
-    key: "多媒体",
-    label: "多媒体",
-    creatorRoles: ["多媒体设计"],
-    defaultRoles: ["多媒体设计", "多媒体设计助理"],
-  },
-  {
-    key: "舞台机械",
-    label: "舞台机械",
-    creatorRoles: ["舞美设计", "舞台监督"],
-    defaultRoles: ["舞美设计", "舞美设计助理", "舞台监督", "助理舞台监督"],
-  },
-  {
-    key: "催场",
-    label: "催场",
-    creatorRoles: ["舞台监督"],
-    defaultRoles: ["舞台监督", "助理舞台监督"],
-  },
-  {
-    key: "预设",
-    label: "预设",
-    creatorRoles: ["舞台监督"],
-    defaultRoles: ["舞台监督", "助理舞台监督", "舞美设计", "舞美设计助理"],
-  },
+  { key: "灯光",   label: "灯光",   creatorRoles: ["灯光设计"] },
+  { key: "追光",   label: "追光",   creatorRoles: ["灯光设计"] },
+  { key: "音效",   label: "音效",   creatorRoles: ["音响设计"] },
+  { key: "音乐",   label: "音乐",   creatorRoles: ["音响设计", "作曲", "编曲"] },
+  { key: "多媒体", label: "多媒体", creatorRoles: ["多媒体设计"] },
+  { key: "舞台机械", label: "舞台机械", creatorRoles: ["舞美设计", "舞台监督"] },
+  { key: "催场",   label: "催场",   creatorRoles: ["舞台监督"] },
+  { key: "预设",   label: "预设",   creatorRoles: ["舞台监督"] },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────

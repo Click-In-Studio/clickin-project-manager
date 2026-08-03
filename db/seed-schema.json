@@ -606,35 +606,6 @@
       "nullable": false
     }
   ],
-  "cue_list_permission": [
-    {
-      "column": "cue_list_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "can_edit",
-      "type": "boolean",
-      "nullable": false
-    },
-    {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    }
-  ],
-  "cue_list_role": [
-    {
-      "column": "cue_list_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "role_id",
-      "type": "text",
-      "nullable": false
-    }
-  ],
   "cue_version": [
     {
       "column": "revision_id",
@@ -1800,18 +1771,6 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
-    }
-  ],
-  "production_role_cue_type": [
-    {
-      "column": "role_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "cue_type",
-      "type": "text",
-      "nullable": false
     }
   ],
   "production_role_permission": [

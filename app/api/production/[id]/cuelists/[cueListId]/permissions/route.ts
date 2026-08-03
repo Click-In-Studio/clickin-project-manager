@@ -29,7 +29,7 @@ export async function PATCH(
   const body = await req.json() as { userId: string; canEdit: boolean | null };
   if (!body.userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
 
-  await setCueListPermission(cueListId, body.userId, body.canEdit);
+  await setCueListPermission(cueListId, body.userId, body.canEdit, session.userId);
   const permissions = await listCueListPermissions(cueListId);
   return Response.json(permissions);
 }

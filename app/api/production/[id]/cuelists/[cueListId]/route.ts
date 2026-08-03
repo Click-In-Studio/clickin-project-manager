@@ -5,6 +5,7 @@ import {
   getCueList, updateCueList, deleteCueList,
   listCueListPermissions, hasListAccess, listCueListRoleMembers,
 } from "@/lib/db";
+// listCueListRoleMembers and listCueListPermissions now query resource_grant (Phase 4)
 import { hasPermission, hasScopedPermission, type PermissionContext } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {

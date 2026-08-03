@@ -35,6 +35,18 @@ import {
   EVENT_DEPT_SNAPSHOT_PATH,
   type EventDeptSnapshot,
 } from "./event-department-snapshot";
+import {
+  isRoleCueTypePreMigrationSchema,
+  createRoleCueTypePreMigrationData,
+  ROLE_CUE_TYPE_SNAPSHOT_PATH,
+  type RoleCueTypeSnapshot,
+} from "./role-cue-type-snapshot";
+import {
+  isCueListGrantPreMigrationSchema,
+  createCueListGrantPreMigrationData,
+  CUE_LIST_GRANT_SNAPSHOT_PATH,
+  type CueListGrantSnapshot,
+} from "./cue-list-grant-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -123,6 +135,30 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isRoleCueTypePreMigrationSchema(pool)) {
+    // Migration path: production_role_cue_type table still exists.
+    faker.seed(Number(process.env.TEST_SEED));
+    const roleCueTypeSnapshot = await createRoleCueTypePreMigrationData(pool, TEST_USER);
+    await writeFile(ROLE_CUE_TYPE_SNAPSHOT_PATH, JSON.stringify(roleCueTypeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-role-cue-type-to-dept.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isCueListGrantPreMigrationSchema(pool)) {
+    // Migration path: cue_list_permission table still exists.
+    faker.seed(Number(process.env.TEST_SEED));
+    const cueListGrantSnapshot = await createCueListGrantPreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_LIST_GRANT_SNAPSHOT_PATH, JSON.stringify(cueListGrantSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-list-to-resource-grant.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -132,6 +168,45 @@ export async function teardown() {
   // cue_list.created_by and production_event.created_by need explicit deletes first.
   await pool.query("DELETE FROM cue_list WHERE created_by = $1", [TEST_USER]);
   await pool.query("DELETE FROM production_event WHERE created_by = $1", [TEST_USER]);
+
+  // Clean up cue-list-grant migration factory data (migration path only; no-op otherwise).
+  let cueListGrantSnapshot: CueListGrantSnapshot | null = null;
+  try {
+    cueListGrantSnapshot = JSON.parse(
+      await readFile(CUE_LIST_GRANT_SNAPSHOT_PATH, "utf8"),
+    ) as CueListGrantSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (cueListGrantSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [cueListGrantSnapshot.production.id],
+    ).catch(() => {});
+    // Clean up extra test users created for this migration
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2)",
+      [cueListGrantSnapshot.personalGrantUserId, cueListGrantSnapshot.roleGrantUserId],
+    ).catch(() => {});
+    await unlink(CUE_LIST_GRANT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up role-cue-type migration factory data (migration path only; no-op otherwise).
+  let roleCueTypeSnapshot: RoleCueTypeSnapshot | null = null;
+  try {
+    roleCueTypeSnapshot = JSON.parse(
+      await readFile(ROLE_CUE_TYPE_SNAPSHOT_PATH, "utf8"),
+    ) as RoleCueTypeSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (roleCueTypeSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [roleCueTypeSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(ROLE_CUE_TYPE_SNAPSHOT_PATH).catch(() => {});
+  }
 
   // Clean up event-department migration factory data (migration path only; no-op otherwise).
   let eventDeptSnapshot: EventDeptSnapshot | null = null;

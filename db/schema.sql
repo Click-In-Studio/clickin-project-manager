@@ -133,13 +133,8 @@ CREATE TABLE IF NOT EXISTS production_role_permission (
 
 CREATE INDEX IF NOT EXISTS production_role_permission_role_idx ON production_role_permission(role_id);
 
-CREATE TABLE IF NOT EXISTS production_role_cue_type (
-  role_id  TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
-  cue_type TEXT NOT NULL,
-  PRIMARY KEY (role_id, cue_type)
-);
-
-CREATE INDEX IF NOT EXISTS production_role_cue_type_role_idx ON production_role_cue_type(role_id);
+-- production_role_cue_type dropped in Phase 4 (migrate-role-cue-type-to-dept.sql)
+-- cue type authorization now managed via production_dept.allowed_cue_types
 
 -- ── Members & permission overrides ────────────────────────────────────────────
 
@@ -356,23 +351,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS cue_list_abbr_production_unique ON cue_list(pr
 CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, created_at);
 
 -- Per-user access override: can_edit=true grants, can_edit=false denies,
--- absence falls through to cue_list_role check. Creator is auto-inserted here
--- at list creation time so all access grants live in one table.
-CREATE TABLE IF NOT EXISTS cue_list_permission (
-  cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
-  user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  can_edit    BOOLEAN NOT NULL,
-  PRIMARY KEY (cue_list_id, user_id)
-);
-
--- Role-based default edit access: any member whose production_role matches
--- a row here can edit cue entries in the list (unless denied by cue_list_permission).
-CREATE TABLE IF NOT EXISTS cue_list_role (
-  cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
-  role_id     TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
-  PRIMARY KEY (cue_list_id, role_id)
-);
-CREATE INDEX IF NOT EXISTS cue_list_role_list_idx ON cue_list_role(cue_list_id);
+-- cue_list_permission and cue_list_role dropped in Phase 4 (migrate-cue-list-to-resource-grant.sql)
+-- Access is now managed via resource_grant (resource_type='cue_list').
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
 -- Each row is a revision of a cue. cue_id is the stable logical identity across

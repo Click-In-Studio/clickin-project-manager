@@ -875,6 +875,18 @@ export default function CuePage({
   const [activeListId, setActiveListId] = useState<string | null>(
     editableListIds[0] ?? cueLists[0]?.id ?? null
   );
+  // Phase 4: localEditableIds starts from server-computed editableListIds and can be
+  // extended when the user self-confirms access to additional lists.
+  const [localEditableIds, setLocalEditableIds] = useState<Set<string>>(
+    () => new Set(editableListIds),
+  );
+  // Phase 4: Access modal state — shown when user activates a list they don't yet have edit access to.
+  type AccessModal =
+    | { listId: string; listName: string; status: "loading" }
+    | { listId: string; listName: string; status: "can_self_confirm"; selfConfirmLevel: "edit" | "manage" }
+    | { listId: string; listName: string; status: "needs_approval" };
+  const [accessModal, setAccessModal] = useState<AccessModal | null>(null);
+  const [accessModalConfirming, setAccessModalConfirming] = useState(false);
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
   const [savingCueId, setSavingCueId] = useState<string | null>(null);
   const [highlightedCueId, setHighlightedCueId] = useState<string | null>(null);
@@ -1040,11 +1052,44 @@ export default function CuePage({
 
   // Frozen/archived versions make cues read-only; editing/committed allow cue edits
   const cueEditAllowed = !versionStatus || versionStatus === "editing" || versionStatus === "committed";
-  const canEditActive = cueEditAllowed && editableListIds.includes(activeListId ?? "");
+  const canEditActive = cueEditAllowed && localEditableIds.has(activeListId ?? "");
   // Editing any cue requires an active list — prevents accidental edits with no context
   const canEditCue = useCallback((cue: Cue) =>
-    cueEditAllowed && cue.cueListId === activeListId && editableListIds.includes(cue.cueListId),
-  [activeListId, editableListIds, cueEditAllowed]);
+    cueEditAllowed && cue.cueListId === activeListId && localEditableIds.has(cue.cueListId),
+  [activeListId, localEditableIds, cueEditAllowed]);
+
+  // Phase 4: activate a cue list, showing access modal if not yet granted
+  const handleActivateList = useCallback(async (listId: string | null) => {
+    if (!listId || localEditableIds.has(listId)) {
+      setActiveListId(listId);
+      return;
+    }
+    const list = cueLists.find(cl => cl.id === listId);
+    if (!list) { setActiveListId(listId); return; }
+    setActiveListId(listId);
+    setAccessModal({ listId, listName: list.name, status: "loading" });
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/access`,
+        { credentials: "include" },
+      );
+      if (!res.ok) { setAccessModal(null); return; }
+      const data = await res.json() as
+        | { canAccess: true }
+        | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "edit" | "manage" }
+        | { canAccess: false; canSelfConfirm: false };
+      if (data.canAccess) {
+        setLocalEditableIds(prev => new Set([...prev, listId]));
+        setAccessModal(null);
+      } else if (data.canSelfConfirm) {
+        setAccessModal({ listId, listName: list.name, status: "can_self_confirm", selfConfirmLevel: data.selfConfirmLevel });
+      } else {
+        setAccessModal({ listId, listName: list.name, status: "needs_approval" });
+      }
+    } catch {
+      setAccessModal(null);
+    }
+  }, [cueLists, localEditableIds, productionId]);
 
   // ── updateCueField ────────────────────────────────────────────────────────
   const updateCueField = useCallback(async (
@@ -1948,12 +1993,12 @@ export default function CuePage({
           <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
           <select
             value={activeListId ?? ""}
-            onChange={e => setActiveListId(e.target.value || null)}
+            onChange={e => { void handleActivateList(e.target.value || null); }}
             className="text-xs bg-zinc-50 border border-zinc-200 rounded px-1.5 py-0.5 outline-none"
           >
             <option value="">—</option>
-            {cueLists.filter(cl => editableListIds.includes(cl.id)).map(cl => (
-              <option key={cl.id} value={cl.id}>{cl.name}</option>
+            {cueLists.map(cl => (
+              <option key={cl.id} value={cl.id}>{cl.name}{localEditableIds.has(cl.id) ? "" : " (只读)"}</option>
             ))}
           </select>
           <Link
@@ -1967,7 +2012,7 @@ export default function CuePage({
         {/* Desktop: right controls */}
         <div className="hidden sm:flex ml-auto items-center gap-1.5 shrink-0">
           <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
-            {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
+            {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
           </span>
           {(["line", "page", "scene"] as const).map(t => (
             <button key={t}
@@ -2012,17 +2057,17 @@ export default function CuePage({
                   <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
                   <select
                     value={activeListId ?? ""}
-                    onChange={e => { setActiveListId(e.target.value || null); setCueMoreOpen(false); }}
+                    onChange={e => { void handleActivateList(e.target.value || null); setCueMoreOpen(false); }}
                     className="flex-1 text-xs bg-zinc-50 border border-zinc-200 rounded px-1.5 py-0.5 outline-none"
                   >
                     <option value="">—</option>
-                    {cueLists.filter(cl => editableListIds.includes(cl.id)).map(cl => (
-                      <option key={cl.id} value={cl.id}>{cl.name}</option>
+                    {cueLists.map(cl => (
+                      <option key={cl.id} value={cl.id}>{cl.name}{localEditableIds.has(cl.id) ? "" : " (只读)"}</option>
                     ))}
                   </select>
                 </div>
                 <span className="rounded bg-[var(--surface-2)] px-2 py-1 text-[11px] text-zinc-400 text-center">
-                  {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
+                  {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
                 </span>
               </div>
               <div className="my-1 border-t border-zinc-100" />
@@ -2584,6 +2629,89 @@ export default function CuePage({
           onDelete={id => setComments(prev => prev.filter(x => x.id !== id))}
           onClose={() => setActiveCommentCueId(null)}
         />
+      )}
+
+      {/* ── Phase 4: Cue list access modal (Level 2-A) ───────────────────── */}
+      {accessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => { setAccessModal(null); }}>
+          <div
+            className="relative mx-4 w-full max-w-sm rounded-2xl bg-[var(--surface)] p-6 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {accessModal.status === "loading" && (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <span className="text-2xl">⏳</span>
+                <p className="text-sm text-zinc-500">正在检查权限…</p>
+              </div>
+            )}
+
+            {accessModal.status === "can_self_confirm" && (
+              <>
+                <h2 className="mb-1 text-base font-semibold text-zinc-900">确认编辑访问</h2>
+                <p className="mb-4 text-sm text-zinc-500">
+                  你即将以部门成员身份编辑
+                  <span className="font-medium text-zinc-800">「{accessModal.listName}」</span>
+                  。确认后，系统将为你创建编辑授权记录。
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setAccessModal(null)}
+                    className="flex-1 rounded-xl border border-zinc-200 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                  >
+                    取消
+                  </button>
+                  <button
+                    disabled={accessModalConfirming}
+                    onClick={async () => {
+                      setAccessModalConfirming(true);
+                      try {
+                        const res = await fetch(
+                          `${BASE_PATH}/api/production/${productionId}/cuelists/${accessModal.listId}/access`,
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
+                            body: JSON.stringify({ action: "self_confirm", level: accessModal.selfConfirmLevel }),
+                          },
+                        );
+                        if (res.ok) {
+                          setLocalEditableIds(prev => new Set([...prev, accessModal.listId]));
+                          setAccessModal(null);
+                        }
+                      } finally {
+                        setAccessModalConfirming(false);
+                      }
+                    }}
+                    className="flex-1 rounded-xl bg-zinc-900 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {accessModalConfirming ? "确认中…" : "确认编辑"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {accessModal.status === "needs_approval" && (
+              <>
+                <h2 className="mb-1 text-base font-semibold text-zinc-900">需要申请访问</h2>
+                <p className="mb-4 text-sm text-zinc-500">
+                  你没有
+                  <span className="font-medium text-zinc-800">「{accessModal.listName}」</span>
+                  的编辑权限。如需访问，请联系该 Cue 表的负责部门 POC 或制作人进行授权。
+                </p>
+                <p className="mb-4 text-xs text-zinc-400">
+                  （审批流将在后续版本中支持。）
+                </p>
+                <button
+                  onClick={() => setAccessModal(null)}
+                  className="w-full rounded-xl bg-zinc-900 py-2.5 text-sm font-medium text-white hover:bg-zinc-800"
+                >
+                  知道了
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

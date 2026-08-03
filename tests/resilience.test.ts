@@ -31,13 +31,13 @@ beforeAll(async () => {
   await createProduction(BASE_PROD, "弹性测试演出");
   await createCueList({
     id: BASE_CL, productionId: BASE_PROD, name: "弹性测试走位表",
-    notes: "", abbr: null, template: null, roleIds: [], createdBy: TEST_USER,
+    notes: "", abbr: null, template: null, createdBy: TEST_USER,
   });
   // cascade chain
   await createProduction(CAS_PROD, "级联测试演出");
   await createCueList({
     id: CAS_CL, productionId: CAS_PROD, name: "级联走位表",
-    notes: "", abbr: null, template: null, roleIds: [], createdBy: TEST_USER,
+    notes: "", abbr: null, template: null, createdBy: TEST_USER,
   });
   const anchor = { kind: "gap" as const, afterBlockId: null };
   await createCue({ id: CAS_CUE, cueListId: CAS_CL, number: "C1", name: "级联Q", content: "", start: anchor, end: anchor });
@@ -64,7 +64,7 @@ describe("duplicate create handling", () => {
     await expect(
       createCueList({
         id: BASE_CL, productionId: BASE_PROD, name: "重复走位表",
-        notes: "", abbr: null, template: null, roleIds: [], createdBy: TEST_USER,
+        notes: "", abbr: null, template: null, createdBy: TEST_USER,
       })
     ).rejects.toThrow();
     expect((await getCueList(BASE_CL, BASE_PROD))!.name).toBe("弹性测试走位表");
