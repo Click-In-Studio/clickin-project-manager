@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
+import { hasResourceGrantLevel, getUserTechReqGrantIdsInEvent } from "@/lib/resource-grant-db";
 import {
   getProductionEvent,
   listEventTechReqs,
@@ -30,33 +31,40 @@ export default async function ReqsPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
+  // Admin role-level OR event resource_grant edit+ → full view
+  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx)
+    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
-  const [isAssignee, departments, productionMembers] = await Promise.all([
+  const [isAssignee, departments, productionMembers, grantedReqIds] = await Promise.all([
     isUserEventTechAssignee(eventId, session.userId),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
+    canViewFull ? Promise.resolve([] as string[]) : getUserTechReqGrantIdsInEvent(session.userId, productionId, eventId),
   ]);
 
-  // POC of any dept in this production can access to see their awaiting reqs
+  // POC of any dept (old system) OR resource_grant holder (new system)
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);
+  const grantedReqIdSet = new Set(grantedReqIds);
 
-  if (!canViewFull && !isAssignee && pocDeptIds.length === 0)
+  if (!canViewFull && !isAssignee && pocDeptIds.length === 0 && grantedReqIds.length === 0)
     redirect(`/production/${productionId}/events/${eventId}/view`);
 
   const allReqs = await listEventTechReqs(eventId);
 
-  // Non-full-viewers only see awaiting reqs for their own POC departments
+  // Non-full-viewers see: non-awaiting reqs, awaiting reqs for their POC depts,
+  // and any req they have a direct resource_grant on
   const techReqs = canViewFull
     ? allReqs
     : allReqs.filter(req =>
-        req.status !== "awaiting" || pocDeptIds.includes(req.departmentId ?? "")
+        req.status !== "awaiting"
+        || pocDeptIds.includes(req.departmentId ?? "")
+        || grantedReqIdSet.has(req.id)
       );
 
   return (

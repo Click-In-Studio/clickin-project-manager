@@ -208,6 +208,53 @@ export async function getTechReqAccess(
   return { canAccess: false, canSelfConfirm: false };
 }
 
+/**
+ * Returns true if the user has any active resource_grant on any tech_req in the given event.
+ * Used to gate access to the reqs page and the reqs link in the follower view.
+ */
+export async function hasUserAnyTechReqGrantInEvent(
+  userId: string,
+  productionId: string,
+  eventId: string,
+): Promise<boolean> {
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM resource_grant rg
+       JOIN event_tech_req etr ON etr.id = rg.resource_id
+       WHERE rg.production_id = $1
+         AND rg.user_id = $2
+         AND rg.resource_type = 'tech_req'
+         AND etr.event_id = $3
+         AND NOT rg.is_revoked
+     ) AS ok`,
+    [productionId, userId, eventId],
+  );
+  return rows[0]?.ok ?? false;
+}
+
+/**
+ * Returns the resource_ids of all tech_reqs in the given event where the user
+ * has an active resource_grant. Used to filter the reqs list for non-full viewers.
+ */
+export async function getUserTechReqGrantIdsInEvent(
+  userId: string,
+  productionId: string,
+  eventId: string,
+): Promise<string[]> {
+  const { rows } = await getPool().query<{ resource_id: string }>(
+    `SELECT DISTINCT rg.resource_id
+     FROM resource_grant rg
+     JOIN event_tech_req etr ON etr.id = rg.resource_id
+     WHERE rg.production_id = $1
+       AND rg.user_id = $2
+       AND rg.resource_type = 'tech_req'
+       AND etr.event_id = $3
+       AND NOT rg.is_revoked`,
+    [productionId, userId, eventId],
+  );
+  return rows.map(r => r.resource_id);
+}
+
 // ─── Grant-write helpers for new resource creation ────────────────────────────
 
 /**
