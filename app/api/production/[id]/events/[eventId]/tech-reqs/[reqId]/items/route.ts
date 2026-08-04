@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, getEventTechReq, setTechReqItems } from "@/lib/event-db";
-import { loadEventPermContext, canEditTechReq } from "@/lib/event-permissions";
+import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 
@@ -21,8 +21,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const existing = await getEventTechReq(reqId, eventId);
   if (!existing) return Response.json({ error: "技术需求不存在" }, { status: 404 });
 
-  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canEditTechReq(permCtx, eventPermCtx, existing.departmentId))
+  if (!await canEditTechReq(permCtx, reqId, eventId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { itemIds?: unknown };

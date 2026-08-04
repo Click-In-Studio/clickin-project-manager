@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { getProductionEvent, getEventTechReq, setTechReqAssignees } from "@/lib/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { loadEventPermContext, canAssignTechReq } from "@/lib/event-permissions";
+import { canAssignTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 
@@ -25,8 +25,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const req_ = await getEventTechReq(reqId, eventId);
   if (!req_) return Response.json({ error: "技术需求不存在" }, { status: 404 });
 
-  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canAssignTechReq(permCtx, eventPermCtx, req_.departmentId))
+  if (!await canAssignTechReq(permCtx, reqId, eventId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { assignees?: unknown };

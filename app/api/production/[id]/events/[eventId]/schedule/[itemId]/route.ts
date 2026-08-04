@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getScheduleItem, updateScheduleItem, deleteScheduleItem, setScheduleItemDepartments } from "@/lib/event-db";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };
 
@@ -14,12 +15,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:edit_schedule", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
   const existing = await getScheduleItem(itemId, eventId);
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
   if (!existing) return Response.json({ error: "流程项不存在" }, { status: 404 });
 
   const body = (await req.json()) as {
@@ -56,11 +57,11 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:edit_schedule", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteScheduleItem(itemId, eventId);
   return Response.json({ ok: true });

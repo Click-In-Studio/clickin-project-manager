@@ -250,17 +250,17 @@ tech_req 在标准层级外额外保留 `assign`（分配人员/设备，区别�
 
 | 资源 | 域类型 | 初始共管方来源 | permission_level 词汇 | 当前状态 |
 |------|--------|-------------|----------------------|---------|
-| cue_list | dept-managed | 创建者部门 + allowed_cue_types 匹配部门 | `view / mount / edit / manage` | 已实现，需改 |
-| event | dept-managed | 创建者部门 + SM 部门（auto）；公开 event 全员 view | `view / edit / publish / edit_published / revoke / manage` | 已实现，需改 |
-| report | dept-managed | 创建者部门 + SM 部门（auto）；发布后全员 view | `view / edit / publish / edit_published / revoke / manage` | 已实现，需改 |
-| tech_req | dept-managed | 创建者部门（auto on create）；SM 部门有类型级 manage | `view / edit / assign / manage` | 已实现，需改 |
-| note | dept-managed（写）/ production-wide（读） | 创建者部门（auto on create）；SM/导演有 `note:create_any` | `view / edit / manage`；全员有原子 `note:view` | 未完全实现 |
-| asset（数字资产） | creator-owned | 上传者控制分享目标（`asset_share` 表） | creator-owned 模型，不走 resource_grant | 已实现，需改 |
-| 物料（实物资产） | dept-managed | 制作人/Owner 直接建立 manage grant | `view / edit / manage` | 待实现 |
-| budget / 财务 | dept-managed | 制作人/Owner 直接建立 manage grant | `view / edit / manage` | 待实现 |
-| script | 原子权限（不使用 resource_grant） | role/dept `permissions[]` 配置 | 原子 key：`script:view / edit_content / edit_marker / annotate / manage_views` | 已实现，key 待整合 |
-| script_view | dept-managed（resource_grant 独立实体） | 视图创建者（需 `script:manage_views` 原子权限） | `view / edit / manage` | 待实现 |
-| announcement | production-wide | 管理员 | 原子权限，不走 resource_grant | 已实现 |
+| cue_list | dept-managed | 创建者部门 + allowed_cue_types 匹配部门 | `view / mount / edit / manage` | ✅ Phase 4 完成 |
+| event | dept-managed | 创建者部门 + SM 部门（auto）；公开 event 全员 view | `view / edit / publish / edit_published / revoke / manage` | Phase 5a |
+| report | dept-managed | 创建者部门 + SM 部门（auto）；发布后全员 view | `view / edit / publish / edit_published / revoke / manage` | Phase 5b |
+| tech_req | dept-managed | 创建者部门（auto on create）；SM 部门有类型级 manage | `view / edit / assign / manage` | Phase 5c |
+| note | dept-managed（写）/ production-wide（读） | 创建者部门（auto on create）；SM/导演有 `note:create_any` | `view / edit / manage`；全员有原子 `note:view` | Phase 5d |
+| asset（数字资产） | creator-owned | 上传者控制分享目标（`asset_share` 表） | creator-owned 模型，不走 resource_grant | 本 epic 范围外 |
+| 物料（实物资产） | dept-managed | 制作人/Owner 直接建立 manage grant | `view / edit / manage` | 本 epic 范围外 |
+| budget / 财务 | dept-managed | 制作人/Owner 直接建立 manage grant | `view / edit / manage` | 本 epic 范围外 |
+| script | 原子权限（不使用 resource_grant） | role/dept `permissions[]` 配置 | 原子 key：`script:view / edit_content / edit_marker / annotate / manage_views` | 原子权限已实现；key 整合随各 Phase 资源迁移逐步完成 |
+| script_view | dept-managed（resource_grant 独立实体） | 视图创建者（需 `script:manage_views` 原子权限） | `view / edit / manage` | 本 epic 范围外（建议另立计划） |
+| announcement | production-wide | 管理员 | 原子权限，不走 resource_grant | 已实现，本 epic 不动 |
 
 ### `resource_dept_manage`（部门-资源结构性管理权）
 
@@ -1104,26 +1104,97 @@ ALTER TABLE production_member
 - "申请访问"界面：访问不在免审批区间的 cue 表 → 显示申请入口（替代纯 403）
 - View 首次访问的轻量通知
 
-### Phase 5（#165 + #138）标签 + 成员管理 API
+### Phase 5 资源迁移（event / report / tech_req / note）
+
+> **排期依据**：Phase 6 审批流的路由逻辑（查 `resource_grant` manage 持有者 → 升级至 `resource_dept_manage` POC）依赖所有资源都已在 `resource_grant` 上；Phase 6（成员管理）的 DELETE 级联撤销也需要 `resource_grant` 覆盖所有资源才完整。因此在成员管理之前完成所有资源迁移。
+>
+> `script` 不在本 Phase 内（通过原子权限控制，不使用 `resource_grant`，设计已定稿）。`script_view` / 物料 / 财务 超出本 epic 范围，另立计划。
+
+**各资源 PR 拆分（顺序执行）：**
+
+#### PR 5a — event
+
 **后端：**
-- migration：将现有 roles 中助理类复合职位拆分（role=原职位、tag=助理）
-- 补充标签 CRUD API（系统预设 + 自定义标签）
-- 重写 `PATCH /api/production/[id]/members` 路由（supervisor_id / tags / role / dept / status 全覆盖）
-- `DELETE /api/production/[id]/members/[userId]`（owner only，级联撤销所有 self_confirmed grant）
-- 制作人/POC 直接写入 `resource_grant(source='direct')` 的 API
+- `canAccess()` 对 `event` 类型完全切换为 `resource_grant` 查询，移除 `hasPermission` 回落
+- 新建 event 时写入 `resource_dept_manage`（创建者部门 + SM 部门）+ 创建者 `resource_grant(self_confirmed, manage)`；公开 event 同时写全员 `resource_grant(auto, view)`
+- 回填：现有 `event` 的权限状态转为 `resource_grant` 记录（`grant_source='direct'`，以最近一次显式授权操作人为 `confirmed_by`；无从追溯者 `confirmed_by = production.owner_id`）
+- 原子权限清理（折叠进 resource_grant，保留 `*_any` 管理员绕过）：
+  - `event:edit / publish / create_schedule / edit_schedule / delete_schedule / assign_participants / assign_schedule_participants / edit_call / view_call_sheet` → `event:event# @ edit / publish`
+  - `event:modify_published / revoke / delete` → `event:event# @ edit_published / revoke / manage`
+  - `event:create_tech_req / edit_tech_req / view_tech_req / assign_tech_req / delete_tech_req` → `tech_req:req# @ view / edit / assign / manage`（与 PR 5c 协调）
+  - `event:*_any` 保留为管理员绕过原子权限
+- 将某人加入 event 参演名单 → 自动写 `resource_grant(event, event_id, 'view', grant_source='assigned')`
+
+**UX（与后端同 PR 交付）：**
+- Level 2-A modal：进入 event 编辑页时确认 edit / publish grant
+- Level 2-B banner：进入 event 主页时确认通配符 view / create grant
+- 无权访问 event → 显示申请入口（替代纯 403）
+
+#### PR 5b — report
+
+**后端：**
+- `canAccess()` 对 `report` 类型切换为 `resource_grant` 查询
+- 新建 report 时写入 `resource_dept_manage`（创建者部门 + SM 部门）+ 创建者 manage grant；正式发布时自动写全员 `resource_grant(auto, view)`
+- 回填：同 event，`grant_source='direct'`，无法追溯时 `confirmed_by = production.owner_id`
+- 原子权限清理：
+  - `report:edit / publish / delete / create_note / edit_note / delete_note` → `report:report# @ edit / publish / manage`
+  - `report:modify_published / revoke` → `report:report# @ edit_published / revoke`
+  - `report:*_any` 保留为管理员绕过
 
 **UX：**
-- 成员详情页展示 tags 和 role（分开显示）
+- 同 event 模式（Level 2-A 编辑确认 / Level 2-B 总览页 banner / 申请入口）
+
+#### PR 5c — tech_req
+
+**后端：**
+- `canAccess()` 对 `tech_req` 类型切换为 `resource_grant` 查询（`view / edit / assign / manage` 四级）
+- 新建 tech_req 时写入 `resource_dept_manage`（创建者部门；SM 部门有类型级 manage）+ 创建者 manage grant
+- 将某人设为 tech_req 执行人 → 自动写 `resource_grant(tech_req, req_id, 'view', grant_source='assigned')`
+- 原子权限清理：与 PR 5a `event:*_tech_req` 协调，统一迁移
+
+**UX：**
+- Level 2-A：进入 tech_req 编辑/分配界面时确认
+- 申请入口替代纯 403
+
+#### PR 5d — note
+
+> **特殊点**：note 读 production-wide（所有成员默认可见），写 dept-scoped。
+
+**后端：**
+- `canAccess()` 对 `note` 的写入路径切换为 `resource_grant`；读取路径保持 production-wide（加入演出时自动写 `resource_grant(note, *, 'view', grant_source='auto')`）
+- 新增原子权限：`note:create`（本部门 note）、`note:create_any`（跨部门，SM/导演）、`note:view`（production-wide，纳入 `MEMBER_BASE_PERMISSIONS`）
+- 新建 note 时写入 `resource_dept_manage`（创建者部门）+ 创建者 manage grant
+
+**UX：**
+- note 写入权限：无权限时申请入口（替代纯 403）
+- note 读权限：production-wide，无需申请 UI
+
+---
+
+### Phase 6（#165 + #138）标签 + 成员管理 API
+
+> **排期依据**：此时 `resource_grant` 已覆盖所有资源，DELETE /members 的 grant 级联撤销可以完整执行。
+
+**后端：**
+- migration：将现有 roles 中助理类复合职位拆分（role=原职位、tag=助理）；复合 role 行保留于 `production_role` 表（不 DROP，避免破坏历史 FK 引用），标记 `is_deprecated=true`（新增 boolean 列）
+- 补充标签 CRUD API：`GET/POST/DELETE /api/production/[id]/tags`（系统预设 tag 只读；自定义 tag 限本演出范围；删除自定义 tag 前检查是否有 assignment）
+- 重写 `PATCH /api/production/[id]/members` 路由：`supervisor_id`（含循环引用校验）/ `tags`（tag assignment 增删）/ `roles`（切换至 FK 路径）/ `dept`（dept 成员归属变更 + grant 级联撤销）
+- `DELETE /api/production/[id]/members/[userId]`：制作人权限检查（`hasPermission("production:manage_members", ctx)` 代理，真正 owner-only 检查待 #137 完整落地）；级联撤销该成员所有 `self_confirmed` grant（`resource_grant` + `atomic_permission_grant`）
+- `status` 字段：仅允许管理员通过 PATCH 设置 `suspended`（紧急操作）；`pending_exit / exited` 状态转换保留给 Phase 7 审批流，不在此 Phase 暴露
+
+**UX：**
+- 成员详情页展示 tags 和 role（分开显示，复合 role 标注"旧格式"）
 - 成员列表支持按 tag 筛选
 
-### Phase 6（#139 → #140 → #141）审批流
+### Phase 7（#139 → #140 → #141）审批流
 **后端：**
 - `add-approval-request.sql`：新建 `approval_request` 表（含 resource_access type 及其专用字段）
 - Resource access 申请提交 API
-- 审批 API（POC 批准/拒绝）
+- 审批 API（POC 批准/拒绝，first-action-wins）
 - 批准后自动写 `resource_grant(source='approval')`
 - Member exit 状态机（active → pending_exit → approved/disputed → exited/suspended）
 - Owner transfer 双向确认
+- TTL 升级计划任务（超时自动通知上级 POC，最终兜底 Production Owner）
 
 **UX：**
 - 申请提交后的状态追踪页
@@ -1131,8 +1202,7 @@ ALTER TABLE production_member
 - Member exit 申请界面
 - Grant 撤销后收到通知
 
-### Phase 7（#156）UI 完整收尾
-- 其余资源类型（script、note、tech_req 等）的自我确认 UI 与申请访问 UI
+### Phase 8（#156）UI 完整收尾
 - Grant 管理界面（用户查看自己的 grants；制作人查看全演出 grant 记录）
 - Inbox 完整实现（资源申请、成员退出申请、grant 撤销通知聚合）
 - 审批流历史记录展示
@@ -1165,22 +1235,13 @@ ALTER TABLE production_member
 - [ ] **asset_share 的实现时机**：asset 分享功能是否在本次 epic 内实现，还是仅做 schema 预留？
 - [ ] **manage grant 的转移 API**：部门解散时的 grant 转移操作，是在部门删除 API 内处理还是独立端点？
 - [x] **原子权限申请流的审批路由**：原子权限是类型级操作，无具体实例的 manage grant 持有者作为锚点。审批权上浮至对 `permissions[]` 有配置权的人：**制作人 → 无则兜底 Production Owner**。与 resource_grant 申请路由同一兜底，规则对称。
-- [ ] **原子权限清理**：以下权限需整合或迁移，待对应 Phase 切换后处理：
-  - `cue_list:manage_permissions` / `_any` → 被 resource_grant 的 `manage` 级替代
-  - `cue_list:delete/rename/edit_abbr/edit_description` → 折叠进 `cue_list:list# @ manage/edit`（resource_grant）
-  - `cue:create/delete/rename/renumber/edit_description/move` → 折叠进 `cue_list:list# @ edit`（resource_grant）
-  - `cue:mount` → 折叠进 `cue_list:list# @ mount`（resource_grant）
-  - `event:edit/publish/create_schedule/edit_schedule/delete_schedule/assign_participants/assign_schedule_participants/edit_call/view_call_sheet` → 折叠进 `event:event# @ edit/publish`（resource_grant）
-  - `event:modify_published/revoke/delete` → 折叠进 `event:event# @ edit_published/revoke/manage`；`event:*_any` 保留原子权限作管理员绕过
-  - `event:create_tech_req/edit_tech_req/view_tech_req/assign_tech_req/delete_tech_req` → 迁移至 `tech_req:req# @ view/edit/assign/manage`；`event:*_tech_req_any` 保留原子权限
-  - `report:edit/publish/delete/create_note/edit_note/delete_note` → 折叠进 `report:report# @ edit/publish/manage`（resource_grant）
-  - `report:modify_published/revoke` → 折叠进 `report:report# @ edit_published/revoke`；`report:*_any` 保留原子权限
-  - `script:manage` → 拆分为 `script:manage_views`（新增原子 key）；整体访问控制改用 `script:view/edit_content/edit_marker`
-  - `script:create_block/delete_block/edit_block/set_character/set_type/set_tag/reorder` → 折叠进 `script:edit_content`
-  - `script:annotate` → 保留（权限范围小于 `edit_content`）
-  - `script:mount` → 保留为原子权限
-  - `asset:mount_any/unmount_any` → 改由 resource_grant `mount` level 表达
-  - **note 新增原子权限**（待 note 功能实现时启用）：`note:create`、`note:create_any`、`note:view`（production-wide，纳入 MEMBER_BASE）
+- [ ] **原子权限清理**（各条目已分配至对应 Phase，随 Phase 完成逐一划掉）：
+  - ✅ **Phase 4**：`cue_list:manage_permissions / _any` → resource_grant `manage` 级替代；`cue_list:delete/rename/edit_abbr/edit_description` → `cue_list:list# @ manage/edit`；`cue:create/.../move` → `cue_list:list# @ edit`；`cue:mount` → `cue_list:list# @ mount`
+  - **Phase 5a**：`event:edit/publish/create_schedule/.../view_call_sheet` → `event:event# @ edit/publish`；`event:modify_published/revoke/delete` → `event:event# @ edit_published/revoke/manage`；`event:*_any` 保留；`event:*_tech_req` → `tech_req:req# @`（与 5c 协调）
+  - **Phase 5b**：`report:edit/publish/delete/create_note/edit_note/delete_note` → `report:report# @ edit/publish/manage`；`report:modify_published/revoke` → `report:report# @ edit_published/revoke`；`report:*_any` 保留
+  - **Phase 5c**：`event:*_tech_req` 系列完成迁移至 `tech_req:req# @ view/edit/assign/manage`
+  - **Phase 5d**：新增原子权限 `note:create`、`note:create_any`、`note:view`（纳入 `MEMBER_BASE_PERMISSIONS`）
+  - **本 epic 范围外**：`script:manage` → `script:manage_views`；`script:create_block/...` → `script:edit_content`；`script:annotate / script:mount` 保留；`asset:mount_any/unmount_any` → resource_grant `mount` level
 
 ---
 

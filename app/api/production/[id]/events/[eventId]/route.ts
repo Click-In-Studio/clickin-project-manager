@@ -4,6 +4,7 @@ import { getProductionPermissionContext, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
 import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -36,11 +37,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:edit", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
     title?: string; eventType?: string; location?: string;
@@ -97,11 +99,12 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:edit", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteProductionEvent(eventId, productionId);
   return Response.json({ ok: true });

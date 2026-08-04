@@ -4,6 +4,7 @@ import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db"
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventCallTimes, createEventCallTime } from "@/lib/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -35,11 +36,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:edit_call", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
     userId?: string; name?: string; departmentId?: string | null;
@@ -60,7 +62,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   });
 
   if (event.chatId) {
-    // Convert internal userId to Feishu open_id for addChatMembers
     batchGetFeishuOpenIds([body.userId]).then(m => {
       const openId = m.get(body.userId!);
       if (openId) feishuPlatform.addGroupMembers(event.chatId!, [openId]).catch(console.error);
