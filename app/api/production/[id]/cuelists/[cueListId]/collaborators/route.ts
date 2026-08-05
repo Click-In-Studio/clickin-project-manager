@@ -49,7 +49,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   if (body.type === "dept" && body.deptId) {
     await addCueListDeptAccess(cueListId, id, body.deptId, mc.session.userId);
   } else if (body.type === "user" && body.userId) {
-    const level: CueListLevel = body.level && VALID_LEVELS.includes(body.level) ? body.level : "edit";
+    if (body.level && !VALID_LEVELS.includes(body.level))
+      return Response.json({ error: "无效的权限级别" }, { status: 400 });
+    const level: CueListLevel = (body.level as CueListLevel | undefined) ?? "edit";
     await setCueListGrant(cueListId, id, body.userId, true, mc.session.userId, level);
   } else {
     return Response.json({ error: "参数错误" }, { status: 400 });
