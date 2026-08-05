@@ -60,10 +60,6 @@ export async function setup() {
     `\nTest seed: ${process.env.TEST_SEED}  (reproduce: TEST_SEED=${process.env.TEST_SEED} npm test)\n`,
   );
 
-  // Seed faker once here so all migration factories share the same sequence
-  // without re-seeding (re-seeding with the same value produces the same IDs → PK collisions).
-  faker.seed(Number(process.env.TEST_SEED));
-
   const pool = getPool();
 
   if (await isPreMigrationSchema(pool)) {
