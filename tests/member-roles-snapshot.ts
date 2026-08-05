@@ -43,7 +43,7 @@ export async function createMemberRolesPreMigrationData(
   // Create production (seeds production_role via seedProductionRoles)
   await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [prodId, faker.company.name()]);
   await pool.query(
-    "INSERT INTO version (id, production_id, label, created_at) VALUES ($1, $2, $3, NOW())",
+    "INSERT INTO version (id, production_id, name, created_at) VALUES ($1, $2, $3, NOW())",
     [`${prodId}_v1`, prodId, "initial"],
   );
   await pool.query(
