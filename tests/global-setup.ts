@@ -60,11 +60,14 @@ export async function setup() {
     `\nTest seed: ${process.env.TEST_SEED}  (reproduce: TEST_SEED=${process.env.TEST_SEED} npm test)\n`,
   );
 
+  // Seed faker once here so all migration factories share the same sequence
+  // without re-seeding (re-seeding with the same value produces the same IDs → PK collisions).
+  faker.seed(Number(process.env.TEST_SEED));
+
   const pool = getPool();
 
   if (await isPreMigrationSchema(pool)) {
     // Migration path: DB is on the old schema (pre-internal-user-id).
-    faker.seed(Number(process.env.TEST_SEED));
     const snapshot = await createPreMigrationData(pool, faker);
     await writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot));
     const migrationSql = await readFile(
@@ -126,7 +129,6 @@ export async function setup() {
   if (await isEventDeptPreMigrationSchema(pool)) {
     // Migration path: event_department data not yet in production_dept.
     // TEST_USER already inserted above.
-    faker.seed(Number(process.env.TEST_SEED));
     const eventDeptSnapshot = await createEventDeptPreMigrationData(pool, TEST_USER);
     await writeFile(EVENT_DEPT_SNAPSHOT_PATH, JSON.stringify(eventDeptSnapshot));
     const migrationSql = await readFile(
@@ -138,7 +140,6 @@ export async function setup() {
 
   if (await isRoleCueTypePreMigrationSchema(pool)) {
     // Migration path: production_role_cue_type table still exists.
-    faker.seed(Number(process.env.TEST_SEED));
     const roleCueTypeSnapshot = await createRoleCueTypePreMigrationData(pool, TEST_USER);
     await writeFile(ROLE_CUE_TYPE_SNAPSHOT_PATH, JSON.stringify(roleCueTypeSnapshot));
     const migrationSql = await readFile(
@@ -150,7 +151,6 @@ export async function setup() {
 
   if (await isCueListGrantPreMigrationSchema(pool)) {
     // Migration path: cue_list_permission table still exists.
-    faker.seed(Number(process.env.TEST_SEED));
     const cueListGrantSnapshot = await createCueListGrantPreMigrationData(pool, TEST_USER);
     await writeFile(CUE_LIST_GRANT_SNAPSHOT_PATH, JSON.stringify(cueListGrantSnapshot));
     const migrationSql = await readFile(
