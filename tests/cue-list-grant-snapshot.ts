@@ -51,7 +51,7 @@ export async function createCueListGrantPreMigrationData(
     faker.company.name(),
   ]);
   await pool.query(
-    "INSERT INTO version (id, production_id, label, created_at) VALUES ($1, $2, $3, NOW())",
+    "INSERT INTO version (id, production_id, name, created_at) VALUES ($1, $2, $3, NOW())",
     [`${prodId}_v1`, prodId, "initial"],
   );
   await pool.query("UPDATE production SET active_version_id = $1 WHERE id = $2", [
