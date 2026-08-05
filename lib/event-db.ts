@@ -1,4 +1,5 @@
 import { getPool } from "./pg";
+import { writeEventGrants, writeReportGrants, writeTechReqGrants } from "./resource-grant-db";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -516,6 +517,7 @@ export async function createProductionEvent(data: {
     [data.id, data.productionId, data.title, data.eventType, data.location,
      data.startTime, data.endTime, data.description, data.createdBy, data.versionId ?? null]
   );
+  await writeEventGrants(data.id, data.productionId, data.createdBy);
   return rowToEvent(res.rows[0]);
 }
 
@@ -999,6 +1001,7 @@ export async function createEventTechReq(data: {
   id: string; eventId: string; scheduleItemIds: string[];
   title: string; description: string; presetMinutes: number | null;
   departmentId: string | null; assignees: EventTechReqAssignee[];
+  createdBy: string;
 }): Promise<EventTechReq> {
   const client = await getPool().connect();
   try {
@@ -1025,6 +1028,13 @@ export async function createEventTechReq(data: {
       );
     }
     await client.query("COMMIT");
+    // Write resource grants after transaction commit (best-effort; failures don't roll back the req)
+    const prodRow = await getPool().query<{ production_id: string }>(
+      "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
+    );
+    if (prodRow.rows[0]) {
+      await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy);
+    }
     return rowToTechReq(res.rows[0], data.assignees, unique);
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1204,6 +1214,12 @@ export async function createEventReport(data: {
                created_at, updated_at, published_at`,
     [data.id, data.eventId, data.reportType, data.title, data.body, data.createdBy]
   );
+  const prodRow = await getPool().query<{ production_id: string }>(
+    "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
+  );
+  if (prodRow.rows[0]) {
+    await writeReportGrants(data.id, prodRow.rows[0].production_id, data.createdBy);
+  }
   return rowToReport(res.rows[0]);
 }
 

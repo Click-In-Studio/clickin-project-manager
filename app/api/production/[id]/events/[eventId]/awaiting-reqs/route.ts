@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { BASE_PATH } from "@/lib/base-path";
 import { getPool } from "@/lib/pg";
@@ -20,11 +21,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:edit_schedule", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { departmentIds?: string[]; scheduleItemId?: string };
   const departmentIds = body.departmentIds ?? [];

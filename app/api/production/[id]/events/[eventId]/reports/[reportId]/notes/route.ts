@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!report) return Response.json({ error: "记录不存在" }, { status: 404 });
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canWriteNote(permCtx, eventPermCtx))
+  if (!await canWriteNote(permCtx, reportId, productionId, eventPermCtx.isInCall))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {

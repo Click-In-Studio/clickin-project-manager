@@ -15,7 +15,8 @@ import {
   listEventDepartments,
   getSelfParticipantRole,
 } from "@/lib/event-db";
-import { loadEventPermContext, canWriteReport, canEditTechReq } from "@/lib/event-permissions";
+import { loadEventPermContext, isReportViewer } from "@/lib/event-permissions";
+import { getEventAccess, hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import EventDetailClient from "@/components/EventDetailClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -42,10 +43,15 @@ export default async function EventDetailPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewFull = hasPermission("event:edit", prodPermCtx);
+  // Check per-event resource grant
+  const accessResult = prodPermCtx.isAdmin
+    ? { canAccess: true as const, level: "manage" as const }
+    : await getEventAccess(session.userId, productionId, eventId);
 
-  // Non-editors always go to the follower view (which enforces status visibility too)
-  if (!canViewFull) redirect(`/production/${productionId}/events/${eventId}/view`);
+  // No access and not in free-approval zone → redirect to follower view
+  if (!accessResult.canAccess && !accessResult.canSelfConfirm) {
+    redirect(`/production/${productionId}/events/${eventId}/view`);
+  }
 
   const name = await getProductionName(productionId);
   if (!name) notFound();
@@ -76,14 +82,25 @@ export default async function EventDetailPage({
     reports = [defaultReport];
   }
 
-  const canEdit = hasPermission("event:edit", prodPermCtx);
-  const canScheduleEdit = hasPermission("event:edit_schedule", prodPermCtx);
-  const canAssignPeople = hasPermission("event:assign_participants", prodPermCtx);
-  const canCallEdit = hasPermission("event:edit_call", prodPermCtx);
+  // Derive capability booleans from the access result
+  const hasEditGrant = accessResult.canAccess &&
+    ["edit", "publish", "edit_published", "revoke", "manage"].includes(accessResult.level);
+
+  const canEdit = hasEditGrant;
+  const canScheduleEdit = hasEditGrant;
+  const canAssignPeople = hasEditGrant;
+  const canCallEdit = hasEditGrant;
+  // admin bypass for deleting any tech req stays as atomic
   const canTechReqDelete = hasPermission("event:delete_tech_req_any", prodPermCtx);
-  const userCanWriteReport = canWriteReport(prodPermCtx, eventPermCtx);
-  const canEditAnyTechReq = canEditTechReq(prodPermCtx, eventPermCtx, null);
+  // canWriteReport: check if user has edit+ on any report in this event OR has event edit grant
+  const canWriteReport = hasEditGrant ||
+    (reports.length > 0 && await hasResourceGrantLevel(session.userId, productionId, "report", reports[0].id, "edit"));
+  const canEditAnyTechReq = hasEditGrant;
   const pocDeptIds = eventPermCtx.pocDeptIds;
+
+  // Level 2-A: user is in free-approval zone but hasn't confirmed yet
+  const needsSelfConfirm = !accessResult.canAccess && accessResult.canSelfConfirm;
+  const selfConfirmLevel = needsSelfConfirm ? accessResult.selfConfirmLevel : undefined;
 
   return (
     <EventDetailClient
@@ -103,11 +120,13 @@ export default async function EventDetailPage({
       canAssignPeople={canAssignPeople}
       canCallEdit={canCallEdit}
       canTechReqDelete={canTechReqDelete}
-      canWriteReport={userCanWriteReport}
+      canWriteReport={canWriteReport}
       canEditAnyTechReq={canEditAnyTechReq}
       pocDeptIds={pocDeptIds}
       currentUserId={session.userId}
       selfParticipantRole={selfRole}
+      needsSelfConfirm={needsSelfConfirm}
+      selfConfirmLevel={selfConfirmLevel}
     />
   );
 }

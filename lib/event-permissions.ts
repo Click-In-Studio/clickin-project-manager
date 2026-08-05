@@ -1,33 +1,29 @@
 /**
  * Contextual (Type B) permission checks for the event system.
  *
- * These cannot be resolved purely from role membership — they require runtime
- * state like "is this SM in the event call?" or "is this user a POC for the
- * tech req's department?".
+ * Phase 5: edit/write operations now gate on per-instance resource_grant rows.
+ * Contextual state (isInCall, isFollower) is retained for note writing and
+ * read-level checks that remain role-based.
  *
- * Type A (role-only) event permissions live in roles.ts as `event:*` entries
- * and are evaluated with the regular `hasPermission()` function.
+ * Type A (role-only) event permissions for admin bypass still use hasPermission().
  */
 
 import { getPool } from "./pg";
 import { hasPermission, type PermissionContext } from "./permissions";
+import { hasResourceGrantLevel } from "./resource-grant-db";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
 
-/**
- * Loads all event-scoped context needed for permission decisions.
- * Call once per request, then pass the result to the individual check functions.
- */
 export type EventPermContext = {
   /** True if the user has an event_call_time record for this event. */
   isInCall: boolean;
   /** True if the user has an event_participant row (is following this event). */
   isFollower: boolean;
-  /** dept IDs the user is assigned to as a participant in this event. */
+  /** dept IDs (event_department.id) the user is assigned to as a participant. */
   participantDeptIds: string[];
-  /** dept IDs for which the user is a POC. */
+  /** event_department.id values where user is POC (used for tech_req dept filter in UI). */
   pocDeptIds: string[];
-  /** All dept IDs the user belongs to in this production (production-wide). */
+  /** All event_department.id values the user belongs to production-wide (for note reply check). */
   memberDeptIds: string[];
 };
 
@@ -50,7 +46,6 @@ export async function loadEventPermContext(
        WHERE event_id = $1 AND user_id = $2 AND department_id IS NOT NULL`,
       [eventId, userId]
     ),
-    // POC membership is production-wide
     pool.query<{ department_id: string }>(
       `SELECT edm.department_id
        FROM event_department_member edm
@@ -59,7 +54,6 @@ export async function loadEventPermContext(
        WHERE pe.id = $1 AND edm.user_id = $2 AND edm.is_poc = true`,
       [eventId, userId]
     ),
-    // All production-wide dept membership for this event's production
     pool.query<{ department_id: string }>(
       `SELECT edm.department_id
        FROM event_department_member edm
@@ -80,60 +74,106 @@ export async function loadEventPermContext(
 
 // ─── Permission checks ────────────────────────────────────────────────────────
 
-/** Can write / publish a report. */
-export function canWriteReport(
+/**
+ * Can write / edit a specific report.
+ * Primary: resource_grant(report, reportId, 'edit'+).
+ * Fallback: isInCall still allows note writing (for tech dept staff in call).
+ */
+export async function canWriteReport(
   permCtx: PermissionContext,
-  ctx: Pick<EventPermContext, "isInCall">,
-): boolean {
+  reportId: string,
+  productionId: string,
+): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
-  if (hasPermission("report:publish", permCtx)) return true;
-  if (hasPermission("event:publish", permCtx)) return ctx.isInCall;
-  return false;
+  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "edit");
 }
 
-/** Can add or edit a tech requirement. */
-export function canEditTechReq(
+/**
+ * Can publish a specific report.
+ */
+export async function canPublishReport(
   permCtx: PermissionContext,
-  ctx: Pick<EventPermContext, "pocDeptIds">,
-  techReqDeptId: string | null,
-): boolean {
+  reportId: string,
+  productionId: string,
+): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (hasPermission("event:create", permCtx) || hasPermission("event:edit_schedule", permCtx)) return true;
-  if (techReqDeptId && ctx.pocDeptIds.includes(techReqDeptId)) return true;
-  return false;
+  if (permCtx.memberPermissions === null) return false;
+  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "publish");
 }
 
-/** Can assign tech personnel to a requirement. Same logic as canEditTechReq. */
-export function canAssignTechReq(
+/**
+ * Can add or edit a specific tech requirement.
+ * Primary: resource_grant(tech_req, reqId, 'edit'+).
+ * Event-level edit also grants access (cascades down to all tech_reqs in the event).
+ */
+export async function canEditTechReq(
   permCtx: PermissionContext,
-  ctx: Pick<EventPermContext, "pocDeptIds">,
+  techReqId: string,
+  eventId: string,
+  productionId: string,
+): Promise<boolean> {
+  if (permCtx.isAdmin) return true;
+  if (permCtx.memberPermissions === null) return false;
+  const [hasReqGrant, hasEventGrant] = await Promise.all([
+    hasResourceGrantLevel(permCtx.userId, productionId, "tech_req", techReqId, "edit"),
+    hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit"),
+  ]);
+  return hasReqGrant || hasEventGrant;
+}
+
+/** Can assign tech personnel to a requirement. Same rule as canEditTechReq. */
+export async function canAssignTechReq(
+  permCtx: PermissionContext,
+  techReqId: string,
+  eventId: string,
+  productionId: string,
+): Promise<boolean> {
+  return canEditTechReq(permCtx, techReqId, eventId, productionId);
+}
+
+/** Can view a tech requirement (for display gating in the list). */
+export async function canViewTechReq(
+  permCtx: PermissionContext,
+  techReqId: string,
+  eventId: string,
+  productionId: string,
   techReqDeptId: string | null,
-): boolean {
-  return canEditTechReq(permCtx, ctx, techReqDeptId);
-}
-
-/** Can view a tech requirement. */
-export function canViewTechReq(
-  permCtx: PermissionContext,
   ctx: Pick<EventPermContext, "participantDeptIds">,
-  techReqDeptId: string | null,
-): boolean {
+): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (hasPermission("event:view_tech_req_any", permCtx)) return true;
+  // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
-  return false;
+  // Or if user has any grant on this req
+  const level = await hasResourceGrantLevel(permCtx.userId, productionId, "tech_req", techReqId, "view");
+  return level;
 }
 
-/** Can add/edit a department note on a report. */
-export function canWriteNote(
+/**
+ * Can add/edit a department note on a report.
+ * Primary: resource_grant(report, reportId, 'edit'+) OR isInCall.
+ */
+export async function canWriteNote(
   permCtx: PermissionContext,
-  ctx: Pick<EventPermContext, "isInCall">,
+  reportId: string,
+  productionId: string,
+  isInCall: boolean,
+): Promise<boolean> {
+  if (permCtx.memberPermissions === null) return false;
+  if (permCtx.isAdmin) return true;
+  if (isInCall) return true;
+  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "edit");
+}
+
+/** Synchronous fallback for contexts where reportId is not available. Matches isInCall only. */
+export function canWriteNoteInCall(
+  permCtx: PermissionContext,
+  isInCall: boolean,
 ): boolean {
   if (permCtx.memberPermissions === null) return false;
   if (permCtx.isAdmin) return true;
-  if (hasPermission("report:create_note_any", permCtx)) return true;
-  return ctx.isInCall;
+  return isInCall;
 }
 
 /** Can delete or edit any note (not just own). */
@@ -142,9 +182,14 @@ export function canModerateNotes(permCtx: PermissionContext): boolean {
   return hasPermission("report:edit_note_any", permCtx);
 }
 
-/** Returns true if the user can view unpublished reports. */
+/**
+ * Returns true if the user can view unpublished reports.
+ * Synchronous role-level check: SM/director/producer have event:edit in their role.
+ * Used for list pages and read gating where a specific report/event ID is not available.
+ */
 export function isReportViewer(permCtx: PermissionContext): boolean {
-  return permCtx.isAdmin || hasPermission("event:edit", permCtx) || hasPermission("event:edit_schedule", permCtx);
+  if (permCtx.isAdmin) return true;
+  return hasPermission("event:edit", permCtx) || hasPermission("event:edit_schedule", permCtx);
 }
 
 /**

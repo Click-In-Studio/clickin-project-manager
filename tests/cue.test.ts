@@ -25,7 +25,7 @@ describe("cue list CRUD", () => {
     await createCueList({
       id: CL_ID, productionId: prodId,
       name: "单元测试走位表", notes: "", abbr: null,
-      template: null, roleIds: [], createdBy: TEST_USER,
+      template: null, createdBy: TEST_USER,
     });
     const cl = await getCueList(CL_ID, prodId);
     expect(cl).not.toBeNull();

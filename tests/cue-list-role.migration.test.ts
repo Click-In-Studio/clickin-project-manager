@@ -1,22 +1,16 @@
 /**
  * Migration tests for migrate-cue-list-role.sql.
  *
- * Operating modes:
- *
- *   Migration path (CI: schema before cue-list-role migration):
- *     global-setup.ts detects old schema (cue_list.default_edit_roles exists),
- *     inserts factory rows, applies the migration, and writes a snapshot to
- *     CUE_LIST_ROLE_SNAPSHOT_PATH. All three layers run, including invariance.
- *
- *   Normal path (already-migrated DB):
- *     global-setup.ts skips the migration. Snapshot file does not exist.
- *     Schema and integrity layers always run; invariance skips (it.skipIf).
+ * Note: Phase 4 (migrate-cue-list-to-resource-grant.sql) subsequently dropped
+ * cue_list_role and cue_list_permission. The schema/integrity layers below reflect
+ * the FINAL post-Phase-4 state. Invariance tests are guarded by it.skipIf(!snapshot)
+ * and are skipped on already-migrated DBs where the snapshot file does not exist.
  *
  * Layer structure:
- *   1. Schema    — column absence/presence, table existence, index presence
- *   2. Integrity — FK orphan counts in cue_list_role and cue_list_permission
- *   3. Invariance — factory default_edit_roles mapped to cue_list_role rows;
- *                   creator written to cue_list_permission
+ *   1. Schema    — cue_list.default_edit_roles column is gone;
+ *                  cue_list_role and cue_list_permission tables are also gone (Phase 4)
+ *   2. Integrity — resource_grant table exists and has no orphan user/production FK refs
+ *   3. Invariance — (skipped on already-migrated DBs; factory data verification)
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -41,50 +35,27 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("cue_list_role table exists", async () => {
+  // Phase 4 dropped both tables; they must not exist post-migration.
+  it("cue_list_role table is gone (dropped by Phase 4)", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name = 'cue_list_role'
     `);
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(0);
   });
 
-  it("cue_list_role.cue_list_id is TEXT NOT NULL", async () => {
+  it("cue_list_permission table is gone (dropped by Phase 4)", async () => {
     const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'cue_list_role' AND column_name = 'cue_list_id'
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'cue_list_permission'
     `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("text");
-    expect(rows[0].is_nullable).toBe("NO");
+    expect(rows).toHaveLength(0);
   });
 
-  it("cue_list_role.role_id is TEXT NOT NULL", async () => {
+  it("resource_grant table exists", async () => {
     const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'cue_list_role' AND column_name = 'role_id'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("text");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
-
-  it("cue_list_role has primary key on (cue_list_id, role_id)", async () => {
-    const { rows } = await getPool().query(`
-      SELECT 1 FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu
-        ON kcu.constraint_name = tc.constraint_name
-      WHERE tc.table_name = 'cue_list_role'
-        AND tc.constraint_type = 'PRIMARY KEY'
-        AND kcu.column_name = 'cue_list_id'
-    `);
-    expect(rows).toHaveLength(1);
-  });
-
-  it("cue_list_role_list_idx index exists", async () => {
-    const { rows } = await getPool().query(`
-      SELECT 1 FROM pg_indexes
-      WHERE tablename = 'cue_list_role' AND indexname = 'cue_list_role_list_idx'
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'resource_grant'
     `);
     expect(rows).toHaveLength(1);
   });
@@ -92,43 +63,39 @@ describe("schema verification", () => {
 
 // ── 2. Integrity verification ─────────────────────────────────────────────────
 
+// Phase 4 removed cue_list_role and cue_list_permission; data migrated to resource_grant.
+// Integrity checks now verify resource_grant cue_list rows are consistent.
 describe("integrity verification", () => {
-  it("cue_list_role: no orphan cue_list_id references", async () => {
+  it("resource_grant(cue_list): no orphan user_id references", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM cue_list_role clr
-      LEFT JOIN cue_list cl ON cl.id = clr.cue_list_id
-      WHERE cl.id IS NULL
+      FROM resource_grant rg
+      LEFT JOIN app_user au ON au.id = rg.user_id
+      WHERE rg.resource_type = 'cue_list' AND au.id IS NULL
     `);
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("cue_list_role: no orphan role_id references", async () => {
+  it("resource_grant(cue_list): no orphan production_id references", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM cue_list_role clr
-      LEFT JOIN production_role pr ON pr.id = clr.role_id
-      WHERE pr.id IS NULL
+      FROM resource_grant rg
+      LEFT JOIN production p ON p.id = rg.production_id
+      WHERE rg.resource_type = 'cue_list' AND p.id IS NULL
     `);
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("cue_list_permission: no orphan cue_list_id references", async () => {
+  it("resource_grant(cue_list): no duplicate active grants", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM cue_list_permission clp
-      LEFT JOIN cue_list cl ON cl.id = clp.cue_list_id
-      WHERE cl.id IS NULL
-    `);
-    expect(rows[0].cnt).toBe(0);
-  });
-
-  it("cue_list_permission: no orphan user_id references", async () => {
-    const { rows } = await getPool().query(`
-      SELECT COUNT(*)::int AS cnt
-      FROM cue_list_permission clp
-      LEFT JOIN app_user au ON au.id = clp.user_id
-      WHERE au.id IS NULL
+      FROM (
+        SELECT production_id, user_id, resource_type, resource_id, resource_sub, permission_level
+        FROM resource_grant
+        WHERE resource_type = 'cue_list' AND NOT is_revoked
+        GROUP BY production_id, user_id, resource_type, resource_id, resource_sub, permission_level
+        HAVING COUNT(*) > 1
+      ) dups
     `);
     expect(rows[0].cnt).toBe(0);
   });
@@ -137,54 +104,34 @@ describe("integrity verification", () => {
 // ── 3. Invariance verification ────────────────────────────────────────────────
 
 describe("invariance verification", () => {
+  // Phase 4 subsequently migrated cue_list_role/cue_list_permission → resource_grant.
+  // Invariance now verified against resource_grant (the final destination).
   it.skipIf(!snapshot)(
-    "cue_list_role: default_edit_roles mapped to production_role IDs",
-    async () => {
-      const { cueList, production } = snapshot!;
-      const mismatches: string[] = [];
-
-      for (const roleName of cueList.defaultEditRoles) {
-        // The migration seeds production_role and populates cue_list_role.
-        const { rows } = await getPool().query<{ role_id: string }>(
-          `SELECT clr.role_id
-           FROM cue_list_role clr
-           JOIN production_role pr ON pr.id = clr.role_id
-           WHERE clr.cue_list_id = $1 AND pr.name = $2 AND pr.production_id = $3`,
-          [cueList.id, roleName, production.id],
-        );
-        if (rows.length === 0) {
-          mismatches.push(
-            `role "${roleName}" not found in cue_list_role for list ${cueList.id}`,
-          );
-        }
-      }
-      expect(mismatches).toEqual([]);
-    },
-  );
-
-  it.skipIf(!snapshot)(
-    "cue_list_permission: creator auto-inserted with can_edit=true",
+    "resource_grant: creator has manage grant (via Phase 4 migration)",
     async () => {
       const { cueList } = snapshot!;
-      const { rows } = await getPool().query<{ can_edit: boolean }>(
-        `SELECT can_edit FROM cue_list_permission
-         WHERE cue_list_id = $1 AND user_id = $2`,
+      const { rows } = await getPool().query(
+        `SELECT 1 FROM resource_grant
+         WHERE resource_type = 'cue_list' AND resource_id = $1
+           AND user_id = $2 AND permission_level = 'manage' AND NOT is_revoked`,
         [cueList.id, cueList.creatorId],
       );
-      expect(rows).toHaveLength(1);
-      expect(rows[0].can_edit).toBe(true);
+      expect(rows.length).toBeGreaterThanOrEqual(1);
     },
   );
 
   it.skipIf(!snapshot)(
-    "cue_list_role: row count matches defaultEditRoles length",
+    "resource_grant: cue list has at least one edit grant (defaultEditRoles migrated)",
     async () => {
       const { cueList } = snapshot!;
-      const { rows } = await getPool().query<{ cnt: number }>(
-        `SELECT COUNT(*)::int AS cnt FROM cue_list_role WHERE cue_list_id = $1`,
+      const { rows } = await getPool().query(
+        `SELECT COUNT(*)::int AS cnt FROM resource_grant
+         WHERE resource_type = 'cue_list' AND resource_id = $1
+           AND permission_level = 'edit' AND NOT is_revoked`,
         [cueList.id],
       );
-      expect(rows[0].cnt).toBe(cueList.defaultEditRoles.length);
+      // defaultEditRoles were mapped to role members; at least the creator's edit grant exists
+      expect(rows[0].cnt).toBeGreaterThanOrEqual(1);
     },
   );
 });

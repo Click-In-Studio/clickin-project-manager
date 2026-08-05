@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventReports, createEventReport } from "@/lib/event-db";
-import { loadEventPermContext, canWriteReport } from "@/lib/event-permissions";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -39,8 +39,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canWriteReport(permCtx, eventPermCtx))
+  // Creating a report requires edit-level on the event
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {

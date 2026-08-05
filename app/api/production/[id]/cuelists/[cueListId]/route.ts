@@ -3,8 +3,9 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext,
   getCueList, updateCueList, deleteCueList,
-  listCueListPermissions, hasListAccess, listCueListRoleMembers,
+  hasListAccess, listProductionDepts,
 } from "@/lib/db";
+import { listCueListGrants, listCueListDeptAccess } from "@/lib/resource-grant-db";
 import { hasPermission, hasScopedPermission, type PermissionContext } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -23,17 +24,22 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   if (!permCtx || !hasPermission("cue_list:view", permCtx))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
-  const [cueList, permissions, canEdit] = await Promise.all([
+  const [cueList, canEdit] = await Promise.all([
     getCueList(cueListId, id),
-    listCueListPermissions(cueListId),
     hasListAccess(cueListId, session.userId),
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
 
   const isCreator = cueList.createdBy === session.userId;
   const canManage = hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx);
-  const roleEditorUserIds = canManage ? await listCueListRoleMembers(cueListId) : [];
-  return Response.json({ cueList, permissions, canEdit, canManage, roleEditorUserIds });
+
+  const [grants, deptAccess, productionDepts] = await Promise.all([
+    canManage ? listCueListGrants(cueListId) : Promise.resolve([]),
+    canManage ? listCueListDeptAccess(cueListId) : Promise.resolve([]),
+    canManage ? listProductionDepts(id) : Promise.resolve([]),
+  ]);
+
+  return Response.json({ cueList, grants, deptAccess, productionDepts, canEdit, canManage });
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]">) {

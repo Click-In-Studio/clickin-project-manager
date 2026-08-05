@@ -9,6 +9,7 @@ export type ProductionAccess = {
   isArchived: boolean;
 };
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION } from "./permissions";
+import { computeUserDeptFreeApprovalZone } from "./dept-db";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -2010,7 +2011,13 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
 // ─── Production management ────────────────────────────────────────────────────
 
 export async function createProduction(id: string, name: string): Promise<void> {
-  await getPool().query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
+  const pool = getPool();
+  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
+  // Phase 3: ensure approval config row exists (default 24h TTL)
+  await pool.query(
+    "INSERT INTO production_approval_config (production_id, ttl_hours) VALUES ($1, 24) ON CONFLICT DO NOTHING",
+    [id],
+  );
   await createInitialVersion(id);
   await seedProductionRoles(id);
 }
@@ -2052,27 +2059,17 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
         [actualId, perms],
       );
     }
-    const cueTypes = roleCueTypes.get(roleName);
-    if (cueTypes?.length) {
-      await pool.query(
-        `INSERT INTO production_role_cue_type (role_id, cue_type)
-         SELECT $1, unnest($2::text[])
-         ON CONFLICT DO NOTHING`,
-        [actualId, cueTypes],
-      );
-    }
+    // Phase 4: production_role_cue_type dropped; cue type auth moved to production_dept.allowed_cue_types
   }
 }
 
-/** Returns cue_type keys the user is allowed to create in a production, based on production_role_cue_type. */
+/** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
 export async function getUserAllowedCueTypes(userId: string, productionId: string): Promise<string[]> {
   const res = await getPool().query<{ cue_type: string }>(
-    `SELECT DISTINCT prct.cue_type
-     FROM production_role_cue_type prct
-     JOIN production_role pr ON pr.id = prct.role_id
-     JOIN production_member pm ON pm.production_id = pr.production_id
-       AND pr.name = ANY(pm.roles)
-     WHERE pm.user_id = $1 AND pr.production_id = $2`,
+    `SELECT DISTINCT unnest(pd.allowed_cue_types) AS cue_type
+     FROM production_dept_member pdm
+     JOIN production_dept pd ON pd.id = pdm.dept_id
+     WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
     [userId, productionId],
   );
   return res.rows.map((r) => r.cue_type);
@@ -2615,13 +2612,24 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    // Transfer cue list resource_grant rows (cue_list_permission/role tables dropped in Phase 4)
     await client.query(
-      `INSERT INTO cue_list_permission (cue_list_id, user_id, can_edit)
-       SELECT cue_list_id, $1, can_edit FROM cue_list_permission WHERE user_id = $2
-       ON CONFLICT DO NOTHING`,
+      `INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at)
+       SELECT production_id, $1, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at
+       FROM resource_grant
+       WHERE user_id = $2 AND resource_type = 'cue_list'
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
       [keepUserId, deleteUserId],
     );
-    await client.query(`DELETE FROM cue_list_permission WHERE user_id = $1`, [deleteUserId]);
+    await client.query(
+      `DELETE FROM resource_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
+      [deleteUserId],
+    );
 
     // 4. Transfer platform identities (before notification_preference, which FK-references them)
     await client.query(
@@ -2805,14 +2813,12 @@ export async function getProductionPermissionContext(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
       [userId, productionId],
     ),
-    // Try DB-backed permissions first (production_role populated after creation/backfill)
+    // Try FK-backed permissions first (production_member_role populated after migration/setMemberRoles)
     pool.query<{ permission_key: string }>(
       `SELECT DISTINCT prp.permission_key
-       FROM production_member pm
-       JOIN production_role pr
-         ON pr.production_id = pm.production_id AND pr.name = ANY(pm.roles)
-       JOIN production_role_permission prp ON prp.role_id = pr.id
-       WHERE pm.user_id = $1 AND pm.production_id = $2`,
+       FROM production_member_role pmr
+       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+       WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
     // Personal overrides (permission key column stores new atomic keys post-migration,
@@ -2821,12 +2827,11 @@ export async function getProductionPermissionContext(
       "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
       [productionId, userId],
     ),
-    // Department memberships
-    pool.query<{ department_id: string; is_poc: boolean }>(
-      `SELECT edm.department_id, edm.is_poc
-       FROM event_department_member edm
-       JOIN event_department ed ON ed.id = edm.department_id
-       WHERE edm.user_id = $1 AND ed.production_id = $2 AND edm.is_member = true`,
+    // Department memberships (Phase 3: use production_dept instead of event_department)
+    pool.query<{ dept_id: string; is_poc: boolean }>(
+      `SELECT pdm.dept_id, pdm.is_poc
+       FROM production_dept_member pdm
+       WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
       [userId, productionId],
     ),
     pool.query<{ archived_at: Date | null }>(
@@ -2869,12 +2874,15 @@ export async function getProductionPermissionContext(
   const deptIds: string[] = [];
   const pocDeptIds: string[] = [];
   for (const row of deptRow.rows) {
-    deptIds.push(row.department_id);
-    if (row.is_poc) pocDeptIds.push(row.department_id);
+    deptIds.push(row.dept_id);
+    if (row.is_poc) pocDeptIds.push(row.dept_id);
   }
 
+  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone)
+  const deptFreeApprovalZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
+
   return {
-    permCtx: { userId, isAdmin, memberPermissions, overrides, deptIds, pocDeptIds },
+    permCtx: { userId, isAdmin, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone },
     isArchived: archivedRow.rows[0]?.archived_at != null,
   };
 }
@@ -2977,10 +2985,53 @@ export async function setMemberRoles(
   userId: string,
   roles: string[],
 ): Promise<void> {
-  await getPool().query(
-    "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND user_id = $2",
-    [productionId, userId, roles],
-  );
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Keep TEXT[] in sync for backward compat (dropped in Phase 3)
+    await client.query(
+      "UPDATE production_member SET roles = $3 WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId, roles],
+    );
+
+    // Rebuild production_member_role FK rows
+    await client.query(
+      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    );
+    if (roles.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_role (production_id, user_id, role_id)
+         SELECT $1, $2, pr.id
+         FROM production_role pr
+         WHERE pr.production_id = $1 AND pr.name = ANY($3::text[])
+         ON CONFLICT DO NOTHING`,
+        [productionId, userId, roles],
+      );
+    }
+
+    // Cascade-revoke self_confirmed grants that are no longer covered by new roles.
+    // Phase 2: resource_grant is empty, so this is a no-op in practice.
+    // Phase 4+ will add selective per-permission revocation here.
+    await client.query(
+      `UPDATE resource_grant
+       SET is_revoked = true, revoked_reason = 'role_change'
+       WHERE production_id = $1
+         AND user_id = $2
+         AND grant_source = 'self_confirmed'
+         AND is_revoked = false`,
+      [productionId, userId],
+    );
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateUserContact(
@@ -3726,36 +3777,50 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
 export async function listCueListsWithAccess(
   productionId: string,
   userId: string,
-): Promise<(CueList & { canEdit: boolean })[]> {
-  const res = await getPool().query<CueListRow & { can_edit: boolean | null }>(
+): Promise<(CueList & { canEdit: boolean; canManage: boolean })[]> {
+  const res = await getPool().query<CueListRow & { can_edit: boolean; can_manage: boolean }>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.created_by, fu.name AS created_by_name, cl.created_at,
-            CASE
-              WHEN clp.can_edit IS NOT NULL THEN clp.can_edit
-              ELSE EXISTS (
-                SELECT 1 FROM cue_list_role clr
-                JOIN production_role pr ON pr.id = clr.role_id
-                JOIN production_member pm
-                  ON pm.production_id = cl.production_id
-                  AND pm.user_id = $2
-                  AND pr.name = ANY(pm.roles)
-                WHERE clr.cue_list_id = cl.id
-              )
-            END AS can_edit
+            EXISTS (
+              SELECT 1 FROM resource_grant rg
+              WHERE rg.production_id = cl.production_id
+                AND rg.resource_type = 'cue_list'
+                AND rg.resource_id = cl.id
+                AND rg.user_id = $2
+                AND rg.permission_level IN ('edit', 'manage')
+                AND NOT rg.is_revoked
+            ) AS can_edit,
+            EXISTS (
+              SELECT 1 FROM resource_grant rg
+              WHERE rg.production_id = cl.production_id
+                AND rg.resource_type = 'cue_list'
+                AND rg.resource_id = cl.id
+                AND rg.user_id = $2
+                AND rg.permission_level = 'manage'
+                AND NOT rg.is_revoked
+            ) AS can_manage
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
-     LEFT JOIN cue_list_permission clp
-       ON clp.cue_list_id = cl.id AND clp.user_id = $2
      WHERE cl.production_id = $1
      ORDER BY cl.created_at`,
     [productionId, userId],
   );
-  return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit === true }));
+  return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit, canManage: r.can_manage }));
+}
+
+export async function listProductionDepts(
+  productionId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const { rows } = await getPool().query<{ id: string; name: string }>(
+    `SELECT id, name FROM production_dept WHERE production_id = $1 ORDER BY display_order, name`,
+    [productionId],
+  );
+  return rows;
 }
 
 export async function createCueList(data: {
   id: string; productionId: string; name: string; notes: string;
-  abbr: string | null; template: string | null; roleIds: string[]; createdBy: string;
+  abbr: string | null; template: string | null; createdBy: string;
 }): Promise<void> {
   const client = await getPool().connect();
   try {
@@ -3763,19 +3828,33 @@ export async function createCueList(data: {
     await client.query(
       `INSERT INTO cue_list (id, production_id, name, notes, abbr, template, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy]
+      [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy],
     );
-    // Creator gets a personal edit grant so all access grants live in one table.
+    // Creator gets manage grant (Phase 4: resource_grant replaces cue_list_permission)
     await client.query(
-      `INSERT INTO cue_list_permission (cue_list_id, user_id, can_edit) VALUES ($1, $2, true)
-       ON CONFLICT (cue_list_id, user_id) DO NOTHING`,
-      [data.id, data.createdBy]
+      `INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'cue_list', $3, '*', 'manage', 'self_confirmed', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [data.productionId, data.createdBy, data.id],
     );
-    if (data.roleIds.length > 0) {
-      const values = data.roleIds.map((_, i) => `($1, $${i + 2})`).join(", ");
+    // Write resource_dept_manage for creator's depts where allowed_cue_types match template
+    if (data.template) {
       await client.query(
-        `INSERT INTO cue_list_role (cue_list_id, role_id) VALUES ${values} ON CONFLICT DO NOTHING`,
-        [data.id, ...data.roleIds]
+        `INSERT INTO resource_dept_manage
+           (production_id, dept_id, resource_type, resource_id, established_by)
+         SELECT $1, pdm.dept_id, 'cue_list', $2, $3
+         FROM production_dept_member pdm
+         JOIN production_dept pd ON pd.id = pdm.dept_id
+         WHERE pdm.user_id = $3
+           AND pdm.production_id = $1
+           AND $4 = ANY(pd.allowed_cue_types)
+         ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
+         DO NOTHING`,
+        [data.productionId, data.id, data.createdBy, data.template],
       );
     }
     await client.query("COMMIT");
@@ -3940,49 +4019,39 @@ export async function copyProductionRole(productionId: string, sourceRoleId: str
 }
 
 /**
- * Returns true if the user has edit access to this cue list.
- * Checks cue_list_permission override first (grant or deny), then falls back to role-based access.
+ * Returns true if the user has edit (or manage) access to this cue list via resource_grant.
  */
 export async function hasListAccess(cueListId: string, userId: string): Promise<boolean> {
-  const res = await getPool().query<{ has_access: boolean | null }>(
-    `SELECT CASE
-       WHEN clp.can_edit IS NOT NULL THEN clp.can_edit
-       ELSE EXISTS (
-         SELECT 1 FROM cue_list_role clr
-         JOIN production_role pr ON pr.id = clr.role_id
-         JOIN production_member pm ON pm.production_id = cl.production_id
-           AND pm.user_id = $2 AND pr.name = ANY(pm.roles)
-         WHERE clr.cue_list_id = cl.id
-       )
-     END AS has_access
-     FROM cue_list cl
-     LEFT JOIN cue_list_permission clp ON clp.cue_list_id = cl.id AND clp.user_id = $2
-     WHERE cl.id = $1`,
-    [cueListId, userId]
+  const res = await getPool().query<{ has_access: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM resource_grant rg
+       JOIN cue_list cl ON cl.id = rg.resource_id AND cl.production_id = rg.production_id
+       WHERE rg.resource_type = 'cue_list'
+         AND rg.resource_id = $1
+         AND rg.user_id = $2
+         AND rg.permission_level IN ('edit', 'manage')
+         AND NOT rg.is_revoked
+     ) AS has_access`,
+    [cueListId, userId],
   );
-  return (res.rows[0]?.has_access) === true;
+  return res.rows[0]?.has_access === true;
 }
 
 /**
- * Returns user IDs of all members who currently have edit access to a cue list
- * (via personal grant OR role match), excluding those with explicit deny overrides.
+ * Returns user IDs of all members with active edit or manage grants on a cue list.
  * Used for cue warning notifications.
  */
 export async function listCueListRoleMembers(cueListId: string): Promise<string[]> {
   const res = await getPool().query<{ user_id: string }>(
-    `SELECT DISTINCT pm.user_id
-     FROM cue_list_role clr
-     JOIN production_role pr ON pr.id = clr.role_id
-     JOIN production_member pm ON pm.production_id = pr.production_id
-       AND pr.name = ANY(pm.roles)
-     WHERE clr.cue_list_id = $1
-       AND NOT EXISTS (
-         SELECT 1 FROM cue_list_permission clp
-         WHERE clp.cue_list_id = $1 AND clp.user_id = pm.user_id AND NOT clp.can_edit
-       )`,
-    [cueListId]
+    `SELECT DISTINCT rg.user_id
+     FROM resource_grant rg
+     WHERE rg.resource_type = 'cue_list'
+       AND rg.resource_id = $1
+       AND rg.permission_level IN ('edit', 'manage')
+       AND NOT rg.is_revoked`,
+    [cueListId],
   );
-  return res.rows.map(r => r.user_id);
+  return res.rows.map((r) => r.user_id);
 }
 
 export async function updateCueList(
@@ -4009,26 +4078,46 @@ export async function deleteCueList(id: string, productionId: string): Promise<v
 }
 
 export async function listCueListPermissions(cueListId: string): Promise<CueListPermissionRow[]> {
-  const res = await getPool().query<{ user_id: string; can_edit: boolean }>(
-    "SELECT user_id, can_edit FROM cue_list_permission WHERE cue_list_id = $1",
+  const res = await getPool().query<{ user_id: string; permission_level: string }>(
+    `SELECT DISTINCT rg.user_id, rg.permission_level
+     FROM resource_grant rg
+     WHERE rg.resource_type = 'cue_list'
+       AND rg.resource_id = $1
+       AND rg.permission_level IN ('edit', 'manage')
+       AND NOT rg.is_revoked
+     ORDER BY rg.user_id`,
     [cueListId],
   );
-  return res.rows.map(r => ({ userId: r.user_id, canEdit: r.can_edit }));
+  return res.rows.map((r) => ({ userId: r.user_id, canEdit: true }));
 }
 
 export async function setCueListPermission(
-  cueListId: string, userId: string, canEdit: boolean | null
+  cueListId: string,
+  userId: string,
+  canEdit: boolean | null,
+  grantedBy?: string,
 ): Promise<void> {
-  if (canEdit === null) {
+  if (canEdit === true) {
     await getPool().query(
-      "DELETE FROM cue_list_permission WHERE cue_list_id = $1 AND user_id = $2",
-      [cueListId, userId],
+      `INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT cl.production_id, $2, 'cue_list', $1, '*', 'edit', 'direct', $3
+       FROM cue_list cl WHERE cl.id = $1
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [cueListId, userId, grantedBy ?? null],
     );
   } else {
     await getPool().query(
-      `INSERT INTO cue_list_permission (cue_list_id, user_id, can_edit) VALUES ($1, $2, $3)
-       ON CONFLICT (cue_list_id, user_id) DO UPDATE SET can_edit = EXCLUDED.can_edit`,
-      [cueListId, userId, canEdit],
+      `UPDATE resource_grant
+       SET is_revoked = true, revoked_reason = 'manual'
+       WHERE resource_type = 'cue_list'
+         AND resource_id = $1
+         AND user_id = $2
+         AND NOT is_revoked`,
+      [cueListId, userId],
     );
   }
 }
@@ -4638,14 +4727,43 @@ export async function upsertProductionMemberWithRoles(
   roles: string[],
   photoUrl: string | null,
 ): Promise<void> {
-  await getPool().query(
-    `INSERT INTO production_member (production_id, user_id, roles, photo_url)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (production_id, user_id) DO UPDATE
-       SET roles     = EXCLUDED.roles,
-           photo_url = EXCLUDED.photo_url`,
-    [productionId, userId, roles, photoUrl],
-  );
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO production_member (production_id, user_id, roles, photo_url)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (production_id, user_id) DO UPDATE
+         SET roles     = EXCLUDED.roles,
+             photo_url = EXCLUDED.photo_url`,
+      [productionId, userId, roles, photoUrl],
+    );
+
+    // Rebuild production_member_role FK rows
+    await client.query(
+      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    );
+    if (roles.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_role (production_id, user_id, role_id)
+         SELECT $1, $2, pr.id
+         FROM production_role pr
+         WHERE pr.production_id = $1 AND pr.name = ANY($3::text[])
+         ON CONFLICT DO NOTHING`,
+        [productionId, userId, roles],
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Block Tags ───────────────────────────────────────────────────────────────

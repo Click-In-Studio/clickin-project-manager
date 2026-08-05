@@ -191,8 +191,16 @@ describe("GET /api/productions", () => {
   });
 
   it("non-admin non-member gets empty list", async () => {
+    // Use a fresh UUID that is never added to any production_member row
+    // (TEST_USER is used by migration factories and may appear as a member).
+    const freshUserSession = createSession({
+      userId: "00000000-0000-0000-0000-000000000099",
+      name: "纯访客",
+      avatarUrl: null,
+      isAdmin: false,
+    });
     const res = await listProductionsHandler(
-      req("/api/productions", { session: userSession() }),
+      req("/api/productions", { session: freshUserSession }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { productions: { id: string }[] };

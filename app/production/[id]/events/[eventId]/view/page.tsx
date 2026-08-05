@@ -13,6 +13,7 @@ import {
   listEventDepartments,
 } from "@/lib/event-db";
 import { isReportViewer } from "@/lib/event-permissions";
+import { hasResourceGrantLevel, hasUserAnyTechReqGrantInEvent } from "@/lib/resource-grant-db";
 import EventFollowerClient from "@/components/EventFollowerClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -41,22 +42,25 @@ export default async function EventViewPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewFull = hasPermission("event:edit", prodPermCtx);
+  // Role-level OR per-instance resource_grant → full editor view on this page
+  const canViewFull = hasPermission("event:edit", prodPermCtx)
+    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
 
   // Non-editors cannot see unpublished events
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
-  const [scheduleItems, reports, isAssignee, selfRole, departments] = await Promise.all([
+  const [scheduleItems, reports, isAssignee, selfRole, departments, hasAnyTechReqGrant] = await Promise.all([
     listScheduleItemsWithParticipants(eventId),
     listEventReports(eventId),
     isUserEventTechAssignee(eventId, session.userId),
     getSelfParticipantRole(eventId, session.userId),
     listEventDepartments(productionId),
+    hasUserAnyTechReqGrantInEvent(session.userId, productionId, eventId),
   ]);
 
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
-  const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0;
+  const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
   const canViewReport = isReportViewer(prodPermCtx);
   const visibleReports = canViewReport ? reports : reports.filter(r => r.publishedAt !== null);

@@ -18,6 +18,7 @@ import {
   canWriteNote, canModerateNotes, isReportViewer,
   canReplyToReport,
 } from "@/lib/event-permissions";
+// canWriteNote is now async; isReportViewer stays synchronous
 import ReportViewClient from "@/components/ReportViewClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; reportId: string }> }): Promise<Metadata> {
@@ -93,7 +94,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewFull = hasPermission("event:edit", prodPermCtx);
+  const canViewFull = isReportViewer(prodPermCtx);
   const canViewReportUnpublished = isReportViewer(prodPermCtx);
 
   if (!canViewFull && !canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
@@ -115,7 +116,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
     await markReportRead(reportId, session.userId);
   }
 
-  const userCanWriteNote = canWriteNote(prodPermCtx, eventPermCtx);
+  const userCanWriteNote = await canWriteNote(prodPermCtx, reportId, productionId, eventPermCtx.isInCall);
   const userCanModerate = canModerateNotes(prodPermCtx);
   const userCanReply = canReplyToReport(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);
 

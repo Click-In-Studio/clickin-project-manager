@@ -14,9 +14,10 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import {
   getProductionEvent, getEventTechReq, setTechReqChatId,
-  getReqChatTargets, getProductionDeptChatIds, isUserDeptPoc,
+  getReqChatTargets, getProductionDeptChatIds,
 } from "@/lib/event-db";
 import { createChat, addChatMembers, isUserInChat } from "@/lib/platform/feishu/feishu-chat";
 
@@ -38,10 +39,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!techReq) return Response.json({ error: "需求不存在" }, { status: 404 });
   if (techReq.chatId) return Response.json({ error: "需求群已存在" }, { status: 409 });
 
-  const isPoc = techReq.departmentId
-    ? await isUserDeptPoc(techReq.departmentId, session.userId)
-    : false;
-  const canManage = hasPermission("event:delete_tech_req_any", permCtx) || isPoc;
+  const canManage = hasPermission("event:delete_tech_req_any", permCtx)
+    || await hasResourceGrantLevel(session.userId, productionId, "tech_req", reqId, "manage");
   if (!canManage) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { action: "create" | "bind"; chatId?: string };

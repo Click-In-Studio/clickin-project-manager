@@ -3018,16 +3018,22 @@ type Props = {
   pocDeptIds: string[];
   currentUserId: string;
   selfParticipantRole: "participant" | "follower" | null;
+  needsSelfConfirm?: boolean;
+  selfConfirmLevel?: "edit" | "manage";
 };
 
 export default function EventDetailClient({
   productionId, event: initialEvent,
   initialScheduleItems, initialTechReqs, initialCallTimes,
   initialReports, departments, members, versions,
-  canEdit, canScheduleEdit, canAssignPeople, canCallEdit,
-  canTechReqDelete, canWriteReport, canEditAnyTechReq, pocDeptIds,
+  canEdit: initialCanEdit, canScheduleEdit: initialCanScheduleEdit,
+  canAssignPeople: initialCanAssignPeople, canCallEdit: initialCanCallEdit,
+  canTechReqDelete, canWriteReport: initialCanWriteReport,
+  canEditAnyTechReq: initialCanEditAnyTechReq, pocDeptIds,
   currentUserId,
   selfParticipantRole: initialSelfRole,
+  needsSelfConfirm = false,
+  selfConfirmLevel,
 }: Props) {
   const [tab, setTab] = useState<Tab>("info");
   const [event, setEvent] = useState(initialEvent);
@@ -3037,6 +3043,40 @@ export default function EventDetailClient({
   const [callTimes, setCallTimes] = useState(initialCallTimes);
   const [techReqs, setTechReqs] = useState(initialTechReqs);
   const [reports, setReports] = useState(initialReports);
+
+  // Level 2-A: self-confirm modal state
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmDone, setConfirmDone] = useState(false);
+  // Effective capability flags — flip to true after self-confirm
+  const [canEdit, setCanEdit] = useState(initialCanEdit);
+  const [canScheduleEdit, setCanScheduleEdit] = useState(initialCanScheduleEdit);
+  const [canAssignPeople, setCanAssignPeople] = useState(initialCanAssignPeople);
+  const [canCallEdit, setCanCallEdit] = useState(initialCanCallEdit);
+  const [canWriteReport, setCanWriteReport] = useState(initialCanWriteReport);
+  const [canEditAnyTechReq, setCanEditAnyTechReq] = useState(initialCanEditAnyTechReq);
+
+  async function handleSelfConfirm() {
+    if (!selfConfirmLevel || confirmBusy) return;
+    setConfirmBusy(true);
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/events/${event.id}/access`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "self_confirm", level: selfConfirmLevel }) },
+      );
+      if (res.ok) {
+        setConfirmDone(true);
+        setCanEdit(true);
+        setCanScheduleEdit(true);
+        setCanAssignPeople(true);
+        setCanCallEdit(true);
+        setCanWriteReport(true);
+        setCanEditAnyTechReq(true);
+      }
+    } finally {
+      setConfirmBusy(false);
+    }
+  }
 
   function handleTechReqsCreated(newReqs: EventTechReq[]) {
     setTechReqs(prev => {
@@ -3112,6 +3152,36 @@ export default function EventDetailClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+
+      {/* Level 2-A: self-confirm modal for users in the free-approval zone */}
+      {needsSelfConfirm && !confirmDone && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "white", borderRadius: 12, padding: "32px 36px",
+            maxWidth: 420, width: "90%", boxShadow: "0 8px 32px rgba(0,0,0,.18)",
+          }}>
+            <h2 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 700 }}>进入编辑模式</h2>
+            <p style={{ margin: "0 0 24px", color: "#555", fontSize: 14, lineHeight: 1.6 }}>
+              你的部门对此演出事件有编辑权限。点击确认后，将为你开通{selfConfirmLevel === "manage" ? "管理" : "编辑"}级别访问权限，无需等待审批。
+            </p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <a href={`/production/${productionId}/events/${event.id}/view`}
+                style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, textDecoration: "none", color: "#333" }}>
+                仅查看
+              </a>
+              <button
+                onClick={handleSelfConfirm}
+                disabled={confirmBusy}
+                style={{ padding: "8px 20px", borderRadius: 8, background: "#1677ff", color: "white", border: "none", fontSize: 14, cursor: confirmBusy ? "wait" : "pointer", opacity: confirmBusy ? 0.7 : 1 }}>
+                {confirmBusy ? "确认中…" : "进入编辑"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Eyebrow + utility links — outside the page sheet */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>

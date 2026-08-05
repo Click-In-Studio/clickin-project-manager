@@ -100,6 +100,7 @@ type Props = {
   cueLists: CueList[];
   initialCues: Cue[];
   editableListIds: string[];
+  manageListIds: string[];
   myUserId: string;
   isAdmin: boolean;
   pageMap: Record<string, number>;
@@ -844,7 +845,7 @@ function ExportModal({
 
 export default function CuePage({
   productionId, productionName, blocks: rawBlocks, characters, scenes,
-  cueLists, initialCues, editableListIds, myUserId, isAdmin, pageMap,
+  cueLists, initialCues, editableListIds, manageListIds, myUserId, isAdmin, pageMap,
   versions = [], versionId, versionStatus,
 }: Props) {
   const router = useRouter();
@@ -875,6 +876,23 @@ export default function CuePage({
   const [activeListId, setActiveListId] = useState<string | null>(
     editableListIds[0] ?? cueLists[0]?.id ?? null
   );
+  // Phase 4: localEditableIds starts from server-computed editableListIds and can be
+  // extended when the user self-confirms access to additional lists.
+  const [localEditableIds, setLocalEditableIds] = useState<Set<string>>(
+    () => new Set(editableListIds),
+  );
+  const [localManageIds, setLocalManageIds] = useState<Set<string>>(
+    // creator always has implicit manage permission regardless of resource_grant state
+    () => new Set([...manageListIds, ...cueLists.filter(cl => cl.createdBy === myUserId).map(cl => cl.id)]),
+  );
+  const [shareModalListId, setShareModalListId] = useState<string | null>(null);
+  // Phase 4: Access modal state — shown when user activates a list they don't yet have edit access to.
+  type AccessModal =
+    | { listId: string; listName: string; status: "loading" }
+    | { listId: string; listName: string; status: "can_self_confirm"; selfConfirmLevel: "edit" | "manage" }
+    | { listId: string; listName: string; status: "needs_approval" };
+  const [accessModal, setAccessModal] = useState<AccessModal | null>(null);
+  const [accessModalConfirming, setAccessModalConfirming] = useState(false);
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
   const [savingCueId, setSavingCueId] = useState<string | null>(null);
   const [highlightedCueId, setHighlightedCueId] = useState<string | null>(null);
@@ -1040,11 +1058,47 @@ export default function CuePage({
 
   // Frozen/archived versions make cues read-only; editing/committed allow cue edits
   const cueEditAllowed = !versionStatus || versionStatus === "editing" || versionStatus === "committed";
-  const canEditActive = cueEditAllowed && editableListIds.includes(activeListId ?? "");
+  const canEditActive = cueEditAllowed && localEditableIds.has(activeListId ?? "");
   // Editing any cue requires an active list — prevents accidental edits with no context
   const canEditCue = useCallback((cue: Cue) =>
-    cueEditAllowed && cue.cueListId === activeListId && editableListIds.includes(cue.cueListId),
-  [activeListId, editableListIds, cueEditAllowed]);
+    cueEditAllowed && cue.cueListId === activeListId && localEditableIds.has(cue.cueListId),
+  [activeListId, localEditableIds, cueEditAllowed]);
+
+  // Phase 4: activate a cue list, showing access modal if not yet granted
+  const handleActivateList = useCallback(async (listId: string | null) => {
+    if (!listId || localEditableIds.has(listId)) {
+      setActiveListId(listId);
+      return;
+    }
+    const list = cueLists.find(cl => cl.id === listId);
+    if (!list) { setActiveListId(listId); return; }
+    setActiveListId(listId);
+    setAccessModal({ listId, listName: list.name, status: "loading" });
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/access`,
+        { credentials: "include" },
+      );
+      if (!res.ok) { setAccessModal(null); return; }
+      const data = await res.json() as
+        | { canAccess: true }
+        | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "edit" | "manage" }
+        | { canAccess: false; canSelfConfirm: false };
+      if (data.canAccess) {
+        setLocalEditableIds(prev => new Set([...prev, listId]));
+        if ((data as { level?: string }).level === "manage") {
+          setLocalManageIds(prev => new Set([...prev, listId]));
+        }
+        setAccessModal(null);
+      } else if (data.canSelfConfirm) {
+        setAccessModal({ listId, listName: list.name, status: "can_self_confirm", selfConfirmLevel: data.selfConfirmLevel });
+      } else {
+        setAccessModal({ listId, listName: list.name, status: "needs_approval" });
+      }
+    } catch {
+      setAccessModal(null);
+    }
+  }, [cueLists, localEditableIds, productionId]);
 
   // ── updateCueField ────────────────────────────────────────────────────────
   const updateCueField = useCallback(async (
@@ -1948,14 +2002,22 @@ export default function CuePage({
           <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
           <select
             value={activeListId ?? ""}
-            onChange={e => setActiveListId(e.target.value || null)}
+            onChange={e => { void handleActivateList(e.target.value || null); }}
             className="text-xs bg-zinc-50 border border-zinc-200 rounded px-1.5 py-0.5 outline-none"
           >
             <option value="">—</option>
-            {cueLists.filter(cl => editableListIds.includes(cl.id)).map(cl => (
-              <option key={cl.id} value={cl.id}>{cl.name}</option>
+            {cueLists.map(cl => (
+              <option key={cl.id} value={cl.id}>{cl.name}{localEditableIds.has(cl.id) ? "" : " (只读)"}</option>
             ))}
           </select>
+          {activeListId && localManageIds.has(activeListId) && (
+            <button
+              onClick={() => setShareModalListId(activeListId)}
+              style={{ fontSize: 11, fontWeight: 600, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 8px", background: "transparent", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              分享
+            </button>
+          )}
           <Link
             href={`/production/${productionId}/cuelists`}
             style={{ fontSize: 11, fontWeight: 600, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 8px", textDecoration: "none", whiteSpace: "nowrap" }}
@@ -1967,7 +2029,7 @@ export default function CuePage({
         {/* Desktop: right controls */}
         <div className="hidden sm:flex ml-auto items-center gap-1.5 shrink-0">
           <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
-            {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
+            {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
           </span>
           {(["line", "page", "scene"] as const).map(t => (
             <button key={t}
@@ -2012,17 +2074,17 @@ export default function CuePage({
                   <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
                   <select
                     value={activeListId ?? ""}
-                    onChange={e => { setActiveListId(e.target.value || null); setCueMoreOpen(false); }}
+                    onChange={e => { void handleActivateList(e.target.value || null); setCueMoreOpen(false); }}
                     className="flex-1 text-xs bg-zinc-50 border border-zinc-200 rounded px-1.5 py-0.5 outline-none"
                   >
                     <option value="">—</option>
-                    {cueLists.filter(cl => editableListIds.includes(cl.id)).map(cl => (
-                      <option key={cl.id} value={cl.id}>{cl.name}</option>
+                    {cueLists.map(cl => (
+                      <option key={cl.id} value={cl.id}>{cl.name}{localEditableIds.has(cl.id) ? "" : " (只读)"}</option>
                     ))}
                   </select>
                 </div>
                 <span className="rounded bg-[var(--surface-2)] px-2 py-1 text-[11px] text-zinc-400 text-center">
-                  {cueEditAllowed && editableListIds.length > 0 ? "可编辑" : "只读"}
+                  {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
                 </span>
               </div>
               <div className="my-1 border-t border-zinc-100" />
@@ -2585,6 +2647,305 @@ export default function CuePage({
           onClose={() => setActiveCommentCueId(null)}
         />
       )}
+
+      {/* ── Phase 4: Cue list access modal (Level 2-A) ───────────────────── */}
+      {accessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => { setAccessModal(null); }}>
+          <div
+            className="relative mx-4 w-full max-w-sm rounded-2xl bg-[var(--surface)] p-6 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {accessModal.status === "loading" && (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <span className="text-2xl">⏳</span>
+                <p className="text-sm text-zinc-500">正在检查权限…</p>
+              </div>
+            )}
+
+            {accessModal.status === "can_self_confirm" && (
+              <>
+                <h2 className="mb-1 text-base font-semibold text-zinc-900">确认编辑访问</h2>
+                <p className="mb-4 text-sm text-zinc-500">
+                  你即将以部门成员身份编辑
+                  <span className="font-medium text-zinc-800">「{accessModal.listName}」</span>
+                  。确认后，系统将为你创建编辑授权记录。
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setAccessModal(null)}
+                    className="flex-1 rounded-xl border border-zinc-200 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                  >
+                    取消
+                  </button>
+                  <button
+                    disabled={accessModalConfirming}
+                    onClick={async () => {
+                      setAccessModalConfirming(true);
+                      try {
+                        const res = await fetch(
+                          `${BASE_PATH}/api/production/${productionId}/cuelists/${accessModal.listId}/access`,
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
+                            body: JSON.stringify({ action: "self_confirm", level: accessModal.selfConfirmLevel }),
+                          },
+                        );
+                        if (res.ok) {
+                          setLocalEditableIds(prev => new Set([...prev, accessModal.listId]));
+                          if (accessModal.selfConfirmLevel === "manage") {
+                            setLocalManageIds(prev => new Set([...prev, accessModal.listId]));
+                          }
+                          setAccessModal(null);
+                        }
+                      } finally {
+                        setAccessModalConfirming(false);
+                      }
+                    }}
+                    className="flex-1 rounded-xl bg-zinc-900 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {accessModalConfirming ? "确认中…" : "确认编辑"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {accessModal.status === "needs_approval" && (
+              <>
+                <h2 className="mb-1 text-base font-semibold text-zinc-900">需要申请访问</h2>
+                <p className="mb-4 text-sm text-zinc-500">
+                  你没有
+                  <span className="font-medium text-zinc-800">「{accessModal.listName}」</span>
+                  的编辑权限。如需访问，请联系该 Cue 表的负责部门 POC 或制作人进行授权。
+                </p>
+                <p className="mb-4 text-xs text-zinc-400">
+                  （审批流将在后续版本中支持。）
+                </p>
+                <button
+                  onClick={() => setAccessModal(null)}
+                  className="w-full rounded-xl bg-zinc-900 py-2.5 text-sm font-medium text-white hover:bg-zinc-800"
+                >
+                  知道了
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {shareModalListId && (
+        <ShareModal
+          productionId={productionId}
+          cueListId={shareModalListId}
+          cueListName={cueLists.find(cl => cl.id === shareModalListId)?.name ?? ""}
+          onClose={() => setShareModalListId(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── ShareModal ───────────────────────────────────────────────────────────────
+
+import type { CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
+import type { MemberWithRoles } from "@/lib/db";
+
+const SM_GRANT_LEVELS = [
+  { value: "view",  label: "查看" },
+  { value: "mount", label: "挂载资产" },
+  { value: "edit",  label: "编辑" },
+  { value: "manage", label: "管理" },
+] as const;
+const SM_LEVEL_LABEL: Record<string, string> = Object.fromEntries(SM_GRANT_LEVELS.map(l => [l.value, l.label]));
+
+function ShareModal({
+  productionId, cueListId, cueListName, onClose,
+}: {
+  productionId: string;
+  cueListId: string;
+  cueListName: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [grants, setGrants] = useState<CueListGrant[]>([]);
+  const [deptAccess, setDeptAccess] = useState<CueListDeptAccess[]>([]);
+  const [productionDepts, setProductionDepts] = useState<{ id: string; name: string }[]>([]);
+  const [members, setMembers] = useState<MemberWithRoles[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showAddDept, setShowAddDept] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [pendingUser, setPendingUser] = useState<{ userId: string; name: string } | null>(null);
+
+  const COLLAB_BASE = `${BASE_PATH}/api/production/${productionId}/cuelists/${cueListId}/collaborators`;
+
+  useEffect(() => {
+    void (async () => {
+      const [collabRes, membersRes] = await Promise.all([
+        fetch(COLLAB_BASE, { credentials: "include" }),
+        fetch(`${BASE_PATH}/api/production/${productionId}/contacts`, { credentials: "include" }),
+      ]);
+      if (collabRes.ok) {
+        const d = await collabRes.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[]; productionDepts: { id: string; name: string }[] };
+        setGrants(d.grants); setDeptAccess(d.deptAccess); setProductionDepts(d.productionDepts);
+      }
+      if (membersRes.ok) setMembers(await membersRes.json() as MemberWithRoles[]);
+      setLoading(false);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const postCollaborator = async (body: object) => {
+    setSaving(true);
+    try {
+      const res = await fetch(COLLAB_BASE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+      if (res.ok) { const d = await res.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[] }; setGrants(d.grants); setDeptAccess(d.deptAccess); }
+    } finally { setSaving(false); }
+  };
+
+  const deleteCollaborator = async (body: object) => {
+    setSaving(true);
+    try {
+      const res = await fetch(COLLAB_BASE, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+      if (res.ok) { const d = await res.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[] }; setGrants(d.grants); setDeptAccess(d.deptAccess); }
+    } finally { setSaving(false); }
+  };
+
+  const grantedUserIds = new Set(grants.map(g => g.userId));
+  const addedDeptIds = new Set(deptAccess.map(d => d.deptId));
+  const availableDepts = productionDepts.filter(d => !addedDeptIds.has(d.id));
+  const availableMembers = members.filter(m =>
+    !grantedUserIds.has(m.userId) &&
+    (userSearch === "" || m.name.includes(userSearch))
+  );
+
+  const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--line)" };
+  const removeBtnStyle: React.CSSProperties = { marginLeft: "auto", flexShrink: 0, border: 0, background: "transparent", fontSize: 11, color: "var(--muted)", cursor: saving ? "default" : "pointer", padding: "2px 6px", borderRadius: 5 };
+  const addBtnStyle: React.CSSProperties = { border: "1px dashed var(--line)", background: "transparent", borderRadius: 7, padding: "5px 10px", fontSize: 11, color: "var(--muted)", cursor: "pointer", width: "100%", textAlign: "left" as const, marginTop: 4 };
+  const labelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" as const, color: "var(--muted)", marginBottom: 6 };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(24,42,42,.25)", zIndex: 70 }} />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+        width: "min(480px, calc(100vw - 32px))", maxHeight: "calc(100vh - 80px)",
+        background: "var(--surface)", borderRadius: 16, border: "1px solid var(--line)",
+        boxShadow: "0 12px 40px rgba(24,42,42,.18)", zIndex: 71,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 2 }}>分享协作</p>
+            <h2 style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)" }}>{cueListName}</h2>
+          </div>
+          <button onClick={onClose} style={{ border: 0, background: "transparent", fontSize: 18, cursor: "pointer", color: "var(--muted)", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8 }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
+          {loading ? (
+            <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>加载中…</p>
+          ) : (
+            <>
+              <div>
+                <p style={labelStyle}>部门自助访问</p>
+                {deptAccess.length === 0 && <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", marginBottom: 4 }}>暂无部门</p>}
+                {deptAccess.map(d => (
+                  <div key={d.deptId} style={rowStyle}>
+                    <span style={{ fontSize: 12, color: "var(--ink)" }}>{d.deptName}</span>
+                    <button style={removeBtnStyle} disabled={saving} onClick={() => deleteCollaborator({ type: "dept", deptId: d.deptId })}>移除</button>
+                  </div>
+                ))}
+                {!showAddDept && availableDepts.length > 0 && (
+                  <button style={addBtnStyle} onClick={() => setShowAddDept(true)}>+ 添加部门</button>
+                )}
+                {showAddDept && (
+                  <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {availableDepts.map(d => (
+                      <button key={d.id} disabled={saving}
+                        style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
+                        onClick={async () => { await postCollaborator({ type: "dept", deptId: d.id }); setShowAddDept(false); }}>
+                        {d.name}
+                      </button>
+                    ))}
+                    <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => setShowAddDept(false)}>取消</button>
+                  </div>
+                )}
+                <p style={{ fontSize: 10, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>添加部门后，该部门符合条件的成员可自助确认访问</p>
+              </div>
+
+              <div>
+                <p style={labelStyle}>个人直接授权</p>
+                {grants.length === 0 && <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", marginBottom: 4 }}>暂无个人授权</p>}
+                {grants.map(g => (
+                  <div key={g.userId + g.level} style={rowStyle}>
+                    <span style={{ fontSize: 12, color: "var(--ink)", flex: 1, minWidth: 0 }}>{g.userName}</span>
+                    <select
+                      value={g.level}
+                      disabled={saving}
+                      onChange={async (e) => { await postCollaborator({ type: "user", userId: g.userId, level: e.target.value }); }}
+                      style={{ fontSize: 11, border: "1px solid var(--line)", borderRadius: 5, padding: "2px 4px", background: "var(--surface)", color: "var(--ink)", cursor: saving ? "default" : "pointer" }}>
+                      {SM_GRANT_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    </select>
+                    <button style={removeBtnStyle} disabled={saving}
+                      onClick={() => deleteCollaborator({ type: "user", userId: g.userId })}>
+                      移除
+                    </button>
+                  </div>
+                ))}
+                {!showAddUser && (
+                  <button style={addBtnStyle} onClick={() => { setShowAddUser(true); setUserSearch(""); setPendingUser(null); }}>+ 添加成员</button>
+                )}
+                {showAddUser && (
+                  <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {!pendingUser ? (
+                      <>
+                        <input
+                          autoFocus placeholder="搜索姓名…" value={userSearch} onChange={e => setUserSearch(e.target.value)}
+                          style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, outline: "none", background: "var(--surface)", color: "var(--ink)", marginBottom: 2 }}
+                        />
+                        {userSearch === ""
+                          ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>输入姓名搜索成员…</p>
+                          : availableMembers.length === 0
+                          ? <p style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>无匹配成员</p>
+                          : availableMembers.map(m => (
+                            <button key={m.userId} disabled={saving}
+                              style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "6px 10px", fontSize: 12, background: "var(--surface-2)", color: "var(--ink)", cursor: saving ? "default" : "pointer", textAlign: "left" }}
+                              onClick={() => setPendingUser({ userId: m.userId, name: m.name })}>
+                              <span>{m.name}</span>
+                              {m.roles.length > 0 && <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>{m.roles.slice(0, 2).join("、")}</span>}
+                            </button>
+                          ))
+                        }
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: 12, color: "var(--ink)", padding: "4px 2px", fontWeight: 600 }}>
+                          {pendingUser.name} — 选择权限
+                        </p>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 2 }}>
+                          {SM_GRANT_LEVELS.map(l => (
+                            <button key={l.value} disabled={saving}
+                              style={{ borderRadius: 6, border: "1px solid var(--line)", padding: "4px 12px", fontSize: 11, cursor: saving ? "default" : "pointer", background: "var(--surface-2)", color: "var(--ink)" }}
+                              onClick={async () => {
+                                await postCollaborator({ type: "user", userId: pendingUser.userId, level: l.value });
+                                setShowAddUser(false); setUserSearch(""); setPendingUser(null);
+                              }}>
+                              {l.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button style={{ ...addBtnStyle, marginTop: 0 }} onClick={() => setPendingUser(null)}>← 返回</button>
+                      </>
+                    )}
+                    <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => { setShowAddUser(false); setUserSearch(""); setPendingUser(null); }}>取消</button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

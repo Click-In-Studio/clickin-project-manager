@@ -254,6 +254,66 @@
       "nullable": false
     }
   ],
+  "atomic_permission_grant": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "permission_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "grant_source",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "confirmed_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "approval_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "is_revoked",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "revoked_reason",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "block_tag": [
     {
       "column": "block_id",
@@ -543,35 +603,6 @@
     {
       "column": "created_by",
       "type": "uuid",
-      "nullable": false
-    }
-  ],
-  "cue_list_permission": [
-    {
-      "column": "cue_list_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "can_edit",
-      "type": "boolean",
-      "nullable": false
-    },
-    {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    }
-  ],
-  "cue_list_role": [
-    {
-      "column": "cue_list_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "role_id",
-      "type": "text",
       "nullable": false
     }
   ],
@@ -1364,6 +1395,129 @@
       "default": "now()"
     }
   ],
+  "production_approval_config": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "ttl_hours",
+      "type": "integer",
+      "nullable": false,
+      "default": "24"
+    },
+    {
+      "column": "updated_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "production_dept": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "parent_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "permissions",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "allowed_cue_types",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "display_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "chat_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "production_dept_member": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "is_poc",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "poc_extra_permissions",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "poc_blocked_permissions",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "joined_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "production_event": [
     {
       "column": "id",
@@ -1469,6 +1623,17 @@
       "column": "user_id",
       "type": "uuid",
       "nullable": false
+    },
+    {
+      "column": "supervisor_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'active'::text"
     }
   ],
   "production_member_permission": [
@@ -1489,6 +1654,64 @@
     },
     {
       "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
+  "production_member_role": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "role_id",
+      "type": "text",
+      "nullable": false
+    }
+  ],
+  "production_member_tag": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "is_system",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    }
+  ],
+  "production_member_tag_assignment": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "tag_id",
       "type": "uuid",
       "nullable": false
     }
@@ -1550,18 +1773,6 @@
       "default": "now()"
     }
   ],
-  "production_role_cue_type": [
-    {
-      "column": "role_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "cue_type",
-      "type": "text",
-      "nullable": false
-    }
-  ],
   "production_role_permission": [
     {
       "column": "role_id",
@@ -1572,6 +1783,147 @@
       "column": "permission_key",
       "type": "text",
       "nullable": false
+    }
+  ],
+  "resource_dept_manage": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "resource_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "resource_id",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "resource_sub",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "established_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "resource_grant": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "resource_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "resource_id",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "resource_sub",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "permission_level",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "grant_source",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "confirmed_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "approval_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "is_revoked",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "revoked_reason",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "resource_permission_level": [
+    {
+      "column": "resource_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "permission_level",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "sort_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
     }
   ],
   "scene": [

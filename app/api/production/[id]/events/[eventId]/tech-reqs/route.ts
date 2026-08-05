@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
-import { loadEventPermContext, canEditTechReq } from "@/lib/event-permissions";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
-  if (!event) return Response.json({ error: "事件��存在" }, { status: 404 });
+  if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
   const techReqs = await listEventTechReqs(eventId);
   return Response.json({ techReqs });
@@ -44,17 +44,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
+  // Creating a tech_req requires edit-level on the event
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+
   const body = (await req.json()) as {
     title?: string; description?: string; scheduleItemIds?: string[];
     presetMinutes?: number | null; departmentId?: string | null;
     assignees?: { userId: string; name: string }[];
   };
   const title = body.title?.trim();
-  if (!title) return Response.json({ error: "标题不���为空" }, { status: 400 });
-
-  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canEditTechReq(permCtx, eventPermCtx, body.departmentId ?? null))
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
 
   const techReq = await createEventTechReq({
     id: uid(),
@@ -65,6 +65,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     presetMinutes: body.presetMinutes ?? null,
     departmentId: body.departmentId ?? null,
     assignees: body.assignees ?? [],
+    createdBy: session.userId,
   });
 
   // Notify POCs when a new awaiting req is created for their department.
@@ -73,7 +74,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (dept?.pocUserIds.length) {
       const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${techReq.id}`;
 
-      // 1. Inbox + optional DM — always fires (no group chat required).
       void notifyUsers({
         userIds: dept.pocUserIds,
         kind: "tech_req_poc",
@@ -93,7 +93,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         },
       }).catch(e => console.error("[tech-req] notify failed:", e));
 
-      // 2. Feishu group chat — secondary, only if dept has a chatId.
       if (dept.chatId) {
         batchGetFeishuOpenIds(dept.pocUserIds).then(m => {
           const pocOpenIds = dept.pocUserIds.map(id => m.get(id)).filter((v): v is string => !!v);

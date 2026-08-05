@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext,
   getUserAllowedCueTypes,
-  listCueLists, createCueList, resolveRoleIdsByNames,
+  listCueLists, createCueList,
 } from "@/lib/db";
 import { hasPermission, type PermissionContext } from "@/lib/permissions";
 import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
@@ -44,20 +44,16 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
 
   const abbr = body.abbr?.trim().toUpperCase() || null;
 
-  let defaultRoles: string[] = [];
   if (body.template) {
     const tpl = CUE_LIST_TEMPLATES.find((t) => t.key === body.template);
     if (!tpl) return Response.json({ error: "未知模板" }, { status: 400 });
-    // Admins (create_any) bypass template filtering; others must have a matching role via production_role_cue_type.
+    // Admins (create_any) bypass template filtering; others must belong to a dept with this cue type.
     if (!hasPermission("cue_list:create_any", permCtx)) {
       const allowedTypes = await getUserAllowedCueTypes(session!.userId, id);
       if (!allowedTypes.includes(body.template))
         return Response.json({ error: "无权创建该类型Cue表" }, { status: 403 });
     }
-    defaultRoles = tpl.defaultRoles;
   }
-
-  const roleIds = await resolveRoleIdsByNames(id, defaultRoles);
 
   try {
     await createCueList({
@@ -67,7 +63,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
       notes: body.notes?.trim() ?? "",
       abbr,
       template: body.template ?? null,
-      roleIds,
       createdBy: session!.userId,
     });
   } catch (e: unknown) {

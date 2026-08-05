@@ -133,13 +133,8 @@ CREATE TABLE IF NOT EXISTS production_role_permission (
 
 CREATE INDEX IF NOT EXISTS production_role_permission_role_idx ON production_role_permission(role_id);
 
-CREATE TABLE IF NOT EXISTS production_role_cue_type (
-  role_id  TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
-  cue_type TEXT NOT NULL,
-  PRIMARY KEY (role_id, cue_type)
-);
-
-CREATE INDEX IF NOT EXISTS production_role_cue_type_role_idx ON production_role_cue_type(role_id);
+-- production_role_cue_type dropped in Phase 4 (migrate-role-cue-type-to-dept.sql)
+-- cue type authorization now managed via production_dept.allowed_cue_types
 
 -- ── Members & permission overrides ────────────────────────────────────────────
 
@@ -356,23 +351,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS cue_list_abbr_production_unique ON cue_list(pr
 CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, created_at);
 
 -- Per-user access override: can_edit=true grants, can_edit=false denies,
--- absence falls through to cue_list_role check. Creator is auto-inserted here
--- at list creation time so all access grants live in one table.
-CREATE TABLE IF NOT EXISTS cue_list_permission (
-  cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
-  user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  can_edit    BOOLEAN NOT NULL,
-  PRIMARY KEY (cue_list_id, user_id)
-);
-
--- Role-based default edit access: any member whose production_role matches
--- a row here can edit cue entries in the list (unless denied by cue_list_permission).
-CREATE TABLE IF NOT EXISTS cue_list_role (
-  cue_list_id TEXT NOT NULL REFERENCES cue_list(id) ON DELETE CASCADE,
-  role_id     TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
-  PRIMARY KEY (cue_list_id, role_id)
-);
-CREATE INDEX IF NOT EXISTS cue_list_role_list_idx ON cue_list_role(cue_list_id);
+-- cue_list_permission and cue_list_role dropped in Phase 4 (migrate-cue-list-to-resource-grant.sql)
+-- Access is now managed via resource_grant (resource_type='cue_list').
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
 -- Each row is a revision of a cue. cue_id is the stable logical identity across
@@ -838,3 +818,228 @@ CREATE TABLE IF NOT EXISTS announcement_read (
 
 CREATE INDEX IF NOT EXISTS announcement_read_announcement_idx
   ON announcement_read(announcement_id);
+
+-- ── Phase 2 (#137): 成员关系模型 ─────────────────────────────────────────────
+
+-- production_member 新增字段（supervisor_id、status）
+ALTER TABLE production_member
+  ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES app_user(id) NULL,
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'pending_exit', 'disputed', 'exited', 'suspended'));
+
+-- production_member_role：用 role_id FK 替代 roles TEXT[] 字符串数组
+CREATE TABLE IF NOT EXISTS production_member_role (
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  role_id       TEXT NOT NULL REFERENCES production_role(id) ON DELETE CASCADE,
+  PRIMARY KEY (production_id, user_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS pmr_user_prod_idx ON production_member_role (production_id, user_id);
+
+-- production_dept：新部门表（替代 event_department，数据迁移在 Phase 3）
+CREATE TABLE IF NOT EXISTS production_dept (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name            TEXT        NOT NULL,
+  parent_id       UUID        REFERENCES production_dept(id) NULL,
+  permissions     TEXT[]      NOT NULL DEFAULT '{}',
+  allowed_cue_types TEXT[]    NOT NULL DEFAULT '{}',
+  display_order   INTEGER     NOT NULL DEFAULT 0,
+  chat_id         TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS production_dept_name_unique_idx
+  ON production_dept (production_id, name, COALESCE(parent_id::text, ''));
+
+CREATE INDEX IF NOT EXISTS production_dept_production_idx
+  ON production_dept (production_id, display_order);
+
+CREATE INDEX IF NOT EXISTS production_dept_parent_idx
+  ON production_dept (parent_id);
+
+-- production_dept_member
+CREATE TABLE IF NOT EXISTS production_dept_member (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  is_poc          BOOLEAN     NOT NULL DEFAULT false,
+  poc_extra_permissions   TEXT[] NOT NULL DEFAULT '{}',
+  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',  -- 含原 poc_block_write_from_children 语义
+  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, dept_id)
+);
+
+CREATE INDEX IF NOT EXISTS pdm_prod_user_idx ON production_dept_member (production_id, user_id);
+CREATE INDEX IF NOT EXISTS pdm_dept_idx      ON production_dept_member (dept_id);
+
+-- production_member_tag（系统预设 + 演出自定义标签定义）
+CREATE TABLE IF NOT EXISTS production_member_tag (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT REFERENCES production(id) ON DELETE CASCADE NULL,
+  name          TEXT NOT NULL,
+  is_system     BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS pmt_system_name_idx
+  ON production_member_tag (name) WHERE production_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS pmt_prod_name_idx
+  ON production_member_tag (production_id, name) WHERE production_id IS NOT NULL;
+
+INSERT INTO production_member_tag (name, is_system)
+VALUES ('正式', true), ('副', true), ('助理', true), ('实习', true), ('顾问', true), ('外包', true)
+ON CONFLICT (name) WHERE production_id IS NULL DO NOTHING;
+
+-- production_member_tag_assignment（成员-标签关联）
+CREATE TABLE IF NOT EXISTS production_member_tag_assignment (
+  production_id TEXT NOT NULL REFERENCES production(id)            ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES app_user(id)              ON DELETE CASCADE,
+  tag_id        UUID NOT NULL REFERENCES production_member_tag(id) ON DELETE CASCADE,
+  PRIMARY KEY (production_id, user_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS pmta_user_prod_idx
+  ON production_member_tag_assignment (production_id, user_id);
+
+-- ── Resource Permission Level（Phase 2c）──────────────────────────────────────
+-- resource_grant.permission_level 的合法值 lookup 表。
+-- 引入新 resource_type 的 migration 必须先在此表插入对应行，再写 grant 数据。
+
+CREATE TABLE IF NOT EXISTS resource_permission_level (
+  resource_type    TEXT    NOT NULL,
+  permission_level TEXT    NOT NULL,
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (resource_type, permission_level)
+);
+
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('cue_list',    'view',           1),
+  ('cue_list',    'mount',          2),
+  ('cue_list',    'edit',           3),
+  ('cue_list',    'manage',         4),
+  ('scene',       'view',           1),
+  ('scene',       'mount',          2),
+  ('scene',       'edit',           3),
+  ('scene',       'manage',         4),
+  ('event',       'view',           1),
+  ('event',       'edit',           2),
+  ('event',       'publish',        3),
+  ('event',       'edit_published', 4),
+  ('event',       'revoke',         5),
+  ('event',       'manage',         6),
+  ('report',      'view',           1),
+  ('report',      'edit',           2),
+  ('report',      'publish',        3),
+  ('report',      'edit_published', 4),
+  ('report',      'revoke',         5),
+  ('report',      'manage',         6),
+  ('tech_req',    'view',           1),
+  ('tech_req',    'edit',           2),
+  ('tech_req',    'assign',         3),
+  ('tech_req',    'manage',         4),
+  ('note',        'view',           1),
+  ('note',        'edit',           2),
+  ('note',        'manage',         3),
+  ('script_view', 'view',           1),
+  ('script_view', 'edit',           2),
+  ('script_view', 'manage',         3),
+  ('asset',       'view',           1),
+  ('asset',       'mount',          2),
+  ('asset',       'edit',           3),
+  ('asset',       'manage',         4)
+ON CONFLICT DO NOTHING;
+
+-- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
+-- 所有实际资源权限的单一权威来源。approval_id FK 等 Phase 6 approval_request 表建好后补。
+
+CREATE TABLE IF NOT EXISTS resource_grant (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  resource_type   TEXT        NOT NULL,
+  resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
+  resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
+  permission_level TEXT       NOT NULL REFERENCES resource_permission_level (resource_type, permission_level)
+                              DEFERRABLE INITIALLY DEFERRED,
+  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
+                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
+                  )),
+  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
+  approval_id     UUID        NULL,
+  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
+  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
+                    'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual'
+                  )),
+  expires_at      TIMESTAMPTZ NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
+  ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+  WHERE is_revoked = false;
+
+CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
+  ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)
+  WHERE is_revoked = false;
+
+-- ── Atomic Permission Grant（Phase 2c）────────────────────────────────────────
+-- 原子权限 key 的个人 grant 记录。approval_id FK 等 Phase 6 approval_request 表建好后补。
+
+CREATE TABLE IF NOT EXISTS atomic_permission_grant (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  permission_key  TEXT        NOT NULL,
+  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
+                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
+                  )),
+  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
+  approval_id     UUID        NULL,
+  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
+  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
+                    'role_change', 'dept_change', 'poc_change', 'manual'
+                  )),
+  expires_at      TIMESTAMPTZ NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS atomic_permission_grant_active_unique_idx
+  ON atomic_permission_grant (production_id, user_id, permission_key)
+  WHERE is_revoked = false;
+
+CREATE INDEX IF NOT EXISTS atomic_permission_grant_lookup_idx
+  ON atomic_permission_grant (production_id, user_id)
+  WHERE is_revoked = false;
+
+-- ── Resource Dept Manage（Phase 3）────────────────────────────────────────────
+-- 部门-资源结构性管理权（信号表，非 grant 表）。
+CREATE TABLE IF NOT EXISTS resource_dept_manage (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id       UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  resource_type TEXT        NOT NULL,
+  resource_id   TEXT        NOT NULL DEFAULT '*',
+  resource_sub  TEXT        NOT NULL DEFAULT '*',
+  established_by UUID       NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (production_id, dept_id, resource_type, resource_id, resource_sub)
+);
+
+CREATE INDEX IF NOT EXISTS rdm_production_resource_idx
+  ON resource_dept_manage (production_id, resource_type, resource_id);
+
+CREATE INDEX IF NOT EXISTS rdm_dept_idx
+  ON resource_dept_manage (dept_id);
+
+-- ── Production Approval Config（Phase 3）──────────────────────────────────────
+-- 演出级审批 TTL 配置，演出创建时自动写入默认行。
+CREATE TABLE IF NOT EXISTS production_approval_config (
+  production_id TEXT        PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
+  ttl_hours     INTEGER     NOT NULL DEFAULT 24
+                            CHECK (ttl_hours > 0 AND ttl_hours <= 720),
+  updated_by    UUID        NULL REFERENCES app_user(id),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

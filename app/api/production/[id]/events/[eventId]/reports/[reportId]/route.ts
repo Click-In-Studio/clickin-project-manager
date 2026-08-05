@@ -1,9 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getEventReport, updateEventReport, deleteEventReport } from "@/lib/event-db";
-import { loadEventPermContext, canWriteReport } from "@/lib/event-permissions";
+import { canWriteReport, canPublishReport } from "@/lib/event-permissions";
 import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify";
 import type { Mention } from "@/lib/event-db";
 
@@ -23,14 +22,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const existing = await getEventReport(reportId, eventId);
   if (!existing) return Response.json({ error: "记录不存在" }, { status: 404 });
 
-  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!canWriteReport(permCtx, eventPermCtx))
+  if (!await canWriteReport(permCtx, reportId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
     reportType?: string; title?: string; body?: string;
     publishedAt?: string | null; mentions?: Mention[];
   };
+
+  // Publishing requires publish-level grant
+  if (body.publishedAt !== undefined && !await canPublishReport(permCtx, reportId, productionId))
+    return Response.json({ error: "权限不足：发布需要更高级别授权" }, { status: 403 });
 
   const updated = await updateEventReport(reportId, eventId, {
     reportType: body.reportType,
@@ -40,7 +42,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     mentions: body.mentions,
   });
 
-  // On publish: broadcast to all followers + send mention notifications
   if (body.publishedAt && !existing.publishedAt && updated) {
     dispatchReportNotification(reportId, eventId, productionId).catch(e =>
       console.error("[notify] dispatchReportNotification failed:", e),
@@ -61,7 +62,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:publish", permCtx))
+
+  if (!await canPublishReport(permCtx, reportId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
