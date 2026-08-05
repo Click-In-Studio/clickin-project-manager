@@ -76,8 +76,8 @@ export async function createRoleCueTypePreMigrationData(
 
   // Create department
   const deptRes = await pool.query<{ id: string }>(
-    `INSERT INTO production_dept (production_id, name, display_order, permissions, allowed_cue_types, poc_extra_permissions)
-     VALUES ($1, $2, 1, '{}', '{}', '{}') RETURNING id`,
+    `INSERT INTO production_dept (production_id, name, display_order, permissions, allowed_cue_types)
+     VALUES ($1, $2, 1, '{}', '{}') RETURNING id`,
     [prodId, "灯光组"],
   );
   const deptId = deptRes.rows[0].id;
