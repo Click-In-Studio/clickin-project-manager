@@ -974,7 +974,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual'
+                    'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual', 'member_removed'
                   )),
   expires_at      TIMESTAMPTZ NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1003,7 +1003,7 @@ CREATE TABLE IF NOT EXISTS atomic_permission_grant (
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'poc_change', 'manual'
+                    'role_change', 'dept_change', 'poc_change', 'manual', 'member_removed'
                   )),
   expires_at      TIMESTAMPTZ NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()

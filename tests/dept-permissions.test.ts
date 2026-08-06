@@ -29,10 +29,19 @@ import {
   setDeptMembers,
   addResourceDeptManage,
   getOrCreateApprovalConfig,
+  recomputeAndRevokeGrants,
+  revokeAllGrantsForMember,
 } from "@/lib/dept-db";
+import {
+  setMemberRoles,
+  removeProductionMember,
+  createProductionRole,
+  setRolePermissions,
+  deleteProductionRole,
+} from "@/lib/db";
 import { canAccess } from "@/lib/permissions";
 import type { PermissionContext } from "@/lib/permissions";
-import { makeProduction, cleanupProduction } from "./factories";
+import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -767,5 +776,243 @@ describe("production_approval_config", () => {
     const config1 = await getOrCreateApprovalConfig(prodId);
     const config2 = await getOrCreateApprovalConfig(prodId);
     expect(config1.ttlHours).toBe(config2.ttlHours);
+  });
+});
+
+// ── 7. recomputeAndRevokeGrants (role_change) ─────────────────────────────────
+
+describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
+  let roleAlphaId: string;
+  let roleAlphaName: string;
+  let roleBetaId: string;
+  let roleBetaName: string;
+
+  beforeAll(async () => {
+    const pool = getPool();
+    // Ensure EXTRA_USER_1 is a production member with a clean slate
+    await pool.query(
+      "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [prodId, EXTRA_USER_1, []],
+    );
+    await pool.query(
+      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_1],
+    );
+    await pool.query(
+      "DELETE FROM production_dept_member WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_1],
+    );
+    await pool.query(
+      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_1],
+    );
+
+    // Create two roles with distinct non-overlapping permissions
+    const alpha = await createProductionRole(prodId, `test-role-alpha-${shortId()}`);
+    roleAlphaId = alpha.id;
+    roleAlphaName = alpha.name;
+    await setRolePermissions(roleAlphaId, ["character:view"]);
+
+    const beta = await createProductionRole(prodId, `test-role-beta-${shortId()}`);
+    roleBetaId = beta.id;
+    roleBetaName = beta.name;
+    await setRolePermissions(roleBetaId, ["scene:view"]);
+
+    // Assign EXTRA_USER_1 to both roles so both permissions are in their zone
+    await setMemberRoles(prodId, EXTRA_USER_1, [roleAlphaName, roleBetaName]);
+
+    // Grant self_confirmed atomics: one per role, plus one outside both zones
+    await pool.query(
+      `INSERT INTO atomic_permission_grant
+         (production_id, user_id, permission_key, grant_source)
+       VALUES
+         ($1, $2, 'character:view', 'self_confirmed'),
+         ($1, $2, 'scene:view',     'self_confirmed'),
+         ($1, $2, 'cue_list:view',  'self_confirmed')
+       ON CONFLICT DO NOTHING`,
+      [prodId, EXTRA_USER_1],
+    );
+  });
+
+  afterAll(async () => {
+    await deleteProductionRole(roleAlphaId, prodId).catch(() => {});
+    await deleteProductionRole(roleBetaId, prodId).catch(() => {});
+    await getPool().query(
+      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_1],
+    );
+  });
+
+  it("removing role-alpha revokes its exclusive grants but keeps role-beta grants", async () => {
+    // Narrow to role-beta only (remove role-alpha)
+    await setMemberRoles(prodId, EXTRA_USER_1, [roleBetaName]);
+
+    const { rows } = await getPool().query<{ permission_key: string; is_revoked: boolean }>(
+      `SELECT permission_key, is_revoked
+       FROM atomic_permission_grant
+       WHERE production_id = $1 AND user_id = $2`,
+      [prodId, EXTRA_USER_1],
+    );
+
+    const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
+    expect(byKey["character:view"]).toBe(true);  // was only in role-alpha zone
+    expect(byKey["scene:view"]).toBe(false);      // still in role-beta zone
+    expect(byKey["cue_list:view"]).toBe(true);    // never in any role zone
+  });
+
+  it("non-self_confirmed grants are never revoked on role change", async () => {
+    // Insert an approval grant that role change must not touch
+    await getPool().query(
+      `INSERT INTO atomic_permission_grant
+         (production_id, user_id, permission_key, grant_source)
+       VALUES ($1, $2, 'scene:create', 'approval')
+       ON CONFLICT DO NOTHING`,
+      [prodId, EXTRA_USER_1],
+    );
+
+    // Remove all roles
+    await setMemberRoles(prodId, EXTRA_USER_1, []);
+
+    const { rows } = await getPool().query<{ is_revoked: boolean }>(
+      `SELECT is_revoked FROM atomic_permission_grant
+       WHERE production_id = $1 AND user_id = $2 AND permission_key = 'scene:create'`,
+      [prodId, EXTRA_USER_1],
+    );
+    expect(rows[0]?.is_revoked).toBe(false);
+  });
+});
+
+// ── 8. removeProductionMember: all grants revoked ─────────────────────────────
+
+describe("removeProductionMember: revokes all grants regardless of grant_source", () => {
+  beforeAll(async () => {
+    const pool = getPool();
+    // Re-add EXTRA_USER_1 as production member (was not removed by describe 7)
+    await pool.query(
+      "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [prodId, EXTRA_USER_1, []],
+    );
+
+    // Insert resource_grant rows with three different grant sources (id is UUID DEFAULT)
+    await pool.query(
+      `INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES
+         ($1, $2, 'scene', 'scene-rm-1', '*', 'view', 'self_confirmed'),
+         ($1, $2, 'scene', 'scene-rm-2', '*', 'view', 'approval'),
+         ($1, $2, 'scene', 'scene-rm-3', '*', 'view', 'direct')`,
+      [prodId, EXTRA_USER_1],
+    );
+
+    // Insert atomic_permission_grant rows with multiple sources
+    await pool.query(
+      `INSERT INTO atomic_permission_grant
+         (production_id, user_id, permission_key, grant_source)
+       VALUES
+         ($1, $2, 'scene:view',   'self_confirmed'),
+         ($1, $2, 'scene:create', 'approval'),
+         ($1, $2, 'scene:manage', 'direct')
+       ON CONFLICT DO NOTHING`,
+      [prodId, EXTRA_USER_1],
+    );
+  });
+
+  it("removes member and revokes all active grants with reason member_removed", async () => {
+    await removeProductionMember(prodId, EXTRA_USER_1);
+
+    const pool = getPool();
+
+    const { rows: rgRows } = await pool.query<{ is_revoked: boolean; revoked_reason: string }>(
+      `SELECT is_revoked, revoked_reason FROM resource_grant
+       WHERE production_id = $1 AND user_id = $2`,
+      [prodId, EXTRA_USER_1],
+    );
+    expect(rgRows.length).toBeGreaterThan(0);
+    for (const row of rgRows) {
+      expect(row.is_revoked).toBe(true);
+      expect(row.revoked_reason).toBe("member_removed");
+    }
+
+    const { rows: apgRows } = await pool.query<{ is_revoked: boolean; revoked_reason: string }>(
+      `SELECT is_revoked, revoked_reason FROM atomic_permission_grant
+       WHERE production_id = $1 AND user_id = $2`,
+      [prodId, EXTRA_USER_1],
+    );
+    expect(apgRows.length).toBeGreaterThan(0);
+    for (const row of apgRows) {
+      expect(row.is_revoked).toBe(true);
+      expect(row.revoked_reason).toBe("member_removed");
+    }
+
+    const { rows: memberRows } = await pool.query(
+      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_1],
+    );
+    expect(memberRows).toHaveLength(0);
+  });
+});
+
+// ── 9. updateProductionDept: permissions narrowing ────────────────────────────
+
+describe("updateProductionDept: permissions narrowing cascades to members", () => {
+  let narrowingDeptId: string;
+
+  beforeAll(async () => {
+    const pool = getPool();
+    // Isolate EXTRA_USER_2: remove any prior dept memberships and grants
+    await pool.query(
+      "DELETE FROM production_dept_member WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_2],
+    );
+    await pool.query(
+      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
+      [prodId, EXTRA_USER_2],
+    );
+    // Ensure EXTRA_USER_2 is a production member
+    await pool.query(
+      "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [prodId, EXTRA_USER_2, []],
+    );
+
+    // Dept starts with two permissions
+    const narrowingDept = await createProductionDept({
+      productionId: prodId,
+      name: `narrowing-test-${shortId()}`,
+      permissions: ["character:view", "script:view"],
+    });
+    narrowingDeptId = narrowingDept.id;
+
+    await setDeptMembers(narrowingDeptId, prodId, [{ userId: EXTRA_USER_2, isPoc: false }]);
+
+    // Self_confirmed grants: both in dept zone, plus one outside
+    await pool.query(
+      `INSERT INTO atomic_permission_grant
+         (production_id, user_id, permission_key, grant_source)
+       VALUES
+         ($1, $2, 'character:view', 'self_confirmed'),
+         ($1, $2, 'script:view',    'self_confirmed'),
+         ($1, $2, 'cue_list:view',  'self_confirmed')
+       ON CONFLICT DO NOTHING`,
+      [prodId, EXTRA_USER_2],
+    );
+  });
+
+  it("narrowing dept permissions revokes grants no longer in any zone", async () => {
+    // Remove 'script:view' from the dept's permissions
+    await updateProductionDept(narrowingDeptId, prodId, {
+      permissions: ["character:view"],
+    });
+
+    const { rows } = await getPool().query<{ permission_key: string; is_revoked: boolean }>(
+      `SELECT permission_key, is_revoked
+       FROM atomic_permission_grant
+       WHERE production_id = $1 AND user_id = $2`,
+      [prodId, EXTRA_USER_2],
+    );
+
+    const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
+    expect(byKey["character:view"]).toBe(false);  // still in narrowed dept zone
+    expect(byKey["script:view"]).toBe(true);       // dept no longer grants this
+    expect(byKey["cue_list:view"]).toBe(true);     // was never in any dept zone
   });
 });

@@ -9,7 +9,7 @@ export type ProductionAccess = {
   isArchived: boolean;
 };
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION } from "./permissions";
-import { computeUserDeptFreeApprovalZone } from "./dept-db";
+import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -2927,10 +2927,22 @@ export async function addProductionMember(productionId: string, userId: string):
 }
 
 export async function removeProductionMember(productionId: string, userId: string): Promise<void> {
-  await getPool().query(
-    "DELETE FROM production_member WHERE production_id = $1 AND user_id = $2",
-    [productionId, userId],
-  );
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await revokeAllGrantsForMember(productionId, userId, client);
+    await client.query(
+      "DELETE FROM production_member WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function searchFeishuUsers(query: string): Promise<{
@@ -3012,18 +3024,8 @@ export async function setMemberRoles(
       );
     }
 
-    // Cascade-revoke self_confirmed grants that are no longer covered by new roles.
-    // Phase 2: resource_grant is empty, so this is a no-op in practice.
-    // Phase 4+ will add selective per-permission revocation here.
-    await client.query(
-      `UPDATE resource_grant
-       SET is_revoked = true, revoked_reason = 'role_change'
-       WHERE production_id = $1
-         AND user_id = $2
-         AND grant_source = 'self_confirmed'
-         AND is_revoked = false`,
-      [productionId, userId],
-    );
+    // Cascade-revoke self_confirmed grants no longer covered by new roles or dept zone.
+    await recomputeAndRevokeGrants(userId, productionId, "role_change", client);
 
     await client.query("COMMIT");
   } catch (e) {
