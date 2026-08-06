@@ -982,7 +982,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
 
 CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
   ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-  WHERE is_revoked = false;
+  WHERE is_revoked = false AND (expires_at IS NULL OR expires_at > NOW());
 
 CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
   ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)

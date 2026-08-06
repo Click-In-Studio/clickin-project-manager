@@ -38,6 +38,7 @@
 - `tag`（标签）= 描述性修饰，如"正式"、"副"、"助理"、"实习"、"顾问"、"外包"
 - **禁止出现"导演助理"这类复合 role**，用 `role="导演" + tag="助理"` 替代
 - 需要 migration：将现有助理类 role 拆分
+- **tag 纯描述性，不参与权限计算**：`production_member_tag_assignment` 仅用于展示与筛选，权限引擎不读取 tag 维度。若未来需要"外包/实习成员权限受限"，需另行设计 tag → 权限映射机制（当前明确不支持）。
 
 ### D5. roles 改为 FK 引用（修复 TEXT[] 断链问题）
 
@@ -234,7 +235,7 @@ tech_req 在标准层级外额外保留 `assign`（分配人员/设备，区别�
 | `cue_list` | 新建 cue list | 创建者所在部门 + `allowed_cue_types[]` 匹配的所有其他部门 | |
 | `event` | 新建 event | 创建者所在部门 + SM 部门 | 公开 event 同时写全员 `view` grant（`grant_source='auto'`） |
 | `report` | 新建 report | 创建者所在部门 + SM 部门 | 正式发布时自动写全员 `view` grant（`grant_source='auto'`） |
-| `tech_req`、`note`、物料、财务等 | 制作人/Owner 手动建立 | 制作人指定的目标部门 | 建立后目标部门 POC 可 self-confirm manage grant |
+| `tech_req`、`note` 等 | 制作人/Owner 手动建立 | 制作人指定的目标部门 | 建立后目标部门 POC 可 self-confirm manage grant |
 
 `allowed_cue_types[]` 语义：控制"哪些部门有资格创建该类 cue list"，并在创建时触发 `resource_dept_manage` 写入。
 
@@ -255,9 +256,9 @@ tech_req 在标准层级外额外保留 `assign`（分配人员/设备，区别�
 | report | dept-managed | 创建者部门 + SM 部门（auto）；发布后全员 view | `view / edit / publish / edit_published / revoke / manage` | Phase 5b |
 | tech_req | dept-managed | 创建者部门（auto on create）；SM 部门有类型级 manage | `view / edit / assign / manage` | Phase 5c |
 | note | dept-managed（写）/ production-wide（读） | 创建者部门（auto on create）；SM/导演有 `note:create_any` | `view / edit / manage`；全员有原子 `note:view` | Phase 5d |
-| asset（数字资产） | creator-owned | 上传者控制分享目标（`asset_share` 表） | creator-owned 模型，不走 resource_grant | 本 epic 范围外 |
-| 物料（实物资产） | dept-managed | 制作人/Owner 直接建立 manage grant | `view / edit / manage` | 本 epic 范围外 |
-| budget / 财务 | dept-managed | 制作人/Owner 直接建立 manage grant | `view / edit / manage` | 本 epic 范围外 |
+| asset（数字资产） | creator-owned | 上传者控制分享目标（`asset_share` 表） | creator-owned 模型，不走 resource_grant | ✅ asset_share 已实现 |
+| 物料（实物资产） | dept-managed | 本 epic 范围外，流程待设计 | 待定 | 本 epic 范围外 |
+| budget / 财务 | dept-managed | 本 epic 范围外，流程待设计 | 待定 | 本 epic 范围外 |
 | script | 原子权限（不使用 resource_grant） | role/dept `permissions[]` 配置 | 原子 key：`script:view / edit_content / edit_marker / annotate / manage_views` | 原子权限已实现；key 整合随各 Phase 资源迁移逐步完成 |
 | script_view | dept-managed（resource_grant 独立实体） | 视图创建者（需 `script:manage_views` 原子权限） | `view / edit / manage` | 本 epic 范围外（建议另立计划） |
 | announcement | production-wide | 管理员 | 原子权限，不走 resource_grant | 已实现，本 epic 不动 |
@@ -305,9 +306,10 @@ resource_grant (
                     'auto',            -- 仅用于加入演出时的 3 条基础 grant（无用户触发行为）
                     'approval',        -- 申请流审批通过后系统写入
                     'direct',          -- 制作人或 Production Owner 直接授权（不走申请流）
-                    'assigned'         -- 操作触发型：指定/添加行为本身即授权，接收方无需确认（见「操作触发型 Grant」章节）
+                    'assigned',        -- 操作触发型：指定/添加行为本身即授权，接收方无需确认（见「操作触发型 Grant」章节）
+                    'migrated'         -- 历史数据回填（backfill script 使用，无操作人信息）
                   )),
-  confirmed_by    UUID REFERENCES app_user(id) NOT NULL,
+  confirmed_by    UUID NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
   approval_id     UUID REFERENCES approval_request(id) NULL,
   is_revoked      BOOLEAN NOT NULL DEFAULT false,
   revoked_reason  TEXT NULL CHECK (revoked_reason IN ('role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual')),
@@ -323,7 +325,9 @@ CREATE UNIQUE INDEX resource_grant_active_unique_idx
   WHERE is_revoked = false AND (expires_at IS NULL OR expires_at > NOW());
 ```
 
-`resource_permission_override` 和 `cue_list_permission` 表均归并至此表（Phase 3/4 迁移，迁移后的 grant_source 追溯为 'direct'）。
+`resource_permission_override` 和 `cue_list_permission` 表均归并至此表（Phase 3/4 迁移）。回填 source：`cue_list` 用 `'migrated'`（无从追溯操作人）；event/report/tech_req 有 `created_by` 时用 `'direct'`，`created_by IS NULL` 的行暂缺 manage grant（待 Production Owner 概念落地后补齐）。
+
+> **Schema 权威文件是 `db/schema.sql` 和各 `db/add-*.sql` / `db/migrate-*.sql`，本 PRD 章节仅供设计参考，以代码为准。**
 
 #### `atomic_permission_grant`（原子权限的个人 grant 记录）
 
@@ -340,9 +344,10 @@ CREATE TABLE atomic_permission_grant (
                     'approval',        -- 申请流审批通过后写入
                     'direct',          -- 制作人或 Owner 直接授权
                     'auto',            -- 加入演出时的 3 条基础 grant
-                    'assigned'         -- 操作触发型：指定/添加行为本身即授权，接收方无需确认
+                    'assigned',        -- 操作触发型：指定/添加行为本身即授权，接收方无需确认
+                    'migrated'         -- 历史数据回填（无操作人信息）
                   )),
-  confirmed_by    UUID NOT NULL REFERENCES app_user(id),
+  confirmed_by    UUID NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
   approval_id     UUID REFERENCES approval_request(id) NULL,
   is_revoked      BOOLEAN NOT NULL DEFAULT false,
   revoked_reason  TEXT NULL CHECK (revoked_reason IN ('role_change', 'dept_change', 'poc_change', 'manual')),
@@ -569,7 +574,7 @@ asset_share (
 |------|-------------|------------|
 | 所有权 | 创建个人 | 登记部门 |
 | 分享模型 | 上传者主动分享 | 跨部门借用申请 → POC 确认 |
-| 跨部门访问 | 分享设置决定 | 走 `approval_request`（type: `material_borrow`） |
+| 跨部门访问 | 分享设置决定 | 待定（本 epic 范围外） |
 | 管理员权限 | `asset:view_any` / `delete_any` | `物料:manage_any` |
 
 ### 有效权限计算（最小权限模型下的两层结构）
@@ -1229,10 +1234,7 @@ ALTER TABLE production_member
 - [x] **TTL 时长**：已确认为演出级配置项（`production_approval_config.ttl_hours`），默认 24h，制作人及以上可修改。无演出当天自动降级逻辑（紧急情况走人际通道）。制作人在升级链末端（仅当底下所有层级全部超时后才收到通知），同时可随时通过 Inbox 主动查看并介入全演出 pending 审批
 - [ ] **script manage grant 初始化时机**：新建演出后制作人需手动通过 UI 给某个部门建立 script manage grant；是否提供向导式引导（新建演出时询问"哪个部门负责剧本"）？
 - [ ] **script_view 实现时机**：script_view 表和相关 API（CRUD 视图、视图内块管理）归入哪个 Phase？建议 Phase 7 UI 收尾时一并实现
-- [ ] **物料的借用流程**：approval_request 的 `type` 字段是否新增 `material_borrow`，还是物料借用走独立流程？
-- [ ] **财务/物料的权限 key 枚举**：`物料:manage`、`budget:view` 等具体 key 待 #158 确定后补充
-- [ ] **supervisor_id 跨演出**：supervisor 不在同一 production 时如何处理审批链爬升（临时 supervisor = Production Owner）？
-- [ ] **asset_share 的实现时机**：asset 分享功能是否在本次 epic 内实现，还是仅做 schema 预留？
+- [x] **asset_share 已实现**：asset 分享功能（`asset_share` 表及相关 API）已实现，不在本 epic 计划内
 - [ ] **manage grant 的转移 API**：部门解散时的 grant 转移操作，是在部门删除 API 内处理还是独立端点？
 - [x] **原子权限申请流的审批路由**：原子权限是类型级操作，无具体实例的 manage grant 持有者作为锚点。审批权上浮至对 `permissions[]` 有配置权的人：**制作人 → 无则兜底 Production Owner**。与 resource_grant 申请路由同一兜底，规则对称。
 - [ ] **原子权限清理**（各条目已分配至对应 Phase，随 Phase 完成逐一划掉）：
