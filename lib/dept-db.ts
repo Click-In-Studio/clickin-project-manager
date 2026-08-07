@@ -184,10 +184,43 @@ export async function updateProductionDept(
   if (fields.permissions !== undefined) { sets.push(`permissions = $${vals.push(fields.permissions)}`); }
   if (fields.allowedCueTypes !== undefined) { sets.push(`allowed_cue_types = $${vals.push(fields.allowedCueTypes)}`); }
   if (sets.length === 0) return;
-  await getPool().query(
-    `UPDATE production_dept SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
-    vals,
-  );
+
+  const pool = getPool();
+
+  if (fields.permissions === undefined) {
+    await pool.query(
+      `UPDATE production_dept SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
+      vals,
+    );
+    return;
+  }
+
+  // permissions changed: cascade-revoke self_confirmed grants for all members
+  // in this dept and all descendant depts whose grants are no longer in zone.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE production_dept SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
+      vals,
+    );
+    const tree = await loadDeptTree(productionId, client);
+    const affectedDeptIds = collectDescendants(deptId, tree).map((d) => d.id);
+    const { rows: memberRows } = await client.query<{ user_id: string }>(
+      `SELECT DISTINCT user_id FROM production_dept_member
+       WHERE production_id = $1 AND dept_id = ANY($2)`,
+      [productionId, affectedDeptIds],
+    );
+    for (const { user_id } of memberRows) {
+      await recomputeAndRevokeGrants(user_id, productionId, "dept_change", client);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export type DeleteDeptResult =
@@ -557,11 +590,120 @@ export async function resolvePocConflict(
 // ─── Grant cascade revocation ─────────────────────────────────────────────────
 
 /**
- * When a user is removed from a dept, revoke their self_confirmed grants
- * that were in the dept's free-approval zone and are no longer covered
- * by any other dept or role.
+ * Compute the combined atomic free-approval zone for a user:
+ * dept zone (computeUserDeptFreeApprovalZone) ∪ role permissions.
+ * Used for revocation checks — we must not revoke grants that are still
+ * covered by either dept OR role membership.
+ */
+async function computeUserCombinedAtomicZone(
+  userId: string,
+  productionId: string,
+  pool: Pool | PoolClient,
+): Promise<Set<string>> {
+  const [deptZone, rolePermsRes] = await Promise.all([
+    computeUserDeptFreeApprovalZone(userId, productionId, pool),
+    pool.query<{ permission_key: string }>(
+      `SELECT prp.permission_key
+       FROM production_member_role pmr
+       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+       WHERE pmr.production_id = $1 AND pmr.user_id = $2`,
+      [productionId, userId],
+    ),
+  ]);
+  const combined = new Set<string>(deptZone);
+  for (const row of rolePermsRes.rows) combined.add(row.permission_key);
+  return combined;
+}
+
+/**
+ * Recompute a user's free-approval zone after a role/dept/POC change and
+ * soft-revoke any self_confirmed grants that are no longer covered.
  *
- * Does NOT revoke 'approval', 'direct', or 'assigned' grants (PRD spec).
+ * - atomic_permission_grant: revoke keys not in the combined (dept ∪ role) zone.
+ * - resource_grant: revoke rows where the user's remaining depts no longer
+ *   cover the resource via resource_dept_manage.
+ *
+ * Does NOT touch 'approval', 'direct', or 'assigned' grants (PRD spec).
+ */
+export async function recomputeAndRevokeGrants(
+  userId: string,
+  productionId: string,
+  reason: "role_change" | "dept_change" | "poc_change",
+  pool: Pool | PoolClient = getPool(),
+): Promise<void> {
+  const newZone = await computeUserCombinedAtomicZone(userId, productionId, pool);
+
+  await pool.query(
+    `UPDATE atomic_permission_grant
+     SET is_revoked = true, revoked_reason = $3
+     WHERE production_id = $1
+       AND user_id = $2
+       AND grant_source = 'self_confirmed'
+       AND is_revoked = false
+       AND NOT (permission_key = ANY($4))`,
+    [productionId, userId, reason, [...newZone]],
+  );
+
+  await pool.query(
+    `UPDATE resource_grant rg
+     SET is_revoked = true, revoked_reason = $3
+     WHERE rg.production_id = $1
+       AND rg.user_id = $2
+       AND rg.grant_source = 'self_confirmed'
+       AND rg.is_revoked = false
+       AND NOT EXISTS (
+         SELECT 1
+         FROM resource_dept_manage rdm
+         JOIN production_dept_member pdm
+           ON pdm.dept_id = rdm.dept_id
+          AND pdm.user_id = rg.user_id
+          AND pdm.production_id = rg.production_id
+         WHERE rdm.production_id = rg.production_id
+           AND rdm.resource_type = rg.resource_type
+           AND rdm.resource_id IN (rg.resource_id, '*')
+           AND rdm.resource_sub IN (rg.resource_sub, '*')
+       )`,
+    [productionId, userId, reason],
+  );
+}
+
+/**
+ * Revoke ALL active grants for a member being removed from a production,
+ * and clean up their role/dept/tag associations.
+ * Called inside a transaction by removeProductionMember before the member row is deleted.
+ */
+export async function revokeAllGrantsForMember(
+  productionId: string,
+  userId: string,
+  pool: Pool | PoolClient = getPool(),
+): Promise<void> {
+  await pool.query(
+    `UPDATE resource_grant SET is_revoked = true, revoked_reason = 'member_removed'
+     WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
+    [productionId, userId],
+  );
+  await pool.query(
+    `UPDATE atomic_permission_grant SET is_revoked = true, revoked_reason = 'member_removed'
+     WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
+    [productionId, userId],
+  );
+  await pool.query(
+    "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId],
+  );
+  await pool.query(
+    "DELETE FROM production_dept_member WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId],
+  );
+  await pool.query(
+    "DELETE FROM production_member_tag_assignment WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId],
+  );
+}
+
+/**
+ * When a user is removed from a dept, revoke self_confirmed grants no longer
+ * covered by any remaining dept or role.
  */
 export async function revokeGrantsForDeptRemoval(
   deptId: string,
@@ -570,53 +712,15 @@ export async function revokeGrantsForDeptRemoval(
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
   if (removedUserIds.length === 0) return;
-
   for (const userId of removedUserIds) {
-    // Recompute user's remaining zone (after removal — the member row is already gone)
-    const newZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
-
-    // Revoke atomic_permission_grant rows that are no longer in zone
-    await pool.query(
-      `UPDATE atomic_permission_grant
-       SET is_revoked = true, revoked_reason = 'dept_change'
-       WHERE production_id = $1
-         AND user_id = $2
-         AND grant_source = 'self_confirmed'
-         AND is_revoked = false
-         AND NOT (permission_key = ANY($3))`,
-      [productionId, userId, [...newZone]],
-    );
-
-    // Revoke resource_grant rows that were in the dept's free-approval zone
-    // (i.e., came from that dept's resource_dept_manage association)
-    // Only revoke if the user no longer has any dept that manages the resource.
-    await pool.query(
-      `UPDATE resource_grant rg
-       SET is_revoked = true, revoked_reason = 'dept_change'
-       WHERE rg.production_id = $1
-         AND rg.user_id = $2
-         AND rg.grant_source = 'self_confirmed'
-         AND rg.is_revoked = false
-         AND NOT EXISTS (
-           SELECT 1
-           FROM resource_dept_manage rdm
-           JOIN production_dept_member pdm
-             ON pdm.dept_id = rdm.dept_id
-            AND pdm.user_id = rg.user_id
-            AND pdm.production_id = rg.production_id
-           WHERE rdm.production_id = rg.production_id
-             AND rdm.resource_type = rg.resource_type
-             AND rdm.resource_id IN (rg.resource_id, '*')
-             AND rdm.resource_sub IN (rg.resource_sub, '*')
-         )`,
-      [productionId, userId],
-    );
+    await recomputeAndRevokeGrants(userId, productionId, "dept_change", pool);
   }
 }
 
 /**
- * When a user loses POC status in a dept, revoke self_confirmed grants
- * that were exclusively in the POC zone (not covered by remaining membership zone).
+ * When a user loses POC status in a dept, revoke self_confirmed grants that
+ * were exclusively in the POC zone (not covered by remaining membership zone).
+ * Also revokes resource_grant rows no longer covered by any dept membership.
  */
 export async function revokeGrantsForPocLoss(
   deptId: string,
@@ -625,21 +729,8 @@ export async function revokeGrantsForPocLoss(
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
   if (userIds.length === 0) return;
-
   for (const userId of userIds) {
-    // After POC removal, recompute the zone (poc removal already committed)
-    const newZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
-
-    await pool.query(
-      `UPDATE atomic_permission_grant
-       SET is_revoked = true, revoked_reason = 'poc_change'
-       WHERE production_id = $1
-         AND user_id = $2
-         AND grant_source = 'self_confirmed'
-         AND is_revoked = false
-         AND NOT (permission_key = ANY($3))`,
-      [productionId, userId, [...newZone]],
-    );
+    await recomputeAndRevokeGrants(userId, productionId, "poc_change", pool);
   }
 }
 

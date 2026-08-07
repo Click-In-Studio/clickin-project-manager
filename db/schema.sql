@@ -974,12 +974,14 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual'
+                    'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual', 'member_removed'
                   )),
   expires_at      TIMESTAMPTZ NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- expires_at 条件不能用 NOW()（非 IMMUTABLE），唯一性保护依赖 is_revoked；
+-- 到期 grant 需由应用层在重发前先标记 is_revoked = true。
 CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
   ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false;
@@ -1003,7 +1005,7 @@ CREATE TABLE IF NOT EXISTS atomic_permission_grant (
   approval_id     UUID        NULL,
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'poc_change', 'manual'
+                    'role_change', 'dept_change', 'poc_change', 'manual', 'member_removed'
                   )),
   expires_at      TIMESTAMPTZ NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
