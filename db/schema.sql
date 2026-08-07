@@ -963,7 +963,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
   resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
   permission_level TEXT       NOT NULL,
-  CONSTRAINT resource_grant_permission_level_fk
+  CONSTRAINT resource_grant_level_fk
     FOREIGN KEY (resource_type, permission_level)
     REFERENCES resource_permission_level (resource_type, permission_level)
     DEFERRABLE INITIALLY DEFERRED,
