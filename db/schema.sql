@@ -962,8 +962,11 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   resource_type   TEXT        NOT NULL,
   resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
   resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
-  permission_level TEXT       NOT NULL REFERENCES resource_permission_level (resource_type, permission_level)
-                              DEFERRABLE INITIALLY DEFERRED,
+  permission_level TEXT       NOT NULL,
+  CONSTRAINT resource_grant_level_fk
+    FOREIGN KEY (resource_type, permission_level)
+    REFERENCES resource_permission_level (resource_type, permission_level)
+    DEFERRABLE INITIALLY DEFERRED,
   grant_source    TEXT        NOT NULL CHECK (grant_source IN (
                     'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
                   )),
