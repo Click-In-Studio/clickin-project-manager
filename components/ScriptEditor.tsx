@@ -3974,7 +3974,7 @@ const SIDE_PANEL_MIN_WIDTH_PX = 360;
 const SIDE_PANEL_MAX_WIDTH_PX = 576;
 const SIDE_PANEL_GUTTER_PADDING_PX = 15;
 
-function buildCommentBlockCaption(block: Block, characters: Character[], index: number): CommentBlockCaption {
+function buildCommentBlockCaption(block: Block, characters: Character[], displayNumber: number): CommentBlockCaption {
   const normalizedBlockContent = block.content.replace(/\s+/g, " ").trim();
   const blockContentPreview = normalizedBlockContent.slice(0, 20);
   const blockContentSuffix = normalizedBlockContent.length > blockContentPreview.length ? "..." : "";
@@ -3986,7 +3986,7 @@ function buildCommentBlockCaption(block: Block, characters: Character[], index: 
         .join("/");
 
   return {
-    label: `【${index + 1}】`,
+    label: `【${displayNumber}】`,
     body: `${characterCaption ? `${characterCaption}: ` : ""}${blockContentPreview || "（空）"}${blockContentSuffix}`,
   };
 }
@@ -5038,6 +5038,7 @@ function ScriptBlock({
   isScriptDragging = false,
   index = 0,
   lineNum,
+  captionLineNum,
   lineIndexWidth,
   isSearchHighlight,
   showRehearsalMark = true,
@@ -5118,6 +5119,7 @@ function ScriptBlock({
   isScriptDragging?: boolean;
   index?: number;
   lineNum?: number;
+  captionLineNum: number;
   lineIndexWidth?: string;
   isSearchHighlight?: "match" | "focused";
   showRehearsalMark?: boolean;
@@ -5492,7 +5494,7 @@ function ScriptBlock({
           ...partialFocusStyle,
         } as React.CSSProperties)
       : undefined;
-  const commentBlockCaption = buildCommentBlockCaption(block, characters, index ?? 0);
+  const commentBlockCaption = buildCommentBlockCaption(block, characters, captionLineNum);
   const lineIndexSlotStyle: React.CSSProperties = {
     width: lineIndexWidth
       ? lineIndexWidth
@@ -10342,14 +10344,20 @@ export default function ScriptEditor({
   const activeCommentBlockIndex = activeCommentBlockId
     ? blocks.findIndex(block => block.id === activeCommentBlockId)
     : -1;
-  const activeCommentBlockCaption = activeCommentBlockIndex >= 0
-    ? buildCommentBlockCaption(blocks[activeCommentBlockIndex], characters, activeCommentBlockIndex)
+  const activeCommentBlockLineNumber = activeCommentBlockId
+    ? scriptLineNumberByBlockId.get(activeCommentBlockId)
+    : undefined;
+  const activeCommentBlockCaption = activeCommentBlockIndex >= 0 && activeCommentBlockLineNumber !== undefined
+    ? buildCommentBlockCaption(blocks[activeCommentBlockIndex], characters, activeCommentBlockLineNumber)
     : null;
   const activeAssetBlockIndex = activeAssetBlockId
     ? blocks.findIndex(block => block.id === activeAssetBlockId)
     : -1;
-  const activeAssetBlockCaption = activeAssetBlockIndex >= 0
-    ? buildCommentBlockCaption(blocks[activeAssetBlockIndex], characters, activeAssetBlockIndex)
+  const activeAssetBlockLineNumber = activeAssetBlockId
+    ? scriptLineNumberByBlockId.get(activeAssetBlockId)
+    : undefined;
+  const activeAssetBlockCaption = activeAssetBlockIndex >= 0 && activeAssetBlockLineNumber !== undefined
+    ? buildCommentBlockCaption(blocks[activeAssetBlockIndex], characters, activeAssetBlockLineNumber)
     : null;
   const dragInstructionNotice = !edgeDragNotice && (isScriptDragging || isReorderLocked)
       ? "拖拽当前剧本块至指定位置松开以调整位置"
@@ -11531,6 +11539,7 @@ export default function ScriptEditor({
             const selectedCount = selectedDeleteIds.length;
             const blockComments = commentsByBlockId.get(block.id) ?? EMPTY_COMMENTS;
             const blockAssets = blockAssetsByBlockId.get(block.id) ?? EMPTY_BLOCK_ASSETS;
+            const blockLineNumber = scriptLineNumberByBlockId.get(block.id)!;
             const requiresNonEmptySceneConfirm = isSelected
               ? selectedBlocksRequireNonEmptySceneConfirm
               : blockIdsRequireNonEmptySceneConfirm(selectedDeleteIds);
@@ -11574,7 +11583,8 @@ export default function ScriptEditor({
                 <ScriptBlock
                   block={displayBlock}
                   index={bIdx}
-                  lineNum={display.lineNumbers ? scriptLineNumberByBlockId.get(block.id) : undefined}
+                  lineNum={display.lineNumbers ? blockLineNumber : undefined}
+                  captionLineNum={blockLineNumber}
                   lineIndexWidth={lineIndexWidthStyle}
                   isSearchHighlight={searchHighlight}
                   showRehearsalMark={display.rehearsalMarks}
