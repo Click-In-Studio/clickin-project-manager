@@ -2853,10 +2853,11 @@ export async function getProductionPermissionContext(
 
   if (isMember) {
     if (dbPermsRow.rows.length > 0) {
-      // DB records exist: use them
-      memberPermissions = new Set(
-        dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
-      );
+      // DB records exist: merge with base permissions (base is always granted to all members).
+      memberPermissions = new Set([
+        ...MEMBER_BASE_PERMISSIONS,
+        ...dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
+      ]);
     } else {
       // Fallback: derive permissions from static templates using existing role strings
       const roleStrings = memberRow.rows[0].roles;
