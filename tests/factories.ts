@@ -23,9 +23,9 @@ export function shortId(): string {
 /**
  * Create a production and return its id + auto-created initial version id.
  */
-export async function makeProduction(): Promise<{ prodId: string; versionId: string }> {
+export async function makeProduction(ownerUserId?: string): Promise<{ prodId: string; versionId: string }> {
   const id = shortId();
-  await createProduction(id, faker.company.name());
+  await createProduction(id, faker.company.name(), ownerUserId);
   const versionId = (await getActiveVersionId(id))!;
   return { prodId: id, versionId };
 }

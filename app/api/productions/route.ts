@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const { updateProductionMeta, updateProductionType } = await import("@/lib/db");
-    await createProduction(id, name.trim());
+    await createProduction(id, name.trim(), session.userId);
     const metaFields: Parameters<typeof updateProductionMeta>[1] = {};
     if (description?.trim()) metaFields.description = description.trim();
     if (language?.trim()) metaFields.language = language.trim();
