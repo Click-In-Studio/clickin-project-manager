@@ -252,6 +252,9 @@ export type PermissionContext = {
   // Atomic permissions the user can self-confirm without waiting for approval.
   // = dept zone (Phase 3) + personal zone adjustments from production_member_permission.
   deptFreeApprovalZone: Set<Permission>;
+  // Permissions explicitly activated by the user (self-confirmed or approved).
+  // Non-base role permissions require a grant to be usable via hasPermission().
+  activeGrants: Set<Permission>;
 };
 
 // ─── Permission Tier Constants ─────────────────────────────────────────────────
@@ -338,12 +341,17 @@ export function hasPermission(perm: Permission, ctx: PermissionContext): boolean
   // Superadmin / owner bypass for non-root, non-sensitive permissions
   if (ctx.isAdmin || ctx.isOwner) return true;
 
-  // Operation implication: script:manage / script:edit / script:annotate
-  if (SCRIPT_MANAGE_DOMAIN.has(perm) && ctx.memberPermissions.has("script:manage")) return true;
-  if (SCRIPT_EDIT_DOMAIN.has(perm) && ctx.memberPermissions.has("script:edit")) return true;
-  if (SCRIPT_ANNOTATE_DOMAIN.has(perm) && ctx.memberPermissions.has("script:annotate")) return true;
+  // Base permissions: all members get these without explicit confirmation.
+  if (MEMBER_BASE_PERMISSIONS_SET.has(perm)) return true;
 
-  return ctx.memberPermissions.has(perm);
+  // Script domain expansion via active grants:
+  // confirming the parent permission activates all its sub-operations.
+  if (SCRIPT_MANAGE_DOMAIN.has(perm) && ctx.activeGrants.has("script:manage")) return true;
+  if (SCRIPT_EDIT_DOMAIN.has(perm) && ctx.activeGrants.has("script:edit")) return true;
+  if (SCRIPT_ANNOTATE_DOMAIN.has(perm) && ctx.activeGrants.has("script:annotate")) return true;
+
+  // All other permissions require an explicit active grant (self-confirmed or approved).
+  return ctx.activeGrants.has(perm);
 }
 
 // ─── Scoped Permission Check ───────────────────────────────────────────────────
@@ -399,6 +407,9 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "asset:share",
   "report:view",
 ];
+
+// O(1) set used by hasPermission() — must be declared after MEMBER_BASE_PERMISSIONS.
+const MEMBER_BASE_PERMISSIONS_SET = new Set<Permission>(MEMBER_BASE_PERMISSIONS);
 
 // ─── Cue Operation Full Set ────────────────────────────────────────────────────
 const CUE_FULL_SET: readonly Permission[] = [
@@ -861,7 +872,10 @@ export function canAccess(
   _resource?: { type: ResourceType; id?: string },
 ): AccessResult {
   if (hasPermission(perm, ctx)) return { allowed: true };
-  // Phase 3: atomic permission is in the dept free-approval zone → user can self-confirm.
-  if (ctx.deptFreeApprovalZone.has(perm)) return { allowed: false, reason: "needs_self_confirm" };
+  // Eligible for self-confirm: role grants eligibility, dept zone also grants eligibility.
+  // Both paths require the user to explicitly confirm before the permission becomes active.
+  if ((ctx.memberPermissions?.has(perm) ?? false) || ctx.deptFreeApprovalZone.has(perm)) {
+    return { allowed: false, reason: "needs_self_confirm" };
+  }
   return { allowed: false, reason: "needs_approval" };
 }

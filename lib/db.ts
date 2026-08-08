@@ -2810,7 +2810,7 @@ export async function getProductionPermissionContext(
 ): Promise<ProductionAccess | null> {
   const pool = getPool();
 
-  const [memberRow, dbPermsRow, personalZoneRow, deptRow, productionRow] = await Promise.all([
+  const [memberRow, dbPermsRow, personalZoneRow, deptRow, productionRow, grantsRow] = await Promise.all([
     // Is user a member? And what are their role strings?
     pool.query<{ roles: string[] }>(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
@@ -2840,6 +2840,11 @@ export async function getProductionPermissionContext(
     pool.query<{ archived_at: Date | null; owner_id: string | null }>(
       "SELECT archived_at, owner_id FROM production WHERE id = $1",
       [productionId],
+    ),
+    // Active grants: permissions the user has explicitly confirmed or had approved.
+    pool.query<{ permission_key: string }>(
+      "SELECT permission_key FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND is_revoked = false",
+      [productionId, userId],
     ),
   ]);
 
@@ -2896,8 +2901,12 @@ export async function getProductionPermissionContext(
     }
   }
 
+  const activeGrants = new Set<AtomicPermission>(
+    grantsRow.rows.map((r) => r.permission_key as AtomicPermission),
+  );
+
   return {
-    permCtx: { userId, isAdmin, isOwner, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone },
+    permCtx: { userId, isAdmin, isOwner, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone, activeGrants },
     isArchived: prodRow?.archived_at != null,
   };
 }
