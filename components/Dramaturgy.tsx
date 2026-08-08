@@ -2,12 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import ScenesManager from "./ScenesManager";
-import styles from "./my-pages.module.css";
 import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
 import TableColumnSettings from "./TableColumnSettings";
 import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
+import ProductionTopMenu, {
+  ProductionTopMenuDivider,
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+} from "./ProductionTopMenu";
+import ListTableViewToggle from "./ListTableViewToggle";
 
 type SceneViewMode = "list" | "table";
 
@@ -159,27 +163,20 @@ export default function Dramaturgy({
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
       {/* ── Frozen toolbar ── */}
-      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0">
-        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
+      <ProductionTopMenu>
+        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>构作</span>
         </div>
-        <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
-        <div className={styles.viewToggle}>
-          <button aria-selected={sceneViewMode === "list"} onClick={() => setSceneViewMode("list")}>
-            ☰ 列表
-          </button>
-          <button aria-selected={sceneViewMode === "table"} onClick={() => setSceneViewMode("table")}>
-            ⊞ 表格
-          </button>
-        </div>
+        <ProductionTopMenuDivider />
+        <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
 
         {sceneViewMode === "table" && (
-          <>
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
             {/* Desktop: inline controls */}
-            <div className="ml-auto hidden sm:flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2">
               <TableViewSelector
                 productionId={productionId}
                 views={savedViews}
@@ -206,7 +203,7 @@ export default function Dramaturgy({
             </div>
 
             {/* Mobile: ⋮ menu */}
-            <div ref={mobileMenuRef} className="ml-auto sm:hidden" style={{ position: "relative" }}>
+            <div ref={mobileMenuRef} className="sm:hidden" style={{ position: "relative" }}>
               <button
                 onClick={() => setShowMobileViewMenu((v) => !v)}
                 className="flex items-center justify-center w-8 h-8 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-base font-bold"
@@ -338,9 +335,9 @@ export default function Dramaturgy({
                 />
               )}
             </div>
-          </>
+          </div>
         )}
-      </div>
+      </ProductionTopMenu>
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>

@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/db";
+import ProductionTopMenu, { ProductionTopMenuDivider } from "./ProductionTopMenu";
+import ListTableViewToggle from "./ListTableViewToggle";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -856,37 +858,16 @@ export default function CharactersManager({ productionId, productionName, initia
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
       {/* Frozen toolbar */}
-      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0">
-        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
+      <ProductionTopMenu>
+        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>角色</span>
         </div>
-        <div style={{ marginLeft: "auto", display: "inline-flex", gap: 2, background: "var(--surface-2)", borderRadius: 8, padding: 3 }}>
-          {(["list", "table"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              style={{
-                border: 0,
-                background: view === v ? "var(--surface)" : "transparent",
-                borderRadius: 6,
-                padding: "5px 13px",
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: "pointer",
-                color: view === v ? "var(--ink)" : "var(--muted)",
-                boxShadow: view === v ? "0 1px 3px rgba(24,42,42,.08)" : "none",
-                transition: "background .1s, color .1s",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {v === "list" ? "列表" : "表格"}
-            </button>
-          ))}
-        </div>
-      </div>
+        <ProductionTopMenuDivider />
+        <ListTableViewToggle value={view} onChange={setView} />
+      </ProductionTopMenu>
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
         {view === "table" ? tableView : card}

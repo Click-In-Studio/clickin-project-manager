@@ -41,6 +41,11 @@ import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
+import ProductionTopMenu, {
+  ProductionTopMenuDivider,
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  PRODUCTION_TOP_MENU_SLOT_ID,
+} from "@/components/ProductionTopMenu";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -1544,7 +1549,7 @@ function ScenePanel({
       </button>
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          className={`${nestedFromMore ? "fixed right-2 top-[4rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
           style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
@@ -2398,7 +2403,7 @@ function CharacterPanel({
 
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          className={`${nestedFromMore ? "fixed right-2 top-[4rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
           style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
@@ -3945,7 +3950,7 @@ const COMMENT_BUBBLE_MIN_GUTTER_PX = 170;
 const SPEECH_TAIL_PIN_OFFSET_PX = 96;
 const SPEECH_TAIL_BASE_HALF_PX = 14;
 const SPEECH_TAIL_EDGE_INSET_PX = 24;
-const SIDE_PANEL_TOP_PX = 120; // AppShell header (64px) + ScriptEditor toolbar (56px)
+const SIDE_PANEL_TOP_PX = 64; // Merged AppShell and ScriptEditor header
 const SIDE_PANEL_MIN_WIDTH_PX = 360;
 const SIDE_PANEL_MAX_WIDTH_PX = 576;
 const SIDE_PANEL_GUTTER_PADDING_PX = 15;
@@ -6874,10 +6879,12 @@ export default function ScriptEditor({
   useEffect(() => {
     const el = toolbarRef.current;
     if (!el) return;
+    const productionTopMenuSlot = el.closest(`#${PRODUCTION_TOP_MENU_SLOT_ID}`);
     let frame: number | null = null;
     const measure = () => {
       frame = null;
       if (navigatingAwayRef.current || openMenu || moreMenuOpen) return;
+      if (productionTopMenuSlot?.getAttribute("data-search-open") === "true") return;
       const available = el.clientWidth;
       const required = el.scrollWidth;
       if (toolbarMode === "full") {
@@ -6913,8 +6920,16 @@ export default function ScriptEditor({
     scheduleMeasure();
     const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(el);
+    const searchStateObserver = new MutationObserver(scheduleMeasure);
+    if (productionTopMenuSlot) {
+      searchStateObserver.observe(productionTopMenuSlot, {
+        attributes: true,
+        attributeFilter: ["data-search-open"],
+      });
+    }
     return () => {
       observer.disconnect();
+      searchStateObserver.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [toolbarMode, openMenu, moreMenuOpen, toolbarMeasureTick]);
@@ -10319,18 +10334,20 @@ export default function ScriptEditor({
       : "";
   const rightMenuClass = `${
     toolbarCompact
-      ? "fixed right-2 top-[7.5rem]"
+      ? "fixed right-2 top-[4rem]"
       : "absolute right-0 top-full"
   } z-30 mt-1 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
 
   return (
     <div className="bg-[var(--paper)]">
       {/* Toolbar */}
-      <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm">
-        <div
-          ref={setToolbarElement}
-          className="relative flex h-14 flex-nowrap items-center gap-3 px-6"
-        >
+      <header className={searchOpen || jumpTarget
+        ? "sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm"
+        : "contents"
+      }>
+        <ProductionTopMenu barRef={setToolbarElement} fallbackClassName="gap-0 px-6">
+          {(portaled) => (
+            <>
           {productionName && !toolbarCompact && (
             <>
               <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
@@ -10339,7 +10356,7 @@ export default function ScriptEditor({
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>剧本</span>
               </div>
-              <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+              <ProductionTopMenuDivider />
             </>
           )}
           {!isLockedMode && (
@@ -10349,13 +10366,13 @@ export default function ScriptEditor({
               <div className="relative shrink-0">
                 <button
                   onClick={() => toggleMenu("script")}
-                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+                  className="flex items-center gap-0.5 whitespace-nowrap rounded py-1 pl-0 pr-2.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                 >
                   剧本 <Chevron />
                 </button>
                 {openMenu === "script" && (
                   <div
-                    className={`${toolbarCompact ? "fixed left-2 top-[7.5rem]" : "absolute left-0 top-full"} z-30 mt-1 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`}
+                    className={`${toolbarCompact ? "fixed left-2 top-[4rem]" : "absolute left-0 top-full"} z-30 mt-1 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`}
                     onMouseLeave={() => setOpenMenu(null)}
                   >
                     <button
@@ -10454,6 +10471,10 @@ export default function ScriptEditor({
                 disabled={versionForcesLockedMode}
                 title={versionForcesLockedMode ? "该版本仅可使用排练模式" : "退出排练模式"}
                 className={`flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors ${
+                  portaled && toolbarMode === "full"
+                    ? "fixed left-1/2 top-0 z-10 h-16 -translate-x-1/2 "
+                    : ""
+                }${
                   versionForcesLockedMode
                     ? "cursor-default text-[#91a8ca]"
                     : "text-teal-600 hover:bg-teal-50 hover:text-teal-700"
@@ -10464,7 +10485,8 @@ export default function ScriptEditor({
               </button>
             </div>
           )}
-          <div className="ml-auto h-4 w-px shrink-0 bg-zinc-100" />
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-1`}>
+          <div className="h-4 w-px shrink-0 bg-zinc-100" />
           {(canEditMetadata || isLockedMode) && (
             <>
               {canEditMetadata && (
@@ -10483,7 +10505,7 @@ export default function ScriptEditor({
                     nestedFromMore={toolbarCompact}
                     label={toolbarShort ? "章" : "章节"}
                   />
-                  <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+                  <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
                 </>
               )}
               <CharacterPanel
@@ -10507,7 +10529,7 @@ export default function ScriptEditor({
                 nestedFromMore={toolbarCompact}
                 label={toolbarShort ? "角" : "角色"}
               />
-              <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+              <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
             </>
           )}
 
@@ -10812,7 +10834,7 @@ export default function ScriptEditor({
             </button>
             {moreMenuOpen && (
               <div
-                className="fixed right-2 top-[7.5rem] z-40 mt-1 w-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
+                className="fixed right-2 top-[4rem] z-40 mt-1 w-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
               >
                 {canEditMetadata && (
                   <button
@@ -10856,7 +10878,10 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
-        </div>
+          </div>
+            </>
+          )}
+        </ProductionTopMenu>
 
         {/* 搜索栏 */}
         {searchOpen && (
@@ -10949,7 +10974,7 @@ export default function ScriptEditor({
       {edgeDragNotice && (
         <div
           className={`pointer-events-none fixed left-1/2 z-10 -translate-x-1/2 select-none text-center text-2xl font-semibold tracking-wide text-zinc-400/35 ${
-            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-[8.5rem]" : "bottom-12"
+            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-[5rem]" : "bottom-12"
           }`}
         >
           {edgeDragNotice}
@@ -10957,7 +10982,7 @@ export default function ScriptEditor({
       )}
 
       {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || largeSelectionNotice || selectionChangeNotice) && (
-        <div className="pointer-events-none fixed left-1/2 top-[7.5rem] z-50 flex -translate-x-1/2 flex-col items-center gap-1">
+        <div className="pointer-events-none fixed left-1/2 top-[4rem] z-50 flex -translate-x-1/2 flex-col items-center gap-1">
           {dragInstructionNotice ? (
             <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
               {dragInstructionNotice}
@@ -11091,8 +11116,8 @@ export default function ScriptEditor({
         {/* Left gutter column (TOC + scene detail, sticky) */}
         <div ref={setLeftGutterRef} className="hidden lg:flex flex-col flex-1 min-w-0 self-stretch">
           {scriptTocRailMode && (
-            <aside style={asideStyle} className={`sticky top-14 pr-4 ${showSceneDetailRail ? "h-[calc(100vh-7.5rem)] flex min-h-0 flex-col" : "h-[calc((100vh-7.5rem)/3)] min-h-44 max-h-96"}`}>
-              <div className={`${showSceneDetailRail ? "h-[calc((100vh-7.5rem)/3)] min-h-44 max-h-96 shrink-0 flex justify-end" : "h-full"}`}>
+            <aside style={asideStyle} className={`sticky top-0 pr-4 ${showSceneDetailRail ? "h-[calc(100vh-4rem)] flex min-h-0 flex-col" : "h-[calc((100vh-4rem)/3)] min-h-44 max-h-96"}`}>
+              <div className={`${showSceneDetailRail ? "h-[calc((100vh-4rem)/3)] min-h-44 max-h-96 shrink-0 flex justify-end" : "h-full"}`}>
                 <div
                   className="h-full"
                   style={showSceneDetailRail ? { width: `${scriptTocRailLayout.railWidthPx + 16}px` } : { width: "100%" }}
@@ -11790,7 +11815,7 @@ export default function ScriptEditor({
       {tagEditorOpen && productionId && (
         <>
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setTagEditorOpen(false)} />
-        <div className="fixed right-0 top-[7.5rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full">
+        <div className="fixed right-0 top-[4rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full">
           <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">标签设置</span>
             <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>

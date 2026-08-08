@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ProductionSearchResults } from "@/lib/search-db";
 
@@ -70,9 +71,10 @@ function ResultRow({
 
 interface SearchBarProps {
   productionId: string | null;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export default function SearchBar({ productionId }: SearchBarProps) {
+export default function SearchBar({ productionId, onOpenChange }: SearchBarProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -80,16 +82,49 @@ export default function SearchBar({ productionId }: SearchBarProps) {
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const transitionFrameRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (transitionFrameRef.current !== null) {
+      cancelAnimationFrame(transitionFrameRef.current);
+    }
+  }, []);
 
   const handleClose = useCallback(() => {
+    if (transitionFrameRef.current !== null) {
+      cancelAnimationFrame(transitionFrameRef.current);
+    }
     setIsOpen(false);
     setQuery("");
     setResults(null);
-  }, []);
+    if (!onOpenChange) return;
+    transitionFrameRef.current = requestAnimationFrame(() => {
+      transitionFrameRef.current = null;
+      onOpenChange(false);
+    });
+  }, [onOpenChange]);
 
   const handleOpen = () => {
-    setIsOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 10);
+    if (transitionFrameRef.current !== null) {
+      cancelAnimationFrame(transitionFrameRef.current);
+    }
+    if (!onOpenChange) {
+      setIsOpen(true);
+      transitionFrameRef.current = requestAnimationFrame(() => {
+        transitionFrameRef.current = null;
+        inputRef.current?.focus();
+      });
+      return;
+    }
+    // Commit the menu hide before the next frame can expand the input.
+    flushSync(() => onOpenChange(true));
+    transitionFrameRef.current = requestAnimationFrame(() => {
+      setIsOpen(true);
+      transitionFrameRef.current = requestAnimationFrame(() => {
+        transitionFrameRef.current = null;
+        inputRef.current?.focus();
+      });
+    });
   };
 
   // Close on outside click

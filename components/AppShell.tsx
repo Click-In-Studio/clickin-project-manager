@@ -1,12 +1,13 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
 import PageActivationGate from "./PageActivationGate";
+import { PRODUCTION_TOP_MENU_SLOT_ID } from "./ProductionTopMenu";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -63,6 +64,14 @@ const OVERVIEW_NAV = [
   { label: "通知提醒", hint: "确认与告知", path: "/my/notifications", symbol: "◉" },
   { label: "报告", hint: "所有演出报告", path: "/my/reports", symbol: "≡" },
 ] as const;
+
+const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
+  script: "剧本",
+  dramaturgy: "构作",
+  characters: "角色",
+  cues: "Cue",
+  cuelists: "Cue 表设置",
+};
 
 const PUNCTUATION_RE = /^[\s《》「」【】『』〈〉（）()"'""''・·—–…、。，。！？]+/u;
 
@@ -511,6 +520,10 @@ export default function AppShell({ session, productions, children, initialUnread
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
   const [cueWarnings, setCueWarnings] = useState(0);
+  const [productionSearchPath, setProductionSearchPath] = useState<string | null>(null);
+  const handleProductionSearchOpenChange = useCallback((open: boolean) => {
+    setProductionSearchPath(open ? pathname : null);
+  }, [pathname]);
 
   // Track current productionId via ref so fetchCounts always uses the latest value
   // without needing to be in the effect dependency array.
@@ -522,6 +535,7 @@ export default function AppShell({ session, productions, children, initialUnread
 
   useEffect(() => {
     setDrawerOpen(null);
+    setProductionSearchPath(null);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
 
@@ -612,6 +626,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const activeModule = productionId && pathname.startsWith(`/production/${productionId}`)
     ? extractModule(pathname, productionId)
     : null;
+  const hasProductionTopMenu = !!activeModule && ["script", "dramaturgy", "characters", "cues", "cuelists"].includes(activeModule);
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -695,10 +710,36 @@ export default function AppShell({ session, productions, children, initialUnread
           onOpen={() => setDropdownOpen(false)}
         />
 
+        {hasProductionTopMenu && (
+          <div
+            id={PRODUCTION_TOP_MENU_SLOT_ID}
+            data-search-open={productionSearchPath === pathname ? "true" : undefined}
+            className="flex h-full min-w-0 flex-1 items-center"
+          >
+            <div
+              data-production-top-menu-placeholder
+              aria-hidden="true"
+              className="flex shrink-0 flex-col"
+              style={{ lineHeight: 1.2 }}
+            >
+              <span className="max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--script)]">
+                {currentProduction?.name ?? ""}
+              </span>
+              <span className="text-xs font-semibold text-[var(--ink)]">
+                {PRODUCTION_TOP_MENU_LABELS[activeModule ?? ""]}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Right actions */}
         <div className="ml-auto flex items-center gap-3">
           {/* Search bar: only when inside a production */}
-          <SearchBar productionId={productionId} />
+          <SearchBar
+            key={pathname}
+            productionId={productionId}
+            onOpenChange={hasProductionTopMenu ? handleProductionSearchOpenChange : undefined}
+          />
 
           {/* Notification bell: sm+ only */}
           <Link

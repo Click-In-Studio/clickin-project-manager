@@ -17,6 +17,10 @@ import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwnershipProjection } from "@/lib/script-marker-blocks";
 import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
+import ProductionTopMenu, {
+  ProductionTopMenuDivider,
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+} from "@/components/ProductionTopMenu";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
 
@@ -1955,17 +1959,20 @@ export default function CuePage({
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]" onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
-      <div className="relative flex items-center gap-2 sm:gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0" onClick={e => e.stopPropagation()}>
+      <ProductionTopMenu onClick={e => e.stopPropagation()}>
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue</span>
         </div>
-        <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+        <ProductionTopMenuDivider />
+        <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
+          {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
+        </span>
 
         {/* List chips — scrollable on mobile */}
-        <div className="flex gap-1.5 flex-nowrap overflow-x-auto sm:flex-wrap flex-1 sm:flex-none" style={{ scrollbarWidth: "none" }}>
+        <div className="ml-2 flex min-w-0 flex-1 flex-nowrap gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
           {cueLists.map((cl, i) => {
             const c = colorFor(i);
             const on = visibleListIds.has(cl.id);
@@ -1996,6 +2003,7 @@ export default function CuePage({
           })}
         </div>
 
+        <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-2 sm:gap-3`}>
         {/* Desktop: 激活 + 设置 */}
         <div className="hidden sm:block shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
         <div className="hidden sm:flex items-center gap-1.5">
@@ -2027,10 +2035,7 @@ export default function CuePage({
         </div>
 
         {/* Desktop: right controls */}
-        <div className="hidden sm:flex ml-auto items-center gap-1.5 shrink-0">
-          <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
-            {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
-          </span>
+        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           {(["line", "page", "scene"] as const).map(t => (
             <button key={t}
               onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); }}
@@ -2054,7 +2059,7 @@ export default function CuePage({
         )}
 
         {/* Mobile: ⋮ button */}
-        <div className="sm:hidden relative shrink-0 ml-auto">
+        <div className="sm:hidden relative shrink-0">
           <button
             type="button"
             onClick={() => setCueMoreOpen(v => !v)}
@@ -2066,7 +2071,7 @@ export default function CuePage({
             <>
               <div className="fixed inset-0 z-40" onClick={() => setCueMoreOpen(false)} />
               <div
-                className="fixed right-2 top-[3.75rem] z-50 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-2 shadow-lg"
+                className="fixed right-2 top-[4rem] z-50 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-2 shadow-lg"
                 onClick={e => e.stopPropagation()}
               >
               <div className="px-3 py-1.5 flex flex-col gap-2">
@@ -2083,9 +2088,6 @@ export default function CuePage({
                     ))}
                   </select>
                 </div>
-                <span className="rounded bg-[var(--surface-2)] px-2 py-1 text-[11px] text-zinc-400 text-center">
-                  {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
-                </span>
               </div>
               <div className="my-1 border-t border-zinc-100" />
               {(["line", "page", "scene"] as const).map(t => (
@@ -2111,7 +2113,8 @@ export default function CuePage({
             </>
           )}
         </div>
-      </div>
+        </div>
+      </ProductionTopMenu>
 
       {/* ── Jump bar panel ── */}
       {jumpTarget && (
