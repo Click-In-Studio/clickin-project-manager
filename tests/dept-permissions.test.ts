@@ -541,7 +541,55 @@ describe("computeUserDeptFreeApprovalZone", () => {
 });
 
 describe("canAccess() with deptFreeApprovalZone", () => {
-  it("returns needs_self_confirm when perm is in deptFreeApprovalZone", () => {
+  // cue:create is a non-base permission suitable for testing the confirmation flow.
+
+  it("base permissions are always allowed for members without any grant", () => {
+    const ctx: PermissionContext = {
+      userId: TEST_USER,
+      isAdmin: false,
+      isOwner: false,
+      memberPermissions: new Set(), // member with no role permissions
+      overrides: new Map(),
+      deptIds: [],
+      pocDeptIds: [],
+      deptFreeApprovalZone: new Set(),
+      activeGrants: new Set(),
+    };
+    // scene:view is in MEMBER_BASE_PERMISSIONS → always directly allowed
+    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: true });
+  });
+
+  it("role permission without active grant → needs_self_confirm", () => {
+    const ctx: PermissionContext = {
+      userId: TEST_USER,
+      isAdmin: false,
+      isOwner: false,
+      memberPermissions: new Set(["cue:create"] as const),
+      overrides: new Map(),
+      deptIds: [],
+      pocDeptIds: [],
+      deptFreeApprovalZone: new Set(),
+      activeGrants: new Set(), // not yet confirmed
+    };
+    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+  });
+
+  it("role permission with active grant → allowed", () => {
+    const ctx: PermissionContext = {
+      userId: TEST_USER,
+      isAdmin: false,
+      isOwner: false,
+      memberPermissions: new Set(["cue:create"] as const),
+      overrides: new Map(),
+      deptIds: [],
+      pocDeptIds: [],
+      deptFreeApprovalZone: new Set(),
+      activeGrants: new Set(["cue:create"] as const),
+    };
+    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: true });
+  });
+
+  it("returns needs_self_confirm when perm is in deptFreeApprovalZone (no role)", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
@@ -550,13 +598,13 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["scene:view", "cue_list:view"]),
+      deptFreeApprovalZone: new Set(["cue:create", "cue_list:create"]),
+      activeGrants: new Set(),
     };
-    const result = canAccess(ctx, "scene:view");
-    expect(result).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
-  it("returns needs_approval when perm is NOT in deptFreeApprovalZone", () => {
+  it("returns needs_approval when perm is in neither role nor deptFreeApprovalZone", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
@@ -565,25 +613,10 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["cue_list:view"]),
+      deptFreeApprovalZone: new Set(["cue_list:create"]),
+      activeGrants: new Set(),
     };
-    const result = canAccess(ctx, "scene:view");
-    expect(result).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-
-  it("returns allowed:true when hasPermission is true (zone not consulted)", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(["scene:view"] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-    };
-    const result = canAccess(ctx, "scene:view");
-    expect(result).toEqual({ allowed: true });
+    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 
   it("needs_self_confirm takes priority over needs_approval when zone matches", () => {
@@ -596,13 +629,12 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(["dept:create"]),
+      activeGrants: new Set(),
     };
-    // dept:create is not a sensitive_admin perm, not a root perm
-    const result = canAccess(ctx, "dept:create");
-    expect(result).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "dept:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
-  it("empty deptFreeApprovalZone always returns needs_approval for blocked perms", () => {
+  it("empty zone and no role → needs_approval for non-base perms", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
@@ -612,8 +644,9 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
+      activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: false, reason: "needs_approval" });
+    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 });
 
