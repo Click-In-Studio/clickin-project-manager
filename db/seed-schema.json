@@ -1347,6 +1347,11 @@
       "column": "language",
       "type": "text",
       "nullable": true
+    },
+    {
+      "column": "owner_id",
+      "type": "uuid",
+      "nullable": true
     }
   ],
   "production_announcement": [

@@ -8,7 +8,7 @@ export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION } from "./permissions";
+import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
 import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
@@ -2010,9 +2010,12 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
 
 // ─── Production management ────────────────────────────────────────────────────
 
-export async function createProduction(id: string, name: string): Promise<void> {
+export async function createProduction(id: string, name: string, ownerUserId?: string): Promise<void> {
   const pool = getPool();
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [id, name]);
+  await pool.query(
+    "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)",
+    [id, name, ownerUserId ?? null],
+  );
   // Phase 3: ensure approval config row exists (default 24h TTL)
   await pool.query(
     "INSERT INTO production_approval_config (production_id, ttl_hours) VALUES ($1, 24) ON CONFLICT DO NOTHING",
@@ -2807,7 +2810,7 @@ export async function getProductionPermissionContext(
 ): Promise<ProductionAccess | null> {
   const pool = getPool();
 
-  const [memberRow, dbPermsRow, overridesRow, deptRow, archivedRow] = await Promise.all([
+  const [memberRow, dbPermsRow, personalZoneRow, deptRow, productionRow] = await Promise.all([
     // Is user a member? And what are their role strings?
     pool.query<{ roles: string[] }>(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
@@ -2821,8 +2824,8 @@ export async function getProductionPermissionContext(
        WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
-    // Personal overrides (permission key column stores new atomic keys post-migration,
-    // old keys are cast and silently ignored at runtime)
+    // Personal zone adjustments: granted=true expands free-approval zone, granted=false shrinks it.
+    // Sensitive admin permissions are ignored here (they require the Phase 7 owner-approval flow).
     pool.query<{ permission: string; granted: boolean }>(
       "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
       [productionId, userId],
@@ -2834,14 +2837,17 @@ export async function getProductionPermissionContext(
        WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
       [userId, productionId],
     ),
-    pool.query<{ archived_at: Date | null }>(
-      "SELECT archived_at FROM production WHERE id = $1",
+    pool.query<{ archived_at: Date | null; owner_id: string | null }>(
+      "SELECT archived_at, owner_id FROM production WHERE id = $1",
       [productionId],
     ),
   ]);
 
+  const prodRow = productionRow.rows[0];
+  const isOwner = prodRow?.owner_id != null && prodRow.owner_id === userId;
+
   const isMember = memberRow.rows.length > 0;
-  if (!isAdmin && !isMember) return null;
+  if (!isAdmin && !isOwner && !isMember) return null;
 
   let memberPermissions: Set<AtomicPermission> | null = null;
 
@@ -2866,10 +2872,8 @@ export async function getProductionPermissionContext(
     }
   }
 
+  // overrides is reserved for future owner-granted direct permissions (Phase 7).
   const overrides = new Map<AtomicPermission, boolean>();
-  for (const row of overridesRow.rows) {
-    overrides.set(row.permission as AtomicPermission, row.granted);
-  }
 
   const deptIds: string[] = [];
   const pocDeptIds: string[] = [];
@@ -2878,12 +2882,22 @@ export async function getProductionPermissionContext(
     if (row.is_poc) pocDeptIds.push(row.dept_id);
   }
 
-  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone)
+  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone),
+  // then apply personal zone adjustments from production_member_permission.
   const deptFreeApprovalZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
+  for (const row of personalZoneRow.rows) {
+    const perm = row.permission as AtomicPermission;
+    if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) continue;
+    if (row.granted) {
+      deptFreeApprovalZone.add(perm);
+    } else {
+      deptFreeApprovalZone.delete(perm);
+    }
+  }
 
   return {
-    permCtx: { userId, isAdmin, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone },
-    isArchived: archivedRow.rows[0]?.archived_at != null,
+    permCtx: { userId, isAdmin, isOwner, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone },
+    isArchived: prodRow?.archived_at != null,
   };
 }
 

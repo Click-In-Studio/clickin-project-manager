@@ -545,6 +545,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
+      isOwner: false,
       memberPermissions: new Set(), // no role-based permissions
       overrides: new Map(),
       deptIds: [],
@@ -559,6 +560,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
+      isOwner: false,
       memberPermissions: new Set(),
       overrides: new Map(),
       deptIds: [],
@@ -573,6 +575,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
+      isOwner: false,
       memberPermissions: new Set(["scene:view"] as const),
       overrides: new Map(),
       deptIds: [],
@@ -587,6 +590,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
+      isOwner: false,
       memberPermissions: new Set(),
       overrides: new Map(),
       deptIds: [],
@@ -602,6 +606,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
+      isOwner: false,
       memberPermissions: new Set(),
       overrides: new Map(),
       deptIds: [],

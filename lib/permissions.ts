@@ -239,15 +239,18 @@ export type Permission =
 export type PermissionContext = {
   userId: string;
   isAdmin: boolean;
+  // True when userId === production.owner_id.
+  isOwner: boolean;
   // Effective permissions from DB role assignments. null = not a member.
   memberPermissions: Set<Permission> | null;
   // Personal overrides — absolute precedence for non-root/non-sensitive permissions.
+  // Reserved for Phase 7 owner-granted direct permissions. Currently always empty.
   overrides: Map<Permission, boolean>;
   // Department membership in this production.
   deptIds: string[];
   pocDeptIds: string[];
   // Atomic permissions the user can self-confirm without waiting for approval.
-  // Computed from dept.permissions[] inheritance + POC zone (Phase 3).
+  // = dept zone (Phase 3) + personal zone adjustments from production_member_permission.
   deptFreeApprovalZone: Set<Permission>;
 };
 
@@ -318,22 +321,22 @@ const SCRIPT_MANAGE_DOMAIN = new Set<Permission>([
 // ─── Core Permission Check ─────────────────────────────────────────────────────
 
 export function hasPermission(perm: Permission, ctx: PermissionContext): boolean {
-  // Root: only superadmin for now (owner short-circuit deferred to #137)
-  if (ROOT_PERMISSIONS.has(perm)) return ctx.isAdmin;
+  // Root: superadmin or production owner
+  if (ROOT_PERMISSIONS.has(perm)) return ctx.isAdmin || ctx.isOwner;
 
-  // Not a member: only superadmin can proceed
-  if (ctx.memberPermissions === null) return ctx.isAdmin;
+  // Not a member: only superadmin or owner can proceed
+  if (ctx.memberPermissions === null) return ctx.isAdmin || ctx.isOwner;
 
-  // Sensitive admin: only via explicit override (no adminBypass, no role default)
+  // Sensitive admin: owner has it directly; others need explicit override (Phase 7 approval flow)
   if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) {
-    return ctx.overrides.get(perm) === true;
+    return ctx.isOwner || ctx.overrides.get(perm) === true;
   }
 
   // Personal override has absolute precedence for all other permissions
   if (ctx.overrides.has(perm)) return ctx.overrides.get(perm)!;
 
-  // Superadmin bypass for non-root, non-sensitive permissions
-  if (ctx.isAdmin) return true;
+  // Superadmin / owner bypass for non-root, non-sensitive permissions
+  if (ctx.isAdmin || ctx.isOwner) return true;
 
   // Operation implication: script:manage / script:edit / script:annotate
   if (SCRIPT_MANAGE_DOMAIN.has(perm) && ctx.memberPermissions.has("script:manage")) return true;

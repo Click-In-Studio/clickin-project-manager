@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS production (
   avatar_url        TEXT,
   type              TEXT,
   type_label        TEXT,
-  language          TEXT
+  language          TEXT,
+  owner_id          UUID REFERENCES app_user(id)
 );
 
 -- ── Versions ──────────────────────────────────────────────────────────────────
