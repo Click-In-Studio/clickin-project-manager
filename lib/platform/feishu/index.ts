@@ -7,7 +7,6 @@ import {
   getTenantAccessToken,
   fetchAllTenantUsersRaw,
   searchUsersByName,
-  checkIsTenantManager,
   TOKEN_COOKIE,
   type FeishuRawUser,
 } from "./feishu-auth";
@@ -107,13 +106,12 @@ export class FeishuPlatform implements PersonalChannel, OrgChannel, InboundGatew
     const tokenData = await exchangeCode(code);
     const info = await feishuGetUserInfo(tokenData.userAccessToken);
     if (!info) throw new Error("feishu: failed to fetch user info");
-    const isAdmin = await checkIsTenantManager(info.openId);
-    const { userId } = await upsertFeishuUser(info.openId, info.name, info.avatarUrl ?? null, isAdmin);
+    const { userId } = await upsertFeishuUser(info.openId, info.name, info.avatarUrl ?? null, false);
     return {
       userId,
       name: info.name,
       avatarUrl: info.avatarUrl ?? null,
-      isAdmin,
+      isAdmin: false,
       extraCookies: [{
         name: TOKEN_COOKIE,
         value: tokenData.userAccessToken,
