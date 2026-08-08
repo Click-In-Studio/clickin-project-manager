@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import ScenesManager from "./ScenesManager";
 import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
 import TableColumnSettings from "./TableColumnSettings";
@@ -8,10 +8,13 @@ import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 import ProductionTopMenu, {
+  ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  useAnchoredMenu,
+  useProductionToolbar,
 } from "./ProductionTopMenu";
-import ListTableViewToggle from "./ListTableViewToggle";
+import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 
 type SceneViewMode = "list" | "table";
 
@@ -36,6 +39,7 @@ export default function Dramaturgy({
   canEdit,
   initialSceneId,
 }: Props) {
+  const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>("list");
 
@@ -45,14 +49,37 @@ export default function Dramaturgy({
 
   const [tableConfig, setTableConfig] = useState<TableViewConfigData>(getDefaultViewConfig());
   const [showColumnSettings, setShowColumnSettings] = useState(false);
-  const [showMobileViewMenu, setShowMobileViewMenu] = useState(false);
+  const [storedColumnSettingsOpen, setStoredColumnSettingsOpen] = useState(false);
   const [mobileCreatingView, setMobileCreatingView] = useState(false);
   const [mobileNewName, setMobileNewName] = useState("");
   const [mobileSaving, setMobileSaving] = useState(false);
-  const mobileMenuRef = useRef<HTMLDivElement>(null);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewsLoaded, setViewsLoaded] = useState(false);
+  const storedColumnSettingsPosition = useAnchoredMenu<HTMLButtonElement>(
+    toolbarStage >= 4.1 && sceneViewMode === "table" && overflowOpen && storedColumnSettingsOpen,
+    "left",
+    "columns",
+  );
+
+  useEffect(() => {
+    if (!overflowOpen || toolbarStage < 4.1 || sceneViewMode !== "table") {
+      setStoredColumnSettingsOpen(false);
+    }
+  }, [overflowOpen, toolbarStage, sceneViewMode]);
+
+  useEffect(() => {
+    if (!storedColumnSettingsOpen) return;
+    const dismiss = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (storedColumnSettingsPosition.anchorRef.current?.contains(target)) return;
+      if (storedColumnSettingsPosition.menuRef.current?.contains(target)) return;
+      setStoredColumnSettingsOpen(false);
+    };
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [storedColumnSettingsOpen, storedColumnSettingsPosition.anchorRef, storedColumnSettingsPosition.menuRef]);
 
   useEffect(() => {
     if (viewsLoaded) return;
@@ -139,7 +166,7 @@ export default function Dramaturgy({
       handleSelectView(data);
       setMobileNewName("");
       setMobileCreatingView(false);
-      setShowMobileViewMenu(false);
+      closeOverflow();
     } catch (e) {
       console.error(e);
     } finally {
@@ -147,23 +174,101 @@ export default function Dramaturgy({
     }
   };
 
-  useEffect(() => {
-    if (!showMobileViewMenu) return;
-    const dismiss = (e: MouseEvent) => {
-      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
-        setShowMobileViewMenu(false);
-        setMobileCreatingView(false);
-        setMobileNewName("");
-      }
-    };
-    document.addEventListener("mousedown", dismiss);
-    return () => document.removeEventListener("mousedown", dismiss);
-  }, [showMobileViewMenu]);
+  const secondaryOverflow = toolbarStage >= 4.1 && sceneViewMode === "table" ? (
+    <>
+      {savedViews.length > 0 && (
+        <>
+          <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">
+            切换视图
+          </div>
+          {savedViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => { handleSelectView(view); closeOverflow(); }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surface-2)] ${
+                activeViewId === view.id ? "font-bold text-[var(--ink)]" : "text-[var(--muted)]"
+              }`}
+            >
+              <span className="w-3 text-[9px] text-[var(--script)]">{activeViewId === view.id ? "✓" : ""}</span>
+              <span className="min-w-0 flex-1 truncate">{view.name}</span>
+              {view.isDefault && <span className="text-[9px] font-normal text-[var(--muted)]">默认</span>}
+            </button>
+          ))}
+        </>
+      )}
+      <div className="border-t border-[var(--line)] py-1">
+        {activeViewId && (
+          <button
+            type="button"
+            onClick={() => { void handleMobileSaveView(); }}
+            disabled={mobileSaving}
+            className="w-full px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+          >
+            {mobileSaving ? "保存中…" : "保存到当前视图"}
+          </button>
+        )}
+        {mobileCreatingView ? (
+          <div className="flex gap-1.5 px-3 py-2">
+            <input
+              autoFocus
+              value={mobileNewName}
+              onChange={(event) => setMobileNewName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void handleMobileCreateView();
+                if (event.key === "Escape") { setMobileCreatingView(false); setMobileNewName(""); }
+              }}
+              placeholder="视图名称"
+              className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-[var(--paper)] px-2 py-1 text-xs text-[var(--ink)] outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => { void handleMobileCreateView(); }}
+              disabled={mobileSaving || !mobileNewName.trim()}
+              className="rounded-md border-0 bg-[var(--ink)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
+            >
+              存
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setMobileCreatingView(true)}
+            className="w-full px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)]"
+          >
+            另存为新视图
+          </button>
+        )}
+      </div>
+      <div className="border-t border-[var(--line)] py-1">
+        <ProductionOverflowSubmenuButton
+          menuId="columns"
+          label="列设置"
+          expanded={storedColumnSettingsOpen}
+          onToggle={(anchor) => {
+            storedColumnSettingsPosition.anchorRef.current = anchor;
+            setStoredColumnSettingsOpen((open) => !open);
+          }}
+        />
+      </div>
+    </>
+  ) : null;
+  const primaryOverflow = toolbarStage >= 5 ? (
+    <ListTableViewToggleOverflow value={sceneViewMode} onChange={setSceneViewMode} />
+  ) : null;
+  const toolbarOverflow = secondaryOverflow || primaryOverflow ? (
+    <>
+      {secondaryOverflow}
+      {primaryOverflow}
+    </>
+  ) : null;
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
       {/* ── Frozen toolbar ── */}
-      <ProductionTopMenu>
+      <ProductionTopMenu overflow={toolbarOverflow}>
+        {toolbarStage < 7 && (
+          <>
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
@@ -171,12 +276,15 @@ export default function Dramaturgy({
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>构作</span>
         </div>
         <ProductionTopMenuDivider />
+          </>
+        )}
         <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
 
         {sceneViewMode === "table" && (
-          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
+          <>
+          <div className={toolbarStage >= 4.1 ? "hidden" : `${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
             {/* Desktop: inline controls */}
-            <div className="hidden sm:flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <TableViewSelector
                 productionId={productionId}
                 views={savedViews}
@@ -188,7 +296,7 @@ export default function Dramaturgy({
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => setShowColumnSettings((v) => !v)}
-                  className="text-[11px] font-bold px-3 py-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                  className="whitespace-nowrap text-[11px] font-bold px-3 py-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
                 >
                   ⚙ 列设置
                 </button>
@@ -201,141 +309,18 @@ export default function Dramaturgy({
                 )}
               </div>
             </div>
-
-            {/* Mobile: ⋮ menu */}
-            <div ref={mobileMenuRef} className="sm:hidden" style={{ position: "relative" }}>
-              <button
-                onClick={() => setShowMobileViewMenu((v) => !v)}
-                className="flex items-center justify-center w-8 h-8 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-base font-bold"
-                title="视图设置"
-              >
-                ⋮
-              </button>
-              {showMobileViewMenu && (
-                <div style={{
-                  position: "absolute", right: 0, top: "calc(100% + 6px)",
-                  minWidth: 180, borderRadius: 12,
-                  border: "1px solid var(--line)", background: "var(--surface)",
-                  boxShadow: "0 4px 20px rgba(24,42,42,.12)", zIndex: 30,
-                  overflow: "hidden",
-                }}>
-                  {/* Saved views list */}
-                  {savedViews.length > 0 && (
-                    <>
-                      <div style={{ padding: "8px 14px 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
-                        切换视图
-                      </div>
-                      {savedViews.map((v) => (
-                        <button
-                          key={v.id}
-                          onClick={() => { handleSelectView(v); setShowMobileViewMenu(false); }}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 8, width: "100%",
-                            padding: "7px 14px", textAlign: "left", cursor: "pointer",
-                            fontSize: 13, fontWeight: activeViewId === v.id ? 700 : 400,
-                            color: activeViewId === v.id ? "var(--ink)" : "var(--muted)",
-                            background: "transparent", border: "none",
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                        >
-                          <span style={{ width: 12, fontSize: 9, color: "var(--script)" }}>{activeViewId === v.id ? "✓" : ""}</span>
-                          {v.name}
-                          {v.isDefault && <span style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)" }}>默认</span>}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {/* Save / create */}
-                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
-                    {activeViewId && (
-                      <button
-                        onClick={() => { void handleMobileSaveView(); }}
-                        disabled={mobileSaving}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 8, width: "100%",
-                          padding: "7px 14px", textAlign: "left", cursor: "pointer",
-                          fontSize: 13, fontWeight: 400, color: "var(--muted)",
-                          background: "transparent", border: "none", opacity: mobileSaving ? 0.5 : 1,
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                      >
-                        {mobileSaving ? "保存中…" : "↑ 保存到当前视图"}
-                      </button>
-                    )}
-                    {mobileCreatingView ? (
-                      <div style={{ padding: "6px 14px", display: "flex", gap: 6 }}>
-                        <input
-                          autoFocus
-                          value={mobileNewName}
-                          onChange={(e) => setMobileNewName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") { void handleMobileCreateView(); }
-                            if (e.key === "Escape") { setMobileCreatingView(false); setMobileNewName(""); }
-                          }}
-                          placeholder="视图名称"
-                          style={{
-                            flex: 1, fontSize: 12, padding: "4px 8px",
-                            border: "1px solid var(--line)", borderRadius: 6,
-                            outline: "none", background: "var(--paper)", color: "var(--ink)",
-                          }}
-                        />
-                        <button
-                          onClick={() => { void handleMobileCreateView(); }}
-                          disabled={mobileSaving || !mobileNewName.trim()}
-                          style={{
-                            padding: "4px 10px", fontSize: 12, fontWeight: 600,
-                            borderRadius: 6, border: "none", cursor: "pointer",
-                            background: "var(--ink)", color: "#fff", opacity: (!mobileNewName.trim() || mobileSaving) ? 0.4 : 1,
-                          }}
-                        >
-                          存
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setMobileCreatingView(true)}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 8, width: "100%",
-                          padding: "7px 14px", textAlign: "left", cursor: "pointer",
-                          fontSize: 13, fontWeight: 400, color: "var(--muted)",
-                          background: "transparent", border: "none",
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                      >
-                        + 另存为新视图
-                      </button>
-                    )}
-                  </div>
-                  {/* Column settings */}
-                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
-                    <button
-                      onClick={() => { setShowMobileViewMenu(false); setShowColumnSettings((v) => !v); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "7px 14px", textAlign: "left", cursor: "pointer",
-                        fontSize: 13, fontWeight: 400, color: "var(--muted)",
-                        background: "transparent", border: "none",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                    >
-                      ⚙ 列设置
-                    </button>
-                  </div>
-                </div>
-              )}
-              {showColumnSettings && (
-                <TableColumnSettings
-                  config={tableConfig}
-                  onChange={handleConfigChange}
-                  onClose={() => setShowColumnSettings(false)}
-                />
-              )}
-            </div>
           </div>
+          {toolbarStage >= 4.1 && overflowOpen && storedColumnSettingsOpen && (
+            <TableColumnSettings
+              config={tableConfig}
+              onChange={handleConfigChange}
+              onClose={() => setStoredColumnSettingsOpen(false)}
+              nestedFromOverflow
+              nestedMenuRef={storedColumnSettingsPosition.menuRef}
+              nestedMenuStyle={storedColumnSettingsPosition.style}
+            />
+          )}
+          </>
         )}
       </ProductionTopMenu>
 

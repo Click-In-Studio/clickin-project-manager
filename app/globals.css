@@ -121,7 +121,12 @@ span[data-stage-inline] {
 }
 
 #production-page-toolbar-slot[data-toolbar-ready="true"] > [data-production-top-menu-placeholder],
-#production-page-toolbar-slot[data-search-open="true"] .production-top-menu-right {
+#production-page-toolbar-slot[data-search-open="true"] .production-top-menu-right,
+#production-top-toolbar-overflow[data-search-open="true"] {
+  display: none;
+}
+
+#production-top-toolbar-overflow:not(:has(#production-page-toolbar-overflow-slot > *)) {
   display: none;
 }
 

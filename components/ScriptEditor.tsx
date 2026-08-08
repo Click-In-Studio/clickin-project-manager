@@ -42,9 +42,12 @@ import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, w
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
 import ProductionTopMenu, {
+  ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
   PRODUCTION_TOP_MENU_SLOT_ID,
+  useAnchoredMenu,
+  useProductionToolbar,
 } from "@/components/ProductionTopMenu";
 
 let _seq = 0;
@@ -371,6 +374,11 @@ const Chevron = () => (
     <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+function anchoredManagementPanelStyle(style: React.CSSProperties): React.CSSProperties {
+  const availableHeight = typeof style.maxHeight === "number" ? `${style.maxHeight}px` : "calc(100vh - 1rem)";
+  return { ...style, maxHeight: `min(28rem, ${availableHeight})`, overflowY: undefined };
+}
 
 const FoldTriangle = ({ open }: { open: boolean }) => (
   <span
@@ -1513,6 +1521,8 @@ function ScenePanel({
   onNavigate,
   triggerClassName,
   nestedFromMore = false,
+  nestedMenuRef,
+  nestedMenuStyle,
   label = "章节",
 }: {
   scenes: Scene[];
@@ -1526,22 +1536,25 @@ function ScenePanel({
   onNavigate?: () => void;
   triggerClassName?: string;
   nestedFromMore?: boolean;
+  nestedMenuRef?: React.RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: React.CSSProperties;
   label?: string;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || nestedFromMore) return;
     const handler = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onOpenChange(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, nestedFromMore]);
 
   return (
     <div ref={wrapRef} className="relative shrink-0">
       <button
+        data-script-toolbar-menu-trigger="scene"
         onClick={() => onOpenChange(!open)}
         className={triggerClassName ?? "flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"}
       >
@@ -1549,8 +1562,11 @@ function ScenePanel({
       </button>
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-[4rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          data-script-toolbar-menu-panel="scene"
+          data-production-overflow-menu-child={nestedFromMore ? "true" : undefined}
+          ref={nestedFromMore ? nestedMenuRef : undefined}
+          className={`${nestedFromMore ? "" : "absolute right-0 top-full mt-2.5"} z-40 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
@@ -2350,6 +2366,8 @@ function CharacterPanel({
   readOnly = false,
   triggerClassName,
   nestedFromMore = false,
+  nestedMenuRef,
+  nestedMenuStyle,
   label = "角色",
 }: {
   characters: Character[];
@@ -2366,19 +2384,21 @@ function CharacterPanel({
   readOnly?: boolean;
   triggerClassName?: string;
   nestedFromMore?: boolean;
+  nestedMenuRef?: React.RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: React.CSSProperties;
   label?: string;
 }) {
   const [draft, setDraft] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || nestedFromMore) return;
     const onDown = (e: MouseEvent) => {
       if (!panelRef.current?.contains(e.target as Node)) onOpenChange(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, nestedFromMore]);
 
   const submit = () => {
     if (readOnly) return;
@@ -2391,6 +2411,7 @@ function CharacterPanel({
   return (
     <div ref={panelRef} className="relative shrink-0">
       <button
+        data-script-toolbar-menu-trigger="char"
         onClick={() => onOpenChange(!open)}
         className={triggerClassName ?? `flex items-center gap-0.5 rounded px-1.5 py-1 text-sm transition-colors ${
           open
@@ -2403,8 +2424,11 @@ function CharacterPanel({
 
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-[4rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          data-script-toolbar-menu-panel="char"
+          data-production-overflow-menu-child={nestedFromMore ? "true" : undefined}
+          ref={nestedFromMore ? nestedMenuRef : undefined}
+          className={`${nestedFromMore ? "" : "absolute right-0 top-full mt-2.5"} z-40 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
@@ -6468,6 +6492,7 @@ export default function ScriptEditor({
   versionId?: string | null;
   initialSearchQuery?: string;
 }) {
+  const { stage: toolbarStage, overflowOpen } = useProductionToolbar();
   const effectiveScriptId = productionId ?? scriptId;
 
   // ── Version state ─────────────────────────────────────────────────────────────
@@ -6835,33 +6860,48 @@ export default function ScriptEditor({
   type OpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
   type ToolbarMode = "full" | "short" | "compact";
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [toolbarMode, setToolbarMode] = useState<ToolbarMode>("full");
   const [toolbarMeasureTick, setToolbarMeasureTick] = useState(0);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const fullToolbarWidthRef = useRef(0);
   const shortToolbarWidthRef = useRef(0);
-  const toolbarCompact = toolbarMode === "compact";
-  const toolbarShort = toolbarMode === "short";
+  const toolbarCompact = toolbarStage >= 5 || toolbarMode === "compact";
+  const toolbarShort = !toolbarCompact && (toolbarStage >= 4.2 || toolbarMode === "short");
+  const presenceFolded = toolbarStage >= 6;
+  const scriptMenuPosition = useAnchoredMenu<HTMLButtonElement>(openMenu === "script", "bottom");
+  const nestedMenuPosition = useAnchoredMenu<HTMLButtonElement>(toolbarCompact && openMenu !== null && openMenu !== "script", "left", openMenu);
   const toggleMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setMoreMenuOpen(false);
     setOpenMenu(prev => prev === name ? null : name);
   }, []);
-  const toggleMoreMenu = useCallback(() => {
-    setMoreMenuOpen(prev => {
-      const next = !prev;
-      setOpenMenu(null);
-      return next;
-    });
-  }, []);
-  const openNestedMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setMoreMenuOpen(false);
-    setOpenMenu(name);
-  }, []);
+  const openNestedMenu = useCallback((name: Exclude<OpenMenu, null>, anchor: HTMLButtonElement) => {
+    nestedMenuPosition.anchorRef.current = anchor;
+    setOpenMenu(current => current === name ? null : name);
+  }, [nestedMenuPosition.anchorRef]);
+  useEffect(() => {
+    if (toolbarCompact && !overflowOpen) setOpenMenu(null);
+  }, [toolbarCompact, overflowOpen]);
   const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
     if (!open && pendingAggregateFocusPrompt) return;
     setOpenMenu(open ? "char" : null);
   }, [pendingAggregateFocusPrompt]);
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismissOnOutsideMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const panel = target.closest<HTMLElement>("[data-script-toolbar-menu-panel]");
+      const scriptTrigger = target.closest<HTMLElement>("[data-script-toolbar-menu-trigger]");
+      const overflowTrigger = target.closest<HTMLElement>("[data-production-overflow-submenu-trigger]");
+      const triggerMenu = scriptTrigger?.dataset.scriptToolbarMenuTrigger
+        ?? overflowTrigger?.dataset.productionOverflowSubmenuTrigger;
+      if (panel?.dataset.scriptToolbarMenuPanel === openMenu
+        || triggerMenu === openMenu) return;
+      if (openMenu === "char") handleCharacterPanelOpenChange(false);
+      else setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", dismissOnOutsideMouseDown);
+    return () => document.removeEventListener("mousedown", dismissOnOutsideMouseDown);
+  }, [openMenu, handleCharacterPanelOpenChange]);
   const setToolbarElement = useCallback((el: HTMLDivElement | null) => {
     toolbarRef.current = el;
     if (el) setToolbarMeasureTick(tick => tick + 1);
@@ -6871,7 +6911,6 @@ export default function ScriptEditor({
     shortToolbarWidthRef.current = 0;
     setToolbarMode("full");
     if (closeMenus) {
-      setMoreMenuOpen(false);
       setOpenMenu(null);
     }
   }, []);
@@ -6880,11 +6919,11 @@ export default function ScriptEditor({
     const el = toolbarRef.current;
     if (!el) return;
     const productionTopMenuSlot = el.closest(`#${PRODUCTION_TOP_MENU_SLOT_ID}`);
+    if (productionTopMenuSlot) return;
     let frame: number | null = null;
     const measure = () => {
       frame = null;
-      if (navigatingAwayRef.current || openMenu || moreMenuOpen) return;
-      if (productionTopMenuSlot?.getAttribute("data-search-open") === "true") return;
+      if (navigatingAwayRef.current || openMenu) return;
       const available = el.clientWidth;
       const required = el.scrollWidth;
       if (toolbarMode === "full") {
@@ -6920,19 +6959,11 @@ export default function ScriptEditor({
     scheduleMeasure();
     const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(el);
-    const searchStateObserver = new MutationObserver(scheduleMeasure);
-    if (productionTopMenuSlot) {
-      searchStateObserver.observe(productionTopMenuSlot, {
-        attributes: true,
-        attributeFilter: ["data-search-open"],
-      });
-    }
     return () => {
       observer.disconnect();
-      searchStateObserver.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [toolbarMode, openMenu, moreMenuOpen, toolbarMeasureTick]);
+  }, [toolbarMode, openMenu, toolbarMeasureTick]);
 
   useEffect(() => {
     resetToolbarMeasurement();
@@ -10334,9 +10365,101 @@ export default function ScriptEditor({
       : "";
   const rightMenuClass = `${
     toolbarCompact
-      ? "fixed right-2 top-[4rem]"
+      ? ""
       : "absolute right-0 top-full"
-  } z-30 mt-1 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
+  } ${toolbarCompact ? "" : "mt-2.5"} z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
+  const selfPresence: RemotePresence | null = clientId
+    ? {
+        clientId,
+        userName: userName || "?",
+        color: presenceColor(clientId),
+        blockId: null,
+      }
+    : null;
+  const onlineUsers = [
+    ...Array.from(presenceMap.values()).filter((presence) => presence.clientId !== clientId),
+    ...(selfPresence ? [selfPresence] : []),
+  ];
+  const renderPresenceStack = (maxVisibleAvatars: number) => {
+    const overflowCount = onlineUsers.length > maxVisibleAvatars
+      ? onlineUsers.length - maxVisibleAvatars + 1
+      : 0;
+    const visibleUsers = overflowCount > 0
+      ? onlineUsers.slice(0, maxVisibleAvatars - 1)
+      : onlineUsers;
+    return (
+      <div className="flex flex-nowrap items-center">
+        {visibleUsers.map((presence) => (
+          <div key={presence.clientId} className={`-ml-1 first:ml-0 ${presence.clientId === clientId ? "opacity-40" : ""}`}>
+            <PresenceAvatar
+              name={presence.userName}
+              color={presence.color}
+              title={presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName}
+            />
+          </div>
+        ))}
+        {overflowCount > 0 && (
+          <div className="-ml-1 first:ml-0">
+            <div
+              title={`另有 ${overflowCount} 位在线人员`}
+              className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500"
+            >
+              +{overflowCount}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const toolbarOverflow = toolbarCompact ? (
+    <>
+      {presenceFolded && onlineUsers.length > 0 && (
+        <div className="border-b border-zinc-100">
+          <ProductionOverflowSubmenuButton
+            menuId="presence"
+            label={<span className="text-[10px] font-medium tracking-wide text-zinc-400">当前在线</span>}
+            detail={renderPresenceStack(4)}
+            expanded={openMenu === "presence"}
+            onToggle={(anchor) => openNestedMenu("presence", anchor)}
+          />
+        </div>
+      )}
+      {canEditMetadata && (
+        <ProductionOverflowSubmenuButton
+          menuId="scene"
+          label="章节"
+          expanded={openMenu === "scene"}
+          onToggle={(anchor) => openNestedMenu("scene", anchor)}
+        />
+      )}
+      {(canEditMetadata || isLockedMode) && (
+        <ProductionOverflowSubmenuButton
+          menuId="char"
+          label="角色"
+          expanded={openMenu === "char"}
+          onToggle={(anchor) => openNestedMenu("char", anchor)}
+        />
+      )}
+      <ProductionOverflowSubmenuButton
+        menuId="edit"
+        label={isLockedMode ? "查找" : "编辑"}
+        expanded={openMenu === "edit"}
+        onToggle={(anchor) => openNestedMenu("edit", anchor)}
+      />
+      <ProductionOverflowSubmenuButton
+        menuId="display"
+        label="显示"
+        expanded={openMenu === "display"}
+        onToggle={(anchor) => openNestedMenu("display", anchor)}
+      />
+      <ProductionOverflowSubmenuButton
+        menuId="export"
+        label="导出"
+        expanded={openMenu === "export"}
+        onToggle={(anchor) => openNestedMenu("export", anchor)}
+      />
+    </>
+  ) : null;
 
   return (
     <div className="bg-[var(--paper)]">
@@ -10345,10 +10468,14 @@ export default function ScriptEditor({
         ? "sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm"
         : "contents"
       }>
-        <ProductionTopMenu barRef={setToolbarElement} fallbackClassName="gap-0 px-6">
+        <ProductionTopMenu
+          barRef={setToolbarElement}
+          fallbackClassName="gap-0 px-6"
+          overflow={toolbarOverflow}
+        >
           {(portaled) => (
             <>
-          {productionName && !toolbarCompact && (
+          {productionName && toolbarStage < 7 && (
             <>
               <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
                 <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -10363,17 +10490,21 @@ export default function ScriptEditor({
             <>
 
               {/* 剧本▼ — 关于 + 元数据设置 */}
-              <div className="relative shrink-0">
+              <div className="relative -ml-1 shrink-0">
                 <button
+                  ref={scriptMenuPosition.anchorRef}
+                  data-script-toolbar-menu-trigger="script"
                   onClick={() => toggleMenu("script")}
-                  className="flex items-center gap-0.5 whitespace-nowrap rounded py-1 pl-0 pr-2.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                 >
                   剧本 <Chevron />
                 </button>
                 {openMenu === "script" && (
                   <div
-                    className={`${toolbarCompact ? "fixed left-2 top-[4rem]" : "absolute left-0 top-full"} z-30 mt-1 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`}
-                    onMouseLeave={() => setOpenMenu(null)}
+                    data-script-toolbar-menu-panel="script"
+                    ref={scriptMenuPosition.menuRef}
+                    style={scriptMenuPosition.style}
+                    className="z-40 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
                   >
                     <button
                       onClick={() => { setAboutOpen(true); setOpenMenu(null); }}
@@ -10453,7 +10584,7 @@ export default function ScriptEditor({
               </div>
             </>
           )}
-          <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
+          <span className="ml-0.5 shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
             {canEdit ? "可编辑" : "只读"}
           </span>
           {!baseCanEdit && (
@@ -10467,11 +10598,12 @@ export default function ScriptEditor({
             >
               <button
                 onClick={toggleLockedMode}
+                data-production-toolbar-flex-content="true"
                 aria-pressed={isLockedMode}
                 disabled={versionForcesLockedMode}
                 title={versionForcesLockedMode ? "该版本仅可使用排练模式" : "退出排练模式"}
                 className={`flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors ${
-                  portaled && toolbarMode === "full"
+                  portaled && !toolbarShort && !toolbarCompact
                     ? "fixed left-1/2 top-0 z-10 h-16 -translate-x-1/2 "
                     : ""
                 }${
@@ -10485,8 +10617,8 @@ export default function ScriptEditor({
               </button>
             </div>
           )}
-          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-1`}>
-          <div className="h-4 w-px shrink-0 bg-zinc-100" />
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ${presenceFolded ? "absolute right-0 flex w-0 items-center" : "ml-auto flex shrink-0 items-center gap-1"}`}>
+          <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
           {(canEditMetadata || isLockedMode) && (
             <>
               {canEditMetadata && (
@@ -10501,8 +10633,10 @@ export default function ScriptEditor({
                     onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
                     canImport={canImport}
                     onNavigate={prepareForNavigation}
-                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
                     nestedFromMore={toolbarCompact}
+                    nestedMenuRef={nestedMenuPosition.menuRef}
+                    nestedMenuStyle={nestedMenuPosition.style}
                     label={toolbarShort ? "章" : "章节"}
                   />
                   <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
@@ -10521,12 +10655,14 @@ export default function ScriptEditor({
                 onOpenChange={handleCharacterPanelOpenChange}
                 onNavigate={prepareForNavigation}
                 readOnly={isLockedMode}
-                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm transition-colors ${
+                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
                   openMenu === "char"
                     ? "bg-zinc-100 text-zinc-800"
                     : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
                 }`}
                 nestedFromMore={toolbarCompact}
+                nestedMenuRef={nestedMenuPosition.menuRef}
+                nestedMenuStyle={nestedMenuPosition.style}
                 label={toolbarShort ? "角" : "角色"}
               />
               <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
@@ -10536,15 +10672,19 @@ export default function ScriptEditor({
           {/* 编辑▼ — undo/redo + 格式 + 搜索/跳转 */}
           <div className="relative shrink-0">
             <button
+              data-script-toolbar-menu-trigger="edit"
               onClick={() => toggleMenu("edit")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <Chevron />
             </button>
             {openMenu === "edit" && (
               <div
+                data-script-toolbar-menu-panel="edit"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-44`}
-                onMouseLeave={() => setOpenMenu(null)}
               >
                 {canEdit && (
                   <>
@@ -10618,15 +10758,19 @@ export default function ScriptEditor({
           {/* 显示▼ */}
           <div className="relative shrink-0">
             <button
+              data-script-toolbar-menu-trigger="display"
               onClick={() => toggleMenu("display")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               {toolbarShort ? "显" : "显示"} <Chevron />
             </button>
             {openMenu === "display" && (
               <div
+                data-script-toolbar-menu-panel="display"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-44`}
-                onMouseLeave={() => setOpenMenu(null)}
               >
                 {(
                   [
@@ -10706,174 +10850,78 @@ export default function ScriptEditor({
 
           {/* Online users: self (dimmed) + overflow menu */}
           <div className="relative shrink-0">
-            {(() => {
-              const selfPresence: RemotePresence | null = clientId
-                ? {
-                    clientId,
-                    userName: userName || "?",
-                    color: presenceColor(clientId),
-                    blockId: null,
-                  }
-                : null;
-              const onlineUsers = [
-                ...Array.from(presenceMap.values()).filter(p => p.clientId !== clientId),
-                ...(selfPresence ? [selfPresence] : []),
-              ];
-              const maxVisibleAvatars = (toolbarShort || toolbarCompact)
+            {!presenceFolded && onlineUsers.length > 0 && (() => {
+              const maxVisibleAvatars = toolbarShort || toolbarCompact
                 ? 2
                 : isLockedMode
                   ? REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS
                   : EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS;
-              const overflowCount = onlineUsers.length > maxVisibleAvatars
-                ? onlineUsers.length - maxVisibleAvatars + 1
-                : 0;
-              const visibleUsers = overflowCount > 0
-                ? onlineUsers.slice(0, maxVisibleAvatars - 1)
-                : onlineUsers;
-
-              if (onlineUsers.length === 0) return null;
-
-              const avatarStack = (
-                <div className="flex items-center">
-                  {visibleUsers.map(p => (
-                    <div key={p.clientId} className={`-ml-1 first:ml-0 ${p.clientId === clientId ? "opacity-40" : ""}`}>
-                      <PresenceAvatar
-                        name={p.userName}
-                        color={p.color}
-                        title={p.clientId === clientId ? `${p.userName}（你）` : p.userName}
-                      />
-                    </div>
-                  ))}
-                  {overflowCount > 0 && (
-                    <div className="-ml-1 first:ml-0">
-                      <div
-                        title={`展开 ${overflowCount} 位在线人员`}
-                        className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500"
-                      >
-                        +{overflowCount}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-
-              if (overflowCount === 0) return avatarStack;
-
+              const stack = renderPresenceStack(maxVisibleAvatars);
+              if (onlineUsers.length <= maxVisibleAvatars) return stack;
               return (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => toggleMenu("presence")}
-                    className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
-                    aria-label={`在线人员：${onlineUsers.length} 人`}
-                    title={`在线人员：${onlineUsers.map(p => p.clientId === clientId ? `${p.userName}（你）` : p.userName).join("、")}`}
-                  >
-                    {avatarStack}
-                  </button>
-                  {openMenu === "presence" && (
-                    <div
-                      className={`${rightMenuClass} w-44`}
-                      onMouseLeave={() => setOpenMenu(null)}
-                    >
-                      <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">在线人员</p>
-                      {onlineUsers.map(p => (
-                        <div key={p.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
-                          <span
-                            aria-hidden
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: p.color }}
-                          />
-                          <span className="min-w-0 flex-1 truncate">
-                            {p.userName}{p.clientId === clientId ? "（你）" : ""}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
+                <button
+                  type="button"
+                  ref={toolbarCompact ? nestedMenuPosition.anchorRef : undefined}
+                  data-script-toolbar-menu-trigger="presence"
+                  onClick={(event) => {
+                    if (toolbarCompact) openNestedMenu("presence", event.currentTarget);
+                    else toggleMenu("presence");
+                  }}
+                  className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
+                  aria-label={`在线人员：${onlineUsers.length} 人`}
+                  title={`在线人员：${onlineUsers.map((presence) => presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName).join("、")}`}
+                >
+                  {stack}
+                </button>
               );
             })()}
+            {openMenu === "presence" && (
+              <div
+                data-script-toolbar-menu-panel="presence"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                className={`${rightMenuClass} w-44`}
+              >
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">在线人员</p>
+                {onlineUsers.map((presence) => (
+                  <div key={presence.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: presence.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {presence.userName}{presence.clientId === clientId ? "（你）" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 导出▼ */}
           <div className="relative shrink-0">
             <button
+              data-script-toolbar-menu-trigger="export"
               onClick={() => toggleMenu("export")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               导出 <Chevron />
             </button>
             {openMenu === "export" && (
               <div
+                data-script-toolbar-menu-panel="export"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-36`}
-                onMouseLeave={() => setOpenMenu(null)}
               >
                 <button
                   onClick={() => { setPrintPreview(true); setOpenMenu(null); }}
                   className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
                 >
                   打印预览
-                </button>
-              </div>
-            )}
-          </div>
-          <div className={`${toolbarCompact ? "relative shrink-0" : "hidden"}`}>
-            {(moreMenuOpen || openMenu !== null) && (
-              <div
-                className="fixed inset-0 z-20"
-                onClick={() => { setMoreMenuOpen(false); setOpenMenu(null); }}
-              />
-            )}
-            <button
-              type="button"
-              aria-label="更多工具"
-              onClick={toggleMoreMenu}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
-            >
-              ⋮
-            </button>
-            {moreMenuOpen && (
-              <div
-                className="fixed right-2 top-[4rem] z-40 mt-1 w-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-              >
-                {canEditMetadata && (
-                  <button
-                    onClick={() => openNestedMenu("scene")}
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    <span>章节</span>
-                    <Chevron />
-                  </button>
-                )}
-                {(canEditMetadata || isLockedMode) && (
-                  <button
-                    onClick={() => openNestedMenu("char")}
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    <span>角色</span>
-                    <Chevron />
-                  </button>
-                )}
-                <button
-                  onClick={() => openNestedMenu("edit")}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  <span>{isLockedMode ? "查找" : "编辑"}</span>
-                  <Chevron />
-                </button>
-                <button
-                  onClick={() => openNestedMenu("display")}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  <span>显示</span>
-                  <Chevron />
-                </button>
-                <button
-                  onClick={() => openNestedMenu("export")}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  <span>导出</span>
-                  <Chevron />
                 </button>
               </div>
             )}

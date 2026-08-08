@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/db";
-import ProductionTopMenu, { ProductionTopMenuDivider } from "./ProductionTopMenu";
-import ListTableViewToggle from "./ListTableViewToggle";
+import ProductionTopMenu, { ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
+import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -704,6 +704,7 @@ function AddCharacterForm({
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded, versionId, initialExpandedId }: Props) {
+  const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
   const [view, setView] = useState<"list" | "table">("list");
@@ -858,7 +859,13 @@ export default function CharactersManager({ productionId, productionName, initia
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
       {/* Frozen toolbar */}
-      <ProductionTopMenu>
+      <ProductionTopMenu
+        overflow={toolbarStage >= 5 ? (
+          <ListTableViewToggleOverflow value={view} onChange={setView} />
+        ) : null}
+      >
+        {toolbarStage < 7 && (
+          <>
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
@@ -866,6 +873,8 @@ export default function CharactersManager({ productionId, productionName, initia
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>角色</span>
         </div>
         <ProductionTopMenuDivider />
+          </>
+        )}
         <ListTableViewToggle value={view} onChange={setView} />
       </ProductionTopMenu>
       {/* Scrollable content */}

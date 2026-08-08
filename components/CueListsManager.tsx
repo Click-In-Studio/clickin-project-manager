@@ -7,7 +7,10 @@ import type { CueList, CueListTemplate, CueListGrant, CueListDeptAccess } from "
 import { TEMPLATE_ABBR_HINTS } from "@/lib/cue-list-types";
 import type { MemberWithRoles } from "@/lib/db";
 import CueListDetail from "./CueListDetail";
-import ProductionTopMenu, { PRODUCTION_TOP_MENU_RIGHT_CLASS } from "./ProductionTopMenu";
+import ProductionTopMenu, {
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  useProductionToolbar,
+} from "./ProductionTopMenu";
 
 type Filter = "all" | "created" | "editable" | "readonly";
 
@@ -199,6 +202,7 @@ export default function CueListsManager({
   editableIds,
   members,
 }: Props) {
+  const { stage: toolbarStage, closeOverflow } = useProductionToolbar();
   const [lists, setLists] = useState(initialCueLists);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
@@ -242,14 +246,26 @@ export default function CueListsManager({
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
       {/* Frozen toolbar */}
-      <ProductionTopMenu>
+      <ProductionTopMenu
+        overflow={toolbarStage >= 5 && canCreate ? (
+          <button
+            type="button"
+            onClick={() => { closeOverflow(); setCreating(true); }}
+            className="w-full px-3 py-2 text-left text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
+          >
+            新建 Cue 表
+          </button>
+        ) : null}
+      >
+        {toolbarStage < 7 && (
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue 表设置</span>
         </div>
-        <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto`}>
+        )}
+        <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto ${toolbarStage >= 5 ? "hidden" : "block"}`}>
           {canCreate && (
             <button
               onClick={() => setCreating(true)}

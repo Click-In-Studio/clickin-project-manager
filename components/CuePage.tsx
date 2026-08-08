@@ -20,6 +20,7 @@ import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import ProductionTopMenu, {
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  useProductionToolbar,
 } from "@/components/ProductionTopMenu";
 
 // ─── Per-production cookies ───────────────────────────────────────────────────
@@ -852,6 +853,7 @@ export default function CuePage({
   cueLists, initialCues, editableListIds, manageListIds, myUserId, isAdmin, pageMap,
   versions = [], versionId, versionStatus,
 }: Props) {
+  const { stage: toolbarStage, closeOverflow } = useProductionToolbar();
   const router = useRouter();
   const blocks = useMemo(() => withLegacyOwnershipProjection(
     textBlocksWithMarkerOwnership(rawBlocks),
@@ -870,7 +872,6 @@ export default function CuePage({
   const [cues, setCues] = useState<Cue[]>(initialCues);
   const [copiedCue, setCopiedCue] = useState<Cue | null>(null);
   const [showExport, setShowExport] = useState(false);
-  const [cueMoreOpen, setCueMoreOpen] = useState(false);
   const [mobileChipSheetCueId, setMobileChipSheetCueId] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activeCommentCueId, setActiveCommentCueId] = useState<string | null>(null);
@@ -1953,13 +1954,83 @@ export default function CuePage({
     ? (cuesForBlock.get(lastBlock.id) ?? []).filter(({ cue }) => cue.start.kind === "gap")
     : [];
 
+  const cueOverflow = toolbarStage >= 5 ? (
+    <>
+      <div className="flex h-9 items-center gap-2 px-3">
+        <span className="shrink-0 text-[10px] text-zinc-400">激活</span>
+        <select
+          value={activeListId ?? ""}
+          onChange={(event) => { void handleActivateList(event.target.value || null); closeOverflow(); }}
+          className="h-7 min-w-0 flex-1 rounded border border-zinc-200 bg-zinc-50 px-1.5 text-xs outline-none"
+        >
+          <option value="">—</option>
+          {cueLists.map((list) => (
+            <option key={list.id} value={list.id}>{list.name}{localEditableIds.has(list.id) ? "" : " (只读)"}</option>
+          ))}
+        </select>
+      </div>
+      <div className="border-t border-zinc-100">
+        {(["line", "page", "scene"] as const).map((target) => (
+          <button
+            key={target}
+            type="button"
+            onClick={() => {
+              setJumpTarget((current) => current === target ? null : target);
+              setJumpValue("");
+              closeOverflow();
+            }}
+            className="h-9 w-full px-3 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+          >
+            {target === "line" ? "跳转到行…" : target === "page" ? "跳转到页…" : "跳转到段落…"}
+          </button>
+        ))}
+      </div>
+      <div className="border-t border-zinc-100">
+        {activeListId && localManageIds.has(activeListId) && (
+          <button
+            type="button"
+            onClick={() => { closeOverflow(); setShareModalListId(activeListId); }}
+            className="h-9 w-full px-3 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+          >
+            分享
+          </button>
+        )}
+        <Link
+          href={`/production/${productionId}/cuelists`}
+          className="flex h-9 w-full items-center px-3 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+          onClick={closeOverflow}
+        >
+          Cue 表设置
+        </Link>
+        <button
+          type="button"
+          onClick={() => { closeOverflow(); setShowExport(true); }}
+          className="h-9 w-full px-3 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+        >
+          导出
+        </button>
+        {selection.kind === "pending" && activeListId && canEditActive && (
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); closeOverflow(); insertCue(); }}
+            className="h-9 w-full px-3 text-left text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+          >
+            插入 Cue
+          </button>
+        )}
+      </div>
+    </>
+  ) : null;
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]" onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
-      <ProductionTopMenu onClick={e => e.stopPropagation()}>
+      <ProductionTopMenu onClick={e => e.stopPropagation()} overflow={cueOverflow}>
+        {toolbarStage < 7 && (
+          <>
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
@@ -1967,6 +2038,8 @@ export default function CuePage({
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue</span>
         </div>
         <ProductionTopMenuDivider />
+          </>
+        )}
         <span className="shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400">
           {cueEditAllowed && localEditableIds.size > 0 ? "可编辑" : "只读"}
         </span>
@@ -2003,10 +2076,10 @@ export default function CuePage({
           })}
         </div>
 
-        <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-2 sm:gap-3`}>
+        <div className={toolbarStage >= 5 ? "hidden" : `${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-3`}>
         {/* Desktop: 激活 + 设置 */}
-        <div className="hidden sm:block shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
-        <div className="hidden sm:flex items-center gap-1.5">
+        <div className="block shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+        <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
           <select
             value={activeListId ?? ""}
@@ -2035,7 +2108,7 @@ export default function CuePage({
         </div>
 
         {/* Desktop: right controls */}
-        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           {(["line", "page", "scene"] as const).map(t => (
             <button key={t}
               onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); }}
@@ -2052,67 +2125,12 @@ export default function CuePage({
         {selection.kind === "pending" && activeListId && canEditActive && (
           <button
             onClick={e => { e.stopPropagation(); insertCue(); }}
-            className="hidden sm:block rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-900 shrink-0"
+            className="block rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-900 shrink-0"
           >
             插入 Cue
           </button>
         )}
 
-        {/* Mobile: ⋮ button */}
-        <div className="sm:hidden relative shrink-0">
-          <button
-            type="button"
-            onClick={() => setCueMoreOpen(v => !v)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
-          >
-            ⋮
-          </button>
-          {cueMoreOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setCueMoreOpen(false)} />
-              <div
-                className="fixed right-2 top-[4rem] z-50 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-2 shadow-lg"
-                onClick={e => e.stopPropagation()}
-              >
-              <div className="px-3 py-1.5 flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-zinc-400 shrink-0">激活</span>
-                  <select
-                    value={activeListId ?? ""}
-                    onChange={e => { void handleActivateList(e.target.value || null); setCueMoreOpen(false); }}
-                    className="flex-1 text-xs bg-zinc-50 border border-zinc-200 rounded px-1.5 py-0.5 outline-none"
-                  >
-                    <option value="">—</option>
-                    {cueLists.map(cl => (
-                      <option key={cl.id} value={cl.id}>{cl.name}{localEditableIds.has(cl.id) ? "" : " (只读)"}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="my-1 border-t border-zinc-100" />
-              {(["line", "page", "scene"] as const).map(t => (
-                <button key={t}
-                  onClick={() => { setJumpTarget(prev => prev === t ? null : t); setJumpValue(""); setCueMoreOpen(false); }}
-                  className="w-full px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  {t === "line" ? "跳转到行…" : t === "page" ? "跳转到页…" : "跳转到段落…"}
-                </button>
-              ))}
-              <div className="my-1 border-t border-zinc-100" />
-              <Link
-                href={`/production/${productionId}/cuelists`}
-                className="block w-full px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                onClick={() => setCueMoreOpen(false)}
-              >
-                Cue 表设置
-              </Link>
-              <button onClick={() => { setShowExport(true); setCueMoreOpen(false); }} className="w-full px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50">
-                导出
-              </button>
-            </div>
-            </>
-          )}
-        </div>
         </div>
       </ProductionTopMenu>
 

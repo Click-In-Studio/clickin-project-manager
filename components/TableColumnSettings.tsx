@@ -1,20 +1,31 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, type CSSProperties, type RefObject } from "react";
 import { DEFAULT_COLUMNS, type TableViewConfigData, getDefaultViewConfig } from "./SceneTableView";
 
 type Props = {
   config: TableViewConfigData;
   onChange: (config: TableViewConfigData) => void;
   onClose: () => void;
+  nestedFromOverflow?: boolean;
+  nestedMenuRef?: RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: CSSProperties;
 };
 
-export default function TableColumnSettings({ config, onChange, onClose }: Props) {
+export default function TableColumnSettings({
+  config,
+  onChange,
+  onClose,
+  nestedFromOverflow = false,
+  nestedMenuRef,
+  nestedMenuStyle,
+}: Props) {
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (nestedFromOverflow) return;
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose();
@@ -22,7 +33,7 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [onClose]);
+  }, [onClose, nestedFromOverflow]);
 
   const toggleColumn = (key: string) => {
     const newVisible = config.visibleColumns.includes(key)
@@ -58,12 +69,15 @@ export default function TableColumnSettings({ config, onChange, onClose }: Props
 
   return (
     <div
-      ref={ref}
+      ref={nestedFromOverflow ? nestedMenuRef : ref}
+      data-production-overflow-menu-child={nestedFromOverflow ? "true" : undefined}
       style={{
-        position: "absolute", right: 0, top: "calc(100% + 6px)",
+        ...(nestedFromOverflow
+          ? nestedMenuStyle
+          : { position: "absolute", right: 0, top: "calc(100% + 10px)" }),
         width: 220, borderRadius: 12,
         border: "1px solid var(--line)", background: "var(--surface)",
-        boxShadow: "0 4px 20px rgba(24,42,42,.10)", zIndex: 20,
+        boxShadow: "0 4px 20px rgba(24,42,42,.10)", zIndex: nestedFromOverflow ? 40 : 20,
       }}
     >
       <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--line)" }}>

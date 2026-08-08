@@ -1,13 +1,20 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
 import PageActivationGate from "./PageActivationGate";
-import { PRODUCTION_TOP_MENU_SLOT_ID } from "./ProductionTopMenu";
+import {
+  PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
+  PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID,
+  PRODUCTION_TOP_MENU_SLOT_ID,
+  ProductionToolbarContext,
+  type ProductionToolbarStage,
+  useAnchoredMenu,
+} from "./ProductionTopMenu";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -72,6 +79,80 @@ const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
   cues: "Cue",
   cuelists: "Cue 表设置",
 };
+
+const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
+const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [0, 3, 4.1, 4.2, 5, 6, 7];
+
+function fixedProductionToolbarStageForWidth(width: number): 0 | 1 | 2 {
+  if (width >= 1280) return 0;
+  if (width >= 1024) return 1;
+  return 2;
+}
+
+function adjacentProductionToolbarStage(
+  stage: ProductionToolbarStage,
+  direction: -1 | 1,
+): ProductionToolbarStage {
+  const index = PRODUCTION_TOOLBAR_STAGES.indexOf(stage);
+  return PRODUCTION_TOOLBAR_STAGES[index + direction] ?? stage;
+}
+
+function horizontalMargins(element: HTMLElement): number {
+  const style = window.getComputedStyle(element);
+  return (Number.parseFloat(style.marginLeft) || 0) + (Number.parseFloat(style.marginRight) || 0);
+}
+
+function outerWidth(element: HTMLElement): number {
+  return element.getBoundingClientRect().width + horizontalMargins(element);
+}
+
+function productionToolbarContentWidth(slot: HTMLElement): number {
+  const root = slot.querySelector<HTMLElement>("[data-production-top-menu-root]");
+  if (!root) return outerWidth(slot);
+
+  const rootStyle = window.getComputedStyle(root);
+  const gap = Number.parseFloat(rootStyle.columnGap) || 0;
+  const padding = (Number.parseFloat(rootStyle.paddingLeft) || 0)
+    + (Number.parseFloat(rootStyle.paddingRight) || 0);
+  let width = padding;
+  let visibleCount = 0;
+
+  for (const child of root.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    const style = window.getComputedStyle(child);
+    if (style.display === "none" || style.position === "absolute" || style.position === "fixed") continue;
+
+    const isFlexible = Number.parseFloat(style.flexGrow) > 0;
+    const flexContent = isFlexible
+      ? child.querySelector<HTMLElement>("[data-production-toolbar-flex-content]")
+      : null;
+
+    width += flexContent ? outerWidth(flexContent) : isFlexible ? horizontalMargins(child) : outerWidth(child);
+    visibleCount += 1;
+  }
+
+  return width + Math.max(0, visibleCount - 1) * gap;
+}
+
+function productionTopbarContentWidth(topbar: HTMLElement): number {
+  const style = window.getComputedStyle(topbar);
+  const gap = Number.parseFloat(style.columnGap) || 0;
+  const padding = (Number.parseFloat(style.paddingLeft) || 0)
+    + (Number.parseFloat(style.paddingRight) || 0);
+  let width = padding;
+  let visibleCount = 0;
+
+  for (const child of topbar.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (window.getComputedStyle(child).display === "none") continue;
+    width += child.id === PRODUCTION_TOP_MENU_SLOT_ID
+      ? productionToolbarContentWidth(child)
+      : outerWidth(child);
+    visibleCount += 1;
+  }
+
+  return width + Math.max(0, visibleCount - 1) * gap;
+}
 
 const PUNCTUATION_RE = /^[\s《》「」【】『』〈〉（）()"'""''・·—–…、。，。！？]+/u;
 
@@ -309,7 +390,7 @@ function ProjectSwitcher({
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
       {/* Switcher button */}
       <button
         onClick={toggle}
@@ -520,10 +601,109 @@ export default function AppShell({ session, productions, children, initialUnread
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
   const [cueWarnings, setCueWarnings] = useState(0);
+  const [productionToolbarFixedStage, setProductionToolbarFixedStage] = useState<0 | 1 | 2>(0);
+  const [productionToolbarStage, setProductionToolbarStage] = useState<ProductionToolbarStage>(0);
+  const [productionToolbarHasStoredControls, setProductionToolbarHasStoredControls] = useState(false);
+  const [topOverflowOpen, setTopOverflowOpen] = useState(false);
   const [productionSearchPath, setProductionSearchPath] = useState<string | null>(null);
-  const handleProductionSearchOpenChange = useCallback((open: boolean) => {
-    setProductionSearchPath(open ? pathname : null);
+  const topbarRef = useRef<HTMLElement>(null);
+  const topOverflowRef = useRef<HTMLDivElement>(null);
+  const productionSearchOpenRef = useRef(false);
+  const productionToolbarFixedStageRef = useRef<0 | 1 | 2>(productionToolbarFixedStage);
+  const productionToolbarStageRef = useRef<ProductionToolbarStage>(productionToolbarStage);
+  const productionToolbarHasStoredControlsRef = useRef(productionToolbarHasStoredControls);
+  const productionToolbarRequiredWidthRef = useRef<Partial<Record<ProductionToolbarStage, number>>>({});
+  productionToolbarFixedStageRef.current = productionToolbarFixedStage;
+  productionToolbarStageRef.current = productionToolbarStage;
+  productionToolbarHasStoredControlsRef.current = productionToolbarHasStoredControls;
+  const closeTopOverflow = useCallback(() => setTopOverflowOpen(false), []);
+  const topOverflowMenu = useAnchoredMenu<HTMLButtonElement>(topOverflowOpen, "bottom");
+  const handleProductionSearchOpenChange = useCallback((open: boolean, stored: boolean) => {
+    productionSearchOpenRef.current = open;
+    if (open && !stored) closeTopOverflow();
+    setProductionSearchPath(open && !stored ? pathname : null);
+  }, [pathname, closeTopOverflow]);
+  const productionToolbarContext = useMemo(() => ({
+    stage: productionToolbarStage,
+    closeOverflow: closeTopOverflow,
+    overflowOpen: topOverflowOpen,
+    hasStoredControls: productionToolbarHasStoredControls,
+    setHasStoredControls: setProductionToolbarHasStoredControls,
+  }), [productionToolbarStage, productionToolbarHasStoredControls, topOverflowOpen, closeTopOverflow]);
+  const productionToolbarHeaderStage = productionToolbarFixedStage;
+
+  const measureProductionToolbar = useCallback(() => {
+    const topbar = topbarRef.current;
+    if (!topbar) return;
+    if (productionSearchOpenRef.current) return;
+
+    const fixedStage = fixedProductionToolbarStageForWidth(window.innerWidth);
+    const current = productionToolbarStageRef.current;
+    if (fixedStage !== productionToolbarFixedStageRef.current) {
+      productionToolbarFixedStageRef.current = fixedStage;
+      productionToolbarStageRef.current = 0;
+      productionToolbarRequiredWidthRef.current = {};
+      setProductionToolbarFixedStage(fixedStage);
+      setProductionToolbarStage(0);
+      return;
+    }
+    if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
+    const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
+    if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
+
+    const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
+    if (overflow > 1 && current < 7) {
+      productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
+      setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
+      return;
+    }
+
+    if (current > 0) {
+      const previous = adjacentProductionToolbarStage(current, -1);
+      const previousRequiredWidth = productionToolbarRequiredWidthRef.current[previous];
+      if (previousRequiredWidth && topbar.clientWidth >= previousRequiredWidth + PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX) {
+        setProductionToolbarStage(previous);
+      }
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    measureProductionToolbar();
+  }, [productionSearchPath, productionToolbarFixedStage, productionToolbarStage, productionToolbarHasStoredControls, measureProductionToolbar]);
+
+  useEffect(() => {
+    const topbar = topbarRef.current;
+    if (!topbar) return;
+    let frame: number | null = null;
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measureProductionToolbar();
+      });
+    };
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    const mutationObserver = new MutationObserver(scheduleMeasure);
+    resizeObserver.observe(topbar);
+    mutationObserver.observe(topbar, { childList: true, characterData: true, subtree: true });
+    window.addEventListener("resize", scheduleMeasure);
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [measureProductionToolbar]);
+
+  useLayoutEffect(() => {
+    productionToolbarRequiredWidthRef.current = {};
+    productionToolbarStageRef.current = 0;
+    setProductionToolbarStage(0);
   }, [pathname]);
+
+  useLayoutEffect(() => {
+    closeTopOverflow();
+  }, [productionToolbarStage, productionToolbarHasStoredControls, closeTopOverflow]);
 
   // Track current productionId via ref so fetchCounts always uses the latest value
   // without needing to be in the effect dependency array.
@@ -536,6 +716,8 @@ export default function AppShell({ session, productions, children, initialUnread
   useEffect(() => {
     setDrawerOpen(null);
     setProductionSearchPath(null);
+    productionSearchOpenRef.current = false;
+    setTopOverflowOpen(false);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
 
@@ -617,6 +799,18 @@ export default function AppShell({ session, productions, children, initialUnread
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
 
+  useEffect(() => {
+    if (!topOverflowOpen) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target;
+      if (topOverflowRef.current?.contains(target as Node)) return;
+      if (target instanceof Element && target.closest("[data-production-overflow-menu-child]")) return;
+      closeTopOverflow();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [topOverflowOpen, closeTopOverflow]);
+
   if (!session || pathname.startsWith("/login")) {
     return <>{children}</>;
   }
@@ -681,9 +875,10 @@ export default function AppShell({ session, productions, children, initialUnread
   );
 
   return (
+    <ProductionToolbarContext.Provider value={productionToolbarContext}>
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
-      <header className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-40">
+      <header ref={topbarRef} className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-50">
         {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
@@ -697,7 +892,7 @@ export default function AppShell({ session, productions, children, initialUnread
               <span className="text-white text-[10px] font-bold select-none">BS</span>
             )}
           </span>
-          <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
+          <span className={`${productionToolbarHeaderStage >= 1 ? "hidden" : "block"} text-[13px] font-bold tracking-[0.12em] text-[#182a2a]`}>
             Backstage
           </span>
         </Link>
@@ -733,7 +928,7 @@ export default function AppShell({ session, productions, children, initialUnread
         )}
 
         {/* Right actions */}
-        <div className="ml-auto flex items-center gap-3">
+        <div className={`${hasProductionTopMenu ? "-ml-2" : "ml-auto"} flex shrink-0 items-center gap-3`}>
           {/* Search bar: only when inside a production */}
           <SearchBar
             key={pathname}
@@ -744,7 +939,7 @@ export default function AppShell({ session, productions, children, initialUnread
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className="relative hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
+            className={`relative ${productionToolbarHeaderStage >= 2 ? "hidden" : "flex"} w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0`}
             title="通知"
             onClick={() => setUnreadCount(0)}
           >
@@ -757,7 +952,7 @@ export default function AppShell({ session, productions, children, initialUnread
           </Link>
 
           {/* User avatar + dropdown: sm+ only */}
-          <div className="relative hidden sm:block" ref={dropdownRef}>
+          <div className={`relative shrink-0 ${productionToolbarHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
               aria-label="个人中心"
@@ -822,6 +1017,40 @@ export default function AppShell({ session, productions, children, initialUnread
               </div>
             )}
           </div>
+
+          {hasProductionTopMenu && (
+            <div
+              ref={topOverflowRef}
+              id="production-top-toolbar-overflow"
+              data-search-open={productionSearchPath === pathname ? "true" : undefined}
+              className="relative shrink-0"
+            >
+              {productionToolbarHasStoredControls && (
+                <button
+                  ref={topOverflowMenu.anchorRef}
+                  type="button"
+                  aria-label="更多工具"
+                  aria-expanded={topOverflowOpen}
+                  onClick={() => setTopOverflowOpen((open) => !open)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
+                >
+                  ⋮
+                </button>
+              )}
+              <div
+                ref={topOverflowMenu.menuRef}
+                style={topOverflowMenu.style}
+                data-production-overflow-menu="true"
+                className={productionToolbarHasStoredControls && topOverflowOpen
+                  ? "z-40 flex w-52 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
+                  : "hidden"
+                }
+              >
+                <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />
+                <div id={PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID} className="order-last shrink-0" />
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -1186,5 +1415,6 @@ export default function AppShell({ session, productions, children, initialUnread
         </div>
       </BottomDrawer>
     </div>
+    </ProductionToolbarContext.Provider>
   );
 }
