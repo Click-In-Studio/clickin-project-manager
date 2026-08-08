@@ -5,6 +5,7 @@ import type { MarkerProjection } from "@/lib/script-marker-domain";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import { parseDuration, formatDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
+import ChevronIcon from "@/components/ChevronIcon";
 
 export type TableColumnDef = {
   key: string;
@@ -397,7 +398,7 @@ export default function SceneTableView({
                 className="text-zinc-400 hover:text-zinc-600 w-4 text-xs flex-shrink-0"
                 title={collapsedChapters.has(scene.id) ? "展开" : "收起"}
               >
-                {collapsedChapters.has(scene.id) ? "▶" : "▼"}
+                <ChevronIcon direction={collapsedChapters.has(scene.id) ? "right" : "down"} size={12} />
               </button>
             )}
             <span className={`text-sm tabular-nums ${isChapter ? "font-semibold text-zinc-600" : "text-zinc-400"}`}>

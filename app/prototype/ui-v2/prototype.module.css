@@ -72,7 +72,7 @@
 .switcherButton > span { min-width: 0; display: flex; flex-direction: column; }
 .switcherButton small { color: var(--muted); font-size: 8px; line-height: 1.2; }
 .switcherButton b { max-width: 164px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.switcherButton > i { margin-left: auto; color: var(--muted); font-style: normal; }
+.switcherChevron { margin-left: auto; flex-shrink: 0; color: var(--muted); }
 .roleDisplay { min-width: 154px; height: 42px; padding: 7px 10px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: #f0f0eb; cursor: default; }
 .roleDisplay > span { color: var(--muted); font-size: 8px; }
 .roleDisplay b { font-size: 11px; font-weight: 700; }
@@ -829,17 +829,16 @@
   pointer-events: none;
 }
 
-.rundownControls label::after {
-  content: "⌄";
+.rundownControls label > svg {
   position: absolute;
   z-index: 1;
   right: 12px;
   bottom: 12px;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1;
   pointer-events: none;
 }
+
+.inlineChevron { display: inline-block; margin-left: 2px; vertical-align: -2px; }
 
 .rundownControls select {
   position: absolute;

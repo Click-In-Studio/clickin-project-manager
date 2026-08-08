@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import ChevronIcon from "@/components/ChevronIcon";
 
 export type SavedView = {
   id: string;
@@ -147,7 +148,7 @@ export default function TableViewSelector({
         <span className="max-w-[120px] truncate">
           {activeView?.name || "默认视图"}
         </span>
-        <span className="text-zinc-400">▾</span>
+        <ChevronIcon size={12} className="shrink-0 text-zinc-400" />
       </button>
 
       {open && (

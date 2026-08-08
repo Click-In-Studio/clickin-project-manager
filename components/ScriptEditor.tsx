@@ -14,6 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, Version, VersionStatus, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
@@ -368,12 +369,6 @@ function largeSelectionOperationMessage(operation: LargeSelectionOperation, coun
     `${count} 行`;
   return `${actionLabel} ${objectLabel}可能导致页面卡顿，建议分批次进行。\n是否确认继续操作？`;
 }
-
-const Chevron = () => (
-  <svg className="h-3 w-3 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden>
-    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
 
 function anchoredManagementPanelStyle(style: React.CSSProperties): React.CSSProperties {
   const availableHeight = typeof style.maxHeight === "number" ? `${style.maxHeight}px` : "calc(100vh - 1rem)";
@@ -1558,7 +1553,7 @@ function ScenePanel({
         onClick={() => onOpenChange(!open)}
         className={triggerClassName ?? "flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"}
       >
-        {label} <Chevron />
+        {label} <ChevronIcon size={12} className="opacity-50" />
       </button>
       {open && (
         <div
@@ -2419,7 +2414,7 @@ function CharacterPanel({
             : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
         }`}
       >
-        {label} <Chevron />
+        {label} <ChevronIcon size={12} className="opacity-50" />
       </button>
 
       {open && (
@@ -3428,7 +3423,7 @@ function PrintHeaderModeMenu({
         title="选择页眉位置"
       >
         <span>{PRINT_HEADER_MODE_LABELS[headerMode]}</span>
-        <Chevron />
+        <ChevronIcon size={12} className="opacity-50" />
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 w-36 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
@@ -6157,9 +6152,7 @@ function SideBlockPanel({
                 className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
                 title="上一条"
               >
-                <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <polyline points="3 7.5 6 4.5 9 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
-                </svg>
+                <ChevronIcon direction="up" />
               </button>
               <button
                 type="button"
@@ -6168,9 +6161,7 @@ function SideBlockPanel({
                 className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
                 title="下一条"
               >
-                <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <polyline points="3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
-                </svg>
+                <ChevronIcon />
               </button>
             </>
           )}
@@ -10489,7 +10480,7 @@ export default function ScriptEditor({
           {!isLockedMode && (
             <>
 
-              {/* 剧本▼ — 关于 + 元数据设置 */}
+              {/* 剧本菜单 — 关于 + 元数据设置 */}
               <div className="relative -ml-1 shrink-0">
                 <button
                   ref={scriptMenuPosition.anchorRef}
@@ -10497,7 +10488,7 @@ export default function ScriptEditor({
                   onClick={() => toggleMenu("script")}
                   className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                 >
-                  剧本 <Chevron />
+                  剧本 <ChevronIcon size={12} className="opacity-50" />
                 </button>
                 {openMenu === "script" && (
                   <div
@@ -10669,14 +10660,14 @@ export default function ScriptEditor({
             </>
           )}
 
-          {/* 编辑▼ — undo/redo + 格式 + 搜索/跳转 */}
+          {/* 编辑菜单 — undo/redo + 格式 + 搜索/跳转 */}
           <div className="relative shrink-0">
             <button
               data-script-toolbar-menu-trigger="edit"
               onClick={() => toggleMenu("edit")}
               className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <Chevron />
+              {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "edit" && (
               <div
@@ -10755,14 +10746,14 @@ export default function ScriptEditor({
             )}
           </div>
 
-          {/* 显示▼ */}
+          {/* 显示菜单 */}
           <div className="relative shrink-0">
             <button
               data-script-toolbar-menu-trigger="display"
               onClick={() => toggleMenu("display")}
               className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              {toolbarShort ? "显" : "显示"} <Chevron />
+              {toolbarShort ? "显" : "显示"} <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "display" && (
               <div
@@ -10900,14 +10891,14 @@ export default function ScriptEditor({
             )}
           </div>
 
-          {/* 导出▼ */}
+          {/* 导出菜单 */}
           <div className="relative shrink-0">
             <button
               data-script-toolbar-menu-trigger="export"
               onClick={() => toggleMenu("export")}
               className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              导出 <Chevron />
+              导出 <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "export" && (
               <div
@@ -10955,12 +10946,12 @@ export default function ScriptEditor({
               onClick={() => setSearchIdx(i => i <= 0 ? searchMatches.length - 1 : i - 1)}
               disabled={searchMatches.length === 0}
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
-            >▲</button>
+            ><ChevronIcon direction="up" size={12} /></button>
             <button
               onClick={() => setSearchIdx(i => (i + 1) % searchMatches.length)}
               disabled={searchMatches.length === 0}
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
-            >▼</button>
+            ><ChevronIcon size={12} /></button>
             <div className="h-4 w-px bg-zinc-100" />
             <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
               <input type="checkbox" checked={searchExact} onChange={e => { setSearchExact(e.target.checked); setSearchIdx(0); }} className="h-3 w-3" />
@@ -12157,9 +12148,7 @@ export default function ScriptEditor({
                             className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-600"
                             aria-expanded={expanded}
                           >
-                            <svg className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${expanded ? "rotate-180" : ""}`} viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                              <polyline points="3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
-                            </svg>
+                            <ChevronIcon direction={expanded ? "up" : "down"} className="shrink-0 text-zinc-400 transition-transform" />
                             <span className="min-w-0 flex-1 truncate">
                               <span className="font-bold">【{marker.captionNumber}】</span>
                               <span>{marker.captionName}</span>

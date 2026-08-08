@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import ChevronIcon from "@/components/ChevronIcon";
 
 export const PRODUCTION_TOP_MENU_SLOT_ID = "production-page-toolbar-slot";
 export const PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID = "production-page-toolbar-overflow-slot";
@@ -172,9 +173,7 @@ export function ProductionOverflowSubmenuButton({
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {detail && <span className="ml-2 shrink-0">{detail}</span>}
-      <svg className="ml-2 h-3 w-3 shrink-0 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden>
-        <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <ChevronIcon direction="right" size={12} className="ml-2 shrink-0 opacity-50" />
     </button>
   );
 }

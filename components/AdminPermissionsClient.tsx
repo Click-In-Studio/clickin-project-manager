@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import { ROLE_TEMPLATE_PERMISSIONS } from "@/lib/permissions";
 import type { MemberWithRoles } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 
 // ─── Re-use same permission group definitions as AdminRolesClient ─────────────
 
@@ -77,7 +78,7 @@ function SinglePermGroup({
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {grantCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, background: "#16a34a", color: "#fff", borderRadius: 10, padding: "1px 6px" }}>+{grantCount}</span>}
           {denyCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, background: "#dc2626", color: "#fff", borderRadius: 10, padding: "1px 6px" }}>−{denyCount}</span>}
-          <span style={{ fontSize: 9, color: "var(--muted)", opacity: 0.6 }}>{open ? "▲" : "▼"}</span>
+          <ChevronIcon direction={open ? "up" : "down"} size={9} className="opacity-60 text-[var(--muted)]" />
         </span>
       </button>
       {open && (

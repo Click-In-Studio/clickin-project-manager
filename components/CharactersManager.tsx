@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 import ProductionTopMenu, { ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 
@@ -280,7 +281,7 @@ function CharacterEditRow({
               className={`text-xs transition-all ${expanded ? "text-zinc-500" : "text-zinc-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-zinc-600"}`}
               title={expanded ? "收起" : "展开"}
             >
-              {expanded ? "⌃" : "⌄"}
+              <ChevronIcon direction={expanded ? "up" : "down"} size={12} />
             </button>
           </div>
         </td>

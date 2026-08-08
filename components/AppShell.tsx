@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
 import PageActivationGate from "./PageActivationGate";
@@ -438,9 +439,11 @@ function ProjectSwitcher({
             <b style={{ fontSize: 13, color: "var(--muted)", fontWeight: 400 }}>选择项目</b>
           )}
         </span>
-        <span style={{ color: "var(--muted)", fontSize: 11, flexShrink: 0 }}>
-          {open ? "⌃" : "⌄"}
-        </span>
+        <ChevronIcon
+          direction={open ? "up" : "down"}
+          size={12}
+          className="shrink-0 text-[var(--muted)]"
+        />
       </button>
 
       {/* Popover dropdown */}

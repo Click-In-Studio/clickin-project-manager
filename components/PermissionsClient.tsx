@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { ALL_PERMISSIONS, type Permission } from "@/lib/permissions";
+import ChevronIcon from "@/components/ChevronIcon";
 
 const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   // 项目管理
@@ -230,7 +231,7 @@ export default function PermissionsClient() {
                             ))}
                           </div>
                         </div>
-                        <span className="ml-3 text-[10px] text-zinc-300 shrink-0">{isExp ? "▲" : "▼"}</span>
+                        <ChevronIcon direction={isExp ? "up" : "down"} size={10} className="ml-3 shrink-0 text-zinc-300" />
                       </button>
 
                       {/* Expanded permission breakdown */}

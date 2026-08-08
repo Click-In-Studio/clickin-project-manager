@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { TagGroup, TagOption } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 
 type Props = {
   productionId: string;
@@ -444,13 +445,13 @@ function GroupCard({
                             <button
                               onClick={() => handleMoveOption(opt.id, -1)}
                               disabled={idx === 0}
-                              className="text-zinc-300 hover:text-zinc-500 disabled:opacity-20 leading-none px-0.5 text-[10px]"
-                            >▲</button>
+                              className="flex justify-center px-0.5 text-zinc-300 hover:text-zinc-500 disabled:opacity-20"
+                            ><ChevronIcon direction="up" size={10} /></button>
                             <button
                               onClick={() => handleMoveOption(opt.id, 1)}
                               disabled={idx === sorted.length - 1}
-                              className="text-zinc-300 hover:text-zinc-500 disabled:opacity-20 leading-none px-0.5 text-[10px]"
-                            >▼</button>
+                              className="flex justify-center px-0.5 text-zinc-300 hover:text-zinc-500 disabled:opacity-20"
+                            ><ChevronIcon size={10} /></button>
                           </div>
                         )}
                         <span

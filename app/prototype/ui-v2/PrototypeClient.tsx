@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ChevronIcon from "@/components/ChevronIcon";
 import styles from "./prototype.module.css";
 
 type View =
@@ -373,7 +374,7 @@ export default function PrototypeClient() {
                 aria-expanded={projectMenuOpen}
               >
                 <span><small>{currentProject.organization}</small><b>{currentProject.name}</b></span>
-                <i>⌄</i>
+                <ChevronIcon size={12} className={styles.switcherChevron} />
               </button>
               {projectMenuOpen && (
                 <div className={`${styles.popoverMenu} ${styles.projectMenu}`}>
@@ -928,7 +929,7 @@ function ScriptWorkspace({ go }: { go: (v: View) => void }) {
         <div className={styles.toolbarActions}>
           <button type="button" onClick={() => setShowNotes((value) => !value)}>{showNotes ? "隐藏批注" : "显示批注"}</button>
           <button type="button">⌕ 搜索</button>
-          <button type="button">显示 ⌄</button>
+          <button type="button">显示 <ChevronIcon size={10} className={styles.inlineChevron} /></button>
         </div>
       </section>
 
@@ -1018,7 +1019,7 @@ function DramaturgyWorkspace({ go }: { go: (v: View) => void }) {
         </div>
         <div className={styles.toolbarActions}>
           {tab === "scenes" && <><button type="button" aria-pressed={mode === "list"} onClick={() => setMode("list")}>☰ 列表</button><button type="button" aria-pressed={mode === "table"} onClick={() => setMode("table")}>⊞ 表格</button></>}
-          <button type="button">视图：构作总览 ⌄</button><button type="button">列设置</button>
+          <button type="button">视图：构作总览 <ChevronIcon size={10} className={styles.inlineChevron} /></button><button type="button">列设置</button>
         </div>
       </section>
 
@@ -1336,8 +1337,8 @@ function TimetableMock({
         <div><Badge tone={completedCount === relevantTaskIds.length ? "green" : "amber"}>{completedCount} / {relevantTaskIds.length} Task 完成</Badge><Badge>{event.milestone}</Badge></div>
       </div>
       <div className={styles.rundownControls}>
-        <label><span>Event</span><select value={event.id} onChange={(e) => setSelectedEventId(e.target.value)}>{PLANNING_EVENTS.map((item) => <option value={item.id} key={item.id}>{item.date} · {item.title}</option>)}</select></label>
-        <label><span>查看工作流</span><select value={personFilter} onChange={(e) => setPersonFilter(e.target.value)}><option value="all">全部成员</option>{PLANNING_PEOPLE.map((person) => <option value={person.id} key={person.id}>{person.name} · {person.department}</option>)}</select></label>
+        <label><span>Event</span><select value={event.id} onChange={(e) => setSelectedEventId(e.target.value)}>{PLANNING_EVENTS.map((item) => <option value={item.id} key={item.id}>{item.date} · {item.title}</option>)}</select><ChevronIcon size={13} /></label>
+        <label><span>查看工作流</span><select value={personFilter} onChange={(e) => setPersonFilter(e.target.value)}><option value="all">全部成员</option>{PLANNING_PEOPLE.map((person) => <option value={person.id} key={person.id}>{person.name} · {person.department}</option>)}</select><ChevronIcon size={13} /></label>
         <p><b>{personName}</b><small>可查看其当前工作、对接人和工作地点</small></p>
       </div>
 

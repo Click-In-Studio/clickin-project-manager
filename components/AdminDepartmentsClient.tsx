@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { EventDepartment } from "@/lib/event-db";
 import type { MemberWithRoles } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -394,10 +395,10 @@ function TreeNode({
           style={{
             width: 20, height: 20, border: "none", background: "none", cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            color: "var(--muted)", fontSize: 9, opacity: hasChildren ? 1 : 0.25,
+            color: "var(--muted)", opacity: hasChildren ? 1 : 0.25,
           }}
         >
-          {expanded ? "▼" : "▶"}
+          <ChevronIcon direction={expanded ? "down" : "right"} size={12} />
         </button>
 
         {/* Name */}
