@@ -127,17 +127,9 @@ export const PAGE_PERMISSION_SCOPES = {
 
   reports: new Set<Permission>([
     "report:create",
-    "report:edit",
-    "report:publish",
-    "report:delete",
-    "report:create_note",
-    "report:edit_note",
-    "report:delete_note",
     "report:create_note_any",
     "report:edit_note_any",
     "report:delete_note_any",
-    "report:modify_published",
-    "report:revoke",
     "report:reply",
     "report:edit_comment_any",
     "report:delete_comment_any",

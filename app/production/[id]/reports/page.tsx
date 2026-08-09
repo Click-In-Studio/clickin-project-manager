@@ -23,7 +23,7 @@ export default async function ProductionReportsPage({ params }: { params: Promis
     getProductionName(productionId),
   ]);
   if (!access) redirect(`/unauthorized?id=${productionId}`);
-  if (!hasPermission("report:view", access.permCtx)) redirect(`/unauthorized?resource=report%3Aview&id=${productionId}`);
+  if (!hasPermission("event:follow", access.permCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
   if (!productionName) notFound();
 
   const canViewDrafts = isReportViewer(access.permCtx);

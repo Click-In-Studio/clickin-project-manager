@@ -68,9 +68,6 @@ export type Permission =
   | "dramaturgy_view:create_public"
   | "dramaturgy_view:delete_public"
   | "dramaturgy_view:overwrite_public"
-  // ─── 普通管理 - 已发布内容修改门控 ───────────────────────────────────────────
-  | "report:modify_published"
-  | "report:revoke"
   // ─── 普通管理 - Tech Req 删除 ─────────────────────────────────────────────────
   | "event:delete_tech_req_any"
   // ─── 普通管理 - 角色管理 ──────────────────────────────────────────────────────
@@ -172,14 +169,8 @@ export type Permission =
   | "event:create_tech_req_any"
   | "event:edit_tech_req_any"
   | "event:assign_tech_req_any"
-  // ─── 写权限 - 报告（Report）──────────────────────────────────────────────────
+  // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
   | "report:create"
-  | "report:edit"
-  | "report:publish"
-  | "report:delete"
-  | "report:create_note"
-  | "report:edit_note"
-  | "report:delete_note"
   | "report:create_note_any"
   | "report:edit_note_any"
   | "report:delete_note_any"
@@ -205,7 +196,6 @@ export type Permission =
   | "event:view_tech_req"
   | "event:view_tech_req_any"
   | "event:follow"
-  | "report:view"
   | "asset:view"
   | "asset:download"
   | "asset:download_any"
@@ -422,7 +412,6 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "asset:view",
   "asset:download",
   "asset:share",
-  "report:view",
 ];
 
 // O(1) set used by hasPermission() — must be declared after MEMBER_BASE_PERMISSIONS.
@@ -537,8 +526,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
-  "report:modify_published",
-  "report:revoke",
   "event:delete_tech_req_any",
   "character:delete",
   "milestone:create",
@@ -586,12 +573,6 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   "event:edit_tech_req_any",
   "event:assign_tech_req_any",
   "report:create",
-  "report:edit",
-  "report:publish",
-  "report:delete",
-  "report:create_note",
-  "report:edit_note",
-  "report:delete_note",
   "report:create_note_any",
   "report:edit_note_any",
   "report:delete_note_any",
@@ -777,7 +758,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue:create_any", "cue:delete_any", "cue:renumber_any", "cue:rename_any",
   "cue:edit_description_any", "cue:move_any", "cue:mount_any",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-  "report:modify_published", "report:revoke",
   "event:delete_tech_req_any",
   "character:delete",
   "tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config",
@@ -807,16 +787,14 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "event:create",
   "event:create_tech_req", "event:edit_tech_req", "event:assign_tech_req", "event:delete_tech_req",
   "event:create_tech_req_any", "event:edit_tech_req_any", "event:assign_tech_req_any",
-  "report:create", "report:edit", "report:publish", "report:delete",
-  "report:create_note", "report:edit_note", "report:delete_note",
-  "report:create_note_any", "report:edit_note_any", "report:delete_note_any",
+  "report:create", "report:create_note_any", "report:edit_note_any", "report:delete_note_any",
   "production:mount", "production:unmount",
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
   "scene:view", "character:view", "script:view", "cue_list:view", "cue:view",
   "contacts:view", "event:view_call_sheet_any",
   "event:view_tech_req", "event:view_tech_req_any", "event:follow",
-  "report:view", "asset:view", "asset:download", "asset:download_any",
+  "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
   "script:comment", "cue:comment", "report:reply", "note:comment",
   "org:assign_member", "org:recall_member",
