@@ -81,9 +81,19 @@ beforeAll(async () => {
     createProduction(RENAME_PROD, "竞态-重命名"),
     (async () => {
       await createProduction(SCRIPT_PROD, "竞态-剧本");
-      // script:edit has adminBypass:false — user must hold 制作人 role
       await addProductionMember(SCRIPT_PROD, TEST_USER);
       await setMemberRoles(SCRIPT_PROD, TEST_USER, ["制作人"]);
+      // atomic_permission_grant is required since Phase 4: write permissions
+      // are no longer bypassed by role membership alone.
+      // Also grant scene:rename because normalizeRehearsalMarkOwnershipInTx sets
+      // scene_id on newly inserted blocks, making update ops diff-detect a sceneId change.
+      await getPool().query(
+        `INSERT INTO atomic_permission_grant
+           (production_id, user_id, permission_key, grant_source, confirmed_by)
+         SELECT $1, $2, unnest($3::text[]), 'self_confirmed', $2
+         ON CONFLICT DO NOTHING`,
+        [SCRIPT_PROD, TEST_USER, ["script:manage", "scene:rename"]],
+      );
       scriptVersionId = (await getActiveVersionId(SCRIPT_PROD))!;
     })(),
   ]);
