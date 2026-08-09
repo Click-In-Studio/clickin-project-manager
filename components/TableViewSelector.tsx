@@ -153,6 +153,11 @@ export default function TableViewSelector({
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-zinc-200 bg-white shadow-lg z-20">
+          <div className="border-b border-zinc-200 px-3 py-2">
+            <p className="text-[11px] font-bold tracking-[0.06em] text-zinc-500 uppercase">
+              视图
+            </p>
+          </div>
           <div className="py-1 max-h-64 overflow-y-auto">
             {views.length === 0 && (
               <div className="px-3 py-2 text-xs text-zinc-400">

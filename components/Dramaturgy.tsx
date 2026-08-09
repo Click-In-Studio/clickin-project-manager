@@ -5,6 +5,7 @@ import ScenesManager from "./ScenesManager";
 import SceneTableView, { getDefaultViewConfig, normalizeTableViewConfig, type TableViewConfigData } from "./SceneTableView";
 import TableColumnSettings from "./TableColumnSettings";
 import TableViewSelector, { type SavedView } from "./TableViewSelector";
+import ChevronIcon from "./ChevronIcon";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 import ProductionTopMenu, {
@@ -296,9 +297,9 @@ export default function Dramaturgy({
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => setShowColumnSettings((v) => !v)}
-                  className="whitespace-nowrap text-[11px] font-bold px-3 py-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                 >
-                  ⚙ 列设置
+                  列设置 <ChevronIcon size={12} className="opacity-50" />
                 </button>
                 {showColumnSettings && (
                   <TableColumnSettings
