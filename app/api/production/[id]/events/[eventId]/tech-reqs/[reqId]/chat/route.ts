@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!techReq) return Response.json({ error: "需求不存在" }, { status: 404 });
   if (techReq.chatId) return Response.json({ error: "需求群已存在" }, { status: 409 });
 
-  const canManage = hasPermission("event:delete_tech_req_any", permCtx)
+  const canManage = hasPermission("task:delete_any", permCtx)
     || await hasResourceGrantLevel(session.userId, productionId, "tech_req", reqId, "manage");
   if (!canManage) return Response.json({ error: "权限不足" }, { status: 403 });
 

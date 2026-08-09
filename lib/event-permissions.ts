@@ -142,7 +142,7 @@ export async function canViewTechReq(
   ctx: Pick<EventPermContext, "participantDeptIds">,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (hasPermission("event:view_tech_req_any", permCtx)) return true;
+  if (hasPermission("task:view_any", permCtx)) return true;
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req

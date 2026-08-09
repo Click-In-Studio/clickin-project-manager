@@ -47,7 +47,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:delete_tech_req_any", permCtx))
+  if (!hasPermission("task:delete_any", permCtx))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

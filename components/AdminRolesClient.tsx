@@ -82,14 +82,14 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "事件 & 日程",
     perms: [
-      "event:create", "event:edit", "event:publish",
-      "event:create_schedule", "event:edit_schedule", "event:delete_schedule",
-      "event:assign_participants", "event:assign_schedule_participants",
-      "event:edit_call",
-      "event:create_tech_req", "event:edit_tech_req", "event:assign_tech_req", "event:delete_tech_req",
-      "event:create_tech_req_any", "event:edit_tech_req_any", "event:assign_tech_req_any",
-      "event:delete_tech_req_any",
-      "event:modify_published", "event:revoke", "event:delete",
+      "event:create",
+      "event:view_call_sheet_any", "event:follow",
+    ],
+  },
+  {
+    label: "任务",
+    perms: [
+      "task:view", "task:view_any", "task:delete_any",
     ],
   },
   {

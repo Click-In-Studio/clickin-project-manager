@@ -68,8 +68,8 @@ export type Permission =
   | "dramaturgy_view:create_public"
   | "dramaturgy_view:delete_public"
   | "dramaturgy_view:overwrite_public"
-  // ─── 普通管理 - Tech Req 删除 ─────────────────────────────────────────────────
-  | "event:delete_tech_req_any"
+  // ─── 普通管理 - Task 删除 ────────────────────────────────────────────────────
+  | "task:delete_any"
   // ─── 普通管理 - 角色管理 ──────────────────────────────────────────────────────
   | "character:delete"
   // ─── 普通管理 - 标注体系管理 ──────────────────────────────────────────────────
@@ -162,13 +162,6 @@ export type Permission =
   | "cue:mount"
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   | "event:create"
-  | "event:create_tech_req"
-  | "event:edit_tech_req"
-  | "event:assign_tech_req"
-  | "event:delete_tech_req"
-  | "event:create_tech_req_any"
-  | "event:edit_tech_req_any"
-  | "event:assign_tech_req_any"
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
   | "report:create"
   | "report:create_note_any"
@@ -193,9 +186,9 @@ export type Permission =
   | "cue:view"
   | "contacts:view"
   | "event:view_call_sheet_any"
-  | "event:view_tech_req"
-  | "event:view_tech_req_any"
   | "event:follow"
+  | "task:view"
+  | "task:view_any"
   | "asset:view"
   | "asset:download"
   | "asset:download_any"
@@ -472,13 +465,13 @@ const DRAMATURGY_FULL_SET: readonly Permission[] = [
 const SM_EVENT_PERMS: readonly Permission[] = [
   "event:create",
   "event:view_call_sheet_any",
-  "event:view_tech_req",
-  "event:view_tech_req_any",
-  "event:delete_tech_req_any",
+  "task:view",
+  "task:view_any",
+  "task:delete_any",
 ];
 
 const DIRECTOR_EVENT_PERMS: readonly Permission[] = [
-  "event:view_tech_req_any",
+  "task:view_any",
 ];
 
 // ─── 制作人 Full Set ───────────────────────────────────────────────────────────
@@ -526,7 +519,7 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
-  "event:delete_tech_req_any",
+  "task:delete_any",
   "character:delete",
   "milestone:create",
   "milestone:manage",
@@ -565,13 +558,6 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   "dramaturgy_view:overwrite",
   ...CUE_FULL_SET,
   ...SM_EVENT_PERMS,
-  "event:create_tech_req",
-  "event:edit_tech_req",
-  "event:assign_tech_req",
-  "event:delete_tech_req",
-  "event:create_tech_req_any",
-  "event:edit_tech_req_any",
-  "event:assign_tech_req_any",
   "report:create",
   "report:create_note_any",
   "report:edit_note_any",
@@ -591,8 +577,8 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
 const PRODUCER_READ_PERMS: readonly Permission[] = [
   ...MEMBER_BASE_PERMISSIONS,
   "event:view_call_sheet_any",
-  "event:view_tech_req",
-  "event:view_tech_req_any",
+  "task:view",
+  "task:view_any",
   "asset:download_any",
   "asset:share_downloadable",
   "asset:share_any",
@@ -721,9 +707,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
 export const ASSISTANT_ROLE_MIGRATION: Record<string, readonly Permission[]> = {
   "制作助理": [
     ...SM_EVENT_PERMS,
-    "event:create_tech_req_any",
-    "event:edit_tech_req_any",
-    "event:assign_tech_req_any",
   ],
   "作曲助理": ROLE_TEMPLATE_PERMISSIONS["作曲"],
   "助理舞台监督": ROLE_TEMPLATE_PERMISSIONS["舞台监督"],
@@ -758,7 +741,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue:create_any", "cue:delete_any", "cue:renumber_any", "cue:rename_any",
   "cue:edit_description_any", "cue:move_any", "cue:mount_any",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-  "event:delete_tech_req_any",
+  "task:delete_any",
   "character:delete",
   "tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config",
   "tag_group:set_default_option", "tag_group:set_lyric_split", "tag_group:reorder",
@@ -785,15 +768,13 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue:create", "cue:delete", "cue:renumber", "cue:rename",
   "cue:edit_description", "cue:move", "cue:mount",
   "event:create",
-  "event:create_tech_req", "event:edit_tech_req", "event:assign_tech_req", "event:delete_tech_req",
-  "event:create_tech_req_any", "event:edit_tech_req_any", "event:assign_tech_req_any",
   "report:create", "report:create_note_any", "report:edit_note_any", "report:delete_note_any",
   "production:mount", "production:unmount",
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
   "scene:view", "character:view", "script:view", "cue_list:view", "cue:view",
-  "contacts:view", "event:view_call_sheet_any",
-  "event:view_tech_req", "event:view_tech_req_any", "event:follow",
+  "contacts:view", "event:view_call_sheet_any", "event:follow",
+  "task:view", "task:view_any", "task:delete_any",
   "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
   "script:comment", "cue:comment", "report:reply", "note:comment",

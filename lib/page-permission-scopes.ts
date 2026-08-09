@@ -112,17 +112,10 @@ export const PAGE_PERMISSION_SCOPES = {
 
   events: new Set<Permission>([
     "event:create",
-    "event:create_tech_req",
-    "event:edit_tech_req",
-    "event:assign_tech_req",
-    "event:delete_tech_req",
-    "event:create_tech_req_any",
-    "event:edit_tech_req_any",
-    "event:assign_tech_req_any",
-    "event:delete_tech_req_any",
     "event:view_call_sheet_any",
-    "event:view_tech_req",
-    "event:view_tech_req_any",
+    "task:view",
+    "task:view_any",
+    "task:delete_any",
   ]),
 
   reports: new Set<Permission>([
