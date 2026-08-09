@@ -202,6 +202,7 @@ const SCRIPT_ANNOTATE_DOMAIN = new Set<Permission>([
 
 const SCRIPT_EDIT_DOMAIN = new Set<Permission>([
   ...SCRIPT_ANNOTATE_DOMAIN,
+  "script:annotate",
   "script:create_block",
   "script:delete_block",
   "script:edit_block",
@@ -214,6 +215,7 @@ const SCRIPT_EDIT_DOMAIN = new Set<Permission>([
 
 const SCRIPT_MANAGE_DOMAIN = new Set<Permission>([
   ...SCRIPT_EDIT_DOMAIN,
+  "script:edit",
 ]);
 
 // ─── Core Permission Check ─────────────────────────────────────────────────────
