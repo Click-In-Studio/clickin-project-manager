@@ -1762,6 +1762,7 @@ function ScriptMarkerRow({
   dismissToken = 0,
   isRecentlyMoved = false,
   isTocHighlighted = false,
+  reserveRehearsalGap = false,
 }: {
   node: ScriptMarkerNode;
   canEdit: boolean;
@@ -1791,6 +1792,7 @@ function ScriptMarkerRow({
   dismissToken?: number;
   isRecentlyMoved?: boolean;
   isTocHighlighted?: boolean;
+  reserveRehearsalGap?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
@@ -1802,7 +1804,7 @@ function ScriptMarkerRow({
         marginRight: `${MARKER_DIVIDER_RIGHT_MARGIN}rem` }
     : undefined;
   const rehearsalMarkerStyle: React.CSSProperties | undefined = isRehearsal
-    ? { height: `max(${REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX}px, ${REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM * REHEARSAL_MARKER_ROW_HEIGHT_SCALE}rem)` }
+    ? { height: reserveRehearsalGap ? "1.25rem" : `max(${REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX}px, ${REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM * REHEARSAL_MARKER_ROW_HEIGHT_SCALE}rem)` }
     : undefined;
   const rehearsalFloatStyle: React.CSSProperties | undefined = isRehearsal
     ? { left: `calc(1.5rem + ${REHEARSAL_MARKER_FLOAT_LEFT_OFFSET_REM}rem)` }
@@ -2426,7 +2428,7 @@ function CharacterPanel({
           style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">{readOnly ? "聚焦角色" : "角色管理"}</span>
             {(focusedCharacterIds.size > 0 || !readOnly) && (
               <div className="flex items-center gap-2">
                 {focusedCharacterIds.size > 0 && (
@@ -4257,8 +4259,8 @@ const PRESENCE_COLORS = [
   "#E53E3E", "#DD6B20", "#D69E2E", "#38A169",
   "#3182CE", "#805AD5", "#D53F8C", "#00B5D8",
 ];
-const EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS = 3;
-const REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS = 5;
+const EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS = 5;
+const REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS = 8;
 
 function presenceColor(clientId: string): string {
   let h = 0;
@@ -4974,6 +4976,9 @@ const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
 const COMPACT_CONTENT_OPTICAL_OFFSET_PX = -2;
 const IN_BLOCK_STAGE_COMMENT_MANUAL_OFFSET_PX = -2;
 const REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS = "mb-[0.18rem]";
+const REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mb-2";
+const REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mt-1";
+const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
 function getCompactFallbackLineHeightPx() {
   if (typeof window === "undefined") return 28;
@@ -5036,12 +5041,10 @@ function ScriptBlock({
   deleteConfirmNoopMessage,
   isReorderLocked = false,
   isScriptDragging = false,
-  index = 0,
   lineNum,
   captionLineNum,
   lineIndexWidth,
   isSearchHighlight,
-  showRehearsalMark = true,
   showReadOnlyRehearsalMark = false,
   readOnlyRehearsalMode = false,
   readOnlyScene = null,
@@ -5117,12 +5120,10 @@ function ScriptBlock({
   deleteConfirmNoopMessage?: string;
   isReorderLocked?: boolean;
   isScriptDragging?: boolean;
-  index?: number;
   lineNum?: number;
   captionLineNum: number;
   lineIndexWidth?: string;
   isSearchHighlight?: "match" | "focused";
-  showRehearsalMark?: boolean;
   showReadOnlyRehearsalMark?: boolean;
   readOnlyRehearsalMode?: boolean;
   readOnlyScene?: Scene | null;
@@ -5425,7 +5426,7 @@ function ScriptBlock({
         ? "bg-emerald-500/10"
     : isCharacterFocusHighlighted
       ? "bg-purple-50"
-      : (index ?? 0) % 2 === 1
+      : captionLineNum % 2 === 1
         ? "bg-zinc-50/60"
         : "";
   const movedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
@@ -5442,7 +5443,9 @@ function ScriptBlock({
       : 0;
   const characterBottomGapClassName =
     readOnlyRehearsalMode && !isCompactTextLayout && block.characterIds.length > 0
-      ? REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS
+      ? hasStageComment
+        ? REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS
+        : REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS
       : undefined;
   const compactCharacterLastLineCenter = compactCharacterColumnHeight - compactCharacterLineHeight / 2;
   const compactContentFirstLineTop = Math.max(
@@ -5462,6 +5465,10 @@ function ScriptBlock({
     onAssetClick();
   };
   const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
+  const stageCommentPlacementClassName =
+    readOnlyRehearsalMode && !isCompactTextLayout && hasStageComment && !showCharacterSelector
+      ? REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS
+      : undefined;
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
     : undefined;
@@ -5495,11 +5502,13 @@ function ScriptBlock({
         } as React.CSSProperties)
       : undefined;
   const commentBlockCaption = buildCommentBlockCaption(block, characters, captionLineNum);
-  const lineIndexSlotStyle: React.CSSProperties = {
-    width: lineIndexWidth
-      ? lineIndexWidth
-      : `${LINE_INDEX_CONTROL_MIN_WIDTH_REM}rem`,
-  };
+  const lineIndexSlotStyle: React.CSSProperties | undefined = lineNum === undefined
+    ? {
+        width: lineIndexWidth
+          ? lineIndexWidth
+          : `${LINE_INDEX_CONTROL_MIN_WIDTH_REM}rem`,
+      }
+    : undefined;
 
   const measureStageCommentEditorWidth = useCallback(() => {
     const blockEl = blockRootRef.current;
@@ -5575,8 +5584,7 @@ function ScriptBlock({
         <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
             <span
-              style={lineIndexSlotStyle}
-              className={`pointer-events-none shrink-0 select-none text-left tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
+              className={`pointer-events-none select-none tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
             >
               {lineNum}
             </span>
@@ -5587,7 +5595,7 @@ function ScriptBlock({
           {(canEditMetadata || canEditRehearsalMark) && (
             <span
               onMouseEnter={unfoldCompactControls}
-              className={`relative top-[1px] transition-opacity ${isMarkStart && block.rehearsalMark && showRehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              className="relative top-[1px] opacity-0 transition-opacity group-hover:opacity-100"
             >
               <RehearsalMarkInput
                 canAddChapterScene={canEditMetadata}
@@ -5951,6 +5959,7 @@ function ScriptBlock({
               readOnly={!canEditText || isEditingLocked}
               stageDelimOpen={stageDelimOpen}
               stageDelimClose={stageDelimClose}
+              placementClassName={stageCommentPlacementClassName}
               addButtonRevealOnHover
               zeroHeightAddButton
               getEditorWidth={measureStageCommentEditorWidth}
@@ -6506,7 +6515,7 @@ export default function ScriptEditor({
   const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
   const versionForcesLockedMode =
     versionStatus === "committed" || versionStatus === "frozen" || versionStatus === "archived";
-  const isLockedMode = manualLockedMode || versionForcesLockedMode;
+  const isLockedMode = !baseCanEdit || manualLockedMode || versionForcesLockedMode;
   const canEditText = baseCanEditText && !isLockedMode;
   const canEditMetadata = baseCanEditMetadata && !isLockedMode;
   const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
@@ -10583,14 +10592,9 @@ export default function ScriptEditor({
               </div>
             </>
           )}
-          <span className="ml-0.5 shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
+          <span className={`${canEdit ? "ml-[3px]" : "ml-0.5"} shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400`}>
             {canEdit ? "可编辑" : "只读"}
           </span>
-          {!baseCanEdit && (
-            <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
-              只读
-            </span>
-          )}
           {baseCanEdit && isLockedMode && (
             <div
               className="flex flex-1 justify-center"
@@ -10600,12 +10604,9 @@ export default function ScriptEditor({
                 data-production-toolbar-flex-content="true"
                 aria-pressed={isLockedMode}
                 disabled={versionForcesLockedMode}
+                style={toolbarShort || toolbarCompact ? undefined : REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE}
                 title={versionForcesLockedMode ? "该版本仅可使用排练模式" : "退出排练模式"}
                 className={`flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors ${
-                  portaled && !toolbarShort && !toolbarCompact
-                    ? "fixed left-1/2 top-0 z-10 h-16 -translate-x-1/2 "
-                    : ""
-                }${
                   versionForcesLockedMode
                     ? "cursor-default text-[#91a8ca]"
                     : "text-teal-600 hover:bg-teal-50 hover:text-teal-700"
@@ -10867,8 +10868,8 @@ export default function ScriptEditor({
                     else toggleMenu("presence");
                   }}
                   className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
-                  aria-label={`在线人员：${onlineUsers.length} 人`}
-                  title={`在线人员：${onlineUsers.map((presence) => presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName).join("、")}`}
+                  aria-label={`当前在线：${onlineUsers.length} 人`}
+                  title={`当前在线：${onlineUsers.map((presence) => presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName).join("、")}`}
                 >
                   {stack}
                 </button>
@@ -10882,7 +10883,7 @@ export default function ScriptEditor({
                 style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-44`}
               >
-                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">在线人员</p>
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">当前在线</p>
                 {onlineUsers.map((presence) => (
                   <div key={presence.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
                     <span
@@ -11482,6 +11483,7 @@ export default function ScriptEditor({
                       if (!moved) unlockReorder();
                     }}
                     lineIndexWidth={markerLineIndexWidthStyle}
+                    reserveRehearsalGap={isLockedMode}
                   />
                 </div>
               ) : null;
@@ -11582,12 +11584,10 @@ export default function ScriptEditor({
                 )}
                 <ScriptBlock
                   block={displayBlock}
-                  index={bIdx}
                   lineNum={display.lineNumbers ? blockLineNumber : undefined}
                   captionLineNum={blockLineNumber}
                   lineIndexWidth={lineIndexWidthStyle}
                   isSearchHighlight={searchHighlight}
-                  showRehearsalMark={display.rehearsalMarks}
                   readOnlyRehearsalMode={isLockedMode}
                   readOnlyScene={isLockedMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
