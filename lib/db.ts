@@ -2147,23 +2147,36 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
 export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
   sortOrder: number; roles: string[]; avatarUrl: string | null;
+  isOwner: boolean;
+  hasAdminPerm: boolean; // true if FK-backed roles include any ADMIN_PANEL_PERMISSIONS key
 };
 
 export async function listMyProductionsWithRoles(
   userId: string, isAdmin: boolean,
+  adminPanelPerms: readonly string[],
 ): Promise<MyProductionEntry[]> {
   const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
   const res = await getPool().query<{
     id: string; name: string; created_at: Date; archived_at: Date | null;
     sort_order: number; roles: string[] | null; avatar_url: string | null;
+    is_owner: boolean; has_admin_perm: boolean;
   }>(
     `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.avatar_url,
-            pm.roles
+            pm.roles,
+            (p.owner_id = $1) AS is_owner,
+            EXISTS(
+              SELECT 1
+              FROM production_member_role pmr
+              JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+              WHERE pmr.production_id = p.id
+                AND pmr.user_id = $1
+                AND prp.permission_key = ANY($3::text[])
+            ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
      WHERE ($2 OR pm.user_id IS NOT NULL)
      ORDER BY ${orderBy}`,
-    [userId, isAdmin],
+    [userId, isAdmin, adminPanelPerms],
   );
   return res.rows.map(r => ({
     id: r.id, name: r.name,
@@ -2172,6 +2185,8 @@ export async function listMyProductionsWithRoles(
     sortOrder: r.sort_order,
     roles: r.roles ?? [],
     avatarUrl: r.avatar_url ?? null,
+    isOwner: r.is_owner,
+    hasAdminPerm: r.has_admin_perm,
   }));
 }
 

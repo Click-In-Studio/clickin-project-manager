@@ -7,6 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import ScriptEditor from "@/components/ScriptEditor";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export default async function ProductionScriptPage({
   params,
@@ -35,15 +36,18 @@ export default async function ProductionScriptPage({
   const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;
 
   return (
-    <ScriptEditor
-      productionId={id}
-      productionName={name ?? undefined}
-      canEditText={p("script:edit")}
-      canEditMetadata={p("scene:rename")}
-      canEditRehearsalMark={p("rehearsal_mark:create")}
-      canImport={p("script:import")}
-      versionId={versionId}
-      initialSearchQuery={q}
-    />
+    <>
+      <ScriptEditor
+        productionId={id}
+        productionName={name ?? undefined}
+        canEditText={p("script:edit")}
+        canEditMetadata={p("scene:rename")}
+        canEditRehearsalMark={p("rehearsal_mark:create")}
+        canImport={p("script:import")}
+        versionId={versionId}
+        initialSearchQuery={q}
+      />
+      <PageActivationGate productionId={id} scope="script" />
+    </>
   );
 }

@@ -293,6 +293,38 @@ export const ROLE_TEMPLATE_EXCLUDED = new Set<Permission>([
   "role:assign_permission",
 ]);
 
+// Permissions that appear in the admin panel (non-SENSITIVE, non-ROOT).
+// Gate: if memberPermissions contains ANY of these → user can enter admin panel.
+export const ADMIN_PANEL_PERMISSIONS = new Set<Permission>([
+  // 成员管理
+  "members:invite",
+  "members:kick",
+  "members:change_role",
+  "members:manage_overrides",
+  // 职位管理
+  "role:create",
+  "role:rename",
+  "role:delete",
+  "role:assign_permission",
+  // 部门管理
+  "dept:create",
+  "dept:rename",
+  "dept:dismiss",
+  "dept:change_type",
+  "dept:add_member",
+  "dept:delete_member",
+  "dept:set_poc",
+  "dept:unset_poc",
+  // 公告
+  "announcement:create",
+  "announcement:edit",
+  "announcement:delete",
+  // 里程碑
+  "milestone:create",
+  "milestone:manage",
+  "milestone:delete",
+]);
+
 // ─── Script Operation Implication ─────────────────────────────────────────────
 // script:manage ⊃ script:edit ⊃ script:annotate
 

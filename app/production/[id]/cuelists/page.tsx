@@ -8,6 +8,7 @@ import { getProductionPermissionContext, getProductionName, listCueListsWithAcce
 import { hasPermission } from "@/lib/permissions";
 import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
 import CueListsManager from "@/components/CueListsManager";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export default async function CueListsPage({
   params,
@@ -42,15 +43,18 @@ export default async function CueListsPage({
   const editableIds = cueListsWithAccess.filter(cl => cl.canEdit).map(cl => cl.id);
 
   return (
-    <CueListsManager
-      productionId={id}
-      productionName={name}
-      initialCueLists={cueListsWithAccess}
-      canCreate={canCreate}
-      availableTemplates={availableTemplates}
-      myUserId={session.userId}
-      editableIds={editableIds}
-      members={members}
-    />
+    <>
+      <CueListsManager
+        productionId={id}
+        productionName={name}
+        initialCueLists={cueListsWithAccess}
+        canCreate={canCreate}
+        availableTemplates={availableTemplates}
+        myUserId={session.userId}
+        editableIds={editableIds}
+        members={members}
+      />
+      <PageActivationGate productionId={id} scope="cuelists" />
+    </>
   );
 }
