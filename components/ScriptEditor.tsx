@@ -4364,11 +4364,11 @@ function _sameCharacters(a: string[], b: string[]): boolean {
   return b.every((id) => s.has(id));
 }
 
-function shouldHideCharacterLabel(prev: Block | null, block: Block): boolean {
+function shouldHideCharacterLabel(prev: Block | null, block: Block, ignoreRehearsalMark = false): boolean {
   if (block.forceShowCharacterName) return false;
   if (!prev || prev.type !== "dialogue" || block.type !== "dialogue") return false;
   if (block.sceneId !== prev.sceneId) return false;
-  if (block.rehearsalMark !== prev.rehearsalMark) return false;
+  if (!ignoreRehearsalMark && block.rehearsalMark !== prev.rehearsalMark) return false;
   return _sameCharacters(prev.characterIds, block.characterIds);
 }
 
@@ -5048,6 +5048,7 @@ function ScriptBlock({
   showReadOnlyRehearsalMark = false,
   readOnlyRehearsalMode = false,
   readOnlyScene = null,
+  showSceneLabel = true,
   stageDelimOpen = "（",
   stageDelimClose = "）",
   textLayoutMode = "center",
@@ -5127,6 +5128,7 @@ function ScriptBlock({
   showReadOnlyRehearsalMark?: boolean;
   readOnlyRehearsalMode?: boolean;
   readOnlyScene?: Scene | null;
+  showSceneLabel?: boolean;
   stageDelimOpen?: string;
   stageDelimClose?: string;
   textLayoutMode?: ScriptTextLayoutMode;
@@ -5433,7 +5435,9 @@ function ScriptBlock({
   const compactDeleteStyle: React.CSSProperties | undefined = compactControlLayout?.deleteLeft !== null && compactControlLayout?.deleteLeft !== undefined
     ? { left: compactControlLayout.deleteLeft }
     : undefined;
-  const displayScene = readOnlyScene ?? (block.sceneId ? scenes.find((scene) => scene.id === block.sceneId) ?? null : null);
+  const displayScene = showSceneLabel
+    ? readOnlyScene ?? (block.sceneId ? scenes.find((scene) => scene.id === block.sceneId) ?? null : null)
+    : null;
   const hasSceneLabel = !!displayScene;
   const hasStageComment = !!block.stageComment?.trim();
   const showCompactStageCommentRow = hasStageComment || stageCommentEditing;
@@ -10773,27 +10777,49 @@ export default function ScriptEditor({
                     ["rehearsalMarks", "排练记号"],
                     ["blockTags",      "Block 标签"],
                   ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "rehearsalMarks" | "blockTags">, string][]
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => toggleDisplay(key)}
-                    className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    <span>{label}</span>
-                    <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${display[key] ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"}`}>✓</span>
-                  </button>
-                ))}
+                ).map(([key, label]) => {
+                  if (key === "blockTags" && tagGroups.length === 0) return null;
+                  const isRehearsalMarks = key === "rehearsalMarks";
+                  const enabled = !isRehearsalMarks || isLockedMode;
+                  const active = isRehearsalMarks ? !isLockedMode || display[key] : display[key];
+                  const checkboxClass = !enabled
+                    ? "border-zinc-300 bg-zinc-200 text-zinc-400"
+                    : active
+                      ? "border-zinc-800 bg-zinc-800 text-white"
+                      : "border-zinc-300 text-transparent";
+                  return (
+                    <div key={key} className="group/display-option relative">
+                      <button
+                        onClick={() => { if (enabled) toggleDisplay(key); }}
+                        aria-disabled={!enabled}
+                        aria-describedby={!enabled ? "rehearsal-marks-edit-mode-notice" : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          enabled ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${checkboxClass}`}>✓</span>
+                      </button>
+                      {!enabled && (
+                        <span
+                          id="rehearsal-marks-edit-mode-notice"
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          编辑模式下不可隐藏排练记号
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
                 <button
-                  onClick={() => { if (isLockedMode) toggleDisplay("rehearsalBlockScenes"); }}
-                  disabled={!isLockedMode}
-                  className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
-                    isLockedMode ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
-                  }`}
-                  title="排练模式开启时显示每行所属章节"
+                  onClick={() => toggleDisplay("rehearsalBlockScenes")}
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                  title="显示每行所属章节"
                 >
                   <span>逐行章节</span>
                   <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
-                    display.rehearsalBlockScenes && isLockedMode ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
+                    display.rehearsalBlockScenes ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
                   }`}>✓</span>
                 </button>
                 <div className="my-1 border-t border-zinc-50" />
@@ -11260,6 +11286,7 @@ export default function ScriptEditor({
           >
           {(() => {
             const hasFocusedCharacters = focusedCharacterIds.size > 0;
+            const rehearsalMarksHidden = isLockedMode && !display.rehearsalMarks;
             const commentBubbleOffsets = new Map<string, number>();
             let lastBubbleBottom = -Infinity;
             for (let i = safeWindowStart; i < safeWindowEnd; i++) {
@@ -11303,6 +11330,7 @@ export default function ScriptEditor({
             const showSceneEndGap = isLockedMode && shouldShowSceneEndGap(prev, block);
             if (isMarkerBlock(block)) {
               if (!openingChapterVisible && block.id === scriptConfig.openingChapterMarkerId) return [];
+              if (block.type === "rehearsal_marker" && rehearsalMarksHidden) return [];
               const markerScene = block.sceneId ? sceneById.get(block.sceneId) ?? null : null;
               const markerNode: ScriptMarkerNode | null =
                 block.type === "chapter_marker" && markerScene
@@ -11501,6 +11529,14 @@ export default function ScriptEditor({
             }
             const projectedOwnedBlock = legacyProjectedBlocks[bIdx] ?? block;
             const projectedOwnedPrev = bIdx > 0 ? legacyProjectedBlocks[bIdx - 1] ?? null : null;
+            let projectedVisiblePrev = projectedOwnedPrev;
+            if (rehearsalMarksHidden) {
+              let prevIdx = bIdx - 1;
+              while (prevIdx >= 0 && projectedVisiblePrev?.type === "rehearsal_marker") {
+                prevIdx -= 1;
+                projectedVisiblePrev = legacyProjectedBlocks[prevIdx] ?? null;
+              }
+            }
             const ownedSceneId = projectedOwnedBlock.sceneId;
             const ownedRehearsalId = projectedOwnedBlock.rehearsalMark;
             const displayRehearsalMark = ownedRehearsalId
@@ -11523,8 +11559,14 @@ export default function ScriptEditor({
             );
             const isBlockFocused = !isLockedMode && focusedId === block.id;
             const hideCharSelector =
-              isBlockFocused || pageBreak ? false : shouldHideCharacterLabel(projectedOwnedPrev, projectedOwnedBlock);
-            const showCharacterGap = isLockedMode && shouldShowCharacterGap(projectedOwnedPrev, projectedOwnedBlock, hideCharSelector);
+              isBlockFocused || pageBreak
+                ? false
+                : shouldHideCharacterLabel(
+                    projectedVisiblePrev,
+                    projectedOwnedBlock,
+                    rehearsalMarksHidden,
+                  );
+            const showCharacterGap = isLockedMode && shouldShowCharacterGap(projectedVisiblePrev, projectedOwnedBlock, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
               matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
@@ -11584,6 +11626,7 @@ export default function ScriptEditor({
                   isSearchHighlight={searchHighlight}
                   readOnlyRehearsalMode={isLockedMode}
                   readOnlyScene={isLockedMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
+                  showSceneLabel={display.rehearsalBlockScenes}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
                   textLayoutMode={scriptConfig.textLayoutMode}
