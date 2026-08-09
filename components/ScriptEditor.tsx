@@ -6527,6 +6527,7 @@ export default function ScriptEditor({
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [sceneDetails, setSceneDetails] = useState<SceneDetail[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
+  const [rehearsalLabels, setRehearsalLabels] = useState(() => buildMarkerLabelIndex(blocks));
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
@@ -6643,7 +6644,6 @@ export default function ScriptEditor({
   const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
   const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
   const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
-  const markerLabelDirtyRef = useRef(true);
   const markPageMapDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
     pageMapDirtyRef.current = mergeDirtyRanges(pageMapDirtyRef.current, dirty);
   }, []);
@@ -6654,7 +6654,7 @@ export default function ScriptEditor({
   const markBlockStructureDirty = useCallback((previous: Block[], next: Block[], movedBlockIds?: Iterable<string>) => {
     const change = getMarkerChange(previous, next, movedBlockIds);
     if (change.positions.length === 0) return;
-    if (change.markerStructureChanged) markerLabelDirtyRef.current = true;
+    if (change.markerStructureChanged) setRehearsalLabels(buildMarkerLabelIndex(next));
     markPageMapDirty(change.positions.map((start) => ({ start, end: start + 1 })));
     const nextIndexById = new Map(next.map((block, index) => [block.id, index]));
     const ownershipRanges = markerCacheUpdateBlockIds(next, change).flatMap((id): MarkerOwnershipRange[] => {
@@ -6673,12 +6673,6 @@ export default function ScriptEditor({
     () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
     [markerContextById, ownedBlocks],
   );
-  const markerLabelCacheRef = useRef<ReturnType<typeof buildMarkerLabelIndex> | null>(null);
-  if (!markerLabelCacheRef.current || markerLabelDirtyRef.current) {
-    markerLabelCacheRef.current = buildMarkerLabelIndex(blocks);
-    markerLabelDirtyRef.current = false;
-  }
-  const rehearsalLabels = markerLabelCacheRef.current;
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
     const markerIndex = openingChapterMarkerId
@@ -6734,7 +6728,7 @@ export default function ScriptEditor({
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
     const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
     markOwnershipDirty("full");
-    markerLabelDirtyRef.current = true;
+    setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
     setBlocks(normalized.blocks);
     setCharacters(serverState.characters);
     setScenes(normalized.scenes);
@@ -6763,7 +6757,7 @@ export default function ScriptEditor({
       change === "full" ? undefined : change,
     );
     if (change === "full") {
-      markerLabelDirtyRef.current = true;
+      setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
       markOwnershipDirty("full");
     }
     else markBlockStructureDirty(previousBlocks, normalized.blocks);
@@ -8218,7 +8212,7 @@ export default function ScriptEditor({
     measuredHeightTotalRef.current = 0;
     cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
     markOwnershipDirty("full");
-    markerLabelDirtyRef.current = true;
+    setRehearsalLabels(buildMarkerLabelIndex([placeholderBlock]));
     setBlocks([placeholderBlock]);
     applyWindowRange({ start: 0, end: 1 }, true);
     setCharacters([]);
@@ -8261,7 +8255,7 @@ export default function ScriptEditor({
             cumulativeHRef.current[i + 1] = cumulativeHRef.current[i] + DEFAULT_BLOCK_H;
           }
           markOwnershipDirty("full");
-          markerLabelDirtyRef.current = true;
+          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
           blocksRef.current = normalized.blocks;
           blockIndexByIdRef.current = new Map(normalized.blocks.map((block, index) => [block.id, index]));
           applyWindowRange({ start: 0, end: initialWindowEnd }, true);
@@ -8462,7 +8456,7 @@ export default function ScriptEditor({
           const mergedBlocks = expandLegacyMarkersToBlocks(mergeServerBlocks(blocksRef.current, serverState.blocks, oldSynced), serverState.scenes);
           const normalized = normalizeScriptMarkerInvariants(mergedBlocks, serverState.scenes, { ...scriptConfigRef.current, ...(serverState.config ?? {}) });
           markOwnershipDirty("full");
-          markerLabelDirtyRef.current = true;
+          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
           requestVirtualWindowRefresh();
           setBlocks(normalized.blocks);
           setCharacters(serverState.characters);

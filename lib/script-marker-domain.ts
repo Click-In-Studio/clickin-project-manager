@@ -84,6 +84,32 @@ function removalPositions(
   return positions;
 }
 
+function moveSourcePositions(
+  previous: Block[],
+  previousIndexById: ReadonlyMap<string, number>,
+  nextIndexById: ReadonlyMap<string, number>,
+  movedIds: ReadonlySet<string>,
+  nextLength: number,
+): ReadonlyMap<string, number> {
+  const movedIndexes: number[] = [];
+  for (const id of movedIds) {
+    const index = previousIndexById.get(id);
+    if (index !== undefined && nextIndexById.has(id)) movedIndexes.push(index);
+  }
+  movedIndexes.sort((a, b) => a - b);
+  const positions = new Map<string, number>();
+  for (let cursor = 0; cursor < movedIndexes.length; cursor++) {
+    const start = movedIndexes[cursor];
+    let end = start;
+    while (movedIndexes[cursor + 1] === end + 1) end = movedIndexes[++cursor];
+    const afterPosition = nextIndexById.get(previous[end + 1]?.id);
+    const beforePosition = nextIndexById.get(previous[start - 1]?.id);
+    const position = afterPosition ?? (beforePosition === undefined ? 0 : Math.min(nextLength, beforePosition + 1));
+    for (let index = start; index <= end; index++) positions.set(previous[index].id, position);
+  }
+  return positions;
+}
+
 function movedIds(previousIds: string[], nextIds: string[]): Set<string> {
   if (previousIds.every((id, index) => nextIds[index] === id)) return new Set();
   const nextIndexById = new Map(nextIds.map((id, index) => [id, index]));
@@ -141,17 +167,17 @@ export function getMarkerChange(
 ): MarkerChange {
   const previousIndexById = new Map(previous.map((block, index) => [block.id, index]));
   const nextIndexById = new Map(next.map((block, index) => [block.id, index]));
-  let positionAfterRemoval: number[] | null = null;
+  let deletionPositions: number[] | null = null;
   const changes: BlockChange[] = [];
 
   for (let index = 0; index < previous.length; index++) {
     const before = previous[index];
     const nextIndex = nextIndexById.get(before.id);
     if (nextIndex === undefined) {
-      positionAfterRemoval ??= removalPositions(previous, nextIndexById, next.length);
+      deletionPositions ??= removalPositions(previous, nextIndexById, next.length);
       changes.push({
         kind: "delete",
-        position: positionAfterRemoval[index],
+        position: deletionPositions[index],
         blockId: before.id,
         beforeType: before.type,
         afterType: null,
@@ -200,25 +226,38 @@ export function getMarkerChange(
         next.filter((block) => previousIndexById.has(block.id)).map((block) => block.id),
       )
     : new Set(movedBlockIds);
-  for (const id of moved) {
-    const previousIndex = previousIndexById.get(id);
-    const nextIndex = nextIndexById.get(id);
-    if (previousIndex === undefined || nextIndex === undefined) continue;
-    positionAfterRemoval ??= removalPositions(previous, nextIndexById, next.length);
-    const type = previous[previousIndex].type;
-    changes.push({
-      kind: "move-source",
-      position: positionAfterRemoval[previousIndex],
-      blockId: id,
-      beforeType: type,
-      afterType: type,
-    }, {
-      kind: "move-target",
-      position: nextIndex,
-      blockId: id,
-      beforeType: type,
-      afterType: next[nextIndex].type,
-    });
+  if (moved.size > 0) {
+    const sourcePositions = deletionPositions
+      ? (() => {
+          const stationaryNextIndexById = new Map(
+            [...nextIndexById].filter(([id]) => !moved.has(id)),
+          );
+          const positions = removalPositions(previous, stationaryNextIndexById, next.length);
+          return new Map([...moved].flatMap((id) => {
+            const index = previousIndexById.get(id);
+            return index === undefined ? [] : [[id, positions[index]] as const];
+          }));
+        })()
+      : moveSourcePositions(previous, previousIndexById, nextIndexById, moved, next.length);
+    for (const id of moved) {
+      const previousIndex = previousIndexById.get(id);
+      const nextIndex = nextIndexById.get(id);
+      if (previousIndex === undefined || nextIndex === undefined) continue;
+      const type = previous[previousIndex].type;
+      changes.push({
+        kind: "move-source",
+        position: sourcePositions.get(id) ?? 0,
+        blockId: id,
+        beforeType: type,
+        afterType: type,
+      }, {
+        kind: "move-target",
+        position: nextIndex,
+        blockId: id,
+        beforeType: type,
+        afterType: next[nextIndex].type,
+      });
+    }
   }
 
   return {
