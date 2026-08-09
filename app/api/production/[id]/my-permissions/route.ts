@@ -65,7 +65,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const toConfirm: Permission[] = [];
   for (const raw of body.permissions) {
-    if (typeof raw !== "string") {
+    if (typeof raw !== "string" || !ALL_PERMISSIONS.includes(raw as Permission)) {
       return Response.json({ error: `无效的权限值: ${raw}` }, { status: 400 });
     }
     const perm = raw as Permission;
