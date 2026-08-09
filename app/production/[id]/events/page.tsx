@@ -8,6 +8,7 @@ import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { listProductionEvents, listUserEventParticipations, listEventDepartments } from "@/lib/event-db";
 import EventsClient from "@/components/EventsClient";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export default async function EventsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -36,15 +37,18 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
     : allEvents.filter(e => VISIBLE_STATUSES.has(e.status));
 
   return (
-    <EventsClient
-      productionId={id}
-      productionName={name}
-      initialEvents={events}
-      canCreate={canCreate}
-      canViewFull={canViewFull}
-      myParticipations={myParticipations}
-      currentUserId={session.userId}
-      departments={canCreate ? departments : []}
-    />
+    <>
+      <EventsClient
+        productionId={id}
+        productionName={name}
+        initialEvents={events}
+        canCreate={canCreate}
+        canViewFull={canViewFull}
+        myParticipations={myParticipations}
+        currentUserId={session.userId}
+        departments={canCreate ? departments : []}
+      />
+      <PageActivationGate productionId={id} scope="events" />
+    </>
   );
 }

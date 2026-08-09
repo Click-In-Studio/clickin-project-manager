@@ -14,6 +14,7 @@ import {
 } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import Dramaturgy from "@/components/Dramaturgy";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export default async function DramaturgyPage({
   params,
@@ -60,15 +61,18 @@ export default async function DramaturgyPage({
     : [[]];
 
   return (
-    <Suspense>
-      <Dramaturgy
-        productionId={id}
-        productionName={name}
-        versionId={resolvedVersionId}
-        initialScenes={scenes}
-        canEdit={canEdit}
-        initialSceneId={sceneId}
-      />
-    </Suspense>
+    <>
+      <Suspense>
+        <Dramaturgy
+          productionId={id}
+          productionName={name}
+          versionId={resolvedVersionId}
+          initialScenes={scenes}
+          canEdit={canEdit}
+          initialSceneId={sceneId}
+        />
+      </Suspense>
+      <PageActivationGate productionId={id} scope="dramaturgy" />
+    </>
   );
 }

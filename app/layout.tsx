@@ -5,7 +5,7 @@ import { getSession } from "@/lib/session";
 import { listMyProductionsWithRoles } from "@/lib/db";
 import { countUnreadNotifications } from "@/lib/inbox-db";
 import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/event-db";
-import { ROLE_TEMPLATE_PERMISSIONS } from "@/lib/permissions";
+import { ROLE_TEMPLATE_PERMISSIONS, ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
 import AppShell from "@/components/AppShell";
 import "./globals.css";
@@ -33,19 +33,22 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
+  const adminPanelPerms = [...ADMIN_PANEL_PERMISSIONS];
   const [rawProductions, unreadNotificationCount, pendingTaskCount, unreadReportCount] = await Promise.all([
-    session ? listMyProductionsWithRoles(session.userId, session.isAdmin) : Promise.resolve([]),
+    session ? listMyProductionsWithRoles(session.userId, session.isAdmin, adminPanelPerms) : Promise.resolve([]),
     session ? countUnreadNotifications(session.userId) : Promise.resolve(0),
     session ? countPendingTasksForUser(session.userId) : Promise.resolve(0),
     session ? countUnreadReportsForUser(session.userId) : Promise.resolve(0),
   ]);
 
-  const ADMIN_PERMS = new Set(["members:manage_overrides", "dept:create"]);
   const productions = rawProductions.map((p) => ({
     ...p,
-    canAdmin: session!.isAdmin || p.roles.some((role) =>
-      (ROLE_TEMPLATE_PERMISSIONS[role] ?? []).some((perm) => ADMIN_PERMS.has(perm))
-    ),
+    // canAdmin: FK-backed path (hasAdminPerm), owner, system admin,
+    // or fallback text-role path for pre-migration productions.
+    canAdmin: session!.isAdmin || p.isOwner || p.hasAdminPerm ||
+      p.roles.some((role) =>
+        (ROLE_TEMPLATE_PERMISSIONS[role] ?? []).some((perm) => ADMIN_PANEL_PERMISSIONS.has(perm))
+      ),
   }));
 
   const shellSession = session

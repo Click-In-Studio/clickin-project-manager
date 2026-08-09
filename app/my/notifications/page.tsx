@@ -12,7 +12,7 @@ export default async function NotificationsPage() {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const rawProductions = await listMyProductionsWithRoles(session.userId, session.isAdmin);
+  const rawProductions = await listMyProductionsWithRoles(session.userId, session.isAdmin, []);
   const productions = rawProductions.map((p) => ({ id: p.id, name: p.name }));
 
   return <MyNotificationsClient productions={productions} />;

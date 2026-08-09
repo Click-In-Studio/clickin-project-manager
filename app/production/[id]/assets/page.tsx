@@ -7,6 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import AssetPageClient from "@/components/assets/AssetPageClient";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export default async function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,12 +22,15 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 
   return (
-    <AssetPageClient
-      productionId={id}
-      versionId={versionId}
-      myUserId={session.userId}
-      isAdmin={session.isAdmin}
-      userName={session.name}
-    />
+    <>
+      <AssetPageClient
+        productionId={id}
+        versionId={versionId}
+        myUserId={session.userId}
+        isAdmin={session.isAdmin}
+        userName={session.name}
+      />
+      <PageActivationGate productionId={id} scope="assets" />
+    </>
   );
 }

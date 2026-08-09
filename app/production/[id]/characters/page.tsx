@@ -7,6 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import CharactersManager from "@/components/CharactersManager";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export default async function CharactersPage({
   params,
@@ -38,12 +39,15 @@ export default async function CharactersPage({
   const characters = versionId ? await listCharactersByVersion(versionId) : [];
 
   return (
-    <CharactersManager
-      productionId={id}
-      productionName={name}
-      initialCharacters={characters}
-      canEdit={canEdit}
-      versionId={versionId}
-    />
+    <>
+      <CharactersManager
+        productionId={id}
+        productionName={name}
+        initialCharacters={characters}
+        canEdit={canEdit}
+        versionId={versionId}
+      />
+      <PageActivationGate productionId={id} scope="characters" />
+    </>
   );
 }
