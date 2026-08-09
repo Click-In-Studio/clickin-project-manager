@@ -269,8 +269,6 @@ export default function Dramaturgy({
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* ── Frozen toolbar ── */}
       <ProductionTopMenu overflow={toolbarOverflow}>
-        {toolbarStage < 7 && (
-          <>
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
@@ -278,8 +276,6 @@ export default function Dramaturgy({
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>构作</span>
         </div>
         <ProductionTopMenuDivider />
-          </>
-        )}
         <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
 
         {sceneViewMode === "table" && (

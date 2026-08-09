@@ -82,7 +82,7 @@ const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
 };
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
-const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [0, 3, 4.1, 4.2, 5, 6, 7];
+const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [0, 3, 4.1, 4.2, 5, 6];
 
 function fixedProductionToolbarStageForWidth(width: number): 0 | 1 | 2 {
   if (width >= 1280) return 0;
@@ -655,7 +655,7 @@ export default function AppShell({ session, productions, children, initialUnread
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
     const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
-    if (overflow > 1 && current < 7) {
+    if (overflow > 1 && current < 6) {
       productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
       setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
       return;

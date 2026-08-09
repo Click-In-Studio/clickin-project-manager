@@ -865,8 +865,6 @@ export default function CharactersManager({ productionId, productionName, initia
           <ListTableViewToggleOverflow value={view} onChange={setView} />
         ) : null}
       >
-        {toolbarStage < 7 && (
-          <>
         <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
@@ -874,8 +872,6 @@ export default function CharactersManager({ productionId, productionName, initia
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>角色</span>
         </div>
         <ProductionTopMenuDivider />
-          </>
-        )}
         <ListTableViewToggle value={view} onChange={setView} />
       </ProductionTopMenu>
       {/* Scrollable content */}

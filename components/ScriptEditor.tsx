@@ -10530,7 +10530,7 @@ export default function ScriptEditor({
         >
           {(portaled) => (
             <>
-          {productionName && toolbarStage < 7 && (
+          {productionName && (
             <>
               <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
                 <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
