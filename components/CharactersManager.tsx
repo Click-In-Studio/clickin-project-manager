@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/db";
 import ChevronIcon from "@/components/ChevronIcon";
-import ProductionTopMenu, { ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
+import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
@@ -858,7 +858,7 @@ export default function CharactersManager({ productionId, productionName, initia
   if (embedded) return card;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
+    <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
       <ProductionTopMenu
         overflow={toolbarStage >= 5 ? (

@@ -18,6 +18,7 @@ import CommentAssetPicker, { type PendingAsset } from "@/components/assets/Comme
 import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwnershipProjection } from "@/lib/script-marker-blocks";
 import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import ProductionTopMenu, {
+  PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
   useProductionToolbar,
@@ -2025,7 +2026,7 @@ export default function CuePage({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]" onClick={handleContainerClick}>
+    <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS} onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
       <ProductionTopMenu onClick={e => e.stopPropagation()} overflow={cueOverflow}>

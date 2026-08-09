@@ -9,6 +9,7 @@ import ChevronIcon from "./ChevronIcon";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 import ProductionTopMenu, {
+  PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
@@ -265,7 +266,7 @@ export default function Dramaturgy({
   ) : null;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
+    <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* ── Frozen toolbar ── */}
       <ProductionTopMenu overflow={toolbarOverflow}>
         {toolbarStage < 7 && (

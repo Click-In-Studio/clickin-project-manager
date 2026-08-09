@@ -8,6 +8,7 @@ import { TEMPLATE_ABBR_HINTS } from "@/lib/cue-list-types";
 import type { MemberWithRoles } from "@/lib/db";
 import CueListDetail from "./CueListDetail";
 import ProductionTopMenu, {
+  PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
   useProductionToolbar,
 } from "./ProductionTopMenu";
@@ -244,7 +245,7 @@ export default function CueListsManager({
   }, [drawerListId, creating]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
+    <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
       <ProductionTopMenu
         overflow={toolbarStage >= 5 && canCreate ? (

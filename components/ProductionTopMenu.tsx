@@ -19,6 +19,7 @@ export const PRODUCTION_TOP_MENU_SLOT_ID = "production-page-toolbar-slot";
 export const PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID = "production-page-toolbar-overflow-slot";
 export const PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID = "production-page-toolbar-search-overflow-slot";
 export const PRODUCTION_TOP_MENU_RIGHT_CLASS = "production-top-menu-right";
+export const PRODUCTION_PAGE_SCROLL_ROOT_CLASS = "flex h-full min-h-0 flex-col overflow-hidden bg-[var(--paper)]";
 
 export type ProductionToolbarStage = 0 | 1 | 2 | 3 | 4.1 | 4.2 | 5 | 6 | 7;
 
