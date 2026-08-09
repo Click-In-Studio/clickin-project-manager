@@ -69,9 +69,6 @@ export type Permission =
   | "dramaturgy_view:delete_public"
   | "dramaturgy_view:overwrite_public"
   // ─── 普通管理 - 已发布内容修改门控 ───────────────────────────────────────────
-  | "event:modify_published"
-  | "event:revoke"
-  | "event:delete"
   | "report:modify_published"
   | "report:revoke"
   // ─── 普通管理 - Tech Req 删除 ─────────────────────────────────────────────────
@@ -166,16 +163,8 @@ export type Permission =
   | "cue:edit_description"
   | "cue:move"
   | "cue:mount"
-  // ─── 写权限 - 事件 ────────────────────────────────────────────────────────────
+  // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   | "event:create"
-  | "event:edit"
-  | "event:publish"
-  | "event:create_schedule"
-  | "event:edit_schedule"
-  | "event:delete_schedule"
-  | "event:assign_participants"
-  | "event:assign_schedule_participants"
-  | "event:edit_call"
   | "event:create_tech_req"
   | "event:edit_tech_req"
   | "event:assign_tech_req"
@@ -212,8 +201,6 @@ export type Permission =
   | "cue_list:view"
   | "cue:view"
   | "contacts:view"
-  | "event:view"
-  | "event:view_call_sheet"
   | "event:view_call_sheet_any"
   | "event:view_tech_req"
   | "event:view_tech_req_any"
@@ -431,8 +418,6 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "cue_list:view",
   "cue:view",
   "contacts:view",
-  "event:view",
-  "event:view_call_sheet",
   "event:follow",
   "asset:view",
   "asset:download",
@@ -493,29 +478,18 @@ const DRAMATURGY_FULL_SET: readonly Permission[] = [
 ];
 
 // ─── SM Event Permissions ──────────────────────────────────────────────────────
+// Per-event 写权限（event:edit 等）已迁移至 resource_grant；SM 通过 dept.permissions[]
+// 配置获得 event 的免审批区间，不再需要原子权限。
 const SM_EVENT_PERMS: readonly Permission[] = [
   "event:create",
-  "event:edit",
-  "event:publish",
   "event:view_call_sheet_any",
   "event:view_tech_req",
   "event:view_tech_req_any",
-  "event:edit_call",
   "event:delete_tech_req_any",
-  "event:create_schedule",
-  "event:edit_schedule",
-  "event:delete_schedule",
-  "event:assign_participants",
-  "event:assign_schedule_participants",
 ];
 
 const DIRECTOR_EVENT_PERMS: readonly Permission[] = [
   "event:view_tech_req_any",
-  "event:create_schedule",
-  "event:edit_schedule",
-  "event:delete_schedule",
-  "event:assign_participants",
-  "event:assign_schedule_participants",
 ];
 
 // ─── 制作人 Full Set ───────────────────────────────────────────────────────────
@@ -563,9 +537,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
-  "event:modify_published",
-  "event:revoke",
-  "event:delete",
   "report:modify_published",
   "report:revoke",
   "event:delete_tech_req_any",
@@ -806,7 +777,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue:create_any", "cue:delete_any", "cue:renumber_any", "cue:rename_any",
   "cue:edit_description_any", "cue:move_any", "cue:mount_any",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-  "event:modify_published", "event:revoke", "event:delete",
   "report:modify_published", "report:revoke",
   "event:delete_tech_req_any",
   "character:delete",
@@ -834,10 +804,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue_list:edit_abbr", "cue_list:edit_description", "cue_list:manage_permissions",
   "cue:create", "cue:delete", "cue:renumber", "cue:rename",
   "cue:edit_description", "cue:move", "cue:mount",
-  "event:create", "event:edit", "event:publish",
-  "event:create_schedule", "event:edit_schedule", "event:delete_schedule",
-  "event:assign_participants", "event:assign_schedule_participants",
-  "event:edit_call",
+  "event:create",
   "event:create_tech_req", "event:edit_tech_req", "event:assign_tech_req", "event:delete_tech_req",
   "event:create_tech_req_any", "event:edit_tech_req_any", "event:assign_tech_req_any",
   "report:create", "report:edit", "report:publish", "report:delete",
@@ -847,7 +814,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
   "scene:view", "character:view", "script:view", "cue_list:view", "cue:view",
-  "contacts:view", "event:view", "event:view_call_sheet", "event:view_call_sheet_any",
+  "contacts:view", "event:view_call_sheet_any",
   "event:view_tech_req", "event:view_tech_req_any", "event:follow",
   "report:view", "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",

@@ -42,8 +42,8 @@ export default async function EventViewPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  // Role-level OR per-instance resource_grant → full editor view on this page
-  const canViewFull = hasPermission("event:edit", prodPermCtx)
+  // Per-instance resource_grant edit+ → full editor view on this page
+  const canViewFull = prodPermCtx.isAdmin
     || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
 
   // Non-editors cannot see unpublished events

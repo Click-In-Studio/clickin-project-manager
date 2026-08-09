@@ -388,10 +388,13 @@ export async function setDepartmentMembers(
   }
 }
 
-/** Replace the full participant list for an event in one transaction. */
+/** Replace the full participant list for an event in one transaction.
+ *  Writes an assigned view grant for each new participant. */
 export async function setEventParticipants(
   eventId: string,
   participants: { userId: string; name: string; departmentId: string | null; role: "participant" | "follower" }[],
+  productionId: string,
+  assignedBy: string,
 ): Promise<void> {
   const seen = new Set<string>();
   const unique = participants.filter(p => { if (seen.has(p.userId)) return false; seen.add(p.userId); return true; });
@@ -405,6 +408,19 @@ export async function setEventParticipants(
       await client.query(
         "INSERT INTO event_participant (id, event_id, user_id, name, department_id, role) VALUES ($1,$2,$3,$4,$5,$6)",
         [pid(), eventId, p.userId, p.name, p.departmentId, p.role],
+      );
+    }
+    // Write assigned view grants for all participants (idempotent).
+    if (unique.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT $1, unnest($2::uuid[]), 'event', $3, '*', 'view', 'assigned', $4
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, unique.map(p => p.userId), eventId, assignedBy],
       );
     }
     await client.query("COMMIT");

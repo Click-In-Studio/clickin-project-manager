@@ -184,12 +184,12 @@ export function canModerateNotes(permCtx: PermissionContext): boolean {
 
 /**
  * Returns true if the user can view unpublished reports.
- * Synchronous role-level check: SM/director/producer have event:edit in their role.
- * Used for list pages and read gating where a specific report/event ID is not available.
+ * Phase 5a: event:edit/edit_schedule are now resource_grant levels; use event:create as a
+ * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to resource_grant.
  */
 export function isReportViewer(permCtx: PermissionContext): boolean {
   if (permCtx.isAdmin) return true;
-  return hasPermission("event:edit", permCtx) || hasPermission("event:edit_schedule", permCtx);
+  return hasPermission("event:create", permCtx);
 }
 
 /**
