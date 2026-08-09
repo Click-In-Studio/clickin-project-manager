@@ -130,11 +130,17 @@ span[data-stage-inline] {
   display: none;
 }
 
-/* Side panels: fill content area on mobile (below header, above bottom nav) */
+/* Side panels stay above the bottom nav wherever that nav is visible. */
+@media (max-width: 1023px) {
+  .panel-mobile-full {
+    bottom: 4rem !important;
+  }
+}
+
+/* Side panels fill the available content width on phones. */
 @media (max-width: 639px) {
   .panel-mobile-full {
     right: 0 !important;
-    bottom: 3.5rem !important;
     left: 0 !important;
     width: 100% !important;
   }

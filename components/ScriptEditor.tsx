@@ -3953,6 +3953,13 @@ type SideBlockPanelNavigation = {
   onNext: () => void;
 };
 
+type BlockSidePanelKind = "comment" | "asset";
+
+type CommentDraft = {
+  text: string;
+  mentions: Mention[];
+};
+
 type SideBlockPanelNavigationTargets = {
   previousBlockId: string | null;
   nextBlockId: string | null;
@@ -3972,8 +3979,8 @@ const SPEECH_TAIL_PIN_OFFSET_PX = 96;
 const SPEECH_TAIL_BASE_HALF_PX = 14;
 const SPEECH_TAIL_EDGE_INSET_PX = 24;
 const SIDE_PANEL_TOP_PX = 64; // Merged AppShell and ScriptEditor header
-const SIDE_PANEL_MIN_WIDTH_PX = 360;
-const SIDE_PANEL_MAX_WIDTH_PX = 576;
+const SIDE_PANEL_MIN_WIDTH_PX = 270;
+const SIDE_PANEL_MAX_WIDTH_PX = 384;
 const SIDE_PANEL_GUTTER_PADDING_PX = 15;
 
 function buildCommentBlockCaption(block: Block, characters: Character[], displayNumber: number): CommentBlockCaption {
@@ -6106,7 +6113,8 @@ function relativeTime(iso: string): string {
 
 function SideBlockPanel({
   blockId,
-  title,
+  activePanel,
+  onPanelChange,
   blockCaption,
   hasGutterSpace,
   gutterWidth,
@@ -6115,7 +6123,8 @@ function SideBlockPanel({
   children,
 }: {
   blockId: string;
-  title: string;
+  activePanel: BlockSidePanelKind;
+  onPanelChange: (panel: BlockSidePanelKind) => void;
   blockCaption?: CommentBlockCaption | null;
   hasGutterSpace: boolean;
   gutterWidth: number;
@@ -6132,7 +6141,7 @@ function SideBlockPanel({
     updateHeaderHeight();
     window.addEventListener("resize", updateHeaderHeight);
     return () => window.removeEventListener("resize", updateHeaderHeight);
-  }, [title, blockCaption?.label, blockCaption?.body]);
+  }, [activePanel, blockCaption?.label, blockCaption?.body]);
 
   const tailUsesHeaderFill = pointerTop + SPEECH_TAIL_BASE_HALF_PX <= headerHeight;
 
@@ -6147,51 +6156,69 @@ function SideBlockPanel({
       }}
     >
       <SpeechTail top={pointerTop} offsetY={pointerOffsetY} fillClassName={tailUsesHeaderFill ? "fill-zinc-100" : "fill-white"} />
-      <div ref={headerRef} className="relative z-10 flex shrink-0 items-start justify-between gap-3 border-y border-emerald-600/80 bg-zinc-100 px-4 py-3">
-        <div className="min-w-0">
-          <span className="block text-sm font-semibold text-zinc-700">{title}</span>
-          {blockCaption && (
-            <p className="mt-1 line-clamp-1 text-xs leading-snug text-zinc-500" title={`${blockCaption.label} ${blockCaption.body}`}>
-              <span className="font-bold text-zinc-700">{blockCaption.label}</span>{" "}
-              <span>{blockCaption.body}</span>
-            </p>
-          )}
+      <div ref={headerRef} className="relative z-10 shrink-0 border-y border-emerald-600/80 bg-zinc-100 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => onPanelChange("comment")}
+              aria-pressed={activePanel === "comment"}
+              className={activePanel === "comment" ? "text-zinc-700" : "text-zinc-300 hover:text-emerald-600/80"}
+            >
+              评论
+            </button>
+            <span className="text-zinc-300" aria-hidden="true">/</span>
+            <button
+              type="button"
+              onClick={() => onPanelChange("asset")}
+              aria-pressed={activePanel === "asset"}
+              className={activePanel === "asset" ? "text-zinc-700" : "text-zinc-300 hover:text-emerald-600/80"}
+            >
+              附件
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {navigation && (
+              <>
+                <button
+                  type="button"
+                  onClick={navigation.onPrevious}
+                  disabled={!navigation.hasPrevious}
+                  className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                  title="上一条"
+                >
+                  <ChevronIcon direction="up" />
+                </button>
+                <button
+                  type="button"
+                  onClick={navigation.onNext}
+                  disabled={!navigation.hasNext}
+                  className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                  title="下一条"
+                >
+                  <ChevronIcon />
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80"
+              title="关闭"
+            >
+              <span className="relative h-3 w-3" aria-hidden="true">
+                <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+                <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 -rotate-45 bg-current" />
+              </span>
+            </button>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {navigation && (
-            <>
-              <button
-                type="button"
-                onClick={navigation.onPrevious}
-                disabled={!navigation.hasPrevious}
-                className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
-                title="上一条"
-              >
-                <ChevronIcon direction="up" />
-              </button>
-              <button
-                type="button"
-                onClick={navigation.onNext}
-                disabled={!navigation.hasNext}
-                className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
-                title="下一条"
-              >
-                <ChevronIcon />
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80"
-            title="关闭"
-          >
-            <span className="relative h-3 w-3" aria-hidden="true">
-              <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
-              <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 -rotate-45 bg-current" />
-            </span>
-          </button>
-        </div>
+        {blockCaption && (
+          <p className="mt-2 line-clamp-1 text-xs leading-snug text-zinc-500" title={`${blockCaption.label} ${blockCaption.body}`}>
+            <span className="font-bold text-zinc-700">{blockCaption.label}</span>{" "}
+            <span>{blockCaption.body}</span>
+          </p>
+        )}
       </div>
       {children}
     </div>
@@ -6203,6 +6230,7 @@ function SideBlockPanel({
 function CommentsPanel({
   blockId, productionId, comments, currentUserId, isAdmin,
   onAdd, onEdit, onDelete, onClose, onNavigate,
+  onPanelChange, draft, onDraftChange,
   hasGutterSpace,
   gutterWidth,
   blockCaption,
@@ -6213,14 +6241,17 @@ function CommentsPanel({
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
   onNavigate?: () => void;
+  onPanelChange: (panel: BlockSidePanelKind) => void;
+  draft?: CommentDraft;
+  onDraftChange: (blockId: string, draft: CommentDraft) => void;
   hasGutterSpace: boolean;
   gutterWidth: number;
   blockCaption?: CommentBlockCaption | null;
   navigation?: SideBlockPanelNavigation;
 }) {
   const [members, setMembers] = useState<Mention[]>([]);
-  const [newText, setNewText] = useState("");
-  const [newMentions, setNewMentions] = useState<Mention[]>([]);
+  const [newText, setNewText] = useState(draft?.text ?? "");
+  const [newMentions, setNewMentions] = useState<Mention[]>(draft?.mentions ?? []);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
@@ -6229,6 +6260,13 @@ function CommentsPanel({
   const [submitting, setSubmitting] = useState(false);
   const [pendingNewAssets, setPendingNewAssets] = useState<PendingAsset[]>([]);
   const [pendingReplyAssets, setPendingReplyAssets] = useState<PendingAsset[]>([]);
+  const draftRef = useRef<CommentDraft>(draft ?? { text: "", mentions: [] });
+
+  const updateDraft = (patch: Partial<CommentDraft>) => {
+    const next = { ...draftRef.current, ...patch };
+    draftRef.current = next;
+    onDraftChange(blockId, next);
+  };
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/production/${productionId}/mention-users`)
@@ -6274,6 +6312,9 @@ function CommentsPanel({
     const c = await postComment({ text, mentions: newMentions });
     if (c) {
       if (pendingNewAssets.length > 0) await mountAssets(c.id, pendingNewAssets);
+      const emptyDraft = { text: "", mentions: [] };
+      draftRef.current = emptyDraft;
+      onDraftChange(blockId, emptyDraft);
       onAdd(c); setNewText(""); setNewMentions([]); setPendingNewAssets([]);
     }
   };
@@ -6365,7 +6406,8 @@ function CommentsPanel({
   return (
     <SideBlockPanel
       blockId={blockId}
-      title="评论"
+      activePanel="comment"
+      onPanelChange={onPanelChange}
       blockCaption={blockCaption}
       hasGutterSpace={hasGutterSpace}
       gutterWidth={gutterWidth}
@@ -6438,8 +6480,8 @@ function CommentsPanel({
       </div>
 
       <div className="relative z-10 shrink-0 border-t border-zinc-100 bg-white px-4 py-3">
-        <SmartTextarea value={newText} onChange={setNewText}
-          memberMention={{ members, onMentionsChange: setNewMentions }}
+        <SmartTextarea value={newText} onChange={value => { setNewText(value); updateDraft({ text: value }); }}
+          memberMention={{ members, onMentionsChange: mentions => { setNewMentions(mentions); updateDraft({ mentions }); } }}
           placeholder="添加评论… (⌘↵ 发布)" rows={3}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
           className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
@@ -8373,6 +8415,7 @@ export default function ScriptEditor({
       if (idx >= 0) { scrollToBlockIdx(idx, "center"); setHighlightedBlockId(blockId); }
       if (new URLSearchParams(query).get("open_comment") === "true") {
         setActiveCommentBlockId(blockId);
+        setTagEditorOnTop(false);
       }
       return () => clearTimeout(unlockTimer);
     }
@@ -8621,6 +8664,17 @@ export default function ScriptEditor({
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
   const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [tagEditorOnTop, setTagEditorOnTop] = useState(false);
+  const commentDraftsRef = useRef(new Map<string, CommentDraft>());
+  const updateCommentDraft = useCallback((blockId: string, draft: CommentDraft) => {
+    if (draft.text.length > 0) commentDraftsRef.current.set(blockId, draft);
+    else commentDraftsRef.current.delete(blockId);
+  }, []);
+  const openBlockSidePanel = useCallback((panel: BlockSidePanelKind, blockId: string) => {
+    setActiveCommentBlockId(panel === "comment" ? blockId : null);
+    setActiveAssetBlockId(panel === "asset" ? blockId : null);
+    setTagEditorOnTop(false);
+  }, []);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
   const [leftGutterWidth, setLeftGutterWidth] = useState(0);
@@ -10214,19 +10268,14 @@ export default function ScriptEditor({
     const nextBlockId = direction === -1 ? targets.previousBlockId : targets.nextBlockId;
     if (!nextBlockId) return;
 
-    if (kind === "comment") {
-      setActiveAssetBlockId(null);
-      setActiveCommentBlockId(nextBlockId);
-    } else {
-      setActiveCommentBlockId(null);
-      setActiveAssetBlockId(nextBlockId);
-    }
+    openBlockSidePanel(kind, nextBlockId);
 
     const blockIndex = blocksRef.current.findIndex(block => block.id === nextBlockId);
     if (blockIndex >= 0) scrollToBlockIdx(blockIndex, "center");
   }, [
     assetPanelNavigationTargets,
     commentPanelNavigationTargets,
+    openBlockSidePanel,
     scrollToBlockIdx,
   ]);
 
@@ -10571,7 +10620,7 @@ export default function ScriptEditor({
                       <>
                         <div className="my-1 border-t border-zinc-50" />
                         <button
-                          onClick={() => { setTagEditorOpen(true); setOpenMenu(null); }}
+                          onClick={() => { setTagEditorOpen(true); setTagEditorOnTop(true); setOpenMenu(null); }}
                           className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
                         >
                           标签设置…
@@ -11841,8 +11890,8 @@ export default function ScriptEditor({
                   commentBubbleOffsetY={commentBubbleOffsets.get(block.id) ?? 0}
                   rightGutterCanShowComments={rightGutterCanShowComments}
                   commentBubbleMaxWidth={commentBubbleMaxWidth}
-                  onCommentClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(block.id); }}
-                  onAssetClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(block.id); }}
+                  onCommentClick={() => openBlockSidePanel("comment", block.id)}
+                  onAssetClick={() => openBlockSidePanel("asset", block.id)}
                   canEditText={canEditText}
                   canEditMetadata={canEditMetadata}
                   canEditRehearsalMark={effectiveCanEditRehearsalMark}
@@ -11901,7 +11950,9 @@ export default function ScriptEditor({
       {tagEditorOpen && productionId && (
         <>
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setTagEditorOpen(false)} />
-        <div className="fixed right-0 top-[4rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full">
+        <div
+          className={`fixed right-0 top-[4rem] bottom-0 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full ${tagEditorOnTop ? "z-[31]" : "z-30"}`}
+        >
           <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">标签设置</span>
             <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
@@ -11923,7 +11974,8 @@ export default function ScriptEditor({
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveAssetBlockId(null)} />
         <SideBlockPanel
           blockId={activeAssetBlockId}
-          title="附件"
+          activePanel="asset"
+          onPanelChange={panel => openBlockSidePanel(panel, activeAssetBlockId)}
           blockCaption={activeAssetBlockCaption}
           hasGutterSpace={rightGutterCanShowComments}
           gutterWidth={rightGutterWidth}
@@ -11955,6 +12007,7 @@ export default function ScriptEditor({
         <>
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveCommentBlockId(null)} />
         <CommentsPanel
+          key={activeCommentBlockId}
           blockId={activeCommentBlockId}
           productionId={productionId}
           comments={commentsByBlockId.get(activeCommentBlockId) ?? EMPTY_COMMENTS}
@@ -11965,6 +12018,9 @@ export default function ScriptEditor({
           onDelete={id => setComments(prev => prev.filter(x => x.id !== id))}
           onClose={() => setActiveCommentBlockId(null)}
           onNavigate={prepareForNavigation}
+          onPanelChange={panel => openBlockSidePanel(panel, activeCommentBlockId)}
+          draft={commentDraftsRef.current.get(activeCommentBlockId)}
+          onDraftChange={updateCommentDraft}
           hasGutterSpace={rightGutterCanShowComments}
           gutterWidth={rightGutterWidth}
           blockCaption={activeCommentBlockCaption}
@@ -12527,13 +12583,13 @@ export default function ScriptEditor({
                   </button>
                 )}
                 <button
-                  onClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(mobileBlockMenuBlockId); close(); }}
+                  onClick={() => { openBlockSidePanel("asset", mobileBlockMenuBlockId); close(); }}
                   className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                 >
                   附件
                 </button>
                 <button
-                  onClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(mobileBlockMenuBlockId); close(); }}
+                  onClick={() => { openBlockSidePanel("comment", mobileBlockMenuBlockId); close(); }}
                   className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                 >
                   {commentCount > 0 ? `评论（${commentCount}）` : "评论"}

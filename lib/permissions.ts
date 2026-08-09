@@ -274,6 +274,7 @@ export function hasScopedPermission(
 
 export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "script:view",
+  "script:comment",
   "contacts:view",
 ];
 

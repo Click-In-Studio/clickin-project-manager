@@ -43,6 +43,7 @@ import {
   GET as getScriptHandler,
   PATCH as patchScriptHandler,
 } from "@/app/api/script/[id]/route";
+import { POST as createScriptCommentHandler } from "@/app/api/script/[id]/comments/route";
 import {
   GET as listMembersHandler,
   POST as addMemberHandler,
@@ -855,5 +856,20 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toMatch(/script:edit/);
+  });
+
+  it("member without a script-editing role can publish a comment", async () => {
+    const res = await createScriptCommentHandler(
+      req(`/api/script/${SCRIPT_PERM_PROD}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ blockId: "test-comment-block", body: "测试评论" }),
+        session: userSession(),
+      }),
+      ctx({ id: SCRIPT_PERM_PROD }),
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { comment: { body: string; userId: string } };
+    expect(body.comment).toMatchObject({ body: "测试评论", userId: TEST_USER });
   });
 });
