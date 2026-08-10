@@ -1795,7 +1795,17 @@ export async function listProductionReports(
      FROM event_report er
      JOIN production_event pe ON pe.id = er.event_id
      WHERE pe.production_id = $1
-       AND ($3 OR er.published_at IS NOT NULL)
+       AND ($3 OR er.published_at IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM resource_grant rg
+              JOIN resource_permission_level rpl
+                ON rpl.resource_type = rg.resource_type AND rpl.permission_level = rg.permission_level
+              JOIN resource_permission_level rpl_view
+                ON rpl_view.resource_type = 'report' AND rpl_view.permission_level = 'view'
+              WHERE rg.user_id = $2::uuid AND rg.production_id = $1
+                AND rg.resource_type = 'report' AND rg.resource_id = er.id
+                AND NOT rg.is_revoked AND rpl.sort_order >= rpl_view.sort_order
+            ))
      ORDER BY COALESCE(er.published_at, er.updated_at) DESC`,
     [productionId, userId, includeDrafts]
   );

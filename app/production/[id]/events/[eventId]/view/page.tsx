@@ -12,7 +12,6 @@ import {
   getSelfParticipantRole,
   listEventDepartments,
 } from "@/lib/event-db";
-import { isReportViewer } from "@/lib/event-permissions";
 import { hasResourceGrantLevel, hasUserAnyTechReqGrantInEvent } from "@/lib/resource-grant-db";
 import EventFollowerClient from "@/components/EventFollowerClient";
 
@@ -62,8 +61,15 @@ export default async function EventViewPage({
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
   const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
-  const canViewReport = isReportViewer(prodPermCtx);
-  const visibleReports = canViewReport ? reports : reports.filter(r => r.publishedAt !== null);
+  const visibleReports = canViewFull
+    ? reports
+    : (await Promise.all(
+        reports.map(async r => {
+          if (r.publishedAt !== null) return r;
+          const hasGrant = await hasResourceGrantLevel(session.userId, productionId, "report", r.id, "view");
+          return hasGrant ? r : null;
+        })
+      )).filter((r): r is NonNullable<typeof r> => r !== null);
 
   return (
     <EventFollowerClient
