@@ -83,6 +83,9 @@ const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
 const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [0, 3, 4.1, 4.2, 5, 6];
+const PRODUCTION_SIDEBAR_TRANSITION_MS = 150;
+// Below this width the full production sidebar no longer fits the script layout.
+const SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX = 1496;
 
 function fixedProductionToolbarStageForWidth(width: number): 0 | 1 | 2 {
   if (width >= 1280) return 0;
@@ -215,6 +218,7 @@ function NavItem({
   badge,
   warningBadge,
   onClick,
+  folded,
 }: {
   href: string;
   symbol: string;
@@ -224,36 +228,53 @@ function NavItem({
   badge?: number;
   warningBadge?: number;
   onClick?: () => void;
+  folded?: boolean;
 }) {
+  const foldedBadge = folded ? Math.max(badge ?? 0, warningBadge ?? 0) : 0;
+
   return (
     <Link
       href={href}
       onClick={onClick}
-      className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors ${
+      aria-label={folded ? `${label}${foldedBadge > 0 ? ` ${foldedBadge}` : ""}` : undefined}
+      title={folded ? label : undefined}
+      className={`flex min-h-[46px] items-center rounded-[9px] px-2.5 py-1.5 transition-colors ${
+        folded ? "relative justify-center" : "gap-2.5 overflow-hidden"
+      } ${
         active
           ? "bg-[var(--surface)] shadow-[inset_3px_0_0_#182a2a]"
           : "hover:bg-white/50"
       }`}
     >
-      <span className="w-[27px] h-[27px] rounded-[7px] border border-[#cbd2cf] flex items-center justify-center text-[11px] text-[#667676] shrink-0 leading-none">
+      <span className="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[7px] border border-[#cbd2cf] text-[11px] leading-none text-[#667676]">
         {symbol}
       </span>
-      <span className="flex flex-col min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
-          {badge != null && badge > 0 && (
-            <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
-              {badge > 99 ? "99+" : badge}
-            </span>
-          )}
-          {warningBadge != null && warningBadge > 0 && (
-            <span className="min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
-              {warningBadge > 99 ? "99+" : warningBadge}
-            </span>
-          )}
+      {folded ? (
+        foldedBadge > 0 && (
+          <span className={`absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white ${
+            (warningBadge ?? 0) >= foldedBadge ? "bg-amber-500" : "bg-[#c0392b]"
+          }`}>
+            {foldedBadge > 99 ? "99+" : foldedBadge}
+          </span>
+        )
+      ) : (
+        <span className="flex min-w-0 flex-1 flex-col overflow-hidden whitespace-nowrap">
+          <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+            <span className="min-w-0 truncate text-[12px] font-bold leading-tight text-[#182a2a]">{label}</span>
+            {badge != null && badge > 0 && (
+              <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-[#c0392b] px-1 text-[9px] font-bold leading-none text-white">
+                {badge > 99 ? "99+" : badge}
+              </span>
+            )}
+            {warningBadge != null && warningBadge > 0 && (
+              <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
+                {warningBadge > 99 ? "99+" : warningBadge}
+              </span>
+            )}
+          </span>
+          <span className="mt-0.5 truncate text-[9px] text-[#667676]">{hint}</span>
         </span>
-        <span className="text-[9px] text-[#667676] mt-0.5 truncate">{hint}</span>
-      </span>
+      )}
     </Link>
   );
 }
@@ -266,7 +287,7 @@ function NavGroup({ label, color }: { label: string; color: "script" | "stage" }
           color === "script" ? "bg-[#2f6670]" : "bg-[#a55c32]"
         }`}
       />
-      <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">
+      <span className="whitespace-nowrap text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">
         {label}
       </span>
     </div>
@@ -607,6 +628,10 @@ export default function AppShell({ session, productions, children, initialUnread
   const [productionToolbarFixedStage, setProductionToolbarFixedStage] = useState<0 | 1 | 2>(0);
   const [productionToolbarStage, setProductionToolbarStage] = useState<ProductionToolbarStage>(0);
   const [productionToolbarHasStoredControls, setProductionToolbarHasStoredControls] = useState(false);
+  const [scriptProductionSidebarAutoFolded, setScriptProductionSidebarAutoFolded] = useState(false);
+  const [scriptProductionSidebarManuallyFolded, setScriptProductionSidebarManuallyFolded] = useState(false);
+  const [scriptProductionSidebarOverlayOpen, setScriptProductionSidebarOverlayOpen] = useState(false);
+  const [scriptProductionSidebarContentFolded, setScriptProductionSidebarContentFolded] = useState(false);
   const [topOverflowOpen, setTopOverflowOpen] = useState(false);
   const [productionSearchPath, setProductionSearchPath] = useState<string | null>(null);
   const topbarRef = useRef<HTMLElement>(null);
@@ -814,6 +839,50 @@ export default function AppShell({ session, productions, children, initialUnread
     return () => document.removeEventListener("mousedown", handler);
   }, [topOverflowOpen, closeTopOverflow]);
 
+  const isScriptPage = /^\/production\/[^/]+\/script(?:\/|$)/.test(pathname);
+  useLayoutEffect(() => {
+    if (!isScriptPage) {
+      setScriptProductionSidebarAutoFolded(false);
+      setScriptProductionSidebarManuallyFolded(false);
+      setScriptProductionSidebarOverlayOpen(false);
+      setScriptProductionSidebarContentFolded(false);
+      return;
+    }
+
+    const foldQuery = window.matchMedia(`(max-width: ${SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX - 1}px)`);
+    const hiddenQuery = window.matchMedia("(max-width: 1023px)");
+    const syncSidebarState = () => {
+      const autoFolded = foldQuery.matches;
+      setScriptProductionSidebarAutoFolded(autoFolded);
+      if (!autoFolded || hiddenQuery.matches) setScriptProductionSidebarOverlayOpen(false);
+    };
+    syncSidebarState();
+    foldQuery.addEventListener("change", syncSidebarState);
+    hiddenQuery.addEventListener("change", syncSidebarState);
+    return () => {
+      foldQuery.removeEventListener("change", syncSidebarState);
+      hiddenQuery.removeEventListener("change", syncSidebarState);
+    };
+  }, [isScriptPage]);
+
+  const productionSidebarOverlayOpen = isScriptPage
+    && scriptProductionSidebarAutoFolded
+    && scriptProductionSidebarOverlayOpen;
+  const productionSidebarFolded = isScriptPage && (
+    scriptProductionSidebarAutoFolded
+      ? !productionSidebarOverlayOpen
+      : scriptProductionSidebarManuallyFolded
+  );
+  const productionSidebarContentFolded = isScriptPage && scriptProductionSidebarContentFolded;
+  useEffect(() => {
+    if (!isScriptPage) return;
+    const timer = window.setTimeout(
+      () => setScriptProductionSidebarContentFolded(productionSidebarFolded),
+      PRODUCTION_SIDEBAR_TRANSITION_MS + 20,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isScriptPage, productionSidebarFolded]);
+
   if (!session || pathname.startsWith("/login")) {
     return <>{children}</>;
   }
@@ -831,6 +900,13 @@ export default function AppShell({ session, productions, children, initialUnread
   const activeProductions = productions.filter((p) => !p.archivedAt);
   const isAdminMode = !!(productionId && pathname.startsWith(`/production/${productionId}/admin`));
   const activeAdminModule = isAdminMode ? extractAdminModule(pathname, productionId!) : null;
+  const toggleScriptProductionSidebar = () => {
+    if (scriptProductionSidebarAutoFolded) {
+      setScriptProductionSidebarOverlayOpen((open) => !open);
+      return;
+    }
+    setScriptProductionSidebarManuallyFolded((folded) => !folded);
+  };
 
   function navHref(path: string) {
     return productionId ? `/production/${productionId}/${path}` : "#";
@@ -1058,9 +1134,19 @@ export default function AppShell({ session, productions, children, initialUnread
       </header>
 
       {/* Body: sidebar + workspace */}
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
         {/* Sidebar (desktop only) */}
-        <aside className="hidden lg:flex w-[240px] shrink-0 flex-col overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] px-3.5 py-5">
+        <aside
+          className={`hover-reveal-scrollbar hidden lg:flex shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] transition-[width,padding,margin] duration-150 ${
+            isScriptPage
+              ? productionSidebarOverlayOpen
+                ? "z-30 -mr-[168px] w-[240px] px-3.5 pt-9 pb-5 shadow-lg"
+                : productionSidebarFolded
+                ? "w-[72px] px-2 pt-9 pb-5"
+                : "w-[240px] px-3.5 pt-9 pb-5"
+              : "w-[240px] px-3.5 py-5"
+          }`}
+        >
           {isAdminMode ? (
             /* ── Admin sidebar ── */
             <nav className="flex flex-col gap-0.5 flex-1">
@@ -1120,24 +1206,25 @@ export default function AppShell({ session, productions, children, initialUnread
 
               {productionId ? (
                 <>
-                  <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} />
-                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} />
-                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} />
+                  <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} folded={productionSidebarContentFolded} />
+                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} folded={productionSidebarContentFolded} />
+                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} folded={productionSidebarContentFolded} />
 
-                  <NavGroup label="创作侧" color="script" />
+                  <NavGroup label={productionSidebarContentFolded ? "创作" : "创作侧"} color="script" />
                   {CREATION_NAV.map((item) => (
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.label.charAt(0)}
+                      symbol={item.path === "cues" ? "Q" : item.label.charAt(0)}
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
                       warningBadge={item.path === "cues" ? cueWarnings : undefined}
+                      folded={productionSidebarContentFolded}
                     />
                   ))}
 
-                  <NavGroup label="制作侧" color="stage" />
+                  <NavGroup label={productionSidebarContentFolded ? "制作" : "制作侧"} color="stage" />
                   {PRODUCTION_NAV.map((item) => (
                     <NavItem
                       key={item.path}
@@ -1152,6 +1239,7 @@ export default function AppShell({ session, productions, children, initialUnread
                         item.path === "reports" ? unreadReports :
                         undefined
                       }
+                      folded={productionSidebarContentFolded}
                     />
                   ))}
                 </>
@@ -1159,6 +1247,24 @@ export default function AppShell({ session, productions, children, initialUnread
             </nav>
           )}
         </aside>
+
+        {isScriptPage && (
+          <div
+            className={`pointer-events-none absolute left-0 top-0 z-40 hidden h-8 items-start justify-end bg-white/20 pr-2 pt-1 backdrop-blur-[1px] transition-[width] duration-150 lg:flex ${
+              productionSidebarFolded ? "w-[72px]" : "w-[240px]"
+            }`}
+          >
+            <button
+              type="button"
+              aria-label={productionSidebarFolded ? "展开制作栏" : "折叠制作栏"}
+              title={productionSidebarFolded ? "展开制作栏" : "折叠制作栏"}
+              onClick={toggleScriptProductionSidebar}
+              className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full border border-transparent bg-transparent text-[#667676]/60 transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-[var(--line)] hover:bg-[var(--surface)] hover:text-[var(--ink)] hover:shadow-sm"
+            >
+              <ChevronIcon direction={productionSidebarFolded ? "right" : "left"} size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Workspace */}
         <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>

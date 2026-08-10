@@ -130,6 +130,36 @@ span[data-stage-inline] {
   display: none;
 }
 
+.hover-reveal-scrollbar {
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+.hover-reveal-scrollbar:hover {
+  scrollbar-color: rgba(161, 161, 170, 0.45) transparent;
+}
+
+.hover-reveal-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.hover-reveal-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.hover-reveal-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+.hover-reveal-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.45);
+}
+
+.hover-reveal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.55);
+}
+
 /* Side panels stay above the bottom nav wherever that nav is visible. */
 @media (max-width: 1023px) {
   .panel-mobile-full {
