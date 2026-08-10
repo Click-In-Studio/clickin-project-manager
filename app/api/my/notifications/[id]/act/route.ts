@@ -51,7 +51,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       (e) => e.type !== "approve_access_request" && e.type !== "reject_access_request",
     );
 
-    // Run self-managed effects first (each is atomic on its own connection).
+    // Invariant: an action must not mix multiple self-managed effects, because
+    // partial failure (second throws after first committed) has no rollback path.
+    if (selfManaged.length > 1) {
+      console.error("[notifications/act] action has >1 self-managed effects — refusing", action.id);
+      return Response.json({ error: "操作配置错误" }, { status: 500 });
+    }
+
+    // Run self-managed effect first (atomic on its own connection).
     for (const effect of selfManaged) {
       await executeSelfManagedEffect(effect, session.userId);
     }
@@ -185,13 +192,24 @@ async function executeSelfManagedEffect(
   switch (effect.type) {
     case "approve_access_request": {
       const result = await approveAccessRequest(effect.requestId, userId);
-      // conflict = someone else got there first; that's fine, swallow it
-      if (!result.ok && result.reason === "unauthorized") throw new Error("无权审批");
+      if (!result.ok) {
+        if (result.reason === "unauthorized") throw new Error("无权审批");
+        if (result.reason === "not_found") {
+          // Stale notification with a bad requestId — log but don't surface to user.
+          console.warn("[notifications/act] approve_access_request: requestId not found", effect.requestId);
+        }
+        // conflict = someone else got there first; swallow silently.
+      }
       break;
     }
     case "reject_access_request": {
       const result = await rejectAccessRequest(effect.requestId, userId);
-      if (!result.ok && result.reason === "unauthorized") throw new Error("无权审批");
+      if (!result.ok) {
+        if (result.reason === "unauthorized") throw new Error("无权审批");
+        if (result.reason === "not_found") {
+          console.warn("[notifications/act] reject_access_request: requestId not found", effect.requestId);
+        }
+      }
       break;
     }
     default:

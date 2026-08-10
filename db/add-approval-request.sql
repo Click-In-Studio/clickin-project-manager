@@ -6,7 +6,7 @@
 
 CREATE TABLE IF NOT EXISTS approval_request (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT NOT NULL,
+  production_id   TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
 
   subject_id      UUID NOT NULL REFERENCES app_user(id),
   type            TEXT NOT NULL CHECK (type IN (
