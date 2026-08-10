@@ -23,6 +23,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权限" }, { status: 403 });
 
   const body = (await req.json()) as {
+    type?: "resource_access" | "atomic_permission";
     resourceType?: string;
     resourceId?: string;
     resourceSub?: string;
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   const request = await submitAccessRequest(id, session.userId, {
+    type: body.type,
     resourceType: body.resourceType,
     resourceId: body.resourceId,
     resourceSub: body.resourceSub,

@@ -6902,6 +6902,7 @@ async function findResourceApprovers(
 }
 
 export type SubmitAccessRequestParams = {
+  type?: "resource_access" | "atomic_permission";
   resourceType: string;
   resourceId?: string;
   resourceSub?: string;
@@ -6930,15 +6931,16 @@ export async function submitAccessRequest(
   const initialStatus = supervisorId ? "pending_supervisor" : "pending_resource";
 
   // Insert the request
+  const requestType = params.type ?? "resource_access";
   const insertRes = await getPool().query<ApprovalRow>(
     `INSERT INTO approval_request
        (production_id, subject_id, type,
         resource_type, resource_id, resource_sub,
         permission_level, grant_type, ttl_duration, note, status)
-     VALUES ($1,$2,'resource_access',$3,$4,$5,$6,$7,$8::INTERVAL,$9,$10)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10,$11)
      RETURNING *`,
     [
-      productionId, userId,
+      productionId, userId, requestType,
       params.resourceType, resourceId, resourceSub,
       params.permissionLevel,
       params.grantType ?? "permanent",
@@ -7171,27 +7173,46 @@ export async function approveAccessRequest(
     );
     const fresh = freshRes.rows[0];
 
-    // Write resource_grant
-    await getPool().query(
-      `INSERT INTO resource_grant
-         (production_id, user_id, resource_type, resource_id, resource_sub,
-          permission_level, grant_source, confirmed_by, approval_id, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-         WHERE is_revoked = false
-       DO NOTHING`,
-      [
-        req.production_id,
-        req.subject_id,
-        req.resource_type,
-        req.resource_id ?? "*",
-        req.resource_sub ?? "*",
-        req.permission_level,
-        actorId,
-        requestId,
-        fresh?.expires_at ?? null,
-      ],
-    );
+    // Write grant — atomic_permission type → atomic_permission_grant, otherwise → resource_grant
+    if (req.type === "atomic_permission") {
+      const permKey = `${req.resource_type}:${req.permission_level}`;
+      await getPool().query(
+        `INSERT INTO atomic_permission_grant
+           (production_id, user_id, permission_key, grant_source, confirmed_by, approval_id, expires_at)
+         VALUES ($1,$2,$3,'approval',$4,$5,$6)
+         ON CONFLICT (production_id, user_id, permission_key) WHERE is_revoked = false
+         DO NOTHING`,
+        [
+          req.production_id,
+          req.subject_id,
+          permKey,
+          actorId,
+          requestId,
+          fresh?.expires_at ?? null,
+        ],
+      );
+    } else {
+      await getPool().query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by, approval_id, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [
+          req.production_id,
+          req.subject_id,
+          req.resource_type,
+          req.resource_id ?? "*",
+          req.resource_sub ?? "*",
+          req.permission_level,
+          actorId,
+          requestId,
+          fresh?.expires_at ?? null,
+        ],
+      );
+    }
 
     // Expire any pending action notifications for this request
     await getPool().query(
