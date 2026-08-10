@@ -162,7 +162,7 @@ export default function AccessRequestModal({
   const [resourceType,    setResourceType]    = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
 
-  const [grantType,  setGrantType]  = useState<"permanent" | "ttl">("permanent");
+  const [ttlOption,  setTtlOption]  = useState<"permanent" | "30m" | "1h" | "1d" | "1w">("permanent");
   const [note,       setNote]       = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -172,7 +172,7 @@ export default function AccessRequestModal({
     if (!open) return;
     setResourceType(RESOURCE_OPTIONS[0].type);
     setPermissionLevel(RESOURCE_OPTIONS[0].levels[0].value);
-    setGrantType("permanent");
+    setTtlOption("permanent");
     setNote("");
     setError(null);
     setDone(false);
@@ -220,7 +220,8 @@ export default function AccessRequestModal({
           type: permission ? "atomic_permission" : "resource_access",
           resourceType: postResourceType,
           permissionLevel: postPermissionLevel,
-          grantType,
+          grantType: ttlOption === "permanent" ? "permanent" : "ttl",
+          ttlDuration: ({ "30m": "30 minutes", "1h": "1 hour", "1d": "1 day", "1w": "7 days" } as Record<string, string>)[ttlOption] ?? null,
           note: note.trim() || null,
         }),
       });
@@ -372,12 +373,15 @@ export default function AccessRequestModal({
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
                 <select
-                  value={grantType}
-                  onChange={(e) => setGrantType(e.target.value as "permanent" | "ttl")}
+                  value={ttlOption}
+                  onChange={(e) => setTtlOption(e.target.value as typeof ttlOption)}
                   style={fieldStyle}
                 >
                   <option value="permanent">长期</option>
-                  <option value="ttl">临时（单次演出）</option>
+                  <option value="30m">30 分钟</option>
+                  <option value="1h">1 小时</option>
+                  <option value="1d">1 天</option>
+                  <option value="1w">1 周</option>
                 </select>
               </div>
 
