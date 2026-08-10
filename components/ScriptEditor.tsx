@@ -73,6 +73,7 @@ const SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX = 576;
 const SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX = 12;
 const SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM = 0.25;
 const SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM = 2.5;
+const SCRIPT_SCENE_DETAIL_MODE_LABEL = { view: "编辑", edit: "完成" } as const;
 const SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX = 80;
 /** Returns the workspace scroll container element, or document.documentElement as fallback. */
 function getScrollEl(): HTMLElement {
@@ -1108,10 +1109,20 @@ function ScriptSceneMetaField({
 }) {
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setDraft(value);
   }, [value]);
+
+  useLayoutEffect(() => {
+    if (!canEdit || !multiline) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    const borderHeight = textarea.offsetHeight - textarea.clientHeight;
+    textarea.style.height = `${textarea.scrollHeight + borderHeight}px`;
+  }, [canEdit, draft, multiline]);
 
   const commit = async () => {
     if (draft === value) return;
@@ -1131,12 +1142,13 @@ function ScriptSceneMetaField({
       {canEdit ? (
         multiline ? (
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             disabled={saving}
             rows={3}
-            className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
+            className="w-full resize-none overflow-hidden rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
             placeholder="—"
           />
         ) : (
@@ -1165,6 +1177,8 @@ function ScriptSceneDetailRail({
   productionId,
   versionId,
   canEdit,
+  controlledEditMode,
+  showHeader = true,
   isDeleteConfirmHighlighted = false,
   scrollbarOffsetPx,
   onUpdateIdentity,
@@ -1175,6 +1189,8 @@ function ScriptSceneDetailRail({
   productionId: string;
   versionId: string | null;
   canEdit: boolean;
+  controlledEditMode?: boolean;
+  showHeader?: boolean;
   isDeleteConfirmHighlighted?: boolean;
   scrollbarOffsetPx: number;
   onUpdateIdentity: (id: string, name: string) => void;
@@ -1182,7 +1198,8 @@ function ScriptSceneDetailRail({
 }) {
   const [nameDraft, setNameDraft] = useState(scene?.name ?? "");
   const [savingIdentity, setSavingIdentity] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const [internalEditMode, setInternalEditMode] = useState(false);
+  const editMode = controlledEditMode ?? internalEditMode;
   const railRef = useRef<HTMLDivElement | null>(null);
   const sectionCanEdit = canEdit && editMode;
   const chapterDurationDisplay = useMemo(
@@ -1212,20 +1229,20 @@ function ScriptSceneDetailRail({
     setNameDraft(scene?.name ?? "");
   }, [scene?.id, scene?.name]);
   useEffect(() => {
-    setEditMode(false);
+    setInternalEditMode(false);
   }, [scene?.id]);
   useEffect(() => {
-    if (!editMode) return;
+    if (!editMode || controlledEditMode !== undefined) return;
     const handlePointerDown = (event: PointerEvent) => {
       const rail = railRef.current;
       if (!rail || rail.contains(event.target as Node)) return;
       const active = document.activeElement;
       if (active instanceof HTMLElement && rail.contains(active)) active.blur();
-      window.setTimeout(() => setEditMode(false), 0);
+      window.setTimeout(() => setInternalEditMode(false), 0);
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [editMode]);
+  }, [controlledEditMode, editMode]);
 
   const commitIdentity = async () => {
     if (!scene) return;
@@ -1272,7 +1289,7 @@ function ScriptSceneDetailRail({
           : `linear-gradient(to bottom, rgb(255, 255, 255) 0, rgb(255, 255, 255) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) 100%)`,
       }}
     >
-      <div
+      {showHeader && <div
         className="mb-3 flex shrink-0 items-center justify-between gap-2"
         style={{
           marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
@@ -1301,19 +1318,19 @@ function ScriptSceneDetailRail({
         {canEdit ? (
           <button
             type="button"
-            onClick={() => setEditMode((value) => !value)}
+            onClick={() => setInternalEditMode((value) => !value)}
             className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
               editMode
                 ? "bg-zinc-700 text-white opacity-100 hover:bg-zinc-600"
                 : "pointer-events-none bg-[#637ca1] text-white opacity-0 hover:bg-[#91a8ca] group-hover/scene-detail:pointer-events-auto group-hover/scene-detail:opacity-100"
             }`}
           >
-            {editMode ? "确认" : "编辑"}
+            {editMode ? SCRIPT_SCENE_DETAIL_MODE_LABEL.edit : SCRIPT_SCENE_DETAIL_MODE_LABEL.view}
           </button>
         ) : (
           <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">只读</span>
         )}
-      </div>
+      </div>}
       {!scene ? (
         <div className="flex flex-1 items-center justify-center text-center text-xs leading-relaxed text-zinc-500">
           滚动或选择目录中的章节
@@ -1323,7 +1340,7 @@ function ScriptSceneDetailRail({
           className="hover-reveal-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
           style={{
             marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
-            paddingRight: `${scrollbarOffsetPx}px`,
+            paddingRight: `calc(${scrollbarOffsetPx}px + 8px)`,
             scrollbarGutter: "stable",
           }}
         >
@@ -1697,6 +1714,7 @@ function ScriptMarkerRow({
   onAddRehearsalBefore,
   onConvertToChapter,
   onConvertToScene,
+  onOpenSceneDetail,
   onDeleteConfirmChange,
   onSceneNameChange,
   deleteCount = 1,
@@ -1727,6 +1745,7 @@ function ScriptMarkerRow({
   onAddRehearsalBefore: () => void;
   onConvertToChapter?: () => void;
   onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
   onDeleteConfirmChange?: (confirming: boolean) => void;
   onSceneNameChange?: (id: string, name: string) => void;
   deleteCount?: number;
@@ -1773,7 +1792,8 @@ function ScriptMarkerRow({
     canAddChapterScene ||
     canAddRehearsal ||
     !!convertToChapter ||
-    !!convertToScene
+    !!convertToScene ||
+    !!onOpenSceneDetail
   );
   const boundaryMenuControl = canShowBoundaryMenu ? (
     <RehearsalMarkInput
@@ -1785,6 +1805,7 @@ function ScriptMarkerRow({
       onAddRehearsalBefore={onAddRehearsalBefore}
       onConvertToChapter={convertToChapter}
       onConvertToScene={convertToScene}
+      onOpenSceneDetail={isRehearsal ? undefined : onOpenSceneDetail}
     />
   ) : null;
   const markerRootCombinedStyle: React.CSSProperties | undefined = (
@@ -2036,6 +2057,7 @@ function BoundaryInsertMenu({
   onAddRehearsal,
   onConvertToChapter,
   onConvertToScene,
+  onOpenSceneDetail,
 }: {
   canAddChapterScene: boolean;
   canAddRehearsal: boolean;
@@ -2044,6 +2066,7 @@ function BoundaryInsertMenu({
   onAddRehearsal: () => void;
   onConvertToChapter?: () => void;
   onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
 }) {
   const actions: Array<[string, () => void]> = [
     ...(canAddChapterScene ? [
@@ -2085,6 +2108,13 @@ function BoundaryInsertMenu({
           {conversionActions.map(renderAction)}
         </>
       )}
+      {onOpenSceneDetail && (
+        <>
+          {(actions.length > 0 || conversionActions.length > 0) && <div className="my-1 h-px bg-zinc-100" />}
+          <div className="px-3 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">详情</div>
+          {renderAction(["查看构作详情", onOpenSceneDetail])}
+        </>
+      )}
     </div>
   );
 }
@@ -2113,6 +2143,7 @@ function RehearsalMarkInput({
   onAddRehearsalBefore,
   onConvertToChapter,
   onConvertToScene,
+  onOpenSceneDetail,
 }: {
   variant?: "script-block" | "marker-control";
   canAddChapterScene: boolean;
@@ -2122,6 +2153,7 @@ function RehearsalMarkInput({
   onAddRehearsalBefore: () => void;
   onConvertToChapter?: () => void;
   onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -2169,6 +2201,7 @@ function RehearsalMarkInput({
           onAddRehearsal={() => closeAfter(onAddRehearsalBefore)}
           onConvertToChapter={onConvertToChapter ? () => closeAfter(onConvertToChapter) : undefined}
           onConvertToScene={onConvertToScene ? () => closeAfter(onConvertToScene) : undefined}
+          onOpenSceneDetail={onOpenSceneDetail ? () => closeAfter(onOpenSceneDetail) : undefined}
         />
       )}
     </span>
@@ -6548,6 +6581,8 @@ export default function ScriptEditor({
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
+  const [sceneDetailDialogSceneId, setSceneDetailDialogSceneId] = useState<string | null>(null);
+  const [sceneDetailDialogEditing, setSceneDetailDialogEditing] = useState(false);
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
@@ -6588,6 +6623,14 @@ export default function ScriptEditor({
   const lineIndexMinMeasureRef = useRef<HTMLSpanElement | null>(null);
   const [lineIndexWidth, setLineIndexWidth] = useState(0);
   const [lineIndexMinWidth, setLineIndexMinWidth] = useState(0);
+  const openSceneDetailDialog = (sceneId: string) => {
+    setSceneDetailDialogEditing(false);
+    setSceneDetailDialogSceneId(sceneId);
+  };
+  const closeSceneDetailDialog = () => {
+    setSceneDetailDialogEditing(false);
+    setSceneDetailDialogSceneId(null);
+  };
 
   // ── Block tags ───────────────────────────────────────────────────────────────
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -11414,6 +11457,9 @@ export default function ScriptEditor({
                     onAddRehearsalBefore={() => addRehearsalBeforeBlock(block.id)}
                     onConvertToChapter={canEditMetadata ? () => convertMarkerBlockType(block.id, "chapter_marker") : undefined}
                     onConvertToScene={canEditMetadata ? () => convertMarkerBlockType(block.id, "scene_marker") : undefined}
+                    onOpenSceneDetail={productionId && block.sceneId && (block.type === "chapter_marker" || block.type === "scene_marker")
+                      ? () => openSceneDetailDialog(block.sceneId as string)
+                      : undefined}
                     onDeleteConfirmChange={(confirming) => {
                       if (confirming) {
                         setMarkerDetailDeleteConfirmBlockId(block.id);
@@ -12553,6 +12599,78 @@ export default function ScriptEditor({
             </div>
         </ScriptDialog>
       )}
+
+      {sceneDetailDialogSceneId && productionId && (() => {
+        const dialogScene = sceneById.get(sceneDetailDialogSceneId) ?? null;
+        if (!dialogScene) return null;
+        const dialogSceneDetail = sceneDetailById.get(dialogScene.id) ?? toSceneDetail(dialogScene);
+        const chapterDurationDisplay = dialogScene.parentId === null
+          ? getChapterDurationDisplay(sceneDetails.filter((scene) => scene.parentId === dialogScene.id))
+          : null;
+        const durationText = chapterDurationDisplay
+          ? chapterDurationDisplay.hasMissingDuration ? "—" : chapterDurationDisplay.text || "—"
+          : formatDuration(parseDuration(dialogSceneDetail.expectedDuration)) || "—";
+        const sceneCaption = `【${dialogScene.number.trim() || "—"}】${dialogScene.name.trim() || "未命名"}`;
+        return (
+          <ScriptDialog
+            onClose={closeSceneDetailDialog}
+            overlayClassName="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+            panelClassName="flex h-[28rem] max-h-[calc(100vh-2rem)] w-[560px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-xl"
+          >
+            <div className="flex h-6 shrink-0 items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold text-zinc-800">
+                {sceneDetailDialogEditing ? (
+                  <h2 className="truncate">编辑构作详情</h2>
+                ) : (
+                  <>
+                    <p className="min-w-0 flex-1 truncate" title={sceneCaption}>{sceneCaption}</p>
+                    <div className="h-4 w-px shrink-0 bg-zinc-200" />
+                    <p className="shrink-0 whitespace-nowrap">预期时长：{durationText}</p>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={closeSceneDetailDialog}
+                className="flex h-6 w-6 items-center justify-center rounded text-lg leading-none text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-zinc-500"
+                title="关闭"
+                aria-label="关闭构作详情"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-4 min-h-0 flex-1 overflow-hidden">
+              <ScriptSceneDetailRail
+                scene={dialogSceneDetail}
+                scenes={sceneDetails}
+                productionId={productionId}
+                versionId={activeVersionId ?? null}
+                canEdit={canEditMetadata}
+                controlledEditMode={sceneDetailDialogEditing}
+                showHeader={false}
+                scrollbarOffsetPx={0}
+                onUpdateIdentity={updateScene}
+                onPatchMeta={patchSceneMeta}
+              />
+            </div>
+            {canEditMetadata && (
+              <div className="mt-5 flex shrink-0 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSceneDetailDialogEditing((editing) => !editing)}
+                  className={`rounded px-3 py-1.5 text-sm font-medium text-white transition-colors ${
+                    sceneDetailDialogEditing
+                      ? "bg-zinc-800 hover:bg-zinc-700"
+                      : "bg-[#637ca1] hover:bg-[#536b8e]"
+                  }`}
+                >
+                  {sceneDetailDialogEditing ? SCRIPT_SCENE_DETAIL_MODE_LABEL.edit : SCRIPT_SCENE_DETAIL_MODE_LABEL.view}
+                </button>
+              </div>
+            )}
+          </ScriptDialog>
+        );
+      })()}
 
       {/* Mobile block action bottom sheet */}
       {mobileBlockMenuBlockId !== null && (() => {
