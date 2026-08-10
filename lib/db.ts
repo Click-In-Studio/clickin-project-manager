@@ -4067,6 +4067,21 @@ export async function createCueList(data: {
         [data.productionId, data.id, data.createdBy, data.template],
       );
     }
+    // Person fallback: no dept managers → creator manages this cue_list
+    const hasDept = await client.query(
+      `SELECT 1 FROM resource_dept_manage
+       WHERE production_id=$1 AND resource_type='cue_list' AND resource_id=$2 LIMIT 1`,
+      [data.productionId, data.id],
+    );
+    if (hasDept.rows.length === 0) {
+      await client.query(
+        `INSERT INTO resource_person_manage
+           (production_id, user_id, resource_type, resource_id, established_by)
+         VALUES ($1,$2,'cue_list',$3,$2)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+        [data.productionId, data.createdBy, data.id],
+      );
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
