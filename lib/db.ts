@@ -3298,6 +3298,140 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
   }));
 }
 
+// ─── Member tags ──────────────────────────────────────────────────────────────
+
+export type MemberTag = {
+  id: string;
+  name: string;
+  isSystem: boolean;
+  productionId: string | null;
+};
+
+/** Lists all tags available in a production (system-wide + custom for this production). */
+export async function listMemberTags(productionId: string): Promise<MemberTag[]> {
+  const { rows } = await getPool().query<{
+    id: string; name: string; is_system: boolean; production_id: string | null;
+  }>(
+    `SELECT id, name, is_system, production_id
+     FROM production_member_tag
+     WHERE production_id IS NULL OR production_id = $1
+     ORDER BY is_system DESC, name`,
+    [productionId],
+  );
+  return rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    isSystem: r.is_system,
+    productionId: r.production_id,
+  }));
+}
+
+/** Creates a custom tag for a production. Rejects system tag names. */
+export async function createMemberTag(
+  productionId: string,
+  name: string,
+): Promise<MemberTag> {
+  const existing = await getPool().query<{ id: string }>(
+    "SELECT id FROM production_member_tag WHERE name = $1 AND production_id IS NULL",
+    [name],
+  );
+  if (existing.rows.length > 0) {
+    throw new Error("SYSTEM_TAG_NAME_CONFLICT");
+  }
+  const { rows } = await getPool().query<{
+    id: string; name: string; is_system: boolean; production_id: string | null;
+  }>(
+    `INSERT INTO production_member_tag (production_id, name, is_system)
+     VALUES ($1, $2, false)
+     RETURNING id, name, is_system, production_id`,
+    [productionId, name],
+  );
+  return {
+    id: rows[0].id,
+    name: rows[0].name,
+    isSystem: rows[0].is_system,
+    productionId: rows[0].production_id,
+  };
+}
+
+/** Deletes a custom (non-system) tag. Cascades to tag assignments. */
+export async function deleteMemberTag(tagId: string, productionId: string): Promise<void> {
+  const { rows } = await getPool().query<{ is_system: boolean; production_id: string | null }>(
+    "SELECT is_system, production_id FROM production_member_tag WHERE id = $1",
+    [tagId],
+  );
+  if (rows.length === 0) throw new Error("TAG_NOT_FOUND");
+  if (rows[0].is_system || rows[0].production_id !== productionId) {
+    throw new Error("TAG_NOT_DELETABLE");
+  }
+  await getPool().query("DELETE FROM production_member_tag WHERE id = $1", [tagId]);
+}
+
+/** Gets all tag IDs assigned to a member in a production. */
+export async function getMemberTagIds(productionId: string, userId: string): Promise<string[]> {
+  const { rows } = await getPool().query<{ tag_id: string }>(
+    "SELECT tag_id FROM production_member_tag_assignment WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId],
+  );
+  return rows.map(r => r.tag_id);
+}
+
+/** Replaces all tag assignments for a member atomically. */
+export async function setMemberTags(
+  productionId: string,
+  userId: string,
+  tagIds: string[],
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "DELETE FROM production_member_tag_assignment WHERE production_id = $1 AND user_id = $2",
+      [productionId, userId],
+    );
+    if (tagIds.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_tag_assignment (production_id, user_id, tag_id)
+         SELECT $1, $2, t.id
+         FROM unnest($3::uuid[]) AS t(id)
+         JOIN production_member_tag pmt ON pmt.id = t.id
+         WHERE pmt.production_id IS NULL OR pmt.production_id = $1
+         ON CONFLICT DO NOTHING`,
+        [productionId, userId, tagIds],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Member supervisor / status ───────────────────────────────────────────────
+
+export async function setMemberSupervisor(
+  productionId: string,
+  userId: string,
+  supervisorId: string | null,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE production_member SET supervisor_id = $3 WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId, supervisorId],
+  );
+}
+
+export async function setMemberStatus(
+  productionId: string,
+  userId: string,
+  status: "active" | "suspended",
+): Promise<void> {
+  await getPool().query(
+    "UPDATE production_member SET status = $3 WHERE production_id = $1 AND user_id = $2",
+    [productionId, userId, status],
+  );
+}
 
 /** Returns Feishu open_ids of 制作人 / 制作助理 — used by Feishu bot to add them to dept chats. */
 export async function getBossOpenIds(productionId: string): Promise<string[]> {

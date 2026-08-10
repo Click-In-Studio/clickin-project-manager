@@ -1776,6 +1776,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "is_deprecated",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "production_role_permission": [
