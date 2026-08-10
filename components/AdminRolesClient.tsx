@@ -96,7 +96,6 @@ const PERM_GROUPS: PermGroup[] = [
     label: "报告",
     perms: [
       "report:create",
-      "report:create_note_any", "report:edit_note_any", "report:delete_note_any",
     ],
   },
   {
@@ -128,7 +127,6 @@ const PERM_GROUPS: PermGroup[] = [
       "script:edit_comment_any", "script:delete_comment_any",
       "cue:edit_comment_any", "cue:delete_comment_any",
       "report:edit_comment_any", "report:delete_comment_any",
-      "note:edit_comment_any", "note:delete_comment_any",
     ],
   },
   {
@@ -139,8 +137,8 @@ const PERM_GROUPS: PermGroup[] = [
       "scene:view", "character:view",
       "cue_list:view", "cue:view", "cue:comment",
       "event:view_call_sheet_any",
-      "event:view_tech_req", "event:view_tech_req_any", "event:follow",
-      "report:reply", "note:comment",
+      "event:follow",
+      "report:reply",
       "asset:view", "asset:download", "asset:download_any",
       "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
       "org:assign_member", "org:recall_member",

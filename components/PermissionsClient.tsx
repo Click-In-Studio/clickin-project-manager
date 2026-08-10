@@ -152,15 +152,9 @@ const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   "task:delete_any": "删除他人任务",
   // 报告（per-report 写操作已迁移至 resource_grant）
   "report:create": "创建报告",
-  "report:create_note_any": "创建他人记录",
-  "report:edit_note_any": "编辑他人记录",
-  "report:delete_note_any": "删除他人记录",
   "report:edit_comment_any": "编辑他人报告评论",
   "report:delete_comment_any": "删除他人报告评论",
   "report:reply": "回复报告",
-  "note:edit_comment_any": "编辑他人备注评论",
-  "note:delete_comment_any": "删除他人备注评论",
-  "note:comment": "评论备注",
   // 附件
   "asset:view_any": "查看他人附件",
   "asset:delete_any": "删除他人附件",

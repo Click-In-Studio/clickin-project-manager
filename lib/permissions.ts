@@ -92,8 +92,6 @@ export type Permission =
   | "cue:delete_comment_any"
   | "report:edit_comment_any"
   | "report:delete_comment_any"
-  | "note:edit_comment_any"
-  | "note:delete_comment_any"
   // ─── 普通管理 - 里程碑 ────────────────────────────────────────────────────────
   | "milestone:create"
   | "milestone:manage"
@@ -164,9 +162,6 @@ export type Permission =
   | "event:create"
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
   | "report:create"
-  | "report:create_note_any"
-  | "report:edit_note_any"
-  | "report:delete_note_any"
   // ─── 写权限 - 项目挂载点 ──────────────────────────────────────────────────────
   | "production:mount"
   | "production:unmount"
@@ -199,7 +194,6 @@ export type Permission =
   | "script:comment"
   | "cue:comment"
   | "report:reply"
-  | "note:comment"
   // ─── 组织特殊权限（由 org_admin_production_grant 授予，见 #136）────────────
   | "org:assign_member"
   | "org:recall_member";
@@ -545,8 +539,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "cue:delete_comment_any",
   "report:edit_comment_any",
   "report:delete_comment_any",
-  "note:edit_comment_any",
-  "note:delete_comment_any",
   "production:manage_config",
 ];
 
@@ -559,9 +551,6 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   ...CUE_FULL_SET,
   ...SM_EVENT_PERMS,
   "report:create",
-  "report:create_note_any",
-  "report:edit_note_any",
-  "report:delete_note_any",
   "production:mount",
   "production:unmount",
   "asset:create",
@@ -750,7 +739,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "script:edit_comment_any", "script:delete_comment_any",
   "cue:edit_comment_any", "cue:delete_comment_any",
   "report:edit_comment_any", "report:delete_comment_any",
-  "note:edit_comment_any", "note:delete_comment_any",
   "production:manage_config",
   "script:manage", "script:edit", "script:annotate",
   "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
@@ -768,7 +756,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue:create", "cue:delete", "cue:renumber", "cue:rename",
   "cue:edit_description", "cue:move", "cue:mount",
   "event:create",
-  "report:create", "report:create_note_any", "report:edit_note_any", "report:delete_note_any",
+  "report:create",
   "production:mount", "production:unmount",
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
@@ -777,7 +765,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "task:view", "task:view_any", "task:delete_any",
   "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
-  "script:comment", "cue:comment", "report:reply", "note:comment",
+  "script:comment", "cue:comment", "report:reply",
   "org:assign_member", "org:recall_member",
 ];
 
