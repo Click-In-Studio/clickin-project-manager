@@ -193,6 +193,12 @@ function attemptConnect(): Promise<GatewayStatus> {
         clearDeviceAuthToken: device.clearDeviceAuthToken,
       },
       onEvent: (evt) => {
+        // Raw event tap for diagnosing stream-shape mismatches (e.g. the
+        // snapshot-vs-fragment `delta` semantics that differ across gateway
+        // builds). Opt-in: AGENT_GATEWAY_DEBUG=1.
+        if (process.env.AGENT_GATEWAY_DEBUG) {
+          console.log(`[agent-gateway] ${evt.event}`, JSON.stringify(evt.payload)?.slice(0, 600));
+        }
         if (evt.event === "chat") {
           const payload = evt.payload as ChatEventPayload;
           // Keyed by session, not runId: a tool-call turn spans multiple
@@ -379,12 +385,17 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
       if (agentPayload.stream === "assistant") {
         const delta = agentPayload.data?.delta;
         const text = agentPayload.data?.text;
-        if (typeof delta === "string" && delta) {
-          onEvent({ type: "delta", text: delta });
-        } else if (agentPayload.data?.replace === true && typeof text === "string" && text) {
-          // Full-content snapshot (commentary segment): `delta` is empty
-          // here and the actual text only exists in `text`.
+        // `text` is the authoritative cumulative text for the current
+        // segment — prefer it as a replace-style snapshot whenever present.
+        // Do NOT accumulate `delta` when `text` exists: some gateway builds
+        // emit snapshot events whose `delta` carries the full text rather
+        // than an increment (observed live: treating those as fragments
+        // duplicates the whole reply once per snapshot). `delta`
+        // accumulation is only the fallback for events with no `text`.
+        if (typeof text === "string" && text) {
           onEvent({ type: "replace", text });
+        } else if (typeof delta === "string" && delta) {
+          onEvent({ type: "delta", text: delta });
         }
         return;
       }

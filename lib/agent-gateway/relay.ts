@@ -59,15 +59,20 @@ export function createChatStreamResponse(
         unsubscribe?.();
       });
 
-      // Two possible text sources, never mixed: the "chat" stream's own
-      // delta/final (full-text-so-far, fine for a plain reply with no tool
-      // calls) or the "agent"/"assistant" stream's genuinely incremental
-      // delta (required once a tool call happens — the "chat" stream's text
+      // Two possible text sources with SEPARATE buffers, never mixed: the
+      // "chat" stream's own delta/final (full-text-so-far, fine for a plain
+      // reply with no tool calls) and the "agent"/"assistant" stream
+      // (required once a tool call happens — the "chat" stream's text
       // starts duplicating across the tool-call boundary). The first
       // tool-call or "agent"/"assistant" event flips usingAgentStream
       // permanently for this request; chat-delta is ignored from then on.
+      // Separate buffers matter: both sources can be live at once for a
+      // plain reply, and letting an agent-stream fragment append onto text
+      // that came from a chat-delta snapshot duplicates content.
       let usingAgentStream = false;
-      let currentText = "";
+      let agentText = "";
+      let chatText = "";
+      const liveText = () => (usingAgentStream ? agentText : chatText);
       let sessionDone = false;
       // steerChatRun() registers pending steers under the *canonical*
       // sessionKey the Gateway echoes back — for a brand-new session that
@@ -85,28 +90,28 @@ export function createChatStreamResponse(
           // arrived (via "replace" snapshots), and whatever follows belongs
           // to a fresh segment.
           usingAgentStream = true;
-          currentText = "";
+          agentText = "";
           send({ type: "tool", name: evt.toolName, id: evt.toolId });
           return;
         }
         if (evt.type === "delta") {
           usingAgentStream = true;
-          currentText += evt.text;
-          send({ type: "delta", text: currentText });
+          agentText += evt.text;
+          send({ type: "delta", text: agentText });
           return;
         }
         if (evt.type === "replace") {
-          // Full-content snapshot (commentary segment) — authoritative for
-          // the current segment, replaces whatever accumulated so far.
+          // Cumulative snapshot — authoritative for the current segment,
+          // replaces whatever accumulated so far.
           usingAgentStream = true;
-          currentText = evt.text;
-          send({ type: "delta", text: currentText });
+          agentText = evt.text;
+          send({ type: "delta", text: agentText });
           return;
         }
         if (evt.type === "chat-delta") {
           if (usingAgentStream) return;
-          currentText = evt.text;
-          send({ type: "delta", text: currentText });
+          chatText = evt.text;
+          send({ type: "delta", text: chatText });
           return;
         }
         // final/aborted/error mark the session's work done by default — but
@@ -115,22 +120,22 @@ export function createChatStreamResponse(
         // exchange, just one of (at least) two runs this connection covers.
         if (evt.type === "final") {
           if (consumeExpectedSteerFinal(canonicalSessionKey)) {
-            if (!usingAgentStream) currentText = evt.text;
-            send({ type: "delta", text: currentText });
+            if (!usingAgentStream) chatText = evt.text;
+            send({ type: "delta", text: liveText() });
             return;
           }
           sessionDone = true;
-          finish({ type: "final", text: usingAgentStream ? currentText : evt.text });
+          finish({ type: "final", text: usingAgentStream ? agentText : evt.text });
           return;
         }
         if (evt.type === "aborted") {
           if (consumeExpectedSteerFinal(canonicalSessionKey)) {
-            if (!usingAgentStream) currentText = evt.text;
-            send({ type: "delta", text: currentText });
+            if (!usingAgentStream) chatText = evt.text;
+            send({ type: "delta", text: liveText() });
             return;
           }
           sessionDone = true;
-          finish({ type: "aborted", text: usingAgentStream ? currentText : evt.text });
+          finish({ type: "aborted", text: usingAgentStream ? agentText : evt.text });
           return;
         }
         if (consumeExpectedSteerFinal(canonicalSessionKey)) return;
@@ -173,7 +178,7 @@ export function createChatStreamResponse(
         }
         if (!sessionDone && !closed) {
           const text = await fetchLatestAssistantText(started.sessionKey);
-          finish({ type: "final", text: text || currentText });
+          finish({ type: "final", text: text || liveText() });
         }
       } catch (err) {
         finish({ type: "error", error: err instanceof Error ? err.message : "Agent run failed" });
