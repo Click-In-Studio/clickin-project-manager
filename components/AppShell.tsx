@@ -848,6 +848,7 @@ export default function AppShell({ session, productions, children, initialUnread
                 <>
                   <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} />
                   <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} />
+                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} />
 
                   <NavGroup label="创作侧" color="script" />
                   {CREATION_NAV.map((item) => (
