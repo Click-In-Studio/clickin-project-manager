@@ -11,11 +11,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ke
   const denied = requireOwnership(key, auth.userId);
   if (denied) return denied;
 
+  let body: { title?: unknown };
   try {
-    const { title } = await req.json();
-    if (!title || typeof title !== "string") {
-      return NextResponse.json({ error: "缺少 title" }, { status: 400 });
-    }
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const { title } = body;
+  if (!title || typeof title !== "string") {
+    return NextResponse.json({ error: "缺少 title" }, { status: 400 });
+  }
+
+  try {
     await renameChatSession(key, title);
     return NextResponse.json({ ok: true });
   } catch (err) {

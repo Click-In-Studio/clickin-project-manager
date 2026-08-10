@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { createNewSessionKey, sessionKeyOwnedBy } from "../lib/agent-gateway/client";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import {
+  createNewSessionKey,
+  sessionKeyOwnedBy,
+  markSteerPending,
+  consumeExpectedSteerFinal,
+} from "../lib/agent-gateway/client";
 
 // Pure-function tests for the per-user session namespace — the entire
 // user-isolation boundary of the agent gateway rests on these two.
@@ -53,5 +58,41 @@ describe("agent gateway session keys", () => {
     const key = `agent:main:${createNewSessionKey(USER_A)}:heartbeat`;
     expect(sessionKeyOwnedBy(key, USER_A)).toBe(true);
     expect(sessionKeyOwnedBy(key, USER_B)).toBe(false);
+  });
+});
+
+describe("steer expectation bookkeeping", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("consumes exactly as many finals as steers were marked", () => {
+    const key = createNewSessionKey(USER_A);
+    markSteerPending(key);
+    markSteerPending(key);
+    expect(consumeExpectedSteerFinal(key)).toBe(true);
+    expect(consumeExpectedSteerFinal(key)).toBe(true);
+    expect(consumeExpectedSteerFinal(key)).toBe(false);
+  });
+
+  it("expired expectations are pruned, not consumed", () => {
+    vi.useFakeTimers();
+    const key = createNewSessionKey(USER_A);
+    markSteerPending(key);
+    // Past the relay's 180s overall timeout: the relay that registered this
+    // expectation has certainly stopped waiting — a fresh stream on the same
+    // session must not have its genuine final swallowed by the stale entry.
+    vi.advanceTimersByTime(181_000);
+    expect(consumeExpectedSteerFinal(key)).toBe(false);
+  });
+
+  it("fresh expectation survives while stale ones are pruned", () => {
+    vi.useFakeTimers();
+    const key = createNewSessionKey(USER_A);
+    markSteerPending(key);
+    vi.advanceTimersByTime(181_000);
+    markSteerPending(key);
+    expect(consumeExpectedSteerFinal(key)).toBe(true);
+    expect(consumeExpectedSteerFinal(key)).toBe(false);
   });
 });

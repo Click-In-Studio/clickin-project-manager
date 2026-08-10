@@ -23,6 +23,9 @@ import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./t
 
 // operator.admin is required for sessions.patch (rename) and sessions.delete —
 // operator.read/write alone 403 on both (confirmed against a real gateway).
+// Deliberately requested up front for the whole connection: scopes are fixed
+// per WS connection (a singleton here), so per-call scope narrowing isn't
+// possible, and adding a scope later forces a re-pairing round.
 const SCOPES = ["operator.read", "operator.write", "operator.admin"];
 
 const SESSION_NAMESPACE = "clickin:chat:";
@@ -50,13 +53,16 @@ interface GatewayStore {
   // request is waiting on that session. Survives reconnects since it's
   // stored alongside the rest of the globalThis-cached state.
   events: EventEmitter;
-  // How many *additional* genuine "final" events a session's relay
-  // connection should still wait for before actually closing — incremented
-  // by steerChatRun(), consumed by the relay. A steered message is a
-  // genuinely separate run from the Gateway's perspective, so without this
-  // the relay would close on the first run's own final and never see the
-  // steered run's reply live.
-  pendingSteers: Map<string, number>;
+  // Timestamps of steers whose extra "final" a session's relay connection
+  // should still wait for before closing — appended by steerChatRun(),
+  // consumed by the relay. A steered message is a genuinely separate run
+  // from the Gateway's perspective, so without this the relay would close
+  // on the first run's own final and never see the steered run's reply
+  // live. Entries expire (see STEER_EXPECTATION_TTL_MS): if the relay that
+  // registered one died before its final arrived, a permanent counter would
+  // make the session's NEXT stream swallow a genuine final and stall to its
+  // timeout fallback.
+  pendingSteers: Map<string, number[]>;
 }
 
 declare global {
@@ -65,31 +71,49 @@ declare global {
 
 function store(): GatewayStore {
   if (!globalThis.__clickinAgentGateway) {
+    const events = new EventEmitter();
+    // Listener count is per event name (session:<key>) — normally 1-2 per
+    // session, but the same session can be watched from multiple tabs, and
+    // this is a multi-user process. Raise the cap so legitimate fan-out
+    // never trips MaxListenersExceededWarning.
+    events.setMaxListeners(100);
     globalThis.__clickinAgentGateway = {
       client: null,
       status: { state: isGatewayConfigured() ? "disconnected" : "unconfigured" },
       connecting: null,
-      events: new EventEmitter(),
+      events,
       pendingSteers: new Map(),
     };
   }
   return globalThis.__clickinAgentGateway;
 }
 
+// Matches the relay's overallTimeoutMs: an expectation older than this
+// belongs to an exchange whose relay has certainly stopped waiting.
+const STEER_EXPECTATION_TTL_MS = 180_000;
+
 export function markSteerPending(sessionKey: string): void {
   const s = store();
-  s.pendingSteers.set(sessionKey, (s.pendingSteers.get(sessionKey) ?? 0) + 1);
+  const list = s.pendingSteers.get(sessionKey) ?? [];
+  list.push(Date.now());
+  s.pendingSteers.set(sessionKey, list);
 }
 
 /** Called by the relay on every genuine (non-yielded) final — returns true
  * if there's still at least one more steered run it should keep waiting
- * for, having consumed one unit of that expectation. */
+ * for, having consumed one unit of that expectation. Stale expectations
+ * (whose relay died before the final arrived) are pruned, not consumed. */
 export function consumeExpectedSteerFinal(sessionKey: string): boolean {
   const s = store();
-  const remaining = s.pendingSteers.get(sessionKey) ?? 0;
-  if (remaining <= 0) return false;
-  if (remaining === 1) s.pendingSteers.delete(sessionKey);
-  else s.pendingSteers.set(sessionKey, remaining - 1);
+  const now = Date.now();
+  const fresh = (s.pendingSteers.get(sessionKey) ?? []).filter((t) => now - t < STEER_EXPECTATION_TTL_MS);
+  if (fresh.length === 0) {
+    s.pendingSteers.delete(sessionKey);
+    return false;
+  }
+  fresh.shift();
+  if (fresh.length === 0) s.pendingSteers.delete(sessionKey);
+  else s.pendingSteers.set(sessionKey, fresh);
   return true;
 }
 

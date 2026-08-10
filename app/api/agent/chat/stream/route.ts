@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
   if (!message || typeof message !== "string") {
     return NextResponse.json({ error: "缺少 message" }, { status: 400 });
   }
+  if (message.length > 16_000) {
+    return NextResponse.json({ error: "消息过长（上限 16000 字符）" }, { status: 400 });
+  }
   if (!sessionKey || typeof sessionKey !== "string") {
     return NextResponse.json({ error: "缺少 sessionKey" }, { status: 400 });
   }
