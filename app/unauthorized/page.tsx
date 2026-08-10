@@ -18,9 +18,8 @@ const PERMISSION_LABELS: Record<string, string> = {
   "event:view_call_sheet": "查看 Call Sheet",
   "event:view_call_sheet_any": "查看所有 Call Sheet",
   "event:follow": "跟踪日程",
-  "event:view_tech_req": "查看技术需求",
-  "event:view_tech_req_any": "查看所有技术需求",
-  "report:view": "查看报告",
+  "task:view": "查看任务",
+  "task:view_any": "查看所有任务",
   "asset:view": "查看数字资产",
   "cue_list:view": "查看 Cue 表",
   // 写权限

@@ -13,6 +13,7 @@ import {
   listEventCallTimes,
   listEventDepartments,
 } from "@/lib/event-db";
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import CallSheetClient from "@/components/CallSheetClient";
 
 export default async function CallSheetPage({
@@ -28,16 +29,17 @@ export default async function CallSheetPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  // Check access: event:edit (production member with full view) OR in the call
+  // Full view: resource_grant edit+ on this event, OR event:view_call_sheet_any (admin bypass).
+  // Fallback: isInCall (you can see your own call sheet).
   const [_prodAccess, eventPermCtx] = await Promise.all([
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),
     loadEventPermContext(session.userId, eventId),
   ]);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:view_call_sheet", prodPermCtx) && !hasPermission("event:view_call_sheet_any", prodPermCtx))
-    redirect(`/unauthorized?resource=event%3Aview_call_sheet&id=${productionId}`);
-  const canViewFull = hasPermission("event:edit", prodPermCtx);
+  const canViewFull = prodPermCtx.isAdmin
+    || hasPermission("event:view_call_sheet_any", prodPermCtx)
+    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))

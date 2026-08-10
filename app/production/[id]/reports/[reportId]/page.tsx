@@ -15,10 +15,10 @@ import {
 } from "@/lib/event-db";
 import {
   loadEventPermContext,
-  canWriteNote, canModerateNotes, isReportViewer,
+  canModerateNotes, isReportViewer,
   canReplyToReport,
 } from "@/lib/event-permissions";
-// canWriteNote is now async; isReportViewer stays synchronous
+import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import ReportViewClient from "@/components/ReportViewClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; reportId: string }> }): Promise<Metadata> {
@@ -94,10 +94,10 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewFull = isReportViewer(prodPermCtx);
-  const canViewReportUnpublished = isReportViewer(prodPermCtx);
+  const canViewReportUnpublished = isReportViewer(prodPermCtx)
+    || await hasResourceGrantLevel(session.userId, productionId, "report", reportId, "view");
 
-  if (!canViewFull && !canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
+  if (!canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/reports`);
 
   if (!report.publishedAt && !canViewReportUnpublished)
@@ -116,8 +116,11 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
     await markReportRead(reportId, session.userId);
   }
 
-  const userCanWriteNote = await canWriteNote(prodPermCtx, reportId, productionId, eventPermCtx.isInCall);
-  const userCanModerate = canModerateNotes(prodPermCtx);
+  // Page-level: can write note for at least one dept (specific dept check is in POST /notes)
+  const userCanWriteNote = prodPermCtx.isAdmin
+    || eventPermCtx.participantDeptIds.length > 0
+    || await canModerateNotes(prodPermCtx, productionId, eventId);
+  const userCanModerate = await canModerateNotes(prodPermCtx, productionId, eventId);
   const userCanReply = canReplyToReport(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);
 
   return (

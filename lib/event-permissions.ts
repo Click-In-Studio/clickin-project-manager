@@ -142,7 +142,7 @@ export async function canViewTechReq(
   ctx: Pick<EventPermContext, "participantDeptIds">,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (hasPermission("event:view_tech_req_any", permCtx)) return true;
+  if (hasPermission("task:view_any", permCtx)) return true;
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req
@@ -151,45 +151,60 @@ export async function canViewTechReq(
 }
 
 /**
- * Can add/edit a department note on a report.
- * Primary: resource_grant(report, reportId, 'edit'+) OR isInCall.
+ * Can create a note for a specific department in a report.
+ * SM（event edit+ grant）或该部门的参与者均可创建。
  */
 export async function canWriteNote(
   permCtx: PermissionContext,
-  reportId: string,
   productionId: string,
-  isInCall: boolean,
+  eventId: string,
+  departmentId: string,
+  participantDeptIds: string[],
 ): Promise<boolean> {
   if (permCtx.memberPermissions === null) return false;
   if (permCtx.isAdmin) return true;
-  if (isInCall) return true;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "edit");
+  if (await hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit")) return true;
+  return participantDeptIds.includes(departmentId);
 }
 
-/** Synchronous fallback for contexts where reportId is not available. Matches isInCall only. */
-export function canWriteNoteInCall(
+/**
+ * Can edit or delete an existing note.
+ * SM（event edit+ grant）或"是该 note 所属 dept 的参与者且是作者"。
+ */
+export async function canEditNote(
   permCtx: PermissionContext,
-  isInCall: boolean,
-): boolean {
-  if (permCtx.memberPermissions === null) return false;
+  productionId: string,
+  eventId: string,
+  noteAuthorUserId: string,
+  noteDepartmentId: string,
+  participantDeptIds: string[],
+): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  return isInCall;
+  if (await hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit")) return true;
+  return permCtx.userId === noteAuthorUserId && participantDeptIds.includes(noteDepartmentId);
 }
 
-/** Can delete or edit any note (not just own). */
-export function canModerateNotes(permCtx: PermissionContext): boolean {
+/**
+ * Can moderate any note or reply (delete others' content).
+ * SM（event edit+ grant）。
+ */
+export async function canModerateNotes(
+  permCtx: PermissionContext,
+  productionId: string,
+  eventId: string,
+): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  return hasPermission("report:edit_note_any", permCtx);
+  return hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit");
 }
 
 /**
  * Returns true if the user can view unpublished reports.
- * Synchronous role-level check: SM/director/producer have event:edit in their role.
- * Used for list pages and read gating where a specific report/event ID is not available.
+ * Phase 5a: event:edit/edit_schedule are now resource_grant levels; use event:create as a
+ * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to resource_grant.
  */
 export function isReportViewer(permCtx: PermissionContext): boolean {
   if (permCtx.isAdmin) return true;
-  return hasPermission("event:edit", permCtx) || hasPermission("event:edit_schedule", permCtx);
+  return hasPermission("event:create", permCtx);
 }
 
 /**

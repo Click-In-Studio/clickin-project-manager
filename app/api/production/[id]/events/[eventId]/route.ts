@@ -41,9 +41,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-
   const body = (await req.json()) as {
     title?: string; eventType?: string; location?: string;
     startTime?: string | null; endTime?: string | null;
@@ -51,6 +48,20 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     stageManagers?: { userId: string; name: string }[];
     versionId?: string | null;
   };
+
+  // Determine required grant level from the requested operation:
+  //   published→field edit = edit_published; →cancelled/completed = revoke
+  //   draft→published = publish; all other draft edits = edit
+  const newStatus = body.status;
+  let requiredLevel: "edit" | "publish" | "edit_published" | "revoke" = "edit";
+  if (existing.status === "published") {
+    requiredLevel = newStatus === "cancelled" || newStatus === "completed" ? "revoke" : "edit_published";
+  } else if (newStatus === "published") {
+    requiredLevel = "publish";
+  }
+
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, requiredLevel))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const validStatuses = new Set(["draft", "published", "completed", "cancelled"]);
   if (body.status && !validStatuses.has(body.status))
@@ -103,7 +114,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "manage"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteProductionEvent(eventId, productionId);

@@ -63,7 +63,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const participants = body.participants as {
     userId: string; name: string; departmentId: string | null; role: "participant" | "follower";
   }[];
-  await setEventParticipants(eventId, participants);
+  await setEventParticipants(eventId, participants, productionId, session.userId);
 
   const updated = await listEventParticipants(eventId);
   return Response.json({ participants: updated });

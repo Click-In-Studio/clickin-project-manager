@@ -91,7 +91,7 @@ export default async function EventDetailPage({
   const canAssignPeople = hasEditGrant;
   const canCallEdit = hasEditGrant;
   // admin bypass for deleting any tech req stays as atomic
-  const canTechReqDelete = hasPermission("event:delete_tech_req_any", prodPermCtx);
+  const canTechReqDelete = hasPermission("task:delete_any", prodPermCtx);
   // canWriteReport: check if user has edit+ on any report in this event OR has event edit grant
   const canWriteReport = hasEditGrant ||
     (reports.length > 0 && await hasResourceGrantLevel(session.userId, productionId, "report", reports[0].id, "edit"));

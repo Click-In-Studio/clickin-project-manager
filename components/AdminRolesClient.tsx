@@ -82,23 +82,20 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "事件 & 日程",
     perms: [
-      "event:create", "event:edit", "event:publish",
-      "event:create_schedule", "event:edit_schedule", "event:delete_schedule",
-      "event:assign_participants", "event:assign_schedule_participants",
-      "event:edit_call",
-      "event:create_tech_req", "event:edit_tech_req", "event:assign_tech_req", "event:delete_tech_req",
-      "event:create_tech_req_any", "event:edit_tech_req_any", "event:assign_tech_req_any",
-      "event:delete_tech_req_any",
-      "event:modify_published", "event:revoke", "event:delete",
+      "event:create",
+      "event:view_call_sheet_any", "event:follow",
+    ],
+  },
+  {
+    label: "任务",
+    perms: [
+      "task:view", "task:view_any", "task:delete_any",
     ],
   },
   {
     label: "报告",
     perms: [
-      "report:create", "report:edit", "report:publish", "report:delete",
-      "report:create_note", "report:edit_note", "report:delete_note",
-      "report:create_note_any", "report:edit_note_any", "report:delete_note_any",
-      "report:modify_published", "report:revoke",
+      "report:create",
     ],
   },
   {
@@ -130,7 +127,6 @@ const PERM_GROUPS: PermGroup[] = [
       "script:edit_comment_any", "script:delete_comment_any",
       "cue:edit_comment_any", "cue:delete_comment_any",
       "report:edit_comment_any", "report:delete_comment_any",
-      "note:edit_comment_any", "note:delete_comment_any",
     ],
   },
   {
@@ -140,9 +136,9 @@ const PERM_GROUPS: PermGroup[] = [
       "script:view", "script:comment",
       "scene:view", "character:view",
       "cue_list:view", "cue:view", "cue:comment",
-      "event:view", "event:view_call_sheet", "event:view_call_sheet_any",
-      "event:view_tech_req", "event:view_tech_req_any", "event:follow",
-      "report:view", "report:reply", "note:comment",
+      "event:view_call_sheet_any",
+      "event:follow",
+      "report:reply",
       "asset:view", "asset:download", "asset:download_any",
       "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
       "org:assign_member", "org:recall_member",

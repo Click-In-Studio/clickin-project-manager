@@ -23,7 +23,7 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
   if (!access) redirect(`/unauthorized?id=${productionId}`);
   if (!productionName) notFound();
 
-  const canViewAll = hasPermission("event:view_tech_req_any", access.permCtx);
+  const canViewAll = hasPermission("task:view_any", access.permCtx);
 
   const tasks = canViewAll
     ? await listProductionTechReqs(productionId)

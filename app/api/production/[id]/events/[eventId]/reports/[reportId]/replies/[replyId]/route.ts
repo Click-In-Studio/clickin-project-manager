@@ -21,7 +21,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const reply = await getReportReply(replyId, reportId);
   if (!reply) return Response.json({ error: "回复不存在" }, { status: 404 });
 
-  const isModerator = canModerateNotes(permCtx);
+  const isModerator = await canModerateNotes(permCtx, productionId, eventId);
   if (reply.userId !== session.userId && !isModerator)
     return Response.json({ error: "权限不足" }, { status: 403 });
 

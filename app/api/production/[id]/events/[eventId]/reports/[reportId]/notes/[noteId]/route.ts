@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, getEventReport, getReportNote, updateReportNote, deleteReportNote, type Mention } from "@/lib/event-db";
-import { canModerateNotes } from "@/lib/event-permissions";
+import { loadEventPermContext, canEditNote } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string; noteId: string }> };
 
@@ -23,8 +23,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const note = await getReportNote(noteId, reportId);
   if (!note) return Response.json({ error: "Note 不存在" }, { status: 404 });
 
-  const isModerator = canModerateNotes(permCtx);
-  if (!isModerator && note.authorUserId !== session.userId)
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
+  if (!await canEditNote(permCtx, productionId, eventId, note.authorUserId, note.departmentId, eventPermCtx.participantDeptIds))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { content?: string; mentions?: Mention[] };
@@ -50,8 +50,14 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const report = await getEventReport(reportId, eventId);
   if (!report) return Response.json({ error: "记录不存在" }, { status: 404 });
 
-  const isModerator = canModerateNotes(permCtx);
-  const deleted = await deleteReportNote(noteId, reportId, session.userId, isModerator || session.isAdmin);
+  const note = await getReportNote(noteId, reportId);
+  if (!note) return Response.json({ error: "Note 不存在" }, { status: 404 });
+
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
+  if (!await canEditNote(permCtx, productionId, eventId, note.authorUserId, note.departmentId, eventPermCtx.participantDeptIds))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+
+  const deleted = await deleteReportNote(noteId, reportId, session.userId, true);
   if (!deleted) return Response.json({ error: "无权删除或 Note 不存在" }, { status: 403 });
   return Response.json({ ok: true });
 }
