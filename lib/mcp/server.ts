@@ -5,9 +5,10 @@ import { z } from "zod";
 import http from "http";
 import type { Request, Response } from "express";
 
-const MCP_PORT = Number(process.env.MCP_PORT ?? 3101);
+const rawPort = Number(process.env.MCP_PORT ?? 3101);
+const MCP_PORT = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3101;
 
-function buildServer(): McpServer {
+export function buildMcpServer(): McpServer {
   const s = new McpServer({ name: "clickin", version: "0.1.0" });
 
   s.registerTool("docs.read", {
@@ -29,6 +30,7 @@ function buildServer(): McpServer {
   }));
 
   s.registerTool("docs.propose", {
+    // TODO(Phase 5): add shared-secret header check before touching real data
     description: "Propose a document change — requires human approval before taking effect",
     inputSchema: {
       path: z.string().describe("Vault-relative document path"),
@@ -52,7 +54,7 @@ export function startMcpServer(): void {
 
   app.all("/mcp", async (req: Request, res: Response) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = buildServer();
+    const server = buildMcpServer();
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -64,7 +66,13 @@ export function startMcpServer(): void {
     }
   });
 
-  g.__mcpHttpServer = http.createServer(app).listen(MCP_PORT, "127.0.0.1", () => {
+  const httpServer = http.createServer(app);
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    // EADDRINUSE on hot-reload is expected; log and continue rather than crashing Next.js
+    console.error(`[mcp] server error (port ${MCP_PORT}):`, err.message);
+  });
+  httpServer.listen(MCP_PORT, "127.0.0.1", () => {
     console.log(`[mcp] listening on 127.0.0.1:${MCP_PORT}/mcp`);
   });
+  g.__mcpHttpServer = httpServer;
 }
