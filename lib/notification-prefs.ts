@@ -87,6 +87,19 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  // ── Approval requests ─────────────────────────────────────────────────────
+  approval_request_pending: {
+    label: "资源申请待审批",
+    description: "有成员申请资源访问权限需要你审批时通知",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
+  approval_request_result: {
+    label: "资源申请结果通知",
+    description: "你提交的资源访问申请有结果时通知",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
 } as const;
 
 export type NotificationType = keyof typeof NOTIFICATION_CONFIG;

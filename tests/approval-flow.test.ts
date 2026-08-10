@@ -149,7 +149,7 @@ describe("findResourceApprovers", () => {
     // U_POC should have received a pending_resource notification
     const notifs = await notifForRequest(U_POC, req.id);
     expect(notifs.length).toBeGreaterThanOrEqual(1);
-    expect(notifs[0].kind).toBe("approval_request.pending_resource");
+    expect(notifs[0].kind).toBe("approval_request_pending");
 
     // Cleanup: cancel the request
     await getPool().query(
@@ -213,7 +213,7 @@ describe("submitAccessRequest", () => {
 
     const notifs = await notifForRequest(U_SUPERVISOR, req.id);
     expect(notifs.length).toBe(1);
-    expect(notifs[0].kind).toBe("approval_request.pending_supervisor");
+    expect(notifs[0].kind).toBe("approval_request_pending");
     expect(notifs[0].actionRequired).toBe(true);
     expect(notifs[0].approvalRequestId).toBe(req.id);
 
@@ -285,7 +285,7 @@ describe("approveAccessRequest — supervisor → resource phase", () => {
 
   it("notify: POC gets action_required notification after supervisor approves", async () => {
     const notifs = await notifForRequest(U_POC, reqId);
-    const resourceNotif = notifs.find((n) => n.kind === "approval_request.pending_resource");
+    const resourceNotif = notifs.find((n) => n.kind === "approval_request_pending");
     expect(resourceNotif).toBeDefined();
     expect(resourceNotif?.actionRequired).toBe(true);
     expect(resourceNotif?.approvalRequestId).toBe(reqId);
@@ -345,7 +345,7 @@ describe("approveAccessRequest — resource phase → approved", () => {
 
   it("notify: requester gets approved notification", async () => {
     const notifs = await notifForRequest(U_POC, reqId);
-    const approvedNotif = notifs.find((n) => n.kind === "approval_request.approved");
+    const approvedNotif = notifs.find((n) => n.kind === "approval_request_result");
     expect(approvedNotif).toBeDefined();
     expect(approvedNotif?.approvalRequestId).toBe(reqId);
   });
@@ -423,7 +423,7 @@ describe("rejectAccessRequest", () => {
     await rejectAccessRequest(req.id, U_SUPERVISOR);
 
     const notifs = await notifForRequest(U_REQUESTER, req.id);
-    const rejectedNotif = notifs.find((n) => n.kind === "approval_request.rejected");
+    const rejectedNotif = notifs.find((n) => n.kind === "approval_request_result");
     expect(rejectedNotif).toBeDefined();
     expect(rejectedNotif?.approvalRequestId).toBe(req.id);
     expect(rejectedNotif?.category).toBe("warning");
@@ -707,7 +707,7 @@ describe("escalateExpiredApprovals", () => {
 
     // U_POC should have received a new resource-phase notification
     const notifs = await notifForRequest(U_POC, req.id);
-    const resourceNotif = notifs.find((n) => n.kind === "approval_request.pending_resource");
+    const resourceNotif = notifs.find((n) => n.kind === "approval_request_pending");
     expect(resourceNotif).toBeDefined();
     expect(resourceNotif?.approvalRequestId).toBe(req.id);
 
@@ -755,7 +755,7 @@ describe("full happy path — supervisor gate", () => {
 
     // POC should have received resource-phase notif
     const pocNotifs1 = await notifForRequest(U_POC, req.id);
-    expect(pocNotifs1.some((n) => n.kind === "approval_request.pending_resource")).toBe(true);
+    expect(pocNotifs1.some((n) => n.kind === "approval_request_pending")).toBe(true);
 
     // Step 2: POC approves
     const step2 = await approveAccessRequest(req.id, U_POC);
@@ -776,7 +776,7 @@ describe("full happy path — supervisor gate", () => {
 
     // Requester gets approved notification
     const requesterNotifs = await notifForRequest(U_REQUESTER, req.id);
-    expect(requesterNotifs.some((n) => n.kind === "approval_request.approved")).toBe(true);
+    expect(requesterNotifs.some((n) => n.kind === "approval_request_result")).toBe(true);
 
     // No unexpired action notifications remain
     const allRelatedNotifs = [

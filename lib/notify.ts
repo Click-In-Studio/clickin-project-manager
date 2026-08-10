@@ -70,6 +70,7 @@ type InboxContent = {
   category?: NotificationCategory;
   actionRequired?: boolean;
   actions?: NotificationAction[];
+  approvalRequestId?: string | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

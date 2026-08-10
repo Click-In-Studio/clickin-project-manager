@@ -1,5 +1,6 @@
 import { getPool } from "./pg";
-import { batchCreateUserNotifications, createUserNotification } from "./inbox-db";
+import { notifyUser, notifyUsers } from "./notify";
+import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
@@ -6965,14 +6966,15 @@ export async function submitAccessRequest(
       `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
       [JSON.stringify([chain]), request.id],
     );
-    await createUserNotification({
+    await notifyUser({
       userId: supervisorId,
       productionId,
-      kind: "approval_request.pending_supervisor",
+      kind: "approval_request_pending",
       entityType: "approval_request",
       entityId: request.id,
       title: `${subjectName} 申请 ${resourceDesc}`,
       body: `${subjectName} 申请获得${resourceDesc}，请审批。${request.note ? `\n\n申请理由：${request.note}` : ""}`,
+      viewHref: `${SERVER_URL}/production/${productionId}/access-requests`,
       category: "action",
       actionRequired: true,
       approvalRequestId: request.id,
@@ -6980,6 +6982,11 @@ export async function submitAccessRequest(
         { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: request.id }] },
         { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: request.id }] },
       ],
+      buildExternalMessage: async () => ({
+        text: `${subjectName} 申请 ${resourceDesc}，请审批`,
+        title: `资源申请待审批`,
+        primaryUrl: `${SERVER_URL}/production/${productionId}/access-requests`,
+      }),
     });
   } else {
     // Notify resource approvers
@@ -6994,13 +7001,15 @@ export async function submitAccessRequest(
         `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
         [JSON.stringify([chain]), request.id],
       );
-      await batchCreateUserNotifications(approverIds, {
+      await notifyUsers({
+        userIds: approverIds,
         productionId,
-        kind: "approval_request.pending_resource",
+        kind: "approval_request_pending",
         entityType: "approval_request",
         entityId: request.id,
         title: `${subjectName} 申请 ${resourceDesc}`,
         body: `${subjectName} 申请获得${resourceDesc}，请审批。${request.note ? `\n\n申请理由：${request.note}` : ""}`,
+        viewHref: `${SERVER_URL}/production/${productionId}/access-requests`,
         category: "action",
         actionRequired: true,
         approvalRequestId: request.id,
@@ -7008,6 +7017,11 @@ export async function submitAccessRequest(
           { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: request.id }] },
           { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: request.id }] },
         ],
+        buildExternalMessage: async () => ({
+          text: `${subjectName} 申请 ${resourceDesc}，请审批`,
+          title: `资源申请待审批`,
+          primaryUrl: `${SERVER_URL}/production/${productionId}/access-requests`,
+        }),
       });
     }
   }
@@ -7090,13 +7104,15 @@ export async function approveAccessRequest(
       );
       const subjectName = nameRes.rows[0]?.name ?? "成员";
       const resourceDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
-      await batchCreateUserNotifications(approverIds, {
+      await notifyUsers({
+        userIds: approverIds,
         productionId: req.production_id,
-        kind: "approval_request.pending_resource",
+        kind: "approval_request_pending",
         entityType: "approval_request",
         entityId: requestId,
         title: `${subjectName} 申请 ${resourceDesc}`,
         body: `${subjectName} 申请获得${resourceDesc}（已通过直属上级审批），请审批。`,
+        viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
         category: "action",
         actionRequired: true,
         approvalRequestId: requestId,
@@ -7104,6 +7120,11 @@ export async function approveAccessRequest(
           { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId }] },
           { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId }] },
         ],
+        buildExternalMessage: async () => ({
+          text: `${subjectName} 申请 ${resourceDesc}（已通过直属上级审批），请审批`,
+          title: `资源申请待审批`,
+          primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+        }),
       });
     }
   } else {
@@ -7180,16 +7201,22 @@ export async function approveAccessRequest(
 
     // Notify requester
     const approvedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
-    await createUserNotification({
+    await notifyUser({
       userId: req.subject_id,
       productionId: req.production_id,
-      kind: "approval_request.approved",
+      kind: "approval_request_result",
       entityType: "approval_request",
       entityId: requestId,
       title: "资源访问申请已批准",
       body: `你申请的${approvedDesc}已获批准。`,
+      viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
       category: "info",
       approvalRequestId: requestId,
+      buildExternalMessage: async () => ({
+        text: `你申请的${approvedDesc}已获批准`,
+        title: `资源申请已批准`,
+        primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+      }),
     });
   }
 
@@ -7253,16 +7280,22 @@ export async function rejectAccessRequest(
 
   // Notify requester
   const rejectedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
-  await createUserNotification({
+  await notifyUser({
     userId: req.subject_id,
     productionId: req.production_id,
-    kind: "approval_request.rejected",
+    kind: "approval_request_result",
     entityType: "approval_request",
     entityId: requestId,
     title: "资源访问申请被拒绝",
     body: `你申请的${rejectedDesc}未获批准。`,
+    viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
     category: "warning",
     approvalRequestId: requestId,
+    buildExternalMessage: async () => ({
+      text: `你申请的${rejectedDesc}未获批准`,
+      title: `资源申请被拒绝`,
+      primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    }),
   });
 
   const finalRes = await getPool().query<ApprovalRow>(
@@ -7424,13 +7457,15 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
     );
 
     const escalateDesc = await describeResource(row.resource_type ?? "", row.resource_id ?? "*", row.permission_level ?? "");
-    await batchCreateUserNotifications(approverIds, {
+    await notifyUsers({
+      userIds: approverIds,
       productionId: row.production_id,
-      kind: "approval_request.pending_resource",
+      kind: "approval_request_pending",
       entityType: "approval_request",
       entityId: row.id,
       title: `${subjectName} 申请 ${escalateDesc}（直属上级超时，已自动升级）`,
       body: `${subjectName} 申请获得${escalateDesc}，直属上级审批已超时，请直接审批。`,
+      viewHref: `${SERVER_URL}/production/${row.production_id}/access-requests`,
       category: "action",
       actionRequired: true,
       approvalRequestId: row.id,
@@ -7438,6 +7473,11 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
         { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: row.id }] },
         { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: row.id }] },
       ],
+      buildExternalMessage: async () => ({
+        text: `${subjectName} 申请 ${escalateDesc}，直属上级审批超时，请直接审批`,
+        title: `资源申请待审批（已升级）`,
+        primaryUrl: `${SERVER_URL}/production/${row.production_id}/access-requests`,
+      }),
     });
   }
 
