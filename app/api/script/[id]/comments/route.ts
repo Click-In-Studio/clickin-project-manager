@@ -4,7 +4,7 @@ import { getProductionPermissionContext, listProductionComments, createComment, 
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { buildScriptCommentMentionCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 async function guard(req: NextRequest, productionId: string) {

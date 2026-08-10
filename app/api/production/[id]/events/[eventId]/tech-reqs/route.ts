@@ -7,7 +7,7 @@ import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };

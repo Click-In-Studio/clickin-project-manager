@@ -1,4 +1,3 @@
-// Canonical base URL for this deployment — used for building absolute links in
-// emails and external notifications. Must NOT have a trailing slash.
-// Example: https://backstage.clickinmusical.com
-export const BASE_PATH = process.env.BASE_PATH ?? '';
+// Relative URL prefix for client components. Always empty — use relative paths in browsers.
+// For server-side absolute URLs (emails, notifications), import SERVER_URL from ./server-url instead.
+export const BASE_PATH = '';

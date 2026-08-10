@@ -12,7 +12,7 @@ import {
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
 import { buildReplyMentionCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };

@@ -5,7 +5,7 @@ import { getProductionPermissionContext, getCueList, updateCue, deleteCue,
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 async function getCtx(req: NextRequest, productionId: string) {

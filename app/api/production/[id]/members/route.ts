@@ -48,7 +48,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, email, phone, photoUrl, supervisorId, tags, status } =
+  const { userId, roles, email, phone, photoUrl, supervisorId, tagIds, status } =
     (await req.json()) as {
       userId?: string;
       roles?: string[];
@@ -56,7 +56,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       phone?: string | null;
       photoUrl?: string | null;
       supervisorId?: string | null;
-      tags?: string[];
+      tagIds?: string[];
       status?: "active" | "suspended";
     };
   if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
@@ -74,11 +74,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     await setMemberRoles(id, userId, roles);
   }
-  if (tags !== undefined) {
+  if (tagIds !== undefined) {
     if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
-    await setMemberTags(id, userId, tags);
+    await setMemberTags(id, userId, tagIds);
   }
   if (supervisorId !== undefined) {
     if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {

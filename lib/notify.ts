@@ -19,7 +19,7 @@
  */
 
 import { getPool } from "./pg";
-import { BASE_PATH } from "./base-path";
+import { SERVER_URL as BASE_PATH } from "./server-url";
 import {
   buildWeeklyCallCard, buildDailyCallCard, buildReportCard, buildMentionCard,
 } from "./platform/feishu/feishu-bot";

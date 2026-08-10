@@ -13,7 +13,7 @@ import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db"
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
 import { buildUrgeReqCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { notifyUsers } from "@/lib/notify";
 

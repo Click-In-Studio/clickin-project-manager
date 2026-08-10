@@ -3275,16 +3275,22 @@ export type MemberWithRoles = {
   roles: string[];
   tags: string[];
   photoUrl: string | null;
+  supervisorId: string | null;
+  supervisorName: string | null;
+  status: "active" | "suspended";
 };
 
 export async function listProductionMembersWithRoles(productionId: string): Promise<MemberWithRoles[]> {
   const res = await getPool().query<{
     user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean;
     email: string | null; phone: string | null; roles: string[]; tags: string[]; photo_url: string | null;
+    supervisor_id: string | null; supervisor_name: string | null; status: string;
   }>(
     `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
             COALESCE(upi.platform_user_id, fu.email) AS email,
             fu.phone, pm.roles, pm.photo_url,
+            pm.supervisor_id, sup.name AS supervisor_name,
+            COALESCE(pm.status, 'active') AS status,
             COALESCE(
               ARRAY(
                 SELECT pmt.name
@@ -3301,6 +3307,7 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
        ON upi.user_id = pm.user_id
       AND upi.platform_id = 'email'
       AND upi.is_primary = true
+     LEFT JOIN feishu_user sup ON sup.user_id = pm.supervisor_id
      WHERE pm.production_id = $1
      ORDER BY fu.name`,
     [productionId],
@@ -3316,6 +3323,9 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
     roles: r.roles,
     tags: r.tags,
     photoUrl: r.photo_url,
+    supervisorId: r.supervisor_id,
+    supervisorName: r.supervisor_name,
+    status: (r.status === "suspended" ? "suspended" : "active") as "active" | "suspended",
   }));
 }
 

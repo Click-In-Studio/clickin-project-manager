@@ -5,7 +5,7 @@ import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
 import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
 import { getPool } from "@/lib/pg";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { notifyUsers } from "@/lib/notify";
