@@ -14,6 +14,7 @@
     "test:selection": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/script-selection.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tiptap/extension-mention": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@faker-js/faker": "^10.5.0",
     "@tailwindcss/postcss": "^4",
+    "@types/express": "^5.0.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
