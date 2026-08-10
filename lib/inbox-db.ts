@@ -59,6 +59,7 @@ export type UserNotification = {
    * their action buttons as disabled — the new notification supersedes them.
    */
   expiredAt: string | null;
+  approvalRequestId: string | null;
 };
 
 type NotifRow = {
@@ -79,6 +80,7 @@ type NotifRow = {
   acted_at: Date | null;
   action_result: unknown | null;
   expired_at: Date | null;
+  approval_request_id: string | null;
 };
 
 function rowToNotif(r: NotifRow): UserNotification {
@@ -100,6 +102,7 @@ function rowToNotif(r: NotifRow): UserNotification {
     actedAt: r.acted_at ? r.acted_at.toISOString() : null,
     actionResult: r.action_result ?? null,
     expiredAt: r.expired_at ? r.expired_at.toISOString() : null,
+    approvalRequestId: r.approval_request_id ?? null,
   };
 }
 
@@ -124,6 +127,7 @@ export type CreateNotificationParams = {
   category?: NotificationCategory;
   actionRequired?: boolean;
   actions?: NotificationAction[];
+  approvalRequestId?: string | null;
 };
 
 /** Insert a single inbox entry. */
@@ -134,8 +138,8 @@ export async function createUserNotification(
   const res = await getPool().query<NotifRow>(
     `INSERT INTO user_notification
        (id, user_id, production_id, kind, entity_type, entity_id,
-        title, body, view_href, category, action_required, actions)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        title, body, view_href, category, action_required, actions, approval_request_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [
       id,
@@ -150,6 +154,7 @@ export async function createUserNotification(
       params.category ?? "info",
       params.actionRequired ?? false,
       JSON.stringify(params.actions ?? []),
+      params.approvalRequestId ?? null,
     ],
   );
   return rowToNotif(res.rows[0]);
@@ -178,22 +183,23 @@ export async function batchCreateUserNotifications(
     category: shared.category ?? "info",
     actionRequired: shared.actionRequired ?? false,
     actions: JSON.stringify(shared.actions ?? []),
+    approvalRequestId: shared.approvalRequestId ?? null,
   }));
 
-  const cols = 12;
+  const cols = 13;
   const valueClauses = rows.map(
     (_, i) =>
-      `($${i * cols + 1},$${i * cols + 2},$${i * cols + 3},$${i * cols + 4},$${i * cols + 5},$${i * cols + 6},$${i * cols + 7},$${i * cols + 8},$${i * cols + 9},$${i * cols + 10},$${i * cols + 11},$${i * cols + 12})`,
+      `($${i * cols + 1},$${i * cols + 2},$${i * cols + 3},$${i * cols + 4},$${i * cols + 5},$${i * cols + 6},$${i * cols + 7},$${i * cols + 8},$${i * cols + 9},$${i * cols + 10},$${i * cols + 11},$${i * cols + 12},$${i * cols + 13})`,
   );
   const values = rows.flatMap((r) => [
     r.id, r.userId, r.productionId, r.kind, r.entityType, r.entityId,
-    r.title, r.body, r.viewHref, r.category, r.actionRequired, r.actions,
+    r.title, r.body, r.viewHref, r.category, r.actionRequired, r.actions, r.approvalRequestId,
   ]);
 
   await getPool().query(
     `INSERT INTO user_notification
        (id, user_id, production_id, kind, entity_type, entity_id,
-        title, body, view_href, category, action_required, actions)
+        title, body, view_href, category, action_required, actions, approval_request_id)
      VALUES ${valueClauses.join(",")}`,
     values,
   );
