@@ -60,14 +60,17 @@ const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
 const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;
 const SCRIPT_TOC_CENTER_EVENT = "script-toc-center-active";
 const SCRIPT_EDITOR_MAX_WIDTH_PX = 768; // Tailwind max-w-3xl
-const SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM = 14;
-const SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM = 4;
+const SCRIPT_BODY_HORIZONTAL_PADDING_REM = 1; // Tailwind px-4; side rails may overlap this padding.
+const SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX = 240;
+const SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM = 11;
 const SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM = 2.5;
+const SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM = 1.75;
 const SCRIPT_TOC_RAIL_NUMBER_SLOT_REM = 0.5; // Minimum number slot width; widened when longer scene numbers need it.
 const SCRIPT_TOC_RAIL_LABEL_GAP_REM = 1.5;
-const SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM = 2; // Right-edge gap between chapter numbers and scene numbers.
-const SCRIPT_TOC_RAIL_GAP_REM = -1;
+const SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM = 1; // Right-edge gap between chapter numbers and scene numbers.
 const SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM = 18;
+const SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX = 576;
+const SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX = 12;
 const SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM = 0.25;
 const SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM = 2.5;
 const SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX = 80;
@@ -107,28 +110,33 @@ const MARKER_DIVIDER_RIGHT_MARGIN = 0.2;
 let scriptTocMeasureElement: HTMLSpanElement | null = null;
 let scriptTocMeasureCache: {
   scenes: Scene[];
-  layoutKey: string;
-  railWidthPx: number;
+  rootFontSizePx: number;
   chapterNumberSlotWidthPx: number;
   sceneNumberSlotWidthPx: number;
 } | null = null;
 
-function measureScriptTocTextWidth(
-  text: string,
-  {
-    fontSizePx,
-    fontWeight,
-    letterSpacingPx = 0,
-  }: {
-    fontSizePx: number;
-    fontWeight: number;
-    letterSpacingPx?: number;
+function measureScriptTocNumberWidths(scenes: Scene[], rootFontSizePx: number): {
+  chapterNumberSlotWidthPx: number;
+  sceneNumberSlotWidthPx: number;
+} {
+  const minimumNumberSlotWidthPx = SCRIPT_TOC_RAIL_NUMBER_SLOT_REM * rootFontSizePx;
+  if (scriptTocMeasureCache?.scenes === scenes && scriptTocMeasureCache.rootFontSizePx === rootFontSizePx) {
+    return scriptTocMeasureCache;
   }
-): number {
+  if (typeof document === "undefined" || scenes.length === 0) {
+    return {
+      chapterNumberSlotWidthPx: minimumNumberSlotWidthPx,
+      sceneNumberSlotWidthPx: minimumNumberSlotWidthPx,
+    };
+  }
+
+  let chapterNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  let sceneNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  const numberFontSizePx = 0.75 * rootFontSizePx;
   scriptTocMeasureElement ??= document.createElement("span");
-  const el = scriptTocMeasureElement;
-  if (!el.isConnected) document.body.appendChild(el);
-  Object.assign(el.style, {
+  const measureElement = scriptTocMeasureElement;
+  if (!measureElement.isConnected) document.body.appendChild(measureElement);
+  Object.assign(measureElement.style, {
     position: "fixed",
     top: "-9999px",
     left: "-9999px",
@@ -136,96 +144,28 @@ function measureScriptTocTextWidth(
     whiteSpace: "nowrap",
     pointerEvents: "none",
     fontFamily: window.getComputedStyle(document.body).fontFamily,
-    fontSize: `${fontSizePx}px`,
-    fontWeight: String(fontWeight),
-    letterSpacing: `${letterSpacingPx}px`,
+    fontSize: `${numberFontSizePx}px`,
+    fontWeight: "700",
+    letterSpacing: `${0.05 * numberFontSizePx}px`,
   });
-  el.textContent = text;
-  return el.getBoundingClientRect().width;
-}
-
-function measureScriptTocRailLayout(scenes: Scene[], rootFontSizePx: number): {
-  railWidthPx: number;
-  chapterNumberSlotWidthPx: number;
-  sceneNumberSlotWidthPx: number;
-} {
-  const maxWidthPx = SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM * rootFontSizePx;
-  const minimumNumberSlotWidthPx = SCRIPT_TOC_RAIL_NUMBER_SLOT_REM * rootFontSizePx;
-  const gapPx = SCRIPT_TOC_RAIL_LABEL_GAP_REM * rootFontSizePx;
-  const subSceneIndentPx = SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM * rootFontSizePx;
-  const scrollbarWidthPx = SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM * rootFontSizePx;
-  const minWidthPx = (SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
-  const layoutKey = [
-    rootFontSizePx,
-    maxWidthPx,
-    minimumNumberSlotWidthPx,
-    gapPx,
-    subSceneIndentPx,
-    scrollbarWidthPx,
-    minWidthPx,
-  ].join("|");
-  if (scriptTocMeasureCache?.scenes === scenes && scriptTocMeasureCache.layoutKey === layoutKey) {
-    return {
-      railWidthPx: scriptTocMeasureCache.railWidthPx,
-      chapterNumberSlotWidthPx: scriptTocMeasureCache.chapterNumberSlotWidthPx,
-      sceneNumberSlotWidthPx: scriptTocMeasureCache.sceneNumberSlotWidthPx,
-    };
-  }
-  if (typeof document === "undefined" || scenes.length === 0) {
-    return {
-      railWidthPx: maxWidthPx,
-      chapterNumberSlotWidthPx: minimumNumberSlotWidthPx,
-      sceneNumberSlotWidthPx: minimumNumberSlotWidthPx,
-    };
-  }
-
-  const horizontalPaddingPx = 2 * rootFontSizePx;
-  let requiredWidthPx = 0;
-  const sceneNameWidths: Array<{ scene: Scene; nameWidthPx: number }> = [];
-  let chapterNumberSlotWidthPx = minimumNumberSlotWidthPx;
-  let sceneNumberSlotWidthPx = minimumNumberSlotWidthPx;
-
-  const numberFontSizePx = 0.75 * rootFontSizePx;
-  const numberTrackingPx = 0.05 * numberFontSizePx;
 
   for (const scene of scenes) {
-    const numberText = scene.number || "—";
-    const measuredNumberWidthPx = measureScriptTocTextWidth(numberText, {
-      fontSizePx: numberFontSizePx,
-      fontWeight: 700,
-      letterSpacingPx: numberTrackingPx,
-    });
+    measureElement.textContent = scene.number || "—";
+    const measuredNumberWidthPx = measureElement.getBoundingClientRect().width;
     if (scene.parentId === null) {
       chapterNumberSlotWidthPx = Math.max(chapterNumberSlotWidthPx, measuredNumberWidthPx);
     } else {
       sceneNumberSlotWidthPx = Math.max(sceneNumberSlotWidthPx, measuredNumberWidthPx);
     }
-    const nameWidthPx = scene.name
-      ? measureScriptTocTextWidth(scene.name, {
-        fontSizePx: scene.parentId === null ? 0.875 * rootFontSizePx : 0.75 * rootFontSizePx,
-        fontWeight: scene.parentId === null ? 500 : 400,
-      })
-      : 32;
-    sceneNameWidths.push({ scene, nameWidthPx });
   }
 
-  for (const { scene, nameWidthPx } of sceneNameWidths) {
-    const numberSlotWidthPx = scene.parentId === null ? chapterNumberSlotWidthPx : sceneNumberSlotWidthPx;
-    requiredWidthPx = Math.max(
-      requiredWidthPx,
-      horizontalPaddingPx + (scene.parentId === null ? 0 : subSceneIndentPx) + numberSlotWidthPx + gapPx + nameWidthPx + scrollbarWidthPx
-    );
-  }
-
-  const railWidthPx = Math.ceil(Math.min(maxWidthPx, Math.max(minWidthPx, requiredWidthPx)));
   scriptTocMeasureCache = {
     scenes,
-    layoutKey,
-    railWidthPx,
+    rootFontSizePx,
     chapterNumberSlotWidthPx,
     sceneNumberSlotWidthPx,
   };
-  return { railWidthPx, chapterNumberSlotWidthPx, sceneNumberSlotWidthPx };
+  return scriptTocMeasureCache;
 }
 
 /**
@@ -392,6 +332,7 @@ type DisplaySettings = {
   blockTags: boolean;
   rehearsalMode: boolean;
   rehearsalBlockScenes: boolean;
+  sceneDetail: boolean;
 };
 const DEFAULT_DISPLAY: DisplaySettings = {
   pageBreaks: true,
@@ -400,6 +341,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   blockTags: true,
   rehearsalMode: false,
   rehearsalBlockScenes: true,
+  sceneDetail: true,
 };
 const DISPLAY_COOKIE = "script_display";
 const CHARACTER_FOCUS_STORAGE_PREFIX = "script_character_focus";
@@ -1084,10 +1026,10 @@ function TableOfContents({
   };
 
   const wrapClass = isRailPlacement
-    ? `flex h-full flex-col rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
+    ? `flex h-full min-w-0 w-full flex-col overflow-hidden rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
     : "px-8 pt-6 pb-5 border-b border-zinc-100";
   const navClass = isRailPlacement
-    ? "script-toc-rail-scrollbar flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain pr-1"
+    ? "hover-reveal-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
     : "flex flex-col gap-0.5";
 
   return (
@@ -1112,7 +1054,7 @@ function TableOfContents({
                 columnGap: `${SCRIPT_TOC_RAIL_LABEL_GAP_REM}rem`,
                 ...(isRailPlacement && isSubScene ? { paddingLeft: `calc(0.5rem + ${SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM}rem)` } : {}),
               }}
-              className={`flex items-baseline rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group ${
+              className={`flex w-full min-w-0 shrink-0 items-baseline overflow-hidden rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group ${
                 isCompactRail ? "justify-center gap-0" : `${!isRailPlacement && isSubScene ? "pl-6" : ""}`
               } ${
                 isActive ? "bg-white hover:bg-white" : ""
@@ -1122,7 +1064,7 @@ function TableOfContents({
                 style={isCompactRail
                   ? undefined
                   : { minWidth: numberSlotWidthPx ? `${numberSlotWidthPx}px` : `${SCRIPT_TOC_RAIL_NUMBER_SLOT_REM}rem` }}
-                className={`${isCompactRail ? "min-w-0" : "inline-block text-right"} text-xs tracking-wider ${
+                className={`${isCompactRail ? "min-w-0" : "inline-block shrink-0 text-right"} text-xs tracking-wider ${
                 isActive
                   ? "font-bold text-[#637ca1]"
                   : isSubScene
@@ -1133,12 +1075,12 @@ function TableOfContents({
                 {scene.number || "—"}
               </span>
               {!isCompactRail && (
-                <span className={`min-w-0 truncate ${
+                <span className={`min-w-0 flex-1 truncate ${
                   isActive
                     ? `${isSubScene ? "text-xs" : "text-sm"} font-semibold text-zinc-700`
                     : isSubScene
                       ? "text-xs text-zinc-300 group-hover:text-zinc-500"
-                      : "text-sm font-medium text-zinc-500 group-hover:text-zinc-700"
+                      : "text-sm font-medium text-zinc-400 group-hover:text-zinc-700"
                 }`}>
                   {scene.name || <span className="italic text-zinc-200">未命名</span>}
                 </span>
@@ -1378,7 +1320,7 @@ function ScriptSceneDetailRail({
         </div>
       ) : (
         <div
-          className="script-toc-rail-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
+          className="hover-reveal-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
           style={{
             marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
             paddingRight: `${scrollbarOffsetPx}px`,
@@ -8677,27 +8619,22 @@ export default function ScriptEditor({
   }, []);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
-  const [leftGutterWidth, setLeftGutterWidth] = useState(0);
-  const [rightGutterWidth, setRightGutterWidth] = useState(0);
-  const leftGutterRoRef = useRef<ResizeObserver | null>(null);
-  const rightGutterRoRef = useRef<ResizeObserver | null>(null);
-  const setLeftGutterRef = useCallback((el: HTMLDivElement | null) => {
-    if (leftGutterRoRef.current) { leftGutterRoRef.current.disconnect(); leftGutterRoRef.current = null; }
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const [productionSidebarReservedWidth, setProductionSidebarReservedWidth] = useState(0);
+  const workspaceMeasureRoRef = useRef<ResizeObserver | null>(null);
+  const setWorkspaceMeasureRef = useCallback((el: HTMLDivElement | null) => {
+    workspaceMeasureRoRef.current?.disconnect();
+    workspaceMeasureRoRef.current = null;
     if (!el) return;
-    const measure = () => setLeftGutterWidth(el.clientWidth);
+    const workspaceScrollEl = el.closest<HTMLElement>("#workspace-scroll") ?? el;
+    const measure = () => {
+      setWorkspaceWidth(workspaceScrollEl.clientWidth);
+      setProductionSidebarReservedWidth(Math.max(0, workspaceScrollEl.getBoundingClientRect().left));
+    };
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    leftGutterRoRef.current = ro;
-  }, []);
-  const setRightGutterRef = useCallback((el: HTMLDivElement | null) => {
-    if (rightGutterRoRef.current) { rightGutterRoRef.current.disconnect(); rightGutterRoRef.current = null; }
-    if (!el) return;
-    const measure = () => setRightGutterWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    rightGutterRoRef.current = ro;
+    ro.observe(workspaceScrollEl);
+    workspaceMeasureRoRef.current = ro;
   }, []);
 
   // Resolve Feishu display name and identity on mount
@@ -10356,18 +10293,80 @@ export default function ScriptEditor({
   const rootFontSizePx = typeof window === "undefined"
     ? 16
     : parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
-  const scriptTocRailLayout = measureScriptTocRailLayout(tocScenes, rootFontSizePx);
+  const scriptTocNumberWidths = measureScriptTocNumberWidths(tocScenes, rootFontSizePx);
+  const scriptTocRailFullWidthPx = SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM * rootFontSizePx;
+  const scriptTocRailCompactWidthPx = Math.max(
+    scriptTocNumberWidths.chapterNumberSlotWidthPx,
+    scriptTocNumberWidths.sceneNumberSlotWidthPx,
+  ) + (SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
   const scriptSceneDetailRailMinWidthPx = SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM * rootFontSizePx;
-  const scriptTocRailMode: "full" | null = leftGutterWidth > 0 ? "full" : null;
-  const showSceneDetailRail = !!productionId && leftGutterWidth >= scriptSceneDetailRailMinWidthPx;
-  const asideTargetWidthPx = showSceneDetailRail
-    // scene detail 模式：gutter 宽度减去固定左边距 12px，但不低于组件最小宽度
-    ? Math.max(scriptSceneDetailRailMinWidthPx, leftGutterWidth - 12)
-    // TOC only 模式：恰好 TOC 内容宽 + pr-4，其余空间作为左边距实现右对齐
-    : scriptTocRailLayout.railWidthPx + 16;
-  const asideStyle: React.CSSProperties = {
-    width: `${asideTargetWidthPx}px`,
-    marginLeft: `${Math.max(0, leftGutterWidth - asideTargetWidthPx)}px`,
+  const canShowSceneDetail = productionSidebarReservedWidth > 0
+    && workspaceWidth >= (
+      SCRIPT_EDITOR_MAX_WIDTH_PX + scriptTocRailCompactWidthPx + scriptSceneDetailRailMinWidthPx
+    );
+  const isSceneDetailRequested = !!productionId && display.sceneDetail;
+  const isSceneDetailVisible = isSceneDetailRequested && canShowSceneDetail;
+  const centeredScriptWidthPx = Math.min(workspaceWidth, SCRIPT_EDITOR_MAX_WIDTH_PX);
+  const centeredLeftPanelWidthPx = Math.max(
+    0,
+    (workspaceWidth - centeredScriptWidthPx) / 2,
+  );
+  const detailReservedContentsWidthPx = Math.max(
+    0,
+    workspaceWidth - centeredScriptWidthPx - scriptSceneDetailRailMinWidthPx,
+  );
+  const fullContentsPanelAvailableWidthPx = isSceneDetailRequested
+    ? detailReservedContentsWidthPx
+    : centeredLeftPanelWidthPx;
+  const compactContentsPanelAvailableWidthPx = isSceneDetailVisible
+    ? detailReservedContentsWidthPx
+    : centeredLeftPanelWidthPx;
+  const scriptTocRailMode: "full" | "compact" | null =
+    productionSidebarReservedWidth >= SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX
+      || workspaceWidth === 0
+      || fullContentsPanelAvailableWidthPx >= scriptTocRailFullWidthPx
+      ? "full"
+      : compactContentsPanelAvailableWidthPx + SCRIPT_BODY_HORIZONTAL_PADDING_REM * rootFontSizePx
+          >= scriptTocRailCompactWidthPx
+        ? "compact"
+        : null;
+  const tocAsideWidthPx = scriptTocRailMode === "compact"
+    ? scriptTocRailCompactWidthPx
+    : scriptTocRailFullWidthPx;
+  const renderedLeftPanelWidthPx = isSceneDetailVisible
+    ? scriptTocRailMode ? tocAsideWidthPx : 0
+    : centeredLeftPanelWidthPx;
+  const availableRightGutterWidthPx = Math.max(
+    0,
+    workspaceWidth - renderedLeftPanelWidthPx - centeredScriptWidthPx,
+  );
+  const rightGutterWidthPx = isSceneDetailVisible
+    ? Math.min(
+        availableRightGutterWidthPx,
+        SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX + SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX,
+      )
+    : availableRightGutterWidthPx;
+  const scriptBodyWidthPx = Math.max(
+    0,
+    workspaceWidth - renderedLeftPanelWidthPx - rightGutterWidthPx,
+  );
+  const tocAsideStyle: React.CSSProperties = {
+    width: `${tocAsideWidthPx}px`,
+    marginLeft: `${Math.max(
+      0,
+      renderedLeftPanelWidthPx - tocAsideWidthPx + SCRIPT_BODY_HORIZONTAL_PADDING_REM * rootFontSizePx,
+    )}px`,
+  };
+  const sceneDetailAsideWidthPx = Math.min(
+    SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX,
+    Math.max(
+      scriptSceneDetailRailMinWidthPx,
+      rightGutterWidthPx - SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX,
+    ),
+  );
+  const sceneDetailAsideStyle: React.CSSProperties = {
+    width: `${sceneDetailAsideWidthPx}px`,
+    marginRight: `${Math.max(0, rightGutterWidthPx - sceneDetailAsideWidthPx)}px`,
   };
   const sceneIdForBlockAtIndex = (block: Block, index: number): string | null => {
     const markerId = isMarkerBlock(block) ? block.id : (ownedBlocks[index] ?? block).ownerMarkerId;
@@ -10381,20 +10380,25 @@ export default function ScriptEditor({
       : blocks.findIndex((block) => block.id === blockId);
     return blockIndex >= 0 ? sceneIdForBlockAtIndex(blocks[blockIndex], blockIndex) : null;
   };
-  const selectedDetailSceneId = selectedBlockIds.size === 1
-    ? (detailBlockVisibility.selected ? sceneIdForBlockId(selectedDetailBlockId) : null)
+  const markerDeleteConfirmDetailSceneId = isSceneDetailVisible
+    ? sceneIdForBlockId(markerDetailDeleteConfirmBlockId)
     : null;
-  const focusedDetailSceneId = detailBlockVisibility.focused ? sceneIdForBlockId(focusedId) : null;
-  const markerDeleteConfirmDetailSceneId = sceneIdForBlockId(markerDetailDeleteConfirmBlockId);
-  const detailSceneId = markerDeleteConfirmDetailSceneId ?? (
-    selectedBlockIds.size > 1
-      ? null
-      : selectedDetailSceneId ?? focusedDetailSceneId ?? activeSceneId
-  );
+  const detailSceneId = isSceneDetailVisible
+    ? markerDeleteConfirmDetailSceneId ?? (
+        selectedBlockIds.size > 1
+          ? null
+          : (selectedBlockIds.size === 1 && detailBlockVisibility.selected
+              ? sceneIdForBlockId(selectedDetailBlockId)
+              : null)
+            ?? (detailBlockVisibility.focused ? sceneIdForBlockId(focusedId) : null)
+            ?? activeSceneId
+      )
+    : null;
   const activeScene = detailSceneId ? sceneById.get(detailSceneId) ?? null : null;
   const activeSceneDetail = activeScene
     ? sceneDetailById.get(activeScene.id) ?? toSceneDetail(activeScene)
     : null;
+  const rightGutterWidth = rightGutterWidthPx;
   const rightGutterCanShowComments = rightGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
   const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, rightGutterWidth - 24);
   const activeCommentBlockIndex = activeCommentBlockId
@@ -10517,7 +10521,7 @@ export default function ScriptEditor({
   ) : null;
 
   return (
-    <div className="bg-[var(--paper)]">
+    <div ref={setWorkspaceMeasureRef} className="bg-[var(--paper)]">
       {/* Toolbar */}
       <header className={searchOpen || jumpTarget
         ? "sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm"
@@ -10825,14 +10829,28 @@ export default function ScriptEditor({
                     ["lineNumbers",    "行号"],
                     ["rehearsalMarks", "排练记号"],
                     ["blockTags",      "Block 标签"],
-                  ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "rehearsalMarks" | "blockTags">, string][]
+                    ["rehearsalBlockScenes", "逐行章节"],
+                    ["sceneDetail",    "构作详情"],
+                  ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "rehearsalMarks" | "blockTags" | "rehearsalBlockScenes" | "sceneDetail">, string][]
                 ).map(([key, label]) => {
                   if (key === "blockTags" && tagGroups.length === 0) return null;
+                  if (key === "sceneDetail" && !productionId) return null;
                   const isRehearsalMarks = key === "rehearsalMarks";
-                  const enabled = !isRehearsalMarks || isLockedMode;
-                  const active = isRehearsalMarks ? !isLockedMode || display[key] : display[key];
+                  const isSceneDetail = key === "sceneDetail";
+                  const enabled = isRehearsalMarks
+                    ? isLockedMode
+                    : !isSceneDetail || canShowSceneDetail;
+                  const active = enabled ? display[key] : isRehearsalMarks;
+                  const disabledNotice = isSceneDetail
+                    ? "当前窗口宽度过窄，无法显示构作详情"
+                    : "编辑模式下不可隐藏排练记号";
+                  const disabledNoticeId = isSceneDetail
+                    ? "scene-detail-width-notice"
+                    : "rehearsal-marks-edit-mode-notice";
                   const checkboxClass = !enabled
-                    ? "border-zinc-300 bg-zinc-200 text-zinc-400"
+                    ? active
+                      ? "border-zinc-300 bg-zinc-200 text-zinc-400"
+                      : "border-zinc-300 bg-zinc-100 text-transparent"
                     : active
                       ? "border-zinc-800 bg-zinc-800 text-white"
                       : "border-zinc-300 text-transparent";
@@ -10841,7 +10859,8 @@ export default function ScriptEditor({
                       <button
                         onClick={() => { if (enabled) toggleDisplay(key); }}
                         aria-disabled={!enabled}
-                        aria-describedby={!enabled ? "rehearsal-marks-edit-mode-notice" : undefined}
+                        aria-describedby={!enabled ? disabledNoticeId : undefined}
+                        title={key === "rehearsalBlockScenes" ? "显示每行所属章节" : undefined}
                         className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
                           enabled ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-600 hover:bg-zinc-50"
                         }`}
@@ -10851,26 +10870,16 @@ export default function ScriptEditor({
                       </button>
                       {!enabled && (
                         <span
-                          id="rehearsal-marks-edit-mode-notice"
+                          id={disabledNoticeId}
                           role="tooltip"
                           className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
                         >
-                          编辑模式下不可隐藏排练记号
+                          {disabledNotice}
                         </span>
                       )}
                     </div>
                   );
                 })}
-                <button
-                  onClick={() => toggleDisplay("rehearsalBlockScenes")}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
-                  title="显示每行所属章节"
-                >
-                  <span>逐行章节</span>
-                  <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
-                    display.rehearsalBlockScenes ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
-                  }`}>✓</span>
-                </button>
                 <div className="my-1 border-t border-zinc-50" />
                 <button
                   onClick={() => {
@@ -11184,35 +11193,6 @@ export default function ScriptEditor({
           animation: scriptTocMarkerGlow 1.5s ease-out;
         }
 
-        .script-toc-rail-scrollbar {
-          scrollbar-color: transparent transparent;
-          scrollbar-width: thin;
-        }
-
-        .script-toc-rail-scrollbar:hover {
-          scrollbar-color: rgba(161, 161, 170, 0.45) transparent;
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar {
-          width: 8px;
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar-thumb {
-          background: transparent;
-          border-radius: 9999px;
-        }
-
-        .script-toc-rail-scrollbar:hover::-webkit-scrollbar-thumb {
-          background: rgba(161, 161, 170, 0.45);
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(113, 113, 122, 0.55);
-        }
       `}</style>
 
       {printPageMapMeasureEnabled && display.pageBreaks && (
@@ -11230,50 +11210,34 @@ export default function ScriptEditor({
 
       {/* Document: 3-column flex — left gutter | script content | right gutter */}
       <div className="flex items-start">
-        {/* Left gutter column (TOC + scene detail, sticky) */}
-        <div ref={setLeftGutterRef} className="hidden lg:flex flex-col flex-1 min-w-0 self-stretch">
+        {/* Offset the script only while the scene detail panel is actually visible. */}
+        <div
+          className="hidden md:flex min-w-0 flex-col self-stretch"
+          style={{ width: `${renderedLeftPanelWidthPx}px`, flexShrink: 0 }}
+        >
           {scriptTocRailMode && (
-            <aside style={asideStyle} className={`sticky top-0 pr-4 ${showSceneDetailRail ? "h-[calc(100vh-4rem)] flex min-h-0 flex-col" : "h-[calc((100vh-4rem)/3)] min-h-44 max-h-96"}`}>
-              <div className={`${showSceneDetailRail ? "h-[calc((100vh-4rem)/3)] min-h-44 max-h-96 shrink-0 flex justify-end" : "h-full"}`}>
-                <div
-                  className="h-full"
-                  style={showSceneDetailRail ? { width: `${scriptTocRailLayout.railWidthPx + 16}px` } : { width: "100%" }}
-                >
-                  <TableOfContents
-                    scenes={tocScenes}
-                    blocks={legacyProjectedBlocks}
-                    onScrollToScene={scrollToScene}
-                    activeSceneId={activeSceneId}
-                    placement="rail"
-                    chapterNumberSlotWidthPx={scriptTocRailLayout.chapterNumberSlotWidthPx}
-                    sceneNumberSlotWidthPx={scriptTocRailLayout.sceneNumberSlotWidthPx}
-                  />
-                </div>
-              </div>
-              {showSceneDetailRail && (
-                <div className="my-3 h-px w-full shrink-0 bg-zinc-300" />
-              )}
-              {showSceneDetailRail && productionId && (
-                <div className="flex-1 min-h-0 overflow-hidden pl-2">
-                  <ScriptSceneDetailRail
-                    scene={activeSceneDetail}
-                    scenes={sceneDetails}
-                    productionId={productionId}
-                    versionId={activeVersionId ?? null}
-                    canEdit={canEditMetadata}
-                    isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
-                    scrollbarOffsetPx={0}
-                    onUpdateIdentity={updateScene}
-                    onPatchMeta={patchSceneMeta}
-                  />
-                </div>
-              )}
+            <aside
+              style={tocAsideStyle}
+              className="sticky top-0 h-[calc(44.444vh_-_1.778rem)] min-h-[14.667rem] max-h-[32rem]"
+            >
+              <TableOfContents
+                scenes={tocScenes}
+                blocks={legacyProjectedBlocks}
+                onScrollToScene={scrollToScene}
+                activeSceneId={activeSceneId}
+                placement={scriptTocRailMode === "compact" ? "rail-compact" : "rail"}
+                chapterNumberSlotWidthPx={scriptTocNumberWidths.chapterNumberSlotWidthPx}
+                sceneNumberSlotWidthPx={scriptTocNumberWidths.sceneNumberSlotWidthPx}
+              />
             </aside>
           )}
         </div>
 
         {/* Center column (script content) */}
-        <main className="w-full flex-none min-w-0 px-4 py-8" style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}>
+        <main
+          className="w-full flex-none min-w-0 px-4 py-8"
+          style={{ maxWidth: scriptBodyWidthPx || SCRIPT_EDITOR_MAX_WIDTH_PX }}
+        >
         <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
           {display.lineNumbers && (
             <>
@@ -11943,8 +11907,32 @@ export default function ScriptEditor({
         )}
         </main>
 
-        {/* Right gutter column (comment bubbles overflow into here) */}
-        <div ref={setRightGutterRef} className="hidden lg:block flex-1 min-w-0 self-stretch" aria-hidden="true" />
+        {/* Right column: scene detail below the top third; overlays render above it. */}
+        <div className="hidden min-w-0 flex-1 self-stretch md:block">
+          {isSceneDetailVisible && productionId && (
+            <aside
+              style={sceneDetailAsideStyle}
+              className="pointer-events-none sticky top-0 z-10 flex h-[calc(100vh-4rem)] min-h-0 flex-col"
+            >
+              <div className="h-[calc((100vh-4rem)/3)] min-h-44 max-h-96 shrink-0" aria-hidden="true" />
+              <div className="pointer-events-auto mt-3 flex min-h-0 flex-1 flex-col border-t border-zinc-300 bg-[var(--paper)] pt-3 pr-2">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <ScriptSceneDetailRail
+                    scene={activeSceneDetail}
+                    scenes={sceneDetails}
+                    productionId={productionId}
+                    versionId={activeVersionId ?? null}
+                    canEdit={canEditMetadata}
+                    isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
+                    scrollbarOffsetPx={0}
+                    onUpdateIdentity={updateScene}
+                    onPatchMeta={patchSceneMeta}
+                  />
+                </div>
+              </div>
+            </aside>
+          )}
+        </div>
       </div>
 
       {tagEditorOpen && productionId && (
