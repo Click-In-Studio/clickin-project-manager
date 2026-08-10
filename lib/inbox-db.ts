@@ -30,7 +30,11 @@ export type ActionEffect =
   /** Soft RSVP for a call time row before the daily-call dispatch window. */
   | { type: "set_rsvp";    entityType: "call_time"; entityId: string; rsvp: "yes" | "no" | "tentative" }
   | { type: "mark_read"; entityType?: string; entityId?: string }
-  | { type: "mark_acted" };
+  | { type: "mark_acted" }
+  /** Approve an approval_request inline — first-action-wins, conflict is silently swallowed. */
+  | { type: "approve_access_request"; requestId: string }
+  /** Reject an approval_request inline — first-action-wins, conflict is silently swallowed. */
+  | { type: "reject_access_request"; requestId: string };
 
 export type NotificationCategory = "info" | "action" | "warning";
 

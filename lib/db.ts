@@ -6917,6 +6917,10 @@ export async function submitAccessRequest(
       category: "action",
       actionRequired: true,
       approvalRequestId: request.id,
+      actions: [
+        { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: request.id }] },
+        { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: request.id }] },
+      ],
     });
   } else {
     // Notify resource approvers
@@ -6941,6 +6945,10 @@ export async function submitAccessRequest(
         category: "action",
         actionRequired: true,
         approvalRequestId: request.id,
+        actions: [
+          { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: request.id }] },
+          { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: request.id }] },
+        ],
       });
     }
   }
@@ -7027,6 +7035,10 @@ export async function approveAccessRequest(
         category: "action",
         actionRequired: true,
         approvalRequestId: requestId,
+        actions: [
+          { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId }] },
+          { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId }] },
+        ],
       });
     }
   } else {
@@ -7354,6 +7366,10 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
       category: "action",
       actionRequired: true,
       approvalRequestId: row.id,
+      actions: [
+        { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: row.id }] },
+        { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: row.id }] },
+      ],
     });
   }
 

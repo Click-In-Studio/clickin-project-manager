@@ -15,6 +15,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getUserNotification, markNotificationActed, rsvpCallTime } from "@/lib/inbox-db";
+import { approveAccessRequest, rejectAccessRequest } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import type { ActionEffect } from "@/lib/inbox-db";
 import type { PoolClient } from "pg";
@@ -149,6 +150,23 @@ async function executeEffect(
     case "mark_acted":
       // Handled outside the transaction via markNotificationActed; no-op here.
       break;
+
+    case "approve_access_request": {
+      const result = await approveAccessRequest(effect.requestId, userId);
+      // conflict = someone else got there first; that's fine, swallow it
+      if (!result.ok && result.reason === "unauthorized") {
+        throw new Error("无权审批");
+      }
+      break;
+    }
+
+    case "reject_access_request": {
+      const result = await rejectAccessRequest(effect.requestId, userId);
+      if (!result.ok && result.reason === "unauthorized") {
+        throw new Error("无权审批");
+      }
+      break;
+    }
 
     default:
       // Exhaustiveness guard — unknown effect types are ignored, not thrown, so
