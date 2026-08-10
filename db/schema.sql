@@ -1093,6 +1093,23 @@ CREATE INDEX IF NOT EXISTS rdm_production_resource_idx
 CREATE INDEX IF NOT EXISTS rdm_dept_idx
   ON resource_dept_manage (dept_id);
 
+-- ── Resource Person Manage ────────────────────────────────────────────────────
+-- Per-resource individual person management (complements resource_dept_manage).
+CREATE TABLE IF NOT EXISTS resource_person_manage (
+  id             uuid        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  production_id  text        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id        uuid        NOT NULL REFERENCES app_user(id)   ON DELETE CASCADE,
+  resource_type  text        NOT NULL,
+  resource_id    text        NOT NULL DEFAULT '*',
+  resource_sub   text        NOT NULL DEFAULT '*',
+  established_by uuid        NOT NULL REFERENCES app_user(id),
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (production_id, user_id, resource_type, resource_id, resource_sub)
+);
+
+CREATE INDEX IF NOT EXISTS rpm_production_resource_idx
+  ON resource_person_manage (production_id, resource_type, resource_id);
+
 -- ── Production Approval Config（Phase 3）──────────────────────────────────────
 -- 演出级审批 TTL 配置，演出创建时自动写入默认行。
 CREATE TABLE IF NOT EXISTS production_approval_config (
