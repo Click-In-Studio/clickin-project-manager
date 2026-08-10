@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
@@ -152,6 +152,7 @@ export type SettingsPerms = {
   canImportContacts: boolean;
   canImportScript: boolean;
   canImportScenes: boolean;
+  canManageTags: boolean;
 };
 
 export type InitialMeta = {
@@ -197,6 +198,9 @@ export default function AdminSettingsClient({
 
         {/* ── 基本信息 ── */}
         <BasicInfoCard productionId={productionId} initialMeta={initialMeta} perms={perms} />
+
+        {/* ── 成员标签 ── */}
+        <MemberTagsCard productionId={productionId} perms={perms} />
 
         {/* ── 数据 ── */}
         <DataCard productionId={productionId} perms={perms} />
@@ -425,6 +429,136 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
               onFocus={inputFocus} onBlur={inputBlur}
             />
             <SaveBtn dirty={langDirty} saving={langSave.saving} saved={langSave.saved} onClick={() => langSave.save({ language: language.trim() || null })} />
+          </div>
+        )}
+      </Row>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 成员标签 card
+// ─────────────────────────────────────────────────────────────────────────────
+
+type MemberTag = { id: string; name: string; isSystem: boolean };
+
+function MemberTagsCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
+  const [tags, setTags] = useState<MemberTag[]>([]);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${BASE_PATH}/api/production/${productionId}/member-tags`)
+      .then((r) => r.json())
+      .then((data: { tags?: MemberTag[] }) => setTags(data.tags ?? []))
+      .catch(() => {});
+  }, [productionId]);
+
+  const handleCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/member-tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json() as { tag?: MemberTag; error?: string };
+      if (res.ok && data.tag) {
+        setTags((prev) => [...prev, data.tag!]);
+        setNewName("");
+      } else {
+        setError(data.error ?? "创建失败");
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (tag: MemberTag) => {
+    if (!confirm(`确定删除标签「${tag.name}」？已分配该标签的成员将自动移除。`)) return;
+    setDeletingIds((s) => new Set(s).add(tag.id));
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/member-tags/${tag.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setTags((prev) => prev.filter((t) => t.id !== tag.id));
+      } else {
+        const data = await res.json() as { error?: string };
+        setError(data.error ?? "删除失败");
+      }
+    } finally {
+      setDeletingIds((s) => { const n = new Set(s); n.delete(tag.id); return n; });
+    }
+  };
+
+  const inputFocus = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--ink)"; };
+  const inputBlur = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--line)"; };
+
+  const systemTags = tags.filter((t) => t.isSystem);
+  const customTags = tags.filter((t) => !t.isSystem);
+
+  return (
+    <Card title="成员标签">
+      <Row title="系统标签" hint="内置标签，不可删除">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {systemTags.length === 0 ? (
+            <p style={{ fontSize: 12, color: "var(--muted)" }}>—</p>
+          ) : systemTags.map((t) => (
+            <span key={t.id} style={{ fontSize: 12, padding: "3px 10px", borderRadius: 20, background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe" }}>
+              {t.name}
+            </span>
+          ))}
+        </div>
+      </Row>
+
+      <Row title="自定义标签" hint="演出专属标签，可创建或删除" last>
+        {!perms.canManageTags ? <LockedNotice reason="需要 members:change_role 权限" /> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* Existing custom tags */}
+            {customTags.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {customTags.map((t) => (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "3px 6px 3px 10px", borderRadius: 20, background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}>
+                    {t.name}
+                    <button
+                      onClick={() => handleDelete(t)}
+                      disabled={deletingIds.has(t.id)}
+                      style={{ fontSize: 13, lineHeight: 1, color: "#86efac", cursor: "pointer", border: "none", background: "none", padding: "0 2px", opacity: deletingIds.has(t.id) ? 0.4 : 1 }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {customTags.length === 0 && (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>暂无自定义标签</p>
+            )}
+            {/* Create new */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={newName}
+                onChange={(e) => { setNewName(e.target.value); setError(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
+                placeholder="新标签名称…"
+                style={{ ...INPUT, flex: 1 }}
+                onFocus={inputFocus} onBlur={inputBlur}
+              />
+              <button
+                onClick={handleCreate}
+                disabled={!newName.trim() || creating}
+                style={BTN(!!newName.trim())}
+              >
+                {creating ? "创建中…" : "创建"}
+              </button>
+            </div>
+            {error && <p style={{ fontSize: 12, color: "#dc2626" }}>{error}</p>}
           </div>
         )}
       </Row>

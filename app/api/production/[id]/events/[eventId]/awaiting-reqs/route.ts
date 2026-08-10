@@ -5,7 +5,7 @@ import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
 import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL } from "@/lib/server-url";
 import { getPool } from "@/lib/pg";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { notifyUsers } from "@/lib/notify";
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const dept = await getEventDepartment(req.departmentId, productionId);
     if (!dept?.pocUserIds.length) continue;
 
-    const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${req.id}`;
+    const reqPath = `${SERVER_URL}/production/${productionId}/tasks/${req.id}`;
 
     // Inbox + optional DM — always fires regardless of group chat.
     void notifyUsers({

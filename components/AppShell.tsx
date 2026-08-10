@@ -7,7 +7,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
 
-type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; canAdmin: boolean; avatarUrl: string | null };
+type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
 
 interface AppShellProps {
@@ -330,7 +330,10 @@ function ProjectSwitcher({
                   color: "var(--muted)", fontSize: 10, lineHeight: 1.2,
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
-                  {currentProduction.roles.slice(0, 2).join(" · ")}
+                  {currentProduction.roles[0]}
+                  {currentProduction.firstTag && (
+                    <span style={{ marginLeft: 3, opacity: 0.7 }}>[{currentProduction.firstTag}]</span>
+                  )}
                 </small>
               )}
               <b style={{
@@ -441,7 +444,10 @@ function ProjectSwitcher({
                 </b>
                 {p.roles.length > 0 && (
                   <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 10 }}>
-                    {p.roles.slice(0, 2).join(" · ")}
+                    {p.roles[0]}
+                    {p.firstTag && (
+                      <span style={{ marginLeft: 3, opacity: 0.7 }}>[{p.firstTag}]</span>
+                    )}
                   </small>
                 )}
               </span>

@@ -64,7 +64,12 @@ function MemberCard({
 
       <div className="px-2 py-2 flex flex-col gap-1">
         <div className="flex items-center justify-between gap-1">
-          <p className="text-sm font-semibold text-zinc-800 truncate">{member.name}</p>
+          <div className="flex items-center gap-1 min-w-0">
+            <p className="text-sm font-semibold text-zinc-800 truncate">{member.name}</p>
+            {member.status === "suspended" && (
+              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-red-50 text-red-400">停用</span>
+            )}
+          </div>
           <div className="shrink-0 flex gap-0.5">
             {(canManage || isSelf) && (
               <button
@@ -85,6 +90,20 @@ function MemberCard({
               </span>
             ))}
           </div>
+        )}
+
+        {member.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {member.tags.map((t) => (
+              <span key={t} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-500">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {member.supervisorName && (
+          <p className="text-[11px] text-zinc-400 truncate">↑ {member.supervisorName}</p>
         )}
 
         {member.email && (
@@ -108,6 +127,7 @@ function EditInfoPanel({
   productionId,
   member,
   canManage,
+  allMembers,
   onClose,
   onSaved,
   onDeleted,
@@ -115,6 +135,7 @@ function EditInfoPanel({
   productionId: string;
   member: MemberWithRoles;
   canManage: boolean;
+  allMembers: MemberWithRoles[];
   onClose: () => void;
   onSaved: (updated: Partial<MemberWithRoles>) => void;
   onDeleted: () => void;
@@ -123,8 +144,27 @@ function EditInfoPanel({
   const [phone, setPhone] = useState(member.phone ?? "");
   const [photoUrl, setPhotoUrl] = useState(member.photoUrl ?? "");
   const [selectedRoles, setSelectedRoles] = useState<string[]>(member.roles);
+  // selectedTagIds tracks UUIDs (what the API expects); initialized once availableTags loads
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [supervisorId, setSupervisorId] = useState<string | null>(member.supervisorId);
+  const [availableTags, setAvailableTags] = useState<{ id: string; name: string; isSystem: boolean }[]>([]);
+  const [tagsReady, setTagsReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    fetch(`${BASE_PATH}/api/production/${productionId}/member-tags`)
+      .then((r) => r.json())
+      .then((data: { tags?: { id: string; name: string; isSystem: boolean }[] }) => {
+        const tags = data.tags ?? [];
+        setAvailableTags(tags);
+        // Convert member's current tag names → IDs
+        const nameToId = new Map(tags.map((t) => [t.name, t.id]));
+        setSelectedTagIds(member.tags.map((n) => nameToId.get(n)).filter(Boolean) as string[]);
+        setTagsReady(true);
+      })
+      .catch(() => {});
+  }, [productionId, member.tags]);
 
   const toggleRole = (role: string) => {
     setSelectedRoles((prev) =>
@@ -132,11 +172,21 @@ function EditInfoPanel({
     );
   };
 
+  const toggleTag = (id: string) => {
+    setSelectedTagIds((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
       const body: Record<string, unknown> = { userId: member.userId };
-      if (canManage) body.roles = selectedRoles;
+      if (canManage) {
+        body.roles = selectedRoles;
+        body.tagIds = selectedTagIds;
+        body.supervisorId = supervisorId;
+      }
       body.email = email.trim() || null;
       body.phone = phone.trim() || null;
       body.photoUrl = photoUrl.trim() || null;
@@ -147,8 +197,17 @@ function EditInfoPanel({
         body: JSON.stringify(body),
       });
       if (res.ok) {
+        const resolvedSupervisorName = canManage
+          ? (allMembers.find((m) => m.userId === supervisorId)?.name ?? null)
+          : member.supervisorName;
+        const resolvedTagNames = canManage
+          ? availableTags.filter((t) => selectedTagIds.includes(t.id)).map((t) => t.name)
+          : member.tags;
         onSaved({
           roles: canManage ? selectedRoles : member.roles,
+          tags: resolvedTagNames,
+          supervisorId: canManage ? supervisorId : member.supervisorId,
+          supervisorName: resolvedSupervisorName,
           email: email.trim() || null,
           phone: phone.trim() || null,
           photoUrl: photoUrl.trim() || null,
@@ -175,6 +234,8 @@ function EditInfoPanel({
       setDeleting(false);
     }
   };
+
+  const otherMembers = allMembers.filter((m) => m.userId !== member.userId);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -254,6 +315,49 @@ function EditInfoPanel({
               ))}
             </div>
           )}
+
+          {/* Tags — admin only */}
+          {canManage && tagsReady && availableTags.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">标签</p>
+              <div className="flex flex-wrap gap-1.5">
+                {availableTags.map((tag) => {
+                  const active = selectedTagIds.includes(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      onClick={() => toggleTag(tag.id)}
+                      className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+                        active
+                          ? "bg-blue-600 text-white"
+                          : "bg-blue-50 text-blue-500 hover:bg-blue-100"
+                      }`}
+                    >
+                      {tag.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Supervisor — admin only */}
+          {canManage && (
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase">上级</p>
+              <select
+                value={supervisorId ?? ""}
+                onChange={(e) => setSupervisorId(e.target.value || null)}
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400 bg-white"
+              >
+                <option value="">— 无 —</option>
+                {otherMembers.map((m) => (
+                  <option key={m.userId} value={m.userId}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
         </div>
 
         <div className="border-t border-zinc-100 px-5 py-4 flex items-center gap-3">
@@ -373,7 +477,11 @@ function AddMemberPanel({
         email: selected.email ?? null,
         phone: selected.phone ?? null,
         roles: selectedRoles,
+        tags: [],
         photoUrl: null,
+        supervisorId: null,
+        supervisorName: null,
+        status: "active",
       });
       onClose();
     } catch {
@@ -719,6 +827,7 @@ export default function ContactsClient({
           productionId={productionId}
           member={editingMember}
           canManage={canManage}
+          allMembers={members}
           onClose={() => setEditingOpenId(null)}
           onSaved={(updated) => handleMemberSaved(editingMember.userId, updated)}
           onDeleted={() => handleMemberDeleted(editingMember.userId)}

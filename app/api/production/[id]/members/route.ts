@@ -7,8 +7,12 @@ import {
   setMemberRoles,
   updateUserContact,
   setMemberPhoto,
+  setMemberSupervisor,
+  setMemberTags,
   isProductionArchived,
+  getProductionPermissionContext,
 } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 
 function requireAdmin(req: NextRequest) {
   const session = getSession(req.cookies);
@@ -43,21 +47,42 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, email, phone, photoUrl } = (await req.json()) as {
-    userId?: string;
-    roles?: string[];
-    email?: string | null;
-    phone?: string | null;
-    photoUrl?: string | null;
-  };
+  const { userId, roles, email, phone, photoUrl, supervisorId, tagIds } =
+    (await req.json()) as {
+      userId?: string;
+      roles?: string[];
+      email?: string | null;
+      phone?: string | null;
+      photoUrl?: string | null;
+      supervisorId?: string | null;
+      tagIds?: string[];
+    };
   if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
 
   const isSelf = session.userId === userId;
   if (!session.isAdmin && !isSelf) return Response.json({ error: "权限不足" }, { status: 403 });
 
+  const access = session.isAdmin
+    ? null
+    : await getProductionPermissionContext(session.userId, false, id);
+
   if (roles !== undefined) {
-    if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
+    if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
+      return Response.json({ error: "权限不足" }, { status: 403 });
+    }
     await setMemberRoles(id, userId, roles);
+  }
+  if (tagIds !== undefined) {
+    if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
+      return Response.json({ error: "权限不足" }, { status: 403 });
+    }
+    await setMemberTags(id, userId, tagIds);
+  }
+  if (supervisorId !== undefined) {
+    if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
+      return Response.json({ error: "权限不足" }, { status: 403 });
+    }
+    await setMemberSupervisor(id, userId, supervisorId);
   }
   if (email !== undefined || phone !== undefined) {
     await updateUserContact(userId, email ?? null, phone ?? null);
@@ -69,12 +94,21 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 }
 
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const auth = requireAdmin(req);
-  if (auth instanceof Response) return auth;
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+
   const { userId } = (await req.json()) as { userId?: string };
   if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
+
+  if (!session.isAdmin) {
+    const access = await getProductionPermissionContext(session.userId, false, id);
+    if (!access || !hasPermission("members:kick", access.permCtx)) {
+      return Response.json({ error: "权限不足" }, { status: 403 });
+    }
+  }
+
   await removeProductionMember(id, userId);
   return Response.json({ ok: true });
 }

@@ -36,6 +36,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     canImportContacts: !!permCtx && hasPermission("contacts:import", permCtx),
     canImportScript: !!permCtx && hasPermission("script:import", permCtx),
     canImportScenes: !!permCtx && hasPermission("dramaturgy:import", permCtx),
+    canManageTags: !!permCtx && hasPermission("members:change_role", permCtx),
   };
 
   return (

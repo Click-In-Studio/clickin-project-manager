@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS production_role (
   production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  is_deprecated BOOLEAN NOT NULL DEFAULT false,
   UNIQUE (production_id, name)
 );
 

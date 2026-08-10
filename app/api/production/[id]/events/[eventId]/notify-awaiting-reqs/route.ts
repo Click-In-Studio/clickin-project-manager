@@ -13,7 +13,7 @@ import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db"
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
 import { buildUrgeReqCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL } from "@/lib/server-url";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { notifyUsers } from "@/lib/notify";
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // One inbox notification per awaiting req so each can be individually acted.
     for (const techReq of reqs) {
-      const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${techReq.id}`;
+      const reqPath = `${SERVER_URL}/production/${productionId}/tasks/${techReq.id}`;
       await notifyUsers({
         userIds: dept.pocUserIds,
         kind: "tech_req_poc",
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // Feishu group card — secondary summary, only if dept has a chatId.
     if (dept.chatId) {
-      const listPath = `${BASE_PATH}/production/${productionId}/events/${eventId}/reqs`;
+      const listPath = `${SERVER_URL}/production/${productionId}/events/${eventId}/reqs`;
       const userIdToOpenId = await batchGetFeishuOpenIds(dept.pocUserIds);
       const pocOpenIds = dept.pocUserIds.map(id => userIdToOpenId.get(id)).filter((v): v is string => !!v);
       const groupActionUrl = feishuPlatform.buildActionUrl(listPath);

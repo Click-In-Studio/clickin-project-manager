@@ -5,7 +5,7 @@ import { getProductionPermissionContext, getCueList, updateCue, deleteCue,
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/platform/feishu/feishu-bot";
-import { BASE_PATH } from "@/lib/base-path";
+import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -103,7 +103,7 @@ async function notifyCueWarning(
   const recipients = [...new Set([cueList.createdBy, ...roleEditorUserIds])];
   if (!recipients.length) return;
 
-  const cuePath = `${BASE_PATH}/production/${productionId}/cuelists/${cueListId}`;
+  const cuePath = `${SERVER_URL}/production/${productionId}/cuelists/${cueListId}`;
   await notifyUsers({
     userIds: recipients,
     kind: "cue_warning",
