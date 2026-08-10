@@ -32,7 +32,7 @@ import ScriptDialog, {
   SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS,
   SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS,
 } from "@/components/ScriptDialog";
-import { COMPACT_TEXT_SIDE_WIDTH_REM, PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
+import { PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
 import type { EstimatedPageMapCache, PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
@@ -97,6 +97,22 @@ function scrollContainerBy(opts: ScrollToOptions) {
   if (typeof document === 'undefined') return;
   const el = document.getElementById('workspace-scroll');
   if (el) el.scrollBy(opts); else window.scrollBy(opts);
+}
+
+function scrollElementIntoView(
+  element: HTMLElement,
+  align: ScrollLogicalPosition,
+  viewportTopRatio?: number,
+) {
+  if (viewportTopRatio === undefined) {
+    element.scrollIntoView({ behavior: "instant", block: align });
+    return;
+  }
+  const blockElement = element.closest<HTMLElement>("[data-bwrap]") ?? element;
+  const { clientHeight, viewTop } = getScrollMetrics();
+  const targetTop = viewTop + clientHeight * viewportTopRatio;
+  const delta = blockElement.getBoundingClientRect().top - targetTop;
+  if (Math.abs(delta) >= 0.5) scrollContainerBy({ top: delta, behavior: "instant" });
 }
 
 const REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM = 1.75;
@@ -1697,6 +1713,8 @@ function ScriptMarkerRow({
   canEdit,
   isSelected,
   isDeleteConfirmHighlighted,
+  isDeleteConfirmationOpen,
+  isMobileMenuOpen = false,
   isReorderLocked,
   isScriptDragging,
   dragTarget,
@@ -1717,9 +1735,9 @@ function ScriptMarkerRow({
   onOpenSceneDetail,
   onDeleteConfirmChange,
   onSceneNameChange,
+  onMobileMenuOpen,
   deleteCount = 1,
   lineIndexWidth,
-  dismissToken = 0,
   isRecentlyMoved = false,
   isTocHighlighted = false,
   reserveRehearsalGap = false,
@@ -1728,6 +1746,8 @@ function ScriptMarkerRow({
   canEdit: boolean;
   isSelected: boolean;
   isDeleteConfirmHighlighted: boolean;
+  isDeleteConfirmationOpen: boolean;
+  isMobileMenuOpen?: boolean;
   isReorderLocked: boolean;
   isScriptDragging: boolean;
   dragTarget?: DragTarget | null;
@@ -1748,17 +1768,13 @@ function ScriptMarkerRow({
   onOpenSceneDetail?: () => void;
   onDeleteConfirmChange?: (confirming: boolean) => void;
   onSceneNameChange?: (id: string, name: string) => void;
+  onMobileMenuOpen?: () => void;
   deleteCount?: number;
   lineIndexWidth?: string;
-  dismissToken?: number;
   isRecentlyMoved?: boolean;
   isTocHighlighted?: boolean;
   reserveRehearsalGap?: boolean;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  useEffect(() => {
-    setConfirmDelete(false);
-  }, [dismissToken]);
   const isRehearsal = node.kind === "rehearsal";
   const markerRootStyle: React.CSSProperties | undefined = lineIndexWidth
     ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)`,
@@ -1782,7 +1798,7 @@ function ScriptMarkerRow({
         : "确认删除此排练记号？";
   const markerMovedGlowClass = isRecentlyMoved && !isRehearsal ? "script-block-moved-glow" : "";
   const markerTocGlowClass = !isRehearsal && !isRecentlyMoved && isTocHighlighted ? "script-toc-marker-glow" : "";
-  const isDeleteHighlighted = confirmDelete || isDeleteConfirmHighlighted;
+  const isDeleteHighlighted = isDeleteConfirmationOpen || isDeleteConfirmHighlighted;
   const markerGlowEndColor = !isRehearsal && isTocHighlighted
     ? isDeleteHighlighted ? "#fee2e2" : isSelected ? "#eef3fa" : "#ffffff"
     : undefined;
@@ -1822,7 +1838,6 @@ function ScriptMarkerRow({
     e.stopPropagation();
     if (isScriptDragging) return;
     if (!onRequestDelete()) return;
-    setConfirmDelete(true);
     onDeleteConfirmChange?.(true);
   };
   const deleteConfirmationControl = (
@@ -1835,7 +1850,6 @@ function ScriptMarkerRow({
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
-          setConfirmDelete(false);
           onDeleteConfirmChange?.(false);
           onRemove();
         }}
@@ -1847,7 +1861,6 @@ function ScriptMarkerRow({
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
-          setConfirmDelete(false);
           onDeleteConfirmChange?.(false);
         }}
         className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
@@ -1897,9 +1910,9 @@ function ScriptMarkerRow({
       )}
       {!isRehearsal && (canEdit || boundaryMenuControl) && (
         <div className="absolute left-0 top-1 bottom-1 z-20 w-12">
-          {canEdit && confirmDelete ? (
+          {canEdit && isDeleteConfirmationOpen ? (
             <span
-              className="absolute left-0 top-1/2 z-10 -translate-y-1/2 translate-x-8"
+              className="absolute left-0 top-1/2 z-10 hidden -translate-y-1/2 translate-x-8 sm:block"
             >
               {deleteConfirmationControl}
             </span>
@@ -1916,7 +1929,7 @@ function ScriptMarkerRow({
                 e.stopPropagation();
               }}
               style={{ left: MARKER_CONTROL_DELETE_LEFT_PX }}
-              className="absolute top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100"
+              className="absolute top-1/2 hidden h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100 sm:flex"
               title="删除此标记"
               aria-label="删除此标记"
             >
@@ -1939,24 +1952,28 @@ function ScriptMarkerRow({
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect(e);
+                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
               }}
               style={{ left: MARKER_CONTROL_BAR_LEFT_PX }}
-              className={`absolute top-1/2 h-[max(1.25rem,calc(100%-0.25rem))] w-4 -translate-y-1/2 select-none rounded opacity-0 outline-none transition-all focus:outline-none focus-visible:outline-none group-hover/marker:opacity-100 ${
+              className={`absolute top-1/2 h-[max(1.25rem,calc(100%-0.25rem))] w-4 -translate-y-1/2 select-none rounded text-zinc-300 outline-none transition-colors hover:text-zinc-500 focus:outline-none focus-visible:outline-none sm:opacity-0 sm:transition-all sm:group-hover/marker:opacity-100 ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
-                  : `cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
-                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] opacity-100" : "text-zinc-200"
-                    }`
+                  : isDeleteHighlighted
+                    ? "cursor-grab bg-red-100 text-red-500 hover:bg-red-100 hover:text-red-600 active:cursor-grabbing sm:opacity-100"
+                    : `cursor-grab active:cursor-grabbing sm:hover:bg-[#dbe5f3] sm:hover:text-[#91a8ca] ${
+                        isSelected ? "sm:bg-[#dbe5f3] sm:text-[#91a8ca] sm:opacity-100" : "sm:text-zinc-200"
+                      }`
               }`}
               title="拖动调整标记位置"
               aria-label="拖动调整标记位置"
             >
-              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current" />
+              <span className="pointer-events-none flex h-full items-center justify-center text-[11px] font-bold sm:hidden">▶</span>
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 hidden w-0.5 -translate-x-1/2 rounded bg-current sm:block" />
             </button>
           )}
           {boundaryMenuControl && (
             <span
-              className="absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/marker:opacity-100"
+              className="absolute top-1/2 hidden -translate-y-1/2 opacity-0 transition-opacity group-hover/marker:opacity-100 sm:block"
               style={{
                 left: MARKER_CONTROL_TRIANGLE_LEFT_PX,
                 marginTop: MARKER_CONTROL_TRIANGLE_TOP_OFFSET_PX,
@@ -1989,10 +2006,10 @@ function ScriptMarkerRow({
               if (!canEdit) return;
               onSelect(e);
             }}
-            className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${confirmDelete ? "transition-none" : "transition-all"} ${
+            className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${isDeleteConfirmationOpen ? "transition-none" : "transition-all"} ${
               isDeleteHighlighted
                 ? "bg-red-100 text-red-600 ring-1 ring-red-300"
-                : isSelected ? "bg-[#eef3fa] text-[#637ca1] ring-1 ring-[#91a8ca]" : "bg-zinc-100 text-zinc-500"
+                : isSelected || isMobileMenuOpen ? "bg-[#eef3fa] text-[#637ca1] ring-1 ring-[#91a8ca]" : "bg-zinc-100 text-zinc-500"
             } ${
               canEdit && !isReorderLocked
                 ? isDeleteHighlighted
@@ -2005,7 +2022,7 @@ function ScriptMarkerRow({
           >
             {node.mark}
           </button>
-          {canEdit && confirmDelete ? (
+          {canEdit && isDeleteConfirmationOpen ? (
             deleteConfirmationControl
           ) : canEdit ? (
             <button
@@ -2019,7 +2036,7 @@ function ScriptMarkerRow({
               onClick={(e) => {
                 e.stopPropagation();
               }}
-              className={`flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 transition-all hover:bg-red-100 hover:text-red-500 ${
+              className={`hidden h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 transition-all hover:bg-red-100 hover:text-red-500 sm:flex ${
                 isSelected ? "opacity-100" : "opacity-0 group-hover/marker:opacity-100"
               }`}
               title="删除此排练记号"
@@ -2028,10 +2045,24 @@ function ScriptMarkerRow({
               ×
             </button>
           ) : null}
-          {!confirmDelete && boundaryMenuControl ? (
-            <span className="flex h-4 items-center opacity-0 transition-opacity group-hover/marker:opacity-100">
+          {!isDeleteConfirmationOpen && boundaryMenuControl ? (
+            <span className="hidden h-4 items-center opacity-0 transition-opacity group-hover/marker:opacity-100 sm:flex">
               {boundaryMenuControl}
             </span>
+          ) : null}
+          {!isDeleteConfirmationOpen && (canEdit || boundaryMenuControl) ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMobileMenuOpen?.();
+              }}
+              className="flex h-5 w-4 items-center justify-center rounded text-zinc-300 transition-colors hover:text-zinc-500 sm:hidden"
+              title="更多操作"
+              aria-label="更多操作"
+            >
+              <span className="pointer-events-none flex h-full items-center justify-center text-[11px] font-bold">▶</span>
+            </button>
           ) : null}
         </div>
       ) : (
@@ -2474,6 +2505,33 @@ function CharacterPanel({
 
 // ─── BlockCharacterSelector ───────────────────────────────────────────────────
 
+function CharacterControlBottomSheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:hidden" onClick={onClose}>
+      <div
+        data-script-selection-action="true"
+        className="max-h-[75vh] w-full overflow-y-auto rounded-t-2xl border-t border-[var(--line)] bg-[var(--surface)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="h-1 w-10 rounded-full bg-zinc-200" />
+        </div>
+        <p className="px-5 py-2 text-xs font-medium text-zinc-400">{title}</p>
+        {children}
+        <div className="h-6" />
+      </div>
+    </div>
+  );
+}
+
 function BlockCharacterSelector({
   block,
   characters,
@@ -2507,6 +2565,7 @@ function BlockCharacterSelector({
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [displayMenuOpen, setDisplayMenuOpen] = useState(false);
+  const [mobileControlMenu, setMobileControlMenu] = useState<"display" | "annotations" | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -2527,6 +2586,7 @@ function BlockCharacterSelector({
     } else {
       setShowAnnotations(false);
       setDisplayMenuOpen(false);
+      setMobileControlMenu(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
@@ -2677,16 +2737,25 @@ function BlockCharacterSelector({
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="relative flex h-4 items-center">
               <button
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setDisplayMenuOpen((v) => !v); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (window.matchMedia("(max-width: 639px)").matches) {
+                    setMobileControlMenu((current) => current === "display" ? null : "display");
+                    return;
+                  }
+                  setDisplayMenuOpen((v) => !v);
+                }}
                 className={`${selectorControlClass} ${
                   block.forceShowCharacterName ? "text-zinc-600" : "text-zinc-300 hover:text-zinc-500"
                 }`}
               >
                 <span>显示状态</span>
-                <FoldTriangle open={displayMenuOpen} />
+                <span className="sm:hidden"><FoldTriangle open={mobileControlMenu === "display"} /></span>
+                <span className="hidden sm:inline"><FoldTriangle open={displayMenuOpen} /></span>
               </button>
               {displayMenuOpen && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl">
+                <div className="absolute right-0 top-full z-50 mt-1 hidden w-32 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl sm:block">
                   <button
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -2717,17 +2786,26 @@ function BlockCharacterSelector({
               )}
             </div>
             <button
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowAnnotations((v) => !v); }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.matchMedia("(max-width: 639px)").matches) {
+                  setMobileControlMenu((current) => current === "annotations" ? null : "annotations");
+                  return;
+                }
+                setShowAnnotations((v) => !v);
+              }}
               className={`${selectorControlClass} text-zinc-300 hover:text-zinc-500`}
             >
               <span>备注</span>
-              <FoldTriangle open={showAnnotations} />
+              <span className="sm:hidden"><FoldTriangle open={mobileControlMenu === "annotations"} /></span>
+              <span className="hidden sm:inline"><FoldTriangle open={showAnnotations} /></span>
             </button>
           </div>
         )}
       </div>
       {showAnnotations && selected.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 rounded-b-lg border border-t-0 border-zinc-200 px-2.5 py-1.5">
+        <div className="hidden flex-wrap gap-x-4 gap-y-0.5 rounded-b-lg border border-t-0 border-zinc-200 px-2.5 py-1.5 sm:flex">
           {selected.map((c) => (
             <label key={c.id} className="flex items-center gap-1">
               <span className="text-[11px] text-zinc-400">{c.name}</span>
@@ -2741,6 +2819,61 @@ function BlockCharacterSelector({
             </label>
           ))}
         </div>
+      )}
+      {mobileControlMenu === "display" && (
+        <CharacterControlBottomSheet title="显示状态" onClose={() => setMobileControlMenu(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              onForceShowCharacterNameChange(true);
+              setMobileControlMenu(null);
+            }}
+            className={`flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] ${
+              block.forceShowCharacterName ? "font-medium text-zinc-900" : "text-zinc-600"
+            }`}
+          >
+            <span>永远显示该行角色</span>
+            {block.forceShowCharacterName && <span className="text-xs">✓</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onForceShowCharacterNameChange(false);
+              setMobileControlMenu(null);
+            }}
+            className={`flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] ${
+              block.forceShowCharacterName ? "text-zinc-600" : "font-medium text-zinc-900"
+            }`}
+          >
+            <span>自动</span>
+            {!block.forceShowCharacterName && <span className="text-xs">✓</span>}
+          </button>
+        </CharacterControlBottomSheet>
+      )}
+      {mobileControlMenu === "annotations" && (
+        <CharacterControlBottomSheet title="备注" onClose={() => setMobileControlMenu(null)}>
+          <div className="border-t border-zinc-100 px-5 py-2">
+            {selected.map((c) => (
+              <label key={c.id} className="flex items-center gap-3 border-b border-zinc-100 py-3 last:border-0">
+                <span className="w-20 shrink-0 truncate text-sm text-zinc-500">{c.name}</span>
+                <input
+                  value={block.characterAnnotations[c.id] ?? ""}
+                  onChange={(e) => onAnnotationChange(c.id, e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  placeholder="备注…"
+                  className="min-w-0 flex-1 border-b border-zinc-200 bg-transparent py-1 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-500"
+                />
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileControlMenu(null)}
+            className="w-full border-t border-zinc-100 px-5 py-3.5 text-center text-[15px] font-medium text-zinc-700"
+          >
+            完成
+          </button>
+        </CharacterControlBottomSheet>
       )}
       {suggestions.length > 0 && (
         <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(16rem, calc(100vh - 12rem))" }}>
@@ -4979,6 +5112,17 @@ function TagPicker({
 const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
 const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
 const COMPACT_CONTENT_OPTICAL_OFFSET_PX = -2;
+const COMPACT_CHARACTER_COLUMN_WIDTH_REM = 7.5;
+const NARROW_COMPACT_CHARACTER_COLUMN_WIDTH_REM = 3.5;
+const COMPACT_TEXT_AUXILIARY_WIDTH_REM = 2;
+const COMPACT_TEXT_GRID_STYLE = {
+  "--compact-character-column-width": `${NARROW_COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+  "--compact-character-column-width-wide": `${COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+} as React.CSSProperties;
+const COMPACT_TEXT_GRID_UNFOLDED_STYLE = {
+  ...COMPACT_TEXT_GRID_STYLE,
+  "--compact-character-column-width": `${COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+} as React.CSSProperties;
 const IN_BLOCK_STAGE_COMMENT_MANUAL_OFFSET_PX = -2;
 const REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS = "mb-[0.18rem]";
 const REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mb-2";
@@ -5534,7 +5678,9 @@ function ScriptBlock({
       blockEl.getBoundingClientRect().width -
       parseFloat(blockStyle.paddingLeft) -
       parseFloat(blockStyle.paddingRight);
-    const compactContentWidth = blockContentWidth - COMPACT_TEXT_SIDE_WIDTH_REM * remPx;
+    const compactCharacterWidth = compactCharacterColumnRef.current?.getBoundingClientRect().width
+      ?? COMPACT_CHARACTER_COLUMN_WIDTH_REM * remPx;
+    const compactContentWidth = blockContentWidth - compactCharacterWidth - COMPACT_TEXT_AUXILIARY_WIDTH_REM * remPx;
     const width = Math.round(compactContentWidth * COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO);
     return width > 0 ? width : null;
   }, []);
@@ -5609,7 +5755,7 @@ function ScriptBlock({
           {(canEditMetadata || canEditRehearsalMark) && (
             <span
               onMouseEnter={unfoldCompactControls}
-              className="relative top-[1px] opacity-0 transition-opacity group-hover:opacity-100"
+              className="relative top-[1px] hidden opacity-0 transition-opacity group-hover:opacity-100 sm:inline-flex"
             >
               <RehearsalMarkInput
                 canAddChapterScene={canEditMetadata}
@@ -5640,7 +5786,7 @@ function ScriptBlock({
           {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
             confirmDelete ? (
               <span
-                className="absolute left-0 bottom-0 z-10 flex translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm"
+                className="absolute left-0 bottom-0 z-10 hidden translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm sm:flex"
                 style={compactDeleteStyle}
                 data-script-confirmation="true"
               >
@@ -5687,7 +5833,7 @@ function ScriptBlock({
                   else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
                 }}
                 style={compactDeleteStyle}
-                className="relative flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
+                className="relative hidden h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100 sm:flex"
                 title="删除此行"
                 aria-label="删除此行"
               >
@@ -5707,12 +5853,19 @@ function ScriptBlock({
                 if (e.shiftKey) e.preventDefault();
                 e.stopPropagation();
               }}
-              onClick={(e) => { onToggleSelected(e); onMobileMenuOpen?.(); }}
+              onClick={(e) => {
+                onToggleSelected(e);
+                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
+              }}
               className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
-                  : `sm:cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
-                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
+                  : `sm:cursor-grab active:cursor-grabbing ${
+                      isDeleteConfirmHighlighted
+                        ? "bg-red-100 text-red-500 hover:bg-red-100 hover:text-red-600 sm:opacity-100"
+                        : `hover:bg-[#dbe5f3] hover:text-[#91a8ca] ${
+                            isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
+                          }`
                     }`
               }`}
               title="更多操作"
@@ -5841,7 +5994,10 @@ function ScriptBlock({
       )}
 
       {isCompactTextLayout ? (
-        <div className="grid grid-cols-[7.5rem_1rem_minmax(0,1fr)] items-start gap-x-2 text-left">
+        <div
+          className="grid grid-cols-[var(--compact-character-column-width)_1rem_minmax(0,1fr)] items-start gap-x-2 text-left sm:grid-cols-[var(--compact-character-column-width-wide)_1rem_minmax(0,1fr)]"
+          style={charSelectorOpen ? COMPACT_TEXT_GRID_UNFOLDED_STYLE : COMPACT_TEXT_GRID_STYLE}
+        >
           <div ref={compactCharacterColumnRef} className="col-start-1 row-start-1 min-w-0 pt-0.5">
             {(showCharacterSelector || hiddenCharacterCollapsed) && (
               <div className={hiddenCharacterCollapsed && !showCharacterSelector ? "opacity-0 transition-opacity group-hover:opacity-100" : undefined}>
@@ -6581,8 +6737,36 @@ export default function ScriptEditor({
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
+  const [mobileInsertMenuOpen, setMobileInsertMenuOpen] = useState(false);
+  const [mobileBatchAction, setMobileBatchAction] = useState<"type" | "lyric" | null>(null);
+  const closeMobileBlockMenu = useCallback(() => {
+    setMobileBatchAction(null);
+    setMobileInsertMenuOpen(false);
+    setMobileBlockMenuBlockId(null);
+  }, []);
+  useEffect(() => {
+    if (mobileBlockMenuBlockId === null) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest("[data-script-mobile-block-menu='true']") ||
+        target.closest("[data-script-block-bar='true']:not([data-script-marker-bar='true'])")
+      ) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMobileBlockMenu();
+    };
+    document.addEventListener("click", handleOutsideClick, true);
+    return () => document.removeEventListener("click", handleOutsideClick, true);
+  }, [closeMobileBlockMenu, mobileBlockMenuBlockId]);
   const [sceneDetailDialogSceneId, setSceneDetailDialogSceneId] = useState<string | null>(null);
   const [sceneDetailDialogEditing, setSceneDetailDialogEditing] = useState(false);
+  const [mobileDeleteConfirmation, setMobileDeleteConfirmation] = useState<
+    | { kind: "marker"; markerId: string; message: string }
+    | { kind: "blocks"; blockIds: string[]; message: string; blocked: boolean }
+    | null
+  >(null);
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
@@ -6595,7 +6779,7 @@ export default function ScriptEditor({
   const [tocHighlightedMarkerIds, setTocHighlightedMarkerIds] = useState<Set<string>>(() => new Set());
   const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
   const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
-  const [markerDetailDeleteConfirmBlockId, setMarkerDetailDeleteConfirmBlockId] = useState<string | null>(null);
+  const [markerDeleteConfirmBlockId, setMarkerDeleteConfirmBlockId] = useState<string | null>(null);
   const [markerDeleteDialog, setMarkerDeleteDialog] = useState<(MarkerDeleteDialogState & { source: "local" | "server" }) | null>(null);
   const [markerDeleteDialogBusy, setMarkerDeleteDialogBusy] = useState(false);
   const [dismissActionToken, setDismissActionToken] = useState(0);
@@ -6640,6 +6824,7 @@ export default function ScriptEditor({
 
   // ── Script config (page layout, stage delimiters) ─────────────────────────
   const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
+  const canAddRehearsalMark = effectiveCanEditRehearsalMark && scriptConfig.useRehearsalMarks;
   const scriptConfigRef = useRef(scriptConfig);
   useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
   const syncOpeningChapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -7247,7 +7432,7 @@ export default function ScriptEditor({
     setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmationRequest(null);
-    setMarkerDetailDeleteConfirmBlockId(null);
+    setMarkerDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
     setDragTarget(null);
     setIsScriptDragging(false);
@@ -7453,11 +7638,11 @@ export default function ScriptEditor({
   const pendingVirtualWindowRefreshRef = useRef(false);
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
   const pendingNavigateRef = useRef<
-    { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
+    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
   >(null);
   // After the initial estimated scroll, store the target for a precise correction after measurement
   const postNavCorrectionRef = useRef<
-    { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
+    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
   >(null);
   // Incremented by the measurement effect to trigger the correction layout effect
   const [correctionTick, setCorrectionTick] = useState(0);
@@ -8011,7 +8196,7 @@ export default function ScriptEditor({
     rebuildCumulative();
     syncSpacerHeights(windowRange);
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
+    scrollElementIntoView(el, nav.kind === 'block' ? nav.align : 'center', nav.kind === 'block' ? nav.viewportTopRatio : undefined);
     setScrollLocked(false);
     requestAnimationFrame(() => {
       updateActiveSceneFromScroll();
@@ -8037,7 +8222,7 @@ export default function ScriptEditor({
     syncSpacerHeights(windowRange);
 
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
+    scrollElementIntoView(el, nav.kind === 'block' ? nav.align : 'center', nav.kind === 'block' ? nav.viewportTopRatio : undefined);
 
     // Newly-rendered blocks haven't been measured yet so the cumulative heights are estimated.
     // Store the target so the measurement effect can trigger a precise correction pass.
@@ -8055,10 +8240,14 @@ export default function ScriptEditor({
   }, [windowRange, blocks.length, syncSpacerHeights]);
 
   // Teleport to a block: load target window, then instant-jump in the layout effect.
-  const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = 'center') => {
+  const scrollToBlockIdx = useCallback((
+    idx: number,
+    align: ScrollLogicalPosition = 'center',
+    viewportTopRatio?: number,
+  ) => {
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
-    pendingNavigateRef.current = { kind: 'block', id: block.id, align };
+    pendingNavigateRef.current = { kind: 'block', id: block.id, align, viewportTopRatio };
     const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
     let start = Math.max(0, idx - Math.floor(windowSize / 2));
     const end = Math.min(blocksRef.current.length, start + windowSize);
@@ -8072,13 +8261,20 @@ export default function ScriptEditor({
       if (!el) return;
       pendingNavigateRef.current = null;
       markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-      el.scrollIntoView({ behavior: 'instant', block: align });
+      scrollElementIntoView(el, align, viewportTopRatio);
       requestAnimationFrame(() => {
         updateActiveSceneFromScroll();
         window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
     }
   }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
+
+  const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number) => {
+    setMobileBatchAction(null);
+    setMobileInsertMenuOpen(false);
+    scrollToBlockIdx(blockIndex, "start", 0.2);
+    setMobileBlockMenuBlockId(blockId);
+  }, [scrollToBlockIdx]);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const markerIdx = findSceneMarkerBlockIndex(sceneId, blocksRef.current);
@@ -9811,18 +10007,68 @@ export default function ScriptEditor({
     return true;
   }, [canPerformSelectedBlockAction, clearBlockSelection, isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
 
+  const requestMobileDelete = useCallback((id: string) => {
+    const index = blockIndexByIdRef.current.get(id);
+    const block = index === undefined ? null : blocksRef.current[index] ?? null;
+    if (!block) return;
+
+    if (isMarkerBlock(block)) {
+      if (!requestMarkerDelete(id)) return;
+      setMobileDeleteConfirmation({
+        kind: "marker",
+        markerId: id,
+        message: block.type === "chapter_marker"
+          ? "确认删除此章节标记？"
+          : block.type === "scene_marker"
+            ? "确认删除此段落标记？"
+            : "确认删除此排练记号？",
+      });
+      return;
+    }
+
+    const ids = selectedBlockIds.has(id) ? selectedBlockIdsArray : [id];
+    if (!canPerformSelectedBlockAction(ids)) return;
+    const blocked = ids.length === 1 && blockIdsRequireNonEmptySceneConfirm(ids);
+    const canDeleteWithoutConfirmation = blockIdsAreEmptyForDelete(ids) && !blocked;
+    if (canDeleteWithoutConfirmation) {
+      requestLargeSelectionOperation("delete", ids.length, () => deleteBlocks(ids));
+      return;
+    }
+    setDeleteConfirmingBlockIds(new Set(ids));
+    setMobileDeleteConfirmation({
+      kind: "blocks",
+      blockIds: ids,
+      message: blocked
+        ? "章节/段落/排练记号内容不可为空，至少需包含一个剧本块"
+        : ids.length > 1
+          ? `确认删除所选 ${ids.length} 行？`
+          : "确认删除此行？",
+      blocked,
+    });
+  }, [
+    blockIdsAreEmptyForDelete,
+    blockIdsRequireNonEmptySceneConfirm,
+    canPerformSelectedBlockAction,
+    deleteBlocks,
+    requestLargeSelectionOperation,
+    requestMarkerDelete,
+    selectedBlockIds,
+    selectedBlockIdsArray,
+  ]);
+
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
-    setMarkerDetailDeleteConfirmBlockId(null);
+    setMarkerDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
   }, []);
 
   useEffect(() => {
-    const hasDeleteConfirmationOpen = deleteConfirmingBlockIds.size > 0 || markerDetailDeleteConfirmBlockId !== null;
+    const hasDeleteConfirmationOpen = deleteConfirmingBlockIds.size > 0 || markerDeleteConfirmBlockId !== null;
     const handler = (e: PointerEvent) => {
       if (draggingBlockId.current || isReorderLockedRef.current) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      if (mobileBlockMenuBlockId !== null && !target.closest("[data-script-selection-action='true']")) return;
       if (target.closest("a[href]")) return;
       const docEl = document.documentElement;
       const isViewportScrollbar = e.clientX >= docEl.clientWidth || e.clientY >= docEl.clientHeight;
@@ -9846,7 +10092,7 @@ export default function ScriptEditor({
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDetailDeleteConfirmBlockId, selectedBlockIds.size]);
+  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -10444,8 +10690,18 @@ export default function ScriptEditor({
       : blocks.findIndex((block) => block.id === blockId);
     return blockIndex >= 0 ? sceneIdForBlockAtIndex(blocks[blockIndex], blockIndex) : null;
   };
+  const markerDeleteConfirmBlockIndex = markerDeleteConfirmBlockId
+    ? blockIndexByIdRef.current.get(markerDeleteConfirmBlockId)
+    : undefined;
+  const markerDeleteConfirmBlock = markerDeleteConfirmBlockIndex === undefined
+    ? null
+    : blocks[markerDeleteConfirmBlockIndex] ?? null;
   const markerDeleteConfirmDetailSceneId = isSceneDetailVisible
-    ? sceneIdForBlockId(markerDetailDeleteConfirmBlockId)
+    && markerDeleteConfirmBlockIndex !== undefined
+    && markerDeleteConfirmBlock && (
+    markerDeleteConfirmBlock.type === "chapter_marker" || markerDeleteConfirmBlock.type === "scene_marker"
+  )
+    ? sceneIdForBlockAtIndex(markerDeleteConfirmBlock, markerDeleteConfirmBlockIndex)
     : null;
   const detailSceneId = isSceneDetailVisible
     ? markerDeleteConfirmDetailSceneId ?? (
@@ -11443,6 +11699,8 @@ export default function ScriptEditor({
                     canEdit={block.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata}
                     isSelected={selectedBlockIds.has(block.id)}
                     isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id) || invalidSelectionEndIds.has(block.id)}
+                    isDeleteConfirmationOpen={markerDeleteConfirmBlockId === block.id}
+                    isMobileMenuOpen={mobileBlockMenuBlockId === block.id}
                     isReorderLocked={isReorderLocked}
                     isScriptDragging={isScriptDragging}
                     dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
@@ -11462,12 +11720,14 @@ export default function ScriptEditor({
                       : undefined}
                     onDeleteConfirmChange={(confirming) => {
                       if (confirming) {
-                        setMarkerDetailDeleteConfirmBlockId(block.id);
+                        setMarkerDeleteConfirmBlockId(block.id);
                         return;
                       }
                       dismissBlockConfirmations();
                     }}
-                    dismissToken={dismissActionToken}
+                    onMobileMenuOpen={() => {
+                      openMobileBlockMenu(block.id, bIdx);
+                    }}
                     onSelect={(e) => {
                       if (isReorderLockedRef.current) return;
                       const isAdditiveSelection = e.ctrlKey || e.metaKey;
@@ -11789,7 +12049,9 @@ export default function ScriptEditor({
                   onToggleSelected={(e) => {
                     if (isReorderLockedRef.current) return;
                     focusBlockContent(block.id);
-                    const isAdditiveSelection = e.ctrlKey || e.metaKey;
+                    const isAdditiveSelection = e.ctrlKey || e.metaKey || (
+                      window.matchMedia("(max-width: 639px)").matches && selectedBlockIds.size > 0
+                    );
                     if (e.shiftKey) {
                       const anchorId = selectionAnchorBlockIdRef.current;
                       const anchorIdx = anchorId ? blockIndexByIdRef.current.get(anchorId) ?? -1 : -1;
@@ -11946,7 +12208,9 @@ export default function ScriptEditor({
                   onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
                   onTagCopyClick={() => handleTagCopy(block.id)}
                   onTagPasteClick={() => handleTagPaste(block.id)}
-                  onMobileMenuOpen={() => setMobileBlockMenuBlockId(block.id)}
+                  onMobileMenuOpen={() => {
+                    openMobileBlockMenu(block.id, bIdx);
+                  }}
                 />
               </div>
             );
@@ -12676,18 +12940,49 @@ export default function ScriptEditor({
       {mobileBlockMenuBlockId !== null && (() => {
         const menuBlock = blocks.find(b => b.id === mobileBlockMenuBlockId);
         if (!menuBlock) return null;
-        const isStageBlock = menuBlock.type === "stage";
-        const hasLyricBlock = !!menuBlock.lyric;
+        const isMarker = isMarkerBlock(menuBlock);
+        const isBatchMode = !isMarker && selectedBlockIds.size > 1;
+        const actionBlock = isBatchMode
+          ? blocks.find(block => selectedBlockIds.has(block.id) && !isMarkerBlock(block)) ?? menuBlock
+          : menuBlock;
+        const isStageBlock = actionBlock.type === "stage";
+        const hasLyricBlock = !!actionBlock.lyric;
         const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
         const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
-        const isBatchMode = selectedBlockIds.has(mobileBlockMenuBlockId) && selectedBlockIds.size > 1;
         const batchCount = selectedBlockIds.size;
-        const close = () => setMobileBlockMenuBlockId(null);
+        const insertActions: Array<[string, () => void]> = [
+          ...(canEditMetadata ? [
+            ["添加新章", () => addChapterBeforeBlock(menuBlock.id)] as [string, () => void],
+            ["添加新段", () => addSceneBeforeBlock(menuBlock.id)] as [string, () => void],
+          ] : []),
+          ...(canAddRehearsalMark ? [
+            ["添加新排练记号", () => addRehearsalBeforeBlock(menuBlock.id)] as [string, () => void],
+          ] : []),
+        ];
+        const conversionActions: Array<[string, () => void]> = isMarker && canEditMetadata ? [
+          ...(menuBlock.type !== "chapter_marker"
+            ? [["转为章节", () => convertMarkerBlockType(menuBlock.id, "chapter_marker")] as [string, () => void]]
+            : []),
+          ...(menuBlock.type !== "scene_marker"
+            ? [["转为段落", () => convertMarkerBlockType(menuBlock.id, "scene_marker")] as [string, () => void]]
+            : []),
+        ] : [];
+        const detailSceneId = productionId && menuBlock.sceneId && (
+          menuBlock.type === "chapter_marker" || menuBlock.type === "scene_marker"
+        ) ? menuBlock.sceneId : null;
+        const canDeleteMenuBlock = isMarker
+          ? menuBlock.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata
+          : canEditText;
+        const runAndClose = (action: () => void) => {
+          closeMobileBlockMenu();
+          action();
+        };
         return (
-          <div className="sm:hidden fixed inset-0 z-50 flex items-end" onClick={close}>
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-end sm:hidden">
             <div
-              className="w-full rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
-              onClick={e => e.stopPropagation()}
+              data-script-selection-action="true"
+              data-script-mobile-block-menu="true"
+              className="pointer-events-auto max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
             >
               <div className="flex justify-center pt-3 pb-1">
                 <div className="w-10 h-1 rounded-full bg-zinc-200" />
@@ -12696,56 +12991,193 @@ export default function ScriptEditor({
                 <p className="px-5 py-2 text-xs text-zinc-400">已选中 {batchCount} 行</p>
               )}
               <div className="flex flex-col">
-                {canEditText && !isStageBlock && !hasLyricCfg && (
+                {mobileBatchAction && (
+                  <div className="flex items-center justify-between gap-3 border-t border-zinc-100 px-5 py-3.5">
+                    <span className="min-w-0 text-sm leading-5 text-zinc-500">
+                      确认修改所选 {batchCount} 行{mobileBatchAction === "type" ? "类型" : "文本状态"}？
+                    </span>
+                    <span className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const action = mobileBatchAction;
+                          setMobileBatchAction(null);
+                          if (!canPerformSelectedBlockAction(selectedBlockIdsArray)) return;
+                          closeMobileBlockMenu();
+                          requestLargeSelectionOperation(action, batchCount, () => {
+                            if (action === "type") {
+                              setBlocksType(selectedBlockIdsArray, isStageBlock ? "dialogue" : "stage");
+                            } else {
+                              setBlocksLyric(selectedBlockIdsArray, !hasLyricBlock);
+                            }
+                          });
+                        }}
+                        className="text-sm text-red-500 hover:text-red-700"
+                      >
+                        确认
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMobileBatchAction(null)}
+                        className="text-sm text-zinc-400 hover:text-zinc-600"
+                      >
+                        取消
+                      </button>
+                    </span>
+                  </div>
+                )}
+                {!isBatchMode && insertActions.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => setMobileInsertMenuOpen((open) => !open)}
+                      className="flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] text-zinc-700"
+                      aria-expanded={mobileInsertMenuOpen}
+                    >
+                      <span>在块前添加</span>
+                      <ChevronIcon size={16} className={`text-zinc-400 transition-transform ${mobileInsertMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {mobileInsertMenuOpen && insertActions.map(([label, action]) => (
+                      <button
+                        key={label}
+                        onClick={() => runAndClose(action)}
+                        className="w-full border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] text-zinc-600"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {conversionActions.map(([label, action]) => (
                   <button
-                    onClick={() => { toggleBlockLyric(mobileBlockMenuBlockId); close(); }}
+                    key={label}
+                    onClick={() => runAndClose(action)}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {label}
+                  </button>
+                ))}
+                {detailSceneId && (
+                  <>
+                    <p className="border-t border-zinc-100 px-5 pt-3 pb-1 text-xs font-medium text-zinc-400">详情</p>
+                    <button
+                      onClick={() => runAndClose(() => openSceneDetailDialog(detailSceneId))}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700"
+                    >
+                      查看构作详情
+                    </button>
+                  </>
+                )}
+                {!isMarker && canEditText && !isStageBlock && !hasLyricCfg && (
+                  <button
+                    onClick={() => {
+                      if (isBatchMode) {
+                        setMobileBatchAction("lyric");
+                      } else {
+                        toggleBlockLyric(mobileBlockMenuBlockId);
+                        closeMobileBlockMenu();
+                      }
+                    }}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                   >
                     {hasLyricBlock ? "转为台词" : "转为歌词"}
                   </button>
                 )}
-                {canEditText && (
+                {!isMarker && canEditText && (
                   <button
                     onClick={() => {
                       if (isBatchMode) {
-                        setBlocksType(Array.from(selectedBlockIds), isStageBlock ? "dialogue" : "stage");
+                        setMobileBatchAction("type");
                       } else {
                         toggleBlockType(mobileBlockMenuBlockId);
+                        closeMobileBlockMenu();
                       }
-                      close();
                     }}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                   >
                     {isStageBlock ? "转为台词" : "转为舞台提示"}
                   </button>
                 )}
-                <button
-                  onClick={() => { openBlockSidePanel("asset", mobileBlockMenuBlockId); close(); }}
-                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
-                >
-                  附件
-                </button>
-                <button
-                  onClick={() => { openBlockSidePanel("comment", mobileBlockMenuBlockId); close(); }}
-                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
-                >
-                  {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
-                </button>
-                {canEdit && (
+                {!isMarker && !isBatchMode && (
+                  <>
+                    <button
+                      onClick={() => { openBlockSidePanel("asset", mobileBlockMenuBlockId); closeMobileBlockMenu(); }}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                    >
+                      附件
+                    </button>
+                    <button
+                      onClick={() => { openBlockSidePanel("comment", mobileBlockMenuBlockId); closeMobileBlockMenu(); }}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                    >
+                      {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
+                    </button>
+                  </>
+                )}
+                {canDeleteMenuBlock && (
                   <button
                     onClick={() => {
-                      deleteBlocks(isBatchMode ? Array.from(selectedBlockIds) : [mobileBlockMenuBlockId]);
-                      close();
+                      closeMobileBlockMenu();
+                      requestMobileDelete(actionBlock.id);
                     }}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-red-500 border-t border-zinc-100"
                   >
-                    {isBatchMode ? `删除所选 ${batchCount} 行` : "删除此行"}
+                    {isBatchMode ? `删除所选 ${batchCount} 行` : isMarker ? "删除此标记" : "删除此行"}
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={closeMobileBlockMenu}
+                  className="w-full border-t border-zinc-100 px-5 py-3.5 text-center text-[15px] font-medium text-zinc-600"
+                >
+                  取消
+                </button>
               </div>
               <div className="h-6" />
             </div>
           </div>
+        );
+      })()}
+
+      {mobileDeleteConfirmation && (() => {
+        const blocked = mobileDeleteConfirmation.kind === "blocks" && mobileDeleteConfirmation.blocked;
+        const cancel = () => {
+          setMobileDeleteConfirmation(null);
+          dismissBlockConfirmations();
+        };
+        const confirm = () => {
+          const request = mobileDeleteConfirmation;
+          setMobileDeleteConfirmation(null);
+          dismissBlockConfirmations();
+          if (request.kind === "marker") {
+            deleteMarker(request.markerId);
+            return;
+          }
+          if (request.blocked) return;
+          requestLargeSelectionOperation("delete", request.blockIds.length, () => {
+            deleteBlocks(request.blockIds);
+          });
+        };
+        return (
+          <ScriptDialog
+            onClose={cancel}
+            overlayClassName="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+            panelClassName="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl"
+          >
+            <h2 className="text-base font-semibold text-zinc-800">
+              {blocked ? "无法删除" : "确认删除？"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              {mobileDeleteConfirmation.message}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={cancel} className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}>
+                取消
+              </button>
+              <button onClick={confirm} className={SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}>
+                确认
+              </button>
+            </div>
+          </ScriptDialog>
         );
       })()}
 
