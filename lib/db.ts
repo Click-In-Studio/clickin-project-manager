@@ -6,7 +6,7 @@ import type { UserInfo } from "./db-feishu";
 import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
-import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
+import { DEFAULT_SCRIPT_CONFIG, usesRehearsalMarksByDefault } from "./script-types";
 import type { Permission as AtomicPermission, PermissionContext } from "./permissions";
 
 export type ProductionAccess = {
@@ -105,6 +105,13 @@ export async function getMarkerLabelIndex(
   }).finally(() => markerLabelLoads.delete(versionId));
   markerLabelLoads.set(versionId, load);
   return (await load)?.index ?? buildMarkerLabelIndex([]);
+}
+
+export async function getFirstRehearsalMarkerLabel(versionId: string): Promise<string | null> {
+  const labels = await getMarkerLabelIndex(versionId);
+  const markerId = labels.rehearsalLabelByMarkerId.keys().next().value;
+  if (!markerId) return null;
+  return labels.labelByMarkerId.get(markerId) ?? "（未命名）";
 }
 
 // ─── Version types ────────────────────────────────────────────────────────────
@@ -1163,6 +1170,7 @@ export async function saveScriptConfig(productionId: string, versionId: string |
     stageDelimClose: config.stageDelimClose,
     pageLayout: config.pageLayout,
     textLayoutMode: config.textLayoutMode,
+    useRehearsalMarks: config.useRehearsalMarks,
   });
   const configUpdate = await pool.query<{ pagination_changed: boolean }>(
     `WITH previous AS (
@@ -2017,11 +2025,24 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
 
 // ─── Production management ────────────────────────────────────────────────────
 
-export async function createProduction(id: string, name: string, ownerUserId?: string): Promise<void> {
+export async function createProduction(
+  id: string,
+  name: string,
+  ownerUserId?: string,
+  productionType?: string,
+  productionTypeLabel?: string | null,
+): Promise<void> {
   const pool = getPool();
   await pool.query(
-    "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)",
-    [id, name, ownerUserId ?? null],
+    "INSERT INTO production (id, name, owner_id, type, type_label, script_config) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+    [
+      id,
+      name,
+      ownerUserId ?? null,
+      productionType ?? null,
+      productionTypeLabel ?? null,
+      JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
+    ],
   );
   // Phase 3: ensure approval config row exists (default 24h TTL)
   await pool.query(
