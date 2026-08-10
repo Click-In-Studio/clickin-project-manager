@@ -92,7 +92,7 @@ beforeAll(async () => {
            (production_id, user_id, permission_key, grant_source, confirmed_by)
          SELECT $1, $2, unnest($3::text[]), 'self_confirmed', $2
          ON CONFLICT DO NOTHING`,
-        [SCRIPT_PROD, TEST_USER, ["script:manage", "scene:rename"]],
+        [SCRIPT_PROD, TEST_USER, ["script:view", "script:manage", "scene:rename"]],
       );
       scriptVersionId = (await getActiveVersionId(SCRIPT_PROD))!;
     })(),

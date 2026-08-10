@@ -2035,6 +2035,52 @@
       "default": "0"
     }
   ],
+  "resource_person_manage": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "resource_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "resource_id",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "resource_sub",
+      "type": "text",
+      "nullable": false,
+      "default": "'*'::text"
+    },
+    {
+      "column": "established_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "scene": [
     {
       "column": "id",
