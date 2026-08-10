@@ -4100,6 +4100,7 @@ function CommentBubble({
       replies.push(comment);
       childrenByParent.set(comment.parentId, replies);
     }
+    const commentIds = new Set(sortedComments.map(comment => comment.id));
     const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
     for (const comment of sortedComments.filter(c => c.parentId === null)) {
       orderedComments.push({ comment, reply: false });
@@ -4107,7 +4108,7 @@ function CommentBubble({
         orderedComments.push({ comment: reply, reply: true });
       }
     }
-    for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !sortedComments.some(parent => parent.id === c.parentId))) {
+    for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !commentIds.has(c.parentId))) {
       orderedComments.push({ comment: orphanReply, reply: true });
     }
     const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : 4;
