@@ -41,23 +41,38 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const action = notif.actions.find((a) => a.id === body.actionId);
     if (!action) return Response.json({ error: "动作不存在" }, { status: 400 });
 
-    // Execute all effects in one transaction.
-    const pool = getPool();
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
+    // Self-managed effects (approve/reject access requests) manage their own
+    // transactions internally. Run them outside the pool-client transaction so
+    // there is no false expectation that a ROLLBACK on client would undo them.
+    const selfManaged = action.effects.filter(
+      (e) => e.type === "approve_access_request" || e.type === "reject_access_request",
+    );
+    const transactional = action.effects.filter(
+      (e) => e.type !== "approve_access_request" && e.type !== "reject_access_request",
+    );
 
-      for (const effect of action.effects) {
-        await executeEffect(client, effect, session.userId, body.value);
+    // Run self-managed effects first (each is atomic on its own connection).
+    for (const effect of selfManaged) {
+      await executeSelfManagedEffect(effect, session.userId);
+    }
+
+    // Run remaining effects in a single transaction.
+    if (transactional.length > 0) {
+      const pool = getPool();
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        for (const effect of transactional) {
+          await executeEffect(client, effect, session.userId, body.value);
+        }
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK");
+        console.error("[notifications/act] transaction failed:", e);
+        return Response.json({ error: "操作失败" }, { status: 500 });
+      } finally {
+        client.release();
       }
-
-      await client.query("COMMIT");
-    } catch (e) {
-      await client.query("ROLLBACK");
-      console.error("[notifications/act] transaction failed:", e);
-      return Response.json({ error: "操作失败" }, { status: 500 });
-    } finally {
-      client.release();
     }
   }
 
@@ -151,26 +166,35 @@ async function executeEffect(
       // Handled outside the transaction via markNotificationActed; no-op here.
       break;
 
-    case "approve_access_request": {
-      const result = await approveAccessRequest(effect.requestId, userId);
-      // conflict = someone else got there first; that's fine, swallow it
-      if (!result.ok && result.reason === "unauthorized") {
-        throw new Error("无权审批");
-      }
+    case "approve_access_request":
+    case "reject_access_request":
+      // Handled by executeSelfManagedEffect — should not reach here.
       break;
-    }
-
-    case "reject_access_request": {
-      const result = await rejectAccessRequest(effect.requestId, userId);
-      if (!result.ok && result.reason === "unauthorized") {
-        throw new Error("无权审批");
-      }
-      break;
-    }
 
     default:
       // Exhaustiveness guard — unknown effect types are ignored, not thrown, so
       // new effect types can be deployed without breaking existing notifications.
       console.warn("[notifications/act] unknown effect type:", (effect as { type: string }).type);
+  }
+}
+
+async function executeSelfManagedEffect(
+  effect: ActionEffect,
+  userId: string,
+): Promise<void> {
+  switch (effect.type) {
+    case "approve_access_request": {
+      const result = await approveAccessRequest(effect.requestId, userId);
+      // conflict = someone else got there first; that's fine, swallow it
+      if (!result.ok && result.reason === "unauthorized") throw new Error("无权审批");
+      break;
+    }
+    case "reject_access_request": {
+      const result = await rejectAccessRequest(effect.requestId, userId);
+      if (!result.ok && result.reason === "unauthorized") throw new Error("无权审批");
+      break;
+    }
+    default:
+      break;
   }
 }
