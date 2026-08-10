@@ -370,9 +370,18 @@ function MemberList({
   const [nameQ, setNameQ] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("");
 
-  const allRoles = useMemo(() => {
+  // Build "role [tag]" combined filter options
+  const allRoleFilters = useMemo(() => {
     const s = new Set<string>();
-    for (const m of members) for (const r of m.roles) s.add(r);
+    for (const m of members) {
+      for (const r of m.roles) {
+        if (m.tags.length === 0) {
+          s.add(r);
+        } else {
+          for (const t of m.tags) s.add(`${r} [${t}]`);
+        }
+      }
+    }
     return [...s].sort();
   }, [members]);
 
@@ -380,7 +389,15 @@ function MemberList({
     const q = nameQ.trim().toLowerCase();
     return members.filter((m) => {
       if (q && !m.name.toLowerCase().includes(q)) return false;
-      if (roleFilter && !m.roles.includes(roleFilter)) return false;
+      if (roleFilter) {
+        const combined = roleFilter.match(/^(.+) \[(.+)\]$/);
+        if (combined) {
+          const [, role, tag] = combined;
+          if (!m.roles.includes(role) || !m.tags.includes(tag)) return false;
+        } else {
+          if (!m.roles.includes(roleFilter)) return false;
+        }
+      }
       return true;
     });
   }, [members, nameQ, roleFilter]);
@@ -404,7 +421,7 @@ function MemberList({
           style={{ width: "100%", marginTop: 5, fontSize: 12, background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", outline: "none", color: "var(--muted)", boxSizing: "border-box" }}
         >
           <option value="">全部角色</option>
-          {allRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+          {allRoleFilters.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
       </div>
 
@@ -450,6 +467,9 @@ function MemberList({
                     <span key={r} style={{ fontSize: 9, background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 4, padding: "0 4px", color: "var(--muted)", lineHeight: "16px" }}>{r}</span>
                   ))}
                   {m.roles.length > 3 && <span style={{ fontSize: 9, color: "var(--muted)" }}>+{m.roles.length - 3}</span>}
+                  {m.tags.slice(0, 2).map((t) => (
+                    <span key={t} style={{ fontSize: 9, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 4, padding: "0 4px", color: "var(--ink)", lineHeight: "16px", opacity: 0.7 }}>{t}</span>
+                  ))}
                 </div>
               </div>
               {ovCount > 0 && (

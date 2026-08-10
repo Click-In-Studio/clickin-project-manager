@@ -373,6 +373,7 @@ function AddMemberPanel({
         email: selected.email ?? null,
         phone: selected.phone ?? null,
         roles: selectedRoles,
+        tags: [],
         photoUrl: null,
       });
       onClose();

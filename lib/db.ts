@@ -2146,7 +2146,7 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
 
 export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
-  sortOrder: number; roles: string[]; avatarUrl: string | null;
+  sortOrder: number; roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
   hasAdminPerm: boolean; // true if FK-backed roles include any ADMIN_PANEL_PERMISSIONS key
 };
@@ -2158,11 +2158,19 @@ export async function listMyProductionsWithRoles(
   const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
   const res = await getPool().query<{
     id: string; name: string; created_at: Date; archived_at: Date | null;
-    sort_order: number; roles: string[] | null; avatar_url: string | null;
-    is_owner: boolean; has_admin_perm: boolean;
+    sort_order: number; roles: string[] | null; first_tag: string | null;
+    avatar_url: string | null; is_owner: boolean; has_admin_perm: boolean;
   }>(
     `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.avatar_url,
             pm.roles,
+            (
+              SELECT pmt.name
+              FROM production_member_tag_assignment pmta
+              JOIN production_member_tag pmt ON pmt.id = pmta.tag_id
+              WHERE pmta.production_id = p.id AND pmta.user_id = $1
+              ORDER BY pmt.is_system DESC, pmt.name
+              LIMIT 1
+            ) AS first_tag,
             (p.owner_id = $1) AS is_owner,
             EXISTS(
               SELECT 1
@@ -2184,6 +2192,7 @@ export async function listMyProductionsWithRoles(
     archivedAt: r.archived_at?.toISOString() ?? null,
     sortOrder: r.sort_order,
     roles: r.roles ?? [],
+    firstTag: r.first_tag ?? null,
     avatarUrl: r.avatar_url ?? null,
     isOwner: r.is_owner,
     hasAdminPerm: r.has_admin_perm,
@@ -3264,17 +3273,28 @@ export type MemberWithRoles = {
   email: string | null;
   phone: string | null;
   roles: string[];
+  tags: string[];
   photoUrl: string | null;
 };
 
 export async function listProductionMembersWithRoles(productionId: string): Promise<MemberWithRoles[]> {
   const res = await getPool().query<{
     user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean;
-    email: string | null; phone: string | null; roles: string[]; photo_url: string | null;
+    email: string | null; phone: string | null; roles: string[]; tags: string[]; photo_url: string | null;
   }>(
     `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
             COALESCE(upi.platform_user_id, fu.email) AS email,
-            fu.phone, pm.roles, pm.photo_url
+            fu.phone, pm.roles, pm.photo_url,
+            COALESCE(
+              ARRAY(
+                SELECT pmt.name
+                FROM production_member_tag_assignment pmta
+                JOIN production_member_tag pmt ON pmt.id = pmta.tag_id
+                WHERE pmta.production_id = pm.production_id AND pmta.user_id = pm.user_id
+                ORDER BY pmt.is_system DESC, pmt.name
+              ),
+              '{}'::text[]
+            ) AS tags
      FROM production_member pm
      JOIN feishu_user fu ON fu.user_id = pm.user_id
      LEFT JOIN user_platform_identity upi
@@ -3294,6 +3314,7 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
     email: r.email,
     phone: r.phone,
     roles: r.roles,
+    tags: r.tags,
     photoUrl: r.photo_url,
   }));
 }
