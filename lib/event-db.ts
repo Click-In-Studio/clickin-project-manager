@@ -1049,7 +1049,7 @@ export async function createEventTechReq(data: {
       "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
     );
     if (prodRow.rows[0]) {
-      await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy);
+      await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy, data.eventId);
     }
     return rowToTechReq(res.rows[0], data.assignees, unique);
   } catch (err) {
@@ -1234,7 +1234,7 @@ export async function createEventReport(data: {
     "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
   );
   if (prodRow.rows[0]) {
-    await writeReportGrants(data.id, prodRow.rows[0].production_id, data.createdBy);
+    await writeReportGrants(data.id, prodRow.rows[0].production_id, data.createdBy, data.eventId);
   }
   return rowToReport(res.rows[0]);
 }
