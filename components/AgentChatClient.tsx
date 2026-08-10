@@ -63,7 +63,7 @@ export default function AgentChatClient() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [bubbles]);
+  }, [bubbles, streaming]);
 
   // Reads one NDJSON chat stream into the bubble list. Shared by "send" and
   // "attach to running session".
@@ -373,6 +373,24 @@ export default function AgentChatClient() {
               </p>
             );
           })}
+          {/* 思考中：run 已发出但当前没有任何在流式渲染的气泡（等首 token、
+              或工具刚结束还没吐后续文本）时的占位反馈 */}
+          {streaming &&
+            (() => {
+              const last = bubbles[bubbles.length - 1];
+              const activelyRendering =
+                (last?.kind === "assistant" && last.streaming) || (last?.kind === "tool" && !last.done);
+              if (activelyRendering) return null;
+              return (
+                <div className="flex justify-start">
+                  <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm bg-zinc-100 px-4 py-3">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:0ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:150ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:300ms]" />
+                  </div>
+                </div>
+              );
+            })()}
         </div>
 
         {/* 输入区 */}
