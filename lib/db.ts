@@ -6874,8 +6874,8 @@ async function findResourceApprovers(
   resourceId: string,
   resourceSub: string,
 ): Promise<string[]> {
-  // POCs of depts that manage the resource
-  const pocRes = await getPool().query<{ user_id: string }>(
+  // 1. POCs of depts that manage the resource
+  const deptRes = await getPool().query<{ user_id: string }>(
     `SELECT pdm.user_id
      FROM resource_dept_manage rdm
      JOIN production_dept_member pdm
@@ -6889,11 +6889,35 @@ async function findResourceApprovers(
     [productionId, resourceType, resourceId, resourceSub],
   );
 
-  if (pocRes.rows.length > 0) {
-    return pocRes.rows.map((r) => r.user_id);
+  // 2. Individual person managers
+  const personRes = await getPool().query<{ user_id: string }>(
+    `SELECT user_id
+     FROM resource_person_manage
+     WHERE production_id = $1
+       AND resource_type = $2
+       AND (resource_id = $3 OR resource_id = '*')
+       AND (resource_sub = $4 OR resource_sub = '*')`,
+    [productionId, resourceType, resourceId, resourceSub],
+  );
+
+  const configured = [
+    ...deptRes.rows.map((r) => r.user_id),
+    ...personRes.rows.map((r) => r.user_id),
+  ];
+  const unique = [...new Set(configured)];
+  if (unique.length > 0) return unique;
+
+  // 3. Fallback: members with "制作人" role
+  const producerRes = await getPool().query<{ user_id: string }>(
+    `SELECT user_id FROM production_member
+     WHERE production_id = $1 AND '制作人' = ANY(roles)`,
+    [productionId],
+  );
+  if (producerRes.rows.length > 0) {
+    return producerRes.rows.map((r) => r.user_id);
   }
 
-  // Fallback: production owner
+  // 4. Final fallback: production owner (always exists)
   const ownerRes = await getPool().query<{ owner_id: string }>(
     `SELECT owner_id FROM production WHERE id = $1`,
     [productionId],
