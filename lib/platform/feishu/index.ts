@@ -10,7 +10,7 @@ import {
   TOKEN_COOKIE,
   type FeishuRawUser,
 } from "./feishu-auth";
-import { upsertFeishuUser } from "../../db";
+import { upsertFeishuUser } from "../../db-feishu";
 import {
   sendBotDm,
   sendCard,
