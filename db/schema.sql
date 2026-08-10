@@ -631,6 +631,54 @@ CREATE TABLE IF NOT EXISTS production_platform_channel (
 CREATE UNIQUE INDEX IF NOT EXISTS ppc_prod_org_uniq
   ON production_platform_channel(production_id, COALESCE(org_id, ''));
 
+-- ── Approval Request（Phase 7）────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS approval_request (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT NOT NULL,
+
+  subject_id      UUID NOT NULL REFERENCES app_user(id),
+  type            TEXT NOT NULL CHECK (type IN (
+                    'resource_access',
+                    'member_exit',
+                    'owner_transfer'
+                  )),
+
+  resource_type       TEXT NULL,
+  resource_id         TEXT NULL DEFAULT '*',
+  resource_sub        TEXT NULL DEFAULT '*',
+  permission_level    TEXT NULL,
+  grant_type          TEXT NULL CHECK (grant_type IN ('permanent', 'ttl')),
+  ttl_duration        INTERVAL NULL,
+  note                TEXT NULL,
+
+  CONSTRAINT approval_resource_fields_required
+    CHECK (type != 'resource_access' OR (resource_type IS NOT NULL AND permission_level IS NOT NULL)),
+
+  status          TEXT NOT NULL DEFAULT 'pending_resource'
+                  CHECK (status IN (
+                    'pending_supervisor',
+                    'pending_resource',
+                    'approved',
+                    'rejected',
+                    'cancelled'
+                  )),
+
+  escalation_chain  JSONB NOT NULL DEFAULT '[]',
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at     TIMESTAMPTZ NULL,
+  resolved_by     UUID NULL REFERENCES app_user(id),
+  granted_at      TIMESTAMPTZ NULL,
+  expires_at      TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS approval_request_production_status_idx
+  ON approval_request (production_id, status);
+
+CREATE INDEX IF NOT EXISTS approval_request_subject_idx
+  ON approval_request (subject_id, production_id);
+
 -- ── Notifications ─────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS notification_subscription (
@@ -658,7 +706,8 @@ CREATE TABLE IF NOT EXISTS user_notification (
   actions         JSONB NOT NULL DEFAULT '[]',
   acted_at        TIMESTAMPTZ,
   action_result   JSONB,
-  expired_at      TIMESTAMPTZ
+  expired_at      TIMESTAMPTZ,
+  approval_request_id UUID REFERENCES approval_request(id) NULL
 );
 
 CREATE INDEX IF NOT EXISTS user_notification_user_created_idx
@@ -671,6 +720,9 @@ CREATE INDEX IF NOT EXISTS user_notification_user_pending_idx
   WHERE action_required = true AND acted_at IS NULL;
 CREATE INDEX IF NOT EXISTS user_notification_entity_idx
   ON user_notification(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS user_notification_approval_idx
+  ON user_notification (approval_request_id)
+  WHERE approval_request_id IS NOT NULL;
 
 -- ── Bot testers ───────────────────────────────────────────────────────────────
 -- Intentionally uses open_id: this is a Feishu-layer control table used for
@@ -955,7 +1007,7 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
 ON CONFLICT DO NOTHING;
 
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
--- 所有实际资源权限的单一权威来源。approval_id FK 等 Phase 6 approval_request 表建好后补。
+-- 所有实际资源权限的单一权威来源。
 
 CREATE TABLE IF NOT EXISTS resource_grant (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -973,7 +1025,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
                     'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
                   )),
   confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
-  approval_id     UUID        NULL,
+  approval_id     UUID        NULL REFERENCES approval_request(id),
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
                     'role_change', 'dept_change', 'dept_dissolved', 'poc_change', 'manual', 'member_removed'
@@ -993,7 +1045,7 @@ CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
   WHERE is_revoked = false;
 
 -- ── Atomic Permission Grant（Phase 2c）────────────────────────────────────────
--- 原子权限 key 的个人 grant 记录。approval_id FK 等 Phase 6 approval_request 表建好后补。
+-- 原子权限 key 的个人 grant 记录。
 
 CREATE TABLE IF NOT EXISTS atomic_permission_grant (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1004,7 +1056,7 @@ CREATE TABLE IF NOT EXISTS atomic_permission_grant (
                     'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
                   )),
   confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
-  approval_id     UUID        NULL,
+  approval_id     UUID        NULL REFERENCES approval_request(id),
   is_revoked      BOOLEAN     NOT NULL DEFAULT false,
   revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
                     'role_change', 'dept_change', 'poc_change', 'manual', 'member_removed'

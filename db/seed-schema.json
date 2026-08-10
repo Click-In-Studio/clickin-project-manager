@@ -31,6 +31,104 @@
       "default": "now()"
     }
   ],
+  "approval_request": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "subject_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "resource_type",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "resource_id",
+      "type": "text",
+      "nullable": true,
+      "default": "'*'::text"
+    },
+    {
+      "column": "resource_sub",
+      "type": "text",
+      "nullable": true,
+      "default": "'*'::text"
+    },
+    {
+      "column": "permission_level",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "grant_type",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "ttl_duration",
+      "type": "interval",
+      "nullable": true
+    },
+    {
+      "column": "note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'pending_resource'::text"
+    },
+    {
+      "column": "escalation_chain",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[]'::jsonb"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "resolved_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "resolved_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "granted_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "asset": [
     {
       "column": "id",
@@ -2386,6 +2484,11 @@
       "type": "text",
       "nullable": false,
       "default": "'info'::text"
+    },
+    {
+      "column": "approval_request_id",
+      "type": "uuid",
+      "nullable": true
     }
   ],
   "user_platform_identity": [
