@@ -11,6 +11,7 @@ import { deleteProduction, createProduction, archiveProduction, addProductionMem
 import { deleteProductionEvent } from "@/lib/event-db";
 import { TEST_USER } from "./helpers";
 import { makeProduction, makeBlocks, cleanupProduction } from "./factories";
+import { getPool } from "@/lib/pg";
 
 // ── Route handlers under test ──────────────────────────────────────────────────
 import {
@@ -819,6 +820,15 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
     await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
     await addProductionMember(SCRIPT_PERM_PROD, TEST_USER); // no 编剧 / 制作人 role
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
+    // Grant script:view so the user passes the view check and hits the script:edit gate.
+    // (MEMBER_BASE_PERMISSIONS bypass was removed in #158 — view perms now require explicit grants.)
+    await getPool().query(
+      `INSERT INTO atomic_permission_grant
+         (production_id, user_id, permission_key, grant_source, confirmed_by)
+       VALUES ($1, $2, 'script:view', 'direct', $2)
+       ON CONFLICT DO NOTHING`,
+      [SCRIPT_PERM_PROD, TEST_USER],
+    );
   });
 
   afterAll(async () => {

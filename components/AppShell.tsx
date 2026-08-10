@@ -6,6 +6,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
+import PageActivationGate from "./PageActivationGate";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -848,6 +849,7 @@ export default function AppShell({ session, productions, children, initialUnread
                 <>
                   <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} />
                   <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} />
+                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} />
 
                   <NavGroup label="创作侧" color="script" />
                   {CREATION_NAV.map((item) => (
@@ -888,6 +890,9 @@ export default function AppShell({ session, productions, children, initialUnread
         {/* Workspace */}
         <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
       </div>
+
+      {/* Level 1: base view-grant activation — resets on production switch */}
+      {productionId && <PageActivationGate key={productionId} productionId={productionId} scope="base" />}
 
       {/* Mobile bottom nav */}
       <nav className="lg:hidden shrink-0 bg-[var(--surface)] border-t border-[var(--line)] flex z-40 safe-area-bottom">

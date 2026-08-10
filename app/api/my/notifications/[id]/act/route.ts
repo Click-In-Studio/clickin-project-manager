@@ -15,6 +15,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getUserNotification, markNotificationActed, rsvpCallTime } from "@/lib/inbox-db";
+import { approveAccessRequest, rejectAccessRequest } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import type { ActionEffect } from "@/lib/inbox-db";
 import type { PoolClient } from "pg";
@@ -40,23 +41,45 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const action = notif.actions.find((a) => a.id === body.actionId);
     if (!action) return Response.json({ error: "动作不存在" }, { status: 400 });
 
-    // Execute all effects in one transaction.
-    const pool = getPool();
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
+    // Self-managed effects (approve/reject access requests) manage their own
+    // transactions internally. Run them outside the pool-client transaction so
+    // there is no false expectation that a ROLLBACK on client would undo them.
+    const selfManaged = action.effects.filter(
+      (e) => e.type === "approve_access_request" || e.type === "reject_access_request",
+    );
+    const transactional = action.effects.filter(
+      (e) => e.type !== "approve_access_request" && e.type !== "reject_access_request",
+    );
 
-      for (const effect of action.effects) {
-        await executeEffect(client, effect, session.userId, body.value);
+    // Invariant: an action must not mix multiple self-managed effects, because
+    // partial failure (second throws after first committed) has no rollback path.
+    if (selfManaged.length > 1) {
+      console.error("[notifications/act] action has >1 self-managed effects — refusing", action.id);
+      return Response.json({ error: "操作配置错误" }, { status: 500 });
+    }
+
+    // Run self-managed effect first (atomic on its own connection).
+    for (const effect of selfManaged) {
+      await executeSelfManagedEffect(effect, session.userId);
+    }
+
+    // Run remaining effects in a single transaction.
+    if (transactional.length > 0) {
+      const pool = getPool();
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        for (const effect of transactional) {
+          await executeEffect(client, effect, session.userId, body.value);
+        }
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK");
+        console.error("[notifications/act] transaction failed:", e);
+        return Response.json({ error: "操作失败" }, { status: 500 });
+      } finally {
+        client.release();
       }
-
-      await client.query("COMMIT");
-    } catch (e) {
-      await client.query("ROLLBACK");
-      console.error("[notifications/act] transaction failed:", e);
-      return Response.json({ error: "操作失败" }, { status: 500 });
-    } finally {
-      client.release();
     }
   }
 
@@ -150,9 +173,46 @@ async function executeEffect(
       // Handled outside the transaction via markNotificationActed; no-op here.
       break;
 
+    case "approve_access_request":
+    case "reject_access_request":
+      // Handled by executeSelfManagedEffect — should not reach here.
+      break;
+
     default:
       // Exhaustiveness guard — unknown effect types are ignored, not thrown, so
       // new effect types can be deployed without breaking existing notifications.
       console.warn("[notifications/act] unknown effect type:", (effect as { type: string }).type);
+  }
+}
+
+async function executeSelfManagedEffect(
+  effect: ActionEffect,
+  userId: string,
+): Promise<void> {
+  switch (effect.type) {
+    case "approve_access_request": {
+      const result = await approveAccessRequest(effect.requestId, userId);
+      if (!result.ok) {
+        if (result.reason === "unauthorized") throw new Error("无权审批");
+        if (result.reason === "not_found") {
+          // Stale notification with a bad requestId — log but don't surface to user.
+          console.warn("[notifications/act] approve_access_request: requestId not found", effect.requestId);
+        }
+        // conflict = someone else got there first; swallow silently.
+      }
+      break;
+    }
+    case "reject_access_request": {
+      const result = await rejectAccessRequest(effect.requestId, userId);
+      if (!result.ok) {
+        if (result.reason === "unauthorized") throw new Error("无权审批");
+        if (result.reason === "not_found") {
+          console.warn("[notifications/act] reject_access_request: requestId not found", effect.requestId);
+        }
+      }
+      break;
+    }
+    default:
+      break;
   }
 }

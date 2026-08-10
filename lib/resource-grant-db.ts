@@ -259,9 +259,9 @@ export async function getUserTechReqGrantIdsInEvent(
 
 /**
  * Writes initial resource_grant + resource_dept_manage when a new event is created.
- * Called inside or after the INSERT transaction.
  *   - creator gets manage grant
- *   - all production_depts with 'event:edit' in permissions get resource_dept_manage
+ *   - depts with 'event:create' permission get resource_dept_manage
+ *   - if no such depts exist, creator is written to resource_person_manage as fallback
  */
 export async function writeEventGrants(
   eventId: string,
@@ -285,20 +285,37 @@ export async function writeEventGrants(
      SELECT $1, pd.id, 'event', $2, '*', $3
      FROM production_dept pd
      WHERE pd.production_id = $1
-       AND 'event:edit' = ANY(pd.permissions)
+       AND 'event:create' = ANY(pd.permissions)
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
     [productionId, eventId, createdBy],
   );
+  // Person fallback: no dept managers → creator manages this event
+  const hasDept = await pool.query(
+    `SELECT 1 FROM resource_dept_manage
+     WHERE production_id=$1 AND resource_type='event' AND resource_id=$2 LIMIT 1`,
+    [productionId, eventId],
+  );
+  if (hasDept.rows.length === 0) {
+    await pool.query(
+      `INSERT INTO resource_person_manage
+         (production_id, user_id, resource_type, resource_id, established_by)
+       VALUES ($1,$2,'event',$3,$2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+      [productionId, createdBy, eventId],
+    );
+  }
 }
 
 /**
  * Writes initial resource_grant + resource_dept_manage when a new report is created.
- * Inherits the same managing depts as the parent event.
+ * Inherits managing depts/persons from the parent event's resource_dept_manage /
+ * resource_person_manage (not queried from dept permissions).
  */
 export async function writeReportGrants(
   reportId: string,
   productionId: string,
   createdBy: string,
+  eventId: string,
 ): Promise<void> {
   const pool = getPool();
   await pool.query(
@@ -311,15 +328,25 @@ export async function writeReportGrants(
      DO NOTHING`,
     [productionId, createdBy, reportId],
   );
+  // Inherit dept managers from parent event
   await pool.query(
     `INSERT INTO resource_dept_manage
        (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-     SELECT $1, pd.id, 'report', $2, '*', $3
-     FROM production_dept pd
-     WHERE pd.production_id = $1
-       AND 'event:edit' = ANY(pd.permissions)
+     SELECT production_id, dept_id, 'report', $1, '*', $2
+     FROM resource_dept_manage
+     WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-    [productionId, reportId, createdBy],
+    [reportId, createdBy, productionId, eventId],
+  );
+  // Inherit person managers from parent event (person fallback)
+  await pool.query(
+    `INSERT INTO resource_person_manage
+       (production_id, user_id, resource_type, resource_id, established_by)
+     SELECT production_id, user_id, 'report', $1, $2
+     FROM resource_person_manage
+     WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+    [reportId, createdBy, productionId, eventId],
   );
 }
 
@@ -327,19 +354,20 @@ export async function writeReportGrants(
  * Writes initial resource_grant + resource_dept_manage when a new tech_req is created.
  *   - POC(s) of the assigned dept get manage grant
  *   - Assigned dept gets resource_dept_manage
- *   - All SM depts (event:edit) get resource_dept_manage
+ *   - Parent event's managing depts/persons get resource_dept_manage / resource_person_manage
+ *   - If neither assigned dept nor event depts exist, creator is written to resource_person_manage
  * eventDeptId is an event_department.id (TEXT); we map to production_dept by name.
- * createdBy is the requesting user (session.userId) used as established_by.
  */
 export async function writeTechReqGrants(
   reqId: string,
   productionId: string,
   eventDeptId: string | null,
   createdBy: string,
+  eventId: string,
 ): Promise<void> {
   const pool = getPool();
   if (eventDeptId) {
-    // Map event_department → production_dept by name, then write grants for POCs
+    // Map event_department → production_dept by name, write grants for POCs
     await pool.query(
       `INSERT INTO resource_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -368,17 +396,49 @@ export async function writeTechReqGrants(
       [productionId, reqId, eventDeptId, createdBy],
     );
   }
-  // SM depts always get resource_dept_manage
+  // Parent event's managing depts also manage the tech_req
   await pool.query(
     `INSERT INTO resource_dept_manage
        (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-     SELECT $1, pd.id, 'tech_req', $2, '*', $3
-     FROM production_dept pd
-     WHERE pd.production_id = $1
-       AND 'event:edit' = ANY(pd.permissions)
+     SELECT production_id, dept_id, 'tech_req', $1, '*', $2
+     FROM resource_dept_manage
+     WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-    [productionId, reqId, createdBy],
+    [reqId, createdBy, productionId, eventId],
   );
+  // Person fallback: no dept managers at all → creator manages this tech_req
+  const hasDept = await pool.query(
+    `SELECT 1 FROM resource_dept_manage
+     WHERE production_id=$1 AND resource_type='tech_req' AND resource_id=$2 LIMIT 1`,
+    [productionId, reqId],
+  );
+  if (hasDept.rows.length === 0) {
+    // Also inherit event's person manager if present
+    await pool.query(
+      `INSERT INTO resource_person_manage
+         (production_id, user_id, resource_type, resource_id, established_by)
+       SELECT production_id, user_id, 'tech_req', $1, $2
+       FROM resource_person_manage
+       WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+      [reqId, createdBy, productionId, eventId],
+    );
+    // If still nothing, creator is the manager
+    const hasPerson = await pool.query(
+      `SELECT 1 FROM resource_person_manage
+       WHERE production_id=$1 AND resource_type='tech_req' AND resource_id=$2 LIMIT 1`,
+      [productionId, reqId],
+    );
+    if (hasPerson.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO resource_person_manage
+           (production_id, user_id, resource_type, resource_id, established_by)
+         VALUES ($1,$2,'tech_req',$3,$2)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+        [productionId, createdBy, reqId],
+      );
+    }
+  }
 }
 
 export type CueListLevel = "manage" | "edit" | "mount" | "view";

@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getProductionName } from "@/lib/db";
 import { getTechReqByProduction } from "@/lib/event-db";
+import UnauthorizedActions from "@/components/UnauthorizedActions";
 
 export const metadata: Metadata = { title: "无访问权限" };
 
@@ -144,24 +145,9 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        {/* 申请权限 — placeholder until approval flow is ready */}
-        {resource && (
-          <button
-            disabled
-            title="审批流功能即将上线"
-            style={{
-              padding: "9px 22px",
-              borderRadius: 9,
-              background: "var(--surface-2)",
-              color: "var(--muted)",
-              fontSize: 13,
-              fontWeight: 700,
-              border: "1px solid var(--line)",
-              cursor: "not-allowed",
-            }}
-          >
-            申请权限
-          </button>
+        {/* 申请权限 — opens AccessRequestModal pre-filled from the resource param */}
+        {resource && id && (
+          <UnauthorizedActions productionId={id} resource={resource} />
         )}
         <Link
           href={backHref}

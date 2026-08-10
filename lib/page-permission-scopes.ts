@@ -2,13 +2,26 @@ import type { Permission } from "./permissions";
 
 /**
  * Per-page atomic permission scopes for the self-confirm gate.
- * On entry to each page, we check if the user has any selfConfirmable
+ * On entry to each page / context, we check if the user has any selfConfirmable
  * permissions in the relevant scope and prompt a one-click activation.
  *
- * Base permissions (scene:view, event:view, etc.) are already always granted
- * and will never surface as selfConfirmable — they can safely be included here.
+ * `base` handles the Level 1 view-grant notification (see AppShell):
+ * after #158 removed the MEMBER_BASE_PERMISSIONS bypass, view-class perms
+ * go through the same role→selfConfirm→grant path as all other permissions.
  */
 export const PAGE_PERMISSION_SCOPES = {
+  base: new Set<Permission>([
+    "scene:view",
+    "character:view",
+    "script:view",
+    "cue_list:view",
+    "cue:view",
+    "contacts:view",
+    "event:follow",
+    "asset:view",
+    "asset:download",
+    "asset:share",
+  ]),
   script: new Set<Permission>([
     "script:import",
     "script:manage",
