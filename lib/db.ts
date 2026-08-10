@@ -6806,6 +6806,64 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
   };
 }
 
+const RESOURCE_TYPE_LABELS: Record<string, string> = {
+  cue_list: "Cue表",
+  scene:    "章节/段落",
+  event:    "事件",
+};
+
+const PERMISSION_LEVEL_LABELS: Record<string, string> = {
+  view:           "查看",
+  mount:          "挂载",
+  edit:           "编辑",
+  manage:         "管理",
+  publish:        "发布",
+  edit_published: "修改已发布",
+  revoke:         "撤销",
+};
+
+/**
+ * Returns a human-readable description of a resource for use in notification text.
+ * e.g. "「声响」Cue表的编辑权限"
+ */
+async function describeResource(
+  resourceType: string,
+  resourceId: string,
+  permissionLevel: string,
+): Promise<string> {
+  const typeLabel  = RESOURCE_TYPE_LABELS[resourceType] ?? resourceType;
+  const levelLabel = PERMISSION_LEVEL_LABELS[permissionLevel] ?? permissionLevel;
+
+  // Fetch the specific resource name when a concrete ID is given
+  let resourceName: string | null = null;
+  if (resourceId !== "*") {
+    if (resourceType === "cue_list") {
+      const r = await getPool().query<{ name: string }>(
+        `SELECT name FROM cue_list WHERE id = $1`,
+        [resourceId],
+      );
+      resourceName = r.rows[0]?.name ?? null;
+    } else if (resourceType === "scene") {
+      const r = await getPool().query<{ name: string }>(
+        `SELECT COALESCE(name, number::text, '未命名') AS name FROM scene WHERE id = $1`,
+        [resourceId],
+      );
+      resourceName = r.rows[0]?.name ?? null;
+    } else if (resourceType === "event") {
+      const r = await getPool().query<{ name: string }>(
+        `SELECT COALESCE(name, '') AS name FROM production_event WHERE id = $1`,
+        [resourceId],
+      );
+      resourceName = r.rows[0]?.name || null;
+    }
+  }
+
+  const resourceDesc = resourceName
+    ? `「${resourceName}」${typeLabel}`
+    : `所有${typeLabel}`;
+  return `${resourceDesc}的${levelLabel}权限`;
+}
+
 /** Returns user_ids who should approve resource access (POCs → production owner fallback). */
 async function findResourceApprovers(
   productionId: string,
@@ -6888,12 +6946,13 @@ export async function submitAccessRequest(
   );
   const request = insertRes.rows[0];
 
-  // Get subject display name for notifications
+  // Get subject display name and resource description for notifications
   const nameRes = await getPool().query<{ name: string }>(
     `SELECT name FROM feishu_user WHERE user_id = $1`,
     [userId],
   );
   const subjectName = nameRes.rows[0]?.name ?? "成员";
+  const resourceDesc = await describeResource(params.resourceType, resourceId, params.permissionLevel);
 
   if (supervisorId) {
     // Notify supervisor
@@ -6912,8 +6971,8 @@ export async function submitAccessRequest(
       kind: "approval_request.pending_supervisor",
       entityType: "approval_request",
       entityId: request.id,
-      title: `${subjectName} 申请资源访问权限`,
-      body: `${subjectName} 正在申请 ${params.resourceType} 的 ${params.permissionLevel} 权限，请审批。`,
+      title: `${subjectName} 申请 ${resourceDesc}`,
+      body: `${subjectName} 申请获得${resourceDesc}，请审批。${request.note ? `\n\n申请理由：${request.note}` : ""}`,
       category: "action",
       actionRequired: true,
       approvalRequestId: request.id,
@@ -6940,8 +6999,8 @@ export async function submitAccessRequest(
         kind: "approval_request.pending_resource",
         entityType: "approval_request",
         entityId: request.id,
-        title: `${subjectName} 申请资源访问权限`,
-        body: `${subjectName} 正在申请 ${params.resourceType} 的 ${params.permissionLevel} 权限，请审批。`,
+        title: `${subjectName} 申请 ${resourceDesc}`,
+        body: `${subjectName} 申请获得${resourceDesc}，请审批。${request.note ? `\n\n申请理由：${request.note}` : ""}`,
         category: "action",
         actionRequired: true,
         approvalRequestId: request.id,
@@ -7019,19 +7078,25 @@ export async function approveAccessRequest(
       [JSON.stringify(chain), requestId],
     );
 
+    // Self-skip: if the supervisor is also a resource approver, auto-approve resource phase now
+    if (approverIds.includes(actorId)) {
+      return approveAccessRequest(requestId, actorId);
+    }
+
     if (approverIds.length > 0) {
       const nameRes = await getPool().query<{ name: string }>(
         `SELECT name FROM feishu_user WHERE user_id = $1`,
         [req.subject_id],
       );
       const subjectName = nameRes.rows[0]?.name ?? "成员";
+      const resourceDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
       await batchCreateUserNotifications(approverIds, {
         productionId: req.production_id,
         kind: "approval_request.pending_resource",
         entityType: "approval_request",
         entityId: requestId,
-        title: `${subjectName} 申请资源访问权限（已通过直属上级审批）`,
-        body: `${subjectName} 正在申请 ${req.resource_type} 的 ${req.permission_level} 权限，请审批。`,
+        title: `${subjectName} 申请 ${resourceDesc}`,
+        body: `${subjectName} 申请获得${resourceDesc}（已通过直属上级审批），请审批。`,
         category: "action",
         actionRequired: true,
         approvalRequestId: requestId,
@@ -7114,6 +7179,7 @@ export async function approveAccessRequest(
     );
 
     // Notify requester
+    const approvedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
     await createUserNotification({
       userId: req.subject_id,
       productionId: req.production_id,
@@ -7121,7 +7187,7 @@ export async function approveAccessRequest(
       entityType: "approval_request",
       entityId: requestId,
       title: "资源访问申请已批准",
-      body: `你对 ${req.resource_type} 的 ${req.permission_level} 权限申请已获批准。`,
+      body: `你申请的${approvedDesc}已获批准。`,
       category: "info",
       approvalRequestId: requestId,
     });
@@ -7186,6 +7252,7 @@ export async function rejectAccessRequest(
   );
 
   // Notify requester
+  const rejectedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
   await createUserNotification({
     userId: req.subject_id,
     productionId: req.production_id,
@@ -7193,7 +7260,7 @@ export async function rejectAccessRequest(
     entityType: "approval_request",
     entityId: requestId,
     title: "资源访问申请被拒绝",
-    body: `你对 ${req.resource_type} 的 ${req.permission_level} 权限申请被拒绝。`,
+    body: `你申请的${rejectedDesc}未获批准。`,
     category: "warning",
     approvalRequestId: requestId,
   });
@@ -7356,13 +7423,14 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
       [JSON.stringify(chain), row.id],
     );
 
+    const escalateDesc = await describeResource(row.resource_type ?? "", row.resource_id ?? "*", row.permission_level ?? "");
     await batchCreateUserNotifications(approverIds, {
       productionId: row.production_id,
       kind: "approval_request.pending_resource",
       entityType: "approval_request",
       entityId: row.id,
-      title: `${subjectName} 申请资源访问权限（直属上级审批超时，已自动升级）`,
-      body: `${subjectName} 正在申请 ${row.resource_type} 的 ${row.permission_level} 权限，请审批。`,
+      title: `${subjectName} 申请 ${escalateDesc}（直属上级超时，已自动升级）`,
+      body: `${subjectName} 申请获得${escalateDesc}，直属上级审批已超时，请直接审批。`,
       category: "action",
       actionRequired: true,
       approvalRequestId: row.id,
