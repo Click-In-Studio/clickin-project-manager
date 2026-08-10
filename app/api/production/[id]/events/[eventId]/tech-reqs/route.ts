@@ -7,7 +7,7 @@ import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
+import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (techReq.status === "awaiting" && techReq.departmentId) {
     const dept = await getEventDepartment(techReq.departmentId, productionId);
     if (dept?.pocUserIds.length) {
-      const reqPath = `${BASE_PATH}/production/${productionId}/tasks/${techReq.id}`;
+      const reqPath = `${SERVER_URL}/production/${productionId}/tasks/${techReq.id}`;
 
       void notifyUsers({
         userIds: dept.pocUserIds,

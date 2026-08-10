@@ -8,7 +8,6 @@ import {
   updateUserContact,
   setMemberPhoto,
   setMemberSupervisor,
-  setMemberStatus,
   setMemberTags,
   isProductionArchived,
   getProductionPermissionContext,
@@ -48,7 +47,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, email, phone, photoUrl, supervisorId, tagIds, status } =
+  const { userId, roles, email, phone, photoUrl, supervisorId, tagIds } =
     (await req.json()) as {
       userId?: string;
       roles?: string[];
@@ -57,7 +56,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       photoUrl?: string | null;
       supervisorId?: string | null;
       tagIds?: string[];
-      status?: "active" | "suspended";
     };
   if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
 
@@ -85,15 +83,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberSupervisor(id, userId, supervisorId);
-  }
-  if (status !== undefined) {
-    if (!session.isAdmin && (!access || !hasPermission("members:kick", access.permCtx))) {
-      return Response.json({ error: "权限不足" }, { status: 403 });
-    }
-    if (status !== "active" && status !== "suspended") {
-      return Response.json({ error: "status 只能为 active 或 suspended" }, { status: 400 });
-    }
-    await setMemberStatus(id, userId, status);
   }
   if (email !== undefined || phone !== undefined) {
     await updateUserContact(userId, email ?? null, phone ?? null);

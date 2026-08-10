@@ -12,7 +12,7 @@ import {
   canReplyToReport, canReplyToReportNote, canReplyToReply,
 } from "@/lib/event-permissions";
 import { buildReplyMentionCard } from "@/lib/platform/feishu/feishu-bot";
-import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
+import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // Fire-and-forget: notify @mentioned users via unified interface (inbox + optional DM).
   if (mentions.length > 0) {
-    const replyPath = `${BASE_PATH}/production/${productionId}/reports/${reportId}#reply-${id}`;
+    const replyPath = `${SERVER_URL}/production/${productionId}/reports/${reportId}#reply-${id}`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
     const eventRow = await getProductionEvent(eventId, productionId).catch(() => null);
     const eventTitle = eventRow?.title ?? "";

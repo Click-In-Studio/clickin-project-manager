@@ -4,7 +4,7 @@ import { getProductionPermissionContext, listProductionComments, createComment, 
 import type { Mention } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { buildScriptCommentMentionCard } from "@/lib/platform/feishu/feishu-bot";
-import { SERVER_URL as BASE_PATH } from "@/lib/server-url";
+import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
 
 async function guard(req: NextRequest, productionId: string) {
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   // Fire-and-forget: notify mentioned users via unified interface (inbox + optional DM).
   if (mentions.length > 0) {
-    const blockPath = `${BASE_PATH}/production/${productionId}/script#block-${blockId}?open_comment=true`;
+    const blockPath = `${SERVER_URL}/production/${productionId}/script#block-${blockId}?open_comment=true`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
     const productionName = await getProductionName(productionId).catch(() => null);
     void notifyUsers({

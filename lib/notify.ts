@@ -19,7 +19,7 @@
  */
 
 import { getPool } from "./pg";
-import { SERVER_URL as BASE_PATH } from "./server-url";
+import { SERVER_URL } from "./server-url";
 import {
   buildWeeklyCallCard, buildDailyCallCard, buildReportCard, buildMentionCard,
 } from "./platform/feishu/feishu-bot";
@@ -230,7 +230,7 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
     const callTimeStr = new Date(row.call_at).toLocaleTimeString("zh-CN", {
       hour: "2-digit", minute: "2-digit", timeZone: "Asia/Shanghai",
     });
-    const viewHref = `${BASE_PATH}/production/${event.production_id}/events/${eventId}`;
+    const viewHref = `${SERVER_URL}/production/${event.production_id}/events/${eventId}`;
 
     const rsvpActions: NotificationAction[] = isPastDispatchWindow
       ? [
@@ -304,7 +304,7 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
             no:       signRsvpToken(row.user_id, row.id, "no"),
             tentative: signRsvpToken(row.user_id, row.id, "tentative"),
           };
-          const rsvpBaseUrl = `${BASE_PATH}/api/rsvp?token=`;
+          const rsvpBaseUrl = `${SERVER_URL}/api/rsvp?token=`;
           return {
             text: `Event 已发布 — ${event.title}，你的 Call 时间：${callTimeStr}，查看：${actionUrl}`,
             title: `${productionName}通知`,
@@ -369,7 +369,7 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
     if (!entries.length) continue;
 
     const token = createCardToken(userId, "weekly-call", weeklyTokenExp);
-    const viewHref = `${BASE_PATH}/my/weekly-call/${token}`;
+    const viewHref = `${SERVER_URL}/my/weekly-call/${token}`;
     const userEnabled = !optedOut.has(userId);
 
     await notifyUser({
@@ -607,7 +607,7 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
     seen.add(row.user_id);
 
     const token = createCardToken(row.user_id, "daily-call", dailyTokenExp);
-    const viewHref = `${BASE_PATH}/my/daily-call/${dateStr}/${token}`;
+    const viewHref = `${SERVER_URL}/my/daily-call/${dateStr}/${token}`;
     const userEnabled = !optedOut.has(row.user_id);
 
     const confirmAction: NotificationAction = {
@@ -640,7 +640,7 @@ export async function dispatchDailyCallForEvent(eventId: string, dryRun = false)
         let richContent: unknown;
         if (target.platformId === "email") {
           const confirmToken = signRsvpToken(row.user_id, row.id, "confirm");
-          const rsvpBaseUrl = `${BASE_PATH}/api/rsvp?token=`;
+          const rsvpBaseUrl = `${SERVER_URL}/api/rsvp?token=`;
           richContent = buildDailyCallEmail({
             eventTitle: event.title,
             eventLocation: event.location,
@@ -723,7 +723,7 @@ export async function dispatchReportNotification(
   if (!recipRes.rows.length) return { sent: 0, errors: [] };
 
   const userIds = recipRes.rows.map((r) => r.user_id);
-  const viewHref = `${BASE_PATH}/production/${productionId}/reports/${reportId}`;
+  const viewHref = `${SERVER_URL}/production/${productionId}/reports/${reportId}`;
   const reportTokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
   const dryMessages: { platformUserId: string; platformId: string; message: PlatformMessage }[] = [];
@@ -789,7 +789,7 @@ export async function dispatchMentionNotifications(
   const reportTitle = rptRes.rows[0]?.title ?? "报告";
   const eventTitle = evRes.rows[0]?.title ?? "";
   const mentionProductionName = mentionProdNameRes.rows[0]?.name ?? "后台";
-  const viewHref = `${BASE_PATH}/production/${productionId}/reports/${reportId}`;
+  const viewHref = `${SERVER_URL}/production/${productionId}/reports/${reportId}`;
   const tokenExp = new Date(Date.now() + 30 * 24 * 3_600_000);
 
   await notifyUsers({
@@ -836,7 +836,7 @@ export async function notifyAnnouncementRemind(params: {
   const { unreadUserIds, announcementId, announcementTitle, productionId, productionName } = params;
   if (!unreadUserIds.length) return { inboxCount: 0, externalSent: 0, errors: [] };
 
-  const viewHref = `${BASE_PATH}/production/${productionId}/announcements`;
+  const viewHref = `${SERVER_URL}/production/${productionId}/announcements`;
 
   return notifyUsers({
     userIds: unreadUserIds,
