@@ -3916,14 +3916,12 @@ type BlockAssetBubbleItem = {
 const EMPTY_COMMENTS: Comment[] = [];
 const EMPTY_BLOCK_ASSETS: BlockAssetBubbleItem[] = [];
 const COMMENT_BUBBLE_MIN_WIDTH_PX = 135;
-const COMMENT_BUBBLE_MIN_GUTTER_PX = 170;
+const COMMENT_BUBBLE_GAP_REM = 1.5; // Tailwind ml-6
 const SPEECH_TAIL_PIN_OFFSET_PX = 96;
 const SPEECH_TAIL_BASE_HALF_PX = 14;
 const SPEECH_TAIL_EDGE_INSET_PX = 24;
 const SIDE_PANEL_TOP_PX = 64; // Merged AppShell and ScriptEditor header
-const SIDE_PANEL_MIN_WIDTH_PX = 270;
-const SIDE_PANEL_MAX_WIDTH_PX = 384;
-const SIDE_PANEL_GUTTER_PADDING_PX = 15;
+const SIDE_PANEL_FALLBACK_WIDTH_PX = 270;
 
 function buildCommentBlockCaption(block: Block, characters: Character[], displayNumber: number): CommentBlockCaption {
   const normalizedBlockContent = block.content.replace(/\s+/g, " ").trim();
@@ -4065,8 +4063,8 @@ function CommentBubble({
   assets,
   active,
   offsetY = 0,
-  hasGutterSpace,
-  maxWidth,
+  mode,
+  width,
   blockLabel,
   captionBody,
   onCommentClick,
@@ -4077,42 +4075,47 @@ function CommentBubble({
   assets: BlockAssetBubbleItem[];
   active: boolean;
   offsetY?: number;
-  hasGutterSpace: boolean;
-  maxWidth: number;
+  mode: "full" | "compact" | null;
+  width: number;
   blockLabel: string;
   captionBody: string;
   onCommentClick: () => void;
   onAssetClick: () => void;
   onHoverChange: (hovered: boolean) => void;
 }) {
-  if ((comments.length === 0 && assets.length === 0) || !hasGutterSpace) return null;
+  if ((comments.length === 0 && assets.length === 0) || mode === null) return null;
 
   if (active) return null;
 
-  const sortedComments = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const childrenByParent = new Map<string, Comment[]>();
-  for (const comment of sortedComments) {
-    if (!comment.parentId) continue;
-    const replies = childrenByParent.get(comment.parentId) ?? [];
-    replies.push(comment);
-    childrenByParent.set(comment.parentId, replies);
-  }
-  const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
-  for (const comment of sortedComments.filter(c => c.parentId === null)) {
-    orderedComments.push({ comment, reply: false });
-    for (const reply of childrenByParent.get(comment.id) ?? []) {
-      orderedComments.push({ comment: reply, reply: true });
+  let visibleComments: Array<{ comment: Comment; reply: boolean }> = [];
+  let visibleAssets = EMPTY_BLOCK_ASSETS;
+  let hiddenCommentCount = 0;
+  let hiddenAssetCount = 0;
+  if (mode === "full") {
+    const sortedComments = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const childrenByParent = new Map<string, Comment[]>();
+    for (const comment of sortedComments) {
+      if (!comment.parentId) continue;
+      const replies = childrenByParent.get(comment.parentId) ?? [];
+      replies.push(comment);
+      childrenByParent.set(comment.parentId, replies);
     }
+    const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
+    for (const comment of sortedComments.filter(c => c.parentId === null)) {
+      orderedComments.push({ comment, reply: false });
+      for (const reply of childrenByParent.get(comment.id) ?? []) {
+        orderedComments.push({ comment: reply, reply: true });
+      }
+    }
+    for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !sortedComments.some(parent => parent.id === c.parentId))) {
+      orderedComments.push({ comment: orphanReply, reply: true });
+    }
+    const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : 4;
+    visibleComments = orderedComments.slice(0, visibleCommentLimit);
+    visibleAssets = assets.slice(0, 4 - visibleComments.length);
+    hiddenCommentCount = orderedComments.length - visibleComments.length;
+    hiddenAssetCount = assets.length - visibleAssets.length;
   }
-  for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !sortedComments.some(parent => parent.id === c.parentId))) {
-    orderedComments.push({ comment: orphanReply, reply: true });
-  }
-  const maxVisible = 4;
-  const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : maxVisible;
-  const visibleComments = orderedComments.slice(0, visibleCommentLimit);
-  const visibleAssets = assets.slice(0, maxVisible - visibleComments.length);
-  const hiddenCommentCount = orderedComments.length - visibleComments.length;
-  const hiddenAssetCount = assets.length - visibleAssets.length;
   const defaultAction = comments.length > 0 ? onCommentClick : onAssetClick;
   const handleClick = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
@@ -4121,25 +4124,42 @@ function CommentBubble({
 
   return (
     <div
-      className="absolute left-full top-1/2 z-10 ml-6 hover:z-40 focus-within:z-40"
-      style={{ transform: `translateY(calc(-50% + ${offsetY}px))` }}
+      className="absolute left-full top-1/2 z-0 ml-6"
+      style={{ transform: mode === "compact" ? "translateY(-50%)" : `translateY(calc(-50% + ${offsetY}px))` }}
       onMouseEnter={() => onHoverChange(true)}
       onMouseLeave={() => onHoverChange(false)}
     >
       <div
-        className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300"
-        style={{ width: maxWidth, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
+        className={`relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300 ${mode === "compact" ? "w-max" : ""}`}
+        style={mode === "compact"
+          ? { maxWidth: width }
+          : { width, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
       >
-        <button
-          type="button"
-          onClick={(e) => handleClick(e, defaultAction)}
-          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-100 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-600"
-          title={`${blockLabel} ${captionBody}`}
-        >
-          <span className="font-bold text-zinc-800">{blockLabel}</span>{" "}
-          <span>{captionBody}</span>
-        </button>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {mode === "compact" ? (
+          <div className="flex items-center justify-center gap-2 whitespace-nowrap px-2 py-1.5 text-[10px] font-medium text-zinc-600">
+            {comments.length > 0 && (
+              <button type="button" onClick={(e) => handleClick(e, onCommentClick)} className="hover:text-zinc-900">
+                评 {comments.length}
+              </button>
+            )}
+            {assets.length > 0 && (
+              <button type="button" onClick={(e) => handleClick(e, onAssetClick)} className="hover:text-zinc-900">
+                附 {assets.length}
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={(e) => handleClick(e, defaultAction)}
+              className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-100 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-600"
+              title={`${blockLabel} ${captionBody}`}
+            >
+              <span className="font-bold text-zinc-800">{blockLabel}</span>{" "}
+              <span>{captionBody}</span>
+            </button>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {(visibleComments.length > 0 || hiddenCommentCount > 0) && (
             <div
               className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenCommentCount > 0 ? "relative pr-10" : ""}`}
@@ -4198,7 +4218,9 @@ function CommentBubble({
               )}
             </div>
           )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -4974,8 +4996,8 @@ function ScriptBlock({
   isCommentPanelActive,
   isAssetPanelActive,
   commentBubbleOffsetY = 0,
-  rightGutterCanShowComments,
-  commentBubbleMaxWidth,
+  commentBubbleMode,
+  commentBubbleWidth,
   onCommentClick,
   onAssetClick,
   dragTarget = null,
@@ -5054,8 +5076,8 @@ function ScriptBlock({
   isCommentPanelActive: boolean;
   isAssetPanelActive: boolean;
   commentBubbleOffsetY?: number;
-  rightGutterCanShowComments: boolean;
-  commentBubbleMaxWidth: number;
+  commentBubbleMode: "full" | "compact" | null;
+  commentBubbleWidth: number;
   onCommentClick: () => void;
   onAssetClick: () => void;
   dragTarget?: BlockDragTarget | null;
@@ -5454,7 +5476,12 @@ function ScriptBlock({
           ...partialFocusStyle,
         } as React.CSSProperties)
       : undefined;
-  const commentBlockCaption = buildCommentBlockCaption(block, characters, captionLineNum);
+  const commentBlockCaption = commentBubbleMode === "full"
+    && !isCommentPanelActive
+    && !isAssetPanelActive
+    && (blockComments.length > 0 || blockAssets.length > 0)
+    ? buildCommentBlockCaption(block, characters, captionLineNum)
+    : null;
   const lineIndexSlotStyle: React.CSSProperties | undefined = lineNum === undefined
     ? {
         width: lineIndexWidth
@@ -5689,10 +5716,10 @@ function ScriptBlock({
         assets={blockAssets}
         active={isCommentPanelActive || isAssetPanelActive}
         offsetY={commentBubbleOffsetY}
-        hasGutterSpace={rightGutterCanShowComments}
-        maxWidth={commentBubbleMaxWidth}
-        blockLabel={commentBlockCaption.label}
-        captionBody={commentBlockCaption.body}
+        mode={commentBubbleMode}
+        width={commentBubbleWidth}
+        blockLabel={commentBlockCaption?.label ?? ""}
+        captionBody={commentBlockCaption?.body ?? ""}
         onCommentClick={handleCommentClick}
         onAssetClick={handleAssetClick}
         onHoverChange={setCommentBubbleHovered}
@@ -6058,8 +6085,7 @@ function SideBlockPanel({
   activePanel,
   onPanelChange,
   blockCaption,
-  hasGutterSpace,
-  gutterWidth,
+  width,
   navigation,
   onClose,
   children,
@@ -6068,8 +6094,7 @@ function SideBlockPanel({
   activePanel: BlockSidePanelKind;
   onPanelChange: (panel: BlockSidePanelKind) => void;
   blockCaption?: CommentBlockCaption | null;
-  hasGutterSpace: boolean;
-  gutterWidth: number;
+  width: number;
   navigation?: SideBlockPanelNavigation;
   onClose: () => void;
   children: React.ReactNode;
@@ -6092,9 +6117,7 @@ function SideBlockPanel({
       className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full"
       style={{
         top: SIDE_PANEL_TOP_PX,
-        width: hasGutterSpace
-          ? Math.min(SIDE_PANEL_MAX_WIDTH_PX, Math.max(SIDE_PANEL_MIN_WIDTH_PX, gutterWidth - SIDE_PANEL_GUTTER_PADDING_PX))
-          : SIDE_PANEL_MIN_WIDTH_PX,
+        width,
       }}
     >
       <SpeechTail top={pointerTop} offsetY={pointerOffsetY} fillClassName={tailUsesHeaderFill ? "fill-zinc-100" : "fill-white"} />
@@ -6173,8 +6196,7 @@ function CommentsPanel({
   blockId, productionId, comments, currentUserId, isAdmin,
   onAdd, onEdit, onDelete, onClose, onNavigate,
   onPanelChange, draft, onDraftChange,
-  hasGutterSpace,
-  gutterWidth,
+  width,
   blockCaption,
   navigation,
 }: {
@@ -6186,8 +6208,7 @@ function CommentsPanel({
   onPanelChange: (panel: BlockSidePanelKind) => void;
   draft?: CommentDraft;
   onDraftChange: (blockId: string, draft: CommentDraft) => void;
-  hasGutterSpace: boolean;
-  gutterWidth: number;
+  width: number;
   blockCaption?: CommentBlockCaption | null;
   navigation?: SideBlockPanelNavigation;
 }) {
@@ -6351,8 +6372,7 @@ function CommentsPanel({
       activePanel="comment"
       onPanelChange={onPanelChange}
       blockCaption={blockCaption}
-      hasGutterSpace={hasGutterSpace}
-      gutterWidth={gutterWidth}
+      width={width}
       navigation={navigation}
       onClose={onClose}
     >
@@ -10398,9 +10418,18 @@ export default function ScriptEditor({
   const activeSceneDetail = activeScene
     ? sceneDetailById.get(activeScene.id) ?? toSceneDetail(activeScene)
     : null;
-  const rightGutterWidth = rightGutterWidthPx;
-  const rightGutterCanShowComments = rightGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
-  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, rightGutterWidth - 24);
+  const commentBubbleMode = workspaceWidth === 0
+    ? null
+    : isSceneDetailVisible ? "full" : scriptTocRailMode;
+  const blockSidePanelWidthPx = isSceneDetailVisible
+    ? sceneDetailAsideWidthPx
+    : SIDE_PANEL_FALLBACK_WIDTH_PX;
+  const commentBubbleWidthPx = commentBubbleMode === "compact"
+    ? scriptTocRailCompactWidthPx - COMMENT_BUBBLE_GAP_REM * rootFontSizePx
+    : Math.max(
+        COMMENT_BUBBLE_MIN_WIDTH_PX,
+        rightGutterWidthPx - COMMENT_BUBBLE_GAP_REM * rootFontSizePx,
+      );
   const activeCommentBlockIndex = activeCommentBlockId
     ? blocks.findIndex(block => block.id === activeCommentBlockId)
     : -1;
@@ -11300,25 +11329,28 @@ export default function ScriptEditor({
           {(() => {
             const hasFocusedCharacters = focusedCharacterIds.size > 0;
             const rehearsalMarksHidden = isLockedMode && !display.rehearsalMarks;
-            const commentBubbleOffsets = new Map<string, number>();
-            let lastBubbleBottom = -Infinity;
-            for (let i = safeWindowStart; i < safeWindowEnd; i++) {
-              const windowBlock = blocks[i];
-              const commentCount = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
-              const assetCount = blockAssetsByBlockId.get(windowBlock.id)?.length ?? 0;
-              const count = commentCount + assetCount;
-              if (count === 0 || activeCommentBlockId === windowBlock.id || activeAssetBlockId === windowBlock.id) continue;
-              const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
-              const blockTop = cumulativeHRef.current[i] - spacerH.top;
-              const desiredCenter = blockTop + blockHeight / 2;
-              const visibleCommentCount = assetCount > 0 ? Math.min(3, commentCount) : Math.min(4, commentCount);
-              const visibleAssetCount = Math.min(assetCount, 4 - visibleCommentCount);
-              const hasDivider = commentCount > 0 && assetCount > 0;
-              const bubbleHeight = Math.min(160, 38 + (visibleCommentCount + visibleAssetCount) * 17 + (hasDivider ? 11 : 0));
-              const desiredTop = desiredCenter - bubbleHeight / 2;
-              const top = Math.max(desiredTop, lastBubbleBottom + 6);
-              lastBubbleBottom = top + bubbleHeight;
-              commentBubbleOffsets.set(windowBlock.id, top - desiredTop);
+            let commentBubbleOffsets: Map<string, number> | null = null;
+            if (commentBubbleMode === "full") {
+              commentBubbleOffsets = new Map<string, number>();
+              let lastBubbleBottom = -Infinity;
+              for (let i = safeWindowStart; i < safeWindowEnd; i++) {
+                const windowBlock = blocks[i];
+                const commentCount = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
+                const assetCount = blockAssetsByBlockId.get(windowBlock.id)?.length ?? 0;
+                const count = commentCount + assetCount;
+                if (count === 0 || activeCommentBlockId === windowBlock.id || activeAssetBlockId === windowBlock.id) continue;
+                const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
+                const blockTop = cumulativeHRef.current[i] - spacerH.top;
+                const desiredCenter = blockTop + blockHeight / 2;
+                const visibleCommentCount = assetCount > 0 ? Math.min(3, commentCount) : Math.min(4, commentCount);
+                const visibleAssetCount = Math.min(assetCount, 4 - visibleCommentCount);
+                const hasDivider = commentCount > 0 && assetCount > 0;
+                const bubbleHeight = Math.min(160, 38 + (visibleCommentCount + visibleAssetCount) * 17 + (hasDivider ? 11 : 0));
+                const desiredTop = desiredCenter - bubbleHeight / 2;
+                const top = Math.max(desiredTop, lastBubbleBottom + 6);
+                lastBubbleBottom = top + bubbleHeight;
+                commentBubbleOffsets.set(windowBlock.id, top - desiredTop);
+              }
             }
 
             return [
@@ -11851,9 +11883,9 @@ export default function ScriptEditor({
                   blockAssets={blockAssets}
                   isCommentPanelActive={activeCommentBlockId === block.id}
                   isAssetPanelActive={activeAssetBlockId === block.id}
-                  commentBubbleOffsetY={commentBubbleOffsets.get(block.id) ?? 0}
-                  rightGutterCanShowComments={rightGutterCanShowComments}
-                  commentBubbleMaxWidth={commentBubbleMaxWidth}
+                  commentBubbleOffsetY={commentBubbleOffsets?.get(block.id) ?? 0}
+                  commentBubbleMode={commentBubbleMode}
+                  commentBubbleWidth={commentBubbleWidthPx}
                   onCommentClick={() => openBlockSidePanel("comment", block.id)}
                   onAssetClick={() => openBlockSidePanel("asset", block.id)}
                   canEditText={canEditText}
@@ -11965,8 +11997,7 @@ export default function ScriptEditor({
           activePanel="asset"
           onPanelChange={panel => openBlockSidePanel(panel, activeAssetBlockId)}
           blockCaption={activeAssetBlockCaption}
-          hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={rightGutterWidth}
+          width={blockSidePanelWidthPx}
           navigation={{
             hasPrevious: assetPanelNavigationTargets.previousBlockId !== null,
             hasNext: assetPanelNavigationTargets.nextBlockId !== null,
@@ -12009,8 +12040,7 @@ export default function ScriptEditor({
           onPanelChange={panel => openBlockSidePanel(panel, activeCommentBlockId)}
           draft={commentDraftsRef.current.get(activeCommentBlockId)}
           onDraftChange={updateCommentDraft}
-          hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={rightGutterWidth}
+          width={blockSidePanelWidthPx}
           blockCaption={activeCommentBlockCaption}
           navigation={{
             hasPrevious: commentPanelNavigationTargets.previousBlockId !== null,
