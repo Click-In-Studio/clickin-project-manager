@@ -7420,7 +7420,7 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
      RETURNING ar.*`,
   );
 
-  let escalated = supervisorExpiredRes.rowCount ?? 0;
+  const escalated = supervisorExpiredRes.rowCount ?? 0;
 
   // For each escalated request, notify resource approvers
   for (const row of supervisorExpiredRes.rows) {
