@@ -337,9 +337,6 @@ export function hasPermission(perm: Permission, ctx: PermissionContext): boolean
   // Superadmin / owner bypass for non-root, non-sensitive permissions
   if (ctx.isAdmin || ctx.isOwner) return true;
 
-  // Base permissions: all members get these without explicit confirmation.
-  if (MEMBER_BASE_PERMISSIONS_SET.has(perm)) return true;
-
   // Script domain expansion via active grants:
   // confirming the parent permission activates all its sub-operations.
   if (SCRIPT_MANAGE_DOMAIN.has(perm) && ctx.activeGrants.has("script:manage")) return true;
@@ -381,12 +378,12 @@ export function hasMountPermission(
 }
 
 // ─── Member Base Permissions ───────────────────────────────────────────────────
-// All members receive these regardless of job title.
+// Default view-class permissions included in every new role template.
+// NOT a bypass — these take effect only after self-confirm writes an active grant.
+// Admins can remove any of these from a specific role; the grant then does not exist.
 //
-// Phase 1 设计意图（#158）：最终目标是将此列表缩减至 3 项隐式权限（成员身份感知、
-// 个人档案查看、演出基本信息查看），其余全部移入 role/dept permissions[] 配置。
-// 实际缩减等 resource_grant 系统在 Phase 4 完全接管访问控制后再执行，以保证
-// 在此之前"无 UX 变化"。
+// (#158) Phase 5 complete: bypass removed. Members confirm view grants via Level 1
+// notification on first production entry (see AppShell ViewGrantNotification).
 
 export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "scene:view",
@@ -400,9 +397,6 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "asset:download",
   "asset:share",
 ];
-
-// O(1) set used by hasPermission() — must be declared after MEMBER_BASE_PERMISSIONS.
-const MEMBER_BASE_PERMISSIONS_SET = new Set<Permission>(MEMBER_BASE_PERMISSIONS);
 
 // ─── Cue Operation Full Set ────────────────────────────────────────────────────
 const CUE_FULL_SET: readonly Permission[] = [
@@ -590,19 +584,23 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   "编剧": [
     "script:manage",
     ...DRAMATURGY_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "戏剧构作": [
     "script:annotate",
     ...DRAMATURGY_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "导演": [
     "script:annotate",
     "script:mount",
     "scene:mount",
     ...DIRECTOR_EVENT_PERMS,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "副导演": [
     ...DIRECTOR_EVENT_PERMS,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "音乐导演": [
     "script:annotate",
@@ -611,6 +609,7 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "production:mount",
     ...DIRECTOR_EVENT_PERMS,
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "作曲": [
     "script:annotate",
@@ -619,6 +618,7 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "scene:mount",
     "production:mount",
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "编曲": [
     "script:annotate",
@@ -626,6 +626,7 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "scene:mount",
     "production:mount",
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
 
   // 设计组
@@ -634,21 +635,26 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "scene:mount",
     "script:mount",
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "灯光设计": [
     "production:mount",
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "多媒体设计": [
     "production:mount",
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "服化设计": [
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "音响设计": [
     "production:mount",
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
 
   // 执行组
@@ -656,38 +662,42 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "script:mount",
     "scene:mount",
     "production:mount",
+    ...MEMBER_BASE_PERMISSIONS,
   ],
-  "灯光编程": [],
-  "技术导演": [],
-  "执行": [],
+  "灯光编程": [...MEMBER_BASE_PERMISSIONS],
+  "技术导演": [...MEMBER_BASE_PERMISSIONS],
+  "执行": [...MEMBER_BASE_PERMISSIONS],
 
   // 舞台监督
   "舞台监督": [
     ...SM_EVENT_PERMS,
     ...CUE_FULL_SET,
+    ...MEMBER_BASE_PERMISSIONS,
   ],
 
   // 宣发/外围
   "新媒体": [
     "production:mount",
+    ...MEMBER_BASE_PERMISSIONS,
   ],
   "侧写": [
     "script:mount",
     "scene:mount",
     "production:mount",
+    ...MEMBER_BASE_PERMISSIONS,
   ],
 
   // 演员
-  "演员": [],
-  "群演": [],
-  "乐手": [],
+  "演员": [...MEMBER_BASE_PERMISSIONS],
+  "群演": [...MEMBER_BASE_PERMISSIONS],
+  "乐手": [...MEMBER_BASE_PERMISSIONS],
 
   // 特殊岗位
-  "肢体指导": [],
-  "编舞": [],
+  "肢体指导": [...MEMBER_BASE_PERMISSIONS],
+  "编舞": [...MEMBER_BASE_PERMISSIONS],
 
   // 特殊内置
-  "访客": [],
+  "访客": [...MEMBER_BASE_PERMISSIONS],
 };
 
 // ─── Assistant Role Migration Map ─────────────────────────────────────────────

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
+import PageActivationGate from "./PageActivationGate";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -889,6 +890,9 @@ export default function AppShell({ session, productions, children, initialUnread
         {/* Workspace */}
         <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
       </div>
+
+      {/* Level 1: base view-grant activation — resets on production switch */}
+      {productionId && <PageActivationGate key={productionId} productionId={productionId} scope="base" />}
 
       {/* Mobile bottom nav */}
       <nav className="lg:hidden shrink-0 bg-[var(--surface)] border-t border-[var(--line)] flex z-40 safe-area-bottom">

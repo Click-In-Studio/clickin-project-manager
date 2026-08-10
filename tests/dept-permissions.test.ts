@@ -543,7 +543,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
 describe("canAccess() with deptFreeApprovalZone", () => {
   // cue:create is a non-base permission suitable for testing the confirmation flow.
 
-  it("base permissions are always allowed for members without any grant", () => {
+  it("base permission without role or grant → needs_approval (bypass removed, #158)", () => {
     const ctx: PermissionContext = {
       userId: TEST_USER,
       isAdmin: false,
@@ -555,7 +555,38 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       deptFreeApprovalZone: new Set(),
       activeGrants: new Set(),
     };
-    // scene:view is in MEMBER_BASE_PERMISSIONS → always directly allowed
+    // scene:view used to be granted via MEMBER_BASE_PERMISSIONS bypass.
+    // Now it requires the role to include it; with empty memberPermissions → needs_approval.
+    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: false, reason: "needs_approval" });
+  });
+
+  it("base permission with role but no active grant → needs_self_confirm", () => {
+    const ctx: PermissionContext = {
+      userId: TEST_USER,
+      isAdmin: false,
+      isOwner: false,
+      memberPermissions: new Set(["scene:view"] as const),
+      overrides: new Map(),
+      deptIds: [],
+      pocDeptIds: [],
+      deptFreeApprovalZone: new Set(),
+      activeGrants: new Set(),
+    };
+    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+  });
+
+  it("base permission with active grant → allowed", () => {
+    const ctx: PermissionContext = {
+      userId: TEST_USER,
+      isAdmin: false,
+      isOwner: false,
+      memberPermissions: new Set(["scene:view"] as const),
+      overrides: new Map(),
+      deptIds: [],
+      pocDeptIds: [],
+      deptFreeApprovalZone: new Set(),
+      activeGrants: new Set(["scene:view"] as const),
+    };
     expect(canAccess(ctx, "scene:view")).toEqual({ allowed: true });
   });
 

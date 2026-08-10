@@ -2884,15 +2884,17 @@ export async function getProductionPermissionContext(
 
   if (isMember) {
     if (dbPermsRow.rows.length > 0) {
-      // DB records exist: merge with base permissions (base is always granted to all members).
-      memberPermissions = new Set([
-        ...MEMBER_BASE_PERMISSIONS,
-        ...dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
-      ]);
+      // DB records exist: use exactly what's in production_role_permission.
+      // Base permissions are now stored in role rows (db/add-base-perms-to-roles.sql, #158),
+      // so no need to inject MEMBER_BASE_PERMISSIONS here.
+      memberPermissions = new Set(
+        dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
+      );
     } else {
-      // Fallback: derive permissions from static templates using existing role strings
+      // Fallback: no FK rows yet — derive from static templates via TEXT[] role strings.
+      // Templates now include MEMBER_BASE_PERMISSIONS, so empty roles → empty Set.
       const roleStrings = memberRow.rows[0].roles;
-      const perms = new Set<AtomicPermission>(MEMBER_BASE_PERMISSIONS);
+      const perms = new Set<AtomicPermission>();
       for (const role of roleStrings) {
         const templatePerms =
           ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
