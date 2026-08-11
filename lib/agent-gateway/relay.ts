@@ -194,8 +194,17 @@ export function createChatStreamResponse(
         // otherwise-silent RPC failures.
         if (started.runId) waitForRunOutcome(started.runId).catch(() => {});
 
+        // Heartbeat lines let the client distinguish "quiet but alive" (long
+        // model call, approval gate waiting on a human) from a dead
+        // connection (server restarted mid-stream) — without one, a client
+        // watchdog can't exist and a severed stream hangs its reader forever.
+        let lastPing = Date.now();
         while (!sessionDone && !closed && Date.now() < deadline) {
           await sleep(POLL_INTERVAL_MS);
+          if (Date.now() - lastPing >= 15_000) {
+            lastPing = Date.now();
+            send({ type: "ping" });
+          }
         }
         if (!sessionDone && !closed) {
           const text = await fetchLatestAssistantText(started.sessionKey);

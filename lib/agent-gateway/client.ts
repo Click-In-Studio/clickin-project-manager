@@ -677,18 +677,13 @@ export function getPendingApprovalSession(approvalId: string): string | undefine
 }
 
 /**
- * Resolves a pending plugin approval. Tries the kind-agnostic durable method
- * first (`approval.resolve` with explicit kind, per protocol docs), falling
- * back to the plugin-specific `plugin.approval.resolve` — exact param naming
- * is live-validated during Phase 4 rollout.
+ * Resolves a pending plugin approval via `plugin.approval.resolve` —
+ * live-validated against the production gateway (2026.7.1-2): the protocol
+ * doc's kind-agnostic `approval.resolve` does NOT exist there ("unknown
+ * method"), while this one works with `{ id, decision }`.
  */
 export async function resolveApproval(approvalId: string, decision: "allow-once" | "allow-always" | "deny"): Promise<void> {
   const status = await connect();
   const client = requireConnectedClient(status);
-  try {
-    await client.request("approval.resolve", { id: approvalId, kind: "plugin", decision });
-  } catch (err) {
-    console.warn("[agent-gateway] approval.resolve failed, trying plugin.approval.resolve:", err);
-    await client.request("plugin.approval.resolve", { id: approvalId, decision });
-  }
+  await client.request("plugin.approval.resolve", { id: approvalId, decision });
 }
