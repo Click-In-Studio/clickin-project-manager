@@ -292,6 +292,36 @@ export default definePluginEntry({
       });
     });
 
+    // 按工具生成人类可读的确认文案（gateway 的 approval 只带 title/description
+    // 两个字符串，description 上限 512——所以美化在这里做，前端只管按换行
+    // 渲染；未知工具回退 JSON 预览）。字符串截断都留给调用处的 slice。
+    function describeToolCall(tool: string, params: Record<string, unknown>): { title: string; description: string } {
+      const str = (v: unknown, cap: number): string =>
+        typeof v === "string" ? (v.length > cap ? `${v.slice(0, cap)}…` : v) : String(v ?? "（无）");
+      switch (tool) {
+        case "docs-propose":
+          return {
+            title: `提议修改文档：${str(params.path, 60)}`,
+            description: [
+              `📄 目标：${str(params.path, 80)}`,
+              `📝 摘要：${str(params.summary, 120)}`,
+              `内容预览：`,
+              str(params.content, 220),
+            ].join("\n"),
+          };
+        case "approvals-respond":
+          return {
+            title: `回应审批请求`,
+            description: `⚖️ 参数：${str(JSON.stringify(params), 480)}`,
+          };
+        default:
+          return {
+            title: `执行 ${tool}`,
+            description: `参数：${str(JSON.stringify(params), 480)}`,
+          };
+      }
+    }
+
     api.on(
       "before_tool_call",
       async (event: unknown) => {
@@ -316,11 +346,11 @@ export default definePluginEntry({
         // fail closed：annotations 没加载成功、或该工具不在只读集合 → 确认门
         if (annotationsLoaded && readOnlyTools.has(e.toolName)) return;
 
-        const paramsPreview = JSON.stringify(e.params ?? {});
+        const pretty = describeToolCall(e.toolName.slice(MCP_TOOL_PREFIX.length), e.params ?? {});
         return {
           requireApproval: {
-            title: `执行 ${e.toolName.slice(MCP_TOOL_PREFIX.length)}`.slice(0, 80),
-            description: `参数：${paramsPreview}`.slice(0, 512),
+            title: pretty.title.slice(0, 80),
+            description: pretty.description.slice(0, 512),
             severity: "warning" as const,
             // v1 不做 allow-always 持久化（OpenClaw 不自动记，插件自存是
             // Phase 4 后续项），所以只提供一次性放行
