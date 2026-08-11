@@ -191,7 +191,7 @@ jobs:
             OC='sudo -u openclaw /opt/node/bin/openclaw'
             if [ -x /opt/node/bin/openclaw ]; then
               if ! \$OC plugins list 2>/dev/null | grep -q clickin-memory; then
-                \$OC plugins install --link $PLUGIN_DIR --force ||
+                \$OC plugins install --link $PLUGIN_DIR ||
                   echo '::warning::clickin-memory install failed — run install --link manually'
               fi
               \$OC gateway restart ||
