@@ -3,6 +3,9 @@
   "name": "Click-In Memory",
   "description": "Click-In 团队记忆注入 + MCP 写工具确认门（Phase 4 v1）",
   "version": "0.1.0",
+  "contracts": {
+    "agentToolResultMiddleware": ["openclaw"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

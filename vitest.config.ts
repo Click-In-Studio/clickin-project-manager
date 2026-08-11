@@ -3,7 +3,12 @@ import path from "path";
 
 export default defineConfig({
   resolve: {
-    alias: { "@": path.resolve(__dirname, ".") },
+    alias: {
+      "@": path.resolve(__dirname, "."),
+      // openclaw SDK 只在 gateway 运行时可解析；测试里换成身份包装替身，
+      // 让 clickin-memory 插件可以被 import 并用 fake api 做集成测试
+      "openclaw/plugin-sdk/plugin-entry": path.resolve(__dirname, "tests/mocks/openclaw-plugin-entry.ts"),
+    },
   },
   test: {
     globals: true,
