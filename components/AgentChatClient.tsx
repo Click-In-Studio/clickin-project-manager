@@ -43,7 +43,8 @@ type StreamLine =
   | { type: "tool-end"; id?: string }
   | { type: "approval"; approval?: ApprovalInfo }
   | { type: "approval-resolved"; id?: string; decision?: string }
-  | { type: "ping" };
+  | { type: "ping" }
+  | { type: "session"; key?: string };
 
 export default function AgentChatClient() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -102,10 +103,14 @@ export default function AgentChatClient() {
       }
     }, 5_000);
 
+    // 会话 key 可能在流中升级为 canonical 形式（服务端回显）——之后的
+    // 归属判断和 activeKey 都要跟着走，否则守卫会误杀自己的事件。
+    let streamKey = forKey;
+
     const apply = (line: StreamLine) => {
       // A stale stream for a session the user already switched away from
       // must not touch the current transcript.
-      if (activeKeyRef.current !== forKey) return;
+      if (activeKeyRef.current !== streamKey) return;
       setBubbles((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
@@ -140,6 +145,11 @@ export default function AgentChatClient() {
             if (last?.kind === "assistant" && last.streaming) {
               next[next.length - 1] = { kind: "assistant", text: line.text || last.text };
             } else if (line.text) {
+              // relay 的超时兜底（fetchLatestAssistantText）拉的是"最新
+              // assistant 文本"——本轮若没产出，拉到的是上一轮已渲染的回复。
+              // 与最近一条 assistant 气泡完全相同的 final 视为兜底重复，跳过。
+              const prevAssistant = [...next].reverse().find((b) => b.kind === "assistant");
+              if (prevAssistant?.kind === "assistant" && prevAssistant.text === line.text) return next;
               next.push({ kind: "assistant", text: line.text });
             }
             return next;
@@ -196,6 +206,15 @@ export default function AgentChatClient() {
           try {
             const line = JSON.parse(raw) as StreamLine;
             if (line.type === "ping") continue; // 心跳只喂看门狗
+            if (line.type === "session") {
+              // 采纳 canonical key：下一条消息直接用它订阅，消除
+              // 「先订裸 key、补订 canonical」窗口期丢事件的竞态
+              if (typeof line.key === "string" && line.key && activeKeyRef.current === streamKey) {
+                streamKey = line.key;
+                setActiveKey(line.key);
+              }
+              continue;
+            }
             apply(line);
           } catch {
             // skip malformed line

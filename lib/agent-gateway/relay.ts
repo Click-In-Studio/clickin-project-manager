@@ -187,6 +187,14 @@ export function createChatStreamResponse(
           };
         }
 
+        // Tell the client the canonical key so its NEXT send passes it
+        // directly — when the client sends a bare key, this relay only
+        // subscribes to the canonical form after the RPC echo above, and
+        // any events emitted before that frame arrives are lost forever
+        // (EventEmitter has no replay). Live-hit: a fast tool call's
+        // start + approval events raced the echo and the card never showed.
+        if (started.runId) send({ type: "session", key: started.sessionKey });
+
         // Fire-and-forget: agent.wait only tracks the FIRST segment's runId,
         // and a tool-call turn spans multiple runIds — so its resolution
         // can't gate finishing the stream. The subscription is the sole
