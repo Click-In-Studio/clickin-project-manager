@@ -94,6 +94,7 @@ export function createChatStreamResponse(
           // deny), so extend this stream's own deadline to outlive the
           // approval window plus the continued run.
           extendDeadline();
+          console.log(`[agent-gateway] relay forwarding approval ${evt.approval?.id} (closed=${closed})`);
           send({ type: "approval", approval: evt.approval });
           return;
         }
@@ -171,6 +172,11 @@ export function createChatStreamResponse(
         // events almost immediately, and an EventEmitter never replays what
         // it already emitted to a listener that shows up late.
         unsubscribe = subscribeToSession(sessionKey, handleSessionEvent);
+
+        // First byte goes out BEFORE startRun: if the gateway RPC hangs
+        // (half-open socket), the client/watchdog/Cloudflare see a live
+        // stream instead of 100s of dead silence ending in a CF 524.
+        send({ type: "ping" });
 
         const started = startRun ? await startRun() : { runId: null as string | null, sessionKey };
 

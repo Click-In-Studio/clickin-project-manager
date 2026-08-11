@@ -280,6 +280,10 @@ function attemptConnect(): Promise<GatewayStatus> {
           prunePendingApprovals(s);
           s.pendingApprovals.set(approval.id, { sessionKey: approval.sessionKey, ts: Date.now() });
           if (approval.sessionKey) {
+            // 无条件日志（每个 approval 一行，量极低）：审批链路的关键
+            // 排障锚点——「广播到达且已路由」与「relay 是否转发」分属两行
+            const listeners = s.events.listenerCount(`session:${approval.sessionKey}`);
+            console.log(`[agent-gateway] approval ${approval.id} routed to ${approval.sessionKey} (listeners=${listeners})`);
             s.events.emit(`session:${approval.sessionKey}`, { approvalRequest: approval } satisfies ApprovalRequestBusPayload);
           } else {
             // Without a sessionKey the request can't be routed to a chat —
@@ -414,11 +418,25 @@ export async function startChatRun(sessionKey: string, message: string): Promise
   const status = await connect();
   const client = requireConnectedClient(status);
 
-  return client.request<{ runId: string; sessionKey: string }>("agent", {
-    sessionKey,
-    message,
-    idempotencyKey: crypto.randomUUID(),
-  });
+  try {
+    // 30s acceptance timeout: without it, a request written into a
+    // half-open socket (gateway restarted, close event never fired) hangs
+    // forever with zero bytes on the stream — Cloudflare then serves the
+    // user a 524 after 100s (live-hit after a CD gateway restart).
+    return await client.request<{ runId: string; sessionKey: string }>("agent", {
+      sessionKey,
+      message,
+      idempotencyKey: crypto.randomUUID(),
+    }, { timeoutMs: 30_000 });
+  } catch (err) {
+    // A timed-out request usually means the socket is dead but not closed —
+    // drop it so the NEXT attempt reconnects fresh instead of hitting the
+    // same zombie connection until TCP reaps it minutes later.
+    const s = store();
+    s.client = null;
+    s.status = { state: "disconnected" };
+    throw err;
+  }
 }
 
 /**
