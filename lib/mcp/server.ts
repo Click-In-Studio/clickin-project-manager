@@ -53,30 +53,35 @@ export function buildMcpServer(): McpServer {
   };
   const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
 
+  // my.* 描述统一声明语义（用户定的原则）：个人查询跨全部制作、权限过滤
+  // 内嵌（零权限 → 空结果而非拒绝）——在关联制作的会话里模型必须知道这些
+  // 结果**不局限于当前项目**。
+  const MY_SCOPE_NOTE = "【个人查询：范围是该用户参与的全部制作，不局限于当前对话关联的项目；结果已按其参与范围过滤，无权限时返回空结果而非拒绝】";
+
   const myTools: Array<{ name: string; description: string; fn: (userId: string) => Promise<string> }> = [
     {
       name: "my.call_times",
-      description: "查询当前用户自己的近期Call（时间、事件、地点、所属制作）。",
+      description: `查询当前用户自己的近期Call（时间、事件、地点、所属制作）。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myCallTimes(uid),
     },
     {
       name: "my.tech_reqs",
-      description: "查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态。",
+      description: `查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myTechReqs(uid),
     },
     {
       name: "my.events",
-      description: "查询当前用户关注的即将开始的Event事件。",
+      description: `查询当前用户关注的即将开始的Event事件。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myFollowedEvents(uid),
     },
     {
       name: "my.milestones",
-      description: "查询当前用户可见项目的临近里程碑（截止日期）。",
+      description: `查询当前用户可见项目的临近里程碑（截止日期）。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myMilestones(uid),
     },
     {
       name: "my.productions",
-      description: "查询当前用户参与的全部制作与角色（含已归档）。",
+      description: `查询当前用户参与的全部制作与角色（含已归档）。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myProductions(uid),
     },
   ];
@@ -88,6 +93,51 @@ export function buildMcpServer(): McpServer {
     }, async ({ _caller_user_id }) => {
       if (!_caller_user_id) return NO_CALLER;
       return { content: [{ type: "text" as const, text: await t.fn(_caller_user_id) }] };
+    });
+  }
+
+  // ─── production.* 项目工具（与 my.* 的语义分界）─────────────────────────
+  // 权限门在前：非成员 → 明确"权限被拒绝"（不是空结果）；仅在关联制作的
+  // 会话可用（_caller_production_id 由插件按 sessionKey 覆写，个人会话
+  // 没有该字段）。本批四个工具的门 = 成员资格。
+  const NO_PRODUCTION = {
+    content: [{
+      type: "text" as const,
+      text: "该工具仅在关联制作的对话中可用。请让用户新建对话并选择关联制作，或改用 my.* 个人查询（跨全部制作）。",
+    }],
+  };
+
+  const productionTools: Array<{ name: string; description: string; fn: (userId: string, productionId: string) => Promise<string> }> = [
+    {
+      name: "production.info",
+      description: "查询当前对话关联制作的项目详情（简介、类型、所有者、制作人）。成员内公开信息。",
+      fn: async (uid, pid) => (await import("./production-tools")).productionInfo(uid, pid),
+    },
+    {
+      name: "production.my_role",
+      description: "查询当前用户在当前对话关联制作中的职位、标签与部门（含是否部门负责人）。",
+      fn: async (uid, pid) => (await import("./production-tools")).productionMyRole(uid, pid),
+    },
+    {
+      name: "production.notifications",
+      description: "查询当前用户在当前对话关联制作中的通知（未读/待办/警告）。",
+      fn: async (uid, pid) => (await import("./production-tools")).productionNotifications(uid, pid),
+    },
+    {
+      name: "production.milestones",
+      description: "查询当前对话关联制作的全部里程碑（含已过与未来）。",
+      fn: async (uid, pid) => (await import("./production-tools")).productionMilestones(uid, pid),
+    },
+  ];
+  for (const t of productionTools) {
+    s.registerTool(t.name, {
+      description: t.description,
+      inputSchema: { ...callerShape },
+      annotations: READ_ONLY,
+    }, async ({ _caller_user_id, _caller_production_id }) => {
+      if (!_caller_user_id) return NO_CALLER;
+      if (!_caller_production_id) return NO_PRODUCTION;
+      return { content: [{ type: "text" as const, text: await t.fn(_caller_user_id, _caller_production_id) }] };
     });
   }
 

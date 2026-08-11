@@ -21,6 +21,10 @@ describe("MCP server skeleton", () => {
       "my.milestones",
       "my.productions",
       "my.tech_reqs",
+      "production.info",
+      "production.milestones",
+      "production.my_role",
+      "production.notifications",
       "users.query_sensitive",
     ]);
     await server.close();
