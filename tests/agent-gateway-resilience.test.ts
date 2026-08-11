@@ -124,7 +124,11 @@ describe("relay first-byte ordering", () => {
     }
 
     expect(pingBeforeStartRun).toBe(true);
-    const lines = buffer.trim().split("\n").map((l) => JSON.parse(l) as { type: string });
+    // SSE 帧格式：data: <json>\n\n
+    const lines = buffer
+      .split("\n")
+      .filter((l) => l.startsWith("data:"))
+      .map((l) => JSON.parse(l.slice(5).trim()) as { type: string });
     expect(lines[0].type).toBe("ping");
   });
 });

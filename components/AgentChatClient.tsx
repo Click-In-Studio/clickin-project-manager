@@ -97,9 +97,17 @@ export default function AgentChatClient() {
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const raw of lines) {
-          if (!raw.trim()) continue;
+          // SSE 帧：data: <json>；空行是帧分隔符，其他前缀（注释等）忽略。
+          // 解析假设（与 relay.ts 的 send() 是配套契约）：一行 data: 即一个
+          // 完整 JSON 帧——JSON.stringify 永不输出裸换行，所以服务端不会产
+          // 生规范 SSE 允许的"多 data: 行拼一个事件"。若未来 relay 改变发帧
+          // 方式，这里必须同步改为按空行聚合再拼接 data: 行。
+          const trimmed = raw.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload) continue;
           try {
-            const line = JSON.parse(raw) as StreamLine;
+            const line = JSON.parse(payload) as StreamLine;
             if (line.type === "ping") continue; // 心跳只喂看门狗
             if (line.type === "session") {
               // 采纳 canonical key：下一条消息直接用它订阅，消除
