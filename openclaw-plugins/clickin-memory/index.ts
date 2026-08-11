@@ -74,6 +74,18 @@ function parseSessionIdentity(sessionKey: string | undefined): { userId: string;
 
 const readOnlyTools = new Set<string>();
 let annotationsLoaded = false;
+let lastAnnotationAttempt = 0;
+
+// gateway 与 Next.js（MCP server）在 CD 后几乎同时启动——gateway_start
+// 拉取时 3101 可能还没监听。失败不能永久 fail closed 到下次重启：
+// before_tool_call 里按需惰性重试（30s 节流），成功一次即缓存。
+async function ensureAnnotations(mcpUrl: string): Promise<void> {
+  if (annotationsLoaded) return;
+  const now = Date.now();
+  if (now - lastAnnotationAttempt < 30_000) return;
+  lastAnnotationAttempt = now;
+  await loadToolAnnotations(mcpUrl);
+}
 
 async function loadToolAnnotations(mcpUrl: string): Promise<void> {
   try {
@@ -282,7 +294,7 @@ export default definePluginEntry({
 
     api.on(
       "before_tool_call",
-      (event: unknown) => {
+      async (event: unknown) => {
         const e = event as {
           toolName: string;
           params: Record<string, unknown>;
@@ -291,6 +303,8 @@ export default definePluginEntry({
         const cfg = resolveConfig(e?.context?.pluginConfig);
         if (!cfg.approvalEnabled) return;
         if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
+        // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉
+        await ensureAnnotations(cfg.mcpUrl);
         // fail closed：annotations 没加载成功、或该工具不在只读集合 → 确认门
         if (annotationsLoaded && readOnlyTools.has(e.toolName)) return;
 
