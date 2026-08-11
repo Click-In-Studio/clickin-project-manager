@@ -40,7 +40,14 @@ export async function buildInjectContext(userId: string, excludeSessionKey?: str
 
   const sections: string[] = [];
   if (userContext) sections.push(userContext); // 自带 "## 当前用户" 标题
-  if (memory) sections.push(`## 长期记忆摘要\n${memory}`);
+  if (memory) {
+    // 防御性降级 MEMORY.md 内部标题（#/## → ###）：蒸馏产物若自带二级
+    // 标题会与包裹标题同级，模型会把"长期记忆摘要"读成空标题、把内容
+    // 归给后续小节（真机反馈）。蒸馏 prompt 已要求 ### 起步，此处兜底
+    // 覆盖历史产物与模型不听话的情况。
+    const demoted = memory.replace(/^#{1,2}(?=\s)/gm, "###");
+    sections.push(`## 长期记忆摘要\n${demoted}`);
+  }
   if (recent) sections.push(`## 近期对话（最近 ${RECENT_DAYS} 天）\n${recent}`);
   return sections.join("\n\n");
 }

@@ -135,6 +135,16 @@ describe("MCP 端点：上报与组装取件", () => {
     expect(data.markdown!).toContain("端点上报测试"); // 近期对话段
   });
 
+  it("MEMORY.md 内部二级标题注入时降级为三级（不与包裹标题同级）", async () => {
+    const { writeMemory } = await import("@/lib/agent-memory/store");
+    writeMemory(userId, "## 偏好与习惯\n- 喜欢先听结论\n# 顶级标题\n- x");
+    const inject = await fetch(`${BASE}/inject-context?userId=${userId}`);
+    const data = (await inject.json()) as { markdown: string };
+    expect(data.markdown).toContain("## 长期记忆摘要\n### 偏好与习惯");
+    expect(data.markdown).toContain("### 顶级标题");
+    expect(data.markdown).not.toMatch(/\n## 偏好与习惯/);
+  });
+
   it("excludeSessionKey 过滤当前会话自身条目", async () => {
     const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=agent:team:x`);
     const data = (await inject.json()) as { markdown: string | null };
