@@ -3,6 +3,7 @@ import { createNewSessionKey, listChatSessions, getStatus } from "@/lib/agent-ga
 import { requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProfile } from "@/lib/db";
 import { ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
+import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 
 export const runtime = "nodejs";
 
@@ -36,11 +37,14 @@ export async function POST(req: NextRequest) {
   const auth = requireUser(req.cookies);
   if (auth instanceof NextResponse) return auth;
 
+  // 注意：不能在 req.json() 上挂 .catch(() => ({}))——那会把 malformed
+  // JSON 静默当成"无 productionId"签发个人会话（review #206 抓出的死代码
+  // + 行为偏差），必须真 400。
   let productionId: string | undefined;
   try {
-    const body = (await req.json().catch(() => ({}))) as { productionId?: unknown };
+    const body = (await req.json()) as { productionId?: unknown };
     if (body.productionId !== undefined) {
-      if (typeof body.productionId !== "string" || !/^[a-z0-9]{1,32}$/i.test(body.productionId)) {
+      if (typeof body.productionId !== "string" || !PRODUCTION_ID_RE.test(body.productionId)) {
         return NextResponse.json({ error: "productionId 格式非法" }, { status: 400 });
       }
       productionId = body.productionId;
@@ -50,9 +54,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (productionId) {
-    const access = await getProductionPermissionContext(auth.userId, auth.isAdmin, productionId).catch(() => null);
-    if (!access) {
-      return NextResponse.json({ error: "你不是该制作的成员" }, { status: 403 });
+    // getProductionPermissionContext 对"非成员"本身返回 null（不抛）——
+    // 不吞异常：真实基础设施错误（DB 断连等）走 500，别伪装成 403
+    try {
+      const access = await getProductionPermissionContext(auth.userId, auth.isAdmin, productionId);
+      if (!access) {
+        return NextResponse.json({ error: "你不是该制作的成员" }, { status: 403 });
+      }
+    } catch (err) {
+      return toErrorResponse(err);
     }
   }
 

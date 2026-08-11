@@ -18,12 +18,29 @@ const RECENT_MAX_CHARS = 2000;
 // 用户档案 5min 缓存（DB 查询，相对静态；记忆/近期对话每次现读）
 const userContextCache = new Map<string, { md: string | null; ts: number }>();
 const USER_CONTEXT_TTL_MS = 300_000;
+const CACHE_MAX_ENTRIES = 500;
+
+/** 写入时清扫：过期条目删除 + 硬上限兜底（user×production 组合空间在
+ * 长进程里无界，不能只靠读时 TTL）。 */
+function sweepCache(cache: Map<string, { md: string | null; ts: number }>): void {
+  const now = Date.now();
+  for (const [k, v] of cache) {
+    if (now - v.ts > USER_CONTEXT_TTL_MS) cache.delete(k);
+  }
+  if (cache.size > CACHE_MAX_ENTRIES) {
+    for (const k of cache.keys()) {
+      if (cache.size <= CACHE_MAX_ENTRIES) break;
+      cache.delete(k); // Map 迭代按插入序 → 删最旧
+    }
+  }
+}
 
 async function cachedUserContext(userId: string): Promise<string | null> {
   const hit = userContextCache.get(userId);
   if (hit && Date.now() - hit.ts < USER_CONTEXT_TTL_MS) return hit.md;
   const md = await buildUserContextMarkdown(userId);
   const clipped = md && md.length > USER_CONTEXT_MAX ? `${md.slice(0, USER_CONTEXT_MAX)}…` : md;
+  sweepCache(userContextCache);
   userContextCache.set(userId, { md: clipped, ts: Date.now() });
   return clipped;
 }
@@ -37,6 +54,7 @@ async function cachedProductionContext(userId: string, productionId: string): Pr
   if (hit && Date.now() - hit.ts < USER_CONTEXT_TTL_MS) return hit.md;
   const md = await buildProductionContextMarkdown(userId, productionId);
   const clipped = md && md.length > PRODUCTION_CONTEXT_MAX ? `${md.slice(0, PRODUCTION_CONTEXT_MAX)}…` : md;
+  sweepCache(productionContextCache);
   productionContextCache.set(key, { md: clipped, ts: Date.now() });
   return clipped;
 }

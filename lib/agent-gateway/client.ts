@@ -6,6 +6,7 @@ import { GATEWAY_CLIENT_CAPS, GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "@
 import { GATEWAY_URL, getGatewayToken, isGatewayConfigured } from "./config";
 import * as device from "./device";
 import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./types";
+import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 
 /**
  * Server-only singleton Gateway connection (globalThis-cached so it survives
@@ -34,7 +35,6 @@ const SCOPES = ["operator.read", "operator.write", "operator.admin", "operator.a
 
 const SESSION_NAMESPACE = "clickin:chat:";
 
-const PRODUCTION_ID_RE = /^[a-z0-9]{1,32}$/i;
 
 /** 个人会话：clickin:chat:<userId>:<uuid>
  *  production 会话：clickin:chat:<userId>:<productionId>:<uuid>

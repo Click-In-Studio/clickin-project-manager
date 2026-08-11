@@ -51,6 +51,18 @@ describe("POST /api/agent/sessions（production 签发）", () => {
     expect(res.status).toBe(400);
   });
 
+  it("malformed JSON 是真 400，不会静默签发个人会话（#206 review 回归）", async () => {
+    const cookie = `${SESSION_COOKIE}=${createSession({ userId: memberId, name: "测试", avatarUrl: null, isAdmin: false })}`;
+    const res = await POST(
+      new NextRequest("http://localhost/api/agent/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: "{not json",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("无 productionId 照常签发个人 key", async () => {
     const res = await POST(makeReq(memberId));
     expect(res.status).toBe(201);

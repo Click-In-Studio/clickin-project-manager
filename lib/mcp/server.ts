@@ -48,10 +48,6 @@ export function buildMcpServer(): McpServer {
   // ─── "我的 ×××" 只读工具（镜像 app/my/* 数据面，self-scoped）────────────
   // 与 my 页面共用同一批以 userId 收窄的查询函数，无新权限面；
   // readOnlyHint: true → 插件门控直通（Level A）。
-  const CALLER_PARAM = {
-    _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
-    _caller_production_id: z.string().optional().describe("系统注入的制作语境，勿手动填写"),
-  };
   const NO_CALLER = {
     content: [{ type: "text" as const, text: "拒绝：缺少调用者身份（该工具只能经审批插件路径调用）。" }],
   };
@@ -87,7 +83,7 @@ export function buildMcpServer(): McpServer {
   for (const t of myTools) {
     s.registerTool(t.name, {
       description: t.description,
-      inputSchema: { ...CALLER_PARAM },
+      inputSchema: { ...callerShape },
       annotations: READ_ONLY,
     }, async ({ _caller_user_id }) => {
       if (!_caller_user_id) return NO_CALLER;

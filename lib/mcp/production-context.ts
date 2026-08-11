@@ -13,8 +13,13 @@ export async function buildProductionContextMarkdown(userId: string, productionI
   const profile = await getUserProfile(userId);
   if (!profile) return null;
 
-  // 成员资格实时校验（含管理员通道），失败即不注入
-  const access = await getProductionPermissionContext(userId, profile.isAdmin, productionId).catch(() => null);
+  // 成员资格实时校验（含管理员通道；非成员时函数本身返回 null 不抛）。
+  // 真异常（DB 断连等）记日志后按"不注入"降级——注入是增强项不是关键
+  // 路径，但错误不能无声消失成"像是非成员"。
+  const access = await getProductionPermissionContext(userId, profile.isAdmin, productionId).catch((err) => {
+    console.error(`[production-context] 成员资格查询异常（按不注入降级）user=${userId} prod=${productionId}:`, err);
+    return null;
+  });
   if (!access) return null;
 
   const productions = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_PERMISSIONS]);
