@@ -142,19 +142,41 @@ export function startMcpServer(): void {
     res.json({ reason: takeDenyReason(toolCallId) ?? null });
   });
 
-  // 用户上下文端点（供 clickin-memory 插件在 before_prompt_build 注入
-  // "当前用户"档案）。仅 loopback，与 MCP 同信任域。
-  app.get("/user-context", async (req: Request, res: Response) => {
+  // 注入内容组装端点（供 clickin-memory 插件 before_prompt_build 单次
+  // fetch）：当前用户档案 + 长期记忆 + 近期对话，预算集中后端。
+  // 仅 loopback，与 MCP 同信任域。
+  app.get("/inject-context", async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+    const sessionKey = typeof req.query.sessionKey === "string" ? req.query.sessionKey : undefined;
     if (!userId) {
       res.status(400).json({ error: "missing userId" });
       return;
     }
     try {
-      const { buildUserContextMarkdown } = await import("./user-context");
-      res.json({ markdown: await buildUserContextMarkdown(userId) });
+      const { buildInjectContext } = await import("../agent-memory/inject");
+      res.json({ markdown: await buildInjectContext(userId, sessionKey) });
     } catch (err) {
-      console.error("[mcp] /user-context error:", err);
+      console.error("[mcp] /inject-context error:", err);
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  // episodic 上报端点（插件 agent_end 调用）——记忆文件所有权在后端
+  // （插件进程写不进后端目录，也不该写），上报走 loopback HTTP。
+  app.post("/memory-run", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { userId?: unknown; record?: unknown };
+    const userId = typeof body.userId === "string" ? body.userId : "";
+    const record = body.record as Record<string, unknown> | undefined;
+    if (!userId || !record || typeof record !== "object") {
+      res.status(400).json({ error: "missing userId/record" });
+      return;
+    }
+    try {
+      const { appendRunRecord } = await import("../agent-memory/store");
+      appendRunRecord(userId, record as import("../agent-memory/store").RunRecord);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[mcp] /memory-run error:", err);
       res.status(500).json({ error: "internal error" });
     }
   });

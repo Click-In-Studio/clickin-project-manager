@@ -12,33 +12,8 @@
     "properties": {
       "mcpUrl": {
         "type": "string",
-        "description": "clickin MCP server 地址（用于启动时拉取工具 annotations）",
+        "description": "clickin MCP server 地址（annotations 拉取 / 注入取件 / episodic 上报都走它）",
         "default": "http://127.0.0.1:3101/mcp"
-      },
-      "memoryDir": {
-        "type": "string",
-        "description": "记忆文件根目录（每用户一个子目录），~ 为 gateway 进程用户的 home",
-        "default": "~/.openclaw/clickin-memory"
-      },
-      "injectMaxChars": {
-        "type": "number",
-        "description": "before_prompt_build 注入的长期记忆摘要（MEMORY.md）字符上限",
-        "default": 4000
-      },
-      "recentDays": {
-        "type": "number",
-        "description": "近期对话注入的时间窗口（天）",
-        "default": 3
-      },
-      "recentMaxEntries": {
-        "type": "number",
-        "description": "近期对话注入的最大条数",
-        "default": 5
-      },
-      "recentMaxChars": {
-        "type": "number",
-        "description": "近期对话注入的字符上限",
-        "default": 2000
       },
       "approvalEnabled": {
         "type": "boolean",
