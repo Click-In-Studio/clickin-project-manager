@@ -63,6 +63,33 @@ export async function hasGrant(
 }
 
 /**
+ * 域级可见性：用户对某类型是否持有任一实例的指定动词行（不限实例）。
+ * 用于全项目级通道（如 cue-stream SSE）的粗粒度门。
+ */
+export async function hasAnyGrant(
+  userId: string,
+  productionId: string,
+  resourceType: string,
+  subs: readonly string[],
+  verb: GrantVerb,
+): Promise<boolean> {
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM resource_grant rg
+       WHERE rg.production_id = $1
+         AND rg.user_id = $2
+         AND rg.resource_type = $3
+         AND rg.resource_sub = ANY($4)
+         AND rg.permission_level = $5
+         AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
+     ) AS ok`,
+    [productionId, userId, resourceType, [...subs, "*"], verb],
+  );
+  return rows[0]?.ok ?? false;
+}
+
+/**
  * 目录/列表查询的行入口：用户对某类型某 sub 节点持有 verb 的实例集合。
  * 返回 { wildcard: true } 表示持有通配行（可见全量）；否则给出具体实例 id 列表。
  * 典型用途：目录页 = listGrantedResourceIds(user, prod, 'cue_list', 'meta', 'view')。

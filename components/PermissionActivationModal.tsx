@@ -15,7 +15,8 @@ type Props = {
 function groupByCategory(perms: string[]): { label: string; perms: string[] }[] {
   const map = new Map<string, string[]>();
   for (const p of perms) {
-    const prefix = p.split(":")[0] ?? p;
+    // 节点键（node:<type>/...）按资源类型分组
+    const prefix = p.startsWith("node:") ? p.slice(5).split("/")[0] ?? p : p.split(":")[0] ?? p;
     const label = GROUP_LABELS[prefix] ?? prefix;
     const existing = map.get(label);
     if (existing) existing.push(p);

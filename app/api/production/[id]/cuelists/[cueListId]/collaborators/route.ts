@@ -6,19 +6,18 @@ import {
   addCueListDeptAccess, removeCueListDeptAccess,
   setCueListGrant, type CueListLevel,
 } from "@/lib/resource-grant-db";
-import { hasPermission, hasScopedPermission } from "@/lib/permissions";
+import { hasGrant } from "@/lib/grant-check";
 
 async function getManageCtx(req: NextRequest, productionId: string, cueListId: string) {
   const session = getSession(req.cookies);
   if (!session) return null;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !hasPermission("cue_list:view", access.permCtx)) return null;
+  if (!access) return null;
   const cueList = await getCueList(cueListId, productionId);
   if (!cueList) return null;
-  const isCreator = cueList.createdBy === session.userId;
-  const canManage = hasScopedPermission(
-    "cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, access.permCtx,
-  );
+  // 批A：管理面 = grants 显式行（admin/owner 旁路）
+  const canManage = access.permCtx.isAdmin || access.permCtx.isOwner
+    || await hasGrant(session.userId, productionId, "cue_list", cueListId, "grants", "edit");
   return { session, canManage, productionId, isArchived: access.isArchived };
 }
 

@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getCueList, listCueListPermissions, setCueListPermission,
 } from "@/lib/db";
-import { hasScopedPermission } from "@/lib/permissions";
+import { hasGrant } from "@/lib/grant-check";
 
 // PATCH /api/production/[id]/cuelists/[cueListId]/permissions
 // body: { userId: string; canEdit: boolean | null }  (null = remove override)
@@ -22,8 +22,10 @@ export async function PATCH(
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  const isCreator = cueList.createdBy === session.userId;
-  if (!hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx))
+  // 批A：管理面 = grants 显式行（admin/owner 旁路）
+  const canManage = permCtx.isAdmin || permCtx.isOwner
+    || await hasGrant(session.userId, id, "cue_list", cueListId, "grants", "edit");
+  if (!canManage)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as { userId: string; canEdit: boolean | null };

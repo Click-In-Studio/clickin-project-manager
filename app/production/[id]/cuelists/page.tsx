@@ -5,7 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listCueListsWithAccess, getUserAllowedCueTypes, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { canAccessNode } from "@/lib/grant-template";
 import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
 import CueListsManager from "@/components/CueListsManager";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -23,17 +23,20 @@ export default async function CueListsPage({
   const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!_access) redirect(`/unauthorized?id=${id}`);
   const { permCtx } = _access;
-  if (!hasPermission("cue_list:view", permCtx)) redirect(`/unauthorized?resource=cue_list%3Aview&id=${id}`);
+  // 批A：目录三态——成员即可进目录页，可见条目由 meta view 行过滤（admin/owner 全量）
+  const seeAll = permCtx.isAdmin || permCtx.isOwner;
 
-  const canCreate = hasPermission("cue_list:create", permCtx);
-  const canCreateAny = hasPermission("cue_list:create_any", permCtx);
-
-  const [name, cueListsWithAccess, allowedCueTypes, members] = await Promise.all([
+  const [canCreateRes, name, cueListsWithAccess, members] = await Promise.all([
+    canAccessNode(permCtx, id, "cue_list", "*", "*", "create"),
     getProductionName(id),
-    listCueListsWithAccess(id, session.userId),
-    canCreate && !canCreateAny ? getUserAllowedCueTypes(session.userId, id) : Promise.resolve(null),
+    listCueListsWithAccess(id, session.userId, { seeAll }),
     listProductionMembersWithRoles(id),
   ]);
+  const canCreate = canCreateRes.allowed;
+  const canCreateAny = seeAll; // create_any 已并入 create；admin/owner 越过模板类型限制
+  const allowedCueTypes = canCreate && !canCreateAny
+    ? await getUserAllowedCueTypes(session.userId, id)
+    : null;
   if (!name) notFound();
 
   const availableTemplates = canCreateAny

@@ -3922,13 +3922,15 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
 }
 
 /**
- * Returns all cue lists for a production together with whether the given user
- * has edit access to each one (personal grant OR role match, respecting denials).
- * Runs a single query instead of N×hasListAccess calls.
+ * Returns cue lists for a production with per-list canEdit/canManage（批A REST 语义）。
+ * 目录三态：seeAll=false 时只返回用户持有 meta/cues view 行（含通配）的表；
+ * seeAll=true（admin/owner）返回全量。
+ * canEdit = 覆盖 cues 的 edit 行；canManage = 显式 grants edit 行。
  */
 export async function listCueListsWithAccess(
   productionId: string,
   userId: string,
+  opts: { seeAll?: boolean } = {},
 ): Promise<(CueList & { canEdit: boolean; canManage: boolean })[]> {
   const res = await getPool().query<CueListRow & { can_edit: boolean; can_manage: boolean }>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
@@ -3937,9 +3939,10 @@ export async function listCueListsWithAccess(
               SELECT 1 FROM resource_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
-                AND rg.resource_id = cl.id
+                AND rg.resource_id IN (cl.id, '*')
+                AND rg.resource_sub IN ('cues', '*')
+                AND rg.permission_level = 'edit'
                 AND rg.user_id = $2
-                AND rg.permission_level IN ('edit', 'manage')
                 AND NOT rg.is_revoked
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_edit,
@@ -3947,17 +3950,29 @@ export async function listCueListsWithAccess(
               SELECT 1 FROM resource_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
-                AND rg.resource_id = cl.id
+                AND rg.resource_id IN (cl.id, '*')
+                AND rg.resource_sub = 'grants'
+                AND rg.permission_level = 'edit'
                 AND rg.user_id = $2
-                AND rg.permission_level = 'manage'
                 AND NOT rg.is_revoked
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_manage
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
+       AND ($3 OR EXISTS (
+              SELECT 1 FROM resource_grant rg
+              WHERE rg.production_id = cl.production_id
+                AND rg.resource_type = 'cue_list'
+                AND rg.resource_id IN (cl.id, '*')
+                AND rg.resource_sub IN ('meta', 'cues', '*')
+                AND rg.permission_level = 'view'
+                AND rg.user_id = $2
+                AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
+            ))
      ORDER BY cl.created_at`,
-    [productionId, userId],
+    [productionId, userId, opts.seeAll === true],
   );
   return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit, canManage: r.can_manage }));
 }
@@ -3984,12 +3999,17 @@ export async function createCueList(data: {
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy],
     );
-    // Creator gets manage grant (Phase 4: resource_grant replaces cue_list_permission)
+    // Creator row-set（批A §0.6：动词行集取代 manage 单行）。
+    // '*' 整树通配不含保留段，grants 必须显式；cues 的 create/delete 是独立动词行。
+    // 存续按归属二分（self_confirmed + resource_dept_manage/resource_person_manage 覆盖）。
     await client.query(
       `INSERT INTO resource_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
-       VALUES ($1, $2, 'cue_list', $3, '*', 'manage', 'self_confirmed', $2)
+       SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
+       FROM (VALUES ('*', 'view'), ('*', 'edit'), ('*', 'delete'),
+                    ('cues', 'create'), ('cues', 'delete'),
+                    ('grants', 'edit')) AS s(sub, verb)
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
@@ -4188,17 +4208,20 @@ export async function copyProductionRole(productionId: string, sourceRoleId: str
 }
 
 /**
- * Returns true if the user has edit (or manage) access to this cue list via resource_grant.
+ * Returns true if the user can edit this cue list（批A REST 语义）：
+ * 持有 (id|'*') 上覆盖 cues 的 edit 动词行（'*' 整树或显式 cues）。
+ * 存量 edit 行（sub='*' level='edit'）天然是合法树行；原 manage 行经迁移拆解。
  */
 export async function hasListAccess(cueListId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ has_access: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM resource_grant rg
-       JOIN cue_list cl ON cl.id = rg.resource_id AND cl.production_id = rg.production_id
+       JOIN cue_list cl ON cl.id = $1 AND cl.production_id = rg.production_id
        WHERE rg.resource_type = 'cue_list'
-         AND rg.resource_id = $1
+         AND rg.resource_id IN ($1, '*')
+         AND rg.resource_sub IN ('cues', '*')
+         AND rg.permission_level = 'edit'
          AND rg.user_id = $2
-         AND rg.permission_level IN ('edit', 'manage')
          AND NOT rg.is_revoked
          AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ) AS has_access`,
@@ -4217,7 +4240,8 @@ export async function listCueListRoleMembers(cueListId: string): Promise<string[
      FROM resource_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
-       AND rg.permission_level IN ('edit', 'manage')
+       AND rg.resource_sub IN ('cues', '*')
+       AND rg.permission_level = 'edit'
        AND NOT rg.is_revoked
        AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [cueListId],
@@ -4254,7 +4278,8 @@ export async function listCueListPermissions(cueListId: string): Promise<CueList
      FROM resource_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
-       AND rg.permission_level IN ('edit', 'manage')
+       AND rg.resource_sub IN ('cues', '*')
+       AND rg.permission_level = 'edit'
        AND NOT rg.is_revoked
        AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ORDER BY rg.user_id`,
@@ -4270,12 +4295,15 @@ export async function setCueListPermission(
   grantedBy?: string,
 ): Promise<void> {
   if (canEdit === true) {
+    // 批A：编辑授权 = 动词行集（view + edit + cues create/delete）
     await getPool().query(
       `INSERT INTO resource_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
-       SELECT cl.production_id, $2, 'cue_list', $1, '*', 'edit', 'direct', $3
-       FROM cue_list cl WHERE cl.id = $1
+       SELECT cl.production_id, $2, 'cue_list', $1, s.sub, s.verb, 'direct', $3
+       FROM cue_list cl,
+            (VALUES ('*', 'view'), ('*', 'edit'), ('cues', 'create'), ('cues', 'delete')) AS s(sub, verb)
+       WHERE cl.id = $1
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,

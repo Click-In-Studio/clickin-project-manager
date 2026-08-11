@@ -16,7 +16,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getCueList } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getCueListAccess,
   selfConfirmCueListGrant,
@@ -32,9 +31,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  const { permCtx } = access;
-  if (!hasPermission("cue_list:view", permCtx))
-    return Response.json({ error: "无权访问" }, { status: 403 });
+  // 批A：自身访问状态查询，成员资格即可
 
   const cueList = await getCueList(cueListId, productionId);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
@@ -50,10 +47,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  const { permCtx, isArchived } = access;
+  const { isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("cue_list:view", permCtx))
-    return Response.json({ error: "无权访问" }, { status: 403 });
 
   const cueList = await getCueList(cueListId, productionId);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });

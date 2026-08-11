@@ -1,6 +1,12 @@
 import type { Permission } from "./permissions";
 
-export const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
+// 批A 起同时容纳原子键与树节点键（node:<type>/<id>[/<sub>]@<verb>）
+export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<string, string> = {
+  // ── 树节点键（cue 域，批A）──
+  "node:cue_list/*/meta@view": "查看Cue表目录",
+  "node:cue_list/*/cues@view": "查看Cue表内容",
+  "node:cue_list/*/cues/comments@create": "评论Cue",
+  "node:cue_list/*@create": "创建Cue表",
   // 项目管理
   "production:delete": "删除项目",
   "production:transfer_owner": "转让所有权",
@@ -214,12 +220,18 @@ export const GROUP_LABELS: Record<string, string> = {
   announcement: "公告",
 };
 
+/** 键的分组前缀：原子键取 ':' 前段，节点键取资源类型段 */
+export function permissionGroupPrefix(key: string): string {
+  if (key.startsWith("node:")) return key.slice(5).split("/")[0] ?? key;
+  return key.split(":")[0] ?? key;
+}
+
 /** Deduplicated category labels for a list of permission keys */
 export function permissionCategories(perms: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const p of perms) {
-    const prefix = p.split(":")[0] ?? p;
+    const prefix = permissionGroupPrefix(p);
     const label = GROUP_LABELS[prefix] ?? prefix;
     if (!seen.has(label)) {
       seen.add(label);
