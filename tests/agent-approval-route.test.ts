@@ -49,4 +49,14 @@ describe("POST /api/agent/approval", () => {
     const res = await POST(makeReq({ id: "never-seen-approval", decision: "deny" }));
     expect(res.status).toBe(403);
   });
+
+  it("rejects over-long deny reason with 400", async () => {
+    const res = await POST(makeReq({ id: "x", decision: "deny", reason: "长".repeat(501) }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects non-string reason with 400", async () => {
+    const res = await POST(makeReq({ id: "x", decision: "deny", reason: 123 }));
+    expect(res.status).toBe(400);
+  });
 });

@@ -216,14 +216,20 @@ export default function AgentChatClient() {
     }).catch(() => {});
   }, [activeKey]);
 
-  const decideApproval = useCallback(async (approvalId: string, decision: string) => {
+  // 拒绝理由的行内输入状态（哪张卡片展开了理由输入框 + 草稿内容）
+  const [denyingId, setDenyingId] = useState<string | null>(null);
+  const [denyReason, setDenyReason] = useState("");
+
+  const decideApproval = useCallback(async (approvalId: string, decision: string, reason?: string) => {
+    setDenyingId(null);
+    setDenyReason("");
     setBubbles((prev) =>
       prev.map((b) => (b.kind === "approval" && b.approval.id === approvalId ? { ...b, resolving: true } : b))
     );
     const res = await fetch("/api/agent/approval", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: approvalId, decision }),
+      body: JSON.stringify({ id: approvalId, decision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
     }).catch(() => null);
     if (!res?.ok) {
       const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
@@ -385,19 +391,53 @@ export default function AgentChatClient() {
                   <div className={`max-w-[85%] rounded-xl border px-4 py-3 text-sm ${severityStyle}`}>
                     <p className="font-medium text-zinc-800">⚠ 需要确认：{b.approval.title}</p>
                     {b.approval.description && (
-                      <p className="mt-1 break-all text-xs text-zinc-500">{b.approval.description}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">{b.approval.description}</p>
                     )}
                     {b.decision ? (
                       <p className="mt-2 text-xs font-medium text-zinc-600">
                         {b.decision.startsWith("allow") ? "✓ 已允许" : b.decision === "deny" ? "✕ 已拒绝" : `已处理（${b.decision}）`}
                       </p>
+                    ) : denyingId === b.approval.id ? (
+                      <div className="mt-2 space-y-2">
+                        <textarea
+                          value={denyReason}
+                          onChange={(e) => setDenyReason(e.target.value)}
+                          maxLength={500}
+                          rows={2}
+                          autoFocus
+                          placeholder="拒绝理由（可选，会告知 AI 以便它调整方案）"
+                          className="w-full resize-none rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs focus:border-zinc-500 focus:outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            disabled={b.resolving}
+                            onClick={() => decideApproval(b.approval.id, "deny", denyReason)}
+                            className="rounded-md bg-red-600 px-3 py-1 text-xs text-white hover:bg-red-500 disabled:opacity-40"
+                          >
+                            确认拒绝
+                          </button>
+                          <button
+                            onClick={() => { setDenyingId(null); setDenyReason(""); }}
+                            className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
                     ) : (
                       <div className="mt-2 flex gap-2">
                         {b.approval.allowedDecisions.map((d) => (
                           <button
                             key={d}
                             disabled={b.resolving}
-                            onClick={() => decideApproval(b.approval.id, d)}
+                            onClick={() => {
+                              if (d === "deny") {
+                                setDenyingId(b.approval.id);
+                                setDenyReason("");
+                              } else {
+                                decideApproval(b.approval.id, d);
+                              }
+                            }}
                             className={`rounded-md px-3 py-1 text-xs disabled:opacity-40 ${
                               d === "deny"
                                 ? "border border-zinc-300 text-zinc-600 hover:bg-zinc-100"
