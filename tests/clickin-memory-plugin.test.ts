@@ -71,15 +71,22 @@ afterAll(async () => {
 });
 
 const PLUGIN_CONFIG = { mcpUrl: MCP_URL };
+const CALLER_ID = "0b6ab930-e2aa-4020-8334-d749d7be82a5";
+const SESSION_CTX = { sessionKey: `agent:team:clickin:chat:${CALLER_ID}:11111111-2222-3333-4444-555555555555` };
 
 async function gateToolCall(toolCallId: string) {
   const handler = hooks.get("before_tool_call")!;
-  return (await handler({
-    toolName: "clickin__docs-propose",
-    params: { path: "test.md", content: "x", summary: "测试" },
-    toolCallId,
-    context: { pluginConfig: PLUGIN_CONFIG },
-  })) as { requireApproval?: { onResolution?: (d: string) => unknown } } | undefined;
+  return (await handler(
+    {
+      toolName: "clickin__docs-propose",
+      params: { path: "test.md", content: "x", summary: "测试" },
+      toolCallId,
+      context: { pluginConfig: PLUGIN_CONFIG },
+    },
+    SESSION_CTX,
+  )) as
+    | { params?: Record<string, unknown>; requireApproval?: { onResolution?: (d: string) => unknown } }
+    | undefined;
 }
 
 describe("clickin-memory 确认门", () => {
@@ -90,28 +97,67 @@ describe("clickin-memory 确认门", () => {
     expect(middleware).not.toBeNull();
   });
 
-  it("write tool gets requireApproval; read-only docs-read passes (annotations loaded live)", async () => {
+  it("write tool gets requireApproval WITH caller-id param override", async () => {
     const gated = await gateToolCall("call_gate_1");
     expect(gated?.requireApproval).toBeTruthy();
-
-    const handler = hooks.get("before_tool_call")!;
-    const readResult = await handler({
-      toolName: "clickin__docs-read",
-      params: { path: "a.md" },
-      toolCallId: "call_read_1",
-      context: { pluginConfig: PLUGIN_CONFIG },
-    });
-    expect(readResult).toBeUndefined(); // 只读直通
+    expect(gated?.params?._caller_user_id).toBe(CALLER_ID);
   });
 
-  it("non-clickin tools are ignored", async () => {
+  it("read-only docs-read passes with caller-id injected (annotations loaded live)", async () => {
     const handler = hooks.get("before_tool_call")!;
-    const result = await handler({
-      toolName: "web_search",
-      params: { query: "x" },
-      toolCallId: "call_ws",
-      context: { pluginConfig: PLUGIN_CONFIG },
-    });
+    const readResult = (await handler(
+      {
+        toolName: "clickin__docs-read",
+        params: { path: "a.md" },
+        toolCallId: "call_read_1",
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      SESSION_CTX,
+    )) as { params?: Record<string, unknown>; requireApproval?: unknown };
+    expect(readResult?.requireApproval).toBeUndefined(); // 只读不弹卡
+    expect(readResult?.params?._caller_user_id).toBe(CALLER_ID); // 但身份已注入
+    expect(readResult?.params?.path).toBe("a.md"); // 原参数保留
+  });
+
+  it("model-forged _caller_user_id is overwritten by the real session identity", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const result = (await handler(
+      {
+        toolName: "clickin__docs-read",
+        params: { path: "a.md", _caller_user_id: "99999999-9999-9999-9999-999999999999" },
+        toolCallId: "call_forge",
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      SESSION_CTX,
+    )) as { params?: Record<string, unknown> };
+    expect(result?.params?._caller_user_id).toBe(CALLER_ID); // 伪造被盖掉
+  });
+
+  it("non-webchat session (no identity) strips any forged caller id", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const result = (await handler(
+      {
+        toolName: "clickin__docs-read",
+        params: { path: "a.md", _caller_user_id: "99999999-9999-9999-9999-999999999999" },
+        toolCallId: "call_cron",
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      { sessionKey: "agent:team:cron:job-xyz" },
+    )) as { params?: Record<string, unknown> };
+    expect(result?.params?._caller_user_id).toBeUndefined(); // 无身份则剥除
+  });
+
+  it("non-clickin tools are ignored entirely", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const result = await handler(
+      {
+        toolName: "web_search",
+        params: { query: "x" },
+        toolCallId: "call_ws",
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      SESSION_CTX,
+    );
     expect(result).toBeUndefined();
   });
 });
