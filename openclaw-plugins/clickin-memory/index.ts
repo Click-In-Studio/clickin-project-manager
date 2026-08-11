@@ -96,7 +96,11 @@ async function loadToolAnnotations(mcpUrl: string): Promise<void> {
     const tools = parsed.result?.tools ?? [];
     readOnlyTools.clear();
     for (const t of tools) {
-      if (t.annotations?.readOnlyHint === true) readOnlyTools.add(t.name);
+      // 缓存按 OpenClaw 暴露名存：<server>__<name>，且非 [A-Za-z0-9_-]
+      // 字符规范化为 '-'（实测 docs.read → clickin__docs-read）。
+      // before_tool_call 拿到的是暴露名，存 MCP 原始名永远不命中。
+      const exposedName = MCP_TOOL_PREFIX + t.name.replace(/[^A-Za-z0-9_-]/g, "-");
+      if (t.annotations?.readOnlyHint === true) readOnlyTools.add(exposedName);
     }
     annotationsLoaded = true;
     console.log(`[clickin-memory] loaded ${tools.length} MCP tools, ${readOnlyTools.size} read-only`);
