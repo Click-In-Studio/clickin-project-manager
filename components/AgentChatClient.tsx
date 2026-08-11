@@ -32,17 +32,40 @@ export default function AgentChatClient() {
   const activeKeyRef = useRef<string | null>(null);
   activeKeyRef.current = activeKey;
 
+  // 新建对话选择器（个人对话 / 关联制作）
+  const [productions, setProductions] = useState<{ id: string; name: string }[]>([]);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+
   const refreshSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/agent/sessions");
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: SessionSummary[]; gatewayStatus?: GatewayStatus };
+      const data = (await res.json()) as {
+        sessions: SessionSummary[];
+        productions?: { id: string; name: string }[];
+        gatewayStatus?: GatewayStatus;
+      };
       setSessions(data.sessions);
+      if (data.productions) setProductions(data.productions);
       if (data.gatewayStatus) setGatewayStatus(data.gatewayStatus);
     } catch {
       // network hiccup — sidebar just stays stale
     }
   }, []);
+
+  // 会话 key → 制作名（production 会话第 4 段是短字母数字 id，个人会话
+  // 该位置是会话 UUID——用 productions 映射命中判定，未命中即个人会话）
+  const productionOfKey = useCallback(
+    (key: string): string | null => {
+      const bare = key.replace(/^agent:[^:]+:/, "");
+      const parts = bare.split(":");
+      // clickin:chat:<userId>:<productionId>:<uuid>
+      if (parts.length < 5) return null;
+      const pid = parts[3];
+      return productions.find((p) => p.id === pid)?.name ?? null;
+    },
+    [productions],
+  );
 
   useEffect(() => {
     refreshSessions();
@@ -168,8 +191,13 @@ export default function AgentChatClient() {
     }
   }, [consumeStream]);
 
-  const newSession = useCallback(async () => {
-    const res = await fetch("/api/agent/sessions", { method: "POST" });
+  const newSession = useCallback(async (productionId?: string) => {
+    setShowNewMenu(false);
+    const res = await fetch("/api/agent/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productionId ? { productionId } : {}),
+    });
     if (!res.ok) return;
     const { key } = (await res.json()) as { key: string };
     setActiveKey(key);
@@ -283,14 +311,35 @@ export default function AgentChatClient() {
     <div className="mx-auto flex h-[calc(100dvh-6rem)] max-w-6xl gap-4 p-4">
       {/* 会话列表 */}
       <aside className="flex w-64 shrink-0 flex-col rounded-lg border border-zinc-200 bg-white">
-        <div className="flex items-center justify-between border-b border-zinc-200 p-3">
+        <div className="relative flex items-center justify-between border-b border-zinc-200 p-3">
           <span className="text-sm font-medium text-zinc-700">对话</span>
           <button
-            onClick={newSession}
+            onClick={() => (productions.length > 0 ? setShowNewMenu((v) => !v) : newSession())}
             className="rounded-md bg-zinc-900 px-2.5 py-1 text-xs text-white hover:bg-zinc-700"
           >
-            新对话
+            新对话{productions.length > 0 ? " ▾" : ""}
           </button>
+          {showNewMenu && (
+            <div className="absolute right-3 top-full z-10 mt-1 w-52 rounded-md border border-zinc-200 bg-white py-1 shadow-lg">
+              <button
+                onClick={() => newSession()}
+                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+              >
+                💬 个人对话
+              </button>
+              <div className="mx-3 my-1 border-t border-zinc-100" />
+              <p className="px-3 py-0.5 text-[10px] text-zinc-400">关联制作（对话将带入制作语境）</p>
+              {productions.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => newSession(p.id)}
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+                >
+                  🎭 {p.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {sessions.length === 0 && (
@@ -307,6 +356,12 @@ export default function AgentChatClient() {
               <div className="flex items-center justify-between gap-1">
                 <span className="truncate text-zinc-800">
                   {s.status === "running" && <span className="mr-1 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />}
+                  {(() => {
+                    const prod = productionOfKey(s.key);
+                    return prod ? (
+                      <span className="mr-1 rounded bg-violet-100 px-1 text-[10px] text-violet-700">{prod}</span>
+                    ) : null;
+                  })()}
                   {s.title}
                 </span>
                 <span className="hidden shrink-0 gap-1 group-hover:flex">

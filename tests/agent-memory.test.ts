@@ -135,10 +135,42 @@ describe("MCP 端点：上报与组装取件", () => {
     expect(data.markdown!).toContain("端点上报测试"); // 近期对话段
   });
 
+  it("MEMORY.md 内部二级标题注入时降级为三级（不与包裹标题同级）", async () => {
+    const { writeMemory } = await import("@/lib/agent-memory/store");
+    writeMemory(userId, "## 偏好与习惯\n- 喜欢先听结论\n# 顶级标题\n- x");
+    const inject = await fetch(`${BASE}/inject-context?userId=${userId}`);
+    const data = (await inject.json()) as { markdown: string };
+    expect(data.markdown).toContain("## 长期记忆摘要\n### 偏好与习惯");
+    expect(data.markdown).toContain("### 顶级标题");
+    expect(data.markdown).not.toMatch(/\n## 偏好与习惯/);
+  });
+
   it("excludeSessionKey 过滤当前会话自身条目", async () => {
     const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=agent:team:x`);
     const data = (await inject.json()) as { markdown: string | null };
     expect(data.markdown ?? "").not.toContain("端点上报测试");
+  });
+
+  it("production 会话注入「当前制作」段（成员）", async () => {
+    const sessionKey = `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`;
+    const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=${encodeURIComponent(sessionKey)}`);
+    const data = (await inject.json()) as { markdown: string };
+    expect(data.markdown).toContain("## 当前制作");
+    expect(data.markdown).toContain("我的角色");
+  });
+
+  it("非成员的 production 会话不注入制作段（实时资格校验）", async () => {
+    const { makeProduction: mk } = await import("./factories");
+    const { prodId: otherProd } = await mk(); // 无 owner、无成员
+    try {
+      const sessionKey = `clickin:chat:${userId}:${otherProd}:11111111-2222-3333-4444-555555555555`;
+      const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=${encodeURIComponent(sessionKey)}`);
+      const data = (await inject.json()) as { markdown: string | null };
+      expect(data.markdown ?? "").not.toContain("## 当前制作");
+    } finally {
+      const { cleanupProduction: cp } = await import("./factories");
+      await cp(otherProd).catch(() => {});
+    }
   });
 
   it("缺 userId → 400；非法 record → 400", async () => {

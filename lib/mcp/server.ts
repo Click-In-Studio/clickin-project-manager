@@ -11,9 +11,16 @@ const MCP_PORT = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3101;
 export function buildMcpServer(): McpServer {
   const s = new McpServer({ name: "clickin", version: "0.1.0" });
 
+  // 所有 clickin 工具的 schema 都声明 caller 参数（插件对一切 clickin__*
+  // 调用强制覆写注入；schema 不声明的话严格校验模式下会拒参）
+  const callerShape = {
+    _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
+    _caller_production_id: z.string().optional().describe("系统注入的制作语境，勿手动填写"),
+  };
+
   s.registerTool("docs.read", {
     description: "Read a vault document by path",
-    inputSchema: { path: z.string().describe("Vault-relative document path") },
+    inputSchema: { path: z.string().describe("Vault-relative document path"), ...callerShape },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async ({ path }) => ({
     content: [{ type: "text" as const, text: `[stub] docs.read → ${path}` }],
@@ -23,6 +30,7 @@ export function buildMcpServer(): McpServer {
     description: "List pending approval requests for a production",
     inputSchema: {
       production_id: z.string().describe("Production ID"),
+      ...callerShape,
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async ({ production_id }) => ({
@@ -40,9 +48,6 @@ export function buildMcpServer(): McpServer {
   // ─── "我的 ×××" 只读工具（镜像 app/my/* 数据面，self-scoped）────────────
   // 与 my 页面共用同一批以 userId 收窄的查询函数，无新权限面；
   // readOnlyHint: true → 插件门控直通（Level A）。
-  const CALLER_PARAM = {
-    _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
-  };
   const NO_CALLER = {
     content: [{ type: "text" as const, text: "拒绝：缺少调用者身份（该工具只能经审批插件路径调用）。" }],
   };
@@ -78,7 +83,7 @@ export function buildMcpServer(): McpServer {
   for (const t of myTools) {
     s.registerTool(t.name, {
       description: t.description,
-      inputSchema: { ...CALLER_PARAM },
+      inputSchema: { ...callerShape },
       annotations: READ_ONLY,
     }, async ({ _caller_user_id }) => {
       if (!_caller_user_id) return NO_CALLER;
@@ -91,9 +96,7 @@ export function buildMcpServer(): McpServer {
     // 当写工具挂确认门（"AI 想查询你的联系方式" → 用户批准/拒绝）。
     // 敏感信息即使目标是自己也要确认；确认语义纯靠 annotations 表达。
     description: "查询当前用户自己的登记联系方式（邮箱/电话）。敏感信息，需用户确认。",
-    inputSchema: {
-      _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
-    },
+    inputSchema: { ...callerShape },
     annotations: { openWorldHint: false, destructiveHint: false },
   }, async ({ _caller_user_id }) => {
     if (!_caller_user_id) {
@@ -110,6 +113,7 @@ export function buildMcpServer(): McpServer {
       path: z.string().describe("Vault-relative document path"),
       content: z.string().describe("Proposed full new content"),
       summary: z.string().describe("Short description of what changed and why"),
+      ...callerShape,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   }, async ({ path, summary }) => ({

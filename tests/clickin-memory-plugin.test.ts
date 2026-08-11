@@ -133,6 +133,29 @@ describe("clickin-memory 确认门", () => {
     expect(result?.params?._caller_user_id).toBe(CALLER_ID); // 伪造被盖掉
   });
 
+  it("production session injects _caller_production_id; personal session strips forged one", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const prodCtx = { sessionKey: `agent:team:clickin:chat:${CALLER_ID}:t3k9xa1b:11111111-2222-3333-4444-555555555555` };
+    const prodResult = (await handler(
+      { toolName: "clickin__docs-read", params: { path: "a.md" }, toolCallId: "call_prod", context: { pluginConfig: PLUGIN_CONFIG } },
+      prodCtx,
+    )) as { params?: Record<string, unknown> };
+    expect(prodResult?.params?._caller_user_id).toBe(CALLER_ID);
+    expect(prodResult?.params?._caller_production_id).toBe("t3k9xa1b");
+
+    const personal = (await handler(
+      {
+        toolName: "clickin__docs-read",
+        params: { path: "a.md", _caller_production_id: "forged123" },
+        toolCallId: "call_personal",
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      SESSION_CTX, // 个人会话
+    )) as { params?: Record<string, unknown> };
+    expect(personal?.params?._caller_user_id).toBe(CALLER_ID);
+    expect(personal?.params?._caller_production_id).toBeUndefined(); // 伪造被剥除
+  });
+
   it("non-webchat session (no identity) strips any forged caller id", async () => {
     const handler = hooks.get("before_tool_call")!;
     const result = (await handler(
