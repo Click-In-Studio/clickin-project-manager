@@ -42,7 +42,8 @@ type StreamLine =
   | { type: "tool"; name?: string; id?: string }
   | { type: "tool-end"; id?: string }
   | { type: "approval"; approval?: ApprovalInfo }
-  | { type: "approval-resolved"; id?: string; decision?: string };
+  | { type: "approval-resolved"; id?: string; decision?: string }
+  | { type: "ping" };
 
 export default function AgentChatClient() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -88,6 +89,18 @@ export default function AgentChatClient() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+
+    // 静默看门狗：服务端每 15s 发 ping，60s 收不到任何字节视为连接已死
+    // （如 pm2 重启掐断流），cancel 让 read() 解除阻塞、finally 复位状态——
+    // 否则 streaming 永远卡 true，后续消息全走 steer 打进虚空。
+    let lastByteAt = Date.now();
+    let watchdogFired = false;
+    const watchdog = setInterval(() => {
+      if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
+        watchdogFired = true; // cancel 一次即可，read() 解除阻塞后 finally 收尾
+        reader.cancel().catch(() => {});
+      }
+    }, 5_000);
 
     const apply = (line: StreamLine) => {
       // A stale stream for a session the user already switched away from
@@ -164,6 +177,8 @@ export default function AgentChatClient() {
             next.push({ kind: "notice", text: line.error || "出错了" });
             return next;
           }
+          default:
+            return next; // ping 等非渲染事件在上游已过滤，这里兜底
         }
       });
     };
@@ -172,19 +187,23 @@ export default function AgentChatClient() {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        lastByteAt = Date.now();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const raw of lines) {
           if (!raw.trim()) continue;
           try {
-            apply(JSON.parse(raw) as StreamLine);
+            const line = JSON.parse(raw) as StreamLine;
+            if (line.type === "ping") continue; // 心跳只喂看门狗
+            apply(line);
           } catch {
             // skip malformed line
           }
         }
       }
     } finally {
+      clearInterval(watchdog);
       setStreaming(false);
       // Settle any bubble still marked streaming (connection dropped).
       setBubbles((prev) =>
@@ -245,14 +264,21 @@ export default function AgentChatClient() {
     setBubbles((prev) => [...prev, { kind: "user", text: message }]);
 
     // streaming === true → there's a run in flight; inject via steer instead
-    // of waiting (the same stream connection will carry the extra reply).
+    // of waiting (the already-open stream connection carries the extra reply).
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionKey: key, message, steer: streaming || undefined }),
     });
-    // A steer rides the existing stream; only a fresh send consumes its own.
-    if (!streaming) consumeStream(res, key);
+    if (streaming) {
+      // Steer returns plain JSON (no second stream) — only surface failures.
+      const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !out?.ok) {
+        setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
+      }
+    } else {
+      consumeStream(res, key);
+    }
   }, [input, activeKey, streaming, consumeStream]);
 
   const abort = useCallback(async () => {
