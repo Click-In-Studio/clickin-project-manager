@@ -177,20 +177,33 @@ jobs:
           echo "Plugin changed: ${REMOTE_HASH:-<none>} → $TREE_HASH"
           ssh prod "mkdir -p $SHARED/openclaw-plugins && rm -rf $PLUGIN_DIR.new" < /dev/null
           scp -r openclaw-plugins/clickin-memory prod:$PLUGIN_DIR.new
-          ssh prod "rm -rf $PLUGIN_DIR && mv $PLUGIN_DIR.new $PLUGIN_DIR && echo '$TREE_HASH' > $PLUGIN_DIR.tree-hash" < /dev/null
-
-          # 安装（首次）+ 重启团队 gateway。OpenClaw 未装好时软失败：不阻塞
-          # 主应用部署，但在 Actions 日志里留 warning。
+          # 目录保持部署用户所有（下次 CD 才能写），openclaw 用户只需读（--link）。
+          # chmod 只递归本插件目录，不碰 openclaw-plugins 下其他插件的权限；
+          # 父链补 x 位保证 openclaw 用户可穿越到叶子目录。
           ssh prod "
-            if command -v openclaw >/dev/null 2>&1; then
-              if ! openclaw --profile team plugins list 2>/dev/null | grep -q clickin-memory; then
-                openclaw --profile team plugins install --link $PLUGIN_DIR --force ||
+            rm -rf $PLUGIN_DIR && mv $PLUGIN_DIR.new $PLUGIN_DIR &&
+            chmod -R a+rX $PLUGIN_DIR &&
+            chmod a+x $SHARED $SHARED/openclaw-plugins &&
+            echo '$TREE_HASH' > $PLUGIN_DIR.tree-hash
+          " < /dev/null
+
+          # 服务器上团队实例以专用 openclaw 用户跑默认 profile
+          # （/home/openclaw/.openclaw），binary 在 /opt/node/bin（不在部署
+          # 用户 PATH 里）。未装好时软失败：不阻塞主应用部署，留 warning。
+          # 注意：sudo -u openclaw 依赖部署用户的 NOPASSWD sudo（与上面
+          # sudo -u postgres 跑迁移同一前提）——如果 install 长期报 warning，
+          # 先排查 sudoers，别当成 openclaw 未安装。
+          ssh prod "
+            OC='sudo -u openclaw /opt/node/bin/openclaw'
+            if [ -x /opt/node/bin/openclaw ]; then
+              if ! \$OC plugins list 2>/dev/null | grep -q clickin-memory; then
+                \$OC plugins install --link $PLUGIN_DIR ||
                   echo '::warning::clickin-memory install failed — run install --link manually'
               fi
-              openclaw --profile team gateway restart ||
+              \$OC gateway restart ||
                 echo '::warning::team gateway restart failed — restart manually to load plugin changes'
             else
-              echo '::warning::openclaw not found on server — plugin synced but not installed'
+              echo '::warning::openclaw not found at /opt/node/bin — plugin synced but not installed'
             fi
           " < /dev/null
 
