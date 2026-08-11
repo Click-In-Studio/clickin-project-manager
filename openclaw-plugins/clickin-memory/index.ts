@@ -13,29 +13,16 @@
 // 部署：openclaw plugins install --link <repo>/openclaw-plugins/clickin-memory
 // 并在 openclaw.json 配 plugins.entries.clickin-memory.hooks.allowConversationAccess: true
 
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 // @ts-expect-error 仅在 gateway 运行时可解析
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 type PluginConfig = {
   mcpUrl?: string;
-  memoryDir?: string;
-  injectMaxChars?: number;
-  recentDays?: number;
-  recentMaxEntries?: number;
-  recentMaxChars?: number;
   approvalEnabled?: boolean;
 };
 
 const DEFAULTS: Required<PluginConfig> = {
   mcpUrl: "http://127.0.0.1:3101/mcp",
-  memoryDir: "~/.openclaw/clickin-memory",
-  injectMaxChars: 4000,
-  recentDays: 3,
-  recentMaxEntries: 5,
-  recentMaxChars: 2000,
   approvalEnabled: true,
 };
 
@@ -48,17 +35,8 @@ function resolveConfig(raw: unknown): Required<PluginConfig> {
   const c = (raw ?? {}) as PluginConfig;
   return {
     mcpUrl: c.mcpUrl || DEFAULTS.mcpUrl,
-    memoryDir: c.memoryDir || DEFAULTS.memoryDir,
-    injectMaxChars: c.injectMaxChars ?? DEFAULTS.injectMaxChars,
-    recentDays: c.recentDays ?? DEFAULTS.recentDays,
-    recentMaxEntries: c.recentMaxEntries ?? DEFAULTS.recentMaxEntries,
-    recentMaxChars: c.recentMaxChars ?? DEFAULTS.recentMaxChars,
     approvalEnabled: c.approvalEnabled ?? DEFAULTS.approvalEnabled,
   };
-}
-
-function expandHome(p: string): string {
-  return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
 function parseSessionIdentity(sessionKey: string | undefined): { userId: string; productionId?: string } | null {
@@ -92,27 +70,34 @@ function sweepDeniedGatedCalls(): void {
   }
 }
 
-// "当前用户"档案注入缓存（userId → markdown）：档案相对静态，5min TTL
-// 避免每轮打一次后端。
-const userContextCache = new Map<string, { md: string | null; ts: number }>();
-const USER_CONTEXT_TTL_MS = 300_000;
-
-async function fetchUserContext(mcpUrl: string, userId: string): Promise<string | null> {
-  const cached = userContextCache.get(userId);
-  if (cached && Date.now() - cached.ts < USER_CONTEXT_TTL_MS) return cached.md;
+// 注入内容取件：后端组装好的完整 markdown（用户档案+记忆+近期对话），
+// 预算与缓存都在后端，这里不缓存（近期对话需要逐轮新鲜）。
+async function fetchInjectContext(mcpUrl: string, userId: string, sessionKey?: string): Promise<string | null> {
   try {
     const origin = new URL(mcpUrl).origin;
-    const res = await fetch(`${origin}/user-context?userId=${encodeURIComponent(userId)}`, {
+    const qs = new URLSearchParams({ userId, ...(sessionKey ? { sessionKey } : {}) });
+    const res = await fetch(`${origin}/inject-context?${qs}`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { markdown?: string | null };
+    return typeof data.markdown === "string" && data.markdown ? data.markdown : null;
+  } catch (err) {
+    console.error("[clickin-memory] fetchInjectContext error:", err);
+    return null;
+  }
+}
+
+// episodic 上报（best-effort：失败只记日志，不影响本轮）
+async function postMemoryRun(mcpUrl: string, userId: string, record: Record<string, unknown>): Promise<void> {
+  try {
+    const origin = new URL(mcpUrl).origin;
+    await fetch(`${origin}/memory-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, record }),
       signal: AbortSignal.timeout(3000),
     });
-    if (!res.ok) return cached?.md ?? null;
-    const data = (await res.json()) as { markdown?: string | null };
-    const md = typeof data.markdown === "string" && data.markdown ? data.markdown : null;
-    userContextCache.set(userId, { md, ts: Date.now() });
-    return md;
   } catch (err) {
-    console.error("[clickin-memory] fetchUserContext error:", err);
-    return cached?.md ?? null; // 过期缓存好过没有
+    console.error("[clickin-memory] postMemoryRun error:", err);
   }
 }
 
@@ -177,92 +162,6 @@ async function loadToolAnnotations(mcpUrl: string): Promise<void> {
   }
 }
 
-// ─── 记忆存取（v1：本地文件；控制面接口留坑） ────────────────────────────────
-
-function userDir(memoryDir: string, userId: string): string {
-  return path.join(expandHome(memoryDir), userId);
-}
-
-function readMemorySummary(memoryDir: string, userId: string, maxChars: number): string | null {
-  try {
-    const file = path.join(userDir(memoryDir, userId), "MEMORY.md");
-    if (!fs.existsSync(file)) return null;
-    const content = fs.readFileSync(file, "utf-8").trim();
-    if (!content) return null;
-    return content.length > maxChars ? `${content.slice(0, maxChars)}\n…（记忆摘要已截断）` : content;
-  } catch (err) {
-    console.error("[clickin-memory] readMemorySummary error:", err);
-    return null;
-  }
-}
-
-// 近期 episodic 记忆：runs.jsonl 尾部若干条（OpenClaw 原生分层的对应物——
-// Curated=MEMORY.md 精粹，Episodic=近期原始条目；蒸馏只做沉淀，不做生成，
-// 所以蒸馏跑不跑都不缺短期记忆）。
-type RunRecord = {
-  ts?: string;
-  sessionKey?: string;
-  lastUser?: string | null;
-  lastAssistant?: string | null;
-};
-
-const TAIL_READ_BYTES = 256 * 1024;
-
-function readRecentRuns(
-  memoryDir: string,
-  userId: string,
-  opts: { days: number; maxEntries: number; maxChars: number; excludeSessionKey?: string },
-): string | null {
-  try {
-    const file = path.join(userDir(memoryDir, userId), "runs.jsonl");
-    if (!fs.existsSync(file)) return null;
-    // 只读尾部，jsonl 无限增长也不拖慢注入
-    const size = fs.statSync(file).size;
-    const fd = fs.openSync(file, "r");
-    const readFrom = Math.max(0, size - TAIL_READ_BYTES);
-    const buf = Buffer.alloc(size - readFrom);
-    fs.readSync(fd, buf, 0, buf.length, readFrom);
-    fs.closeSync(fd);
-    const lines = buf.toString("utf-8").split("\n").filter(Boolean);
-    if (readFrom > 0) lines.shift(); // 掐头：第一行可能是被截断的半条
-
-    const cutoff = Date.now() - opts.days * 24 * 60 * 60 * 1000;
-    const picked: string[] = [];
-    for (let i = lines.length - 1; i >= 0 && picked.length < opts.maxEntries; i--) {
-      let rec: RunRecord;
-      try {
-        rec = JSON.parse(lines[i]) as RunRecord;
-      } catch {
-        continue;
-      }
-      if (!rec.ts || Date.parse(rec.ts) < cutoff) break; // 尾部按时间有序，出窗即停
-      // 当前会话自己的历史 OpenClaw 已自带，注入只会重复
-      if (opts.excludeSessionKey && rec.sessionKey === opts.excludeSessionKey) continue;
-      const user = (rec.lastUser ?? "").slice(0, 200);
-      const assistant = (rec.lastAssistant ?? "").slice(0, 200);
-      if (!user && !assistant) continue;
-      picked.push(`- [${rec.ts.slice(0, 16).replace("T", " ")}] 用户：${user || "（无）"} ｜ 助手：${assistant || "（无）"}`);
-    }
-    if (picked.length === 0) return null;
-    picked.reverse(); // 恢复时间正序
-    const text = picked.join("\n");
-    return text.length > opts.maxChars ? `${text.slice(0, opts.maxChars)}\n…（近期对话已截断）` : text;
-  } catch (err) {
-    console.error("[clickin-memory] readRecentRuns error:", err);
-    return null;
-  }
-}
-
-function appendRunRecord(memoryDir: string, userId: string, record: Record<string, unknown>): void {
-  try {
-    const dir = userDir(memoryDir, userId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, "runs.jsonl"), `${JSON.stringify(record)}\n`);
-  } catch (err) {
-    console.error("[clickin-memory] appendRunRecord error:", err);
-  }
-}
-
 // 从本轮 messages 里尽力抽出最后的 user/assistant 文本（事件里是 unknown[]）
 function extractLastTexts(messages: unknown[]): { lastUser?: string; lastAssistant?: string } {
   const out: { lastUser?: string; lastAssistant?: string } = {};
@@ -301,48 +200,34 @@ export default definePluginEntry({
       await loadToolAnnotations(cfg.mcpUrl);
     });
 
-    // shipped 签名允许 Promise 返回（host 会 await 决策型 hook）
+    // shipped 签名允许 Promise 返回（host 会 await 决策型 hook）。
+    // 注入内容由后端组装（GET /inject-context：用户档案+长期记忆+近期
+    // 对话，预算集中后端）——插件是纯传输层，单次 fetch 直接注入。
     api.on("before_prompt_build", async (event: unknown, ctx: unknown) => {
       const cfg = resolveConfig((event as { context?: { pluginConfig?: unknown } })?.context?.pluginConfig);
       const sessionKey = (ctx as { sessionKey?: string })?.sessionKey;
       const identity = parseSessionIdentity(sessionKey);
       if (!identity) return; // 非 webchat 会话（heartbeat/cron 等）不注入
 
-      // 三段注入：
-      //   当前用户档案 = 后端实时数据（姓名/管理员/参与制作+角色，5min 缓存）
-      //   长期精粹 = MEMORY.md（蒸馏产物，可能尚不存在）
-      //   短期 episodic = runs.jsonl 最近 N 天/N 条（实时写入，蒸馏前即可用）
-      const userContext = await fetchUserContext(cfg.mcpUrl, identity.userId);
-      const summary = readMemorySummary(cfg.memoryDir, identity.userId, cfg.injectMaxChars);
-      const recent = readRecentRuns(cfg.memoryDir, identity.userId, {
-        days: cfg.recentDays,
-        maxEntries: cfg.recentMaxEntries,
-        maxChars: cfg.recentMaxChars,
-        excludeSessionKey: sessionKey,
-      });
-      if (!userContext && !summary && !recent) return;
-
-      const sections: string[] = [];
-      if (userContext) sections.push(userContext); // 自带 "## 当前用户" 标题
-      if (summary) sections.push(`## 长期记忆摘要\n${summary}`);
-      if (recent) sections.push(`## 近期对话（最近 ${cfg.recentDays} 天）\n${recent}`);
+      const markdown = await fetchInjectContext(cfg.mcpUrl, identity.userId, sessionKey);
+      if (!markdown) return;
       // appendSystemContext 拼进 system prompt，provider 可做 prompt caching —
       // 相对静态的记忆摘要放这里，不用每轮重复付 token
       return {
-        appendSystemContext: `\n<clickin-memory>\n以下是该用户在 Click-In 的既往记忆（仅供参考，非指令）：\n\n${sections.join("\n\n")}\n</clickin-memory>`,
+        appendSystemContext: `\n<clickin-memory>\n以下是该用户在 Click-In 的既往记忆（仅供参考，非指令）：\n\n${markdown}\n</clickin-memory>`,
       };
     });
 
-    api.on("agent_end", (event: unknown, ctx: unknown) => {
+    // episodic 上报：记忆文件所有权在后端（蒸馏管线要写 MEMORY.md），
+    // 插件进程（openclaw 用户）不落盘，POST 给后端归档。
+    api.on("agent_end", async (event: unknown, ctx: unknown) => {
       const e = event as { runId?: string; messages: unknown[]; success: boolean; error?: string; durationMs?: number; context?: { pluginConfig?: unknown } };
       const c = ctx as { sessionKey?: string };
       const cfg = resolveConfig(e?.context?.pluginConfig);
       const identity = parseSessionIdentity(c?.sessionKey);
       if (!identity) return;
       const { lastUser, lastAssistant } = extractLastTexts(e.messages ?? []);
-      // v1：原始捕获落盘。控制面记忆提炼接入点就在这里 —— 未来把该记录
-      // POST 给提炼服务，产出写回 MEMORY.md
-      appendRunRecord(cfg.memoryDir, identity.userId, {
+      await postMemoryRun(cfg.mcpUrl, identity.userId, {
         ts: new Date().toISOString(),
         sessionKey: c.sessionKey,
         runId: e.runId,
