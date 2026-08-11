@@ -85,6 +85,34 @@ describe("store：字节偏移增量语义", () => {
     const { appendRunRecord } = await import("@/lib/agent-memory/store");
     expect(() => appendRunRecord("../evil", { ts: new Date().toISOString() })).toThrow();
   });
+
+  it("截断批次：nextOffset 停在最后已消费行，剩余数据下次继续（#205 critical 回归）", async () => {
+    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent-memory/store");
+    // 独立用户目录，避免与其他用例的 offset 状态耦合
+    const uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee01";
+    appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次甲".repeat(20), lastAssistant: "x" });
+    appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次乙".repeat(20), lastAssistant: "x" });
+    appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次丙".repeat(20), lastAssistant: "x" });
+
+    // maxChars 只够装下第一条 → 截断
+    const first = readRunsSinceLastDistill(uid, 10);
+    expect(first.entries).toHaveLength(1);
+    expect(first.entries[0].lastUser).toContain("批次甲");
+    commitDistill(uid, first.nextOffset);
+
+    // 旧 bug：这里会拿到空（offset 已跳到文件尾，乙/丙永久丢失）
+    const second = readRunsSinceLastDistill(uid, 10);
+    expect(second.entries).toHaveLength(1);
+    expect(second.entries[0].lastUser).toContain("批次乙");
+    commitDistill(uid, second.nextOffset);
+
+    const third = readRunsSinceLastDistill(uid, 100_000);
+    expect(third.entries).toHaveLength(1);
+    expect(third.entries[0].lastUser).toContain("批次丙");
+    commitDistill(uid, third.nextOffset);
+
+    expect(readRunsSinceLastDistill(uid, 100_000).entries).toHaveLength(0);
+  });
 });
 
 describe("MCP 端点：上报与组装取件", () => {

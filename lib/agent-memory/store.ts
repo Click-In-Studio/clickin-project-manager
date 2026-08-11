@@ -16,9 +16,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export const MEMORY_ROOT = process.env.AGENT_MEMORY_PATH
-  ? path.resolve(process.env.AGENT_MEMORY_PATH)
-  : path.join(process.cwd(), "data", "agent-memory");
+/** 惰性求值 + 生产环境快速失败：AGENT_MEMORY_PATH 未设时默认路径相对
+ * cwd（= release 目录），生产环境下等于每次部署丢记忆——静默降级不可
+ * 接受，首次**使用**时抛错（不在模块顶层抛：next build 也带
+ * NODE_ENV=production，模块级抛会炸构建）。 */
+export function memoryRoot(): string {
+  if (process.env.AGENT_MEMORY_PATH) return path.resolve(process.env.AGENT_MEMORY_PATH);
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AGENT_MEMORY_PATH 未设置——生产环境必须指向 shared/ 持久目录（默认相对 cwd 会随 release 轮换丢数据）");
+  }
+  return path.join(process.cwd(), "data", "agent-memory");
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -26,7 +34,15 @@ function userDir(userId: string): string {
   // userId 进路径前强校验（来源是插件解析的 sessionKey，理应干净，但
   // 路径拼接的输入永远不豁免校验）
   if (!UUID_RE.test(userId)) throw new Error(`invalid userId for memory path: ${userId}`);
-  return path.join(MEMORY_ROOT, userId.toLowerCase());
+  return path.join(memoryRoot(), userId.toLowerCase());
+}
+
+/** 原子写：临时文件 + rename——半截写入的 MEMORY.md/state.json 会被
+ * 读回并注入每一轮 prompt，崩溃安全必须与偏移幂等设计同级。 */
+function atomicWrite(file: string, content: string): void {
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, content, "utf-8");
+  fs.renameSync(tmp, file);
 }
 
 export type RunRecord = {
@@ -62,7 +78,7 @@ export function readMemory(userId: string, maxChars: number): string | null {
 export function writeMemory(userId: string, content: string): void {
   const dir = userDir(userId);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "MEMORY.md"), content, "utf-8");
+  atomicWrite(path.join(dir, "MEMORY.md"), content);
 }
 
 const TAIL_READ_BYTES = 256 * 1024;
@@ -124,10 +140,14 @@ function readState(userId: string): DistillState {
 function writeState(userId: string, state: DistillState): void {
   const dir = userDir(userId);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(state), "utf-8");
+  atomicWrite(path.join(dir, "state.json"), JSON.stringify(state));
 }
 
-/** 读取自上次蒸馏以来的新 episodic 条目（按字节偏移增量消费）。 */
+/** 读取自上次蒸馏以来的新 episodic 条目（按字节偏移增量消费）。
+ * 超出 maxChars 的批次会截断：nextOffset 精确指向**最后一条已消费行**
+ * 之后（按 UTF-8 字节数累计，不是字符数），未消费的行留待下次——
+ * 早期版本无条件返回文件尾偏移，截断批次的剩余数据被永久跳过
+ * （review #205 抓出的 critical）。 */
 export function readRunsSinceLastDistill(userId: string, maxChars: number): { entries: RunRecord[]; nextOffset: number } {
   const file = path.join(userDir(userId), "runs.jsonl");
   if (!fs.existsSync(file)) return { entries: [], nextOffset: 0 };
@@ -143,19 +163,30 @@ export function readRunsSinceLastDistill(userId: string, maxChars: number): { en
   fs.closeSync(fd);
 
   const entries: RunRecord[] = [];
-  let total = 0;
+  let consumedBytes = 0;
+  let totalChars = 0;
   for (const line of buf.toString("utf-8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const rec = JSON.parse(line) as RunRecord;
-      total += line.length;
-      entries.push(rec);
-      if (total > maxChars) break; // 单次蒸馏输入上限，剩余下次消费
-    } catch {
+    const lineBytes = Buffer.byteLength(line, "utf8") + 1; // +1 = 换行符
+    if (!line.trim()) {
+      consumedBytes += lineBytes;
       continue;
     }
+    let rec: RunRecord;
+    try {
+      rec = JSON.parse(line) as RunRecord;
+    } catch {
+      consumedBytes += lineBytes; // 坏行消费掉，不阻塞后续
+      continue;
+    }
+    // 容量判定在消费**之前**：超限的行不计入本批、不推进偏移——
+    // 但至少消费一条，保证单条超大行也能推进（否则死循环）
+    if (entries.length > 0 && totalChars + line.length > maxChars) break;
+    entries.push(rec);
+    totalChars += line.length;
+    consumedBytes += lineBytes;
   }
-  return { entries, nextOffset: size };
+  // 末行可能无尾随换行，+1 会多算一字节——夹到文件大小
+  return { entries, nextOffset: Math.min(from + consumedBytes, size) };
 }
 
 export function commitDistill(userId: string, nextOffset: number): void {
@@ -166,7 +197,7 @@ export function commitDistill(userId: string, nextOffset: number): void {
 export function listUserIds(): string[] {
   try {
     return fs
-      .readdirSync(MEMORY_ROOT, { withFileTypes: true })
+      .readdirSync(memoryRoot(), { withFileTypes: true })
       .filter((d) => d.isDirectory() && UUID_RE.test(d.name))
       .map((d) => d.name);
   } catch {

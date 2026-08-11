@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { type NextRequest } from "next/server";
 import { distillAllUsers } from "@/lib/agent-memory/distill";
 
@@ -9,7 +10,11 @@ import { distillAllUsers } from "@/lib/agent-memory/distill";
 function authorized(req: NextRequest): boolean {
   const secret = process.env.INTERNAL_NOTIFY_SECRET;
   if (!secret) return false;
-  return req.headers.get("Authorization") === `Bearer ${secret}`;
+  const expected = Buffer.from(`Bearer ${secret}`);
+  const got = Buffer.from(req.headers.get("Authorization") ?? "");
+  // 恒定时间比较（该路由经 nginx 对公网可达，虽仅 loopback 有意义的
+  // 语义，防御性拉平比较时长）
+  return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
 export async function POST(req: NextRequest) {
