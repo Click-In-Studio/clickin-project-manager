@@ -164,11 +164,14 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
   });
 
   it("contains standard cue_list levels in correct order", async () => {
+    // 批0（add-rest-verbs.sql）起词汇表含 REST 动词行 create/delete（sort_order=0，
+    // 刻意低于一切旧级别，避免旧线性 checker 误判命中）。
     const { rows } = await getPool().query<{ permission_level: string; sort_order: number }>(
       `SELECT permission_level, sort_order FROM resource_permission_level
-       WHERE resource_type = 'cue_list' ORDER BY sort_order`,
+       WHERE resource_type = 'cue_list' ORDER BY sort_order, permission_level`,
     );
-    expect(rows.map((r) => r.permission_level)).toEqual(["view", "mount", "edit", "manage"]);
+    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "view", "mount", "edit", "manage"]);
+    expect(rows.filter((r) => r.sort_order === 0).map((r) => r.permission_level)).toEqual(["create", "delete"]);
   });
 
   it("contains event workflow levels (publish, edit_published, revoke)", async () => {
@@ -193,9 +196,10 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
   it("contains script_view levels", async () => {
     const { rows } = await getPool().query<{ permission_level: string }>(
       `SELECT permission_level FROM resource_permission_level
-       WHERE resource_type = 'script_view' ORDER BY sort_order`,
+       WHERE resource_type = 'script_view' ORDER BY sort_order, permission_level`,
     );
-    expect(rows.map((r) => r.permission_level)).toEqual(["view", "edit", "manage"]);
+    // 批0 起含 REST 动词行 create/delete（sort_order=0）
+    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "view", "edit", "manage"]);
   });
 
   it("has entries for all expected resource types", async () => {

@@ -722,7 +722,8 @@ export const ASSISTANT_ROLE_MIGRATION: Record<string, readonly Permission[]> = {
 // ─── All permission keys as a runtime constant ─────────────────────────────────
 export const ALL_PERMISSIONS: readonly Permission[] = [
   "production:delete", "production:transfer_owner", "production:restore_checkpoint",
-  "production:archive", "production:rename", "production:change_type",
+  "production:archive", "production:rename", "production:change_avatar",
+  "production:edit_description", "production:change_type", "production:change_language",
   "production:manage_integrations", "production:import_members",
   "production:producer_invite", "production:producer_promote",
   "production:producer_demote", "production:producer_kick",
@@ -750,6 +751,8 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "cue:edit_comment_any", "cue:delete_comment_any",
   "report:edit_comment_any", "report:delete_comment_any",
   "production:manage_config",
+  "milestone:create", "milestone:manage", "milestone:delete",
+  "announcement:create", "announcement:edit", "announcement:delete",
   "script:manage", "script:edit", "script:annotate",
   "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
   "script:create_block", "script:delete_block", "script:edit_block",
@@ -772,7 +775,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "asset:delete", "asset:mount", "asset:unmount",
   "scene:view", "character:view", "script:view", "cue_list:view", "cue:view",
   "contacts:view", "event:view_call_sheet_any", "event:follow",
-  "task:view", "task:view_any", "task:delete_any",
+  "task:view", "task:view_any",
   "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
   "script:comment", "cue:comment", "report:reply",

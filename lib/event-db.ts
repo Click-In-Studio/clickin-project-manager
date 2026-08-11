@@ -1804,7 +1804,9 @@ export async function listProductionReports(
                 ON rpl_view.resource_type = 'report' AND rpl_view.permission_level = 'view'
               WHERE rg.user_id = $2::uuid AND rg.production_id = $1
                 AND rg.resource_type = 'report' AND rg.resource_id = er.id
-                AND NOT rg.is_revoked AND rpl.sort_order >= rpl_view.sort_order
+                AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
+                AND rpl.sort_order >= rpl_view.sort_order
             ))
      ORDER BY COALESCE(er.published_at, er.updated_at) DESC`,
     [productionId, userId, includeDrafts]

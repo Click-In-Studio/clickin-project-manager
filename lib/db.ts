@@ -2811,7 +2811,7 @@ export async function getProductionPermissionContext(
     ),
     // Active grants: permissions the user has explicitly confirmed or had approved.
     pool.query<{ permission_key: string }>(
-      "SELECT permission_key FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND is_revoked = false",
+      "SELECT permission_key FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND is_revoked = false AND (expires_at IS NULL OR expires_at > NOW())",
       [productionId, userId],
     ),
   ]);
@@ -3941,6 +3941,7 @@ export async function listCueListsWithAccess(
                 AND rg.user_id = $2
                 AND rg.permission_level IN ('edit', 'manage')
                 AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_edit,
             EXISTS (
               SELECT 1 FROM resource_grant rg
@@ -3950,6 +3951,7 @@ export async function listCueListsWithAccess(
                 AND rg.user_id = $2
                 AND rg.permission_level = 'manage'
                 AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_manage
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
@@ -4198,6 +4200,7 @@ export async function hasListAccess(cueListId: string, userId: string): Promise<
          AND rg.user_id = $2
          AND rg.permission_level IN ('edit', 'manage')
          AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ) AS has_access`,
     [cueListId, userId],
   );
@@ -4215,7 +4218,8 @@ export async function listCueListRoleMembers(cueListId: string): Promise<string[
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND rg.permission_level IN ('edit', 'manage')
-       AND NOT rg.is_revoked`,
+       AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [cueListId],
   );
   return res.rows.map((r) => r.user_id);
@@ -4252,6 +4256,7 @@ export async function listCueListPermissions(cueListId: string): Promise<CueList
        AND rg.resource_id = $1
        AND rg.permission_level IN ('edit', 'manage')
        AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ORDER BY rg.user_id`,
     [cueListId],
   );
