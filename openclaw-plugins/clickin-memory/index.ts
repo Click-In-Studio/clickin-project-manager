@@ -303,8 +303,16 @@ export default definePluginEntry({
         const cfg = resolveConfig(e?.context?.pluginConfig);
         if (!cfg.approvalEnabled) return;
         if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
-        // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉
-        await ensureAnnotations(cfg.mcpUrl);
+        // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。
+        // 防御性 try/catch：loadToolAnnotations 内部已吞错不外抛，但这个
+        // gate 的 fail closed 不变量不能依赖别处的实现细节——万一补拉抛错，
+        // 吞掉后继续走下方判定（annotationsLoaded=false → 弹确认门），
+        // 绝不能让异常把 handler 打断成"未做决策"。
+        try {
+          await ensureAnnotations(cfg.mcpUrl);
+        } catch (err) {
+          console.error("[clickin-memory] ensureAnnotations failed (staying fail-closed):", err);
+        }
         // fail closed：annotations 没加载成功、或该工具不在只读集合 → 确认门
         if (annotationsLoaded && readOnlyTools.has(e.toolName)) return;
 
