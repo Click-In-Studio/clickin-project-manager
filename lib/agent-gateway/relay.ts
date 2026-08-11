@@ -94,6 +94,8 @@ export function createChatStreamResponse(
           // deny), so extend this stream's own deadline to outlive the
           // approval window plus the continued run.
           extendDeadline();
+          // TODO(卡片排障): 临时探针，配合 client.ts 的 routed 行三段定位
+          // 断点（路由/转发/前端）；谜底揭晓后移除本行
           console.log(`[agent-gateway] relay forwarding approval ${evt.approval?.id} (closed=${closed})`);
           send({ type: "approval", approval: evt.approval });
           return;

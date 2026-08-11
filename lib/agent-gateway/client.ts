@@ -429,12 +429,26 @@ export async function startChatRun(sessionKey: string, message: string): Promise
       idempotencyKey: crypto.randomUUID(),
     }, { timeoutMs: 30_000 });
   } catch (err) {
-    // A timed-out request usually means the socket is dead but not closed —
-    // drop it so the NEXT attempt reconnects fresh instead of hitting the
-    // same zombie connection until TCP reaps it minutes later.
+    // A timed-out acceptance (normally <1s) means the socket is almost
+    // certainly dead-but-not-closed — tear it down explicitly (stop() closes
+    // the WS and its listeners; just nulling the reference would leak the FD
+    // until kernel reaping) so the NEXT attempt reconnects fresh. Guarded on
+    // instance identity: if a concurrent caller already reconnected, don't
+    // nuke the healthy new connection.
+    try {
+      client.stop();
+    } catch {
+      // already torn down
+    }
     const s = store();
-    s.client = null;
-    s.status = { state: "disconnected" };
+    if (s.client === client) {
+      s.client = null;
+      s.status = { state: "disconnected" };
+      console.warn(
+        "[agent-gateway] agent RPC failed — dropped connection for fresh reconnect:",
+        err instanceof Error ? err.message : err,
+      );
+    }
     throw err;
   }
 }
