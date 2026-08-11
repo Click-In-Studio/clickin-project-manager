@@ -61,7 +61,11 @@ interface GatewayStore {
   // from plugin.approval.requested broadcasts; consumed for the resolve API's
   // ownership check and cleared on plugin.approval.resolved. Bounded by the
   // gateway's own approval timeout (unresolved approvals always deny).
-  pendingApprovals: Map<string, { sessionKey?: string; ts: number }>;
+  pendingApprovals: Map<string, { sessionKey?: string; toolCallId?: string; ts: number }>;
+  // 拒绝理由暂存（toolCallId → reason）：在 resolve RPC 之前写入，插件的
+  // clickin-memory 经 MCP 同进程端点取走（一次性），用于把理由重写进
+  // 被拒工具结果——与拒绝同帧到达模型，避免 steer 注入造成的双回复。
+  denyReasons: Map<string, { reason: string; ts: number }>;
   // Timestamps of steers whose extra "final" a session's relay connection
   // should still wait for before closing — appended by steerChatRun(),
   // consumed by the relay. A steered message is a genuinely separate run
@@ -92,6 +96,7 @@ function store(): GatewayStore {
       connecting: null,
       events,
       pendingApprovals: new Map(),
+      denyReasons: new Map(),
       pendingSteers: new Map(),
     };
   }
@@ -188,6 +193,9 @@ export interface ApprovalRequest {
   severity: "info" | "warning" | "critical";
   allowedDecisions: string[];
   sessionKey?: string;
+  // 关联的工具调用 id——拒绝理由按它存取（gateway 的 resolve 协议不携带
+  // 理由，理由经 MCP 同进程端点交给插件在 tool_result_persist 里重写）
+  toolCallId?: string;
 }
 
 function extractApprovalRequest(payload: unknown): ApprovalRequest | null {
@@ -200,6 +208,7 @@ function extractApprovalRequest(payload: unknown): ApprovalRequest | null {
   const sessionKey = pick("sessionKey");
   const severity = pick("severity");
   const allowed = pick("allowedDecisions");
+  const toolCallId = pick("toolCallId");
   return {
     id,
     title: String(pick("title") ?? "工具调用确认"),
@@ -209,6 +218,7 @@ function extractApprovalRequest(payload: unknown): ApprovalRequest | null {
       ? allowed.map(String)
       : ["allow-once", "allow-always", "deny"],
     sessionKey: typeof sessionKey === "string" ? sessionKey : undefined,
+    toolCallId: typeof toolCallId === "string" ? toolCallId : undefined,
   };
 }
 
@@ -278,7 +288,11 @@ function attemptConnect(): Promise<GatewayStatus> {
           // lost (WS reconnect mid-approval, gateway restart) would otherwise
           // sit in this globalThis-cached store forever.
           prunePendingApprovals(s);
-          s.pendingApprovals.set(approval.id, { sessionKey: approval.sessionKey, ts: Date.now() });
+          s.pendingApprovals.set(approval.id, {
+            sessionKey: approval.sessionKey,
+            toolCallId: approval.toolCallId,
+            ts: Date.now(),
+          });
           if (approval.sessionKey) {
             // 无条件日志（每个 approval 一行，量极低）：审批链路的关键
             // 排障锚点——「广播到达且已路由」与「relay 是否转发」分属两行
@@ -706,6 +720,32 @@ export function getPendingApprovalSession(approvalId: string): string | undefine
   const s = store();
   prunePendingApprovals(s);
   return s.pendingApprovals.get(approvalId)?.sessionKey;
+}
+
+const DENY_REASON_TTL_MS = 600_000; // 与 approval 生命周期上限一致
+
+/** 按 approval id 暂存拒绝理由（键转为 toolCallId）。必须在 resolve RPC
+ * **之前**调用——保证插件的 tool_result_persist 触发时理由已可取。
+ * 返回 false 表示该 approval 没有 toolCallId 可关联（理由无处安放）。 */
+export function storeDenyReason(approvalId: string, reason: string): boolean {
+  const s = store();
+  const toolCallId = s.pendingApprovals.get(approvalId)?.toolCallId;
+  if (!toolCallId) return false;
+  const now = Date.now();
+  for (const [k, v] of s.denyReasons) {
+    if (now - v.ts > DENY_REASON_TTL_MS) s.denyReasons.delete(k);
+  }
+  s.denyReasons.set(toolCallId, { reason, ts: now });
+  return true;
+}
+
+/** 一次性取走某个工具调用的拒绝理由（供 MCP 同进程端点转交插件）。 */
+export function takeDenyReason(toolCallId: string): string | undefined {
+  const s = store();
+  const entry = s.denyReasons.get(toolCallId);
+  if (!entry) return undefined;
+  s.denyReasons.delete(toolCallId);
+  return Date.now() - entry.ts > DENY_REASON_TTL_MS ? undefined : entry.reason;
 }
 
 /**

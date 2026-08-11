@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { NextRequest } from "next/server";
-import { startChatRun } from "@/lib/agent-gateway/client";
+import { startChatRun, storeDenyReason, takeDenyReason } from "@/lib/agent-gateway/client";
 import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
 
 // PR #199 的两个关键路径回归测试：
@@ -15,7 +15,8 @@ type FakeStore = {
   status: { state: string };
   connecting: null;
   events: EventEmitter;
-  pendingApprovals: Map<string, { sessionKey?: string; ts: number }>;
+  pendingApprovals: Map<string, { sessionKey?: string; toolCallId?: string; ts: number }>;
+  denyReasons: Map<string, { reason: string; ts: number }>;
   pendingSteers: Map<string, number[]>;
 };
 
@@ -44,6 +45,7 @@ function installFakeStore(client: unknown): FakeStore {
     connecting: null,
     events: new EventEmitter(),
     pendingApprovals: new Map(),
+    denyReasons: new Map(),
     pendingSteers: new Map(),
   };
   g.__clickinAgentGateway = store;
@@ -88,6 +90,29 @@ describe("startChatRun timeout invalidation", () => {
     expect(stopped).toBe(true); // 旧连接照样被显式关闭
     expect(store.client).toBe(replacement); // 新连接不受影响
     expect(store.status.state).toBe("connected");
+  });
+});
+
+describe("deny reason store", () => {
+  it("stores by approval id, takes once by toolCallId", () => {
+    const store = installFakeStore(null);
+    store.pendingApprovals.set("plugin:a1", { sessionKey: "agent:team:x", toolCallId: "call_1", ts: Date.now() });
+
+    expect(storeDenyReason("plugin:a1", "内容不合适")).toBe(true);
+    expect(takeDenyReason("call_1")).toBe("内容不合适");
+    expect(takeDenyReason("call_1")).toBeUndefined(); // 一次性取走
+  });
+
+  it("returns false when approval has no toolCallId to anchor to", () => {
+    const store = installFakeStore(null);
+    store.pendingApprovals.set("plugin:a2", { sessionKey: "agent:team:x", ts: Date.now() });
+    expect(storeDenyReason("plugin:a2", "理由")).toBe(false);
+  });
+
+  it("unknown approval id stores nothing", () => {
+    installFakeStore(null);
+    expect(storeDenyReason("plugin:never", "理由")).toBe(false);
+    expect(takeDenyReason("call_never")).toBeUndefined();
   });
 });
 
