@@ -274,6 +274,10 @@ function attemptConnect(): Promise<GatewayStatus> {
         if (evt.event === "plugin.approval.requested") {
           const approval = extractApprovalRequest(evt.payload);
           if (!approval) return;
+          // Sweep on every insert: an approval whose `resolved` broadcast was
+          // lost (WS reconnect mid-approval, gateway restart) would otherwise
+          // sit in this globalThis-cached store forever.
+          prunePendingApprovals(s);
           s.pendingApprovals.set(approval.id, { sessionKey: approval.sessionKey, ts: Date.now() });
           if (approval.sessionKey) {
             s.events.emit(`session:${approval.sessionKey}`, { approvalRequest: approval } satisfies ApprovalRequestBusPayload);
@@ -654,14 +658,21 @@ export async function deleteChatSession(sessionKey: string): Promise<void> {
 
 const APPROVAL_TTL_MS = 600_000; // gateway hard-caps approval timeouts at 10min
 
-/** Owning sessionKey for a pending approval (for the resolve API's ownership
- * check). Prunes entries older than the gateway's own approval cap. */
-export function getPendingApprovalSession(approvalId: string): string | undefined {
-  const s = store();
+/** Evicts pending-approval entries past the gateway's own approval cap —
+ * called on every insert and every lookup, so lost `resolved` broadcasts
+ * (or unrouted entries with no sessionKey) can't accumulate. */
+function prunePendingApprovals(s: GatewayStore): void {
   const now = Date.now();
   for (const [id, entry] of s.pendingApprovals) {
     if (now - entry.ts > APPROVAL_TTL_MS) s.pendingApprovals.delete(id);
   }
+}
+
+/** Owning sessionKey for a pending approval (for the resolve API's ownership
+ * check). Expired entries are treated as unknown. */
+export function getPendingApprovalSession(approvalId: string): string | undefined {
+  const s = store();
+  prunePendingApprovals(s);
   return s.pendingApprovals.get(approvalId)?.sessionKey;
 }
 
