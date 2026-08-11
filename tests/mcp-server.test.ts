@@ -8,20 +8,23 @@ type RegisteredTool = { annotations?: { readOnlyHint?: boolean } };
 type ToolRegistry = Record<string, RegisteredTool>;
 
 describe("MCP server skeleton", () => {
-  it("registers exactly three tools", async () => {
+  it("registers exactly five tools", async () => {
     const server = buildMcpServer();
     const registry = server["_registeredTools"] as ToolRegistry;
     const names = Object.keys(registry).sort();
-    expect(names).toEqual(["approvals.list", "docs.propose", "docs.read"]);
+    expect(names).toEqual(["approvals.list", "docs.propose", "docs.read", "users.query", "users.query_sensitive"]);
     await server.close();
   });
 
-  it("read-only tools have readOnlyHint: true, write tool does not", async () => {
+  it("read-only tools have readOnlyHint: true; gated tools do not", async () => {
     const server = buildMcpServer();
     const registry = server["_registeredTools"] as ToolRegistry;
     expect(registry["docs.read"]?.annotations?.readOnlyHint).toBe(true);
     expect(registry["approvals.list"]?.annotations?.readOnlyHint).toBe(true);
+    expect(registry["users.query"]?.annotations?.readOnlyHint).toBe(true);
     expect(registry["docs.propose"]?.annotations?.readOnlyHint).toBe(false);
+    // 敏感读取刻意不标 readOnly——插件 fail-closed 门控据此自动挂确认门
+    expect(registry["users.query_sensitive"]?.annotations?.readOnlyHint).toBeUndefined();
     await server.close();
   });
 

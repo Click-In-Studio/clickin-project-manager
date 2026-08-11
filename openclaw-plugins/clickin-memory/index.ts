@@ -92,6 +92,30 @@ function sweepDeniedGatedCalls(): void {
   }
 }
 
+// "当前用户"档案注入缓存（userId → markdown）：档案相对静态，5min TTL
+// 避免每轮打一次后端。
+const userContextCache = new Map<string, { md: string | null; ts: number }>();
+const USER_CONTEXT_TTL_MS = 300_000;
+
+async function fetchUserContext(mcpUrl: string, userId: string): Promise<string | null> {
+  const cached = userContextCache.get(userId);
+  if (cached && Date.now() - cached.ts < USER_CONTEXT_TTL_MS) return cached.md;
+  try {
+    const origin = new URL(mcpUrl).origin;
+    const res = await fetch(`${origin}/user-context?userId=${encodeURIComponent(userId)}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return cached?.md ?? null;
+    const data = (await res.json()) as { markdown?: string | null };
+    const md = typeof data.markdown === "string" && data.markdown ? data.markdown : null;
+    userContextCache.set(userId, { md, ts: Date.now() });
+    return md;
+  } catch (err) {
+    console.error("[clickin-memory] fetchUserContext error:", err);
+    return cached?.md ?? null; // 过期缓存好过没有
+  }
+}
+
 async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<string | null> {
   try {
     const origin = new URL(mcpUrl).origin;
@@ -277,15 +301,18 @@ export default definePluginEntry({
       await loadToolAnnotations(cfg.mcpUrl);
     });
 
-    api.on("before_prompt_build", (event: unknown, ctx: unknown) => {
+    // shipped 签名允许 Promise 返回（host 会 await 决策型 hook）
+    api.on("before_prompt_build", async (event: unknown, ctx: unknown) => {
       const cfg = resolveConfig((event as { context?: { pluginConfig?: unknown } })?.context?.pluginConfig);
       const sessionKey = (ctx as { sessionKey?: string })?.sessionKey;
       const identity = parseSessionIdentity(sessionKey);
       if (!identity) return; // 非 webchat 会话（heartbeat/cron 等）不注入
 
-      // 双层注入（对应 OpenClaw 原生记忆分层）：
+      // 三段注入：
+      //   当前用户档案 = 后端实时数据（姓名/管理员/参与制作+角色，5min 缓存）
       //   长期精粹 = MEMORY.md（蒸馏产物，可能尚不存在）
       //   短期 episodic = runs.jsonl 最近 N 天/N 条（实时写入，蒸馏前即可用）
+      const userContext = await fetchUserContext(cfg.mcpUrl, identity.userId);
       const summary = readMemorySummary(cfg.memoryDir, identity.userId, cfg.injectMaxChars);
       const recent = readRecentRuns(cfg.memoryDir, identity.userId, {
         days: cfg.recentDays,
@@ -293,9 +320,10 @@ export default definePluginEntry({
         maxChars: cfg.recentMaxChars,
         excludeSessionKey: sessionKey,
       });
-      if (!summary && !recent) return;
+      if (!userContext && !summary && !recent) return;
 
       const sections: string[] = [];
+      if (userContext) sections.push(userContext); // 自带 "## 当前用户" 标题
       if (summary) sections.push(`## 长期记忆摘要\n${summary}`);
       if (recent) sections.push(`## 近期对话（最近 ${cfg.recentDays} 天）\n${recent}`);
       // appendSystemContext 拼进 system prompt，provider 可做 prompt caching —
@@ -359,7 +387,7 @@ export default definePluginEntry({
 
     api.on(
       "before_tool_call",
-      async (event: unknown) => {
+      async (event: unknown, ctx: unknown) => {
         const e = event as {
           toolName: string;
           params: Record<string, unknown>;
@@ -367,8 +395,19 @@ export default definePluginEntry({
           context?: { pluginConfig?: unknown };
         };
         const cfg = resolveConfig(e?.context?.pluginConfig);
-        if (!cfg.approvalEnabled) return;
         if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
+
+        // Level C 权限链的地基：从 sessionKey 解析真实调用者身份，**强制
+        // 覆写** _caller_user_id——模型自己填什么都会被盖掉，MCP 工具只信
+        // 这个字段。非 webchat 会话（heartbeat/cron 等）解析不出身份则不
+        // 注入，工具侧因缺身份而拒绝。
+        const identity = parseSessionIdentity((ctx as { sessionKey?: string })?.sessionKey);
+        const params = identity
+          ? { ...e.params, _caller_user_id: identity.userId }
+          : { ...e.params };
+        if (!identity) delete (params as Record<string, unknown>)._caller_user_id; // 不许模型伪造
+
+        if (!cfg.approvalEnabled) return { params };
         // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。
         // 防御性 try/catch：loadToolAnnotations 内部已吞错不外抛，但这个
         // gate 的 fail closed 不变量不能依赖别处的实现细节——万一补拉抛错，
@@ -379,12 +418,16 @@ export default definePluginEntry({
         } catch (err) {
           console.error("[clickin-memory] ensureAnnotations failed (staying fail-closed):", err);
         }
-        // fail closed：annotations 没加载成功、或该工具不在只读集合 → 确认门
-        if (annotationsLoaded && readOnlyTools.has(e.toolName)) return;
+        // fail closed：annotations 没加载成功、或该工具不在只读集合 → 确认门。
+        // 只读直通也要带上身份覆写。
+        if (annotationsLoaded && readOnlyTools.has(e.toolName)) return { params };
 
         const pretty = describeToolCall(e.toolName.slice(MCP_TOOL_PREFIX.length), e.params ?? {});
         const toolCallId = e.toolCallId;
         return {
+          // 身份覆写在批准后应用（gateway 语义：approval 时快照 params，
+          // 批准成功才生效）
+          params,
           requireApproval: {
             title: pretty.title.slice(0, 80),
             description: pretty.description.slice(0, 512),
