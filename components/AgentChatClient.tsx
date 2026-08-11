@@ -19,10 +19,19 @@ type GatewayStatus =
   | { state: "pairing_required"; requestId?: string }
   | { state: "error"; error: string };
 
+type ApprovalInfo = {
+  id: string;
+  title: string;
+  description: string;
+  severity: "info" | "warning" | "critical";
+  allowedDecisions: string[];
+};
+
 type Bubble =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming?: boolean }
   | { kind: "tool"; name: string; id?: string; done: boolean }
+  | { kind: "approval"; approval: ApprovalInfo; decision?: string; resolving?: boolean }
   | { kind: "notice"; text: string };
 
 type StreamLine =
@@ -31,7 +40,9 @@ type StreamLine =
   | { type: "aborted"; text: string }
   | { type: "error"; error: string }
   | { type: "tool"; name?: string; id?: string }
-  | { type: "tool-end"; id?: string };
+  | { type: "tool-end"; id?: string }
+  | { type: "approval"; approval?: ApprovalInfo }
+  | { type: "approval-resolved"; id?: string; decision?: string };
 
 export default function AgentChatClient() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -117,6 +128,25 @@ export default function AgentChatClient() {
               next[next.length - 1] = { kind: "assistant", text: line.text || last.text };
             } else if (line.text) {
               next.push({ kind: "assistant", text: line.text });
+            }
+            return next;
+          }
+          case "approval": {
+            if (!line.approval) return next;
+            // Settle the current streaming segment; the gate pauses the run.
+            if (last?.kind === "assistant" && last.streaming) {
+              next[next.length - 1] = { kind: "assistant", text: last.text };
+            }
+            next.push({ kind: "approval", approval: line.approval });
+            return next;
+          }
+          case "approval-resolved": {
+            for (let i = next.length - 1; i >= 0; i--) {
+              const b = next[i];
+              if (b.kind === "approval" && b.approval.id === line.id) {
+                next[i] = { ...b, decision: line.decision || "unknown", resolving: false };
+                break;
+              }
             }
             return next;
           }
@@ -233,6 +263,25 @@ export default function AgentChatClient() {
       body: JSON.stringify({ sessionKey: activeKey }),
     }).catch(() => {});
   }, [activeKey]);
+
+  const decideApproval = useCallback(async (approvalId: string, decision: string) => {
+    setBubbles((prev) =>
+      prev.map((b) => (b.kind === "approval" && b.approval.id === approvalId ? { ...b, resolving: true } : b))
+    );
+    const res = await fetch("/api/agent/approval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: approvalId, decision }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+      setBubbles((prev) =>
+        prev.map((b) => (b.kind === "approval" && b.approval.id === approvalId ? { ...b, resolving: false } : b))
+      );
+      setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "确认请求处理失败" }]);
+    }
+    // 成功路径不在这里改状态——等 approval-resolved 流事件（权威来源）更新卡片
+  }, []);
 
   const removeSession = useCallback(async (key: string) => {
     if (!confirm("删除这个对话？")) return;
@@ -367,6 +416,51 @@ export default function AgentChatClient() {
                 </div>
               );
             }
+            if (b.kind === "approval") {
+              const severityStyle =
+                b.approval.severity === "critical"
+                  ? "border-red-300 bg-red-50"
+                  : b.approval.severity === "info"
+                    ? "border-sky-200 bg-sky-50"
+                    : "border-amber-300 bg-amber-50";
+              const decisionLabel: Record<string, string> = {
+                "allow-once": "允许一次",
+                "allow-always": "始终允许",
+                deny: "拒绝",
+              };
+              return (
+                <div key={i} className="flex justify-start">
+                  <div className={`max-w-[85%] rounded-xl border px-4 py-3 text-sm ${severityStyle}`}>
+                    <p className="font-medium text-zinc-800">⚠ 需要确认：{b.approval.title}</p>
+                    {b.approval.description && (
+                      <p className="mt-1 break-all text-xs text-zinc-500">{b.approval.description}</p>
+                    )}
+                    {b.decision ? (
+                      <p className="mt-2 text-xs font-medium text-zinc-600">
+                        {b.decision.startsWith("allow") ? "✓ 已允许" : b.decision === "deny" ? "✕ 已拒绝" : `已处理（${b.decision}）`}
+                      </p>
+                    ) : (
+                      <div className="mt-2 flex gap-2">
+                        {b.approval.allowedDecisions.map((d) => (
+                          <button
+                            key={d}
+                            disabled={b.resolving}
+                            onClick={() => decideApproval(b.approval.id, d)}
+                            className={`rounded-md px-3 py-1 text-xs disabled:opacity-40 ${
+                              d === "deny"
+                                ? "border border-zinc-300 text-zinc-600 hover:bg-zinc-100"
+                                : "bg-zinc-900 text-white hover:bg-zinc-700"
+                            }`}
+                          >
+                            {decisionLabel[d] ?? d}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
             return (
               <p key={i} className="text-center text-xs text-zinc-400">
                 {b.text}
@@ -379,7 +473,9 @@ export default function AgentChatClient() {
             (() => {
               const last = bubbles[bubbles.length - 1];
               const activelyRendering =
-                (last?.kind === "assistant" && last.streaming) || (last?.kind === "tool" && !last.done);
+                (last?.kind === "assistant" && last.streaming) ||
+                (last?.kind === "tool" && !last.done) ||
+                (last?.kind === "approval" && !last.decision); // 等人确认，不是在思考
               if (activelyRendering) return null;
               return (
                 <div className="flex justify-start">
