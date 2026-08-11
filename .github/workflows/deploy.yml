@@ -207,8 +207,12 @@ jobs:
                 \$OC plugins install --link $PLUGIN_DIR ||
                   echo '::warning::clickin-memory install failed — run install --link manually'
               fi
-              \$OC gateway restart ||
-                echo '::warning::team gateway restart failed — restart manually to load plugin changes'
+              # gateway 由 systemd（openclaw.service）管理——必须走 systemctl。
+              # CLI 的 gateway restart 会把它当 unmanaged process 直接杀掉，
+              # systemd 不会拉起，端口 18790 就此死掉（真机踩过：每次 CD 后
+              # webchat ECONNREFUSED，需人工 systemctl start）。
+              sudo systemctl restart openclaw ||
+                echo '::warning::systemctl restart openclaw failed — restart manually to load plugin changes'
             else
               echo '::warning::openclaw not found at /opt/node/bin — plugin synced but not installed'
             fi
