@@ -23,10 +23,14 @@ import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./t
 
 // operator.admin is required for sessions.patch (rename) and sessions.delete —
 // operator.read/write alone 403 on both (confirmed against a real gateway).
+// operator.approvals is required to receive plugin.approval.requested/resolved
+// broadcasts and to call approval.resolve — the /agent page is the ONLY
+// approval surface for the team gateway (dashboard is disabled), so without
+// it every gated write tool would fail closed.
 // Deliberately requested up front for the whole connection: scopes are fixed
 // per WS connection (a singleton here), so per-call scope narrowing isn't
 // possible, and adding a scope later forces a re-pairing round.
-const SCOPES = ["operator.read", "operator.write", "operator.admin"];
+const SCOPES = ["operator.read", "operator.write", "operator.admin", "operator.approvals"];
 
 const SESSION_NAMESPACE = "clickin:chat:";
 
@@ -53,6 +57,11 @@ interface GatewayStore {
   // request is waiting on that session. Survives reconnects since it's
   // stored alongside the rest of the globalThis-cached state.
   events: EventEmitter;
+  // Pending plugin approvals by approval id → owning sessionKey. Populated
+  // from plugin.approval.requested broadcasts; consumed for the resolve API's
+  // ownership check and cleared on plugin.approval.resolved. Bounded by the
+  // gateway's own approval timeout (unresolved approvals always deny).
+  pendingApprovals: Map<string, { sessionKey?: string; ts: number }>;
   // Timestamps of steers whose extra "final" a session's relay connection
   // should still wait for before closing — appended by steerChatRun(),
   // consumed by the relay. A steered message is a genuinely separate run
@@ -82,6 +91,7 @@ function store(): GatewayStore {
       status: { state: isGatewayConfigured() ? "disconnected" : "unconfigured" },
       connecting: null,
       events,
+      pendingApprovals: new Map(),
       pendingSteers: new Map(),
     };
   }
@@ -166,6 +176,50 @@ interface AgentEventPayload {
   };
 }
 
+// plugin.approval.requested / plugin.approval.resolved broadcast payloads.
+// The docs pin the event names and scope (operator.approvals) but not the
+// exact field layout, so extraction below is defensive: id/title/etc. are
+// looked up both flat and under a nested `request` object. Live-validated
+// during Phase 4 rollout (AGENT_GATEWAY_DEBUG=1 shows the raw payload).
+export interface ApprovalRequest {
+  id: string;
+  title: string;
+  description: string;
+  severity: "info" | "warning" | "critical";
+  allowedDecisions: string[];
+  sessionKey?: string;
+}
+
+function extractApprovalRequest(payload: unknown): ApprovalRequest | null {
+  const p = payload as Record<string, unknown> | undefined;
+  if (!p) return null;
+  const nested = (p.request ?? {}) as Record<string, unknown>;
+  const pick = (key: string): unknown => p[key] ?? nested[key];
+  const id = pick("id") ?? pick("approvalId");
+  if (typeof id !== "string" || !id) return null;
+  const sessionKey = pick("sessionKey");
+  const severity = pick("severity");
+  const allowed = pick("allowedDecisions");
+  return {
+    id,
+    title: String(pick("title") ?? "工具调用确认"),
+    description: String(pick("description") ?? ""),
+    severity: severity === "info" || severity === "critical" ? severity : "warning",
+    allowedDecisions: Array.isArray(allowed) && allowed.length > 0
+      ? allowed.map(String)
+      : ["allow-once", "allow-always", "deny"],
+    sessionKey: typeof sessionKey === "string" ? sessionKey : undefined,
+  };
+}
+
+// Session-bus payloads for approval lifecycle, discriminated by marker keys.
+interface ApprovalRequestBusPayload {
+  approvalRequest: ApprovalRequest;
+}
+interface ApprovalResolvedBusPayload {
+  approvalResolved: { id: string; decision: string };
+}
+
 function attemptConnect(): Promise<GatewayStatus> {
   return new Promise((resolve) => {
     const s = store();
@@ -215,6 +269,32 @@ function attemptConnect(): Promise<GatewayStatus> {
             (payload.data?.phase === "start" || payload.data?.phase === "end");
           const isAssistantDelta = payload.stream === "assistant" && typeof payload.data?.delta === "string";
           if (isToolLifecycle || isAssistantDelta) s.events.emit(`session:${payload.sessionKey}`, payload);
+          return;
+        }
+        if (evt.event === "plugin.approval.requested") {
+          const approval = extractApprovalRequest(evt.payload);
+          if (!approval) return;
+          s.pendingApprovals.set(approval.id, { sessionKey: approval.sessionKey, ts: Date.now() });
+          if (approval.sessionKey) {
+            s.events.emit(`session:${approval.sessionKey}`, { approvalRequest: approval } satisfies ApprovalRequestBusPayload);
+          } else {
+            // Without a sessionKey the request can't be routed to a chat —
+            // log loudly: an unrouted approval will time out and deny.
+            console.error(`[agent-gateway] plugin approval ${approval.id} has no sessionKey — cannot surface in webchat`);
+          }
+          return;
+        }
+        if (evt.event === "plugin.approval.resolved") {
+          const p = evt.payload as { id?: string; approvalId?: string; decision?: string } | undefined;
+          const id = p?.id ?? p?.approvalId;
+          if (!id) return;
+          const pending = s.pendingApprovals.get(id);
+          s.pendingApprovals.delete(id);
+          if (pending?.sessionKey) {
+            s.events.emit(`session:${pending.sessionKey}`, {
+              approvalResolved: { id, decision: String(p?.decision ?? "unknown") },
+            } satisfies ApprovalResolvedBusPayload);
+          }
         }
       },
       onHelloOk: () => {
@@ -306,11 +386,17 @@ export interface ChatStreamEvent {
   // "chat-delta": the "chat" stream's own delta (full text-so-far), used
   // only as fallback for plain replies with no tool calls.
   // "tool"/"tool-end": tool-call lifecycle, correlated by toolId.
-  type: "delta" | "replace" | "chat-delta" | "final" | "aborted" | "error" | "tool" | "tool-end";
+  // "approval"/"approval-resolved": plugin approval gate lifecycle for a
+  // write tool this session invoked — the /agent page is the team gateway's
+  // only approval surface.
+  type: "delta" | "replace" | "chat-delta" | "final" | "aborted" | "error" | "tool" | "tool-end" | "approval" | "approval-resolved";
   text: string;
   errorMessage?: string;
   toolName?: string;
   toolId?: string;
+  approval?: ApprovalRequest;
+  approvalId?: string;
+  decision?: string;
 }
 
 /**
@@ -377,7 +463,21 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
   // Scoped to this one subscription so the same tool call isn't
   // re-announced if its "start" event is ever redelivered.
   const seenToolCalls = new Set<string>();
-  const handler = (rawPayload: ChatEventPayload | AgentEventPayload) => {
+  const handler = (rawPayload: ChatEventPayload | AgentEventPayload | ApprovalRequestBusPayload | ApprovalResolvedBusPayload) => {
+    // Approval lifecycle payloads are discriminated by their marker keys.
+    if ("approvalRequest" in rawPayload) {
+      onEvent({ type: "approval", text: "", approval: rawPayload.approvalRequest });
+      return;
+    }
+    if ("approvalResolved" in rawPayload) {
+      onEvent({
+        type: "approval-resolved",
+        text: "",
+        approvalId: rawPayload.approvalResolved.id,
+        decision: rawPayload.approvalResolved.decision,
+      });
+      return;
+    }
     // "agent" events (tool start / assistant delta) vs "chat" events (state
     // machine) — "stream" only exists on the former, discriminating the union.
     if ("stream" in rawPayload) {
@@ -548,4 +648,36 @@ export async function deleteChatSession(sessionKey: string): Promise<void> {
   const status = await connect();
   const client = requireConnectedClient(status);
   await client.request("sessions.delete", { key: sessionKey });
+}
+
+// ─── Plugin approvals ────────────────────────────────────────────────────────
+
+const APPROVAL_TTL_MS = 600_000; // gateway hard-caps approval timeouts at 10min
+
+/** Owning sessionKey for a pending approval (for the resolve API's ownership
+ * check). Prunes entries older than the gateway's own approval cap. */
+export function getPendingApprovalSession(approvalId: string): string | undefined {
+  const s = store();
+  const now = Date.now();
+  for (const [id, entry] of s.pendingApprovals) {
+    if (now - entry.ts > APPROVAL_TTL_MS) s.pendingApprovals.delete(id);
+  }
+  return s.pendingApprovals.get(approvalId)?.sessionKey;
+}
+
+/**
+ * Resolves a pending plugin approval. Tries the kind-agnostic durable method
+ * first (`approval.resolve` with explicit kind, per protocol docs), falling
+ * back to the plugin-specific `plugin.approval.resolve` — exact param naming
+ * is live-validated during Phase 4 rollout.
+ */
+export async function resolveApproval(approvalId: string, decision: "allow-once" | "allow-always" | "deny"): Promise<void> {
+  const status = await connect();
+  const client = requireConnectedClient(status);
+  try {
+    await client.request("approval.resolve", { id: approvalId, kind: "plugin", decision });
+  } catch (err) {
+    console.warn("[agent-gateway] approval.resolve failed, trying plugin.approval.resolve:", err);
+    await client.request("plugin.approval.resolve", { id: approvalId, decision });
+  }
 }

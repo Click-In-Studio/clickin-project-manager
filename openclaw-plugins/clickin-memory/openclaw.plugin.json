@@ -1,0 +1,32 @@
+{
+  "id": "clickin-memory",
+  "name": "Click-In Memory",
+  "description": "Click-In 团队记忆注入 + MCP 写工具确认门（Phase 4 v1）",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mcpUrl": {
+        "type": "string",
+        "description": "clickin MCP server 地址（用于启动时拉取工具 annotations）",
+        "default": "http://127.0.0.1:3101/mcp"
+      },
+      "memoryDir": {
+        "type": "string",
+        "description": "记忆文件根目录（每用户一个子目录）",
+        "default": "~/.openclaw-team/clickin-memory"
+      },
+      "injectMaxChars": {
+        "type": "number",
+        "description": "before_prompt_build 注入的记忆摘要字符上限",
+        "default": 4000
+      },
+      "approvalEnabled": {
+        "type": "boolean",
+        "description": "对非只读 clickin__* 工具挂 requireApproval 确认门",
+        "default": true
+      }
+    }
+  }
+}

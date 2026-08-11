@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // OpenClaw gateway 侧插件：SDK 依赖只在 gateway 运行时可解析，不参与本仓库构建
+    "openclaw-plugins/**",
   ]),
   {
     // Disable experimental React Compiler rules that produce false positives

@@ -74,6 +74,13 @@ export function createChatStreamResponse(
       let chatText = "";
       const liveText = () => (usingAgentStream ? agentText : chatText);
       let sessionDone = false;
+      let deadline = Date.now() + overallTimeoutMs;
+      // An approval gate pauses the run gateway-side (up to its own timeout)
+      // and the continued run needs time of its own afterward — push this
+      // stream's deadline out so it doesn't cut the exchange short.
+      const extendDeadline = () => {
+        deadline = Date.now() + overallTimeoutMs;
+      };
       // steerChatRun() registers pending steers under the *canonical*
       // sessionKey the Gateway echoes back — for a brand-new session that
       // differs from the pre-canonical key this request arrived with, so
@@ -81,6 +88,21 @@ export function createChatStreamResponse(
       let canonicalSessionKey = sessionKey;
 
       function handleSessionEvent(evt: ChatStreamEvent) {
+        if (evt.type === "approval") {
+          // A write tool hit its confirmation gate — surface the card; the
+          // run stays paused gateway-side until resolved (or times out to
+          // deny), so extend this stream's own deadline to outlive the
+          // approval window plus the continued run.
+          extendDeadline();
+          send({ type: "approval", approval: evt.approval });
+          return;
+        }
+        if (evt.type === "approval-resolved") {
+          // The continued (or denied) run needs fresh time after the gate.
+          extendDeadline();
+          send({ type: "approval-resolved", id: evt.approvalId, decision: evt.decision });
+          return;
+        }
         if (evt.type === "tool-end") {
           send({ type: "tool-end", id: evt.toolId });
           return;
@@ -172,7 +194,6 @@ export function createChatStreamResponse(
         // otherwise-silent RPC failures.
         if (started.runId) waitForRunOutcome(started.runId).catch(() => {});
 
-        const deadline = Date.now() + overallTimeoutMs;
         while (!sessionDone && !closed && Date.now() < deadline) {
           await sleep(POLL_INTERVAL_MS);
         }

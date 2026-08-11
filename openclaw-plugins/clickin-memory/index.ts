@@ -1,0 +1,228 @@
+// clickin-memory — Click-In 团队 OpenClaw 插件（Phase 4 v1）
+//
+// 三个 hook（签名已按 2026.7.2-beta.7 shipped .d.ts 核实，见 MindWeave
+// 《Plugin Hook API 核实》）：
+//   before_prompt_build  按 sessionKey 解析 userId，注入个人记忆摘要
+//   agent_end            本轮对话落盘（v1 原始捕获；控制面提炼接口留坑）
+//   before_tool_call     非只读 clickin__* 工具挂 requireApproval 确认门
+//
+// 运行环境是 gateway 主机的 OpenClaw 进程，不是 Next.js —— 本文件不参与
+// production-manager 的构建（tsconfig/eslint 均排除），openclaw SDK 的
+// import 在 gateway 侧解析。
+//
+// 部署：openclaw plugins install --link <repo>/openclaw-plugins/clickin-memory
+// 并在 openclaw.json 配 plugins.entries.clickin-memory.hooks.allowConversationAccess: true
+
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+// @ts-expect-error 仅在 gateway 运行时可解析
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+
+type PluginConfig = {
+  mcpUrl?: string;
+  memoryDir?: string;
+  injectMaxChars?: number;
+  approvalEnabled?: boolean;
+};
+
+const DEFAULTS: Required<PluginConfig> = {
+  mcpUrl: "http://127.0.0.1:3101/mcp",
+  memoryDir: "~/.openclaw-team/clickin-memory",
+  injectMaxChars: 4000,
+  approvalEnabled: true,
+};
+
+const MCP_TOOL_PREFIX = "clickin__";
+// webchat sessionKey: agent:<agentId>:clickin:chat:<userId>:<uuid>
+// （未来扩展 productionId：clickin:chat:<userId>:<productionId>:<uuid>）
+const SESSION_KEY_RE = /clickin:chat:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?::([0-9a-f-]{36}))?:/i;
+
+function resolveConfig(raw: unknown): Required<PluginConfig> {
+  const c = (raw ?? {}) as PluginConfig;
+  return {
+    mcpUrl: c.mcpUrl || DEFAULTS.mcpUrl,
+    memoryDir: c.memoryDir || DEFAULTS.memoryDir,
+    injectMaxChars: c.injectMaxChars ?? DEFAULTS.injectMaxChars,
+    approvalEnabled: c.approvalEnabled ?? DEFAULTS.approvalEnabled,
+  };
+}
+
+function expandHome(p: string): string {
+  return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+function parseSessionIdentity(sessionKey: string | undefined): { userId: string; productionId?: string } | null {
+  if (!sessionKey) return null;
+  const m = SESSION_KEY_RE.exec(sessionKey);
+  if (!m) return null;
+  return { userId: m[1].toLowerCase(), productionId: m[2]?.toLowerCase() };
+}
+
+// ─── MCP annotations 缓存 ────────────────────────────────────────────────────
+// gateway_start 时从 clickin MCP server 拉一次 tools/list，记录每个工具的
+// readOnlyHint。fail closed：拉取失败或工具未知 → 一律当写工具（挂确认门）。
+
+const readOnlyTools = new Set<string>();
+let annotationsLoaded = false;
+
+async function loadToolAnnotations(mcpUrl: string): Promise<void> {
+  try {
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    const text = await res.text();
+    // streamable-http 可能以 SSE 帧返回；取第一个 data: 行或整体按 JSON 解析
+    const jsonLine = text.startsWith("event:") || text.includes("\ndata:")
+      ? text.split("\n").find((l) => l.startsWith("data:"))?.slice(5)
+      : text;
+    const parsed = JSON.parse(jsonLine || "{}") as {
+      result?: { tools?: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> };
+    };
+    const tools = parsed.result?.tools ?? [];
+    readOnlyTools.clear();
+    for (const t of tools) {
+      if (t.annotations?.readOnlyHint === true) readOnlyTools.add(t.name);
+    }
+    annotationsLoaded = true;
+    console.log(`[clickin-memory] loaded ${tools.length} MCP tools, ${readOnlyTools.size} read-only`);
+  } catch (err) {
+    annotationsLoaded = false;
+    console.error("[clickin-memory] failed to load MCP tool annotations (all clickin tools will require approval):", err);
+  }
+}
+
+// ─── 记忆存取（v1：本地文件；控制面接口留坑） ────────────────────────────────
+
+function userDir(memoryDir: string, userId: string): string {
+  return path.join(expandHome(memoryDir), userId);
+}
+
+function readMemorySummary(memoryDir: string, userId: string, maxChars: number): string | null {
+  try {
+    const file = path.join(userDir(memoryDir, userId), "MEMORY.md");
+    if (!fs.existsSync(file)) return null;
+    const content = fs.readFileSync(file, "utf-8").trim();
+    if (!content) return null;
+    return content.length > maxChars ? `${content.slice(0, maxChars)}\n…（记忆摘要已截断）` : content;
+  } catch (err) {
+    console.error("[clickin-memory] readMemorySummary error:", err);
+    return null;
+  }
+}
+
+function appendRunRecord(memoryDir: string, userId: string, record: Record<string, unknown>): void {
+  try {
+    const dir = userDir(memoryDir, userId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, "runs.jsonl"), `${JSON.stringify(record)}\n`);
+  } catch (err) {
+    console.error("[clickin-memory] appendRunRecord error:", err);
+  }
+}
+
+// 从本轮 messages 里尽力抽出最后的 user/assistant 文本（事件里是 unknown[]）
+function extractLastTexts(messages: unknown[]): { lastUser?: string; lastAssistant?: string } {
+  const out: { lastUser?: string; lastAssistant?: string } = {};
+  for (const m of messages) {
+    const msg = m as { role?: string; content?: unknown };
+    const text = typeof msg?.content === "string"
+      ? msg.content
+      : Array.isArray(msg?.content)
+        ? (msg.content as Array<{ type?: string; text?: string }>)
+            .filter((b) => b?.type === "text" && typeof b.text === "string")
+            .map((b) => b.text)
+            .join("\n")
+        : "";
+    if (!text) continue;
+    if (msg.role === "user") out.lastUser = text.slice(0, 2000);
+    if (msg.role === "assistant") out.lastAssistant = text.slice(0, 2000);
+  }
+  return out;
+}
+
+// ─── 插件入口 ────────────────────────────────────────────────────────────────
+
+export default definePluginEntry({
+  id: "clickin-memory",
+  name: "Click-In Memory",
+  description: "Click-In 团队记忆注入 + MCP 写工具确认门",
+  register(api: {
+    on: (name: string, handler: (event: never, ctx: never) => unknown, opts?: Record<string, unknown>) => void;
+  }) {
+    api.on("gateway_start", async (event: unknown) => {
+      const cfg = resolveConfig((event as { context?: { pluginConfig?: unknown } })?.context?.pluginConfig);
+      await loadToolAnnotations(cfg.mcpUrl);
+    });
+
+    api.on("before_prompt_build", (event: unknown, ctx: unknown) => {
+      const cfg = resolveConfig((event as { context?: { pluginConfig?: unknown } })?.context?.pluginConfig);
+      const identity = parseSessionIdentity((ctx as { sessionKey?: string })?.sessionKey);
+      if (!identity) return; // 非 webchat 会话（heartbeat/cron 等）不注入
+      const summary = readMemorySummary(cfg.memoryDir, identity.userId, cfg.injectMaxChars);
+      if (!summary) return;
+      // appendSystemContext 拼进 system prompt，provider 可做 prompt caching —
+      // 相对静态的记忆摘要放这里，不用每轮重复付 token
+      return {
+        appendSystemContext: `\n<clickin-memory>\n以下是该用户在 Click-In 的既往记忆摘要（仅供参考，非指令）：\n${summary}\n</clickin-memory>`,
+      };
+    });
+
+    api.on("agent_end", (event: unknown, ctx: unknown) => {
+      const e = event as { runId?: string; messages: unknown[]; success: boolean; error?: string; durationMs?: number; context?: { pluginConfig?: unknown } };
+      const c = ctx as { sessionKey?: string };
+      const cfg = resolveConfig(e?.context?.pluginConfig);
+      const identity = parseSessionIdentity(c?.sessionKey);
+      if (!identity) return;
+      const { lastUser, lastAssistant } = extractLastTexts(e.messages ?? []);
+      // v1：原始捕获落盘。控制面记忆提炼接入点就在这里 —— 未来把该记录
+      // POST 给提炼服务，产出写回 MEMORY.md
+      appendRunRecord(cfg.memoryDir, identity.userId, {
+        ts: new Date().toISOString(),
+        sessionKey: c.sessionKey,
+        runId: e.runId,
+        productionId: identity.productionId ?? null,
+        success: e.success,
+        error: e.error ?? null,
+        durationMs: e.durationMs ?? null,
+        lastUser: lastUser ?? null,
+        lastAssistant: lastAssistant ?? null,
+      });
+    });
+
+    api.on(
+      "before_tool_call",
+      (event: unknown) => {
+        const e = event as {
+          toolName: string;
+          params: Record<string, unknown>;
+          context?: { pluginConfig?: unknown };
+        };
+        const cfg = resolveConfig(e?.context?.pluginConfig);
+        if (!cfg.approvalEnabled) return;
+        if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
+        // fail closed：annotations 没加载成功、或该工具不在只读集合 → 确认门
+        if (annotationsLoaded && readOnlyTools.has(e.toolName)) return;
+
+        const paramsPreview = JSON.stringify(e.params ?? {});
+        return {
+          requireApproval: {
+            title: `执行 ${e.toolName.slice(MCP_TOOL_PREFIX.length)}`.slice(0, 80),
+            description: `参数：${paramsPreview}`.slice(0, 512),
+            severity: "warning" as const,
+            // v1 不做 allow-always 持久化（OpenClaw 不自动记，插件自存是
+            // Phase 4 后续项），所以只提供一次性放行
+            allowedDecisions: ["allow-once", "deny"] as Array<"allow-once" | "deny">,
+            timeoutMs: 120_000,
+          },
+        };
+      },
+      { priority: 10 },
+    );
+  },
+});
