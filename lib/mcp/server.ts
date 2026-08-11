@@ -37,6 +37,55 @@ export function buildMcpServer(): McpServer {
   // 刻意没有"查他人"工具：sessionKey 尚无 production 维度，跨成员查询
   // 没有权限语境，等 production 环境落地后再加。
 
+  // ─── "我的 ×××" 只读工具（镜像 app/my/* 数据面，self-scoped）────────────
+  // 与 my 页面共用同一批以 userId 收窄的查询函数，无新权限面；
+  // readOnlyHint: true → 插件门控直通（Level A）。
+  const CALLER_PARAM = {
+    _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
+  };
+  const NO_CALLER = {
+    content: [{ type: "text" as const, text: "拒绝：缺少调用者身份（该工具只能经审批插件路径调用）。" }],
+  };
+  const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
+
+  const myTools: Array<{ name: string; description: string; fn: (userId: string) => Promise<string> }> = [
+    {
+      name: "my.call_times",
+      description: "查询当前用户自己的近期通告（时间、事件、地点、所属制作）。",
+      fn: async (uid) => (await import("./my-tools")).myCallTimes(uid),
+    },
+    {
+      name: "my.tech_reqs",
+      description: "查询与当前用户相关的技术需求（被指派或作为部门对接人），含状态。",
+      fn: async (uid) => (await import("./my-tools")).myTechReqs(uid),
+    },
+    {
+      name: "my.events",
+      description: "查询当前用户关注的即将开始的活动。",
+      fn: async (uid) => (await import("./my-tools")).myFollowedEvents(uid),
+    },
+    {
+      name: "my.milestones",
+      description: "查询当前用户可见项目的临近里程碑（截止日期）。",
+      fn: async (uid) => (await import("./my-tools")).myMilestones(uid),
+    },
+    {
+      name: "my.productions",
+      description: "查询当前用户参与的全部制作与角色（含已归档）。",
+      fn: async (uid) => (await import("./my-tools")).myProductions(uid),
+    },
+  ];
+  for (const t of myTools) {
+    s.registerTool(t.name, {
+      description: t.description,
+      inputSchema: { ...CALLER_PARAM },
+      annotations: READ_ONLY,
+    }, async ({ _caller_user_id }) => {
+      if (!_caller_user_id) return NO_CALLER;
+      return { content: [{ type: "text" as const, text: await t.fn(_caller_user_id) }] };
+    });
+  }
+
   s.registerTool("users.query_sensitive", {
     // 刻意不标 readOnlyHint: true —— 插件的 fail-closed 门控会因此把它
     // 当写工具挂确认门（"AI 想查询你的联系方式" → 用户批准/拒绝）。

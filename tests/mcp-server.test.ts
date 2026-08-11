@@ -8,11 +8,30 @@ type RegisteredTool = { annotations?: { readOnlyHint?: boolean } };
 type ToolRegistry = Record<string, RegisteredTool>;
 
 describe("MCP server skeleton", () => {
-  it("registers exactly four tools", async () => {
+  it("registers the expected tool set", async () => {
     const server = buildMcpServer();
     const registry = server["_registeredTools"] as ToolRegistry;
     const names = Object.keys(registry).sort();
-    expect(names).toEqual(["approvals.list", "docs.propose", "docs.read", "users.query_sensitive"]);
+    expect(names).toEqual([
+      "approvals.list",
+      "docs.propose",
+      "docs.read",
+      "my.call_times",
+      "my.events",
+      "my.milestones",
+      "my.productions",
+      "my.tech_reqs",
+      "users.query_sensitive",
+    ]);
+    await server.close();
+  });
+
+  it("all my.* tools are read-only (Level A direct pass)", async () => {
+    const server = buildMcpServer();
+    const registry = server["_registeredTools"] as ToolRegistry;
+    for (const name of ["my.call_times", "my.events", "my.milestones", "my.productions", "my.tech_reqs"]) {
+      expect(registry[name]?.annotations?.readOnlyHint, name).toBe(true);
+    }
     await server.close();
   });
 
