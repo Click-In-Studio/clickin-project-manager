@@ -14,8 +14,8 @@
       },
       "memoryDir": {
         "type": "string",
-        "description": "记忆文件根目录（每用户一个子目录）",
-        "default": "~/.openclaw-team/clickin-memory"
+        "description": "记忆文件根目录（每用户一个子目录），~ 为 gateway 进程用户的 home",
+        "default": "~/.openclaw/clickin-memory"
       },
       "injectMaxChars": {
         "type": "number",

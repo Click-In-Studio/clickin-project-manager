@@ -31,7 +31,7 @@ type PluginConfig = {
 
 const DEFAULTS: Required<PluginConfig> = {
   mcpUrl: "http://127.0.0.1:3101/mcp",
-  memoryDir: "~/.openclaw-team/clickin-memory",
+  memoryDir: "~/.openclaw/clickin-memory",
   injectMaxChars: 4000,
   recentDays: 3,
   recentMaxEntries: 5,
