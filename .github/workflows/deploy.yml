@@ -196,7 +196,11 @@ jobs:
           ssh prod "
             OC='sudo -u openclaw /opt/node/bin/openclaw'
             if [ -x /opt/node/bin/openclaw ]; then
-              if ! \$OC plugins list 2>/dev/null | grep -q clickin-memory; then
+              # 已安装判断用 inspect 的退出码（实测未安装 exit 1）。不能用
+              # plugins list | grep：配置里有 entry 但插件未装时，list 的
+              # 'plugin not found: clickin-memory' 警告文本会喂饱 grep，
+              # 导致 install 被永久跳过（真机踩过）。
+              if ! \$OC plugins inspect clickin-memory >/dev/null 2>&1; then
                 \$OC plugins install --link $PLUGIN_DIR ||
                   echo '::warning::clickin-memory install failed — run install --link manually'
               fi
