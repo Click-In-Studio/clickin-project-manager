@@ -17,7 +17,7 @@ const EMPTY = (what: string) => `（当前没有${what}）`;
 /** my.call_times：我的近期通告（时间为 UTC+8）。 */
 export async function myCallTimes(userId: string): Promise<string> {
   const rows = await listMyUpcomingCallTimes(userId);
-  if (rows.length === 0) return EMPTY("即将到来的通告");
+  if (rows.length === 0) return EMPTY("即将到来的Call");
   return rows
     .slice(0, 20)
     .map((c) => {
@@ -32,12 +32,12 @@ export async function myCallTimes(userId: string): Promise<string> {
 /** my.tech_reqs：与我相关的技术需求（被指派或作为部门 POC）。 */
 export async function myTechReqs(userId: string): Promise<string> {
   const rows = await listMyTechReqsFull(userId);
-  if (rows.length === 0) return EMPTY("与你相关的技术需求");
+  if (rows.length === 0) return EMPTY("与你相关的技术需求/任务");
   return rows
     .slice(0, 20)
     .map((r) => {
       const dept = r.departmentName ? `［${r.departmentName}］` : "";
-      const poc = r.amPoc ? "（你是对接人）" : "";
+      const poc = r.amPoc ? "（你是负责人）" : "";
       return `- ${dept}${r.title} — 状态：${r.status}${poc}｜《${r.productionName}》${r.eventTitle}`;
     })
     .join("\n");
@@ -46,7 +46,7 @@ export async function myTechReqs(userId: string): Promise<string> {
 /** my.events：我关注的即将开始的活动（时间为 UTC+8）。 */
 export async function myFollowedEvents(userId: string): Promise<string> {
   const rows = await listMyFollowedUpcomingEvents(userId);
-  if (rows.length === 0) return EMPTY("关注中的即将开始的活动");
+  if (rows.length === 0) return EMPTY("关注中的即将开始的 Event 事件");
   return rows
     .slice(0, 20)
     .map((e) => {

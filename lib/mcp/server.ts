@@ -51,17 +51,17 @@ export function buildMcpServer(): McpServer {
   const myTools: Array<{ name: string; description: string; fn: (userId: string) => Promise<string> }> = [
     {
       name: "my.call_times",
-      description: "查询当前用户自己的近期通告（时间、事件、地点、所属制作）。",
+      description: "查询当前用户自己的近期Call（时间、事件、地点、所属制作）。",
       fn: async (uid) => (await import("./my-tools")).myCallTimes(uid),
     },
     {
       name: "my.tech_reqs",
-      description: "查询与当前用户相关的技术需求（被指派或作为部门对接人），含状态。",
+      description: "查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态。",
       fn: async (uid) => (await import("./my-tools")).myTechReqs(uid),
     },
     {
       name: "my.events",
-      description: "查询当前用户关注的即将开始的活动。",
+      description: "查询当前用户关注的即将开始的Event事件。",
       fn: async (uid) => (await import("./my-tools")).myFollowedEvents(uid),
     },
     {
