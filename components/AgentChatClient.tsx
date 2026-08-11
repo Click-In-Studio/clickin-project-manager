@@ -94,8 +94,12 @@ export default function AgentChatClient() {
     // （如 pm2 重启掐断流），cancel 让 read() 解除阻塞、finally 复位状态——
     // 否则 streaming 永远卡 true，后续消息全走 steer 打进虚空。
     let lastByteAt = Date.now();
+    let watchdogFired = false;
     const watchdog = setInterval(() => {
-      if (Date.now() - lastByteAt > 60_000) reader.cancel().catch(() => {});
+      if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
+        watchdogFired = true; // cancel 一次即可，read() 解除阻塞后 finally 收尾
+        reader.cancel().catch(() => {});
+      }
     }, 5_000);
 
     const apply = (line: StreamLine) => {
