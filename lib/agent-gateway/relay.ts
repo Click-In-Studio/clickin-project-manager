@@ -187,6 +187,14 @@ export function createChatStreamResponse(
           };
         }
 
+        // Tell the client the canonical key so its NEXT send passes it
+        // directly — when the client sends a bare key, this relay only
+        // subscribes to the canonical form after the RPC echo above, and
+        // any events emitted before that frame arrives are lost forever
+        // (EventEmitter has no replay). Live-hit: a fast tool call's
+        // start + approval events raced the echo and the card never showed.
+        if (started.runId) send({ type: "session", key: started.sessionKey });
+
         // Fire-and-forget: agent.wait only tracks the FIRST segment's runId,
         // and a tool-call turn spans multiple runIds — so its resolution
         // can't gate finishing the stream. The subscription is the sole
@@ -207,8 +215,11 @@ export function createChatStreamResponse(
           }
         }
         if (!sessionDone && !closed) {
+          // fallback: true 让客户端知道这个 final 来自 chat.history 兜底
+          // （可能是上一轮已渲染的旧文本）——只有带此标记的 final 才做
+          // 与上一条气泡的去重，正常回复即使文本相同也不会被误吞。
           const text = await fetchLatestAssistantText(started.sessionKey);
-          finish({ type: "final", text: text || liveText() });
+          finish({ type: "final", text: text || liveText(), fallback: true });
         }
       } catch (err) {
         finish({ type: "error", error: err instanceof Error ? err.message : "Agent run failed" });
