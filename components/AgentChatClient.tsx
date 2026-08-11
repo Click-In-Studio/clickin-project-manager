@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "@/components/Markdown";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 
 type SessionSummary = {
   key: string;
@@ -18,33 +19,6 @@ type GatewayStatus =
   | { state: "connected" }
   | { state: "pairing_required"; requestId?: string }
   | { state: "error"; error: string };
-
-type ApprovalInfo = {
-  id: string;
-  title: string;
-  description: string;
-  severity: "info" | "warning" | "critical";
-  allowedDecisions: string[];
-};
-
-type Bubble =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string; streaming?: boolean }
-  | { kind: "tool"; name: string; id?: string; done: boolean }
-  | { kind: "approval"; approval: ApprovalInfo; decision?: string; resolving?: boolean }
-  | { kind: "notice"; text: string };
-
-type StreamLine =
-  | { type: "delta"; text: string }
-  | { type: "final"; text: string }
-  | { type: "aborted"; text: string }
-  | { type: "error"; error: string }
-  | { type: "tool"; name?: string; id?: string }
-  | { type: "tool-end"; id?: string }
-  | { type: "approval"; approval?: ApprovalInfo }
-  | { type: "approval-resolved"; id?: string; decision?: string }
-  | { type: "ping" }
-  | { type: "session"; key?: string };
 
 export default function AgentChatClient() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -111,86 +85,7 @@ export default function AgentChatClient() {
       // A stale stream for a session the user already switched away from
       // must not touch the current transcript.
       if (activeKeyRef.current !== streamKey) return;
-      setBubbles((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        switch (line.type) {
-          case "delta": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: line.text, streaming: true };
-            } else {
-              next.push({ kind: "assistant", text: line.text, streaming: true });
-            }
-            return next;
-          }
-          case "tool": {
-            // Current streaming segment (if any) is settled by this tool call.
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "tool", name: line.name || "工具", id: line.id, done: false });
-            return next;
-          }
-          case "tool-end": {
-            for (let i = next.length - 1; i >= 0; i--) {
-              const b = next[i];
-              if (b.kind === "tool" && !b.done && (!line.id || b.id === line.id)) {
-                next[i] = { ...b, done: true };
-                break;
-              }
-            }
-            return next;
-          }
-          case "final": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: line.text || last.text };
-            } else if (line.text) {
-              // relay 的超时兜底（fetchLatestAssistantText）拉的是"最新
-              // assistant 文本"——本轮若没产出，拉到的是上一轮已渲染的回复。
-              // 与最近一条 assistant 气泡完全相同的 final 视为兜底重复，跳过。
-              const prevAssistant = [...next].reverse().find((b) => b.kind === "assistant");
-              if (prevAssistant?.kind === "assistant" && prevAssistant.text === line.text) return next;
-              next.push({ kind: "assistant", text: line.text });
-            }
-            return next;
-          }
-          case "approval": {
-            if (!line.approval) return next;
-            // Settle the current streaming segment; the gate pauses the run.
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "approval", approval: line.approval });
-            return next;
-          }
-          case "approval-resolved": {
-            for (let i = next.length - 1; i >= 0; i--) {
-              const b = next[i];
-              if (b.kind === "approval" && b.approval.id === line.id) {
-                next[i] = { ...b, decision: line.decision || "unknown", resolving: false };
-                break;
-              }
-            }
-            return next;
-          }
-          case "aborted": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "notice", text: "已中止" });
-            return next;
-          }
-          case "error": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "notice", text: line.error || "出错了" });
-            return next;
-          }
-          default:
-            return next; // ping 等非渲染事件在上游已过滤，这里兜底
-        }
-      });
+      setBubbles((prev) => applyStreamLine(prev, line));
     };
 
     try {
@@ -208,9 +103,13 @@ export default function AgentChatClient() {
             if (line.type === "ping") continue; // 心跳只喂看门狗
             if (line.type === "session") {
               // 采纳 canonical key：下一条消息直接用它订阅，消除
-              // 「先订裸 key、补订 canonical」窗口期丢事件的竞态
+              // 「先订裸 key、补订 canonical」窗口期丢事件的竞态。
+              // activeKeyRef 必须与 streamKey 同步更新——ref 平时靠渲染期
+              // 赋值刷新，setActiveKey 到下次渲染之间同一 chunk 里的后续
+              // 事件会被 stale 守卫误杀（review #198 抓到的窗口）。
               if (typeof line.key === "string" && line.key && activeKeyRef.current === streamKey) {
                 streamKey = line.key;
+                activeKeyRef.current = line.key;
                 setActiveKey(line.key);
               }
               continue;
