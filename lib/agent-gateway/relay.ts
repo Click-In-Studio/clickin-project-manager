@@ -41,7 +41,12 @@ export function createChatStreamResponse(
     async start(controller) {
       function send(obj: unknown) {
         if (closed) return;
-        controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
+        // SSE 帧格式（data: <json>\n\n）而非裸 NDJSON：Cloudflare 与 nginx
+        // 都对 text/event-stream 特殊豁免（不压缩、不缓冲）。裸 ndjson 会被
+        // CF 压缩器攒缓冲——小帧（tool/approval，几百字节）永远到不了浏览
+        // 器，实锤表现：relay 已写入 approval 帧而卡片不渲染、思考泡泡从未
+        // 出现（连响应头都被攒着）。剧本/cue 的 SSE 同链路一直实时，即证。
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       }
       function finish(obj?: unknown) {
         if (closed) return;
@@ -237,8 +242,9 @@ export function createChatStreamResponse(
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
     },
   });
 }

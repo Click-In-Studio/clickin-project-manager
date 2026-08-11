@@ -97,9 +97,13 @@ export default function AgentChatClient() {
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const raw of lines) {
-          if (!raw.trim()) continue;
+          // SSE 帧：data: <json>；空行是帧分隔符，其他前缀（注释等）忽略
+          const trimmed = raw.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload) continue;
           try {
-            const line = JSON.parse(raw) as StreamLine;
+            const line = JSON.parse(payload) as StreamLine;
             if (line.type === "ping") continue; // 心跳只喂看门狗
             if (line.type === "session") {
               // 采纳 canonical key：下一条消息直接用它订阅，消除
