@@ -76,16 +76,18 @@ const readOnlyTools = new Set<string>();
 let annotationsLoaded = false;
 let lastAnnotationAttempt = 0;
 
-// 拒绝理由本地暂存（toolCallId → reason）：onResolution 异步预取，
-// tool_result_persist（同步签名）读取。TTL 清扫防 persist 未触发时滞留。
-const denyReasonByToolCall = new Map<string, { reason: string; ts: number }>();
-const DENY_REASON_LOCAL_TTL_MS = 600_000;
+// 被拒的受门控工具调用（toolCallId → 标记时间）：onResolution("deny") 写入，
+// tool-result middleware 命中后取走并向后端取理由。TTL 清扫防 middleware
+// 未触发时滞留。
+const deniedGatedCalls = new Map<string, number>();
+const DENY_MARK_TTL_MS = 600_000;
+
+// gateway_start / before_tool_call 刷新的有效 MCP 地址（middleware 事件
+// 不携带 pluginConfig，只能模块级共享）
+let activeMcpUrl = DEFAULTS.mcpUrl;
 
 async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<string | null> {
   try {
-    for (const [k, v] of denyReasonByToolCall) {
-      if (Date.now() - v.ts > DENY_REASON_LOCAL_TTL_MS) denyReasonByToolCall.delete(k);
-    }
     const origin = new URL(mcpUrl).origin;
     const res = await fetch(`${origin}/deny-reason?toolCallId=${encodeURIComponent(toolCallId)}`, {
       signal: AbortSignal.timeout(2000),
@@ -259,9 +261,14 @@ export default definePluginEntry({
   description: "Click-In 团队记忆注入 + MCP 写工具确认门",
   register(api: {
     on: (name: string, handler: (event: never, ctx: never) => unknown, opts?: Record<string, unknown>) => void;
+    registerAgentToolResultMiddleware: (
+      handler: (event: never, ctx: never) => unknown,
+      options?: Record<string, unknown>,
+    ) => void;
   }) {
     api.on("gateway_start", async (event: unknown) => {
       const cfg = resolveConfig((event as { context?: { pluginConfig?: unknown } })?.context?.pluginConfig);
+      activeMcpUrl = cfg.mcpUrl;
       await loadToolAnnotations(cfg.mcpUrl);
     });
 
@@ -355,6 +362,7 @@ export default definePluginEntry({
           context?: { pluginConfig?: unknown };
         };
         const cfg = resolveConfig(e?.context?.pluginConfig);
+        activeMcpUrl = cfg.mcpUrl;
         if (!cfg.approvalEnabled) return;
         if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
         // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。
@@ -381,15 +389,14 @@ export default definePluginEntry({
             // Phase 4 后续项），所以只提供一次性放行
             allowedDecisions: ["allow-once", "deny"] as Array<"allow-once" | "deny">,
             timeoutMs: 120_000,
-            // 拒绝时预取用户填写的理由：后端在 resolve RPC 之前已把理由按
-            // toolCallId 存好（先存后 resolve 的时序保证），这里异步取回放
-            // 进本地 map——因为 tool_result_persist 的 shipped 签名是同步的，
-            // 不能在那里 await，只能在此预取。
+            // 标记"这个调用被拒了"：tool-result middleware 只对被标记的
+            // 调用取理由（middleware 对所有工具结果触发，标记做廉价筛选）
             onResolution(decision: string) {
               if (decision !== "deny" || !toolCallId) return;
-              return fetchDenyReason(cfg.mcpUrl, toolCallId).then((reason) => {
-                if (reason) denyReasonByToolCall.set(toolCallId, { reason, ts: Date.now() });
-              });
+              for (const [k, t] of deniedGatedCalls) {
+                if (Date.now() - t > DENY_MARK_TTL_MS) deniedGatedCalls.delete(k);
+              }
+              deniedGatedCalls.set(toolCallId, Date.now());
             },
           },
         };
@@ -397,28 +404,31 @@ export default definePluginEntry({
       { priority: 10 },
     );
 
-    // 被拒工具结果的持久化重写：把用户的拒绝理由追加进结果文本，与拒绝
-    // 同帧到达模型（单次回复；steer 注入会造成双回复）。同步 hook——理由
-    // 已由 onResolution 预取到本地。竞态说明：若 persist 在预取完成前触发
-    // （loopback fetch 通常 1-2ms，窗口极小），理由静默丢失、退化为默认
-    // 拒绝文案，无损；联调若观察到丢失再考虑兜底。
-    api.on("tool_result_persist", (event: unknown) => {
-      const e = event as {
-        toolCallId?: string;
-        message: { content: string | Array<{ type?: string; text?: string }> };
-      };
-      if (!e?.toolCallId) return;
-      const entry = denyReasonByToolCall.get(e.toolCallId);
-      if (!entry) return;
-      denyReasonByToolCall.delete(e.toolCallId);
-      const suffix = `\n用户拒绝理由：${entry.reason}`;
-      const msg = e.message;
-      if (typeof msg.content === "string") {
-        return { message: { ...msg, content: msg.content + suffix } };
-      }
-      if (Array.isArray(msg.content)) {
-        return { message: { ...msg, content: [...msg.content, { type: "text", text: suffix }] } };
-      }
-    });
+    // 被拒工具结果的**运行时**重写：把用户的拒绝理由追加进喂给模型的结果
+    // 内容（AgentToolResult.content 注释原文 "returned to the model"），
+    // 与拒绝同帧到达、单次回复。此前用 tool_result_persist 的版本实测只
+    // 改落盘记录：当轮模型仍只见 "Denied by user"，理由下一轮才从历史
+    // 重放里冒出来还被误认成用户消息——middleware 才是活体路径。
+    // 异步签名允许直接 await 取理由，预取竞态一并消失。
+    // manifest 需声明 contracts.agentToolResultMiddleware: ["openclaw"]。
+    api.registerAgentToolResultMiddleware(
+      async (event: {
+        toolCallId: string;
+        toolName: string;
+        result: { content: Array<{ type?: string; text?: string }> };
+      }) => {
+        if (!deniedGatedCalls.has(event.toolCallId)) return;
+        deniedGatedCalls.delete(event.toolCallId);
+        const reason = await fetchDenyReason(activeMcpUrl, event.toolCallId);
+        if (!reason) return;
+        return {
+          result: {
+            ...event.result,
+            content: [...(event.result.content ?? []), { type: "text", text: `\n用户拒绝理由：${reason}` }],
+          },
+        };
+      },
+      { runtimes: ["openclaw"] },
+    );
   },
 });
