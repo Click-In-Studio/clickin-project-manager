@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
       const stored = storeDenyReason(id, reason.trim());
       if (!stored) console.warn(`[agent-approval] approval ${id} 无 toolCallId 关联，拒绝理由无法转交插件`);
     }
+    // 若下面的 resolve 抛错，已存的理由成为孤儿——有意不回滚：TTL（10min）
+    // 兜底回收，且用户重试拒绝会覆盖写入，不值得为此加清理分支。
     await resolveApproval(id, decision as "allow-once" | "allow-always" | "deny");
     return NextResponse.json({ ok: true });
   } catch (err) {

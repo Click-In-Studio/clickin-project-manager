@@ -61,6 +61,9 @@ export function startMcpServer(): void {
       res.status(400).json({ error: "missing toolCallId" });
       return;
     }
+    // 动态 import：不把 gateway-client 依赖树拉进 MCP 模块的静态依赖图
+    // （本仓库有过 Turbopack 循环依赖 TDZ 前科，静态图保持最小）；
+    // Node 模块缓存保证首次之后零开销。
     const { takeDenyReason } = await import("../agent-gateway/client");
     res.json({ reason: takeDenyReason(toolCallId) ?? null });
   });

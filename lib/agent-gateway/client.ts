@@ -739,13 +739,19 @@ export function storeDenyReason(approvalId: string, reason: string): boolean {
   return true;
 }
 
-/** 一次性取走某个工具调用的拒绝理由（供 MCP 同进程端点转交插件）。 */
+/** 一次性取走某个工具调用的拒绝理由（供 MCP 同进程端点转交插件）。
+ * 读侧同样全量清扫：某条理由若从未被取走（插件 fetch 失败 / persist
+ * 未触发），不能指望下一次 store 才回收——这是 globalThis 常驻 map。 */
 export function takeDenyReason(toolCallId: string): string | undefined {
   const s = store();
+  const now = Date.now();
+  for (const [k, v] of s.denyReasons) {
+    if (now - v.ts > DENY_REASON_TTL_MS) s.denyReasons.delete(k);
+  }
   const entry = s.denyReasons.get(toolCallId);
   if (!entry) return undefined;
   s.denyReasons.delete(toolCallId);
-  return Date.now() - entry.ts > DENY_REASON_TTL_MS ? undefined : entry.reason;
+  return entry.reason;
 }
 
 /**
