@@ -372,6 +372,11 @@ export default definePluginEntry({
               str(params.content, 220),
             ].join("\n"),
           };
+        case "users-query_sensitive":
+          return {
+            title: `查询你的登记联系方式`,
+            description: `🔒 AI 请求读取你本人的敏感信息（邮箱/电话）。批准后仅返回给本会话。`,
+          };
         case "approvals-respond":
           return {
             title: `回应审批请求`,

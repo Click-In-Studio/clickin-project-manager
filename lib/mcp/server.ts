@@ -33,38 +33,25 @@ export function buildMcpServer(): McpServer {
   // _caller_user_id 由 clickin-memory 插件在 before_tool_call 里按
   // sessionKey 强制覆写（模型填什么都会被盖掉）——工具只信这个字段；
   // 缺失（未经插件的调用路径）一律拒绝。
-
-  s.registerTool("users.query", {
-    description: "按姓名查询可见成员的基础信息（角色、参与制作）。可见范围：调用者参与的制作的成员。",
-    inputSchema: {
-      query: z.string().describe("姓名（支持部分匹配）"),
-      _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
-    },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async ({ query, _caller_user_id }) => {
-    if (!_caller_user_id) {
-      return { content: [{ type: "text" as const, text: "拒绝：缺少调用者身份（该工具只能经审批插件路径调用）。" }] };
-    }
-    const { queryUsers } = await import("./user-context");
-    return { content: [{ type: "text" as const, text: await queryUsers(_caller_user_id, query) }] };
-  });
+  //
+  // 刻意没有"查他人"工具：sessionKey 尚无 production 维度，跨成员查询
+  // 没有权限语境，等 production 环境落地后再加。
 
   s.registerTool("users.query_sensitive", {
     // 刻意不标 readOnlyHint: true —— 插件的 fail-closed 门控会因此把它
-    // 当写工具挂确认门（"AI 想查询 X 的联系方式" → 用户批准/拒绝），
-    // 敏感读取的确认语义纯靠 annotations 表达，零插件改动。
-    description: "查询某位成员的联系方式（邮箱/电话）。敏感信息，需用户确认。",
+    // 当写工具挂确认门（"AI 想查询你的联系方式" → 用户批准/拒绝）。
+    // 敏感信息即使目标是自己也要确认；确认语义纯靠 annotations 表达。
+    description: "查询当前用户自己的登记联系方式（邮箱/电话）。敏感信息，需用户确认。",
     inputSchema: {
-      name: z.string().describe("目标成员姓名"),
       _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
     },
     annotations: { openWorldHint: false, destructiveHint: false },
-  }, async ({ name, _caller_user_id }) => {
+  }, async ({ _caller_user_id }) => {
     if (!_caller_user_id) {
       return { content: [{ type: "text" as const, text: "拒绝：缺少调用者身份（该工具只能经审批插件路径调用）。" }] };
     }
-    const { queryUserSensitive } = await import("./user-context");
-    return { content: [{ type: "text" as const, text: await queryUserSensitive(_caller_user_id, name) }] };
+    const { querySelfSensitive } = await import("./user-context");
+    return { content: [{ type: "text" as const, text: await querySelfSensitive(_caller_user_id) }] };
   });
 
   s.registerTool("docs.propose", {
