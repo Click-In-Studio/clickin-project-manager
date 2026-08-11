@@ -177,12 +177,15 @@ jobs:
           echo "Plugin changed: ${REMOTE_HASH:-<none>} → $TREE_HASH"
           ssh prod "mkdir -p $SHARED/openclaw-plugins && rm -rf $PLUGIN_DIR.new" < /dev/null
           scp -r openclaw-plugins/clickin-memory prod:$PLUGIN_DIR.new
-          # 目录保持部署用户所有（下次 CD 才能写），openclaw 用户只需读（--link）。
-          # chmod 只递归本插件目录，不碰 openclaw-plugins 下其他插件的权限；
-          # 父链补 x 位保证 openclaw 用户可穿越到叶子目录。
+          # OpenClaw 对 linked 插件源做所有权检查：必须属于运行用户（openclaw）
+          # 或 root，部署用户（ubuntu, uid 1000）会被 'blocked plugin candidate:
+          # suspicious ownership' 拦截（真机踩过）。因此插件目录 chown 给 root，
+          # 本目录的增删改一律走 sudo；tree-hash 哨兵留在 ubuntu 所有的父目录。
           ssh prod "
-            rm -rf $PLUGIN_DIR && mv $PLUGIN_DIR.new $PLUGIN_DIR &&
-            chmod -R a+rX $PLUGIN_DIR &&
+            sudo rm -rf $PLUGIN_DIR &&
+            sudo mv $PLUGIN_DIR.new $PLUGIN_DIR &&
+            sudo chown -R root:root $PLUGIN_DIR &&
+            sudo chmod -R a+rX $PLUGIN_DIR &&
             chmod a+x $SHARED $SHARED/openclaw-plugins &&
             echo '$TREE_HASH' > $PLUGIN_DIR.tree-hash
           " < /dev/null
@@ -196,7 +199,11 @@ jobs:
           ssh prod "
             OC='sudo -u openclaw /opt/node/bin/openclaw'
             if [ -x /opt/node/bin/openclaw ]; then
-              if ! \$OC plugins list 2>/dev/null | grep -q clickin-memory; then
+              # 已安装判断用 inspect 的退出码（实测未安装 exit 1）。不能用
+              # plugins list | grep：配置里有 entry 但插件未装时，list 的
+              # 'plugin not found: clickin-memory' 警告文本会喂饱 grep，
+              # 导致 install 被永久跳过（真机踩过）。
+              if ! \$OC plugins inspect clickin-memory >/dev/null 2>&1; then
                 \$OC plugins install --link $PLUGIN_DIR ||
                   echo '::warning::clickin-memory install failed — run install --link manually'
               fi
