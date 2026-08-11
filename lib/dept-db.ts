@@ -621,7 +621,12 @@ async function computeUserCombinedAtomicZone(
  *
  * - atomic_permission_grant: revoke keys not in the combined (dept ∪ role) zone.
  * - resource_grant: revoke rows where the user's remaining depts no longer
- *   cover the resource via resource_dept_manage.
+ *   cover the resource via resource_dept_manage AND the user is not a person
+ *   manager of the resource (resource_person_manage).
+ *
+ * 存续规则：self_confirmed 行的存续 ⟺ 归属覆盖仍在。dept 归属的资源随 dept
+ * 成员资格生灭；person 归属的资源（role 来源创建，person fallback）跨 dept/role
+ * 变动存续，只随成员移除/手动撤销消亡。
  *
  * Does NOT touch 'approval', 'direct', or 'assigned' grants (PRD spec).
  */
@@ -662,6 +667,15 @@ export async function recomputeAndRevokeGrants(
            AND rdm.resource_type = rg.resource_type
            AND rdm.resource_id IN (rg.resource_id, '*')
            AND rdm.resource_sub IN (rg.resource_sub, '*')
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM resource_person_manage rpm
+         WHERE rpm.production_id = rg.production_id
+           AND rpm.user_id = rg.user_id
+           AND rpm.resource_type = rg.resource_type
+           AND rpm.resource_id IN (rg.resource_id, '*')
+           AND rpm.resource_sub IN (rg.resource_sub, '*')
        )`,
     [productionId, userId, reason],
   );

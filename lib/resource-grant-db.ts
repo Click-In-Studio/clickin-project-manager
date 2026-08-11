@@ -33,6 +33,7 @@ export async function getResourceGrantLevel(
        AND rg.resource_type = $3
        AND rg.resource_id = $4
        AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ORDER BY rpl.sort_order DESC
      LIMIT 1`,
     [productionId, userId, resourceType, resourceId],
@@ -66,6 +67,7 @@ export async function hasResourceGrantLevel(
          AND rg.resource_type = $3
          AND rg.resource_id = $4
          AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
          AND rpl.sort_order >= rpl_req.sort_order
      ) AS ok`,
     [productionId, userId, resourceType, resourceId, requiredLevel],
@@ -226,6 +228,7 @@ export async function hasUserAnyTechReqGrantInEvent(
          AND rg.resource_type = 'tech_req'
          AND etr.event_id = $3
          AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ) AS ok`,
     [productionId, userId, eventId],
   );
@@ -249,7 +252,8 @@ export async function getUserTechReqGrantIdsInEvent(
        AND rg.user_id = $2
        AND rg.resource_type = 'tech_req'
        AND etr.event_id = $3
-       AND NOT rg.is_revoked`,
+       AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [productionId, userId, eventId],
   );
   return rows.map(r => r.resource_id);
@@ -468,6 +472,7 @@ export async function getCueListGrantLevel(
        AND rg.resource_type = 'cue_list'
        AND rg.resource_id = $3
        AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ORDER BY rpl.sort_order DESC
      LIMIT 1`,
     [productionId, userId, cueListId],
@@ -583,6 +588,7 @@ export async function listCueListGrants(
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      GROUP BY rg.user_id, fu.name, rg.permission_level, rpl.sort_order
      ORDER BY rpl.sort_order DESC`,
     [cueListId],

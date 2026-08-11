@@ -1006,6 +1006,19 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('asset',       'manage',         4)
 ON CONFLICT DO NOTHING;
 
+-- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
+-- sort_order=0 保证旧线性 checker（sort_order >= 比较）不会误判命中新动词行。
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('cue_list',    'create', 0), ('cue_list',    'delete', 0),
+  ('scene',       'create', 0), ('scene',       'delete', 0),
+  ('event',       'create', 0), ('event',       'delete', 0),
+  ('report',      'create', 0), ('report',      'delete', 0),
+  ('tech_req',    'create', 0), ('tech_req',    'delete', 0),
+  ('note',        'create', 0), ('note',        'delete', 0),
+  ('script_view', 'create', 0), ('script_view', 'delete', 0),
+  ('asset',       'create', 0), ('asset',       'delete', 0)
+ON CONFLICT DO NOTHING;
+
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 
