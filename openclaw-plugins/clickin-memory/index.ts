@@ -76,6 +76,29 @@ const readOnlyTools = new Set<string>();
 let annotationsLoaded = false;
 let lastAnnotationAttempt = 0;
 
+// 拒绝理由本地暂存（toolCallId → reason）：onResolution 异步预取，
+// tool_result_persist（同步签名）读取。TTL 清扫防 persist 未触发时滞留。
+const denyReasonByToolCall = new Map<string, { reason: string; ts: number }>();
+const DENY_REASON_LOCAL_TTL_MS = 600_000;
+
+async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<string | null> {
+  try {
+    for (const [k, v] of denyReasonByToolCall) {
+      if (Date.now() - v.ts > DENY_REASON_LOCAL_TTL_MS) denyReasonByToolCall.delete(k);
+    }
+    const origin = new URL(mcpUrl).origin;
+    const res = await fetch(`${origin}/deny-reason?toolCallId=${encodeURIComponent(toolCallId)}`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { reason?: string | null };
+    return typeof data.reason === "string" && data.reason ? data.reason : null;
+  } catch (err) {
+    console.error("[clickin-memory] fetchDenyReason error:", err);
+    return null;
+  }
+}
+
 // gateway 与 Next.js（MCP server）在 CD 后几乎同时启动——gateway_start
 // 拉取时 3101 可能还没监听。失败不能永久 fail closed 到下次重启：
 // before_tool_call 里按需惰性重试（30s 节流），成功一次即缓存。
@@ -328,6 +351,7 @@ export default definePluginEntry({
         const e = event as {
           toolName: string;
           params: Record<string, unknown>;
+          toolCallId?: string;
           context?: { pluginConfig?: unknown };
         };
         const cfg = resolveConfig(e?.context?.pluginConfig);
@@ -347,6 +371,7 @@ export default definePluginEntry({
         if (annotationsLoaded && readOnlyTools.has(e.toolName)) return;
 
         const pretty = describeToolCall(e.toolName.slice(MCP_TOOL_PREFIX.length), e.params ?? {});
+        const toolCallId = e.toolCallId;
         return {
           requireApproval: {
             title: pretty.title.slice(0, 80),
@@ -356,10 +381,44 @@ export default definePluginEntry({
             // Phase 4 后续项），所以只提供一次性放行
             allowedDecisions: ["allow-once", "deny"] as Array<"allow-once" | "deny">,
             timeoutMs: 120_000,
+            // 拒绝时预取用户填写的理由：后端在 resolve RPC 之前已把理由按
+            // toolCallId 存好（先存后 resolve 的时序保证），这里异步取回放
+            // 进本地 map——因为 tool_result_persist 的 shipped 签名是同步的，
+            // 不能在那里 await，只能在此预取。
+            onResolution(decision: string) {
+              if (decision !== "deny" || !toolCallId) return;
+              return fetchDenyReason(cfg.mcpUrl, toolCallId).then((reason) => {
+                if (reason) denyReasonByToolCall.set(toolCallId, { reason, ts: Date.now() });
+              });
+            },
           },
         };
       },
       { priority: 10 },
     );
+
+    // 被拒工具结果的持久化重写：把用户的拒绝理由追加进结果文本，与拒绝
+    // 同帧到达模型（单次回复；steer 注入会造成双回复）。同步 hook——理由
+    // 已由 onResolution 预取到本地。竞态说明：若 persist 在预取完成前触发
+    // （loopback fetch 通常 1-2ms，窗口极小），理由静默丢失、退化为默认
+    // 拒绝文案，无损；联调若观察到丢失再考虑兜底。
+    api.on("tool_result_persist", (event: unknown) => {
+      const e = event as {
+        toolCallId?: string;
+        message: { content: string | Array<{ type?: string; text?: string }> };
+      };
+      if (!e?.toolCallId) return;
+      const entry = denyReasonByToolCall.get(e.toolCallId);
+      if (!entry) return;
+      denyReasonByToolCall.delete(e.toolCallId);
+      const suffix = `\n用户拒绝理由：${entry.reason}`;
+      const msg = e.message;
+      if (typeof msg.content === "string") {
+        return { message: { ...msg, content: msg.content + suffix } };
+      }
+      if (Array.isArray(msg.content)) {
+        return { message: { ...msg, content: [...msg.content, { type: "text", text: suffix }] } };
+      }
+    });
   },
 });

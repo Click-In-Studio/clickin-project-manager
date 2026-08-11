@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getPendingApprovalSession, resolveApproval, startChatRun } from "@/lib/agent-gateway/client";
+import { getPendingApprovalSession, resolveApproval, storeDenyReason } from "@/lib/agent-gateway/client";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 
 export const runtime = "nodejs";
@@ -43,16 +43,17 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    await resolveApproval(id, decision as "allow-once" | "allow-always" | "deny");
-    // 拒绝理由通过 queue-steer 注入还在等待的 run：gateway 的 resolve RPC
-    // 不携带理由，但 run 此刻正阻塞在被拒的工具结果上，注入的消息会在下一
-    // 个模型边界与"工具被拒"一起呈现给 agent，它能据此调整方案。
-    // best-effort：注入失败不影响 resolve 本身的成功返回。
+    // 拒绝理由在 resolve **之前**暂存（键为 toolCallId）：gateway 的 resolve
+    // 协议不携带理由，插件在 tool_result_persist 里经 MCP 同进程端点取走并
+    // 重写进被拒工具结果——与拒绝同帧到达模型，单次回复（steer 注入会造成
+    // "先答默认拒绝、再答理由"的双回复）。先存后 resolve 保证时序。
     if (decision === "deny" && typeof reason === "string" && reason.trim()) {
-      startChatRun(sessionKey, `【审批拒绝理由】${reason.trim()}`).catch((err) => {
-        console.warn("[agent-approval] 拒绝理由注入失败（resolve 已成功）:", err instanceof Error ? err.message : err);
-      });
+      const stored = storeDenyReason(id, reason.trim());
+      if (!stored) console.warn(`[agent-approval] approval ${id} 无 toolCallId 关联，拒绝理由无法转交插件`);
     }
+    // 若下面的 resolve 抛错，已存的理由成为孤儿——有意不回滚：TTL（10min）
+    // 兜底回收，且用户重试拒绝会覆盖写入，不值得为此加清理分支。
+    await resolveApproval(id, decision as "allow-once" | "allow-always" | "deny");
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);
