@@ -27,9 +27,15 @@ const DEFAULTS: Required<PluginConfig> = {
 };
 
 const MCP_TOOL_PREFIX = "clickin__";
-// webchat sessionKey: agent:<agentId>:clickin:chat:<userId>:<uuid>
-// （未来扩展 productionId：clickin:chat:<userId>:<productionId>:<uuid>）
-const SESSION_KEY_RE = /clickin:chat:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?::([0-9a-f-]{36}))?:/i;
+// webchat sessionKey（与后端 lib/mcp/session-identity.ts 同构）：
+//   个人        clickin:chat:<userId>:<sessionUuid>
+//   production  clickin:chat:<userId>:<productionId>:<sessionUuid>
+// production id 是短字母数字串（无连字符 ≤32），与末段会话 UUID 可判别。
+const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const SESSION_KEY_RE = new RegExp(
+  `clickin:chat:(${UUID_PATTERN}):(?:([a-z0-9]{1,32}):)?(${UUID_PATTERN})(?::|$)`,
+  "i",
+);
 
 function resolveConfig(raw: unknown): Required<PluginConfig> {
   const c = (raw ?? {}) as PluginConfig;
@@ -288,14 +294,18 @@ export default definePluginEntry({
         if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
 
         // Level C 权限链的地基：从 sessionKey 解析真实调用者身份，**强制
-        // 覆写** _caller_user_id——模型自己填什么都会被盖掉，MCP 工具只信
-        // 这个字段。非 webchat 会话（heartbeat/cron 等）解析不出身份则不
-        // 注入，工具侧因缺身份而拒绝。
+        // 覆写** _caller_user_id / _caller_production_id——模型自己填什么
+        // 都会被盖掉，MCP 工具只信这两个字段。非 webchat 会话解析不出身份
+        // 则剥除，工具侧因缺身份而拒绝；个人会话无 production 维度同样
+        // 剥除 production 字段（防模型伪造制作语境）。
         const identity = parseSessionIdentity((ctx as { sessionKey?: string })?.sessionKey);
-        const params = identity
-          ? { ...e.params, _caller_user_id: identity.userId }
-          : { ...e.params };
-        if (!identity) delete (params as Record<string, unknown>)._caller_user_id; // 不许模型伪造
+        const params: Record<string, unknown> = { ...e.params };
+        delete params._caller_user_id;
+        delete params._caller_production_id;
+        if (identity) {
+          params._caller_user_id = identity.userId;
+          if (identity.productionId) params._caller_production_id = identity.productionId;
+        }
 
         if (!cfg.approvalEnabled) return { params };
         // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。

@@ -151,6 +151,28 @@ describe("MCP 端点：上报与组装取件", () => {
     expect(data.markdown ?? "").not.toContain("端点上报测试");
   });
 
+  it("production 会话注入「当前制作」段（成员）", async () => {
+    const sessionKey = `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`;
+    const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=${encodeURIComponent(sessionKey)}`);
+    const data = (await inject.json()) as { markdown: string };
+    expect(data.markdown).toContain("## 当前制作");
+    expect(data.markdown).toContain("我的角色");
+  });
+
+  it("非成员的 production 会话不注入制作段（实时资格校验）", async () => {
+    const { makeProduction: mk } = await import("./factories");
+    const { prodId: otherProd } = await mk(); // 无 owner、无成员
+    try {
+      const sessionKey = `clickin:chat:${userId}:${otherProd}:11111111-2222-3333-4444-555555555555`;
+      const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=${encodeURIComponent(sessionKey)}`);
+      const data = (await inject.json()) as { markdown: string | null };
+      expect(data.markdown ?? "").not.toContain("## 当前制作");
+    } finally {
+      const { cleanupProduction: cp } = await import("./factories");
+      await cp(otherProd).catch(() => {});
+    }
+  });
+
   it("缺 userId → 400；非法 record → 400", async () => {
     expect((await fetch(`${BASE}/inject-context`)).status).toBe(400);
     const bad = await fetch(`${BASE}/memory-run`, {

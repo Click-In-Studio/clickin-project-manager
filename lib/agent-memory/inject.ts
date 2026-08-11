@@ -3,10 +3,13 @@
 // 全部在这里，插件是纯传输层。
 
 import { buildUserContextMarkdown } from "@/lib/mcp/user-context";
+import { buildProductionContextMarkdown } from "@/lib/mcp/production-context";
+import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { readMemory, readRecentRuns } from "./store";
 
-// 各段预算（字符）——production 段将在 Phase A-2 加入
+// 各段预算（字符）
 const USER_CONTEXT_MAX = 1000;
+const PRODUCTION_CONTEXT_MAX = 1000;
 const MEMORY_MAX = 4000;
 const RECENT_DAYS = 3;
 const RECENT_MAX_ENTRIES = 5;
@@ -25,9 +28,28 @@ async function cachedUserContext(userId: string): Promise<string | null> {
   return clipped;
 }
 
+// production 段缓存（user×production 5min——角色/部门/里程碑相对静态）
+const productionContextCache = new Map<string, { md: string | null; ts: number }>();
+
+async function cachedProductionContext(userId: string, productionId: string): Promise<string | null> {
+  const key = `${userId}:${productionId}`;
+  const hit = productionContextCache.get(key);
+  if (hit && Date.now() - hit.ts < USER_CONTEXT_TTL_MS) return hit.md;
+  const md = await buildProductionContextMarkdown(userId, productionId);
+  const clipped = md && md.length > PRODUCTION_CONTEXT_MAX ? `${md.slice(0, PRODUCTION_CONTEXT_MAX)}…` : md;
+  productionContextCache.set(key, { md: clipped, ts: Date.now() });
+  return clipped;
+}
+
 export async function buildInjectContext(userId: string, excludeSessionKey?: string): Promise<string | null> {
-  const [userContext, memory, recent] = [
+  // production 会话：从 sessionKey 解析制作维度，注入"当前制作"段
+  // （段内做实时成员资格校验，被移出制作后不再注入）
+  const identity = parseSessionIdentity(excludeSessionKey);
+  const productionId = identity?.userId === userId ? identity?.productionId : undefined;
+
+  const [userContext, productionContext, memory, recent] = [
     await cachedUserContext(userId),
+    productionId ? await cachedProductionContext(userId, productionId) : null,
     readMemory(userId, MEMORY_MAX),
     readRecentRuns(userId, {
       days: RECENT_DAYS,
@@ -36,10 +58,11 @@ export async function buildInjectContext(userId: string, excludeSessionKey?: str
       excludeSessionKey,
     }),
   ];
-  if (!userContext && !memory && !recent) return null;
+  if (!userContext && !productionContext && !memory && !recent) return null;
 
   const sections: string[] = [];
   if (userContext) sections.push(userContext); // 自带 "## 当前用户" 标题
+  if (productionContext) sections.push(productionContext); // 自带 "## 当前制作" 标题
   if (memory) {
     // 防御性降级 MEMORY.md 内部标题（#/## → ###）：蒸馏产物若自带二级
     // 标题会与包裹标题同级，模型会把"长期记忆摘要"读成空标题、把内容
