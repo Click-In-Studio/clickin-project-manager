@@ -76,15 +76,21 @@ const readOnlyTools = new Set<string>();
 let annotationsLoaded = false;
 let lastAnnotationAttempt = 0;
 
-// 被拒的受门控工具调用（toolCallId → 标记时间）：onResolution("deny") 写入，
-// tool-result middleware 命中后取走并向后端取理由。TTL 清扫防 middleware
-// 未触发时滞留。
-const deniedGatedCalls = new Map<string, number>();
+// 被拒的受门控工具调用（toolCallId → 标记时间 + 取件地址）：
+// onResolution("deny") 写入，tool-result middleware 命中后取走并向后端
+// 取理由。mcpUrl 按调用捕获（来自 before_tool_call 的 cfg 闭包）——
+// middleware 事件不携带 pluginConfig，用模块级共享变量会在并发调用间
+// 互相覆盖（review #203 指出），按调用捕获则无共享可污染。
+// TTL 清扫在写入与消费两侧都执行。
+const deniedGatedCalls = new Map<string, { ts: number; mcpUrl: string }>();
 const DENY_MARK_TTL_MS = 600_000;
 
-// gateway_start / before_tool_call 刷新的有效 MCP 地址（middleware 事件
-// 不携带 pluginConfig，只能模块级共享）
-let activeMcpUrl = DEFAULTS.mcpUrl;
+function sweepDeniedGatedCalls(): void {
+  const now = Date.now();
+  for (const [k, v] of deniedGatedCalls) {
+    if (now - v.ts > DENY_MARK_TTL_MS) deniedGatedCalls.delete(k);
+  }
+}
 
 async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<string | null> {
   try {
@@ -268,7 +274,6 @@ export default definePluginEntry({
   }) {
     api.on("gateway_start", async (event: unknown) => {
       const cfg = resolveConfig((event as { context?: { pluginConfig?: unknown } })?.context?.pluginConfig);
-      activeMcpUrl = cfg.mcpUrl;
       await loadToolAnnotations(cfg.mcpUrl);
     });
 
@@ -362,7 +367,6 @@ export default definePluginEntry({
           context?: { pluginConfig?: unknown };
         };
         const cfg = resolveConfig(e?.context?.pluginConfig);
-        activeMcpUrl = cfg.mcpUrl;
         if (!cfg.approvalEnabled) return;
         if (!e.toolName?.startsWith(MCP_TOOL_PREFIX)) return; // 只管自建 MCP 工具
         // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。
@@ -390,13 +394,12 @@ export default definePluginEntry({
             allowedDecisions: ["allow-once", "deny"] as Array<"allow-once" | "deny">,
             timeoutMs: 120_000,
             // 标记"这个调用被拒了"：tool-result middleware 只对被标记的
-            // 调用取理由（middleware 对所有工具结果触发，标记做廉价筛选）
+            // 调用取理由（middleware 对所有工具结果触发，标记做廉价筛选）。
+            // mcpUrl 从本次调用的 cfg 闭包捕获，不经模块级共享。
             onResolution(decision: string) {
               if (decision !== "deny" || !toolCallId) return;
-              for (const [k, t] of deniedGatedCalls) {
-                if (Date.now() - t > DENY_MARK_TTL_MS) deniedGatedCalls.delete(k);
-              }
-              deniedGatedCalls.set(toolCallId, Date.now());
+              sweepDeniedGatedCalls();
+              deniedGatedCalls.set(toolCallId, { ts: Date.now(), mcpUrl: cfg.mcpUrl });
             },
           },
         };
@@ -409,7 +412,8 @@ export default definePluginEntry({
     // 与拒绝同帧到达、单次回复。此前用 tool_result_persist 的版本实测只
     // 改落盘记录：当轮模型仍只见 "Denied by user"，理由下一轮才从历史
     // 重放里冒出来还被误认成用户消息——middleware 才是活体路径。
-    // 异步签名允许直接 await 取理由，预取竞态一并消失。
+    // 异步签名允许直接 await 取理由（消掉的是 #202 的本地预取竞态；
+    // 后端 fetch 失败仍按原设计静默降级为默认拒绝文案）。
     // manifest 需声明 contracts.agentToolResultMiddleware: ["openclaw"]。
     api.registerAgentToolResultMiddleware(
       async (event: {
@@ -417,9 +421,12 @@ export default definePluginEntry({
         toolName: string;
         result: { content: Array<{ type?: string; text?: string }> };
       }) => {
-        if (!deniedGatedCalls.has(event.toolCallId)) return;
+        // 消费侧也清扫：middleware 未触发的孤儿标记不依赖下一次 deny 回收
+        sweepDeniedGatedCalls();
+        const mark = deniedGatedCalls.get(event.toolCallId);
+        if (!mark) return;
         deniedGatedCalls.delete(event.toolCallId);
-        const reason = await fetchDenyReason(activeMcpUrl, event.toolCallId);
+        const reason = await fetchDenyReason(mark.mcpUrl, event.toolCallId);
         if (!reason) return;
         return {
           result: {
