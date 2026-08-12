@@ -94,7 +94,12 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
+  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
+
+  // 业务规则（用户定）：参加 event 的部门要在发布前给 report 写 note
+  // → 部门参与者可见 draft report（上下文判定，与 canWriteNote 的授权面对齐）
   const canViewReportUnpublished = await isReportViewer(prodPermCtx, productionId)
+    || eventPermCtx.participantDeptIds.length > 0
     || await hasGrant(session.userId, productionId, "event", eventId, "reports", "view")
     || await hasGrant(session.userId, productionId, "report", reportId, "publication", "view");
 
@@ -103,8 +108,6 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
 
   if (!report.publishedAt && !canViewReportUnpublished)
     redirect(`/production/${productionId}/reports`);
-
-  const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
   const [notes, departments, replies, allMembers] = await Promise.all([
     listReportNotes(reportId),

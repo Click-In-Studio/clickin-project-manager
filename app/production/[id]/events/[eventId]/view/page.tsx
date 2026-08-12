@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEventDomainView, loadEventPermContext } from "@/lib/event-permissions";
 import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
@@ -69,11 +69,14 @@ export default async function EventViewPage({
     || prodPermCtx.isAdmin;
   const canViewReqs = canViewReqsFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
+  const viewerPermCtx = await loadEventPermContext(session.userId, eventId);
   const visibleReports = canViewFull
     ? reports
     : (await Promise.all(
         reports.map(async r => {
           if (r.publishedAt !== null) return r;
+          // 部门参与者可见 draft（发布前写 note 的业务规则）
+          if (viewerPermCtx.participantDeptIds.length > 0) return r;
           const hasReportView = await hasGrantCheck(session.userId, productionId, "report", r.id, "publication", "view");
           return hasReportView ? r : null;
         })

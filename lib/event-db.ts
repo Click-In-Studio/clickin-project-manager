@@ -1963,17 +1963,22 @@ export async function listProductionReports(
      JOIN production_event pe ON pe.id = er.event_id
      WHERE pe.production_id = $1
        AND ($3 OR er.published_at IS NOT NULL
+            -- draft 可见：publication@view（本报告）或 event reports@view（本 event；'*' 已由 $3 覆盖）
             OR EXISTS (
               SELECT 1 FROM resource_grant rg
-              JOIN resource_permission_level rpl
-                ON rpl.resource_type = rg.resource_type AND rpl.permission_level = rg.permission_level
-              JOIN resource_permission_level rpl_view
-                ON rpl_view.resource_type = 'report' AND rpl_view.permission_level = 'view'
               WHERE rg.user_id = $2::uuid AND rg.production_id = $1
-                AND rg.resource_type = 'report' AND rg.resource_id = er.id
                 AND NOT rg.is_revoked
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-                AND rpl.sort_order >= rpl_view.sort_order
+                AND ((rg.resource_type = 'report' AND rg.resource_id = er.id
+                      AND rg.resource_sub = 'publication' AND rg.permission_level = 'view')
+                  OR (rg.resource_type = 'event' AND rg.resource_id = er.event_id
+                      AND rg.resource_sub = 'reports' AND rg.permission_level = 'view'))
+            )
+            -- 部门参与者可见 draft（发布前写 note 的业务规则，与 participantDeptIds 同谓词）
+            OR EXISTS (
+              SELECT 1 FROM event_participant ep_dept
+              WHERE ep_dept.event_id = pe.id AND ep_dept.user_id = $2::uuid
+                AND ep_dept.department_id IS NOT NULL
             ))
      ORDER BY COALESCE(er.published_at, er.updated_at) DESC`,
     [productionId, userId, includeDrafts]
