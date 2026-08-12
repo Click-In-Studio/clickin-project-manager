@@ -376,6 +376,24 @@ describe("A: importScriptToVersion DB integration", () => {
     ]);
     expect(cueRows.rows[2].cue_list_id).not.toBe(existingLightListId);
 
+    const importedListId = cueRows.rows[2].cue_list_id;
+    const creatorGrants = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM resource_grant
+       WHERE production_id = $1 AND user_id = $2
+         AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
+      [PROD_A, TEST_USER, importedListId],
+    );
+    expect(creatorGrants.rows.map(row => `${row.resource_sub}@${row.permission_level}`).sort()).toEqual(
+      ["*@view", "*@edit", "*@delete", "cues@create", "cues@delete", "grants@edit"].sort(),
+    );
+    const personOwnership = await getPool().query(
+      `SELECT 1 FROM resource_person_manage
+       WHERE production_id = $1 AND user_id = $2
+         AND resource_type = 'cue_list' AND resource_id = $3`,
+      [PROD_A, TEST_USER, importedListId],
+    );
+    expect(personOwnership.rows).toHaveLength(1);
+
     const scriptContents = await getPool().query<{ content: string }>(
       `SELECT s.content
        FROM script_version sv

@@ -1756,6 +1756,56 @@ type ImportedCueColumn = {
   cues: Array<{ afterBlockId: string | null; content: string }>;
 };
 
+async function seedCueListCreatorAccessInTx(
+  client: PoolClient,
+  data: { id: string; productionId: string; template: string | null; createdBy: string },
+): Promise<void> {
+  await client.query(
+    `WITH creator_grants AS (
+       INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT $1, $3, 'cue_list', $2, s.sub, s.verb, 'self_confirmed', $3
+       FROM (VALUES ('*', 'view'), ('*', 'edit'), ('*', 'delete'),
+                    ('cues', 'create'), ('cues', 'delete'),
+                    ('grants', 'edit')) AS s(sub, verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING
+     ), eligible_depts AS (
+       SELECT pdm.dept_id
+       FROM production_dept_member pdm
+       JOIN production_dept pd ON pd.id = pdm.dept_id
+       WHERE pdm.user_id = $3
+         AND pdm.production_id = $1
+         AND $4::text = ANY(pd.allowed_cue_types)
+     ), dept_manage AS (
+       INSERT INTO resource_dept_manage
+         (production_id, dept_id, resource_type, resource_id, established_by)
+       SELECT $1, dept_id, 'cue_list', $2, $3 FROM eligible_depts
+       ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
+       DO NOTHING
+     ), dept_permissions AS (
+       INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+       SELECT $1, eligible_depts.dept_id, k.key
+       FROM eligible_depts
+       CROSS JOIN (VALUES
+         ('node:cue_list/' || $2 || '@view'),
+         ('node:cue_list/' || $2 || '@edit'),
+         ('node:cue_list/' || $2 || '/cues@create'),
+         ('node:cue_list/' || $2 || '/cues@delete')
+       ) AS k(key)
+       ON CONFLICT (dept_id, permission_key) DO NOTHING
+     )
+     INSERT INTO resource_person_manage
+       (production_id, user_id, resource_type, resource_id, established_by)
+     SELECT $1, $3, 'cue_list', $2, $3
+     WHERE NOT EXISTS (SELECT 1 FROM eligible_depts)
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+    [data.productionId, data.id, data.createdBy, data.template],
+  );
+}
+
 async function importCueColumnsInTx(
   client: PoolClient,
   productionId: string,
@@ -1788,31 +1838,7 @@ async function importCueColumnsInTx(
          VALUES ($1, $2, $3, '', NULL, $4, $5)`,
         [id, productionId, column.name, template, createdBy],
       );
-      await client.query(
-        `INSERT INTO resource_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by)
-         VALUES ($1, $2, 'cue_list', $3, '*', 'manage', 'self_confirmed', $2)
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [productionId, createdBy, id],
-      );
-      if (template) {
-        await client.query(
-          `INSERT INTO resource_dept_manage
-             (production_id, dept_id, resource_type, resource_id, established_by)
-           SELECT $1, pdm.dept_id, 'cue_list', $2, $3
-           FROM production_dept_member pdm
-           JOIN production_dept pd ON pd.id = pdm.dept_id
-           WHERE pdm.user_id = $3
-             AND pdm.production_id = $1
-             AND $4 = ANY(pd.allowed_cue_types)
-           ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
-           DO NOTHING`,
-          [productionId, id, createdBy, template],
-        );
-      }
+      await seedCueListCreatorAccessInTx(client, { id, productionId, template, createdBy });
       list = { id, name: column.name, template };
       listByKey.set(key, list);
     }
@@ -4427,72 +4453,7 @@ export async function createCueList(data: {
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy],
     );
-    // Creator row-set（批A §0.6：动词行集取代 manage 单行）。
-    // '*' 整树通配不含保留段，grants 必须显式；cues 的 create/delete 是独立动词行。
-    // 存续按归属二分（self_confirmed + resource_dept_manage/resource_person_manage 覆盖）。
-    await client.query(
-      `INSERT INTO resource_grant
-         (production_id, user_id, resource_type, resource_id, resource_sub,
-          permission_level, grant_source, confirmed_by)
-       SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
-       FROM (VALUES ('*', 'view'), ('*', 'edit'), ('*', 'delete'),
-                    ('cues', 'create'), ('cues', 'delete'),
-                    ('grants', 'edit')) AS s(sub, verb)
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-         WHERE is_revoked = false
-       DO NOTHING`,
-      [data.productionId, data.createdBy, data.id],
-    );
-    // Write resource_dept_manage for creator's depts where allowed_cue_types match template
-    if (data.template) {
-      await client.query(
-        `INSERT INTO resource_dept_manage
-           (production_id, dept_id, resource_type, resource_id, established_by)
-         SELECT $1, pdm.dept_id, 'cue_list', $2, $3
-         FROM production_dept_member pdm
-         JOIN production_dept pd ON pd.id = pdm.dept_id
-         WHERE pdm.user_id = $3
-           AND pdm.production_id = $1
-           AND $4 = ANY(pd.allowed_cue_types)
-         ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
-         DO NOTHING`,
-        [data.productionId, data.id, data.createdBy, data.template],
-      );
-      // 批A 六步链：归属 dept 同时获得该表的 edit 行集资格（production_dept_permission，
-      // 节点串词汇——zone 键与 grant 键时刻一致；成员经第 3 步自我确认落行）
-      await client.query(
-        `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-         SELECT DISTINCT $1, pdm.dept_id, k.key
-         FROM production_dept_member pdm
-         JOIN production_dept pd ON pd.id = pdm.dept_id
-         CROSS JOIN (VALUES
-           ('node:cue_list/' || $2 || '@view'),
-           ('node:cue_list/' || $2 || '@edit'),
-           ('node:cue_list/' || $2 || '/cues@create'),
-           ('node:cue_list/' || $2 || '/cues@delete')
-         ) AS k(key)
-         WHERE pdm.user_id = $3
-           AND pdm.production_id = $1
-           AND $4 = ANY(pd.allowed_cue_types)
-         ON CONFLICT (dept_id, permission_key) DO NOTHING`,
-        [data.productionId, data.id, data.createdBy, data.template],
-      );
-    }
-    // Person fallback: no dept managers → creator manages this cue_list
-    const hasDept = await client.query(
-      `SELECT 1 FROM resource_dept_manage
-       WHERE production_id=$1 AND resource_type='cue_list' AND resource_id=$2 LIMIT 1`,
-      [data.productionId, data.id],
-    );
-    if (hasDept.rows.length === 0) {
-      await client.query(
-        `INSERT INTO resource_person_manage
-           (production_id, user_id, resource_type, resource_id, established_by)
-         VALUES ($1,$2,'cue_list',$3,$2)
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-        [data.productionId, data.createdBy, data.id],
-      );
-    }
+    await seedCueListCreatorAccessInTx(client, data);
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
