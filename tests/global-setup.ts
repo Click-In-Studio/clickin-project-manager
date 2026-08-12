@@ -304,10 +304,10 @@ export async function teardown() {
     await unlink(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH).catch(() => {});
   }
 
-  // Tables with no ON DELETE CASCADE from app_user:
-  // cue_list.created_by and production_event.created_by need explicit deletes first.
+  // Tables with no ON DELETE CASCADE from app_user need explicit cleanup first.
   await pool.query("DELETE FROM cue_list WHERE created_by = $1", [TEST_USER]);
   await pool.query("DELETE FROM production_event WHERE created_by = $1", [TEST_USER]);
+  await pool.query("DELETE FROM wiki WHERE created_by = $1", [TEST_USER]);
 
   // Clean up cue-list-grant migration factory data (migration path only; no-op otherwise).
   let cueListGrantSnapshot: CueListGrantSnapshot | null = null;
