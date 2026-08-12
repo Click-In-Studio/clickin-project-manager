@@ -447,6 +447,19 @@ export async function writeTechReqGrants(
 
 export type CueListLevel = "manage" | "edit" | "mount" | "view";
 
+/**
+ * 批A：cue_list 伪级别 → 动词行集（授权面统一展开表）。
+ * 非线性模型下"级别"只是授权 UX 的语言，蕴含由授权时发多行表达（总表 §0）。
+ * selfConfirm / 直接授权 / 审批发行共用此表。
+ */
+export const CUE_LIST_LEVEL_ROW_SETS: Record<CueListLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["*", "view"]],
+  mount:  [["*", "view"], ["mounts", "create"]],
+  edit:   [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"]],
+  manage: [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"],
+           ["*", "delete"], ["grants", "edit"]],
+};
+
 export type CueListAccessResult =
   | { canAccess: true; level: CueListLevel }
   | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "manage" | "edit" }
@@ -461,30 +474,34 @@ export async function getCueListGrantLevel(
   productionId: string,
   cueListId: string,
 ): Promise<CueListLevel | null> {
-  const { rows } = await getPool().query<{ permission_level: string }>(
-    `SELECT rg.permission_level
+  // 批A REST 语义：从动词行推导 UI 伪级别（manage=grants edit；edit=覆盖 cues 的
+  // edit；view=meta/cues view）。伪级别仅为前端展示兼容，检查本体是动词行。
+  const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+    `SELECT rg.resource_sub, rg.permission_level
      FROM resource_grant rg
-     JOIN resource_permission_level rpl
-       ON rpl.resource_type = rg.resource_type
-       AND rpl.permission_level = rg.permission_level
      WHERE rg.production_id = $1
        AND rg.user_id = $2
        AND rg.resource_type = 'cue_list'
-       AND rg.resource_id = $3
+       AND rg.resource_id IN ($3, '*')
        AND NOT rg.is_revoked
-       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-     ORDER BY rpl.sort_order DESC
-     LIMIT 1`,
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [productionId, userId, cueListId],
   );
-  return (rows[0]?.permission_level ?? null) as CueListLevel | null;
+  const has = (sub: string[], verb: string) =>
+    rows.some((r) => sub.includes(r.resource_sub) && r.permission_level === verb);
+  if (has(["grants"], "edit")) return "manage";
+  if (has(["cues", "*"], "edit")) return "edit";
+  if (has(["meta", "cues", "*"], "view")) return "view";
+  return null;
 }
 
 /**
  * Checks whether user is in the free-approval zone for a given level on a cue list.
- * Free-approval zone = user is member of a dept that has resource_dept_manage for this cue list
- * AND (dept.permissions[] ⊇ 'cue_list:edit' OR user is POC of that dept).
- * For manage level, only POC qualifies.
+ *
+ * 批A（六步链 §0.8）：
+ *   edit 档 = production_dept_permission 节点行（zone 键与 grant 键同词汇；
+ *             POC 兜底保留——管理部门的 POC 天然有 edit 资格）
+ *   manage 档 = 管理 dept 的 POC（代码规则；模板行不区分 POC，已知例外记总表）
  */
 export async function checkCueListFreeApprovalZone(
   userId: string,
@@ -508,19 +525,31 @@ export async function checkCueListFreeApprovalZone(
     return rows.length > 0;
   }
 
-  // edit level: POC or dept has 'cue_list:edit' in permissions[]
+  // edit 档：dept 节点行（含通配）∪ 管理 dept 的 POC
+  const editKeys = [
+    `node:cue_list/${cueListId}@edit`,
+    `node:cue_list/*@edit`,
+  ];
   const { rows } = await getPool().query(
     `SELECT 1
-     FROM resource_dept_manage rdm
-     JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE rdm.production_id = $1
-       AND rdm.resource_type = 'cue_list'
-       AND rdm.resource_id = $2
-       AND pdm.user_id = $3
-       AND (pdm.is_poc = true OR 'cue_list:edit' = ANY(pd.permissions))
+     FROM production_dept_member pdm
+     WHERE pdm.production_id = $1
+       AND pdm.user_id = $2
+       AND (
+         EXISTS (
+           SELECT 1 FROM production_dept_permission pdp
+           WHERE pdp.dept_id = pdm.dept_id AND pdp.permission_key = ANY($4)
+         )
+         OR (pdm.is_poc AND EXISTS (
+           SELECT 1 FROM resource_dept_manage rdm
+           WHERE rdm.production_id = $1
+             AND rdm.resource_type = 'cue_list'
+             AND rdm.resource_id = $3
+             AND rdm.dept_id = pdm.dept_id
+         ))
+       )
      LIMIT 1`,
-    [productionId, cueListId, userId],
+    [productionId, userId, cueListId, editKeys],
   );
   return rows.length > 0;
 }
@@ -535,16 +564,31 @@ export async function selfConfirmCueListGrant(
   cueListId: string,
   level: "edit" | "manage",
 ): Promise<void> {
+  // 批A：自我确认写动词行集（非线性——edit 集含 view；manage 集另含 delete+grants）
   await getPool().query(
     `INSERT INTO resource_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
-     VALUES ($1, $2, 'cue_list', $3, '*', $4, 'self_confirmed', $2)
+     SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
+     FROM (VALUES ('*', 'view'), ('*', 'edit'), ('cues', 'create'), ('cues', 'delete')) AS s(sub, verb)
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
        WHERE is_revoked = false
      DO NOTHING`,
-    [productionId, userId, cueListId, level],
+    [productionId, userId, cueListId],
   );
+  if (level === "manage") {
+    await getPool().query(
+      `INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
+       FROM (VALUES ('*', 'delete'), ('grants', 'edit')) AS s(sub, verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, userId, cueListId],
+    );
+  }
 }
 
 /**
@@ -578,22 +622,36 @@ export async function getCueListAccess(
 export async function listCueListGrants(
   cueListId: string,
 ): Promise<Array<{ userId: string; userName: string; level: CueListLevel }>> {
-  const { rows } = await getPool().query<{ user_id: string; user_name: string; permission_level: string }>(
-    `SELECT rg.user_id, COALESCE(fu.name, rg.user_id::text) AS user_name, rg.permission_level
+  // 批A：从动词行推导每人伪级别（manage=grants edit > edit=cues edit > view）
+  const { rows } = await getPool().query<{ user_id: string; user_name: string; resource_sub: string; permission_level: string }>(
+    `SELECT rg.user_id, COALESCE(fu.name, rg.user_id::text) AS user_name,
+            rg.resource_sub, rg.permission_level
      FROM resource_grant rg
      LEFT JOIN feishu_user fu ON fu.user_id = rg.user_id
-     JOIN resource_permission_level rpl
-       ON rpl.resource_type = rg.resource_type
-       AND rpl.permission_level = rg.permission_level
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND NOT rg.is_revoked
-       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-     GROUP BY rg.user_id, fu.name, rg.permission_level, rpl.sort_order
-     ORDER BY rpl.sort_order DESC`,
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [cueListId],
   );
-  return rows.map((r) => ({ userId: r.user_id, userName: r.user_name, level: r.permission_level as CueListLevel }));
+  const byUser = new Map<string, { userName: string; subs: Array<{ sub: string; verb: string }> }>();
+  for (const r of rows) {
+    const e = byUser.get(r.user_id) ?? { userName: r.user_name, subs: [] };
+    e.subs.push({ sub: r.resource_sub, verb: r.permission_level });
+    byUser.set(r.user_id, e);
+  }
+  const rank: Record<CueListLevel, number> = { manage: 3, edit: 2, mount: 1, view: 0 };
+  const out: Array<{ userId: string; userName: string; level: CueListLevel }> = [];
+  for (const [userId, e] of byUser) {
+    const has = (subs: string[], verb: string) =>
+      e.subs.some((s) => subs.includes(s.sub) && s.verb === verb);
+    let level: CueListLevel | null = null;
+    if (has(["grants"], "edit")) level = "manage";
+    else if (has(["cues", "*"], "edit")) level = "edit";
+    else if (has(["meta", "cues", "*"], "view")) level = "view";
+    if (level) out.push({ userId, userName: e.userName, level });
+  }
+  return out.sort((a, b) => rank[b.level] - rank[a.level] || a.userId.localeCompare(b.userId));
 }
 
 /**
@@ -622,12 +680,24 @@ export async function addCueListDeptAccess(
   deptId: string,
   establishedBy: string,
 ): Promise<void> {
+  // dept 分享 = 归属（rdm，审批人/POC manage 档）+ zone 资格（dept_permission
+  // 实例级 edit 行集，成员经六步链第 3 步自我确认落 grant）
   await getPool().query(
     `INSERT INTO resource_dept_manage
        (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
      VALUES ($1, $2, 'cue_list', $3, '*', $4)
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
     [productionId, deptId, cueListId, establishedBy],
+  );
+  await getPool().query(
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+     SELECT $1, $2, unnest(ARRAY[
+       'node:cue_list/' || $3 || '@view',
+       'node:cue_list/' || $3 || '@edit',
+       'node:cue_list/' || $3 || '/cues@create',
+       'node:cue_list/' || $3 || '/cues@delete'
+     ]) ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+    [productionId, deptId, cueListId],
   );
 }
 
@@ -636,6 +706,7 @@ export async function addCueListDeptAccess(
  */
 export async function removeCueListDeptAccess(
   cueListId: string,
+  productionId: string,
   deptId: string,
 ): Promise<void> {
   await getPool().query(
@@ -643,6 +714,21 @@ export async function removeCueListDeptAccess(
      WHERE resource_type = 'cue_list' AND resource_id = $1 AND dept_id = $2`,
     [cueListId, deptId],
   );
+  // 撤 zone 资格行，并对该 dept 成员立即重算存续（资格消失 → self_confirmed 行收走，
+  // 不等下次偶然的 role/dept 变动）
+  await getPool().query(
+    `DELETE FROM production_dept_permission
+     WHERE dept_id = $1 AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
+    [deptId, cueListId],
+  );
+  const { rows: members } = await getPool().query<{ user_id: string }>(
+    `SELECT user_id FROM production_dept_member WHERE dept_id = $1`,
+    [deptId],
+  );
+  const { recomputeAndRevokeGrants } = await import("./dept-db");
+  for (const m of members) {
+    await recomputeAndRevokeGrants(m.user_id, productionId, "dept_change");
+  }
 }
 
 /**
@@ -670,13 +756,16 @@ export async function setCueListGrant(
            AND NOT is_revoked`,
         [productionId, userId, cueListId],
       );
-      await client.query(
-        `INSERT INTO resource_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by)
-         VALUES ($1, $2, 'cue_list', $3, '*', $4, 'direct', $5)`,
-        [productionId, userId, cueListId, level, grantedBy],
-      );
+      // 批A：按伪级别写动词行集（direct 授权不受 dept/role sweep 影响）
+      for (const [sub, verb] of CUE_LIST_LEVEL_ROW_SETS[level] ?? CUE_LIST_LEVEL_ROW_SETS.edit) {
+        await client.query(
+          `INSERT INTO resource_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by)
+           VALUES ($1, $2, 'cue_list', $3, $4, $5, 'direct', $6)`,
+          [productionId, userId, cueListId, sub, verb, grantedBy],
+        );
+      }
       await client.query("COMMIT");
     } catch (e) {
       await client.query("ROLLBACK");

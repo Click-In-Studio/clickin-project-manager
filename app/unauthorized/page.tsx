@@ -22,9 +22,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   "task:view": "查看任务",
   "task:view_any": "查看所有任务",
   "asset:view": "查看数字资产",
-  "cue_list:view": "查看 Cue 表",
   // 写权限
-  "cue_list:edit": "编辑 Cue 表",
   "event:edit": "编辑日程",
   "event:edit_call": "编辑 Call 时间",
   "event:edit_schedule": "编辑日程安排",

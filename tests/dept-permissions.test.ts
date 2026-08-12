@@ -88,7 +88,7 @@ describe("computeInheritedPermissions", () => {
     { id: "root", parent_id: null, permissions: ["scene:create", "scene:view"] },
     { id: "child", parent_id: "root", permissions: ["character:create"] },
     { id: "grandchild", parent_id: "child", permissions: ["script:view"] },
-    { id: "sibling", parent_id: "root", permissions: ["cue_list:view"] },
+    { id: "sibling", parent_id: "root", permissions: ["script:view"] },
   ];
 
   it("user in leaf dept inherits its own + all ancestor permissions", () => {
@@ -112,7 +112,7 @@ describe("computeInheritedPermissions", () => {
     expect(result.has("script:view")).toBe(true);
     expect(result.has("character:create")).toBe(true);
     expect(result.has("scene:create")).toBe(true);
-    expect(result.has("cue_list:view")).toBe(true); // from sibling
+    expect(result.has("script:view")).toBe(true); // from sibling
   });
 
   it("empty dept list returns empty set", () => {
@@ -148,8 +148,8 @@ describe("computePocPermissions", () => {
   });
 
   it("poc_extra_permissions are added to the zone", () => {
-    const result = computePocPermissions("child", ["cue_list:view"], [], tree);
-    expect(result.has("cue_list:view")).toBe(true);
+    const result = computePocPermissions("child", ["script:view"], [], tree);
+    expect(result.has("script:view")).toBe(true);
     expect(result.has("character:create")).toBe(true);
   });
 
@@ -234,7 +234,7 @@ describe("createProductionDept / listProductionDepts", () => {
       productionId: prodId,
       name: "测试部门A",
       displayOrder: 1,
-      permissions: ["scene:view", "cue_list:view"],
+      permissions: ["scene:view", "script:view"],
       allowedCueTypes: ["lights"],
     });
     deptId = dept.id;
@@ -286,9 +286,9 @@ describe("updateProductionDept", () => {
   });
 
   it("can update permissions", async () => {
-    await updateProductionDept(deptId, prodId, { permissions: ["cue_list:view", "cue:view"] });
+    await updateProductionDept(deptId, prodId, { permissions: ["script:view", "character:view"] });
     const dept = await getProductionDept(deptId, prodId);
-    expect(dept!.permissions).toContain("cue_list:view");
+    expect(dept!.permissions).toContain("script:view");
     expect(dept!.permissions).not.toContain("scene:view"); // replaced
   });
 
@@ -407,13 +407,13 @@ describe("setDeptMembers: basic add/remove", () => {
       {
         userId: TEST_USER,
         isPoc: true,
-        pocExtraPermissions: ["cue_list:view"],
+        pocExtraPermissions: ["script:view"],
         pocBlockedPermissions: ["scene:view"],
       },
     ]);
     const members = await getDeptMembers(deptId);
     const row = members.find((m) => m.userId === TEST_USER);
-    expect(row?.pocExtraPermissions).toContain("cue_list:view");
+    expect(row?.pocExtraPermissions).toContain("script:view");
     expect(row?.pocBlockedPermissions).toContain("scene:view");
   });
 });
@@ -496,7 +496,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
       productionId: prodId,
       name: "权限继承子部门",
       parentId: parentDeptId,
-      permissions: ["cue_list:view"],
+      permissions: ["script:view"],
     });
     childDeptId = child.id;
 
@@ -515,7 +515,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
 
   it("member of child dept inherits child + parent permissions", async () => {
     const zone = await computeUserDeptFreeApprovalZone(TEST_USER, prodId);
-    expect(zone.has("cue_list:view")).toBe(true);  // child's own
+    expect(zone.has("script:view")).toBe(true);  // child's own
     expect(zone.has("scene:view")).toBe(true);      // inherited from parent
     expect(zone.has("character:view")).toBe(true);  // inherited from parent
   });
@@ -530,7 +530,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
     // parent permissions in zone (from membership)
     expect(zone.has("character:view")).toBe(true);
     // POC zone includes child's permissions
-    expect(zone.has("cue_list:view")).toBe(true);
+    expect(zone.has("script:view")).toBe(true);
     // poc_extra_permissions added
     expect(zone.has("script:view")).toBe(true);
     // Note: scene:view IS in zone from membership (parent dept) even though blocked in POC zone.
@@ -595,14 +595,14 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       userId: TEST_USER,
       isAdmin: false,
       isOwner: false,
-      memberPermissions: new Set(["cue:create"] as const),
+      memberPermissions: new Set(["scene:create"] as const),
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
       activeGrants: new Set(), // not yet confirmed
     };
-    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
   it("role permission with active grant → allowed", () => {
@@ -610,14 +610,14 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       userId: TEST_USER,
       isAdmin: false,
       isOwner: false,
-      memberPermissions: new Set(["cue:create"] as const),
+      memberPermissions: new Set(["scene:create"] as const),
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(["cue:create"] as const),
+      activeGrants: new Set(["scene:create"] as const),
     };
-    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: true });
+    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: true });
   });
 
   it("returns needs_self_confirm when perm is in deptFreeApprovalZone (no role)", () => {
@@ -629,10 +629,10 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["cue:create", "cue_list:create"]),
+      deptFreeApprovalZone: new Set(["scene:create", "tag_group:create"]),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
   it("returns needs_approval when perm is in neither role nor deptFreeApprovalZone", () => {
@@ -644,10 +644,10 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["cue_list:create"]),
+      deptFreeApprovalZone: new Set(["tag_group:create"]),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_approval" });
+    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 
   it("needs_self_confirm takes priority over needs_approval when zone matches", () => {
@@ -677,7 +677,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       deptFreeApprovalZone: new Set(),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "cue:create")).toEqual({ allowed: false, reason: "needs_approval" });
+    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 });
 
@@ -703,7 +703,7 @@ describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
     const deptA = await createProductionDept({
       productionId: prodId,
       name: "撤销测试部门A",
-      permissions: ["scene:view", "cue_list:view"],
+      permissions: ["scene:view", "script:view"],
     });
     deptIdA = deptA.id;
 
@@ -783,7 +783,7 @@ describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
     const pocDept = await createProductionDept({
       productionId: prodId,
       name: "POC撤销测试部门",
-      permissions: ["cue_list:view"],
+      permissions: ["script:view"],
     });
     pocDeptId = pocDept.id;
 
@@ -803,7 +803,7 @@ describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
        VALUES
-         ($1, $2, 'cue_list:view', 'self_confirmed'),
+         ($1, $2, 'script:view', 'self_confirmed'),
          ($1, $2, 'scene:view',    'self_confirmed')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_2],
@@ -829,7 +829,7 @@ describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
     // (user is still a regular member of pocDept, so cue_list:view is still in zone)
     expect(byKey["scene:view"]).toBe(false);    // still in member zone (memberDept)
     // cue_list:view: user is still in pocDept as regular member, so still in zone
-    expect(byKey["cue_list:view"]).toBe(false);
+    expect(byKey["script:view"]).toBe(false);
   });
 });
 
@@ -897,7 +897,7 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
        VALUES
          ($1, $2, 'character:view', 'self_confirmed'),
          ($1, $2, 'scene:view',     'self_confirmed'),
-         ($1, $2, 'cue_list:view',  'self_confirmed')
+         ($1, $2, 'script:view',  'self_confirmed')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_1],
     );
@@ -926,7 +926,7 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
     const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
     expect(byKey["character:view"]).toBe(true);  // was only in role-alpha zone
     expect(byKey["scene:view"]).toBe(false);      // still in role-beta zone
-    expect(byKey["cue_list:view"]).toBe(true);    // never in any role zone
+    expect(byKey["script:view"]).toBe(true);    // never in any role zone
   });
 
   it("non-self_confirmed grants are never revoked on role change", async () => {
@@ -1060,7 +1060,7 @@ describe("updateProductionDept: permissions narrowing cascades to members", () =
        VALUES
          ($1, $2, 'character:view', 'self_confirmed'),
          ($1, $2, 'script:view',    'self_confirmed'),
-         ($1, $2, 'cue_list:view',  'self_confirmed')
+         ($1, $2, 'script:view',  'self_confirmed')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_2],
     );
@@ -1082,6 +1082,6 @@ describe("updateProductionDept: permissions narrowing cascades to members", () =
     const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
     expect(byKey["character:view"]).toBe(false);  // still in narrowed dept zone
     expect(byKey["script:view"]).toBe(true);       // dept no longer grants this
-    expect(byKey["cue_list:view"]).toBe(true);     // was never in any dept zone
+    expect(byKey["script:view"]).toBe(true);     // was never in any dept zone
   });
 });

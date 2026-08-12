@@ -10,12 +10,14 @@ import type { Permission } from "./permissions";
  * go through the same role→selfConfirm→grant path as all other permissions.
  */
 export const PAGE_PERMISSION_SCOPES = {
-  base: new Set<Permission>([
+  base: new Set<string>([
     "scene:view",
     "character:view",
     "script:view",
-    "cue_list:view",
-    "cue:view",
+    // 批A：cue 域读权限改为树节点键（node:<type>/<id>[/<sub>]@<verb>）
+    "node:cue_list/*/meta@view",
+    "node:cue_list/*/cues@view",
+    "node:cue_list/*/cues/comments@create",
     "contacts:view",
     "event:follow",
     "asset:view",
@@ -88,39 +90,10 @@ export const PAGE_PERMISSION_SCOPES = {
     "character:edit_role_type",
   ]),
 
-  // Atomic cue_list/cue management permissions. Per-list resource grants
-  // (cue_list:edit, cue_list:manage_permissions) are handled separately by CuePage.
-  cuelists: new Set<Permission>([
-    "cue_list:create",
-    "cue_list:delete",
-    "cue_list:rename",
-    "cue_list:reorder",
-    "cue_list:edit_abbr",
-    "cue_list:edit_description",
-    "cue_list:create_any",
-    "cue_list:delete_any",
-    "cue_list:rename_any",
-    "cue_list:reorder_any",
-    "cue_list:edit_abbr_any",
-    "cue_list:edit_description_any",
-    "cue_list:manage_permissions_any",
-    "cue:create",
-    "cue:delete",
-    "cue:renumber",
-    "cue:rename",
-    "cue:edit_description",
-    "cue:move",
-    "cue:mount",
-    "cue:comment",
-    "cue:create_any",
-    "cue:delete_any",
-    "cue:renumber_any",
-    "cue:rename_any",
-    "cue:edit_description_any",
-    "cue:move_any",
-    "cue:mount_any",
-    "cue:edit_comment_any",
-    "cue:delete_comment_any",
+  // 批A：cue 域激活面全部走树节点键。集合 create 是唯一需要页面级激活的
+  // 生产级能力；每表写权限由 CuePage 的 per-list access 流处理（zone self-confirm）。
+  cuelists: new Set<string>([
+    "node:cue_list/*@create",
   ]),
 
   events: new Set<Permission>([

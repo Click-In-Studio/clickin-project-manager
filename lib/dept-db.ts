@@ -624,9 +624,12 @@ async function computeUserCombinedAtomicZone(
  *   cover the resource via resource_dept_manage AND the user is not a person
  *   manager of the resource (resource_person_manage).
  *
- * 存续规则：self_confirmed 行的存续 ⟺ 归属覆盖仍在。dept 归属的资源随 dept
- * 成员资格生灭；person 归属的资源（role 来源创建，person fallback）跨 dept/role
- * 变动存续，只随成员移除/手动撤销消亡。
+ * 存续规则：self_confirmed 行的存续 ⟺ 资格/归属覆盖仍在。四路覆盖任一成立即保留：
+ *   ① dept 归属（resource_dept_manage × 仍在该 dept）
+ *   ② person 归属（resource_person_manage 本人行）
+ *   ③ zone 资格（三张 permission 表的节点键仍命中该行——批A：成员基础通配行
+ *      由 role 区间键保护，dept/role 变动不误撤）
+ *   ④ 无 ①②③ → 收走
  *
  * Does NOT touch 'approval', 'direct', or 'assigned' grants (PRD spec).
  */
@@ -676,6 +679,55 @@ export async function recomputeAndRevokeGrants(
            AND rpm.resource_type = rg.resource_type
            AND rpm.resource_id IN (rg.resource_id, '*')
            AND rpm.resource_sub IN (rg.resource_sub, '*')
+       )
+       -- ③ zone 资格覆盖：三张 permission 表任一持有命中该行的节点键（含通配形态；
+       --    保留段 grants/publication 不被 sub 通配覆盖）
+       AND NOT EXISTS (
+         SELECT 1 FROM (
+           SELECT unnest(ARRAY[
+             'node:' || rg.resource_type || '/' || rg.resource_id
+               || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
+               || '@' || rg.permission_level,
+             'node:' || rg.resource_type || '/*'
+               || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
+               || '@' || rg.permission_level
+           ] || CASE WHEN rg.resource_sub = '*'
+                       OR rg.resource_sub IN ('grants', 'publication')
+                       OR rg.resource_sub LIKE 'grants/%'
+                       OR rg.resource_sub LIKE 'publication/%'
+                THEN ARRAY[]::text[]
+                ELSE ARRAY[
+                  'node:' || rg.resource_type || '/' || rg.resource_id || '@' || rg.permission_level,
+                  'node:' || rg.resource_type || '/*@' || rg.permission_level
+                ] END) AS key
+         ) cand
+         WHERE cand.key IN (
+           SELECT prp.permission_key
+           FROM production_member_role pmr
+           JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+           WHERE pmr.production_id = rg.production_id AND pmr.user_id = rg.user_id
+           UNION ALL
+           SELECT pdp.permission_key
+           FROM production_dept_permission pdp
+           WHERE pdp.production_id = rg.production_id
+             AND pdp.dept_id IN (
+               WITH RECURSIVE chain AS (
+                 SELECT pd.id, pd.parent_id
+                 FROM production_dept_member pdm
+                 JOIN production_dept pd ON pd.id = pdm.dept_id
+                 WHERE pdm.production_id = rg.production_id AND pdm.user_id = rg.user_id
+                 UNION
+                 SELECT pd2.id, pd2.parent_id
+                 FROM production_dept pd2 JOIN chain c ON pd2.id = c.parent_id
+               )
+               SELECT id FROM chain
+             )
+           UNION ALL
+           SELECT pmp.permission
+           FROM production_member_permission pmp
+           WHERE pmp.production_id = rg.production_id AND pmp.user_id = rg.user_id
+             AND pmp.granted = true
+         )
        )`,
     [productionId, userId, reason],
   );

@@ -63,20 +63,11 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "Cue 表（个人）",
     perms: [
-      "cue_list:create", "cue_list:delete", "cue_list:rename", "cue_list:reorder",
-      "cue_list:edit_abbr", "cue_list:edit_description", "cue_list:manage_permissions",
-      "cue:create", "cue:delete", "cue:renumber", "cue:rename",
-      "cue:edit_description", "cue:move", "cue:mount",
     ],
   },
   {
     label: "Cue 表（管理 _any）",
     perms: [
-      "cue_list:create_any", "cue_list:delete_any", "cue_list:rename_any",
-      "cue_list:reorder_any", "cue_list:edit_abbr_any", "cue_list:edit_description_any",
-      "cue_list:manage_permissions_any",
-      "cue:create_any", "cue:delete_any", "cue:renumber_any", "cue:rename_any",
-      "cue:edit_description_any", "cue:move_any", "cue:mount_any",
     ],
   },
   {
@@ -125,7 +116,6 @@ const PERM_GROUPS: PermGroup[] = [
     label: "评论管理",
     perms: [
       "script:edit_comment_any", "script:delete_comment_any",
-      "cue:edit_comment_any", "cue:delete_comment_any",
       "report:edit_comment_any", "report:delete_comment_any",
     ],
   },
@@ -135,7 +125,6 @@ const PERM_GROUPS: PermGroup[] = [
       "contacts:view",
       "script:view", "script:comment",
       "scene:view", "character:view",
-      "cue_list:view", "cue:view", "cue:comment",
       "event:view_call_sheet_any",
       "event:follow",
       "report:reply",

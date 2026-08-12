@@ -1,6 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getCueList, listCues, createCue, getVersion, hasListAccess } from "@/lib/db";
+import { canAccessNode } from "@/lib/grant-template";
+import type { PermissionContext } from "@/lib/permissions";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 
@@ -9,10 +11,10 @@ const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, isArchived: false };
+  if (!session) return { session: null, permCtx: null as PermissionContext | null, isArchived: false };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) return { session, isArchived: false };
-  return { session, isArchived: access.isArchived };
+  if (!access) return { session, permCtx: null as PermissionContext | null, isArchived: false };
+  return { session, permCtx: access.permCtx, isArchived: access.isArchived };
 }
 
 async function resolveVersion(productionId: string, versionId?: string | null) {
@@ -29,8 +31,12 @@ export async function GET(
   ctx: RouteContext<"/api/production/[id]/cuelists/[cueListId]/cues">
 ) {
   const { id, cueListId } = await ctx.params;
-  const { session } = await getCtx(req, id);
+  const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  // 批A 三态：内容读取门 = cues view 行（此前仅验登录，读取门缺失）
+  if (!permCtx) return Response.json({ error: "无权访问" }, { status: 403 });
+  const contentAccess = await canAccessNode(permCtx, id, "cue_list", cueListId, "cues", "view");
+  if (!contentAccess.allowed) return Response.json({ error: "无权访问" }, { status: 403 });
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;

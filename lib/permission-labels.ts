@@ -1,6 +1,12 @@
 import type { Permission } from "./permissions";
 
-export const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
+// 批A 起同时容纳原子键与树节点键（node:<type>/<id>[/<sub>]@<verb>）
+export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<string, string> = {
+  // ── 树节点键（cue 域，批A）──
+  "node:cue_list/*/meta@view": "查看Cue表目录",
+  "node:cue_list/*/cues@view": "查看Cue表内容",
+  "node:cue_list/*/cues/comments@create": "评论Cue",
+  "node:cue_list/*@create": "创建Cue表",
   // 项目管理
   "production:delete": "删除项目",
   "production:transfer_owner": "转让所有权",
@@ -100,39 +106,6 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   "tag_option:edit_color": "编辑标签颜色",
   "tag_option:reorder": "排序剧本标签",
   // Cue表
-  "cue_list:create_any": "创建任意Cue表",
-  "cue_list:delete_any": "删除任意Cue表",
-  "cue_list:rename_any": "重命名任意Cue表",
-  "cue_list:reorder_any": "排序任意Cue表",
-  "cue_list:edit_abbr_any": "编辑任意Cue表缩写",
-  "cue_list:edit_description_any": "编辑任意Cue表说明",
-  "cue_list:manage_permissions_any": "管理任意Cue表权限",
-  "cue_list:create": "创建Cue表",
-  "cue_list:delete": "删除Cue表",
-  "cue_list:rename": "重命名Cue表",
-  "cue_list:reorder": "排序Cue表",
-  "cue_list:edit_abbr": "编辑Cue表缩写",
-  "cue_list:edit_description": "编辑Cue表说明",
-  "cue_list:manage_permissions": "管理Cue表权限",
-  "cue_list:view": "查看Cue表",
-  "cue:create_any": "创建任意Cue",
-  "cue:delete_any": "删除任意Cue",
-  "cue:renumber_any": "重新编号任意Cue",
-  "cue:rename_any": "重命名任意Cue",
-  "cue:edit_description_any": "编辑任意Cue说明",
-  "cue:move_any": "移动任意Cue",
-  "cue:mount_any": "挂载任意Cue附件",
-  "cue:create": "创建Cue",
-  "cue:delete": "删除Cue",
-  "cue:renumber": "重新编号Cue",
-  "cue:rename": "重命名Cue",
-  "cue:edit_description": "编辑Cue说明",
-  "cue:move": "移动Cue",
-  "cue:mount": "挂载Cue附件",
-  "cue:view": "查看Cue",
-  "cue:comment": "评论Cue",
-  "cue:edit_comment_any": "编辑他人Cue评论",
-  "cue:delete_comment_any": "删除他人Cue评论",
   // 构作
   "dramaturgy:import": "导入构作数据",
   "dramaturgy_view:create_public": "创建公开构作视图",
@@ -214,12 +187,18 @@ export const GROUP_LABELS: Record<string, string> = {
   announcement: "公告",
 };
 
+/** 键的分组前缀：原子键取 ':' 前段，节点键取资源类型段 */
+export function permissionGroupPrefix(key: string): string {
+  if (key.startsWith("node:")) return key.slice(5).split("/")[0] ?? key;
+  return key.split(":")[0] ?? key;
+}
+
 /** Deduplicated category labels for a list of permission keys */
 export function permissionCategories(perms: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const p of perms) {
-    const prefix = p.split(":")[0] ?? p;
+    const prefix = permissionGroupPrefix(p);
     const label = GROUP_LABELS[prefix] ?? prefix;
     if (!seen.has(label)) {
       seen.add(label);

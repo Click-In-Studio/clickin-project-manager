@@ -5,7 +5,8 @@
       "Bash(npm install *)",
       "Bash(git checkout *)",
       "Bash(git rebase *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(npm test *)"
     ]
   }
 }

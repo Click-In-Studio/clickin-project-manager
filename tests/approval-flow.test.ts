@@ -432,7 +432,7 @@ describe("rejectAccessRequest", () => {
   it("notify: supervisor action notification is expired after reject", async () => {
     const req = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
-      permissionLevel: "mount",
+      permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
     });
     const reqId = req.id;
     await rejectAccessRequest(reqId, U_SUPERVISOR);
@@ -559,7 +559,7 @@ describe("listMyAccessRequests", () => {
     });
     const r2 = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
-      permissionLevel: "mount",
+      permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
     });
 
     const mine = await listMyAccessRequests(prodId, U_REQUESTER);
@@ -741,7 +741,7 @@ describe("full happy path — supervisor gate", () => {
   it("submit → supervisor approve → POC approve → resource_grant written, notifications correct", async () => {
     const req = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
-      permissionLevel: "mount",
+      permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
       grantType: "permanent",
       note: "端到端测试",
     });
@@ -768,11 +768,13 @@ describe("full happy path — supervisor gate", () => {
       `SELECT * FROM resource_grant WHERE approval_id = $1`,
       [req.id],
     );
-    expect(grant.rows).toHaveLength(1);
+    // 批A：mount 伪级别展开为 2 行动词行集（'*'@view + mounts@create）
+    expect(grant.rows).toHaveLength(2);
+    const subs = grant.rows.map((r: { resource_sub: string; permission_level: string }) => `${r.resource_sub}@${r.permission_level}`).sort();
+    expect(subs).toEqual(["*@view", "mounts@create"]);
     expect(grant.rows[0].user_id).toBe(U_REQUESTER);
     expect(grant.rows[0].resource_type).toBe("cue_list");
-    expect(grant.rows[0].permission_level).toBe("mount");
-    expect(grant.rows[0].is_revoked).toBe(false);
+    expect(grant.rows.every((r: { is_revoked: boolean }) => !r.is_revoked)).toBe(true);
 
     // Requester gets approved notification
     const requesterNotifs = await notifForRequest(U_REQUESTER, req.id);

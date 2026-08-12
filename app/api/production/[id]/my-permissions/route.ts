@@ -24,6 +24,22 @@ import {
   ROOT_PERMISSIONS,
   type Permission,
 } from "@/lib/permissions";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
+import {
+  parseNodeKey,
+  canAccessNode,
+  selfConfirmTemplateNodes,
+  type NodeKeyParts,
+} from "@/lib/grant-template";
+
+// 激活面节点目录：各页面 scope 中声明的全部树节点键（去重）
+const NODE_KEYS: readonly string[] = [
+  ...new Set(
+    Object.values(PAGE_PERMISSION_SCOPES).flatMap((s) =>
+      [...s].filter((k) => k.startsWith("node:")),
+    ),
+  ),
+];
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -40,6 +56,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   for (const perm of ALL_PERMISSIONS) {
     const result = canAccess(permCtx, perm);
     permissions[perm] = {
+      granted: result.allowed,
+      selfConfirmable: !result.allowed && result.reason === "needs_self_confirm",
+    };
+  }
+
+  // 批A：树节点键与原子键同走 pending/confirm 管道
+  for (const key of NODE_KEYS) {
+    const node = parseNodeKey(key);
+    if (!node) continue;
+    const result = await canAccessNode(
+      permCtx, productionId,
+      node.resourceType, node.resourceId, node.resourceSub, node.verb,
+    );
+    permissions[key] = {
       granted: result.allowed,
       selfConfirmable: !result.allowed && result.reason === "needs_self_confirm",
     };
@@ -64,8 +94,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   const toConfirm: Permission[] = [];
+  const nodeConfirm: NodeKeyParts[] = [];
   for (const raw of body.permissions) {
-    if (typeof raw !== "string" || !ALL_PERMISSIONS.includes(raw as Permission)) {
+    if (typeof raw !== "string") {
+      return Response.json({ error: `无效的权限值: ${raw}` }, { status: 400 });
+    }
+    // 树节点键：目录内 + 模板资格双重校验（selfConfirmTemplateNodes 内部防伪造）
+    if (raw.startsWith("node:")) {
+      const node = parseNodeKey(raw);
+      if (!node || !NODE_KEYS.includes(raw)) {
+        return Response.json({ error: `无效的权限值: ${raw}` }, { status: 400 });
+      }
+      nodeConfirm.push(node);
+      continue;
+    }
+    if (!ALL_PERMISSIONS.includes(raw as Permission)) {
       return Response.json({ error: `无效的权限值: ${raw}` }, { status: 400 });
     }
     const perm = raw as Permission;
@@ -80,8 +123,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     toConfirm.push(perm);
   }
 
+  let nodeConfirmed = 0;
+  if (nodeConfirm.length > 0) {
+    nodeConfirmed = await selfConfirmTemplateNodes(session.userId, productionId, nodeConfirm);
+  }
+
   if (toConfirm.length === 0) {
-    return Response.json({ ok: true, confirmed: 0 });
+    return Response.json({ ok: true, confirmed: nodeConfirmed });
   }
 
   const pool = getPool();
@@ -105,5 +153,5 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     client.release();
   }
 
-  return Response.json({ ok: true, confirmed: toConfirm.length });
+  return Response.json({ ok: true, confirmed: toConfirm.length + nodeConfirmed });
 }

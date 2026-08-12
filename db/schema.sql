@@ -970,10 +970,9 @@ CREATE TABLE IF NOT EXISTS resource_permission_level (
 );
 
 INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  -- cue_list 已 REST 化（批A）：只余四动词（view/edit 在此，create/delete 在下方批0 INSERT）
   ('cue_list',    'view',           1),
-  ('cue_list',    'mount',          2),
   ('cue_list',    'edit',           3),
-  ('cue_list',    'manage',         4),
   ('scene',       'view',           1),
   ('scene',       'mount',          2),
   ('scene',       'edit',           3),
@@ -1132,3 +1131,48 @@ CREATE TABLE IF NOT EXISTS production_approval_config (
   updated_by    UUID        NULL REFERENCES app_user(id),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Grant Template（权限REST化 批A，总表 §0.7/§0.8）──────────────────────────
+-- 纯全局权限模板（ROLE_TEMPLATE_PERMISSIONS 的 DB 镜像）：production_type（NULL=通用）
+-- × 角色名（'*'=成员基础）→ permission_key。仅作 fallback/seed；演出内实际资格在
+-- production_role_permission / production_dept_permission / production_member_permission。
+-- permission_key 词汇：原子键（迁移期）或节点串 node:<type>/<id>[/<sub>]@<verb>。
+
+CREATE TABLE IF NOT EXISTS grant_template (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_type TEXT        NULL,
+  role_name       TEXT        NOT NULL,
+  permission_key  TEXT        NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS grant_template_unique_idx
+  ON grant_template (COALESCE(production_type, ''), role_name, permission_key);
+
+-- 全局通用模板种子（批A cue 域，保真迁移；见 add-grant-template.sql）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:cue_list/*/meta@view'),
+  ('*', 'node:cue_list/*/cues@view'),
+  ('*', 'node:cue_list/*/cues/comments@create')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, 'node:cue_list/*@create'
+FROM (VALUES ('音响设计'), ('灯光设计'), ('多媒体设计'), ('舞美设计'), ('服化设计'),
+             ('舞台监督'), ('作曲'), ('编曲'), ('音乐导演')) AS r(name)
+ON CONFLICT DO NOTHING;
+
+-- ── Production Dept Permission（批A，六步链第 3 步资格源）──────────────────────
+-- dept 免审批区间；取代 production_dept.permissions 数组的终局形态。
+
+CREATE TABLE IF NOT EXISTS production_dept_permission (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id        UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  permission_key TEXT        NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (dept_id, permission_key)
+);
+
+CREATE INDEX IF NOT EXISTS production_dept_permission_prod_idx
+  ON production_dept_permission (production_id, dept_id);

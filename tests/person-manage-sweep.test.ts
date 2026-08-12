@@ -16,11 +16,12 @@ let prodId: string;
 let userId: string;
 
 async function activeManageRow(cueListId: string): Promise<boolean> {
+  // 批A：创建者控制权 = grants@edit 行（manage 单行已拆解为行集）
   const { rows } = await getPool().query(
     `SELECT 1 FROM resource_grant
      WHERE production_id = $1 AND user_id = $2
        AND resource_type = 'cue_list' AND resource_id = $3
-       AND permission_level = 'manage' AND NOT is_revoked`,
+       AND resource_sub = 'grants' AND permission_level = 'edit' AND NOT is_revoked`,
     [prodId, userId, cueListId],
   );
   return rows.length > 0;
