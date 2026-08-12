@@ -13,10 +13,10 @@ async function newUser(): Promise<string> {
   return res.rows[0].id;
 }
 
-function ctxOf(userId: string, perms: string[] = []): PermissionContext {
+function ctxOf(userId: string): PermissionContext {
   return {
     userId, isAdmin: false, isOwner: false,
-    memberPermissions: new Set(perms), overrides: new Map(),
+    memberPermissions: new Set(), overrides: new Map(),
     deptIds: [], pocDeptIds: [], deptFreeApprovalZone: new Set(),
     activeGrants: new Set(),
   };

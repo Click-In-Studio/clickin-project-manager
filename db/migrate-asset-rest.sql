@@ -13,8 +13,13 @@
 BEGIN;
 
 -- ── 0. 跨文件依赖守卫（add-asset-visibility.sql 镜像）─────────────────────────
-ALTER TABLE asset ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE asset ALTER COLUMN is_public SET DEFAULT false;
+ALTER TABLE asset ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
+
+-- 存量 backfill（保真：老世界成员皆可见）。幂等守卫：('asset','manage') 词汇行
+-- 仍在 = 首次迁移时点；重复执行时词汇已删，不会把新建隐私资产翻成公开。
+UPDATE asset SET is_public = true
+WHERE EXISTS (SELECT 1 FROM resource_permission_level
+              WHERE resource_type = 'asset' AND permission_level = 'manage');
 
 -- ── 1. atomic 键活跃行 → 通配动词行 ──────────────────────────────────────────
 INSERT INTO resource_grant
