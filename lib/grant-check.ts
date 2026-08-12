@@ -23,7 +23,9 @@ export type GrantVerb = "view" | "create" | "edit" | "delete";
 /** 保留段：'*' 通配 sub 不覆盖，任何授权必须显式指到这些段（或其子路径）。
  *  grants=授权面；publication=发布面；assignees=指派面（批B：assign 是独立能力，
  *  持有 task 整树 edit 不自动获得指派权）。 */
-export const RESERVED_SUBS: readonly string[] = ["grants", "publication", "assignees"];
+// imports：本质普通节点，特殊性=一次动作批量行使 create/edit/delete（导入重建
+// 海量 blocks，安全隐患大）→ 保留段，'*' 通配不覆盖、必须显式授予（批E2 用户定谳）
+export const RESERVED_SUBS: readonly string[] = ["grants", "publication", "assignees", "imports"];
 
 export function isReservedSub(sub: string): boolean {
   return RESERVED_SUBS.some((r) => sub === r || sub.startsWith(`${r}/`));

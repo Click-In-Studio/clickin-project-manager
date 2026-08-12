@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hasGrant } from "@/lib/grant-check";
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { hasPermission } from "@/lib/permissions";
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   const { id } = await ctx.params;
   const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!permCtx || !hasPermission("script:view", permCtx)) {
+  if (!permCtx || !(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const { id } = await ctx.params;
   const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!permCtx || !hasPermission("script:view", permCtx)) {
+  if (!permCtx || !(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 

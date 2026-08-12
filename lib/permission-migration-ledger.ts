@@ -56,9 +56,7 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "dept:set_poc": "F",
   "dept:unset_poc": "F",
   // script → 批E
-  "script:import": "E",
   // dramaturgy → 批E
-  "dramaturgy:import": "E",
   // asset → 批D
   // dramaturgy_view → 批E
   "dramaturgy_view:create_public": "E",
@@ -68,8 +66,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // tag_group → 批E
   // tag_option → 批E
   // script → 批E
-  "script:edit_comment_any": "E",
-  "script:delete_comment_any": "E",
   // milestone → 批F
   "milestone:create": "F",
   "milestone:manage": "F",
@@ -81,23 +77,8 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // production → 批F
   "production:manage_config": "F",
   // script → 批E
-  "script:manage": "E",
-  "script:edit": "E",
-  "script:annotate": "E",
   // rehearsal_mark → 批E
-  "rehearsal_mark:create": "E",
-  "rehearsal_mark:edit": "E",
-  "rehearsal_mark:delete": "E",
-  "rehearsal_mark:move": "E",
   // script → 批E
-  "script:create_block": "E",
-  "script:delete_block": "E",
-  "script:edit_block": "E",
-  "script:set_character": "E",
-  "script:set_type": "E",
-  "script:set_tag": "E",
-  "script:reorder": "E",
-  "script:mount": "E",
   // scene → 批E
   // dramaturgy_view → 批E
   "dramaturgy_view:create": "E",
@@ -111,12 +92,10 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // scene → 批E
   // character → 批E
   // script → 批E
-  "script:view": "E",
   // contacts → 批F
   "contacts:view": "F",
   // asset → 批D
   // script → 批E
-  "script:comment": "E",
   // org → 批G
   "org:assign_member": "G",
   "org:recall_member": "G",
@@ -124,6 +103,29 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批E PR-E2（script/rehearsal_mark/dramaturgy:import，2026-08-12）
+  "dramaturgy:import",
+  "rehearsal_mark:create",
+  "rehearsal_mark:delete",
+  "rehearsal_mark:edit",
+  "rehearsal_mark:move",
+  "script:annotate",
+  "script:comment",
+  "script:create_block",
+  "script:delete_block",
+  "script:delete_comment_any",
+  "script:edit",
+  "script:edit_block",
+  "script:edit_comment_any",
+  "script:import",
+  "script:manage",
+  "script:mount",
+  "script:reorder",
+  "script:set_character",
+  "script:set_tag",
+  "script:set_type",
+  "script:view",
+
   // 批E PR-E1（scene/character/tag 域，2026-08-12）
   "character:change_type",
   "character:create",

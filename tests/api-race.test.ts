@@ -90,14 +90,17 @@ beforeAll(async () => {
            (production_id, user_id, permission_key, grant_source, confirmed_by)
          SELECT $1, $2, unnest($3::text[]), 'self_confirmed', $2
          ON CONFLICT DO NOTHING`,
-        [SCRIPT_PROD, TEST_USER, ["script:view", "script:manage"]],
+        [SCRIPT_PROD, TEST_USER, ["contacts:view"]],
       );
       // E1：scene 结构操作已行化（normalizeRehearsalMarkOwnershipInTx 使 update 触发
       // sceneId diff → needed 含 node:scene/*@edit）——直接发 RG 行
       await getPool().query(
         `INSERT INTO resource_grant
            (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
-         VALUES ($1, $2, 'scene', '*', '*', 'edit', 'auto')
+         VALUES ($1, $2, 'scene', '*', '*', 'edit', 'auto'),
+                ($1, $2, 'script', '*', 'blocks', 'view', 'auto'),
+                ($1, $2, 'script', '*', 'blocks', 'edit', 'auto'),
+                ($1, $2, 'script', '*', 'rehearsal_marks', 'create', 'auto')
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false DO NOTHING`,
         [SCRIPT_PROD, TEST_USER],

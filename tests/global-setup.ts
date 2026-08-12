@@ -48,6 +48,11 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isScriptRestPreMigrationSchema,
+  createScriptRestPreMigrationData,
+  SCRIPT_REST_SNAPSHOT_PATH,
+} from "./script-rest-snapshot";
+import {
   isSceneCharTagRestPreMigrationSchema,
   createSceneCharTagRestPreMigrationData,
   SCENE_CHAR_TAG_REST_SNAPSHOT_PATH,
@@ -249,6 +254,16 @@ export async function setup() {
     const sctSnapshot = await createSceneCharTagRestPreMigrationData(pool, TEST_USER);
     await writeFile(SCENE_CHAR_TAG_REST_SNAPSHOT_PATH, JSON.stringify(sctSnapshot));
     for (const file of ["db/add-scene-char-tag-verbs.sql", "db/migrate-scene-char-tag-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isScriptRestPreMigrationSchema(pool)) {
+    // Migration path（批E PR-E2）: script 词汇行尚不存在。
+    const srSnapshot = await createScriptRestPreMigrationData(pool, TEST_USER);
+    await writeFile(SCRIPT_REST_SNAPSHOT_PATH, JSON.stringify(srSnapshot));
+    for (const file of ["db/add-script-dramaturgy-verbs.sql", "db/migrate-script-rest.sql"]) {
       const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
       await pool.query(migrationSql);
     }

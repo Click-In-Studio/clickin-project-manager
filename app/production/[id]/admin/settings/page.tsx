@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "项目管理" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
@@ -34,8 +35,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     canArchive: !!permCtx && hasPermission("production:archive", permCtx),
     canDelete: !!permCtx && hasPermission("production:delete", permCtx),
     canImportContacts: !!permCtx && hasPermission("contacts:import", permCtx),
-    canImportScript: !!permCtx && hasPermission("script:import", permCtx),
-    canImportScenes: !!permCtx && hasPermission("dramaturgy:import", permCtx),
+    canImportScript: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "imports", "create")),
+    canImportScenes: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
     canManageTags: !!permCtx && hasPermission("members:change_role", permCtx),
   };
 

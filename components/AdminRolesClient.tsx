@@ -35,16 +35,11 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "剧本操作",
     perms: [
-      "script:import", "script:manage", "script:edit", "script:annotate",
-      "script:create_block", "script:delete_block", "script:edit_block",
-      "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount",
-      "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
     ],
   },
   {
     label: "场次 & 构作",
     perms: [
-      "dramaturgy:import",
       "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
       "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
     ],
@@ -77,14 +72,12 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "评论管理",
     perms: [
-      "script:edit_comment_any", "script:delete_comment_any",
     ],
   },
   {
     label: "读权限",
     perms: [
       "contacts:view",
-      "script:view", "script:comment",
       "org:assign_member", "org:recall_member",
     ],
   },

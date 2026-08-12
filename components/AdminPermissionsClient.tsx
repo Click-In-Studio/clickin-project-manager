@@ -15,8 +15,8 @@ const PERM_GROUPS: PermGroup[] = [
   { label: "项目配置", perms: ["production:rename", "production:archive", "production:manage_config", "production:mount", "production:unmount", "production:change_avatar", "production:edit_description", "production:change_type", "production:change_language"] },
   { label: "里程碑", perms: ["milestone:create", "milestone:manage", "milestone:delete"] },
   { label: "通知公告", perms: ["announcement:create", "announcement:edit", "announcement:delete"] },
-  { label: "剧本操作", perms: ["script:import", "script:manage", "script:edit", "script:annotate", "script:create_block", "script:delete_block", "script:edit_block", "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount", "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move"] },
-  { label: "场次 & 构作", perms: ["dramaturgy:import", "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite", "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public"] },
+  { label: "剧本操作", perms: [] },
+  { label: "场次 & 构作", perms: ["dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite", "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public"] },
   { label: "角色人物", perms: [] },
   { label: "事件 & 日程", perms: [] },
   { label: "任务", perms: [] },
@@ -24,8 +24,8 @@ const PERM_GROUPS: PermGroup[] = [
   { label: "附件（个人）", perms: [] },
   { label: "附件（管理 _any）", perms: [] },
   { label: "标注体系", perms: [] },
-  { label: "评论管理", perms: ["script:edit_comment_any", "script:delete_comment_any", ] },
-  { label: "读权限", perms: ["contacts:view", "script:view", "script:comment", "org:assign_member", "org:recall_member"] },
+  { label: "评论管理", perms: [] },
+  { label: "读权限", perms: ["contacts:view", "org:assign_member", "org:recall_member"] },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────

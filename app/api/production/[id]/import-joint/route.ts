@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
@@ -35,7 +36,7 @@ async function guard(req: NextRequest, productionId: string) {
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
   if (isArchived) return { session, deny: Response.json({ error: "已归档" }, { status: 403 }) };
-  if (!hasPermission("script:import", permCtx)) {
+  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "script", "*", "imports", "create"))) {
     return { session, deny: Response.json({ error: "仅制作人可导入数据" }, { status: 403 }) };
   }
   return { session, deny: null };

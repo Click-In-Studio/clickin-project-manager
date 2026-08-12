@@ -53,7 +53,7 @@ async function anyMountHostVisible(
   // production 根共享区：成员即接收让渡（调用方已验成员身份）
   if (mounts.some(m => m.mount_type === "production")) return true;
   if (mounts.some(m => SCRIPT_MOUNT_TYPES.includes(m.mount_type))
-      && hasPermission("script:view", permCtx)) return true;
+      && await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view")) return true;
   if (mounts.some(m => SCENE_MOUNT_TYPES.includes(m.mount_type))
       && await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view")) return true;
   return cueMountHostVisible(permCtx.userId, productionId, mounts);
@@ -78,7 +78,7 @@ async function structurallyVisibleAssetIds(
   permCtx: PermissionContext,
   productionId: string,
 ): Promise<Set<string>> {
-  const hasScriptView = hasPermission("script:view", permCtx);
+  const hasScriptView = await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
   // E1：scene 域已行化（域级目录票；per-instance 精确化待客座授权场景出现）
   const hasSceneView = await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view");
   const { rows } = await getPool().query<{ asset_id: string }>(
@@ -152,7 +152,7 @@ export async function mountHostSidePermitted(
   if (SCENE_MOUNT_TYPES.includes(mountType))
     return hasGrant(permCtx.userId, productionId, "scene", mountId, "mounts", "create");
   // version/block/block_snapshot/comment/cue/cue_revision 均属剧本流
-  return hasPermission("script:mount", permCtx);
+  return hasGrant(permCtx.userId, productionId, "script", "*", "mounts", "create");
 }
 
 /** 分享令牌规则："令牌含下载 ⟺ 发令牌者持有 file@view"（不能分享自己没有的能力）。 */

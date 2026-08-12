@@ -39,8 +39,6 @@ export type Permission =
   | "dept:set_poc"
   | "dept:unset_poc"
   // ─── 普通管理 - 导入类 ────────────────────────────────────────────────────────
-  | "script:import"
-  | "dramaturgy:import"
   // ─── 普通管理 - 附件隐私类 ────────────────────────────────────────────────────
   // ─── 普通管理 - 构作视图公开类 ───────────────────────────────────────────────
   | "dramaturgy_view:create_public"
@@ -50,8 +48,6 @@ export type Permission =
   // ─── 普通管理 - 角色管理 ──────────────────────────────────────────────────────
   // ─── 普通管理 - 标注体系管理 ──────────────────────────────────────────────────
   // ─── 普通管理 - 评论管理 ──────────────────────────────────────────────────────
-  | "script:edit_comment_any"
-  | "script:delete_comment_any"
   // ─── 普通管理 - 里程碑 ────────────────────────────────────────────────────────
   | "milestone:create"
   | "milestone:manage"
@@ -63,22 +59,7 @@ export type Permission =
   // ─── 普通管理 - 其他 ──────────────────────────────────────────────────────────
   | "production:manage_config"
   // ─── 写权限 - 剧本操作权限（bundle，含 implication 层级）────────────────────
-  | "script:manage"
-  | "script:edit"
-  | "script:annotate"
   // ─── 写权限 - 剧本领域权限（由操作权限隐含）─────────────────────────────────
-  | "rehearsal_mark:create"
-  | "rehearsal_mark:edit"
-  | "rehearsal_mark:delete"
-  | "rehearsal_mark:move"
-  | "script:create_block"
-  | "script:delete_block"
-  | "script:edit_block"
-  | "script:set_character"
-  | "script:set_type"
-  | "script:set_tag"
-  | "script:reorder"
-  | "script:mount"
   // ─── 写权限 - 场次/章节 ───────────────────────────────────────────────────────
   // ─── 写权限 - 构作视图（个人）────────────────────────────────────────────────
   | "dramaturgy_view:create"
@@ -92,9 +73,7 @@ export type Permission =
   | "production:unmount"
   // ─── 写权限 - 附件基础操作 ────────────────────────────────────────────────────
   // ─── 读权限 ───────────────────────────────────────────────────────────────────
-  | "script:view"
   | "contacts:view"
-  | "script:comment"
   // ─── 组织特殊权限（由 org_admin_production_grant 授予，见 #136）────────────
   | "org:assign_member"
   | "org:recall_member";
@@ -191,31 +170,6 @@ export const ADMIN_PANEL_PERMISSIONS = new Set<Permission>([
 ]);
 
 // ─── Script Operation Implication ─────────────────────────────────────────────
-// script:manage ⊃ script:edit ⊃ script:annotate
-
-const SCRIPT_ANNOTATE_DOMAIN = new Set<Permission>([
-  "rehearsal_mark:create",
-  "rehearsal_mark:edit",
-  "rehearsal_mark:delete",
-  "rehearsal_mark:move",
-]);
-
-const SCRIPT_EDIT_DOMAIN = new Set<Permission>([
-  ...SCRIPT_ANNOTATE_DOMAIN,
-  "script:create_block",
-  "script:delete_block",
-  "script:edit_block",
-  "script:set_character",
-  "script:set_type",
-  "script:set_tag",
-  "script:reorder",
-  "script:mount",
-]);
-
-const SCRIPT_MANAGE_DOMAIN = new Set<Permission>([
-  ...SCRIPT_EDIT_DOMAIN,
-]);
-
 // ─── Core Permission Check ─────────────────────────────────────────────────────
 
 export function hasPermission(perm: Permission, ctx: PermissionContext): boolean {
@@ -235,12 +189,6 @@ export function hasPermission(perm: Permission, ctx: PermissionContext): boolean
 
   // Superadmin / owner bypass for non-root, non-sensitive permissions
   if (ctx.isAdmin || ctx.isOwner) return true;
-
-  // Script domain expansion via active grants:
-  // confirming the parent permission activates all its sub-operations.
-  if (SCRIPT_MANAGE_DOMAIN.has(perm) && ctx.activeGrants.has("script:manage")) return true;
-  if (SCRIPT_EDIT_DOMAIN.has(perm) && ctx.activeGrants.has("script:edit")) return true;
-  if (SCRIPT_ANNOTATE_DOMAIN.has(perm) && ctx.activeGrants.has("script:annotate")) return true;
 
   // All other permissions require an explicit active grant (self-confirmed or approved).
   return ctx.activeGrants.has(perm);
@@ -271,7 +219,6 @@ export function hasScopedPermission(
 // notification on first production entry (see AppShell ViewGrantNotification).
 
 export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
-  "script:view",
   "contacts:view",
 ];
 
@@ -301,8 +248,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dept:delete_member",
   "dept:set_poc",
   "dept:unset_poc",
-  "script:import",
-  "dramaturgy:import",
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
@@ -312,15 +257,12 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "announcement:create",
   "announcement:edit",
   "announcement:delete",
-  "script:edit_comment_any",
-  "script:delete_comment_any",
   
   
   "production:manage_config",
 ];
 
 const PRODUCER_WRITE_PERMS: readonly Permission[] = [
-  "script:manage",
   ...DRAMATURGY_FULL_SET,
   "dramaturgy_view:create",
   "dramaturgy_view:delete",
@@ -348,38 +290,28 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
 
   // 创作组
   "编剧": [
-    "script:manage",
     ...DRAMATURGY_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "戏剧构作": [
-    "script:annotate",
     ...DRAMATURGY_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "导演": [
-    "script:annotate",
-    "script:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "副导演": [
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "音乐导演": [
-    "script:annotate",
-    "script:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "作曲": [
-    "script:annotate",
-    "script:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "编曲": [
-    "script:annotate",
-    "script:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -387,7 +319,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   // 设计组
   "舞美设计": [
     "production:mount",
-    "script:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "灯光设计": [
@@ -408,7 +339,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
 
   // 执行组
   "音响执行": [
-    "script:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -427,7 +357,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "侧写": [
-    "script:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -476,23 +405,17 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "role:create", "role:rename", "role:delete", "role:assign_permission",
   "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
   "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
-  "script:import", "dramaturgy:import",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-  "script:edit_comment_any", "script:delete_comment_any",
   
   "production:manage_config",
   "milestone:create", "milestone:manage", "milestone:delete",
   "announcement:create", "announcement:edit", "announcement:delete",
-  "script:manage", "script:edit", "script:annotate",
-  "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
-  "script:create_block", "script:delete_block", "script:edit_block",
-  "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount",
   "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
   
   
   "production:mount", "production:unmount",
-  "script:view", "contacts:view", 
-  "script:comment", 
+  "contacts:view", 
+  
   "org:assign_member", "org:recall_member",
 ];
 
