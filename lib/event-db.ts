@@ -500,6 +500,8 @@ export async function getProductionEvent(id: string, productionId: string): Prom
 export async function setEventStageManagers(
   eventId: string,
   managers: { userId: string; name: string }[],
+  productionId: string,
+  assignedBy: string,
 ): Promise<void> {
   const seen = new Set<string>();
   const unique = managers.filter(m => { if (seen.has(m.userId)) return false; seen.add(m.userId); return true; });
@@ -511,6 +513,27 @@ export async function setEventStageManagers(
       await client.query(
         "INSERT INTO event_stage_manager (event_id, user_id, name) VALUES ($1,$2,$3)",
         [eventId, m.userId, m.name],
+      );
+    }
+    // 跟组舞监自动行集（用户规范，无需发布即生效）：
+    // details/call_sheet/tasks 可见 + 本 event 报告 CRUD。
+    // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
+    if (unique.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
+         FROM unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES
+           ('meta', 'view'), ('details', 'view'), ('call_sheet', 'view'),
+           ('tasks', 'view'), ('reports', 'view'), ('reports', 'create'),
+           ('reports', 'edit'), ('reports', 'delete')
+         ) AS s(sub, verb)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, unique.map(m => m.userId), eventId, assignedBy],
       );
     }
     await client.query("COMMIT");

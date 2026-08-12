@@ -100,7 +100,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     );
   }
   if (body.stageManagers !== undefined) {
-    await setEventStageManagers(eventId, body.stageManagers);
+    await setEventStageManagers(eventId, body.stageManagers, productionId, session.userId);
   }
   const updated = await getProductionEvent(eventId, productionId);
 

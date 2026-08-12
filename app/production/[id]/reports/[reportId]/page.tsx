@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasAnyEffectiveGrant } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant, hasGrant } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -96,6 +96,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   if (!event) notFound();
 
   const canViewReportUnpublished = await isReportViewer(prodPermCtx, productionId)
+    || await hasGrant(session.userId, productionId, "event", eventId, "reports", "view")
     || await hasResourceGrantLevel(session.userId, productionId, "report", reportId, "view");
 
   if (!canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
