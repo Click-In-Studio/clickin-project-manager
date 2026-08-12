@@ -113,27 +113,6 @@ const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   // 事件（per-event 写操作已迁移至 resource_grant）
   // 报告（per-report 写操作已迁移至 resource_grant）
   // 附件
-  "asset:view_any": "查看他人附件",
-  "asset:delete_any": "删除他人附件",
-  "asset:rename_any": "重命名他人附件",
-  "asset:change_type_any": "修改他人附件类型",
-  "asset:overwrite_any": "覆盖他人附件",
-  "asset:mount_any": "挂载他人附件",
-  "asset:unmount_any": "卸载他人附件",
-  "asset:create": "上传附件",
-  "asset:rename": "重命名附件",
-  "asset:overwrite": "覆盖附件",
-  "asset:change_type": "修改附件类型",
-  "asset:delete": "删除附件",
-  "asset:mount": "挂载附件",
-  "asset:unmount": "卸载附件",
-  "asset:view": "查看附件",
-  "asset:download": "下载附件",
-  "asset:download_any": "下载他人附件",
-  "asset:share": "分享附件",
-  "asset:share_downloadable": "分享附件（可下载）",
-  "asset:share_any": "分享他人附件",
-  "asset:share_any_downloadable": "分享他人附件（可下载）",
   // 组织
   "org:assign_member": "分配组织成员",
   "org:recall_member": "收回组织成员",

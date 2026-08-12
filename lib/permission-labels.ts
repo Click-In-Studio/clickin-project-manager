@@ -132,27 +132,6 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   // Task（技术需求，per-task 写操作已迁移至 resource_grant）
   // 报告（per-report 写操作已迁移至 resource_grant，保留生产级和管理员绕过）
   // 数字资产
-  "asset:view_any": "查看他人数字资产",
-  "asset:delete_any": "删除他人数字资产",
-  "asset:rename_any": "重命名他人数字资产",
-  "asset:change_type_any": "修改他人数字资产类型",
-  "asset:overwrite_any": "覆盖他人数字资产",
-  "asset:mount_any": "挂载他人数字资产",
-  "asset:unmount_any": "卸载他人数字资产",
-  "asset:create": "上传数字资产",
-  "asset:rename": "重命名数字资产",
-  "asset:overwrite": "覆盖数字资产",
-  "asset:change_type": "修改数字资产类型",
-  "asset:delete": "删除数字资产",
-  "asset:mount": "挂载数字资产",
-  "asset:unmount": "卸载数字资产",
-  "asset:view": "查看数字资产",
-  "asset:download": "下载数字资产",
-  "asset:download_any": "下载他人数字资产",
-  "asset:share": "分享数字资产",
-  "asset:share_downloadable": "分享数字资产（可下载）",
-  "asset:share_any": "分享他人数字资产",
-  "asset:share_any_downloadable": "分享他人数字资产（可下载）",
   // 组织
   "org:assign_member": "分配组织成员",
   "org:recall_member": "收回组织成员",

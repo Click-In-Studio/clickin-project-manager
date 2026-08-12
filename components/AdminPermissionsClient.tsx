@@ -21,11 +21,11 @@ const PERM_GROUPS: PermGroup[] = [
   { label: "事件 & 日程", perms: [] },
   { label: "任务", perms: [] },
   { label: "报告", perms: [] },
-  { label: "附件（个人）", perms: ["asset:create", "asset:rename", "asset:overwrite", "asset:change_type", "asset:delete", "asset:mount", "asset:unmount"] },
-  { label: "附件（管理 _any）", perms: ["asset:view_any", "asset:delete_any", "asset:rename_any", "asset:change_type_any", "asset:overwrite_any", "asset:mount_any", "asset:unmount_any"] },
+  { label: "附件（个人）", perms: [] },
+  { label: "附件（管理 _any）", perms: [] },
   { label: "标注体系", perms: ["tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config", "tag_group:set_default_option", "tag_group:set_lyric_split", "tag_group:reorder", "tag_option:create", "tag_option:delete", "tag_option:rename", "tag_option:edit_color", "tag_option:reorder"] },
   { label: "评论管理", perms: ["script:edit_comment_any", "script:delete_comment_any", ] },
-  { label: "读权限", perms: ["contacts:view", "script:view", "script:comment", "scene:view", "character:view", "asset:view", "asset:download", "asset:download_any", "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable", "org:assign_member", "org:recall_member"] },
+  { label: "读权限", perms: ["contacts:view", "script:view", "script:comment", "scene:view", "character:view", "org:assign_member", "org:recall_member"] },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
