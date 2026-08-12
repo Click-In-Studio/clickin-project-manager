@@ -819,14 +819,14 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
 
   beforeAll(async () => {
     await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
-    await addProductionMember(SCRIPT_PERM_PROD, TEST_USER); // no 编剧 / 制作人 role
+    await addProductionMember(SCRIPT_PERM_PROD, TEST_USER);
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
-    // Grant script:view so the user passes the view check and hits the script:edit gate.
-    // (MEMBER_BASE_PERMISSIONS bypass was removed in #158 — view perms now require explicit grants.)
+    // Grant the two permissions exercised below so each request reaches its target gate.
     await getPool().query(
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source, confirmed_by)
-       VALUES ($1, $2, 'script:view', 'direct', $2)
+       VALUES ($1, $2, 'script:view', 'direct', $2),
+              ($1, $2, 'script:comment', 'direct', $2)
        ON CONFLICT DO NOTHING`,
       [SCRIPT_PERM_PROD, TEST_USER],
     );
