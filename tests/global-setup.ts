@@ -82,6 +82,13 @@ import {
   type CueDomainRestSnapshot,
 } from "./cue-domain-rest-snapshot";
 
+import {
+  isLocalScriptDataPreMigrationSchema,
+  createLocalScriptDataPreMigrationData,
+  LOCAL_SCRIPT_DATA_SNAPSHOT_PATH,
+  type LocalScriptDataSnapshot,
+} from "./local-script-data-snapshot";
+
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
 
@@ -254,6 +261,16 @@ export async function setup() {
     }
   }
 
+  if (await isLocalScriptDataPreMigrationSchema(pool)) {
+    const snapshot = await createLocalScriptDataPreMigrationData(pool);
+    await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-script-comment-rehearsal-defaults.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
   const legacyCueNumberConstraint = await pool.query(
     `SELECT 1 FROM pg_constraint
      WHERE conrelid = 'cue'::regclass
@@ -270,6 +287,22 @@ export async function setup() {
 
 export async function teardown() {
   const pool = getPool();
+
+  let localScriptDataSnapshot: LocalScriptDataSnapshot | null = null;
+  try {
+    localScriptDataSnapshot = JSON.parse(
+      await readFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, "utf8"),
+    ) as LocalScriptDataSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (localScriptDataSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = ANY($1::text[])",
+      [Object.values(localScriptDataSnapshot.productionIds)],
+    ).catch(() => {});
+    await unlink(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH).catch(() => {});
+  }
 
   // Tables with no ON DELETE CASCADE from app_user:
   // cue_list.created_by and production_event.created_by need explicit deletes first.
