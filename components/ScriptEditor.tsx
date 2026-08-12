@@ -6293,14 +6293,8 @@ function ScriptBlock({
     return width > 0 ? width : null;
   }, []);
 
-  useEffect(() => {
-    if (!isCompactTextLayout) {
-      setCompactCharacterColumnHeight(0);
-      const fallbackLineHeight = getCompactFallbackLineHeightPx();
-      setCompactCharacterLineHeight(fallbackLineHeight);
-      setCompactContentLineHeight(fallbackLineHeight);
-      return;
-    }
+  useLayoutEffect(() => {
+    if (!isCompactTextLayout) return;
     const el = compactCharacterColumnRef.current;
     if (!el) return;
     const measure = () => {
@@ -7539,6 +7533,8 @@ export default function ScriptEditor({
   const [aboutOpen, setAboutOpen] = useState(false);
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingPageMapScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingTextLayoutPageMapRef = useRef(false);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
   const toolbarOpenMenuRef = useRef<ScriptToolbarOpenMenu>(null);
@@ -7669,9 +7665,7 @@ export default function ScriptEditor({
     return cache.pageMap;
   }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode]);
   const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
-  const handlePrintPageMapChange = useCallback((nextPageMap: Record<string, number>) => {
-    setPrintDividerPageMap((prev) => samePageMap(prev, nextPageMap) ? prev : nextPageMap);
-  }, []);
+  const printDividerPageMapRef = useRef<Record<string, number> | null>(null);
   const reloadScriptState = useCallback(async () => {
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
@@ -7890,18 +7884,6 @@ export default function ScriptEditor({
 
   // ── Display settings (cookie-persisted) ──────────────────────────────────────
   const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
-  useEffect(() => {
-    setPrintDividerPageMap(null);
-  }, [
-    display.pageBreaks,
-    blocks,
-    characters,
-    scenes,
-    scriptConfig.pageLayout,
-    scriptConfig.textLayoutMode,
-    scriptConfig.stageDelimOpen,
-    scriptConfig.stageDelimClose,
-  ]);
   useLayoutEffect(() => {
     if (!display.lineNumbers) {
       setLineIndexWidth(0);
@@ -8371,12 +8353,55 @@ export default function ScriptEditor({
     scrollContainerBy({ top: delta, behavior: "instant" });
   }, []);
 
+  const updatePrintDividerPageMap = useCallback((nextPageMap: Record<string, number> | null) => {
+    const previousPageMap = printDividerPageMapRef.current;
+    if (previousPageMap === nextPageMap || (nextPageMap && samePageMap(previousPageMap, nextPageMap))) {
+      if (nextPageMap) pendingTextLayoutPageMapRef.current = false;
+      return;
+    }
+    if (pendingTextLayoutPageMapRef.current && nextPageMap) {
+      pendingPageMapScrollAnchorRef.current = captureVirtualScrollAnchor();
+      pendingTextLayoutPageMapRef.current = false;
+    }
+    printDividerPageMapRef.current = nextPageMap;
+    setPrintDividerPageMap(nextPageMap);
+  }, [captureVirtualScrollAnchor]);
+
+  useLayoutEffect(() => {
+    if (display.pageBreaks && printDividerPageMapRef.current) {
+      pendingTextLayoutPageMapRef.current = true;
+    }
+  }, [display.pageBreaks, scriptConfig.textLayoutMode]);
+
+  useEffect(() => {
+    if (pendingTextLayoutPageMapRef.current && display.pageBreaks) return;
+    pendingTextLayoutPageMapRef.current = false;
+    updatePrintDividerPageMap(null);
+  }, [
+    display.pageBreaks,
+    blocks,
+    characters,
+    scenes,
+    scriptConfig.pageLayout,
+    scriptConfig.textLayoutMode,
+    scriptConfig.stageDelimOpen,
+    scriptConfig.stageDelimClose,
+    updatePrintDividerPageMap,
+  ]);
+
   useLayoutEffect(() => {
     const anchor = pendingModeScrollAnchorRef.current;
     if (!anchor) return;
     pendingModeScrollAnchorRef.current = null;
     restoreVirtualScrollAnchor(anchor);
   }, [isLockedMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
+
+  useLayoutEffect(() => {
+    const anchor = pendingPageMapScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingPageMapScrollAnchorRef.current = null;
+    restoreVirtualScrollAnchor(anchor);
+  }, [printDividerPageMap, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
     pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
@@ -8772,7 +8797,7 @@ export default function ScriptEditor({
     const container = blocksContainerRef.current;
     if (!container) return;
     measureVirtualItemElements(container.querySelectorAll<HTMLElement>('[data-vitem]'));
-  }, [blocks.length, windowRange.start, windowRange.end, measureVirtualItemElements]);
+  }, [blocks.length, scriptConfig.textLayoutMode, windowRange.start, windowRange.end, measureVirtualItemElements]);
 
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
@@ -12272,7 +12297,7 @@ export default function ScriptEditor({
           stageDelimOpen={scriptConfig.stageDelimOpen}
           stageDelimClose={scriptConfig.stageDelimClose}
           textLayoutMode={scriptConfig.textLayoutMode}
-          onPageMapChange={handlePrintPageMapChange}
+          onPageMapChange={updatePrintDividerPageMap}
         />
       )}
 
