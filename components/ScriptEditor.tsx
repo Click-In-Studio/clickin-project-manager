@@ -8377,7 +8377,7 @@ export default function ScriptEditor({
     if (!anchor) return;
     pendingModeScrollAnchorRef.current = null;
     restoreVirtualScrollAnchor(anchor);
-  }, [isLockedMode, restoreVirtualScrollAnchor]);
+  }, [isLockedMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
     pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
@@ -11949,6 +11949,7 @@ export default function ScriptEditor({
                 <button
                   onClick={() => {
                     if (!baseCanEditMetadata) return;
+                    pendingModeScrollAnchorRef.current = captureVirtualScrollAnchor();
                     saveScriptConfig({
                       textLayoutMode: scriptConfig.textLayoutMode === "compact" ? "center" : "compact",
                     });
