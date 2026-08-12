@@ -13,7 +13,8 @@ import {
   getSelfParticipantRole,
   listEventDepartments,
 } from "@/lib/event-db";
-import { hasResourceGrantLevel, hasUserAnyTechReqGrantInEvent } from "@/lib/resource-grant-db";
+import { hasUserAnyTechReqGrantInEvent } from "@/lib/resource-grant-db";
+import { hasGrant as hasGrantCheck } from "@/lib/grant-check";
 import EventFollowerClient from "@/components/EventFollowerClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -73,8 +74,8 @@ export default async function EventViewPage({
     : (await Promise.all(
         reports.map(async r => {
           if (r.publishedAt !== null) return r;
-          const hasGrant = await hasResourceGrantLevel(session.userId, productionId, "report", r.id, "view");
-          return hasGrant ? r : null;
+          const hasReportView = await hasGrantCheck(session.userId, productionId, "report", r.id, "publication", "view");
+          return hasReportView ? r : null;
         })
       )).filter((r): r is NonNullable<typeof r> => r !== null);
 

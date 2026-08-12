@@ -11,7 +11,6 @@
 import { getPool } from "./pg";
 import { hasPermission, type PermissionContext } from "./permissions";
 import { hasGrant } from "./grant-check";
-import { hasResourceGrantLevel } from "./resource-grant-db";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
 
@@ -107,7 +106,7 @@ export async function canWriteReport(
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "edit");
+  return hasGrant(permCtx.userId, productionId, "report", reportId, "*", "edit");
 }
 
 /**
@@ -120,7 +119,7 @@ export async function canPublishReport(
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "publish");
+  return hasGrant(permCtx.userId, productionId, "report", reportId, "publication", "create");
 }
 
 /**

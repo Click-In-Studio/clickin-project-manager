@@ -63,7 +63,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "报告",
     perms: [
-      "report:create",
     ],
   },
   {
@@ -93,7 +92,6 @@ const PERM_GROUPS: PermGroup[] = [
     label: "评论管理",
     perms: [
       "script:edit_comment_any", "script:delete_comment_any",
-      "report:edit_comment_any", "report:delete_comment_any",
     ],
   },
   {
@@ -102,7 +100,6 @@ const PERM_GROUPS: PermGroup[] = [
       "contacts:view",
       "script:view", "script:comment",
       "scene:view", "character:view",
-      "report:reply",
       "asset:view", "asset:download", "asset:download_any",
       "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
       "org:assign_member", "org:recall_member",

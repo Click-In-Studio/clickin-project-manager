@@ -19,7 +19,6 @@ import {
   canReplyToReport,
   hasEventDomainView,
 } from "@/lib/event-permissions";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import ReportViewClient from "@/components/ReportViewClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; reportId: string }> }): Promise<Metadata> {
@@ -97,7 +96,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
 
   const canViewReportUnpublished = await isReportViewer(prodPermCtx, productionId)
     || await hasGrant(session.userId, productionId, "event", eventId, "reports", "view")
-    || await hasResourceGrantLevel(session.userId, productionId, "report", reportId, "view");
+    || await hasGrant(session.userId, productionId, "report", reportId, "publication", "view");
 
   if (!canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/reports`);

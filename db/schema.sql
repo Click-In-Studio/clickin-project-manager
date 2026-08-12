@@ -1000,16 +1000,13 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   -- event 已 REST 化（批B）：view/edit 沿用为动词，create/delete 在批0 INSERT
   ('event',       'view',           1),
   ('event',       'edit',           2),
+  -- report 已 REST 化（批C）：view/edit 沿用为动词，create/delete 在批0 INSERT
   ('report',      'view',           1),
   ('report',      'edit',           2),
-  ('report',      'publish',        3),
-  ('report',      'edit_published', 4),
-  ('report',      'revoke',         5),
-  ('report',      'manage',         6),
   -- tech_req 已更名 task（批B），词汇见下方 task 四动词 INSERT
+  -- note 过渡类型（批C）：manage 退役，view/edit 沿用为动词
   ('note',        'view',           1),
   ('note',        'edit',           2),
-  ('note',        'manage',         3),
   ('script_view', 'view',           1),
   ('script_view', 'edit',           2),
   ('script_view', 'manage',         3),
@@ -1219,4 +1216,9 @@ ON CONFLICT DO NOTHING;
 INSERT INTO grant_template (role_name, permission_key)
 SELECT r.name, 'node:task/*@view'
 FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
+ON CONFLICT DO NOTHING;
+
+-- 批C：制作人的报告挂接资格（原 report:create）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('制作人', 'node:event/*/reports@create')
 ON CONFLICT DO NOTHING;

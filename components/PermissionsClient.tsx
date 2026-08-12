@@ -112,10 +112,6 @@ const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   "dramaturgy_view:overwrite": "覆盖构作视图",
   // 事件（per-event 写操作已迁移至 resource_grant）
   // 报告（per-report 写操作已迁移至 resource_grant）
-  "report:create": "创建报告",
-  "report:edit_comment_any": "编辑他人报告评论",
-  "report:delete_comment_any": "删除他人报告评论",
-  "report:reply": "回复报告",
   // 附件
   "asset:view_any": "查看他人附件",
   "asset:delete_any": "删除他人附件",

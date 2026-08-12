@@ -48,6 +48,12 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isReportNoteRestPreMigrationSchema,
+  createReportNoteRestPreMigrationData,
+  REPORT_NOTE_REST_SNAPSHOT_PATH,
+  type ReportNoteRestSnapshot,
+} from "./report-note-rest-snapshot";
+import {
   isWikiSplitPreMigrationSchema,
   createWikiSplitPreMigrationData,
   WIKI_SPLIT_SNAPSHOT_PATH,
@@ -206,6 +212,17 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isReportNoteRestPreMigrationSchema(pool)) {
+    // 批C PR-C2 migration path: legacy report manage level still in vocabulary.
+    const rnrSnapshot = await createReportNoteRestPreMigrationData(pool, TEST_USER);
+    await writeFile(REPORT_NOTE_REST_SNAPSHOT_PATH, JSON.stringify(rnrSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-report-note-rest.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -236,6 +253,25 @@ export async function teardown() {
       [cueListGrantSnapshot.personalGrantUserId, cueListGrantSnapshot.roleGrantUserId],
     ).catch(() => {});
     await unlink(CUE_LIST_GRANT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批C report-note-rest migration factory data (migration path only; no-op otherwise).
+  let rnrSnapshot: ReportNoteRestSnapshot | null = null;
+  try {
+    rnrSnapshot = JSON.parse(
+      await readFile(REPORT_NOTE_REST_SNAPSHOT_PATH, "utf8"),
+    ) as ReportNoteRestSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (rnrSnapshot) {
+    await pool.query("DELETE FROM production_event WHERE id = $1", [rnrSnapshot.eventId]).catch(() => {});
+    await pool.query("DELETE FROM production WHERE id = $1", [rnrSnapshot.productionId]).catch(() => {});
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2)",
+      [rnrSnapshot.manageUserId, rnrSnapshot.atomicUserId],
+    ).catch(() => {});
+    await unlink(REPORT_NOTE_REST_SNAPSHOT_PATH).catch(() => {});
   }
 
   // Clean up 批C wiki-split migration factory data (migration path only; no-op otherwise).

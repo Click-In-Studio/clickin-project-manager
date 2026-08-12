@@ -90,9 +90,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // script → 批E
   "script:edit_comment_any": "E",
   "script:delete_comment_any": "E",
-  // report → 批C
-  "report:edit_comment_any": "C",
-  "report:delete_comment_any": "C",
   // milestone → 批F
   "milestone:create": "F",
   "milestone:manage": "F",
@@ -145,8 +142,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "character:edit_gender": "E",
   "character:edit_biography": "E",
   "character:edit_role_type": "E",
-  // report → 批C
-  "report:create": "C",
   // production → 批F
   "production:mount": "F",
   "production:unmount": "F",
@@ -176,8 +171,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "asset:share_any_downloadable": "D",
   // script → 批E
   "script:comment": "E",
-  // report → 批C
-  "report:reply": "C",
   // org → 批G
   "org:assign_member": "G",
   "org:recall_member": "G",
@@ -187,6 +180,11 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
   // 批A（cue 域，2026-08-11）
   // 批B（event/task 域，2026-08-12）
+  // 批C（report/note 域，2026-08-12）
+  "report:create",
+  "report:delete_comment_any",
+  "report:edit_comment_any",
+  "report:reply",
   "event:create",
   "event:follow",
   "event:view_call_sheet_any",
@@ -233,8 +231,6 @@ export const RETIRED_PERMISSION_KEYS: readonly string[] = [
  * 完成一批：对应级别的 grant 行迁移为动词行 + 从词汇表删行 + 从此处删行。
  */
 export const RESOURCE_LEVEL_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
-  "report:manage": "C", "report:publish": "C", "report:edit_published": "C", "report:revoke": "C",
-  "note:manage": "C",
   "asset:mount": "D", "asset:manage": "D",
   "scene:mount": "E", "scene:manage": "E",
   "script_view:manage": "E",

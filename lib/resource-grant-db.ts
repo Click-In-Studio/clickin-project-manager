@@ -135,6 +135,8 @@ export async function selfConfirmResourceGrant(
   const sets: Record<string, Record<string, ReadonlyArray<readonly [string, string]>>> = {
     event: EVENT_LEVEL_ROW_SETS,
     task: TASK_LEVEL_ROW_SETS,
+    report: REPORT_LEVEL_ROW_SETS,
+    note: NOTE_LEVEL_ROW_SETS,
   };
   const rows = sets[resourceType]?.[level] ?? [["*", level] as const];
   for (const [sub, verb] of rows) {
@@ -176,6 +178,25 @@ export const EVENT_LEVEL_ROW_SETS: Record<EventLevel, ReadonlyArray<readonly [st
                    ["reports", "create"], ["reports", "delete"],
                    ["publication", "create"], ["publication", "edit"], ["publication", "delete"],
                    ["grants", "edit"]],
+};
+
+export const REPORT_LEVEL_ROW_SETS: Record<ReportLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:           [["meta", "view"]],
+  edit:           [["meta", "view"], ["publication", "view"], ["*", "edit"],
+                   ["notes", "create"], ["notes", "delete"]],
+  publish:        [["publication", "create"]],
+  edit_published: [["publication", "edit"]],
+  revoke:         [["publication", "delete"]],
+  manage:         [["meta", "view"], ["publication", "view"], ["*", "edit"],
+                   ["notes", "create"], ["notes", "delete"],
+                   ["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+                   ["grants", "edit"]],
+};
+
+export const NOTE_LEVEL_ROW_SETS: Record<NoteLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["*", "view"]],
+  edit:   [["*", "view"], ["*", "edit"]],
+  manage: [["*", "view"], ["*", "edit"], ["*", "delete"], ["grants", "edit"]],
 };
 
 export type TaskLevel = "view" | "edit" | "assign" | "manage";
@@ -300,11 +321,14 @@ export async function getReportAccess(
   productionId: string,
   reportId: string,
 ): Promise<ResourceAccessResult<ReportLevel>> {
-  const level = (await getResourceGrantLevel(userId, productionId, "report", reportId)) as ReportLevel | null;
+  // 批C：动词行推导 + 节点 zone（伪级别仅供 UI 兼容；report=挂载边类型）
+  const level = await deriveNodePseudoLevel(
+    userId, productionId, "report", reportId, ["meta", "*"], ["*"],
+  );
   if (level) return { canAccess: true, level };
   const [canManage, canEdit] = await Promise.all([
-    checkResourceFreeApprovalZone(userId, productionId, "report", reportId, "report:edit", "manage"),
-    checkResourceFreeApprovalZone(userId, productionId, "report", reportId, "report:edit", "edit"),
+    checkNodeFreeApprovalZone(userId, productionId, "report", reportId, "manage"),
+    checkNodeFreeApprovalZone(userId, productionId, "report", reportId, "edit"),
   ]);
   if (canManage) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "manage" };
   if (canEdit) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "edit" };
@@ -459,16 +483,19 @@ export async function writeReportGrants(
   eventId: string,
 ): Promise<void> {
   const pool = getPool();
-  await pool.query(
-    `INSERT INTO resource_grant
-       (production_id, user_id, resource_type, resource_id, resource_sub,
-        permission_level, grant_source, confirmed_by)
-     VALUES ($1, $2, 'report', $3, '*', 'manage', 'direct', $2)
-     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-       WHERE is_revoked = false
-     DO NOTHING`,
-    [productionId, createdBy, reportId],
-  );
+  // 批C：创建者获 REPORT manage 行集（动词行取代 manage 单行）
+  for (const [sub, verb] of REPORT_LEVEL_ROW_SETS.manage) {
+    await pool.query(
+      `INSERT INTO resource_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'report', $3, $4, $5, 'direct', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, createdBy, reportId, sub, verb],
+    );
+  }
   // Inherit dept managers from parent event
   await pool.query(
     `INSERT INTO resource_dept_manage
