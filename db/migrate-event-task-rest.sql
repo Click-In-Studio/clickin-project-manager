@@ -95,6 +95,7 @@ SELECT apg.production_id, apg.user_id, m.rtype, '*', m.sub, m.verb,
 FROM atomic_permission_grant apg
 JOIN (VALUES
   ('event:create',              'event', '*',         'create'),
+  ('event:create',              'event', 'reports',   'view'),
   ('event:follow',              'event', 'meta',      'view'),
   ('event:follow',              'event', 'details',   'view'),
   ('event:follow',              'event', 'followers', 'create'),
@@ -118,6 +119,7 @@ FROM production_role_permission prp
 JOIN (VALUES
   ('event:create',              'node:event/*@create'),
   ('event:create',              'node:event/*/chat@create'),
+  ('event:create',              'node:event/*/reports@view'),
   ('event:follow',              'node:event/*/meta@view'),
   ('event:follow',              'node:event/*/details@view'),
   ('event:follow',              'node:event/*/followers@create'),
@@ -164,8 +166,9 @@ ON CONFLICT (dept_id, permission_key) DO NOTHING;
 
 -- 'event:create' 数组伪键 → 集合 create 资格键
 INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-SELECT pd.production_id, pd.id, 'node:event/*@create'
+SELECT pd.production_id, pd.id, k.key
 FROM production_dept pd
+CROSS JOIN (VALUES ('node:event/*@create'), ('node:event/*/reports@view')) AS k(key)
 WHERE 'event:create' = ANY(pd.permissions)
 ON CONFLICT (dept_id, permission_key) DO NOTHING;
 

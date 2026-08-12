@@ -115,6 +115,7 @@ describe("invariance verification", () => {
     expect(rows.map((r) => r.permission_key).sort()).toEqual([
       "node:event/*@create",
       "node:event/*/chat@create",
+      "node:event/*/reports@view",
       "node:event/*/meta@view",
       "node:event/*/details@view",
       "node:event/*/followers@create",

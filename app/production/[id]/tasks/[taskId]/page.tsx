@@ -45,7 +45,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   if (!event) notFound();
 
-  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view");
+  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);

@@ -144,6 +144,7 @@ export async function canViewTechReq(
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (await hasGrant(permCtx.userId, productionId, "task", "*", "*", "view")) return true;
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "tasks", "view")) return true;
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req
@@ -204,8 +205,9 @@ export async function canModerateNotes(
  */
 export async function isReportViewer(permCtx: PermissionContext, productionId: string): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  // 批B：event:create 键退役，organizer 代理 = event 集合 create 行
-  return hasGrant(permCtx.userId, productionId, "event", "*", "*", "create");
+  // 批B：查看未发布报告是独立可授节点（event/<id>/reports@view）；
+  // organizer 经迁移/模板保真获得通配行，但该能力从此与创建权解耦
+  return hasGrant(permCtx.userId, productionId, "event", "*", "reports", "view");
 }
 
 /**

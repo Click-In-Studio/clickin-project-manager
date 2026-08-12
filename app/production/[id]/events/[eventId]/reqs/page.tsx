@@ -33,7 +33,9 @@ export default async function ReqsPage({
   if (!event) notFound();
 
   // Admin role-level OR event resource_grant edit+ → full view
-  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view")
+  // 批B：别人的技术需求是独立层（tasks@view / task 域通配），不与 call_sheet 合并
+  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "task", "*", "*", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);

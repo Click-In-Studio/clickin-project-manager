@@ -60,7 +60,11 @@ export default async function EventViewPage({
   ]);
 
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
-  const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
+  const canViewReqsFull = await hasGrant(session.userId, productionId, "task", "*", "*", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit")
+    || prodPermCtx.isAdmin;
+  const canViewReqs = canViewReqsFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
   const visibleReports = canViewFull
     ? reports
