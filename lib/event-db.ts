@@ -1207,6 +1207,27 @@ export async function setTechReqAssignees(
         [reqId, a.userId, a.name]
       );
     }
+    // 被 assign 进绑定 event 的 task = 被叫来干活（技术需求 call，与 calltime 同族）
+    // → 自动获得该 event 的 meta+details@view assigned 行（严格剧组下也能看到
+    // 排练时间地点）。不写 event_participant（名单是 organizer 的产品面）；
+    // 移除 assignee 不撤行（行是独立事实）。
+    if (assignees.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
+         FROM event_tech_req etr
+         JOIN production_event pe ON pe.id = etr.event_id
+         CROSS JOIN unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
+         WHERE etr.id = $1
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [reqId, assignees.map(a => a.userId)],
+      );
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
