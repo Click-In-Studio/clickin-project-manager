@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getPool } from "@/lib/pg";
-import { hasPermission } from "@/lib/permissions";
 import { getCtx } from "../ctx";
 
 export async function PATCH(

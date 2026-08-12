@@ -3,7 +3,6 @@ import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { buildScriptCommentMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";

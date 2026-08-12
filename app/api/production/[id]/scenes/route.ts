@@ -5,7 +5,6 @@ import {
   loadProduction, applyPatchToDB, getVersion, listMarkerProjectionByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 import { diffState } from "@/lib/script-ops";
 import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";

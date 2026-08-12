@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getActiveVersionId, loadProduction, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { computePageMap } from "@/lib/script-page";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/pages">) {

@@ -4,7 +4,6 @@ import {
   getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 import { diffState } from "@/lib/script-ops";
 import {

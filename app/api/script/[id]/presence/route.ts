@@ -3,7 +3,6 @@ import { hasGrant } from "@/lib/grant-check";
 import { updatePresence } from "@/lib/server-cache";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { hasPermission } from "@/lib/permissions";
 
 type PresenceBody = {
   clientId: string;

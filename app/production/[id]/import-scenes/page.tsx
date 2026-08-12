@@ -6,7 +6,6 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import ImportScenesWizardPage from "@/components/import/ImportScenesWizardPage";
 
 export default async function ImportScenesPage({ params }: { params: Promise<{ id: string }> }) {

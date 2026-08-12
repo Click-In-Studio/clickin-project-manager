@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { presignedPut } from "@/lib/r2";
 
 // Fixed key — probe uploads always overwrite this object, no accumulation.

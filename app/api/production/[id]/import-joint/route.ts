@@ -5,7 +5,6 @@ import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import type { JointImportMarker, JointImportMappingRow, JointImportPreview, SceneColMap, ScriptColMap } from "@/lib/import/types";
 
 const SCENE_MARKER_COLLATOR = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });

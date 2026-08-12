@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { uploadPartRelay } from "@/lib/r2";
 
 // Max part size the relay will accept (matches client PART_SIZE + headroom)

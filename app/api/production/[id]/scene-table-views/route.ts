@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { hasGrant } from "@/lib/grant-check";
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { hasPermission } from "@/lib/permissions";
 import { getCtx } from "./ctx";
 
 type ViewConfig = {

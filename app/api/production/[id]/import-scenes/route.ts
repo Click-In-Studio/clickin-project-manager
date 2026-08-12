@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listScenesByVersion, listSceneVersionsByVersion, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import type { SceneColMap, SceneConflict, ImportScenePreview } from "@/lib/import/types";
 import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
 import type { SceneRow } from "@/lib/import/scene-builder";

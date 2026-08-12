@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getBlockTagsForProduction, upsertBlockTag, deleteBlockTag } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import type { ProductionAccess } from "@/lib/db";
 
 async function guard(req: NextRequest, productionId: string) {

@@ -4,7 +4,6 @@ import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { getProductionPermissionContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
 import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";

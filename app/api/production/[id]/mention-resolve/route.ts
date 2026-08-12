@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, getMarkerLabelIndex, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
 import { computePageMap } from "@/lib/script-page";

@@ -3,7 +3,6 @@ import { hasGrant } from "@/lib/grant-check";
 import { registerSSE, removePresence, presenceFrameFor } from "@/lib/server-cache";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

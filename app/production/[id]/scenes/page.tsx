@@ -6,7 +6,6 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import ScenesManager from "@/components/ScenesManager";
 
 export default async function ScenesPage({
