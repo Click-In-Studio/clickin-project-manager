@@ -54,7 +54,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     || await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "tasks", "delete")
     // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
     // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
-    || (techReq?.createdVia === "dept_auto" && techReq.departmentId != null
+    || (techReq != null && techReq.createdVia !== "explicit" && techReq.departmentId != null
         && await isUserDeptPoc(techReq.departmentId, session.userId));
   if (!canDelete)
     return Response.json({ error: "权限不足" }, { status: 403 });

@@ -449,7 +449,7 @@ CREATE TABLE IF NOT EXISTS event_stage_manager (
 CREATE INDEX IF NOT EXISTS event_stage_manager_event_idx ON event_stage_manager(event_id);
 
 ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
-  CHECK (created_via IN ('explicit', 'dept_auto'));
+  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
 
 CREATE TABLE IF NOT EXISTS event_participant (
   id            TEXT PRIMARY KEY,

@@ -89,7 +89,7 @@ export type EventTechReq = {
   assignees: EventTechReqAssignee[];
   chatId: string | null;
   createdAt: string;
-  createdVia: "explicit" | "dept_auto";
+  createdVia: "explicit" | "dept_auto" | "poc";
 };
 
 export type Mention = { userId: string; name: string };
@@ -243,7 +243,7 @@ function rowToTechReq(r: TechReqRow, assignees: EventTechReqAssignee[], schedule
     title: r.title, description: r.description,
     presetMinutes: r.preset_minutes, departmentId: r.department_id,
     status: r.status, assignees, chatId: r.chat_id ?? null,
-    createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto",
+    createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto" | "poc",
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -1047,6 +1047,7 @@ export async function createEventTechReq(data: {
   id: string; eventId: string; scheduleItemIds: string[];
   title: string; description: string; presetMinutes: number | null;
   departmentId: string | null; assignees: EventTechReqAssignee[];
+  createdVia?: "explicit" | "poc";
   createdBy: string;
 }): Promise<EventTechReq> {
   const client = await getPool().connect();
@@ -1054,11 +1055,11 @@ export async function createEventTechReq(data: {
     await client.query("BEGIN");
     const res = await client.query<TechReqRow>(
       `INSERT INTO event_tech_req
-         (id, event_id, title, description, preset_minutes, department_id)
-       VALUES ($1,$2,$3,$4,$5,$6)
+         (id, event_id, title, description, preset_minutes, department_id, created_via)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, event_id, title, description,
                  preset_minutes, department_id, status, chat_id, created_via, created_at`,
-      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId]
+      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId, data.createdVia ?? "explicit"]
     );
     const unique = [...new Set(data.scheduleItemIds)];
     for (const itemId of unique) {

@@ -3,7 +3,7 @@ import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
-import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
+import { createEventTechReq, getEventDepartment, getProductionEvent, isUserDeptPoc, listEventTechReqs } from "@/lib/event-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
@@ -45,8 +45,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
   // Creating a tech_req requires edit-level on the event
-  // attach 语义：给 event 挂 task = event 子集合操作（与状态无关，保真旧 edit 级门）
-  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "tasks", "create"))
+  // attach 语义：给 event 挂 task = event 子集合操作。
+  // 路径三（用户场景：服装设计看到排练 schedule 主动来对装）：部门 POC 可为
+  // **本部门**对可见 event 发起 task——可见性由成员基础 details@view 天然界定
+  const bodyPeek = (await req.clone().json()) as { departmentId?: string | null };
+  const viaPoc = typeof bodyPeek.departmentId === "string"
+    && await isUserDeptPoc(bodyPeek.departmentId, session.userId);
+  if (!viaPoc
+      && !await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "tasks", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
@@ -67,6 +73,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     departmentId: body.departmentId ?? null,
     assignees: body.assignees ?? [],
     createdBy: session.userId,
+    createdVia: viaPoc ? "poc" : "explicit",
   });
 
   // Notify POCs when a new awaiting req is created for their department.

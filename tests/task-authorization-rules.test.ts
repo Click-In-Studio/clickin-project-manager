@@ -105,6 +105,24 @@ describe("规则3：已确认 + 关联部门 → 部门全员可见", () => {
   });
 });
 
+describe("路径三：POC 为本部门主动发起 task", () => {
+  it("poc-created task is marked 'poc' and dept members see it once confirmed-by-nature", async () => {
+    const req = await createEventTechReq({
+      id: `tr_${shortId()}`, eventId, scheduleItemIds: [], title: "服装对装",
+      description: "", presetMinutes: null, departmentId: deptId,
+      assignees: [], createdBy: pocId, createdVia: "poc",
+    });
+    expect(req.createdVia).toBe("poc");
+    // POC 恒可编辑（规则1 同源）
+    expect(await canEditTechReq(await ctxOf(pocId), req.id, eventId, prodId)).toBe(true);
+    // 非 awaiting → 部门成员可见（规则3）
+    const visible = await canViewTechReq(
+      await ctxOf(memberId), req.id, eventId, prodId, deptId, { participantDeptIds: [] },
+    );
+    expect(visible).toBe(true);
+  });
+});
+
 describe("规则4：created_via 路径落库", () => {
   it("helpers reflect dept relations", async () => {
     expect(await isUserDeptPoc(deptId, pocId)).toBe(true);
