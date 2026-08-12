@@ -1013,7 +1013,6 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('scene',       'create', 0), ('scene',       'delete', 0),
   ('event',       'create', 0), ('event',       'delete', 0),
   ('report',      'create', 0), ('report',      'delete', 0),
-  ('tech_req',    'create', 0), ('tech_req',    'delete', 0),
   ('note',        'create', 0), ('note',        'delete', 0),
   ('script_view', 'create', 0), ('script_view', 'delete', 0),
   ('asset',       'create', 0), ('asset',       'delete', 0)
