@@ -1,5 +1,5 @@
 import styles from "./ListTableViewToggle.module.css";
-import { useProductionToolbar } from "./ProductionTopMenu";
+import { PRODUCTION_TOOLBAR_STAGE, useProductionToolbar } from "./ProductionTopMenu";
 
 type ViewMode = "list" | "table";
 
@@ -10,10 +10,10 @@ type Props = {
 
 export default function ListTableViewToggle({ value, onChange }: Props) {
   const { stage } = useProductionToolbar();
-  if (stage >= 5) return null;
+  if (stage >= PRODUCTION_TOOLBAR_STAGE.primaryStored) return null;
 
   return (
-    <div className={styles.viewToggle} data-compact={stage >= 4.2 || undefined}>
+    <div className={styles.viewToggle} data-compact={stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || undefined}>
       <button
         type="button"
         aria-label="列表"

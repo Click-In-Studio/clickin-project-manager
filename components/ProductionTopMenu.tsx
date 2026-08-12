@@ -21,7 +21,22 @@ export const PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID = "production-page-tool
 export const PRODUCTION_TOP_MENU_RIGHT_CLASS = "production-top-menu-right";
 export const PRODUCTION_PAGE_SCROLL_ROOT_CLASS = "flex h-full min-h-0 flex-col overflow-hidden bg-[var(--paper)]";
 
-export type ProductionToolbarStage = 0 | 1 | 2 | 3 | 4.1 | 4.2 | 5 | 6;
+export const PRODUCTION_TOOLBAR_STAGE = {
+  full: 0,
+  searchCollapsed: 1,
+  secondaryStored: 2,
+  primaryShort: 3,
+  primaryStored: 4,
+  lowPriorityStored: 5,
+} as const;
+
+export type ProductionToolbarStage = typeof PRODUCTION_TOOLBAR_STAGE[keyof typeof PRODUCTION_TOOLBAR_STAGE];
+
+export const ProductionToolbarStageContext = createContext<ProductionToolbarStage>(PRODUCTION_TOOLBAR_STAGE.full);
+
+export function useProductionToolbarStage() {
+  return useContext(ProductionToolbarStageContext);
+}
 
 export const ProductionToolbarContext = createContext<{
   stage: ProductionToolbarStage;

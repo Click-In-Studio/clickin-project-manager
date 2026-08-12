@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react
 import { createPortal, flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ProductionSearchResults } from "@/lib/search-db";
-import { PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID, useProductionToolbar } from "./ProductionTopMenu";
+import { PRODUCTION_TOOLBAR_STAGE, PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID, useProductionToolbar } from "./ProductionTopMenu";
 
 // ─── Event type labels ────────────────────────────────────────────────────────
 const EVENT_TYPE_LABEL: Record<string, string> = {
@@ -207,7 +207,7 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
           }
         >
           <span className="text-[14px] leading-none">⌕</span>
-          {(hasStoredControls || toolbarStage < 3) && <span>搜索</span>}
+          {(hasStoredControls || toolbarStage < PRODUCTION_TOOLBAR_STAGE.searchCollapsed) && <span>搜索</span>}
         </button>
       )}
 

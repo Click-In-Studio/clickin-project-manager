@@ -11,6 +11,7 @@ import CueListDetail from "./CueListDetail";
 import ChevronIcon from "./ChevronIcon";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
+  PRODUCTION_TOOLBAR_STAGE,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
   useProductionToolbar,
@@ -285,7 +286,7 @@ export default function CueListsManager({
           <ChevronIcon direction="left" size={12} className="opacity-50" />
           返回
         </Link>
-        {toolbarStage < 4.2 && createButton && (
+        {toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryShort && createButton && (
           <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto`}>{createButton}</div>
         )}
       </ProductionTopMenu>
@@ -304,7 +305,7 @@ export default function CueListsManager({
             ))}
           </div>
         </div>
-        {toolbarStage >= 4.2 && createButton}
+        {toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort && createButton}
       </div>
 
       {/* Card grid */}

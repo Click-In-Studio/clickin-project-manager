@@ -19,6 +19,7 @@ import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwners
 import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
+  PRODUCTION_TOOLBAR_STAGE,
   ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
@@ -966,9 +967,9 @@ export default function CuePage({
   // ── Toolbar menus ─────────────────────────────────────────────────────────
   type CueToolbarMenu = "active" | "jump" | "settings" | null;
   const [openToolbarMenu, setOpenToolbarMenu] = useState<CueToolbarMenu>(null);
-  const secondaryMenusFolded = toolbarStage >= 4.1;
-  const cueTagsFolded = toolbarStage >= 4.2;
-  const toolbarCompact = toolbarStage >= 5;
+  const secondaryMenusFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored;
+  const cueTagsFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
+  const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored;
   const activeMenuPosition = useAnchoredMenu<HTMLButtonElement>(
     openToolbarMenu === "active",
     "bottom",

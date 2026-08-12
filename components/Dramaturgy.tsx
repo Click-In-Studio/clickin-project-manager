@@ -10,6 +10,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
+  PRODUCTION_TOOLBAR_STAGE,
   ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
@@ -59,13 +60,13 @@ export default function Dramaturgy({
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewsLoaded, setViewsLoaded] = useState(false);
   const storedColumnSettingsPosition = useAnchoredMenu<HTMLButtonElement>(
-    toolbarStage >= 4.1 && sceneViewMode === "table" && overflowOpen && storedColumnSettingsOpen,
+    toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && sceneViewMode === "table" && overflowOpen && storedColumnSettingsOpen,
     "left",
     "columns",
   );
 
   useEffect(() => {
-    if (!overflowOpen || toolbarStage < 4.1 || sceneViewMode !== "table") {
+    if (!overflowOpen || toolbarStage < PRODUCTION_TOOLBAR_STAGE.secondaryStored || sceneViewMode !== "table") {
       setStoredColumnSettingsOpen(false);
     }
   }, [overflowOpen, toolbarStage, sceneViewMode]);
@@ -176,7 +177,7 @@ export default function Dramaturgy({
     }
   };
 
-  const secondaryOverflow = toolbarStage >= 4.1 && sceneViewMode === "table" ? (
+  const secondaryOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && sceneViewMode === "table" ? (
     <>
       {savedViews.length > 0 && (
         <>
@@ -255,7 +256,7 @@ export default function Dramaturgy({
       </div>
     </>
   ) : null;
-  const primaryOverflow = toolbarStage >= 5 ? (
+  const primaryOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
     <ListTableViewToggleOverflow value={sceneViewMode} onChange={setSceneViewMode} />
   ) : null;
   const toolbarOverflow = secondaryOverflow || primaryOverflow ? (
@@ -280,7 +281,7 @@ export default function Dramaturgy({
 
         {sceneViewMode === "table" && (
           <>
-          <div className={toolbarStage >= 4.1 ? "hidden" : `${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
+          <div className={toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored ? "hidden" : `${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
             {/* Desktop: inline controls */}
             <div className="flex items-center gap-2">
               <TableViewSelector
@@ -308,7 +309,7 @@ export default function Dramaturgy({
               </div>
             </div>
           </div>
-          {toolbarStage >= 4.1 && overflowOpen && storedColumnSettingsOpen && (
+          {toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && overflowOpen && storedColumnSettingsOpen && (
             <TableColumnSettings
               config={tableConfig}
               onChange={handleConfigChange}

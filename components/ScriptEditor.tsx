@@ -47,6 +47,7 @@ import ProductionTopMenu, {
   ProductionTopMenuDivider,
   PRODUCTION_TOP_MENU_RIGHT_CLASS,
   PRODUCTION_TOP_MENU_SLOT_ID,
+  PRODUCTION_TOOLBAR_STAGE,
   useAnchoredMenu,
   useProductionToolbar,
 } from "@/components/ProductionTopMenu";
@@ -7124,9 +7125,9 @@ export default function ScriptEditor({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const fullToolbarWidthRef = useRef(0);
   const shortToolbarWidthRef = useRef(0);
-  const toolbarCompact = toolbarStage >= 5 || toolbarMode === "compact";
-  const toolbarShort = !toolbarCompact && (toolbarStage >= 4.2 || toolbarMode === "short");
-  const presenceFolded = toolbarStage >= 6;
+  const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored || toolbarMode === "compact";
+  const toolbarShort = !toolbarCompact && (toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || toolbarMode === "short");
+  const presenceFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.lowPriorityStored;
   const scriptMenuPosition = useAnchoredMenu<HTMLButtonElement>(openMenu === "script", "bottom");
   const nestedMenuPosition = useAnchoredMenu<HTMLButtonElement>(toolbarCompact && openMenu !== null && openMenu !== "script", "left", openMenu);
   const toggleMenu = useCallback((name: Exclude<OpenMenu, null>) => {

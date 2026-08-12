@@ -12,7 +12,9 @@ import {
   PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SLOT_ID,
+  PRODUCTION_TOOLBAR_STAGE,
   ProductionToolbarContext,
+  ProductionToolbarStageContext,
   type ProductionToolbarStage,
   useAnchoredMenu,
 } from "./ProductionTopMenu";
@@ -31,21 +33,21 @@ interface AppShellProps {
 }
 
 const CREATION_NAV = [
-  { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script" },
-  { label: "构作", hint: "章节 · 行动线", path: "dramaturgy" },
-  { label: "角色", hint: "角色 · 人物关系 · 聚合", path: "characters" },
-  { label: "Cue", hint: "部门执行设计", path: "cues" },
+  { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script", symbol: "剧" },
+  { label: "构作", hint: "章节 · 行动线", path: "dramaturgy", symbol: "构" },
+  { label: "角色", hint: "角色 · 人物关系 · 聚合", path: "characters", symbol: "角" },
+  { label: "Cue", hint: "部门执行设计", path: "cues", symbol: "Q" },
 ] as const;
 
 const PRODUCTION_NAV = [
-  { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts" },
-  { label: "日程", hint: "围读 · 排练 · 演出", path: "events" },
-  { label: "任务", hint: "技术需求 · 跟进", path: "tasks" },
-  { label: "报告", hint: "演出报告 · 归档", path: "reports" },
-  { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications" },
-  { label: "财务", hint: "预算 · 支出 · 关联", path: "finance" },
-  { label: "物料", hint: "道具 · 服装 · 设备", path: "materials" },
-  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets" },
+  { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts", symbol: "人" },
+  { label: "日程", hint: "围读 · 排练 · 演出", path: "events", symbol: "日" },
+  { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
+  { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },
+  { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications", symbol: "通" },
+  { label: "财务", hint: "预算 · 支出 · 关联", path: "finance", symbol: "财" },
+  { label: "物料", hint: "道具 · 服装 · 设备", path: "materials", symbol: "物" },
+  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },
 ] as const;
 
 const ADMIN_NAV_GROUPS = [
@@ -82,12 +84,21 @@ const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
 };
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
-const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [0, 3, 4.1, 4.2, 5, 6];
+const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [
+  PRODUCTION_TOOLBAR_STAGE.full,
+  PRODUCTION_TOOLBAR_STAGE.searchCollapsed,
+  PRODUCTION_TOOLBAR_STAGE.secondaryStored,
+  PRODUCTION_TOOLBAR_STAGE.primaryShort,
+  PRODUCTION_TOOLBAR_STAGE.primaryStored,
+  PRODUCTION_TOOLBAR_STAGE.lowPriorityStored,
+];
 const PRODUCTION_SIDEBAR_TRANSITION_MS = 150;
 // Below this width the full production sidebar no longer fits the script layout.
 const SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX = 1496;
 
-function fixedProductionToolbarStageForWidth(width: number): 0 | 1 | 2 {
+type ProductionHeaderStage = 0 | 1 | 2;
+
+function productionHeaderStageForWidth(width: number): ProductionHeaderStage {
   if (width >= 1280) return 0;
   if (width >= 1024) return 1;
   return 2;
@@ -625,7 +636,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
   const [cueWarnings, setCueWarnings] = useState(0);
-  const [productionToolbarFixedStage, setProductionToolbarFixedStage] = useState<0 | 1 | 2>(0);
+  const [productionHeaderStage, setProductionHeaderStage] = useState<ProductionHeaderStage>(0);
   const [productionToolbarStage, setProductionToolbarStage] = useState<ProductionToolbarStage>(0);
   const [productionToolbarHasStoredControls, setProductionToolbarHasStoredControls] = useState(false);
   const [scriptProductionSidebarAutoFolded, setScriptProductionSidebarAutoFolded] = useState(false);
@@ -637,11 +648,9 @@ export default function AppShell({ session, productions, children, initialUnread
   const topbarRef = useRef<HTMLElement>(null);
   const topOverflowRef = useRef<HTMLDivElement>(null);
   const productionSearchOpenRef = useRef(false);
-  const productionToolbarFixedStageRef = useRef<0 | 1 | 2>(productionToolbarFixedStage);
   const productionToolbarStageRef = useRef<ProductionToolbarStage>(productionToolbarStage);
   const productionToolbarHasStoredControlsRef = useRef(productionToolbarHasStoredControls);
   const productionToolbarRequiredWidthRef = useRef<Partial<Record<ProductionToolbarStage, number>>>({});
-  productionToolbarFixedStageRef.current = productionToolbarFixedStage;
   productionToolbarStageRef.current = productionToolbarStage;
   productionToolbarHasStoredControlsRef.current = productionToolbarHasStoredControls;
   const closeTopOverflow = useCallback(() => setTopOverflowOpen(false), []);
@@ -658,29 +667,26 @@ export default function AppShell({ session, productions, children, initialUnread
     hasStoredControls: productionToolbarHasStoredControls,
     setHasStoredControls: setProductionToolbarHasStoredControls,
   }), [productionToolbarStage, productionToolbarHasStoredControls, topOverflowOpen, closeTopOverflow]);
-  const productionToolbarHeaderStage = productionToolbarFixedStage;
+
+  useLayoutEffect(() => {
+    const syncHeaderStage = () => setProductionHeaderStage(productionHeaderStageForWidth(window.innerWidth));
+    syncHeaderStage();
+    window.addEventListener("resize", syncHeaderStage);
+    return () => window.removeEventListener("resize", syncHeaderStage);
+  }, []);
 
   const measureProductionToolbar = useCallback(() => {
     const topbar = topbarRef.current;
     if (!topbar) return;
     if (productionSearchOpenRef.current) return;
 
-    const fixedStage = fixedProductionToolbarStageForWidth(window.innerWidth);
     const current = productionToolbarStageRef.current;
-    if (fixedStage !== productionToolbarFixedStageRef.current) {
-      productionToolbarFixedStageRef.current = fixedStage;
-      productionToolbarStageRef.current = 0;
-      productionToolbarRequiredWidthRef.current = {};
-      setProductionToolbarFixedStage(fixedStage);
-      setProductionToolbarStage(0);
-      return;
-    }
     if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
     const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
     const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
-    if (overflow > 1 && current < 6) {
+    if (overflow > 1 && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
       productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
       setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
       return;
@@ -697,7 +703,7 @@ export default function AppShell({ session, productions, children, initialUnread
 
   useLayoutEffect(() => {
     measureProductionToolbar();
-  }, [productionSearchPath, productionToolbarFixedStage, productionToolbarStage, productionToolbarHasStoredControls, measureProductionToolbar]);
+  }, [productionSearchPath, productionHeaderStage, productionToolbarStage, productionToolbarHasStoredControls, measureProductionToolbar]);
 
   useEffect(() => {
     const topbar = topbarRef.current;
@@ -954,6 +960,7 @@ export default function AppShell({ session, productions, children, initialUnread
   );
 
   return (
+    <ProductionToolbarStageContext.Provider value={productionToolbarStage}>
     <ProductionToolbarContext.Provider value={productionToolbarContext}>
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
@@ -971,7 +978,7 @@ export default function AppShell({ session, productions, children, initialUnread
               <span className="text-white text-[10px] font-bold select-none">BS</span>
             )}
           </span>
-          <span className={`${productionToolbarHeaderStage >= 1 ? "hidden" : "block"} text-[13px] font-bold tracking-[0.12em] text-[#182a2a]`}>
+          <span className={`${productionHeaderStage >= 1 ? "hidden" : "block"} text-[13px] font-bold tracking-[0.12em] text-[#182a2a]`}>
             Backstage
           </span>
         </Link>
@@ -1018,7 +1025,7 @@ export default function AppShell({ session, productions, children, initialUnread
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className={`relative ${productionToolbarHeaderStage >= 2 ? "hidden" : "flex"} w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0`}
+            className={`relative ${productionHeaderStage >= 2 ? "hidden" : "flex"} w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0`}
             title="通知"
             onClick={() => setUnreadCount(0)}
           >
@@ -1031,7 +1038,7 @@ export default function AppShell({ session, productions, children, initialUnread
           </Link>
 
           {/* User avatar + dropdown: sm+ only */}
-          <div className={`relative shrink-0 ${productionToolbarHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
+          <div className={`relative shrink-0 ${productionHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
               aria-label="个人中心"
@@ -1215,7 +1222,7 @@ export default function AppShell({ session, productions, children, initialUnread
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.path === "cues" ? "Q" : item.label.charAt(0)}
+                      symbol={item.symbol}
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
@@ -1229,7 +1236,7 @@ export default function AppShell({ session, productions, children, initialUnread
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.label.charAt(0)}
+                      symbol={item.symbol}
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path)}
@@ -1387,7 +1394,7 @@ export default function AppShell({ session, productions, children, initialUnread
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.label.charAt(0)}
+              symbol={item.symbol}
               label={item.label}
               hint={item.hint}
               active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
@@ -1408,7 +1415,7 @@ export default function AppShell({ session, productions, children, initialUnread
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.label.charAt(0)}
+              symbol={item.symbol}
               label={item.label}
               hint={item.hint}
               active={isModuleActive(item.path)}
@@ -1525,5 +1532,6 @@ export default function AppShell({ session, productions, children, initialUnread
       </BottomDrawer>
     </div>
     </ProductionToolbarContext.Provider>
+    </ProductionToolbarStageContext.Provider>
   );
 }
