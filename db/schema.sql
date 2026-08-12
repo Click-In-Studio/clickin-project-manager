@@ -448,8 +448,6 @@ CREATE TABLE IF NOT EXISTS event_stage_manager (
 
 CREATE INDEX IF NOT EXISTS event_stage_manager_event_idx ON event_stage_manager(event_id);
 
-ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
-  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
 
 CREATE TABLE IF NOT EXISTS event_participant (
   id            TEXT PRIMARY KEY,
@@ -520,8 +518,14 @@ CREATE TABLE IF NOT EXISTS event_tech_req (
   department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
   status           TEXT NOT NULL DEFAULT 'pending',
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  chat_id          TEXT
+  chat_id          TEXT,
+  created_via      TEXT NOT NULL DEFAULT 'explicit'
+                   CHECK (created_via IN ('explicit', 'dept_auto', 'poc'))
 );
+
+-- 存量库补列守卫（幂等；必须位于 CREATE TABLE 之后——语句顺序即执行顺序）
+ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
+  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
 
 CREATE INDEX IF NOT EXISTS event_tech_req_event_idx ON event_tech_req(event_id);
 
