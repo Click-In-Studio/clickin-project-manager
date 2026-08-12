@@ -27,6 +27,8 @@ import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, withMarkerSceneL
 import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
+import { randomUUID } from "node:crypto";
+import type { ImportTagChanges } from "./import/types";
 
 type MarkerLabelCacheEntry = { revision: string; index: MarkerLabelIndex };
 
@@ -1749,6 +1751,150 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
   }
 }
 
+type ImportedCueColumn = {
+  name: string;
+  cues: Array<{ afterBlockId: string | null; content: string }>;
+};
+
+async function importCueColumnsInTx(
+  client: PoolClient,
+  productionId: string,
+  versionId: string,
+  createdBy: string,
+  columns: ImportedCueColumn[],
+): Promise<void> {
+  const existingLists = await client.query<{ id: string; name: string; template: string | null }>(
+    "SELECT id, name, template FROM cue_list WHERE production_id = $1 ORDER BY created_at",
+    [productionId],
+  );
+  const normalizedKey = (value: string) => value.trim().toLocaleLowerCase();
+  const listByKey = new Map<string, { id: string; name: string; template: string | null }>();
+  for (const list of existingLists.rows) {
+    listByKey.set(normalizedKey(list.name), list);
+    if (list.template) listByKey.set(normalizedKey(list.template), list);
+  }
+
+  const resolvedColumns: Array<ImportedCueColumn & { listId: string }> = [];
+  for (const column of columns) {
+    const key = normalizedKey(column.name);
+    let list = listByKey.get(key);
+    if (!list) {
+      const id = `cl${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      const template = CUE_LIST_TEMPLATES.find((candidate) => (
+        normalizedKey(candidate.key) === key || normalizedKey(candidate.label) === key
+      ))?.key ?? null;
+      await client.query(
+        `INSERT INTO cue_list (id, production_id, name, notes, abbr, template, created_by)
+         VALUES ($1, $2, $3, '', NULL, $4, $5)`,
+        [id, productionId, column.name, template, createdBy],
+      );
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         VALUES ($1, $2, 'cue_list', $3, '*', 'manage', 'self_confirmed', $2)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, createdBy, id],
+      );
+      if (template) {
+        await client.query(
+          `INSERT INTO resource_dept_manage
+             (production_id, dept_id, resource_type, resource_id, established_by)
+           SELECT $1, pdm.dept_id, 'cue_list', $2, $3
+           FROM production_dept_member pdm
+           JOIN production_dept pd ON pd.id = pdm.dept_id
+           WHERE pdm.user_id = $3
+             AND pdm.production_id = $1
+             AND $4 = ANY(pd.allowed_cue_types)
+           ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
+           DO NOTHING`,
+          [productionId, id, createdBy, template],
+        );
+      }
+      list = { id, name: column.name, template };
+      listByKey.set(key, list);
+    }
+    resolvedColumns.push({ ...column, listId: list.id });
+  }
+
+  const afterBlockIds = [...new Set(resolvedColumns.flatMap((column) =>
+    column.cues.flatMap((cue) => cue.afterBlockId ? [cue.afterBlockId] : []),
+  ))];
+  const snapshotByBlockId = new Map<string, string>();
+  if (afterBlockIds.length > 0) {
+    const snapshots = await client.query<{ block_id: string; snapshot_id: string }>(
+      `SELECT block_id, snapshot_id
+       FROM script_version
+       WHERE version_id = $1 AND block_id = ANY($2::text[])`,
+      [versionId, afterBlockIds],
+    );
+    for (const row of snapshots.rows) snapshotByBlockId.set(row.block_id, row.snapshot_id);
+    const missingBlockId = afterBlockIds.find((blockId) => !snapshotByBlockId.has(blockId));
+    if (missingBlockId) throw new Error(`Imported Cue anchor block is missing: ${missingBlockId}`);
+  }
+
+  const listIds = [...new Set(resolvedColumns.map((column) => column.listId))];
+  const existingNumbers = listIds.length > 0
+    ? await client.query<{ cue_list_id: string; number: string }>(
+        "SELECT cue_list_id, number FROM cue WHERE cue_list_id = ANY($1::text[])",
+        [listIds],
+      )
+    : { rows: [] as Array<{ cue_list_id: string; number: string }> };
+  const usedNumbersByList = new Map<string, Set<string>>();
+  for (const row of existingNumbers.rows) {
+    const used = usedNumbersByList.get(row.cue_list_id) ?? new Set<string>();
+    used.add(row.number);
+    usedNumbersByList.set(row.cue_list_id, used);
+  }
+
+  const cueRows: Array<{
+    id: string;
+    listId: string;
+    number: string;
+    content: string;
+    snapshotId: string | null;
+  }> = [];
+  for (const column of resolvedColumns) {
+    const usedNumbers = usedNumbersByList.get(column.listId) ?? new Set<string>();
+    usedNumbersByList.set(column.listId, usedNumbers);
+    let nextNumber = 1;
+    for (const cue of column.cues) {
+      while (usedNumbers.has(String(nextNumber))) nextNumber++;
+      const number = String(nextNumber++);
+      usedNumbers.add(number);
+      const id = `cue${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      const snapshotId = cue.afterBlockId ? snapshotByBlockId.get(cue.afterBlockId)! : null;
+      cueRows.push({ id, listId: column.listId, number, content: cue.content.trim(), snapshotId });
+    }
+  }
+  if (cueRows.length === 0) return;
+  await client.query(
+    `INSERT INTO cue (
+       id, cue_id, cue_list_id, number, name, content,
+       start_kind, start_snapshot_id, start_offset,
+       end_kind, end_snapshot_id, end_offset
+     )
+     SELECT imported.id, imported.id, imported.list_id, imported.number, '', imported.content,
+            'gap', imported.snapshot_id, NULL, 'gap', imported.snapshot_id, NULL
+     FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])
+       AS imported(id, list_id, number, content, snapshot_id)`,
+    [
+      cueRows.map(row => row.id),
+      cueRows.map(row => row.listId),
+      cueRows.map(row => row.number),
+      cueRows.map(row => row.content),
+      cueRows.map(row => row.snapshotId),
+    ],
+  );
+  await client.query(
+    `INSERT INTO cue_version (revision_id, version_id, cue_id)
+     SELECT cue_id, $2::text, cue_id FROM unnest($1::text[]) AS imported(cue_id)`,
+    [cueRows.map(row => row.id), versionId],
+  );
+}
+
 /**
  * Brute-force import: clears ALL blocks from a specific version and replaces them.
  * No copy-on-write, no cue drift — caller is responsible for choosing an editing version.
@@ -1775,10 +1921,28 @@ export async function importScriptToVersion(
     }>;
     upsertChars: Array<{ id: string; name: string; isAggregate: boolean; sortOrder: number }>;
     upsertScenes: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }>;
+    upsertCueColumns?: Array<{
+      name: string;
+      cues: Array<{ afterBlockId: string | null; content: string }>;
+    }>;
+    cueListCreatedBy?: string;
     deleteSceneIds?: string[];
+    blockTagAssignments?: Array<{ blockId: string; groupId: string; optionId: string }>;
+    tagChanges?: ImportTagChanges;
+    aggregateMembers?: Array<{ aggregateId: string; memberIds: string[] }>;
+    openingChapter?: { markerId: string; show?: boolean };
+    stageDelimiters?: { open: string; close: string };
+    ensureEmptySceneBlocks?: boolean;
   },
 ): Promise<void> {
-  const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(payload.upsertBlocks));
+  // Marker projection operates on logical block IDs, while import IDs identify snapshots.
+  const projectedBlocks = withLegacyOwnershipProjection(withMarkerOwnership(
+    payload.upsertBlocks.map((block) => ({ ...block, id: block.blockId ?? block.id })),
+  ));
+  const upsertBlocks = projectedBlocks.map((block, index) => ({
+    ...block,
+    id: payload.upsertBlocks[index].id,
+  }));
   const { deleteSceneIds = [] } = payload;
   const seenCharIds = new Set<string>();
   const upsertChars = payload.upsertChars.filter((char) => {
@@ -1794,10 +1958,173 @@ export async function importScriptToVersion(
       return true;
     })
     .map((scene, sortOrder) => ({ ...scene, sortOrder }));
+  const sceneAnchorIds = [...new Set([
+    ...upsertScenes.map((scene) => scene.id),
+    ...upsertBlocks.flatMap((block) => block.sceneId ? [block.sceneId] : []),
+  ])];
+  const upsertCueColumns = (payload.upsertCueColumns ?? [])
+    .map((column) => ({
+      name: column.name.trim(),
+      cues: column.cues.filter((cue) => cue.content.trim()),
+    }))
+    .filter((column) => column.name && column.cues.length > 0);
+  if (upsertCueColumns.length > 0 && !payload.cueListCreatedBy) {
+    throw new Error("cueListCreatedBy is required when importing Cue columns");
+  }
+  const tagChanges = payload.tagChanges ?? { createGroups: [], createOptions: [], updateGroups: [], updateOptions: [], deleteGroupIds: [], deleteOptionIds: [] };
+  const tagGroupUpdates = tagChanges.updateGroups ?? [];
+  const aggregateMembers = payload.aggregateMembers ?? [];
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     const previousMarkerStructure = await markerStructureBlocksInTx(client, versionId);
+
+    const knownCharacterIds = new Set(upsertChars.map(character => character.id));
+    const aggregateCharacterIds = [...new Set(aggregateMembers.flatMap(item => [item.aggregateId, ...item.memberIds]))];
+    if (aggregateCharacterIds.length > 0) {
+      const existing = await client.query<{ id: string }>(
+        "SELECT id FROM character WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, aggregateCharacterIds],
+      );
+      for (const row of existing.rows) knownCharacterIds.add(row.id);
+      const missingCharacterId = aggregateCharacterIds.find(id => !knownCharacterIds.has(id));
+      if (missingCharacterId) throw new Error(`Imported aggregate character is missing: ${missingCharacterId}`);
+    }
+
+    const createdGroupIdByClientId = new Map<string, string>();
+    const createdOptionIdByClientId = new Map<string, string>();
+    if (tagChanges.deleteGroupIds.length > 0) {
+      const owned = await client.query<{ id: string }>(
+        "SELECT id FROM tag_group WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, tagChanges.deleteGroupIds],
+      );
+      if (owned.rows.length !== new Set(tagChanges.deleteGroupIds).size) throw new Error("Tag group does not belong to the production");
+    }
+    if (tagChanges.deleteOptionIds.length > 0) {
+      const owned = await client.query<{ id: string }>(
+        `SELECT tag_option.id FROM tag_option
+         JOIN tag_group ON tag_group.id = tag_option.group_id
+         WHERE tag_group.production_id = $1 AND tag_option.id = ANY($2::text[])`,
+        [productionId, tagChanges.deleteOptionIds],
+      );
+      if (owned.rows.length !== new Set(tagChanges.deleteOptionIds).size) throw new Error("Tag option does not belong to the production");
+    }
+    for (const group of tagChanges.createGroups) {
+      const id = `tg${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      createdGroupIdByClientId.set(group.clientId, id);
+      await client.query(
+        "INSERT INTO tag_group (id, production_id, name, type, sort_order) VALUES ($1, $2, $3, 'exclusive', 0)",
+        [id, productionId, group.name],
+      );
+    }
+    for (const option of tagChanges.createOptions) {
+      const groupId = createdGroupIdByClientId.get(option.groupId) ?? option.groupId;
+      const group = await client.query("SELECT 1 FROM tag_group WHERE id = $1 AND production_id = $2", [groupId, productionId]);
+      if (group.rowCount !== 1) throw new Error(`Tag option group is missing: ${option.groupId}`);
+      const id = `to${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      createdOptionIdByClientId.set(option.clientId, id);
+      await client.query(
+        "INSERT INTO tag_option (id, group_id, label, color, sort_order) VALUES ($1, $2, $3, $4, $5)",
+        [id, groupId, option.label, option.color, option.sortOrder],
+      );
+    }
+    for (const update of tagChanges.updateOptions ?? []) {
+      const groupId = createdGroupIdByClientId.get(update.groupId) ?? update.groupId;
+      const optionId = createdOptionIdByClientId.get(update.optionId) ?? update.optionId;
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      if (update.color !== undefined) {
+        values.push(update.color);
+        sets.push(`color = $${values.length}`);
+      }
+      if (update.sortOrder !== undefined) {
+        values.push(update.sortOrder);
+        sets.push(`sort_order = $${values.length}`);
+      }
+      if (sets.length === 0) continue;
+      values.push(optionId, groupId, productionId);
+      const updated = await client.query(
+        `UPDATE tag_option
+         SET ${sets.join(", ")}
+         FROM tag_group
+         WHERE tag_option.id = $${values.length - 2}
+           AND tag_option.group_id = $${values.length - 1}
+           AND tag_group.id = tag_option.group_id
+           AND tag_group.production_id = $${values.length}`,
+        values,
+      );
+      if (updated.rowCount !== 1) throw new Error(`Tag option is missing: ${update.optionId}`);
+    }
+    for (const update of tagGroupUpdates) {
+      const groupId = createdGroupIdByClientId.get(update.groupId) ?? update.groupId;
+      const lyricSplitAfterOptionId = update.lyricSplitAfterOptionId == null
+        ? update.lyricSplitAfterOptionId
+        : createdOptionIdByClientId.get(update.lyricSplitAfterOptionId) ?? update.lyricSplitAfterOptionId;
+      const defaultOptionId = update.defaultOptionId == null
+        ? update.defaultOptionId
+        : createdOptionIdByClientId.get(update.defaultOptionId) ?? update.defaultOptionId;
+      const group = await client.query(
+        "SELECT 1 FROM tag_group WHERE id = $1 AND production_id = $2 AND type = 'exclusive'",
+        [groupId, productionId],
+      );
+      if (group.rowCount !== 1) throw new Error(`Tag format group is missing: ${update.groupId}`);
+      for (const [field, optionId] of [
+        ["format", lyricSplitAfterOptionId],
+        ["default", defaultOptionId],
+      ] as const) {
+        if (optionId === undefined || optionId === null) continue;
+        const option = await client.query(
+          "SELECT 1 FROM tag_option WHERE id = $1 AND group_id = $2",
+          [optionId, groupId],
+        );
+        if (option.rowCount !== 1) throw new Error(`Tag ${field} option is missing: ${optionId}`);
+      }
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      if (update.lyricSplitAfterOptionId !== undefined) {
+        values.push(lyricSplitAfterOptionId);
+        sets.push(`lyric_split_after_option_id = $${values.length}`);
+      }
+      if (update.defaultOptionId !== undefined) {
+        values.push(defaultOptionId);
+        sets.push(`default_option_id = $${values.length}`);
+      }
+      if (sets.length > 0) {
+        values.push(groupId);
+        await client.query(`UPDATE tag_group SET ${sets.join(", ")} WHERE id = $${values.length}`, values);
+      }
+    }
+    if (tagChanges.deleteOptionIds.length > 0) {
+      await client.query("DELETE FROM tag_option WHERE id = ANY($1::text[])", [tagChanges.deleteOptionIds]);
+    }
+    if (tagChanges.deleteGroupIds.length > 0) {
+      await client.query("DELETE FROM tag_group WHERE id = ANY($1::text[])", [tagChanges.deleteGroupIds]);
+    }
+    const resolvedBlockTags = (payload.blockTagAssignments ?? []).map(tag => ({
+      blockId: tag.blockId,
+      groupId: createdGroupIdByClientId.get(tag.groupId) ?? tag.groupId,
+      optionId: createdOptionIdByClientId.get(tag.optionId) ?? tag.optionId,
+    }));
+    const tagPairs = [...new Map(resolvedBlockTags.map(tag => [
+      `${tag.groupId}:${tag.optionId}`,
+      { groupId: tag.groupId, optionId: tag.optionId },
+    ])).values()];
+    if (tagPairs.length > 0) {
+      const valid = await client.query<{ group_id: string; option_id: string }>(
+        `SELECT requested.group_id, requested.option_id
+         FROM unnest($2::text[], $3::text[]) AS requested(group_id, option_id)
+         JOIN tag_group ON tag_group.id = requested.group_id AND tag_group.production_id = $1
+         JOIN tag_option ON tag_option.id = requested.option_id AND tag_option.group_id = requested.group_id`,
+        [
+          productionId,
+          tagPairs.map(tag => tag.groupId),
+          tagPairs.map(tag => tag.optionId),
+        ],
+      );
+      const validPairs = new Set(valid.rows.map(tag => `${tag.group_id}:${tag.option_id}`));
+      const invalid = tagPairs.find(tag => !validPairs.has(`${tag.groupId}:${tag.optionId}`));
+      if (invalid) throw new Error(`Imported Tag mapping is invalid: ${invalid.groupId}/${invalid.optionId}`);
+    }
 
     // Clear all blocks from this version; GC snapshots no longer referenced by any version.
     // Split into three separate statements to avoid PostgreSQL CTE snapshot isolation:
@@ -1843,13 +2170,15 @@ export async function importScriptToVersion(
     // scene_version is only a compatibility cache; rebuild it from markers below.
     await client.query("DELETE FROM scene_version WHERE version_id = $1", [versionId]);
 
-    if (upsertScenes.length > 0) {
+    if (sceneAnchorIds.length > 0) {
       await client.query(
         `INSERT INTO scene (id, production_id)
          SELECT unnest($1::text[]), $2::text
          ON CONFLICT (id) DO NOTHING`,
-        [upsertScenes.map(s => s.id), productionId]
+        [sceneAnchorIds, productionId]
       );
+    }
+    if (upsertScenes.length > 0) {
       await client.query(
         `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id)
          SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::text[])
@@ -1927,8 +2256,72 @@ export async function importScriptToVersion(
       }
     }
 
+    if (upsertCueColumns.length > 0) {
+      await importCueColumnsInTx(
+        client,
+        productionId,
+        versionId,
+        payload.cueListCreatedBy!,
+        upsertCueColumns,
+      );
+    }
+
+    if (aggregateMembers.length > 0) {
+      const aggregateIds = [...new Set(aggregateMembers.map((membership) => membership.aggregateId))];
+      await client.query("DELETE FROM character_aggregate WHERE aggregate_id = ANY($1::text[])", [aggregateIds]);
+      const membershipRows = aggregateMembers.flatMap((membership) => (
+        [...new Set(membership.memberIds)].map((memberId) => ({ aggregateId: membership.aggregateId, memberId }))
+      ));
+      if (membershipRows.length > 0) {
+        await client.query(
+          `INSERT INTO character_aggregate (aggregate_id, member_id)
+           SELECT unnest($1::text[]), unnest($2::text[])`,
+          [
+            membershipRows.map((membership) => membership.aggregateId),
+            membershipRows.map((membership) => membership.memberId),
+          ],
+        );
+      }
+    }
+
+    const dedupedBlockTags = [...new Map(
+      resolvedBlockTags.map(tag => [`${tag.blockId}:${tag.groupId}`, tag]),
+    ).values()];
+    if (dedupedBlockTags.length > 0) {
+      await client.query(
+        `INSERT INTO block_tag (block_id, group_id, option_id, updated_at)
+         SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), now()
+         ON CONFLICT (block_id, group_id) DO UPDATE
+           SET option_id = EXCLUDED.option_id, updated_at = now()`,
+        [
+          dedupedBlockTags.map(tag => tag.blockId),
+          dedupedBlockTags.map(tag => tag.groupId),
+          dedupedBlockTags.map(tag => tag.optionId),
+        ],
+      );
+    }
+
+    if (payload.openingChapter) {
+      const config = payload.openingChapter.show === undefined
+        ? { openingChapterMarkerId: payload.openingChapter.markerId }
+        : { openingChapterMarkerId: payload.openingChapter.markerId, showOpeningChapter: payload.openingChapter.show };
+      await client.query(
+        "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
+        [JSON.stringify(config), versionId, productionId],
+      );
+    }
+    if (payload.stageDelimiters) {
+      await client.query(
+        "UPDATE production SET script_config = script_config || $1::jsonb WHERE id = $2",
+        [JSON.stringify({ stageDelimOpen: payload.stageDelimiters.open, stageDelimClose: payload.stageDelimiters.close }), productionId],
+      );
+    }
+
     await normalizeRehearsalMarkOwnershipInTx(client, versionId);
     await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
+    if (payload.ensureEmptySceneBlocks) {
+      await ensureEmptyScriptBlocksForEmptyScenesInTx(client, productionId, versionId);
+    }
     const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
     if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
       await bumpMarkerStructureRevisionInTx(client, versionId);
@@ -1943,14 +2336,12 @@ export async function importScriptToVersion(
   }
 }
 
-export async function ensureEmptyScriptBlocksForEmptyScenes(
+async function ensureEmptyScriptBlocksForEmptyScenesInTx(
+  client: PoolClient,
   productionId: string,
   versionId: string,
 ): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const res = await client.query<{
+  const res = await client.query<{
       block_id: string;
       sort_key: string;
       type: string;
@@ -1962,64 +2353,73 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
        WHERE sv.version_id = $1
        ORDER BY sv.sort_key`,
       [versionId],
-    );
+  );
 
-    const childSceneParentIds = new Set(
+  const childSceneParentIds = new Set(
       res.rows
         .filter(row => row.type === "scene_marker" && row.marker_meta?.parentMarkerId)
         .map(row => row.marker_meta?.parentMarkerId)
         .filter((id): id is string => !!id),
-    );
-    const configRes = await client.query<{ opening_chapter_marker_id: string | null }>(
+  );
+  const configRes = await client.query<{ opening_chapter_marker_id: string | null }>(
       "SELECT script_config->>'openingChapterMarkerId' AS opening_chapter_marker_id FROM version WHERE id = $1",
       [versionId],
-    );
-    const configuredOpeningChapterMarkerId = configRes.rows[0]?.opening_chapter_marker_id ?? null;
-    const openingChapterMarkerId =
-      configuredOpeningChapterMarkerId && res.rows.some(row => row.block_id === configuredOpeningChapterMarkerId && row.type === "chapter_marker")
-        ? configuredOpeningChapterMarkerId
-        : res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
+  );
+  const configuredOpeningChapterMarkerId = configRes.rows[0]?.opening_chapter_marker_id ?? null;
+  const openingChapterMarkerId =
+    configuredOpeningChapterMarkerId && res.rows.some(row => row.block_id === configuredOpeningChapterMarkerId && row.type === "chapter_marker")
+      ? configuredOpeningChapterMarkerId
+      : res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
 
-    for (let index = 0; index < res.rows.length; index++) {
-      const row = res.rows[index];
-      if (row.type !== "scene_marker" && row.type !== "chapter_marker") continue;
-      if (row.block_id === openingChapterMarkerId) continue;
-      if (row.type === "chapter_marker" && childSceneParentIds.has(row.block_id)) continue;
+  const emptyBlocks: Array<{ snapshotId: string; blockId: string; sortKey: string; ownerMarkerId: string }> = [];
+  for (let index = 0; index < res.rows.length; index++) {
+    const row = res.rows[index];
+    if (row.type !== "scene_marker" && row.type !== "chapter_marker") continue;
+    if (row.block_id === openingChapterMarkerId) continue;
+    if (row.type === "chapter_marker" && childSceneParentIds.has(row.block_id)) continue;
 
-      let hasScriptBlock = false;
-      for (let cursor = index + 1; cursor < res.rows.length; cursor++) {
-        const next = res.rows[cursor];
-        if (next.type === "chapter_marker" || next.type === "scene_marker") {
-          break;
-        }
-        if (next.type === "dialogue" || next.type === "stage" || next.type === "lyric") {
-          hasScriptBlock = true;
-          break;
-        }
+    let hasScriptBlock = false;
+    for (let cursor = index + 1; cursor < res.rows.length; cursor++) {
+      const next = res.rows[cursor];
+      if (next.type === "chapter_marker" || next.type === "scene_marker") {
+        break;
       }
-      if (hasScriptBlock) continue;
-
-      const snapshotId = genSnapshotId();
-      const blockId = `blk_${snapshotId}`;
-      const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
-      const lexKey = keyBetween(row.sort_key, nextSortKey);
-      await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
-         VALUES ($1, $2, $3, $4, NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb, $5)`,
-        [snapshotId, blockId, productionId, lexKey, row.block_id],
-      );
-      await client.query(
-        "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
-        [snapshotId, versionId, blockId, lexKey],
-      );
+      if (next.type === "dialogue" || next.type === "stage" || next.type === "lyric") {
+        hasScriptBlock = true;
+        break;
+      }
     }
+    if (hasScriptBlock) continue;
 
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
+    const snapshotId = genSnapshotId();
+    const blockId = `blk_${snapshotId}`;
+    const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
+    const lexKey = keyBetween(row.sort_key, nextSortKey);
+    emptyBlocks.push({ snapshotId, blockId, sortKey: lexKey, ownerMarkerId: row.block_id });
+  }
+  if (emptyBlocks.length > 0) {
+    await client.query(
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
+       SELECT unnest($1::text[]), unnest($2::text[]), $3::text, unnest($4::text[]),
+              NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb, unnest($5::text[])`,
+      [
+        emptyBlocks.map((block) => block.snapshotId),
+        emptyBlocks.map((block) => block.blockId),
+        productionId,
+        emptyBlocks.map((block) => block.sortKey),
+        emptyBlocks.map((block) => block.ownerMarkerId),
+      ],
+    );
+    await client.query(
+      `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
+       SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[])`,
+      [
+        emptyBlocks.map((block) => block.snapshotId),
+        versionId,
+        emptyBlocks.map((block) => block.blockId),
+        emptyBlocks.map((block) => block.sortKey),
+      ],
+    );
   }
 }
 

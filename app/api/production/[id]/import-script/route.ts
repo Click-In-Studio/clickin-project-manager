@@ -2,11 +2,13 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
-import { getProductionPermissionContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, setCharacterMembers, bulkUpsertBlockTags, listTagGroups, saveScriptStageDelimiters, saveOpeningChapterMarkerId, getVersionOpeningChapterId, listScenesByVersion, ensureEmptyScriptBlocksForEmptyScenes } from "@/lib/db";
+import { getProductionPermissionContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, listTagGroups, getVersionOpeningChapterId, listScenesByVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
-import { parseCharacter, collectCharacters, guessIsAggregate } from "@/lib/import/parse-character";
-import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker } from "@/lib/import/types";
+import { parseCharacter, guessIsAggregate } from "@/lib/import/parse-character";
+import { buildImportTagFormatLookup } from "@/lib/import/tag-format";
+import { shouldImportFirstChapterAsOpening } from "@/lib/import/opening-chapter";
+import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker, ImportTagChanges, ImportTypeConflict } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
 import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script-fixed-markers";
 import type { BlockType } from "@/lib/script-types";
@@ -34,12 +36,16 @@ type ImportScriptBody = {
   typeTagMapping?: TypeTagMapping;
   /** name → "normal" | "aggregate", after user override (uses the PARSED name, not raw) */
   characterKinds?: Record<string, "normal" | "aggregate">;
+  /** Raw sheet value → final character name and optional annotation. */
+  characterMappings?: Record<string, { name: string; note: string | null }>;
   /** For aggregate characters: which base-character names are members */
   aggregateMembers?: AggregateMembers;
   stageDelimiterPattern?: ScriptConfigStageDelimiterPattern;
   headerRowIncluded?: boolean;
   sceneOverrides?: JointImportMarker[];
   rows?: (string | null)[][];
+  tagChanges?: ImportTagChanges;
+  firstChapterAsOpening?: boolean;
 };
 
 const REHEARSAL_MARK_RE = /^[A-Za-z]\d*$|^\d+[A-Za-z]?$/;
@@ -53,6 +59,25 @@ const STAGE_DELIMITER_PATTERNS = Object.keys(STAGE_DELIMITERS) as StageDelimiter
 type StageDelimiter = { open: string; close: string };
 type StageDelimiterReplacement = { regex: RegExp; replacement: string };
 const TYPE_VALUE_SPLIT_RE = /[,，;；、/\n]+/;
+const BLOCK_TYPE_PRIORITY: Record<"dialogue" | "stage" | "lyric" | "marker", number> = {
+  lyric: 4,
+  dialogue: 3,
+  stage: 2,
+  marker: 1,
+};
+
+function mappedBlockTypes(actions: TypeAction[]): Array<"dialogue" | "stage" | "lyric" | "marker"> {
+  return [...new Set(actions.flatMap(action => action.action === "mapType" ? [action.blockType] : []))];
+}
+
+function resolveBlockType(types: Array<"dialogue" | "stage" | "lyric" | "marker">) {
+  if (types.length === 0) return "dialogue" as const;
+  return types.reduce<"dialogue" | "stage" | "lyric" | "marker">(
+    (selected, candidate) => BLOCK_TYPE_PRIORITY[candidate] > BLOCK_TYPE_PRIORITY[selected] ? candidate : selected,
+    "marker",
+  );
+}
+
 type ParsedImportRow = {
   sourceIndex: number;
   sceneNum: string;
@@ -63,11 +88,14 @@ type ParsedImportRow = {
   stageComment: string | null;
   typeActions: TypeAction[];
   warningMark: boolean;
+  cueValues: Array<{ column: number; content: string }>;
+  resolvedBlockType: "dialogue" | "stage" | "lyric";
 };
 type MarkerImportRow = {
   sourceIndex: number;
   sceneNum: string;
   body: string;
+  cueValues: Array<{ column: number; content: string }>;
 };
 type ImportBlock = {
   id: string;
@@ -105,11 +133,45 @@ function getCell(row: (string | null)[], col: number | undefined): string | null
   return row[col]?.trim() || null;
 }
 
+function resolveImportedCharacter(raw: string, mappings: ImportScriptBody["characterMappings"]) {
+  const trimmed = raw.trim();
+  const mapped = mappings?.[trimmed];
+  if (mapped) return { raw: trimmed, name: mapped.name.trim(), note: mapped.note?.trim() || undefined };
+  return parseCharacter(trimmed);
+}
+
+function collectImportedCharacters(rawValues: string[], mappings: ImportScriptBody["characterMappings"]) {
+  const byName = new Map<string, ReturnType<typeof resolveImportedCharacter>>();
+  for (const raw of rawValues) {
+    const parsed = resolveImportedCharacter(raw, mappings);
+    if (parsed.name && !byName.has(parsed.name)) byName.set(parsed.name, parsed);
+  }
+  return [...byName.values()];
+}
+
 function getDataRows(rows: (string | null)[][], headerRowIncluded?: boolean) {
   if (!headerRowIncluded) return rows;
   const headerIndex = rows.findIndex(row => row.some(cell => cell?.trim()));
   if (headerIndex < 0) return [];
   return rows.filter((_, index) => index !== headerIndex);
+}
+
+function getHeaderRow(rows: (string | null)[][], headerRowIncluded?: boolean): (string | null)[] | null {
+  if (!headerRowIncluded) return null;
+  return rows.find(row => row.some(cell => cell?.trim())) ?? null;
+}
+
+function cueListNameFromHeader(header: string | null, column: number): string {
+  const fallback = `Cue ${column + 1}`;
+  if (!header?.trim()) return fallback;
+  const name = header
+    .trim()
+    .replace(/(^|[\s_\-—–/\\|:：])cue(?=$|[\s_\-—–/\\|:：])/gi, " ")
+    .replace(/^cue\s*/i, "")
+    .replace(/\s*cue$/i, "")
+    .replace(/[\s_\-—–/\\|:：]+/g, " ")
+    .trim();
+  return name || header.trim() || fallback;
 }
 
 function getStageDelimiter(pattern: ScriptConfigStageDelimiterPattern | undefined) {
@@ -163,6 +225,8 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
   const result: ParsedImportRow[] = [];
   const markerRows: MarkerImportRow[] = [];
   const warningMarks: string[] = [];
+  const typeConflicts: ImportTypeConflict[] = [];
+  const cueColumns = new Set(colMap.cueColumns ?? []);
 
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
@@ -181,13 +245,18 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
       return Array.isArray(action) ? action : [action];
     });
     if (typeActions.some(a => a.action === "ignore")) continue;
+    const blockTypes = mappedBlockTypes(typeActions);
+    const resolvedBlockType = resolveBlockType(blockTypes);
+    if (blockTypes.length > 1) {
+      typeConflicts.push({ sourceIndex: i, rawType: rawType ?? "", blockTypes, resolvedBlockType });
+    }
 
     const rawMark = getCell(row, colMap.rehearsalMark);
     const warningMark = !!(rawMark && !REHEARSAL_MARK_RE.test(rawMark));
     if (warningMark && rawMark && !warningMarks.includes(rawMark)) warningMarks.push(rawMark);
 
     // Build body by concatenating body columns
-    const bodyParts = colMap.bodyColumns.map(col => {
+    const bodyParts = colMap.bodyColumns.filter(col => !cueColumns.has(col)).map(col => {
       const val = getCell(row, col);
       if (!val) return null;
       const isStage = colMap.stageInlineColumns?.includes(col);
@@ -195,8 +264,12 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
       return isStage ? `${stageDelimiter.open}${normalized}${stageDelimiter.close}` : normalized;
     }).filter(Boolean);
     const body = bodyParts.join("\n");
-    if (typeActions.some(a => a.action === "mapType" && a.blockType === "marker")) {
-      markerRows.push({ sourceIndex: i, sceneNum: rawSceneNum, body });
+    const cueValues = [...cueColumns].flatMap(column => {
+      const content = getCell(row, column);
+      return content ? [{ column, content }] : [];
+    });
+    if (resolvedBlockType === "marker") {
+      markerRows.push({ sourceIndex: i, sceneNum: rawSceneNum, body, cueValues });
       continue;
     }
 
@@ -210,12 +283,11 @@ function parseRows(rows: (string | null)[][], body: Omit<ImportScriptBody, "spre
     const rawChars = rawCharCell
       ? rawCharCell.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)
       : [];
-
-    result.push({ sourceIndex: i, sceneNum: rawSceneNum, rehearsalMark: rawMark, rawType, rawChars, body, stageComment, typeActions, warningMark });
+    result.push({ sourceIndex: i, sceneNum: rawSceneNum, rehearsalMark: rawMark, rawType, rawChars, body, stageComment, typeActions, warningMark, cueValues, resolvedBlockType });
     void characterKinds;
   }
 
-  return { rows: result, markerRows, warningMarks };
+  return { rows: result, markerRows, warningMarks, typeConflicts };
 }
 
 function normalizeMarkerName(text: string | null | undefined): string {
@@ -234,9 +306,7 @@ function sceneLabel(scene: { number: string; name: string | null }): string {
 }
 
 function isImportedOpeningChapter(scene: { number: string; name: string }): boolean {
-  const chapterNumber = scene.number.trim();
-  return (chapterNumber !== "" && Number(chapterNumber) === 0) ||
-    scene.name.trim() === FIXED_INITIAL_CHAPTER_NAME;
+  return shouldImportFirstChapterAsOpening(scene.number, scene.name);
 }
 
 function validateProvidedMarkers(markerRows: MarkerImportRow[], textRows: ParsedImportRow[]): string[] {
@@ -259,9 +329,11 @@ function validateProvidedMarkers(markerRows: MarkerImportRow[], textRows: Parsed
     }
   }
 
+  let nextTextRowIndex = 0;
   for (const marker of markerRows) {
     const parsedMarker = parseSceneNum(marker.sceneNum);
-    const nextTextRow = textRows.find(row => row.sourceIndex > marker.sourceIndex);
+    while (textRows[nextTextRowIndex]?.sourceIndex <= marker.sourceIndex) nextTextRowIndex++;
+    const nextTextRow = textRows[nextTextRowIndex];
     if (!parsedMarker) {
       conflicts.push(`章节分界线行 ${marker.sourceIndex + 1} 的段落无法解析：${marker.sceneNum}`);
       continue;
@@ -341,7 +413,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const previewVersionId = await resolveImportVersionId(req, productionId);
   if (previewVersionId instanceof Response) return previewVersionId;
   const rawRows = body.rows ?? await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
-  const { rows: parsed, markerRows, warningMarks } = parseRows(rawRows, body);
+  const { rows: parsed, markerRows, warningMarks, typeConflicts } = parseRows(rawRows, body);
   const markerConflicts = validateProvidedMarkers(markerRows, parsed);
   if (markerConflicts.length > 0) {
     return Response.json({ error: `章节分界线与段落推断不一致：${markerConflicts.join("；")}` }, { status: 400 });
@@ -352,7 +424,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   // Collect all unique character names from import
   const allRawChars = parsed.flatMap(r => r.rawChars);
-  const parsedChars = collectCharacters(allRawChars);
+  const parsedChars = collectImportedCharacters(allRawChars, body.characterMappings);
 
   const charsToAdd: ImportScriptPreview["charsToAdd"] = [];
   const charsToUpdate: ImportScriptPreview["charsToUpdate"] = [];
@@ -377,8 +449,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     charsToAdd,
     charsToUpdate,
     charConflicts,
-    blockCount: parsed.length,
+    blockCount: parsed.filter(row => row.body.trim()).length,
     warningRehearsalMarks: warningMarks,
+    typeConflicts,
   };
   return Response.json({ preview });
 }
@@ -386,8 +459,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 /** PUT: commit the import — clears all blocks in target version, imports fresh */
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
-  const { deny } = await guard(req, productionId);
+  const { session, deny } = await guard(req, productionId);
   if (deny) return deny;
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const body = (await req.json()) as ImportScriptBody;
   const userToken = req.cookies.get(TOKEN_COOKIE)?.value;
@@ -396,8 +470,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const versionId = await resolveImportVersionId(req, productionId);
   if (versionId instanceof Response) return versionId;
 
-  const rawRows = await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
+  const rawRows = body.rows ?? await getSheetValues(body.spreadsheetToken, body.sheetId, userToken, body.rowCount);
   const { rows: parsed, markerRows } = parseRows(rawRows, body);
+  const headerRow = getHeaderRow(rawRows, body.headerRowIncluded);
+  const cueColumnNames = new Map((body.colMap.cueColumns ?? []).map(column => [
+    column,
+    body.colMap.cueColumnNames?.[column]?.trim() || cueListNameFromHeader(getCell(headerRow ?? [], column), column),
+  ]));
   const markerConflicts = validateProvidedMarkers(markerRows, parsed);
   if (markerConflicts.length > 0) {
     return Response.json({ error: `章节分界线与段落推断不一致：${markerConflicts.join("；")}` }, { status: 400 });
@@ -415,16 +494,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const existingCharByName = new Map(existingChars.map(c => [c.name, c]));
 
-  // Build lyric-split lookup from tag group settings
-  const lyricSplitBoundary = new Map<string, number>(); // groupId → split option's sortOrder
-  const optionSortOrderMap = new Map<string, number>(); // `${groupId}:${optionId}` → sortOrder
-  for (const g of tagGroups) {
-    for (const o of g.options) optionSortOrderMap.set(`${g.id}:${o.id}`, o.sortOrder);
-    if (g.lyricSplitAfterOptionId) {
-      const splitOpt = g.options.find(o => o.id === g.lyricSplitAfterOptionId);
-      if (splitOpt) lyricSplitBoundary.set(g.id, splitOpt.sortOrder);
-    }
-  }
+  const { lyricSplitBoundary, optionSortOrderMap } = buildImportTagFormatLookup(tagGroups, body.tagChanges);
 
   // Build a combined scene lookup that auto-creates any scenes referenced by script rows
   // but not yet in the DB. This way scene import is not required before script import.
@@ -542,7 +612,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   // Merge characters (upsert)
   const allRawChars = parsed.flatMap(r => r.rawChars);
-  const parsedChars = collectCharacters(allRawChars);
+  const parsedChars = collectImportedCharacters(allRawChars, body.characterMappings);
   const upsertChars: Array<{ id: string; name: string; isAggregate: boolean; sortOrder: number }> = [];
   const charIdByName = new Map<string, string>();
 
@@ -553,7 +623,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   for (const raw of allRawChars) {
     const trimmed = raw.trim();
     if (!trimmed || rawToName.has(trimmed)) continue;
-    const pc = parseCharacter(trimmed);
+    const pc = resolveImportedCharacter(trimmed, body.characterMappings);
     rawToName.set(trimmed, pc.name);
     if (pc.note) rawToNote.set(trimmed, pc.note);
   }
@@ -577,6 +647,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
 
   type BlockSpec = {
+    sourceIndex: number;
     sceneId: string | null;
     blockType: "dialogue" | "stage";
     lyric: boolean;
@@ -596,18 +667,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const scene = sceneNum ? sceneByNum.get(sceneNum) : null;
     const sceneId = scene?.id ?? null;
 
-    // Determine base block type (first mapType wins; all mapTags collected)
-    let baseType: "dialogue" | "stage" = "dialogue";
-    let lyric = false;
-    const rowTagActions: { groupId: string; optionId: string }[] = [];
-    for (const ta of row.typeActions) {
-      if (ta.action === "mapType") {
-        if (ta.blockType === "stage") baseType = "stage";
-        else if (ta.blockType === "lyric") { baseType = "dialogue"; lyric = true; }
-      } else if (ta.action === "mapTag") {
-        rowTagActions.push({ groupId: ta.groupId, optionId: ta.optionId });
-      }
-    }
+    const baseType: "dialogue" | "stage" = row.resolvedBlockType === "stage" ? "stage" : "dialogue";
+    let lyric = row.resolvedBlockType === "lyric";
+    const rowTagActions = row.typeActions.flatMap(ta => (
+      ta.action === "mapTag" ? [{ groupId: ta.groupId, optionId: ta.optionId }] : []
+    ));
 
     // Apply lyricSplitAfterOptionId: if a tag falls at/before the split boundary → lyric
     if (!lyric && baseType !== "stage") {
@@ -638,6 +702,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       ? normalizeStageDelimiters(stripOuterStageDelimiter(row.body), stageBlockDelimiterReplacements)
       : row.body;
     blockSpecs.push({
+      sourceIndex: row.sourceIndex,
       sceneId,
       blockType: baseType,
       lyric,
@@ -650,22 +715,23 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
   }
 
-  // A zero-numbered chapter or a chapter named 开场 is the imported opening.
+  // A numerically zero chapter named 开场 (or unnamed) is the imported opening.
   // Otherwise prepend a hidden, empty opening chapter.
   const existingOpeningScene = existingOpeningChapterId
     ? existingScenes.find(s => s.id === existingOpeningChapterId) ?? null
     : null;
   const importedScriptSceneIds = new Set(blockSpecs.map((spec) => spec.sceneId).filter((id): id is string => !!id));
-  const importedOpeningScenes = [
-    ...upsertScenesFromScript.filter((scene) => (
-      scene.parentId === null && isImportedOpeningChapter(scene)
-    )),
+  const importedRootScenes = [
+    ...upsertScenesFromScript.filter((scene) => scene.parentId === null),
     ...[...sceneByNum.values()].filter((scene) => (
-      scene.parentId === null &&
-      isImportedOpeningChapter(scene) &&
-      importedScriptSceneIds.has(scene.id)
+      scene.parentId === null && importedScriptSceneIds.has(scene.id)
     )),
   ];
+  const importedOpeningScenes = body.firstChapterAsOpening === true
+    ? importedRootScenes.slice(0, 1)
+    : body.firstChapterAsOpening === false
+      ? []
+      : importedRootScenes.filter(isImportedOpeningChapter);
   const openingChapterMarkerId = importedOpeningScenes[0]?.id ?? existingOpeningScene?.id ?? randomUUID();
   const importedOpeningIds = new Set(importedOpeningScenes.map((scene) => scene.id));
 
@@ -704,11 +770,65 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const upsertBlocksWithoutKeys: Omit<ImportBlock, "lexKey">[] = [];
   const blockTagAssignments: Array<{ blockId: string; groupId: string; optionId: string }> = [];
+  const cueImportsByColumn = new Map([...cueColumnNames].map(([column, name]) => [
+    column,
+    { name, cues: [] as Array<{ afterBlockId: string | null; content: string }> },
+  ]));
   const sceneById = new Map([...sceneByNum.values()].map((scene) => [scene.id, scene]));
+  const cuesBeforeSourceIndex = new Map<number, Array<{ column: number; content: string }>>();
+  const trailingCueValues: Array<{ column: number; content: string }> = [];
+  const scriptSourceIndices = blockSpecs.map(spec => spec.sourceIndex);
+  let nextScriptSourceCursor = 0;
+  for (const row of parsed) {
+    if (row.cueValues.length === 0) continue;
+    while (scriptSourceIndices[nextScriptSourceCursor] <= row.sourceIndex) nextScriptSourceCursor++;
+    const targetSourceIndex = row.body.trim()
+      ? row.sourceIndex
+      : scriptSourceIndices[nextScriptSourceCursor];
+    if (targetSourceIndex == null) {
+      trailingCueValues.push(...row.cueValues);
+      continue;
+    }
+    const values = cuesBeforeSourceIndex.get(targetSourceIndex) ?? [];
+    values.push(...row.cueValues);
+    cuesBeforeSourceIndex.set(targetSourceIndex, values);
+  }
+  const markerCueValuesBySceneId = new Map<string, Array<{ column: number; content: string }>>();
+  for (const row of markerRows) {
+    if (row.cueValues.length === 0) continue;
+    const parsedScene = parseSceneNum(row.sceneNum);
+    const sourceSceneNum = parsedScene?.childNum ?? parsedScene?.parentNum ?? null;
+    const sceneNum = sourceSceneNum ? (sourceSceneNumToOverrideNum.get(sourceSceneNum) ?? sourceSceneNum) : null;
+    const sceneId = sceneNum ? sceneByNum.get(sceneNum)?.id ?? null : null;
+    if (!sceneId) continue;
+    const values = markerCueValuesBySceneId.get(sceneId) ?? [];
+    values.push(...row.cueValues);
+    markerCueValuesBySceneId.set(sceneId, values);
+  }
   const chapterIdsWithScriptBlocks = new Set<string>();
   let currentChapterId: string | null = null;
   let currentSceneId: string | null = null;
+  let previousOutputBlockId: string | null = null;
+  let blockBeforePreviousOutputId: string | null = null;
 
+  const pushCueValues = (
+    values: Array<{ column: number; content: string }>,
+    afterBlockId = previousOutputBlockId,
+  ) => {
+    for (const cueValue of values) {
+      cueImportsByColumn.get(cueValue.column)?.cues.push({
+        afterBlockId,
+        content: cueValue.content,
+      });
+    }
+  };
+
+  const advanceOutputBlock = (blockId: string) => {
+    blockBeforePreviousOutputId = previousOutputBlockId;
+    previousOutputBlockId = blockId;
+  };
+
+  pushCueValues(markerCueValuesBySceneId.get(openingChapterMarkerId) ?? []);
   upsertBlocksWithoutKeys.push({
     id: randomUUID(),
     blockId: openingChapterMarkerId,
@@ -724,6 +844,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       parentMarkerId: null,
     },
   });
+  advanceOutputBlock(openingChapterMarkerId);
   currentChapterId = openingChapterMarkerId;
 
   const pushSceneMarkerBlock = (type: Extract<BlockType, "chapter_marker" | "scene_marker">, sceneId: string) => {
@@ -732,6 +853,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const parentMarkerId = scene?.parentId
       ? scene.parentId
       : null;
+    const cueAnchorId = type === "scene_marker" && parentMarkerId === previousOutputBlockId
+      ? blockBeforePreviousOutputId
+      : previousOutputBlockId;
+    pushCueValues(markerCueValuesBySceneId.get(sceneId) ?? [], cueAnchorId);
     upsertBlocksWithoutKeys.push({
       id: randomUUID(),
       blockId: markerId,
@@ -752,9 +877,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         expectedDuration: scene?.expectedDuration ?? "",
       },
     });
+    advanceOutputBlock(markerId);
   };
   const pushScriptBlock = (spec: BlockSpec) => {
     const blockId = randomUUID();
+    pushCueValues(cuesBeforeSourceIndex.get(spec.sourceIndex) ?? []);
     upsertBlocksWithoutKeys.push({
       id: blockId,
       type: spec.blockType,
@@ -769,14 +896,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     for (const ta of spec.tagActions) {
       blockTagAssignments.push({ blockId, groupId: ta.groupId, optionId: ta.optionId });
     }
+    advanceOutputBlock(blockId);
   };
   const pushSpecWithRehearsal = (spec: BlockSpec, previousSpec: BlockSpec | null) => {
     if (spec.rehearsalMark && (
       spec.rehearsalMark !== previousSpec?.rehearsalMark ||
       spec.sceneId !== previousSpec?.sceneId
     )) {
+      const rehearsalBlockId = randomUUID();
       upsertBlocksWithoutKeys.push({
-        id: randomUUID(),
+        id: rehearsalBlockId,
         type: "rehearsal_marker",
         content: "",
         lyric: false,
@@ -785,6 +914,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         sceneId: null,
         rehearsalMark: null,
       });
+      advanceOutputBlock(rehearsalBlockId);
     }
     pushScriptBlock(spec);
   };
@@ -856,6 +986,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const previousSpec = i > 0 ? blockSpecs[i - 1] : null;
     pushSpecWithRehearsal(spec, previousSpec);
   }
+  pushCueValues(trailingCueValues);
   const lexKeys = initialKeys(upsertBlocksWithoutKeys.length);
   const upsertBlocks: ImportBlock[] = upsertBlocksWithoutKeys.map((block, index) => ({
     ...block,
@@ -881,42 +1012,39 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           .map((scene) => scene.id)
       : []),
   ].filter((id, index, ids) => ids.indexOf(id) === index);
+  const aggregateMemberships: Array<{ aggregateId: string; memberIds: string[] }> = [];
+  for (const [aggregateName, memberNames] of Object.entries(body.aggregateMembers ?? {})) {
+    const aggregateId = charIdByName.get(aggregateName);
+    if (!aggregateId) {
+      return Response.json({ error: `聚合角色不存在：${aggregateName}` }, { status: 400 });
+    }
+    const missingMember = memberNames.find(name => !charIdByName.has(name));
+    if (missingMember) {
+      return Response.json({ error: `聚合角色 ${aggregateName} 的成员不存在：${missingMember}` }, { status: 400 });
+    }
+    aggregateMemberships.push({
+      aggregateId,
+      memberIds: memberNames.map(name => charIdByName.get(name)!),
+    });
+  }
 
   await importScriptToVersion(productionId, versionId, {
     upsertBlocks,
     upsertChars,
     upsertScenes: upsertScenesFromScript,
     deleteSceneIds,
+    upsertCueColumns: [...cueImportsByColumn.values()],
+    cueListCreatedBy: session.userId,
+    blockTagAssignments,
+    tagChanges: body.tagChanges,
+    aggregateMembers: aggregateMemberships,
+    openingChapter: {
+      markerId: openingChapterMarkerId,
+      show: importedOpeningIds.size > 0 ? undefined : false,
+    },
+    stageDelimiters: { open: stageDelimiter.open, close: stageDelimiter.close },
+    ensureEmptySceneBlocks: !!body.sceneOverrides,
   });
-  await saveOpeningChapterMarkerId(
-    productionId,
-    versionId,
-    openingChapterMarkerId,
-    importedOpeningIds.size > 0 ? undefined : false,
-  );
-  if (body.sceneOverrides) await ensureEmptyScriptBlocksForEmptyScenes(productionId, versionId);
-
-  await saveScriptStageDelimiters(productionId, stageDelimiter.open, stageDelimiter.close);
-
-  // Set aggregate member associations
-  if (body.aggregateMembers) {
-    await Promise.all(
-      Object.entries(body.aggregateMembers).map(([aggName, memberNames]) => {
-        const aggId = charIdByName.get(aggName);
-        if (!aggId) return Promise.resolve();
-        const memberIds = memberNames
-          .map(n => charIdByName.get(n))
-          .filter((id): id is string => !!id);
-        return setCharacterMembers(productionId, aggId, memberIds);
-      })
-    );
-  }
-
-  // Write block tag assignments (mapTag type action); deduplicate (block_id, group_id) pairs
-  const dedupedTags = [...new Map(
-    blockTagAssignments.map(t => [`${t.blockId}:${t.groupId}`, t])
-  ).values()];
-  await bulkUpsertBlockTags(dedupedTags);
 
   // Build per-scene block count summary (covers both existing and auto-created scenes)
   const sceneIdToInfo = new Map([...sceneByNum.values()].map(s => [s.id, { num: s.number, name: s.name }]));
