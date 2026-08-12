@@ -1521,19 +1521,8 @@ function ScenePanel({
   nestedMenuStyle?: React.CSSProperties;
   label?: string;
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open || nestedFromMore) return;
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onOpenChange(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, onOpenChange, nestedFromMore]);
-
   return (
-    <div ref={wrapRef} className="relative shrink-0">
+    <div className="relative shrink-0">
       <button
         data-script-toolbar-menu-trigger="scene"
         onClick={() => onOpenChange(!open)}
@@ -2408,16 +2397,6 @@ function CharacterPanel({
   label?: string;
 }) {
   const [draft, setDraft] = useState("");
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open || nestedFromMore) return;
-    const onDown = (e: MouseEvent) => {
-      if (!panelRef.current?.contains(e.target as Node)) onOpenChange(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open, onOpenChange, nestedFromMore]);
 
   const submit = () => {
     if (readOnly) return;
@@ -2428,7 +2407,7 @@ function CharacterPanel({
   };
 
   return (
-    <div ref={panelRef} className="relative shrink-0">
+    <div className="relative shrink-0">
       <button
         data-script-toolbar-menu-trigger="char"
         onClick={() => onOpenChange(!open)}
@@ -3160,6 +3139,19 @@ const PRINT_PREVIEW_MIN_SCALE = 0.1;
 const PRINT_PREVIEW_MAX_SCALE = 2;
 const PRINT_PREVIEW_SIDE_GUTTER_PX = 32;
 const PRINT_PREVIEW_PAGE_GUTTER_PX = 64;
+const PRINT_PAGINATION_MEASURE_BATCH_SIZE = 32;
+
+type PrintPaginationMeasurement = {
+  generation: number;
+  blocks: Block[];
+  characters: Character[];
+  scenes: Scene[];
+  pageLayout: PageLayout;
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  textLayoutMode: ScriptTextLayoutMode;
+  batchStart: number;
+};
 
 type PrintPageData = {
   items: PrintItem[];
@@ -3283,6 +3275,7 @@ function PrintMeasurementLayer({
   stageDelimClose,
   measureRef,
   onLayoutChange,
+  blockRange,
 }: {
   blocks: Block[];
   characters: Character[];
@@ -3293,10 +3286,14 @@ function PrintMeasurementLayer({
   stageDelimClose: string;
   measureRef: React.RefObject<HTMLDivElement | null>;
   onLayoutChange?: () => void;
+  blockRange?: { start: number; end: number };
 }) {
   const characterById = useMemo(() => new Map(characters.map((c) => [c.id, c])), [characters]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
-  const measuredBlocks = useMemo(() => blocks.filter(isTextBlock), [blocks]);
+  const allMeasuredBlocks = useMemo(() => blocks.filter(isTextBlock), [blocks]);
+  const rangeStart = blockRange?.start ?? 0;
+  const rangeEnd = blockRange?.end ?? allMeasuredBlocks.length;
+  const measuredBlocks = allMeasuredBlocks.slice(rangeStart, rangeEnd);
 
   const renderSceneHeader = (scene: Scene) => (
     <div className="flex items-center gap-3 py-3">
@@ -3380,7 +3377,7 @@ function PrintMeasurementLayer({
       }}
     >
       {measuredBlocks.map((block, i) => {
-        const prev = i > 0 ? measuredBlocks[i - 1] : null;
+        const prev = allMeasuredBlocks[rangeStart + i - 1] ?? null;
         const hideChar = shouldHideCharacterLabel(prev, block);
         const sceneStart = isSceneBoundaryBlock(block, prev);
         return (
@@ -3422,13 +3419,42 @@ function PrintPaginationMeasure({
   textLayoutMode: ScriptTextLayoutMode;
   onPageMapChange: (pageMap: Record<string, number>) => void;
 }) {
-  const cfg = PAGE_CONFIGS[pageLayout];
-  const contentW = cfg.width - cfg.marginX * 2;
-  const contentH = cfg.height - cfg.marginTop - cfg.marginBottom;
-  const compactLayout = textLayoutMode === "compact";
   const measureRef = useRef<HTMLDivElement>(null);
   const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
+  const measurementGenerationRef = useRef(0);
+  const pendingMeasureWorkRef = useRef<{ kind: "idle" | "timer"; id: number } | null>(null);
+  const pendingMeasureFrameRef = useRef<number | null>(null);
+  const measuredPrintHeightsRef = useRef<Record<string, number>>({});
+  const [measurement, setMeasurement] = useState<PrintPaginationMeasurement | null>(null);
+  const cancelPendingMeasureWork = useCallback(() => {
+    const pending = pendingMeasureWorkRef.current;
+    if (!pending) return;
+    if (pending.kind === "idle") window.cancelIdleCallback(pending.id);
+    else window.clearTimeout(pending.id);
+    pendingMeasureWorkRef.current = null;
+  }, []);
+  const cancelPendingMeasureFrame = useCallback(() => {
+    if (pendingMeasureFrameRef.current === null) return;
+    cancelAnimationFrame(pendingMeasureFrameRef.current);
+    pendingMeasureFrameRef.current = null;
+  }, []);
+  const scheduleMeasureWork = useCallback((work: () => void) => {
+    cancelPendingMeasureWork();
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(() => {
+        pendingMeasureWorkRef.current = null;
+        work();
+      }, { timeout: 100 });
+      pendingMeasureWorkRef.current = { kind: "idle", id };
+      return;
+    }
+    const id = window.setTimeout(() => {
+      pendingMeasureWorkRef.current = null;
+      work();
+    }, 0);
+    pendingMeasureWorkRef.current = { kind: "timer", id };
+  }, [cancelPendingMeasureWork]);
   const requestLayoutRemeasure = useCallback(() => {
     if (remeasureTimerRef.current) return;
     remeasureTimerRef.current = setTimeout(() => {
@@ -3438,33 +3464,104 @@ function PrintPaginationMeasure({
   }, []);
 
   useEffect(() => {
+    const generation = ++measurementGenerationRef.current;
+    measuredPrintHeightsRef.current = {};
+    cancelPendingMeasureFrame();
+    scheduleMeasureWork(() => {
+      setMeasurement({
+        generation,
+        blocks: blocks.filter(isTextBlock),
+        characters,
+        scenes,
+        pageLayout,
+        stageDelimOpen,
+        stageDelimClose,
+        textLayoutMode,
+        batchStart: 0,
+      });
+    });
     return () => {
-      if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
+      if (remeasureTimerRef.current) {
+        clearTimeout(remeasureTimerRef.current);
+        remeasureTimerRef.current = null;
+      }
+      cancelPendingMeasureWork();
+      cancelPendingMeasureFrame();
     };
-  }, []);
+  }, [blocks, characters, scenes, pageLayout, stageDelimOpen, stageDelimClose, textLayoutMode, cancelPendingMeasureFrame, cancelPendingMeasureWork, scheduleMeasureWork]);
 
   useEffect(() => {
-    const el = measureRef.current;
-    if (!el) return;
-    const heights: Record<string, number> = {};
-    el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
-      if (node.dataset.mid) heights[node.dataset.mid] = node.offsetHeight;
+    if (!measurement) return;
+    if (measurement.generation !== measurementGenerationRef.current) return;
+    const textBlockCount = measurement.blocks.length;
+    if (textBlockCount === 0) {
+      onPageMapChange({});
+      setMeasurement((current) => current?.generation === measurementGenerationRef.current
+        ? null
+        : current
+      );
+      return;
+    }
+    const batchEnd = Math.min(
+      textBlockCount,
+      measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE,
+    );
+    cancelPendingMeasureFrame();
+    pendingMeasureFrameRef.current = requestAnimationFrame(() => {
+      pendingMeasureFrameRef.current = requestAnimationFrame(() => {
+        pendingMeasureFrameRef.current = null;
+        if (measurement.generation !== measurementGenerationRef.current) return;
+        const el = measureRef.current;
+        if (!el) return;
+        el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
+          if (node.dataset.mid) measuredPrintHeightsRef.current[node.dataset.mid] = node.offsetHeight;
+        });
+        if (batchEnd < textBlockCount) {
+          scheduleMeasureWork(() => {
+            setMeasurement((current) => current?.generation === measurementGenerationRef.current
+              ? { ...current, batchStart: batchEnd }
+              : current
+            );
+          });
+          return;
+        }
+        const measurementCfg = PAGE_CONFIGS[measurement.pageLayout];
+        const measurementContentH = measurementCfg.height - measurementCfg.marginTop - measurementCfg.marginBottom;
+        const result = computePrintPages(
+          measurement.blocks,
+          measurement.scenes,
+          measuredPrintHeightsRef.current,
+          measurementContentH,
+        );
+        onPageMapChange(pageMapFromPrintPages(result.pages));
+        setMeasurement((current) => current?.generation === measurementGenerationRef.current
+          ? null
+          : current
+        );
+      });
     });
-    const result = computePrintPages(blocks, scenes, heights, contentH);
-    onPageMapChange(pageMapFromPrintPages(result.pages));
-  }, [blocks, characters, scenes, contentW, contentH, textLayoutMode, stageDelimOpen, stageDelimClose, layoutMeasureTick, onPageMapChange]);
+    return cancelPendingMeasureFrame;
+  }, [measurement, layoutMeasureTick, cancelPendingMeasureFrame, onPageMapChange, scheduleMeasureWork]);
+
+  if (!measurement) return null;
+
+  const batchEnd = Math.min(
+    measurement.blocks.length,
+    measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE,
+  );
 
   return (
     <PrintMeasurementLayer
-      blocks={blocks}
-      characters={characters}
-      scenes={scenes}
-      contentW={contentW}
-      compactLayout={compactLayout}
-      stageDelimOpen={stageDelimOpen}
-      stageDelimClose={stageDelimClose}
+      blocks={measurement.blocks}
+      characters={measurement.characters}
+      scenes={measurement.scenes}
+      contentW={PAGE_CONFIGS[measurement.pageLayout].width - PAGE_CONFIGS[measurement.pageLayout].marginX * 2}
+      compactLayout={measurement.textLayoutMode === "compact"}
+      stageDelimOpen={measurement.stageDelimOpen}
+      stageDelimClose={measurement.stageDelimClose}
       measureRef={measureRef}
       onLayoutChange={requestLayoutRemeasure}
+      blockRange={{ start: measurement.batchStart, end: batchEnd }}
     />
   );
 }
@@ -7258,7 +7355,7 @@ function ScriptToolbarMenuController({
       const overflowTrigger = target.closest<HTMLElement>("[data-production-overflow-submenu-trigger]");
       const triggerMenu = scriptTrigger?.dataset.scriptToolbarMenuTrigger
         ?? overflowTrigger?.dataset.productionOverflowSubmenuTrigger;
-      if (panel?.dataset.scriptToolbarMenuPanel === openMenu || triggerMenu === openMenu) return;
+      if (panel?.dataset.scriptToolbarMenuPanel === openMenu || triggerMenu) return;
       if (openMenu === "char") handleCharacterPanelOpenChange(false);
       else closeMenu();
     };
@@ -7573,7 +7670,6 @@ export default function ScriptEditor({
     return cache.pageMap;
   }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode]);
   const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
-  const [printPageMapMeasureEnabled, setPrintPageMapMeasureEnabled] = useState(false);
   const handlePrintPageMapChange = useCallback((nextPageMap: Record<string, number>) => {
     setPrintDividerPageMap((prev) => samePageMap(prev, nextPageMap) ? prev : nextPageMap);
   }, []);
@@ -7797,17 +7893,6 @@ export default function ScriptEditor({
   const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
   useEffect(() => {
     setPrintDividerPageMap(null);
-    setPrintPageMapMeasureEnabled(false);
-    if (!display.pageBreaks) return;
-    if (typeof window.requestIdleCallback === "function") {
-      const idleId = window.requestIdleCallback(
-        () => setPrintPageMapMeasureEnabled(true),
-        { timeout: 1000 },
-      );
-      return () => window.cancelIdleCallback(idleId);
-    }
-    const timer = window.setTimeout(() => setPrintPageMapMeasureEnabled(true), 250);
-    return () => window.clearTimeout(timer);
   }, [
     display.pageBreaks,
     blocks,
@@ -12178,7 +12263,7 @@ export default function ScriptEditor({
 
       `}</style>
 
-      {printPageMapMeasureEnabled && display.pageBreaks && (
+      {display.pageBreaks && (
         <PrintPaginationMeasure
           blocks={legacyProjectedBlocks}
           characters={characters}
