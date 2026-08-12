@@ -48,6 +48,12 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isEventTaskRestPreMigrationSchema,
+  createEventTaskRestPreMigrationData,
+  EVENT_TASK_REST_SNAPSHOT_PATH,
+  type EventTaskRestSnapshot,
+} from "./event-task-rest-snapshot";
+import {
   isCueDomainRestPreMigrationSchema,
   createCueDomainRestPreMigrationData,
   CUE_DOMAIN_REST_SNAPSHOT_PATH,
@@ -172,6 +178,17 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isEventTaskRestPreMigrationSchema(pool)) {
+    // 批B migration path: legacy event manage level still in vocabulary.
+    const etrSnapshot = await createEventTaskRestPreMigrationData(pool, TEST_USER);
+    await writeFile(EVENT_TASK_REST_SNAPSHOT_PATH, JSON.stringify(etrSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-event-task-rest.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -202,6 +219,25 @@ export async function teardown() {
       [cueListGrantSnapshot.personalGrantUserId, cueListGrantSnapshot.roleGrantUserId],
     ).catch(() => {});
     await unlink(CUE_LIST_GRANT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批B event-task-rest migration factory data (migration path only; no-op otherwise).
+  let etrSnapshot: EventTaskRestSnapshot | null = null;
+  try {
+    etrSnapshot = JSON.parse(
+      await readFile(EVENT_TASK_REST_SNAPSHOT_PATH, "utf8"),
+    ) as EventTaskRestSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (etrSnapshot) {
+    await pool.query("DELETE FROM production_event WHERE id = $1", [etrSnapshot.eventId]).catch(() => {});
+    await pool.query("DELETE FROM production WHERE id = $1", [etrSnapshot.productionId]).catch(() => {});
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2, $3)",
+      [etrSnapshot.manageUserId, etrSnapshot.assignUserId, etrSnapshot.atomicUserId],
+    ).catch(() => {});
+    await unlink(EVENT_TASK_REST_SNAPSHOT_PATH).catch(() => {});
   }
 
   // Clean up 批A cue-domain-rest migration factory data (migration path only; no-op otherwise).

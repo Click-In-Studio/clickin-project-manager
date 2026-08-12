@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "任务" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/event-db";
 import ProductionTasksClient from "@/components/ProductionTasksClient";
 
@@ -23,7 +23,7 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
   if (!access) redirect(`/unauthorized?id=${productionId}`);
   if (!productionName) notFound();
 
-  const canViewAll = hasPermission("task:view_any", access.permCtx);
+  const canViewAll = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
 
   const tasks = canViewAll
     ? await listProductionTechReqs(productionId)

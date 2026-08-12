@@ -20,14 +20,10 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "character:create":    "创建角色",
   "character:set_members": "分配角色成员",
   "contacts:view":       "查看人员通讯录",
-  "event:follow":        "跟踪日程",
   "event:view":          "查看日程",
   "event:edit":          "编辑日程",
   "event:publish":       "发布日程",
   "event:manage":        "管理日程",
-  "event:create":        "创建日程",
-  "task:view":           "查看任务",
-  "task:view_any":       "查看所有任务",
   "asset:view":          "查看附件",
   "asset:download":      "下载附件",
   "asset:share":         "分享附件",
@@ -124,7 +120,7 @@ type Props = {
   onClose: () => void;
   productionId: string;
   /**
-   * Atomic permission key that caused the 403 (e.g. "script:view", "event:follow").
+   * Atomic permission key that caused the 403 (e.g. "script:view", ).
    * When set: the form is locked to this permission — user only fills in a reason.
    * When unset: free-form mode with resource type / level selectors.
    */

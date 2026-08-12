@@ -71,8 +71,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "dramaturgy_view:create_public": "E",
   "dramaturgy_view:delete_public": "E",
   "dramaturgy_view:overwrite_public": "E",
-  // task → 批B
-  "task:delete_any": "B",
   // character → 批E
   "character:delete": "E",
   // tag_group → 批E
@@ -147,8 +145,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "character:edit_gender": "E",
   "character:edit_biography": "E",
   "character:edit_role_type": "E",
-  // event → 批B
-  "event:create": "B",
   // report → 批C
   "report:create": "C",
   // production → 批F
@@ -170,12 +166,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "script:view": "E",
   // contacts → 批F
   "contacts:view": "F",
-  // event → 批B
-  "event:view_call_sheet_any": "B",
-  "event:follow": "B",
-  // task → 批B
-  "task:view": "B",
-  "task:view_any": "B",
   // asset → 批D
   "asset:view": "D",
   "asset:download": "D",
@@ -196,6 +186,13 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
   // 批A（cue 域，2026-08-11）
+  // 批B（event/task 域，2026-08-12）
+  "event:create",
+  "event:follow",
+  "event:view_call_sheet_any",
+  "task:delete_any",
+  "task:view",
+  "task:view_any",
   "cue:comment",
   "cue:create",
   "cue:create_any",
@@ -236,8 +233,6 @@ export const RETIRED_PERMISSION_KEYS: readonly string[] = [
  * 完成一批：对应级别的 grant 行迁移为动词行 + 从词汇表删行 + 从此处删行。
  */
 export const RESOURCE_LEVEL_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
-  "event:manage": "B", "event:publish": "B", "event:edit_published": "B", "event:revoke": "B",
-  "tech_req:assign": "B", "tech_req:manage": "B",
   "report:manage": "C", "report:publish": "C", "report:edit_published": "C", "report:revoke": "C",
   "note:manage": "C",
   "asset:mount": "D", "asset:manage": "D",

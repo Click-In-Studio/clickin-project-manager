@@ -54,7 +54,6 @@ export type Permission =
   | "dramaturgy_view:delete_public"
   | "dramaturgy_view:overwrite_public"
   // ─── 普通管理 - Task 删除 ────────────────────────────────────────────────────
-  | "task:delete_any"
   // ─── 普通管理 - 角色管理 ──────────────────────────────────────────────────────
   | "character:delete"
   // ─── 普通管理 - 标注体系管理 ──────────────────────────────────────────────────
@@ -127,7 +126,6 @@ export type Permission =
   | "character:edit_biography"
   | "character:edit_role_type"
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
-  | "event:create"
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
   | "report:create"
   // ─── 写权限 - 项目挂载点 ──────────────────────────────────────────────────────
@@ -146,10 +144,6 @@ export type Permission =
   | "character:view"
   | "script:view"
   | "contacts:view"
-  | "event:view_call_sheet_any"
-  | "event:follow"
-  | "task:view"
-  | "task:view_any"
   | "asset:view"
   | "asset:download"
   | "asset:download_any"
@@ -355,7 +349,7 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "character:view",
   "script:view",
   "contacts:view",
-  "event:follow",
+  
   "asset:view",
   "asset:download",
   "asset:share",
@@ -396,18 +390,6 @@ const DRAMATURGY_FULL_SET: readonly Permission[] = [
 // ─── SM Event Permissions ──────────────────────────────────────────────────────
 // Per-event 写权限（event:edit 等）已迁移至 resource_grant；SM 通过 dept.permissions[]
 // 配置获得 event 的免审批区间，不再需要原子权限。
-const SM_EVENT_PERMS: readonly Permission[] = [
-  "event:create",
-  "event:view_call_sheet_any",
-  "task:view",
-  "task:view_any",
-  "task:delete_any",
-];
-
-const DIRECTOR_EVENT_PERMS: readonly Permission[] = [
-  "task:view_any",
-];
-
 // ─── 制作人 Full Set ───────────────────────────────────────────────────────────
 // Producer gets all 普通管理 + 写权限 + 读权限 by default.
 const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
@@ -439,7 +421,7 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
-  "task:delete_any",
+  
   "character:delete",
   "milestone:create",
   "milestone:manage",
@@ -472,7 +454,6 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   "dramaturgy_view:create",
   "dramaturgy_view:delete",
   "dramaturgy_view:overwrite",
-  ...SM_EVENT_PERMS,
   "report:create",
   "production:mount",
   "production:unmount",
@@ -483,14 +464,13 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   "asset:delete",
   "asset:mount",
   "asset:unmount",
-  "event:view_call_sheet_any",
 ];
 
 const PRODUCER_READ_PERMS: readonly Permission[] = [
   ...MEMBER_BASE_PERMISSIONS,
-  "event:view_call_sheet_any",
-  "task:view",
-  "task:view_any",
+  
+  
+  
   "asset:download_any",
   "asset:share_downloadable",
   "asset:share_any",
@@ -524,11 +504,9 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "script:annotate",
     "script:mount",
     "scene:mount",
-    ...DIRECTOR_EVENT_PERMS,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "副导演": [
-    ...DIRECTOR_EVENT_PERMS,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "音乐导演": [
@@ -536,7 +514,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "script:mount",
     "scene:mount",
     "production:mount",
-    ...DIRECTOR_EVENT_PERMS,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "作曲": [
@@ -591,7 +568,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
 
   // 舞台监督
   "舞台监督": [
-    ...SM_EVENT_PERMS,
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
@@ -625,12 +601,11 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
 
 export const ASSISTANT_ROLE_MIGRATION: Record<string, readonly Permission[]> = {
   "制作助理": [
-    ...SM_EVENT_PERMS,
   ],
   "作曲助理": ROLE_TEMPLATE_PERMISSIONS["作曲"],
   "助理舞台监督": ROLE_TEMPLATE_PERMISSIONS["舞台监督"],
   "音响设计助理": ROLE_TEMPLATE_PERMISSIONS["音响设计"],
-  "导演助理": [...DIRECTOR_EVENT_PERMS],
+  "导演助理": [],
   "音乐导演助理": ROLE_TEMPLATE_PERMISSIONS["音乐导演"],
   "舞美设计助理": ROLE_TEMPLATE_PERMISSIONS["舞美设计"],
   "灯光设计助理": ROLE_TEMPLATE_PERMISSIONS["灯光设计"],
@@ -656,7 +631,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "asset:view_any", "asset:delete_any", "asset:rename_any",
   "asset:change_type_any", "asset:overwrite_any", "asset:mount_any", "asset:unmount_any",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-  "task:delete_any",
+  
   "character:delete",
   "tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config",
   "tag_group:set_default_option", "tag_group:set_lyric_split", "tag_group:reorder",
@@ -678,13 +653,13 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "character:create", "character:rename", "character:change_type",
   "character:set_members", "character:edit_gender", "character:edit_biography",
   "character:edit_role_type",
-  "event:create",
+  
   "report:create",
   "production:mount", "production:unmount",
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
-  "scene:view", "character:view", "script:view", "contacts:view", "event:view_call_sheet_any", "event:follow",
-  "task:view", "task:view_any",
+  "scene:view", "character:view", "script:view", "contacts:view", 
+  
   "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
   "script:comment", "report:reply",
@@ -699,7 +674,7 @@ export type ResourceType =
   | "scene"
   | "event"
   | "report"
-  | "tech_req"
+  | "task"
   | "note"
   | "script_view"
   | "asset";

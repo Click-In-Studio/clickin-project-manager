@@ -448,6 +448,9 @@ CREATE TABLE IF NOT EXISTS event_stage_manager (
 
 CREATE INDEX IF NOT EXISTS event_stage_manager_event_idx ON event_stage_manager(event_id);
 
+ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
+  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
+
 CREATE TABLE IF NOT EXISTS event_participant (
   id            TEXT PRIMARY KEY,
   event_id      TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
@@ -977,22 +980,16 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('scene',       'mount',          2),
   ('scene',       'edit',           3),
   ('scene',       'manage',         4),
+  -- event 已 REST 化（批B）：view/edit 沿用为动词，create/delete 在批0 INSERT
   ('event',       'view',           1),
   ('event',       'edit',           2),
-  ('event',       'publish',        3),
-  ('event',       'edit_published', 4),
-  ('event',       'revoke',         5),
-  ('event',       'manage',         6),
   ('report',      'view',           1),
   ('report',      'edit',           2),
   ('report',      'publish',        3),
   ('report',      'edit_published', 4),
   ('report',      'revoke',         5),
   ('report',      'manage',         6),
-  ('tech_req',    'view',           1),
-  ('tech_req',    'edit',           2),
-  ('tech_req',    'assign',         3),
-  ('tech_req',    'manage',         4),
+  -- tech_req 已更名 task（批B），词汇见下方 task 四动词 INSERT
   ('note',        'view',           1),
   ('note',        'edit',           2),
   ('note',        'manage',         3),
@@ -1016,6 +1013,11 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('note',        'create', 0), ('note',        'delete', 0),
   ('script_view', 'create', 0), ('script_view', 'delete', 0),
   ('asset',       'create', 0), ('asset',       'delete', 0)
+ON CONFLICT DO NOTHING;
+
+-- 批B（add-task-verbs.sql）：task 类型四动词（tech_req 更名承接）
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('task', 'view', 0), ('task', 'create', 0), ('task', 'edit', 0), ('task', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
@@ -1176,3 +1178,29 @@ CREATE TABLE IF NOT EXISTS production_dept_permission (
 
 CREATE INDEX IF NOT EXISTS production_dept_permission_prod_idx
   ON production_dept_permission (production_id, dept_id);
+
+-- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:event/*/meta@view'),
+  ('*', 'node:event/*/details@view'),
+  ('*', 'node:event/*/followers@create')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, k.key
+FROM (VALUES ('舞台监督'), ('制作人')) AS r(name)
+CROSS JOIN (VALUES
+  ('node:event/*@create'),
+  ('node:event/*/chat@create'),
+  ('node:event/*/call_sheet@view'),
+  ('node:event/*/reports@view'),
+  ('node:event/*/publication@view'),
+  ('node:task/*@view'),
+  ('node:task/*@delete')
+) AS k(key)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, 'node:task/*@view'
+FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
+ON CONFLICT DO NOTHING;

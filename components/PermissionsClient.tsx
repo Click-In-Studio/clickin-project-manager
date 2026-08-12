@@ -111,12 +111,6 @@ const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   "dramaturgy_view:delete": "删除构作视图",
   "dramaturgy_view:overwrite": "覆盖构作视图",
   // 事件（per-event 写操作已迁移至 resource_grant）
-  "event:create": "创建事件",
-  "event:view_call_sheet_any": "查看他人Call Sheet",
-  "event:follow": "关注事件",
-  "task:view": "查看任务",
-  "task:view_any": "查看他人任务",
-  "task:delete_any": "删除他人任务",
   // 报告（per-report 写操作已迁移至 resource_grant）
   "report:create": "创建报告",
   "report:edit_comment_any": "编辑他人报告评论",

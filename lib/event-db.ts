@@ -89,6 +89,7 @@ export type EventTechReq = {
   assignees: EventTechReqAssignee[];
   chatId: string | null;
   createdAt: string;
+  createdVia: "explicit" | "dept_auto" | "poc";
 };
 
 export type Mention = { userId: string; name: string };
@@ -166,6 +167,7 @@ type TechReqRow = {
   id: string; event_id: string;
   title: string; description: string; preset_minutes: number | null;
   department_id: string | null; status: string; chat_id: string | null; created_at: Date;
+  created_via?: string | null;
 };
 
 type TechAssigneeRow = { req_id: string; user_id: string; name: string };
@@ -241,6 +243,7 @@ function rowToTechReq(r: TechReqRow, assignees: EventTechReqAssignee[], schedule
     title: r.title, description: r.description,
     presetMinutes: r.preset_minutes, departmentId: r.department_id,
     status: r.status, assignees, chatId: r.chat_id ?? null,
+    createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto" | "poc",
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -410,13 +413,17 @@ export async function setEventParticipants(
         [pid(), eventId, p.userId, p.name, p.departmentId, p.role],
       );
     }
-    // Write assigned view grants for all participants (idempotent).
+    // 被指派自动授权：meta+details view（五层模型第②层——不用 '*' 通配，
+    // 那会把 call_sheet/tasks/reports 层白送）。写入即独立事实：移除参与者
+    // **不**自动撤行（撤销走 sweep/手动；模板只是模板）。
     if (unique.length > 0) {
       await client.query(
         `INSERT INTO resource_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
-         SELECT $1, unnest($2::uuid[]), 'event', $3, '*', 'view', 'assigned', $4
+         SELECT $1, u, 'event', $3, s.sub, 'view', 'assigned', $4
+         FROM unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
@@ -496,6 +503,8 @@ export async function getProductionEvent(id: string, productionId: string): Prom
 export async function setEventStageManagers(
   eventId: string,
   managers: { userId: string; name: string }[],
+  productionId: string,
+  assignedBy: string,
 ): Promise<void> {
   const seen = new Set<string>();
   const unique = managers.filter(m => { if (seen.has(m.userId)) return false; seen.add(m.userId); return true; });
@@ -507,6 +516,27 @@ export async function setEventStageManagers(
       await client.query(
         "INSERT INTO event_stage_manager (event_id, user_id, name) VALUES ($1,$2,$3)",
         [eventId, m.userId, m.name],
+      );
+    }
+    // 跟组舞监自动行集（用户规范，无需发布即生效）：
+    // details/call_sheet/tasks 可见 + 本 event 报告 CRUD。
+    // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
+    if (unique.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
+         FROM unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES
+           ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
+           ('call_sheet', 'view'), ('tasks', 'view'), ('reports', 'view'),
+           ('reports', 'create'), ('reports', 'edit'), ('reports', 'delete')
+         ) AS s(sub, verb)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, unique.map(m => m.userId), eventId, assignedBy],
       );
     }
     await client.query("COMMIT");
@@ -906,7 +936,7 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
   const [reqRes, assigneeRes, itemRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_at
+              preset_minutes, department_id, status, chat_id, created_via, created_at
        FROM event_tech_req WHERE event_id = $1 ORDER BY created_at`,
       [eventId]
     ),
@@ -943,7 +973,7 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
   const [reqRes, assigneeRes, itemRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_at
+              preset_minutes, department_id, status, chat_id, created_via, created_at
        FROM event_tech_req WHERE id = $1 AND event_id = $2`,
       [id, eventId]
     ),
@@ -1017,6 +1047,7 @@ export async function createEventTechReq(data: {
   id: string; eventId: string; scheduleItemIds: string[];
   title: string; description: string; presetMinutes: number | null;
   departmentId: string | null; assignees: EventTechReqAssignee[];
+  createdVia?: "explicit" | "poc";
   createdBy: string;
 }): Promise<EventTechReq> {
   const client = await getPool().connect();
@@ -1024,11 +1055,11 @@ export async function createEventTechReq(data: {
     await client.query("BEGIN");
     const res = await client.query<TechReqRow>(
       `INSERT INTO event_tech_req
-         (id, event_id, title, description, preset_minutes, department_id)
-       VALUES ($1,$2,$3,$4,$5,$6)
+         (id, event_id, title, description, preset_minutes, department_id, created_via)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, event_id, title, description,
-                 preset_minutes, department_id, status, chat_id, created_at`,
-      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId]
+                 preset_minutes, department_id, status, chat_id, created_via, created_at`,
+      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId, data.createdVia ?? "explicit"]
     );
     const unique = [...new Set(data.scheduleItemIds)];
     for (const itemId of unique) {
@@ -1050,6 +1081,9 @@ export async function createEventTechReq(data: {
     );
     if (prodRow.rows[0]) {
       await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy, data.eventId);
+      if (data.departmentId) {
+        await writeTaskDeptEventVisibility(data.eventId, data.departmentId, prodRow.rows[0].production_id, data.createdBy);
+      }
     }
     return rowToTechReq(res.rows[0], data.assignees, unique);
   } catch (err) {
@@ -1078,7 +1112,7 @@ export async function updateEventTechReq(
   const res = await getPool().query<TechReqRow>(
     `UPDATE event_tech_req SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
      RETURNING id, event_id, title, description,
-               preset_minutes, department_id, status, chat_id, created_at`,
+               preset_minutes, department_id, status, chat_id, created_via, created_at`,
     vals
   );
   if (!res.rows[0]) return null;
@@ -1137,8 +1171,8 @@ export async function upsertAwaitingTechReqs(
     } else {
       reqId = uid();
       await pool.query(
-        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status)
-         VALUES ($1, $2, '', '', $3, 'awaiting')`,
+        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status, created_via)
+         VALUES ($1, $2, '', '', $3, 'awaiting', 'dept_auto')`,
         [reqId, eventId, deptId],
       );
       if (scheduleItemId) {
@@ -1153,7 +1187,44 @@ export async function upsertAwaitingTechReqs(
     if (req) result.push(req);
   }
 
+  // 规则4：部门被 assign（dept_auto 路径）→ event 可见性行
+  const prodRow = await pool.query<{ production_id: string; created_by: string }>(
+    "SELECT production_id, created_by FROM production_event WHERE id = $1", [eventId],
+  );
+  if (prodRow.rows[0]) {
+    for (const deptId of departmentIds) {
+      await writeTaskDeptEventVisibility(eventId, deptId, prodRow.rows[0].production_id, prodRow.rows[0].created_by);
+    }
+  }
+
   return result;
+}
+
+/** 部门被 assign 进 tech req（任何路径）时的 event 可见性行（用户规则4）：
+ *  POC = meta+details+publication view（提前确认/组织）；成员 = meta+details view
+ *  （发布后可见）。物化当下成员（模板只是模板）；解绑不撤行。 */
+export async function writeTaskDeptEventVisibility(
+  eventId: string,
+  eventDeptId: string,
+  productionId: string,
+  establishedBy: string,
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO resource_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub,
+        permission_level, grant_source, confirmed_by)
+     SELECT $1, edm.user_id, 'event', $2, s.sub, 'view', 'assigned', $4
+     FROM event_department_member edm
+     CROSS JOIN LATERAL (
+       SELECT sub FROM (VALUES ('meta'), ('details'), ('publication')) AS v(sub)
+       WHERE edm.is_poc OR v.sub != 'publication'
+     ) AS s
+     WHERE edm.department_id = $3
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+       WHERE is_revoked = false
+     DO NOTHING`,
+    [productionId, eventId, eventDeptId, establishedBy],
+  );
 }
 
 export async function completeAllEventTechReqs(eventId: string): Promise<void> {
@@ -1174,6 +1245,27 @@ export async function setTechReqAssignees(
       await client.query(
         "INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1,$2,$3)",
         [reqId, a.userId, a.name]
+      );
+    }
+    // 被 assign 进绑定 event 的 task = 被叫来干活（技术需求 call，与 calltime 同族）
+    // → 自动获得该 event 的 meta+details@view assigned 行（严格剧组下也能看到
+    // 排练时间地点）。不写 event_participant（名单是 organizer 的产品面）；
+    // 移除 assignee 不撤行（行是独立事实）。
+    if (assignees.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
+         FROM event_tech_req etr
+         JOIN production_event pe ON pe.id = etr.event_id
+         CROSS JOIN unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('meta'), ('details'), ('publication')) AS s(sub)
+         WHERE etr.id = $1
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [reqId, assignees.map(a => a.userId)],
       );
     }
     await client.query("COMMIT");
@@ -1614,6 +1706,18 @@ export async function isUserReqAssignee(reqId: string, userId: string): Promise<
        SELECT 1 FROM event_tech_assignee WHERE req_id = $1 AND user_id = $2
      ) AS exists`,
     [reqId, userId]
+  );
+  return res.rows[0].exists;
+}
+
+/** True if the user is a member of a specific event department. */
+export async function isUserDeptMember(deptId: string, userId: string): Promise<boolean> {
+  const res = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM event_department_member
+       WHERE department_id = $1 AND user_id = $2
+     ) AS exists`,
+    [deptId, userId]
   );
   return res.rows[0].exists;
 }

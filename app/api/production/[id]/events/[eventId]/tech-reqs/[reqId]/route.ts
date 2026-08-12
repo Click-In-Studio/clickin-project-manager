@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
-import { getProductionEvent, getEventTechReq, updateEventTechReq, deleteEventTechReq } from "@/lib/event-db";
+import { getProductionEvent, getEventTechReq, isUserDeptPoc, updateEventTechReq, deleteEventTechReq } from "@/lib/event-db";
 import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -47,7 +47,15 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("task:delete_any", permCtx))
+  const techReq = await getEventTechReq(reqId, eventId);
+  const canDelete =
+    await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", reqId, "*", "delete")
+    || await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "delete")
+    // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
+    // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
+    || (techReq != null && techReq.createdVia !== "explicit" && techReq.departmentId != null
+        && await isUserDeptPoc(techReq.departmentId, session.userId));
+  if (!canDelete)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

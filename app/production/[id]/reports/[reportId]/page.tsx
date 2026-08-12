@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
+import { hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
 import { getProductionPermissionContext, listProductionMembers } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getReportByProduction,
   getProductionEvent,
@@ -17,6 +17,7 @@ import {
   loadEventPermContext,
   canModerateNotes, isReportViewer,
   canReplyToReport,
+  hasEventDomainView,
 } from "@/lib/event-permissions";
 import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import ReportViewClient from "@/components/ReportViewClient";
@@ -85,7 +86,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
   if (!report) notFound();
@@ -94,7 +95,8 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewReportUnpublished = isReportViewer(prodPermCtx)
+  const canViewReportUnpublished = await isReportViewer(prodPermCtx, productionId)
+    || await hasGrant(session.userId, productionId, "event", eventId, "reports", "view")
     || await hasResourceGrantLevel(session.userId, productionId, "report", reportId, "view");
 
   if (!canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))

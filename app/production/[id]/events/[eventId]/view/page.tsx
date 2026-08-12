@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -36,17 +37,19 @@ export default async function EventViewPage({
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
   // Per-instance resource_grant edit+ → full editor view on this page
   const canViewFull = prodPermCtx.isAdmin
-    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   // Non-editors cannot see unpublished events
-  if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
+  // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
+  const canSeeDraft = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "event", eventId, "publication", "view");
+  if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   const [scheduleItems, reports, isAssignee, selfRole, departments, hasAnyTechReqGrant] = await Promise.all([
@@ -59,7 +62,11 @@ export default async function EventViewPage({
   ]);
 
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
-  const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
+  const canViewReqsFull = await hasGrant(session.userId, productionId, "task", "*", "*", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit")
+    || prodPermCtx.isAdmin;
+  const canViewReqs = canViewReqsFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
   const visibleReports = canViewFull
     ? reports

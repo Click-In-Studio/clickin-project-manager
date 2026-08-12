@@ -10,6 +10,7 @@
 
 import { getPool } from "./pg";
 import { hasPermission, type PermissionContext } from "./permissions";
+import { hasGrant } from "./grant-check";
 import { hasResourceGrantLevel } from "./resource-grant-db";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
@@ -72,6 +73,26 @@ export async function loadEventPermContext(
   };
 }
 
+// ─── 域级门 helper（消除路由层复制，review findings 1/2）───────────────────────
+
+import { hasAnyEffectiveGrant, hasEffectiveGrant, type GrantActor } from "./grant-check";
+
+/** event 域读取门的节点集（原 event:follow 读取职责）。改这里=改所有调用点。 */
+export const EVENT_DOMAIN_VIEW_SUBS = ["meta", "details"] as const;
+
+/** event 域可见（任一 meta/details view 行；admin/owner 旁路）。 */
+export function hasEventDomainView(actor: GrantActor, productionId: string): Promise<boolean> {
+  return hasAnyEffectiveGrant(actor, productionId, "event", EVENT_DOMAIN_VIEW_SUBS, "view");
+}
+
+/** 事件内容写门（状态感知）：published → publication@edit；否则 details@edit。 */
+export function hasEventContentEdit(
+  actor: GrantActor, productionId: string, eventId: string, status: string,
+): Promise<boolean> {
+  const sub = status === "published" ? "publication" : "details";
+  return hasEffectiveGrant(actor, productionId, "event", eventId, sub, "edit");
+}
+
 // ─── Permission checks ────────────────────────────────────────────────────────
 
 /**
@@ -116,10 +137,16 @@ export async function canEditTechReq(
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
   const [hasReqGrant, hasEventGrant] = await Promise.all([
-    hasResourceGrantLevel(permCtx.userId, productionId, "tech_req", techReqId, "edit"),
-    hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit"),
+    hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "edit"),
+    hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit"),
   ]);
-  return hasReqGrant || hasEventGrant;
+  if (hasReqGrant || hasEventGrant) return true;
+  // 规则（用户规范）：不论创建路径与进度，task 关联部门的 POC 恒可编辑内容并推进
+  // 状态——上下文关系判定（Type B），部门后关联/POC 变更自动跟踪，无需行同步
+  const { getEventTechReq, isUserDeptPoc } = await import("./event-db");
+  const req = await getEventTechReq(techReqId, eventId);
+  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  return false;
 }
 
 /** Can assign tech personnel to a requirement. Same rule as canEditTechReq. */
@@ -142,12 +169,22 @@ export async function canViewTechReq(
   ctx: Pick<EventPermContext, "participantDeptIds">,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (hasPermission("task:view_any", permCtx)) return true;
+  if (await hasGrant(permCtx.userId, productionId, "task", "*", "*", "view")) return true;
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "tasks", "view")) return true;
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req
-  const level = await hasResourceGrantLevel(permCtx.userId, productionId, "tech_req", techReqId, "view");
-  return level;
+  if (await hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "view")) return true;
+  // 规则（用户规范，上下文判定）：
+  //   - assign 了个人 → 个人恒可见（并可推进进度，见 status 路由）
+  //   - task 已确认（非 awaiting）且关联部门 → 部门全员可见
+  const { isUserReqAssignee, isUserDeptMember, getEventTechReq } = await import("./event-db");
+  if (await isUserReqAssignee(techReqId, permCtx.userId)) return true;
+  if (techReqDeptId) {
+    const req = await getEventTechReq(techReqId, eventId);
+    if (req && req.status !== "awaiting" && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
+  }
+  return false;
 }
 
 /**
@@ -163,7 +200,7 @@ export async function canWriteNote(
 ): Promise<boolean> {
   if (permCtx.memberPermissions === null) return false;
   if (permCtx.isAdmin) return true;
-  if (await hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit")) return true;
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
   return participantDeptIds.includes(departmentId);
 }
 
@@ -180,7 +217,7 @@ export async function canEditNote(
   participantDeptIds: string[],
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (await hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit")) return true;
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
   return permCtx.userId === noteAuthorUserId && participantDeptIds.includes(noteDepartmentId);
 }
 
@@ -194,7 +231,7 @@ export async function canModerateNotes(
   eventId: string,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit");
+  return hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit");
 }
 
 /**
@@ -202,9 +239,11 @@ export async function canModerateNotes(
  * Phase 5a: event:edit/edit_schedule are now resource_grant levels; use event:create as a
  * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to resource_grant.
  */
-export function isReportViewer(permCtx: PermissionContext): boolean {
+export async function isReportViewer(permCtx: PermissionContext, productionId: string): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  return hasPermission("event:create", permCtx);
+  // 批B：查看未发布报告是独立可授节点（event/<id>/reports@view）；
+  // organizer 经迁移/模板保真获得通配行，但该能力从此与创建权解耦
+  return hasGrant(permCtx.userId, productionId, "event", "*", "reports", "view");
 }
 
 /**

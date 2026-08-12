@@ -6,7 +6,7 @@ import {
   addCueListDeptAccess, removeCueListDeptAccess,
   setCueListGrant, type CueListLevel,
 } from "@/lib/resource-grant-db";
-import { hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 
 async function getManageCtx(req: NextRequest, productionId: string, cueListId: string) {
   const session = getSession(req.cookies);
@@ -17,7 +17,7 @@ async function getManageCtx(req: NextRequest, productionId: string, cueListId: s
   if (!cueList) return null;
   // 批A：管理面 = grants 显式行（admin/owner 旁路）
   const canManage = await hasEffectiveGrant(
-    { userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner },
+    toActor(session, access.permCtx),
     productionId, "cue_list", cueListId, "grants", "edit",
   );
   return { session, canManage, productionId, isArchived: access.isArchived };

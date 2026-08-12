@@ -7,6 +7,15 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   "node:cue_list/*/cues@view": "查看Cue表内容",
   "node:cue_list/*/cues/comments@create": "评论Cue",
   "node:cue_list/*@create": "创建Cue表",
+  // ── 树节点键（event/task 域，批B）──
+  "node:event/*/meta@view": "查看事件目录",
+  "node:event/*/details@view": "查看事件详情",
+  "node:event/*/followers@create": "关注事件",
+  "node:event/*@create": "创建事件",
+  "node:event/*/chat@create": "事件群聊",
+  "node:event/*/call_sheet@view": "查看他人Call Sheet",
+  "node:task/*@view": "查看全部任务",
+  "node:task/*@delete": "删除任务",
   // 项目管理
   "production:delete": "删除项目",
   "production:transfer_owner": "转让所有权",
@@ -115,13 +124,7 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   "dramaturgy_view:delete": "删除构作视图",
   "dramaturgy_view:overwrite": "覆盖构作视图",
   // 事件（per-event 写操作已迁移至 resource_grant，原子权限只保留生产级和管理员绕过）
-  "event:create": "创建事件",
-  "event:view_call_sheet_any": "查看他人Call Sheet",
-  "event:follow": "关注事件",
   // Task（技术需求，per-task 写操作已迁移至 resource_grant）
-  "task:view": "查看任务",
-  "task:view_any": "查看他人任务",
-  "task:delete_any": "删除他人任务",
   // 报告（per-report 写操作已迁移至 resource_grant，保留生产级和管理员绕过）
   "report:create": "创建报告",
   "report:edit_comment_any": "编辑他人报告评论",

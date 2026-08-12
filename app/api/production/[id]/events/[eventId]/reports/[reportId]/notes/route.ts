@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getEventReport, listReportNotes, createReportNote, type Mention } from "@/lib/event-db";
-import { loadEventPermContext, canWriteNote } from "@/lib/event-permissions";
+import { canWriteNote, hasEventDomainView, loadEventPermContext } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

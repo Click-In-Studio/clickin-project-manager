@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "Call Sheet" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { loadEventPermContext } from "@/lib/event-permissions";
 import {
   getProductionEvent,
@@ -13,7 +13,6 @@ import {
   listEventCallTimes,
   listEventDepartments,
 } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import CallSheetClient from "@/components/CallSheetClient";
 
 export default async function CallSheetPage({
@@ -38,11 +37,13 @@ export default async function CallSheetPage({
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
   const canViewFull = prodPermCtx.isAdmin
-    || hasPermission("event:view_call_sheet_any", prodPermCtx)
-    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
+    || await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "event", "*", "call_sheet", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
-  if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
+  // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
+  const canSeeDraft = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "event", eventId, "publication", "view");
+  if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   if (!canViewFull && !eventPermCtx.isInCall) redirect(`/production/${productionId}/events/${eventId}/view`);
