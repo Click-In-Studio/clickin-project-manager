@@ -48,20 +48,7 @@ export type Permission =
   | "dramaturgy_view:overwrite_public"
   // ─── 普通管理 - Task 删除 ────────────────────────────────────────────────────
   // ─── 普通管理 - 角色管理 ──────────────────────────────────────────────────────
-  | "character:delete"
   // ─── 普通管理 - 标注体系管理 ──────────────────────────────────────────────────
-  | "tag_group:create"
-  | "tag_group:delete"
-  | "tag_group:rename"
-  | "tag_group:edit_range_config"
-  | "tag_group:set_default_option"
-  | "tag_group:set_lyric_split"
-  | "tag_group:reorder"
-  | "tag_option:create"
-  | "tag_option:delete"
-  | "tag_option:rename"
-  | "tag_option:edit_color"
-  | "tag_option:reorder"
   // ─── 普通管理 - 评论管理 ──────────────────────────────────────────────────────
   | "script:edit_comment_any"
   | "script:delete_comment_any"
@@ -93,29 +80,11 @@ export type Permission =
   | "script:reorder"
   | "script:mount"
   // ─── 写权限 - 场次/章节 ───────────────────────────────────────────────────────
-  | "scene:create"
-  | "scene:delete"
-  | "scene:rename"
-  | "scene:renumber"
-  | "scene:change_type"
-  | "scene:edit_synopsis"
-  | "scene:edit_action_line"
-  | "scene:edit_music"
-  | "scene:edit_stage_notes"
-  | "scene:edit_expected_duration"
-  | "scene:mount"
   // ─── 写权限 - 构作视图（个人）────────────────────────────────────────────────
   | "dramaturgy_view:create"
   | "dramaturgy_view:delete"
   | "dramaturgy_view:overwrite"
   // ─── 写权限 - 角色 ────────────────────────────────────────────────────────────
-  | "character:create"
-  | "character:rename"
-  | "character:change_type"
-  | "character:set_members"
-  | "character:edit_gender"
-  | "character:edit_biography"
-  | "character:edit_role_type"
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
   // ─── 写权限 - 项目挂载点 ──────────────────────────────────────────────────────
@@ -123,8 +92,6 @@ export type Permission =
   | "production:unmount"
   // ─── 写权限 - 附件基础操作 ────────────────────────────────────────────────────
   // ─── 读权限 ───────────────────────────────────────────────────────────────────
-  | "scene:view"
-  | "character:view"
   | "script:view"
   | "contacts:view"
   | "script:comment"
@@ -247,8 +214,6 @@ const SCRIPT_EDIT_DOMAIN = new Set<Permission>([
 
 const SCRIPT_MANAGE_DOMAIN = new Set<Permission>([
   ...SCRIPT_EDIT_DOMAIN,
-  "scene:create",
-  "scene:delete",
 ]);
 
 // ─── Core Permission Check ─────────────────────────────────────────────────────
@@ -306,42 +271,12 @@ export function hasScopedPermission(
 // notification on first production entry (see AppShell ViewGrantNotification).
 
 export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
-  "scene:view",
-  "character:view",
   "script:view",
   "contacts:view",
 ];
 
 // ─── Dramaturgy Full Set ───────────────────────────────────────────────────────
 const DRAMATURGY_FULL_SET: readonly Permission[] = [
-  "scene:create",
-  "scene:rename",
-  "scene:renumber",
-  "scene:change_type",
-  "scene:edit_synopsis",
-  "scene:edit_action_line",
-  "scene:edit_music",
-  "scene:edit_stage_notes",
-  "scene:edit_expected_duration",
-  "character:create",
-  "character:rename",
-  "character:change_type",
-  "character:set_members",
-  "character:edit_gender",
-  "character:edit_biography",
-  "character:edit_role_type",
-  "tag_group:create",
-  "tag_group:delete",
-  "tag_group:rename",
-  "tag_group:edit_range_config",
-  "tag_group:set_default_option",
-  "tag_group:set_lyric_split",
-  "tag_group:reorder",
-  "tag_option:create",
-  "tag_option:delete",
-  "tag_option:rename",
-  "tag_option:edit_color",
-  "tag_option:reorder",
 ];
 
 // ─── SM Event Permissions ──────────────────────────────────────────────────────
@@ -371,26 +306,12 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
-  
-  "character:delete",
   "milestone:create",
   "milestone:manage",
   "milestone:delete",
   "announcement:create",
   "announcement:edit",
   "announcement:delete",
-  "tag_group:create",
-  "tag_group:delete",
-  "tag_group:rename",
-  "tag_group:edit_range_config",
-  "tag_group:set_default_option",
-  "tag_group:set_lyric_split",
-  "tag_group:reorder",
-  "tag_option:create",
-  "tag_option:delete",
-  "tag_option:rename",
-  "tag_option:edit_color",
-  "tag_option:reorder",
   "script:edit_comment_any",
   "script:delete_comment_any",
   
@@ -439,7 +360,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   "导演": [
     "script:annotate",
     "script:mount",
-    "scene:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "副导演": [
@@ -448,22 +368,18 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   "音乐导演": [
     "script:annotate",
     "script:mount",
-    "scene:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "作曲": [
     "script:annotate",
-    "scene:edit_music",
     "script:mount",
-    "scene:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "编曲": [
     "script:annotate",
     "script:mount",
-    "scene:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -471,7 +387,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   // 设计组
   "舞美设计": [
     "production:mount",
-    "scene:mount",
     "script:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -494,7 +409,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   // 执行组
   "音响执行": [
     "script:mount",
-    "scene:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -514,7 +428,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   ],
   "侧写": [
     "script:mount",
-    "scene:mount",
     "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
@@ -565,12 +478,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
   "script:import", "dramaturgy:import",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-  
-  "character:delete",
-  "tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config",
-  "tag_group:set_default_option", "tag_group:set_lyric_split", "tag_group:reorder",
-  "tag_option:create", "tag_option:delete", "tag_option:rename",
-  "tag_option:edit_color", "tag_option:reorder",
   "script:edit_comment_any", "script:delete_comment_any",
   
   "production:manage_config",
@@ -580,17 +487,11 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
   "script:create_block", "script:delete_block", "script:edit_block",
   "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount",
-  "scene:create", "scene:delete", "scene:rename", "scene:renumber", "scene:change_type",
-  "scene:edit_synopsis", "scene:edit_action_line", "scene:edit_music",
-  "scene:edit_stage_notes", "scene:edit_expected_duration", "scene:mount",
   "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
-  "character:create", "character:rename", "character:change_type",
-  "character:set_members", "character:edit_gender", "character:edit_biography",
-  "character:edit_role_type",
   
   
   "production:mount", "production:unmount",
-  "scene:view", "character:view", "script:view", "contacts:view", 
+  "script:view", "contacts:view", 
   "script:comment", 
   "org:assign_member", "org:recall_member",
 ];

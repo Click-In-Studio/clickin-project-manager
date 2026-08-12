@@ -151,7 +151,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // 批D 双门：挂载 = asset publication@create（主人侧让渡）∧ 宿主侧 attach（批E/F 前沿用其域现有键）
   if (!await canPublishAsset(access.permCtx, id, assetId, "create")
-      || !mountHostSidePermitted(access.permCtx, body.mountType))
+      || !await mountHostSidePermitted(access.permCtx, id, body.mountType, body.mountId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   let mountId = body.mountId;

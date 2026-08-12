@@ -85,14 +85,22 @@ beforeAll(async () => {
       await setMemberRoles(SCRIPT_PROD, TEST_USER, ["制作人"]);
       // atomic_permission_grant is required since Phase 4: write permissions
       // are no longer bypassed by role membership alone.
-      // Also grant scene:rename because normalizeRehearsalMarkOwnershipInTx sets
-      // scene_id on newly inserted blocks, making update ops diff-detect a sceneId change.
       await getPool().query(
         `INSERT INTO atomic_permission_grant
            (production_id, user_id, permission_key, grant_source, confirmed_by)
          SELECT $1, $2, unnest($3::text[]), 'self_confirmed', $2
          ON CONFLICT DO NOTHING`,
-        [SCRIPT_PROD, TEST_USER, ["script:view", "script:manage", "scene:rename"]],
+        [SCRIPT_PROD, TEST_USER, ["script:view", "script:manage"]],
+      );
+      // E1：scene 结构操作已行化（normalizeRehearsalMarkOwnershipInTx 使 update 触发
+      // sceneId diff → needed 含 node:scene/*@edit）——直接发 RG 行
+      await getPool().query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+         VALUES ($1, $2, 'scene', '*', '*', 'edit', 'auto')
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false DO NOTHING`,
+        [SCRIPT_PROD, TEST_USER],
       );
       scriptVersionId = (await getActiveVersionId(SCRIPT_PROD))!;
     })(),

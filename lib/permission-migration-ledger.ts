@@ -65,21 +65,8 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "dramaturgy_view:delete_public": "E",
   "dramaturgy_view:overwrite_public": "E",
   // character → 批E
-  "character:delete": "E",
   // tag_group → 批E
-  "tag_group:create": "E",
-  "tag_group:delete": "E",
-  "tag_group:rename": "E",
-  "tag_group:edit_range_config": "E",
-  "tag_group:set_default_option": "E",
-  "tag_group:set_lyric_split": "E",
-  "tag_group:reorder": "E",
   // tag_option → 批E
-  "tag_option:create": "E",
-  "tag_option:delete": "E",
-  "tag_option:rename": "E",
-  "tag_option:edit_color": "E",
-  "tag_option:reorder": "E",
   // script → 批E
   "script:edit_comment_any": "E",
   "script:delete_comment_any": "E",
@@ -112,37 +99,17 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "script:reorder": "E",
   "script:mount": "E",
   // scene → 批E
-  "scene:create": "E",
-  "scene:delete": "E",
-  "scene:rename": "E",
-  "scene:renumber": "E",
-  "scene:change_type": "E",
-  "scene:edit_synopsis": "E",
-  "scene:edit_action_line": "E",
-  "scene:edit_music": "E",
-  "scene:edit_stage_notes": "E",
-  "scene:edit_expected_duration": "E",
-  "scene:mount": "E",
   // dramaturgy_view → 批E
   "dramaturgy_view:create": "E",
   "dramaturgy_view:delete": "E",
   "dramaturgy_view:overwrite": "E",
   // character → 批E
-  "character:create": "E",
-  "character:rename": "E",
-  "character:change_type": "E",
-  "character:set_members": "E",
-  "character:edit_gender": "E",
-  "character:edit_biography": "E",
-  "character:edit_role_type": "E",
   // production → 批F
   "production:mount": "F",
   "production:unmount": "F",
   // asset → 批D
   // scene → 批E
-  "scene:view": "E",
   // character → 批E
-  "character:view": "E",
   // script → 批E
   "script:view": "E",
   // contacts → 批F
@@ -157,6 +124,41 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批E PR-E1（scene/character/tag 域，2026-08-12）
+  "character:change_type",
+  "character:create",
+  "character:delete",
+  "character:edit_biography",
+  "character:edit_gender",
+  "character:edit_role_type",
+  "character:rename",
+  "character:set_members",
+  "character:view",
+  "scene:change_type",
+  "scene:create",
+  "scene:delete",
+  "scene:edit_action_line",
+  "scene:edit_expected_duration",
+  "scene:edit_music",
+  "scene:edit_stage_notes",
+  "scene:edit_synopsis",
+  "scene:mount",
+  "scene:rename",
+  "scene:renumber",
+  "scene:view",
+  "tag_group:create",
+  "tag_group:delete",
+  "tag_group:edit_range_config",
+  "tag_group:rename",
+  "tag_group:reorder",
+  "tag_group:set_default_option",
+  "tag_group:set_lyric_split",
+  "tag_option:create",
+  "tag_option:delete",
+  "tag_option:edit_color",
+  "tag_option:rename",
+  "tag_option:reorder",
+
   // 批D（asset 域 REST 化，2026-08-12）
   "asset:view_any",
   "asset:delete_any",
@@ -233,6 +235,6 @@ export const RETIRED_PERMISSION_KEYS: readonly string[] = [
  */
 export const RESOURCE_LEVEL_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "asset:manage": "D",
-  "scene:mount": "E", "scene:manage": "E",
+  "scene:manage": "E",
   "script_view:manage": "E",
 };

@@ -48,6 +48,11 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isSceneCharTagRestPreMigrationSchema,
+  createSceneCharTagRestPreMigrationData,
+  SCENE_CHAR_TAG_REST_SNAPSHOT_PATH,
+} from "./scene-char-tag-rest-snapshot";
+import {
   isAssetRestPreMigrationSchema,
   createAssetRestPreMigrationData,
   ASSET_REST_SNAPSHOT_PATH,
@@ -234,6 +239,16 @@ export async function setup() {
     const assetRestSnapshot = await createAssetRestPreMigrationData(pool, TEST_USER);
     await writeFile(ASSET_REST_SNAPSHOT_PATH, JSON.stringify(assetRestSnapshot));
     for (const file of ["db/add-asset-visibility.sql", "db/migrate-asset-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isSceneCharTagRestPreMigrationSchema(pool)) {
+    // Migration path（批E PR-E1）: scene manage 词汇行仍在。
+    const sctSnapshot = await createSceneCharTagRestPreMigrationData(pool, TEST_USER);
+    await writeFile(SCENE_CHAR_TAG_REST_SNAPSHOT_PATH, JSON.stringify(sctSnapshot));
+    for (const file of ["db/add-scene-char-tag-verbs.sql", "db/migrate-scene-char-tag-rest.sql"]) {
       const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
       await pool.query(migrationSql);
     }

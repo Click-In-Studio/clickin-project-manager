@@ -44,9 +44,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "场次 & 构作",
     perms: [
-      "scene:create", "scene:delete", "scene:rename", "scene:renumber", "scene:change_type",
-      "scene:edit_synopsis", "scene:edit_action_line", "scene:edit_music",
-      "scene:edit_stage_notes", "scene:edit_expected_duration", "scene:mount",
       "dramaturgy:import",
       "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
       "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
@@ -55,9 +52,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "角色人物",
     perms: [
-      "character:create", "character:rename", "character:change_type",
-      "character:set_members", "character:edit_gender", "character:edit_biography",
-      "character:edit_role_type", "character:delete",
     ],
   },
   {
@@ -78,10 +72,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "标注体系",
     perms: [
-      "tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config",
-      "tag_group:set_default_option", "tag_group:set_lyric_split", "tag_group:reorder",
-      "tag_option:create", "tag_option:delete", "tag_option:rename",
-      "tag_option:edit_color", "tag_option:reorder",
     ],
   },
   {
@@ -95,7 +85,6 @@ const PERM_GROUPS: PermGroup[] = [
     perms: [
       "contacts:view",
       "script:view", "script:comment",
-      "scene:view", "character:view",
       "org:assign_member", "org:recall_member",
     ],
   },

@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
+import { hasGrant } from "@/lib/grant-check";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSession } from "@/lib/session";
 import {
@@ -67,7 +68,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   const patch = (await req.json()) as ScriptPatch;
   const needed = requiredPermissions(patch, current.state);
   for (const perm of needed) {
-    if (!hasPermission(perm, permCtx)) {
+    // E1 过渡双制：node: 前缀键走行判定，其余仍走原子键（E2 收敛）
+    if (perm.startsWith("node:")) {
+      if (permCtx.isAdmin) continue;
+      const m = /^node:([^/]+)\/([^/@]+)(?:\/(.+))?@(\w+)$/.exec(perm);
+      if (!m || !await hasGrant(permCtx.userId, id, m[1], m[2], m[3] ?? "*", m[4] as "view" | "create" | "edit" | "delete")) {
+        return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
+      }
+    } else if (!hasPermission(perm as Parameters<typeof hasPermission>[0], permCtx)) {
       return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
     }
   }

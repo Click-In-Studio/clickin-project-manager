@@ -85,8 +85,8 @@ describe("computeInheritedPermissions", () => {
   //      └── grandchild (p: [script:view])
 
   const tree = [
-    { id: "root", parent_id: null, permissions: ["scene:create", "scene:view"] },
-    { id: "child", parent_id: "root", permissions: ["character:create"] },
+    { id: "root", parent_id: null, permissions: ["script:import", "script:comment"] },
+    { id: "child", parent_id: "root", permissions: ["script:create_block"] },
     { id: "grandchild", parent_id: "child", permissions: ["script:view"] },
     { id: "sibling", parent_id: "root", permissions: ["script:view"] },
   ];
@@ -94,24 +94,24 @@ describe("computeInheritedPermissions", () => {
   it("user in leaf dept inherits its own + all ancestor permissions", () => {
     const result = computeInheritedPermissions(["grandchild"], tree);
     expect(result.has("script:view")).toBe(true);       // own
-    expect(result.has("character:create")).toBe(true);  // parent
-    expect(result.has("scene:create")).toBe(true);      // grandparent
-    expect(result.has("scene:view")).toBe(true);        // grandparent
+    expect(result.has("script:create_block")).toBe(true);  // parent
+    expect(result.has("script:import")).toBe(true);      // grandparent
+    expect(result.has("script:comment")).toBe(true);        // grandparent
   });
 
   it("user in root dept only gets root permissions", () => {
     const result = computeInheritedPermissions(["root"], tree);
-    expect(result.has("scene:create")).toBe(true);
-    expect(result.has("scene:view")).toBe(true);
-    expect(result.has("character:create")).toBe(false); // child — not inherited upward
+    expect(result.has("script:import")).toBe(true);
+    expect(result.has("script:comment")).toBe(true);
+    expect(result.has("script:create_block")).toBe(false); // child — not inherited upward
   });
 
   it("user in multiple depts gets union of all ancestor chains", () => {
     // member of both grandchild AND sibling
     const result = computeInheritedPermissions(["grandchild", "sibling"], tree);
     expect(result.has("script:view")).toBe(true);
-    expect(result.has("character:create")).toBe(true);
-    expect(result.has("scene:create")).toBe(true);
+    expect(result.has("script:create_block")).toBe(true);
+    expect(result.has("script:import")).toBe(true);
     expect(result.has("script:view")).toBe(true); // from sibling
   });
 
@@ -128,47 +128,47 @@ describe("computeInheritedPermissions", () => {
 
 describe("computePocPermissions", () => {
   const tree = [
-    { id: "root", parent_id: null, permissions: ["scene:create"] },
-    { id: "child", parent_id: "root", permissions: ["character:create"] },
+    { id: "root", parent_id: null, permissions: ["script:import"] },
+    { id: "child", parent_id: "root", permissions: ["script:create_block"] },
     { id: "grandchild", parent_id: "child", permissions: ["script:view"] },
   ];
 
   it("POC of root gets permissions from all descendants (union)", () => {
     const result = computePocPermissions("root", [], [], tree);
-    expect(result.has("scene:create")).toBe(true);
-    expect(result.has("character:create")).toBe(true);
+    expect(result.has("script:import")).toBe(true);
+    expect(result.has("script:create_block")).toBe(true);
     expect(result.has("script:view")).toBe(true);
   });
 
   it("POC of child gets only child + grandchild permissions", () => {
     const result = computePocPermissions("child", [], [], tree);
-    expect(result.has("character:create")).toBe(true);
+    expect(result.has("script:create_block")).toBe(true);
     expect(result.has("script:view")).toBe(true);
-    expect(result.has("scene:create")).toBe(false); // root — not in child's subtree
+    expect(result.has("script:import")).toBe(false); // root — not in child's subtree
   });
 
   it("poc_extra_permissions are added to the zone", () => {
     const result = computePocPermissions("child", ["script:view"], [], tree);
     expect(result.has("script:view")).toBe(true);
-    expect(result.has("character:create")).toBe(true);
+    expect(result.has("script:create_block")).toBe(true);
   });
 
   it("poc_blocked_permissions are excluded from the zone", () => {
-    const result = computePocPermissions("root", [], ["character:create"], tree);
-    expect(result.has("scene:create")).toBe(true);
-    expect(result.has("character:create")).toBe(false); // blocked
+    const result = computePocPermissions("root", [], ["script:create_block"], tree);
+    expect(result.has("script:import")).toBe(true);
+    expect(result.has("script:create_block")).toBe(false); // blocked
     expect(result.has("script:view")).toBe(true);
   });
 
   it("blocked overrides extra (cannot re-add a blocked permission)", () => {
-    const result = computePocPermissions("root", ["character:create"], ["character:create"], tree);
-    expect(result.has("character:create")).toBe(false); // blocked wins
+    const result = computePocPermissions("root", ["script:create_block"], ["script:create_block"], tree);
+    expect(result.has("script:create_block")).toBe(false); // blocked wins
   });
 
   it("leaf dept POC gets only its own permissions", () => {
     const result = computePocPermissions("grandchild", [], [], tree);
     expect(result.has("script:view")).toBe(true);
-    expect(result.has("character:create")).toBe(false);
+    expect(result.has("script:create_block")).toBe(false);
   });
 });
 
@@ -234,7 +234,7 @@ describe("createProductionDept / listProductionDepts", () => {
       productionId: prodId,
       name: "测试部门A",
       displayOrder: 1,
-      permissions: ["scene:view", "script:view"],
+      permissions: ["script:comment", "script:view"],
       allowedCueTypes: ["lights"],
     });
     deptId = dept.id;
@@ -245,7 +245,7 @@ describe("createProductionDept / listProductionDepts", () => {
     const found = depts.find((d) => d.id === deptId);
     expect(found).toBeDefined();
     expect(found!.name).toBe("测试部门A");
-    expect(found!.permissions).toContain("scene:view");
+    expect(found!.permissions).toContain("script:comment");
     expect(found!.allowedCueTypes).toContain("lights");
   });
 
@@ -274,7 +274,7 @@ describe("updateProductionDept", () => {
     const dept = await createProductionDept({
       productionId: prodId,
       name: "待更新部门",
-      permissions: ["scene:view"],
+      permissions: ["script:comment"],
     });
     deptId = dept.id;
   });
@@ -286,10 +286,10 @@ describe("updateProductionDept", () => {
   });
 
   it("can update permissions", async () => {
-    await updateProductionDept(deptId, prodId, { permissions: ["script:view", "character:view"] });
+    await updateProductionDept(deptId, prodId, { permissions: ["script:view", "script:edit_block"] });
     const dept = await getProductionDept(deptId, prodId);
     expect(dept!.permissions).toContain("script:view");
-    expect(dept!.permissions).not.toContain("scene:view"); // replaced
+    expect(dept!.permissions).not.toContain("script:comment"); // replaced
   });
 
   it("calling with empty fields is a no-op", async () => {
@@ -408,13 +408,13 @@ describe("setDeptMembers: basic add/remove", () => {
         userId: TEST_USER,
         isPoc: true,
         pocExtraPermissions: ["script:view"],
-        pocBlockedPermissions: ["scene:view"],
+        pocBlockedPermissions: ["script:comment"],
       },
     ]);
     const members = await getDeptMembers(deptId);
     const row = members.find((m) => m.userId === TEST_USER);
     expect(row?.pocExtraPermissions).toContain("script:view");
-    expect(row?.pocBlockedPermissions).toContain("scene:view");
+    expect(row?.pocBlockedPermissions).toContain("script:comment");
   });
 });
 
@@ -488,7 +488,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
     const parent = await createProductionDept({
       productionId: prodId,
       name: "权限继承父部门",
-      permissions: ["scene:view", "character:view"],
+      permissions: ["script:comment", "script:edit_block"],
     });
     parentDeptId = parent.id;
 
@@ -508,7 +508,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
         userId: EXTRA_USER_1,
         isPoc: true,
         pocExtraPermissions: ["script:view"],
-        pocBlockedPermissions: ["scene:view"],
+        pocBlockedPermissions: ["script:comment"],
       },
     ]);
   });
@@ -516,8 +516,8 @@ describe("computeUserDeptFreeApprovalZone", () => {
   it("member of child dept inherits child + parent permissions", async () => {
     const zone = await computeUserDeptFreeApprovalZone(TEST_USER, prodId);
     expect(zone.has("script:view")).toBe(true);  // child's own
-    expect(zone.has("scene:view")).toBe(true);      // inherited from parent
-    expect(zone.has("character:view")).toBe(true);  // inherited from parent
+    expect(zone.has("script:comment")).toBe(true);      // inherited from parent
+    expect(zone.has("script:edit_block")).toBe(true);  // inherited from parent
   });
 
   it("non-member user gets empty zone", async () => {
@@ -528,7 +528,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
   it("POC user gets descendant union + extra, minus blocked", async () => {
     const zone = await computeUserDeptFreeApprovalZone(EXTRA_USER_1, prodId);
     // parent permissions in zone (from membership)
-    expect(zone.has("character:view")).toBe(true);
+    expect(zone.has("script:edit_block")).toBe(true);
     // POC zone includes child's permissions
     expect(zone.has("script:view")).toBe(true);
     // poc_extra_permissions added
@@ -536,7 +536,7 @@ describe("computeUserDeptFreeApprovalZone", () => {
     // Note: scene:view IS in zone from membership (parent dept) even though blocked in POC zone.
     // poc_blocked_permissions only removes from the POC zone, not from the membership zone.
     // EXTRA_USER_1 is a member of parentDeptId which has scene:view, so it remains in zone.
-    expect(zone.has("scene:view")).toBe(true);
+    expect(zone.has("script:comment")).toBe(true);
   });
 });
 
@@ -557,7 +557,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
     };
     // scene:view used to be granted via MEMBER_BASE_PERMISSIONS bypass.
     // Now it requires the role to include it; with empty memberPermissions → needs_approval.
-    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: false, reason: "needs_approval" });
+    expect(canAccess(ctx, "script:comment")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 
   it("base permission with role but no active grant → needs_self_confirm", () => {
@@ -565,14 +565,14 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       userId: TEST_USER,
       isAdmin: false,
       isOwner: false,
-      memberPermissions: new Set(["scene:view"] as const),
+      memberPermissions: new Set(["script:comment"] as const),
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "script:comment")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
   it("base permission with active grant → allowed", () => {
@@ -580,14 +580,14 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       userId: TEST_USER,
       isAdmin: false,
       isOwner: false,
-      memberPermissions: new Set(["scene:view"] as const),
+      memberPermissions: new Set(["script:comment"] as const),
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(["scene:view"] as const),
+      activeGrants: new Set(["script:comment"] as const),
     };
-    expect(canAccess(ctx, "scene:view")).toEqual({ allowed: true });
+    expect(canAccess(ctx, "script:comment")).toEqual({ allowed: true });
   });
 
   it("role permission without active grant → needs_self_confirm", () => {
@@ -595,14 +595,14 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       userId: TEST_USER,
       isAdmin: false,
       isOwner: false,
-      memberPermissions: new Set(["scene:create"] as const),
+      memberPermissions: new Set(["script:import"] as const),
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
       activeGrants: new Set(), // not yet confirmed
     };
-    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
   it("role permission with active grant → allowed", () => {
@@ -610,14 +610,14 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       userId: TEST_USER,
       isAdmin: false,
       isOwner: false,
-      memberPermissions: new Set(["scene:create"] as const),
+      memberPermissions: new Set(["script:import"] as const),
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
       deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(["scene:create"] as const),
+      activeGrants: new Set(["script:import"] as const),
     };
-    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: true });
+    expect(canAccess(ctx, "script:import")).toEqual({ allowed: true });
   });
 
   it("returns needs_self_confirm when perm is in deptFreeApprovalZone (no role)", () => {
@@ -629,10 +629,10 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["scene:create", "tag_group:create"]),
+      deptFreeApprovalZone: new Set(["script:import", "dramaturgy:import"]),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
+    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_self_confirm" });
   });
 
   it("returns needs_approval when perm is in neither role nor deptFreeApprovalZone", () => {
@@ -644,10 +644,10 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       overrides: new Map(),
       deptIds: [],
       pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["tag_group:create"]),
+      deptFreeApprovalZone: new Set(["dramaturgy:import"]),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_approval" });
+    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 
   it("needs_self_confirm takes priority over needs_approval when zone matches", () => {
@@ -677,7 +677,7 @@ describe("canAccess() with deptFreeApprovalZone", () => {
       deptFreeApprovalZone: new Set(),
       activeGrants: new Set(),
     };
-    expect(canAccess(ctx, "scene:create")).toEqual({ allowed: false, reason: "needs_approval" });
+    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_approval" });
   });
 });
 
@@ -703,14 +703,14 @@ describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
     const deptA = await createProductionDept({
       productionId: prodId,
       name: "撤销测试部门A",
-      permissions: ["scene:view", "script:view"],
+      permissions: ["script:comment", "script:view"],
     });
     deptIdA = deptA.id;
 
     const deptB = await createProductionDept({
       productionId: prodId,
       name: "撤销测试部门B",
-      permissions: ["character:view"],
+      permissions: ["script:edit_block"],
     });
     deptIdB = deptB.id;
 
@@ -723,8 +723,8 @@ describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
        VALUES
-         ($1, $2, 'scene:view',      'self_confirmed'),
-         ($1, $2, 'character:view',  'self_confirmed'),
+         ($1, $2, 'script:comment',      'self_confirmed'),
+         ($1, $2, 'script:edit_block',  'self_confirmed'),
          ($1, $2, 'script:manage',   'self_confirmed')
        ON CONFLICT DO NOTHING`,
       [prodId, TEST_USER],
@@ -749,8 +749,8 @@ describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
     );
 
     const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    expect(byKey["scene:view"]).toBe(true);      // was only in deptA's zone
-    expect(byKey["character:view"]).toBe(false);  // still in deptB's zone
+    expect(byKey["script:comment"]).toBe(true);      // was only in deptA's zone
+    expect(byKey["script:edit_block"]).toBe(false);  // still in deptB's zone
     expect(byKey["script:manage"]).toBe(true);    // never in any zone
   });
 
@@ -759,7 +759,7 @@ describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
     await getPool().query(
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
-       VALUES ($1, $2, 'scene:create', 'approval')
+       VALUES ($1, $2, 'script:import', 'approval')
        ON CONFLICT DO NOTHING`,
       [prodId, TEST_USER],
     );
@@ -768,7 +768,7 @@ describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
     await setDeptMembers(deptIdB, prodId, []);
 
     const { rows } = await getPool().query<{ is_revoked: boolean }>(
-      "SELECT is_revoked FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND permission_key = 'scene:create'",
+      "SELECT is_revoked FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND permission_key = 'script:import'",
       [prodId, TEST_USER],
     );
     expect(rows[0]?.is_revoked).toBe(false); // approval grant not touched
@@ -790,7 +790,7 @@ describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
     const memberDept = await createProductionDept({
       productionId: prodId,
       name: "POC撤销测试成员部门",
-      permissions: ["scene:view"],
+      permissions: ["script:comment"],
     });
     memberDeptId = memberDept.id;
 
@@ -804,7 +804,7 @@ describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
          (production_id, user_id, permission_key, grant_source)
        VALUES
          ($1, $2, 'script:view', 'self_confirmed'),
-         ($1, $2, 'scene:view',    'self_confirmed')
+         ($1, $2, 'script:comment',    'self_confirmed')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_2],
     );
@@ -827,7 +827,7 @@ describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
     const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
     // cue_list:view came from pocDept.permissions; member of pocDept still gets it via inheritance
     // (user is still a regular member of pocDept, so cue_list:view is still in zone)
-    expect(byKey["scene:view"]).toBe(false);    // still in member zone (memberDept)
+    expect(byKey["script:comment"]).toBe(false);    // still in member zone (memberDept)
     // cue_list:view: user is still in pocDept as regular member, so still in zone
     expect(byKey["script:view"]).toBe(false);
   });
@@ -880,12 +880,12 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
     const alpha = await createProductionRole(prodId, `test-role-alpha-${shortId()}`);
     roleAlphaId = alpha.id;
     roleAlphaName = alpha.name;
-    await setRolePermissions(roleAlphaId, ["character:view"]);
+    await setRolePermissions(roleAlphaId, ["script:edit_block"]);
 
     const beta = await createProductionRole(prodId, `test-role-beta-${shortId()}`);
     roleBetaId = beta.id;
     roleBetaName = beta.name;
-    await setRolePermissions(roleBetaId, ["scene:view"]);
+    await setRolePermissions(roleBetaId, ["script:comment"]);
 
     // Assign EXTRA_USER_1 to both roles so both permissions are in their zone
     await setMemberRoles(prodId, EXTRA_USER_1, [roleAlphaName, roleBetaName]);
@@ -895,8 +895,8 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
        VALUES
-         ($1, $2, 'character:view', 'self_confirmed'),
-         ($1, $2, 'scene:view',     'self_confirmed'),
+         ($1, $2, 'script:edit_block', 'self_confirmed'),
+         ($1, $2, 'script:comment',     'self_confirmed'),
          ($1, $2, 'script:view',  'self_confirmed')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_1],
@@ -924,8 +924,8 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
     );
 
     const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    expect(byKey["character:view"]).toBe(true);  // was only in role-alpha zone
-    expect(byKey["scene:view"]).toBe(false);      // still in role-beta zone
+    expect(byKey["script:edit_block"]).toBe(true);  // was only in role-alpha zone
+    expect(byKey["script:comment"]).toBe(false);      // still in role-beta zone
     expect(byKey["script:view"]).toBe(true);    // never in any role zone
   });
 
@@ -934,7 +934,7 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
     await getPool().query(
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
-       VALUES ($1, $2, 'scene:create', 'approval')
+       VALUES ($1, $2, 'script:import', 'approval')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_1],
     );
@@ -944,7 +944,7 @@ describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
 
     const { rows } = await getPool().query<{ is_revoked: boolean }>(
       `SELECT is_revoked FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2 AND permission_key = 'scene:create'`,
+       WHERE production_id = $1 AND user_id = $2 AND permission_key = 'script:import'`,
       [prodId, EXTRA_USER_1],
     );
     expect(rows[0]?.is_revoked).toBe(false);
@@ -978,9 +978,9 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
        VALUES
-         ($1, $2, 'scene:view',   'self_confirmed'),
-         ($1, $2, 'scene:create', 'approval'),
-         ($1, $2, 'scene:manage', 'direct')
+         ($1, $2, 'script:comment',   'self_confirmed'),
+         ($1, $2, 'script:import', 'approval'),
+         ($1, $2, 'script:annotate', 'direct')
        ON CONFLICT DO NOTHING`,
       [prodId, EXTRA_USER_1],
     );
@@ -1047,7 +1047,7 @@ describe("updateProductionDept: permissions narrowing cascades to members", () =
     const narrowingDept = await createProductionDept({
       productionId: prodId,
       name: `narrowing-test-${shortId()}`,
-      permissions: ["character:view", "script:view"],
+      permissions: ["script:edit_block", "script:view"],
     });
     narrowingDeptId = narrowingDept.id;
 
@@ -1058,7 +1058,7 @@ describe("updateProductionDept: permissions narrowing cascades to members", () =
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source)
        VALUES
-         ($1, $2, 'character:view', 'self_confirmed'),
+         ($1, $2, 'script:edit_block', 'self_confirmed'),
          ($1, $2, 'script:view',    'self_confirmed'),
          ($1, $2, 'script:view',  'self_confirmed')
        ON CONFLICT DO NOTHING`,
@@ -1069,7 +1069,7 @@ describe("updateProductionDept: permissions narrowing cascades to members", () =
   it("narrowing dept permissions revokes grants no longer in any zone", async () => {
     // Remove 'script:view' from the dept's permissions
     await updateProductionDept(narrowingDeptId, prodId, {
-      permissions: ["character:view"],
+      permissions: ["script:edit_block"],
     });
 
     const { rows } = await getPool().query<{ permission_key: string; is_revoked: boolean }>(
@@ -1080,7 +1080,7 @@ describe("updateProductionDept: permissions narrowing cascades to members", () =
     );
 
     const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    expect(byKey["character:view"]).toBe(false);  // still in narrowed dept zone
+    expect(byKey["script:edit_block"]).toBe(false);  // still in narrowed dept zone
     expect(byKey["script:view"]).toBe(true);       // dept no longer grants this
     expect(byKey["script:view"]).toBe(true);     // was never in any dept zone
   });
