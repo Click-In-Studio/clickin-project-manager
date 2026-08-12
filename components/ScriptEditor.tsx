@@ -42,6 +42,7 @@ import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
 import ProductionTopMenu, {
   ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
@@ -7593,6 +7594,7 @@ export default function ScriptEditor({
     syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
   }, [activeVersionId, effectiveScriptId, markOwnershipDirty]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
+  const sceneParentIdById = useMemo(() => sceneParentIdMap(scenes), [scenes]);
   const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);
   const firstRehearsalMarkerLabel = useMemo(() => {
     const markerId = rehearsalLabels.rehearsalLabelByMarkerId.keys().next().value;
@@ -12316,13 +12318,7 @@ export default function ScriptEditor({
               ...blocks.slice(safeWindowStart, safeWindowEnd).flatMap((block, wIdx) => {
             const bIdx = safeWindowStart + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
-            const isProtectedChapterSceneGap = !!(
-              prev?.type === "chapter_marker" &&
-              block.type === "scene_marker" &&
-              prev.sceneId &&
-              block.sceneId &&
-              sceneById.get(block.sceneId)?.parentId === prev.sceneId
-            );
+            const hasInsertionGap = hasScriptInsertionGapBefore(blocks, bIdx, sceneParentIdById);
             const showSceneEndGap = isLockedMode && shouldShowSceneEndGap(prev, block);
             if (isMarkerBlock(block)) {
               if (!openingChapterVisible && block.id === scriptConfig.openingChapterMarkerId) return [];
@@ -12513,7 +12509,7 @@ export default function ScriptEditor({
               ) : null;
               if (!markerEl) return [];
               const preBlockGap = bIdx > 0
-                ? canEditText && !isProtectedChapterSceneGap
+                ? canEditText && hasInsertionGap
                   ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} />
                   : showSceneEndGap
                     ? <BlockGap />
@@ -12856,7 +12852,7 @@ export default function ScriptEditor({
               </div>
             );
             const preBlockGap = bIdx > 0
-              ? canEditText && !isProtectedChapterSceneGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
+              ? canEditText && hasInsertionGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
                 showSceneEndGap ? <BlockGap /> :
                 isLockedMode && showCharacterGap ? <BlockGap /> :
                 null

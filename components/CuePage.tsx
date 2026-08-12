@@ -15,8 +15,9 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
-import { buildMarkerContextById, textBlocksWithMarkerOwnership, withLegacyOwnershipProjection } from "@/lib/script-marker-blocks";
+import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOOLBAR_STAGE,
@@ -41,6 +42,9 @@ function writeCookie(key: string, value: string) {
 }
 
 type CueViewState = { visibleIds: string[]; activeId: string | null };
+type CueSequenceItem =
+  | { kind: "gap"; afterBlockId: string }
+  | { kind: "marker"; block: Block };
 
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
@@ -880,10 +884,11 @@ export default function CuePage({
 }: Props) {
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const router = useRouter();
-  const blocks = useMemo(() => withLegacyOwnershipProjection(
-    textBlocksWithMarkerOwnership(rawBlocks),
+  const orderedBlocks = useMemo(() => withLegacyOwnershipProjection(
+    withMarkerOwnership(rawBlocks),
     buildMarkerContextById(rawBlocks),
   ), [rawBlocks]);
+  const blocks = useMemo(() => orderedBlocks.filter((block) => !isMarkerBlock(block)), [orderedBlocks]);
   const rehearsalLabelByMarkerId = useMemo(
     () => buildMarkerLabelIndex(rawBlocks).rehearsalLabelByMarkerId,
     [rawBlocks],
@@ -1366,8 +1371,13 @@ export default function CuePage({
     return () => { es.close(); if (debounce) clearTimeout(debounce); };
   }, [productionId, clientId]);
 
-  // ── blockIndexMap: stable sorted index for anchor comparisons ────────────
+  // Cue ordering and gap anchors use the complete script sequence, including markers.
   const blockIndexMap = useMemo(() => {
+    const m = new Map<string, number>();
+    orderedBlocks.forEach((b, i) => m.set(b.id, i));
+    return m;
+  }, [orderedBlocks]);
+  const textBlockIndexMap = useMemo(() => {
     const m = new Map<string, number>();
     blocks.forEach((b, i) => m.set(b.id, i));
     return m;
@@ -1428,6 +1438,24 @@ export default function CuePage({
     for (const s of scenes) m.set(s.id, s);
     return m;
   }, [scenes]);
+  const sceneParentIdById = useMemo(() => sceneParentIdMap(scenes), [scenes]);
+  const { sequenceBeforeTextBlock, trailingSequence } = useMemo(() => {
+    const beforeText = new Map<string, CueSequenceItem[]>();
+    let pending: CueSequenceItem[] = [];
+    for (let index = 0; index < orderedBlocks.length; index++) {
+      const block = orderedBlocks[index];
+      if (hasScriptInsertionGapBefore(orderedBlocks, index, sceneParentIdById)) {
+        pending.push({ kind: "gap", afterBlockId: orderedBlocks[index - 1].id });
+      }
+      if (isMarkerBlock(block)) {
+        pending.push({ kind: "marker", block });
+      } else {
+        beforeText.set(block.id, pending);
+        pending = [];
+      }
+    }
+    return { sequenceBeforeTextBlock: beforeText, trailingSequence: pending };
+  }, [orderedBlocks, sceneParentIdById]);
 
   const handleContainerClick = useCallback(() => setSelection({ kind: "none" }), []);
 
@@ -1437,14 +1465,14 @@ export default function CuePage({
 
   // Returns the first visible range cue whose highlighted area contains (blockId, offset).
   const findRangeCueAtPosition = useCallback((blockId: string, offset: number): Cue | null => {
-    const bi = blockIndexMap.get(blockId) ?? -1;
+    const bi = textBlockIndexMap.get(blockId) ?? -1;
     if (bi === -1) return null;
     for (const cl of visibleLists) {
       for (const cue of (cuesByList.get(cl.id) ?? [])) {
         if (isPointCue(cue)) continue;
         if (cue.start.kind !== "block" || cue.end.kind !== "block") continue;
-        const si = blockIndexMap.get(cue.start.blockId) ?? -1;
-        const ei = blockIndexMap.get(cue.end.blockId) ?? -1;
+        const si = textBlockIndexMap.get(cue.start.blockId) ?? -1;
+        const ei = textBlockIndexMap.get(cue.end.blockId) ?? -1;
         if (bi < si || bi > ei) continue;
         if (bi === si && bi === ei) {
           if (offset < cue.start.offset || offset > cue.end.offset) continue;
@@ -1457,7 +1485,7 @@ export default function CuePage({
       }
     }
     return null;
-  }, [blockIndexMap, visibleLists, cuesByList]);
+  }, [textBlockIndexMap, visibleLists, cuesByList]);
 
   const handleBlockClick = useCallback((blockId: string, offset: number) => {
     if (justDraggedRef.current) { justDraggedRef.current = false; return; }
@@ -1848,8 +1876,8 @@ export default function CuePage({
       for (const cue of listCues) {
         if (isPointCue(cue)) continue;
         if (cue.start.kind !== "block" || cue.end.kind !== "block") continue;
-        const si = blockIndexMap.get(cue.start.blockId) ?? -1;
-        const ei = blockIndexMap.get(cue.end.blockId) ?? -1;
+        const si = textBlockIndexMap.get(cue.start.blockId) ?? -1;
+        const ei = textBlockIndexMap.get(cue.end.blockId) ?? -1;
         if (si === -1 || ei === -1) continue;
         if (si === ei) {
           push(cue.start.blockId, cue.start.offset, cue.end.offset, idx, label(cue));
@@ -1862,7 +1890,7 @@ export default function CuePage({
       }
     }
     return map;
-  }, [visibleLists, cuesByList, listColorIndex, blocks, blockIndexMap]);
+  }, [visibleLists, cuesByList, listColorIndex, blocks, textBlockIndexMap]);
 
   // Unified marks: point cue marks + range start marks (always, for guide lines) + end handles (when selected)
   const cueMarksForBlock = useMemo(() => {
@@ -2040,11 +2068,89 @@ export default function CuePage({
   }, [canEditCue, deleteCue]);
 
   // ── Final-gap derived values (avoids IIFE in JSX that confuses React compiler) ──
-  const lastBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
-  const lastGapChips = lastBlock
-    ? (cuesForBlock.get(lastBlock.id) ?? []).filter(({ cue }) => cue.start.kind === "gap")
-    : [];
+  const lastOrderedBlock = orderedBlocks.length > 0 ? orderedBlocks[orderedBlocks.length - 1] : null;
   const insertCueAvailable = selection.kind === "pending" && activeListId !== null && canEditActive;
+
+  const renderGap = (afterBlockId: string, key: string, minHeight = 22) => {
+    const gapChips = (cuesForBlock.get(afterBlockId) ?? []).filter(({ cue }) => cue.start.kind === "gap");
+    const gapPending = pendingGapBlockId === afterBlockId;
+    return (
+      <div
+        key={key}
+        data-gap-after={afterBlockId}
+        className={`flex cursor-pointer items-center gap-0 rounded transition-colors group ${
+          gapPending ? "bg-zinc-200/70" : "hover:bg-zinc-100"
+        }`}
+        style={{ minHeight: `${minHeight}px` }}
+        onMouseDown={event => event.stopPropagation()}
+        onClick={event => { event.stopPropagation(); handleGapClick(afterBlockId); }}
+      >
+        <div className="flex w-8 shrink-0 flex-wrap gap-1 px-1 py-1 sm:w-44 sm:px-2">
+          {gapChips.map(({ cue, listIdx }) => {
+            const color = colorFor(listIdx);
+            return (
+              <React.Fragment key={cue.id}>
+                <button
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white sm:hidden ${color.bg} ${cue.warning ? "ring-2 ring-amber-400" : ""}`}
+                  onClick={event => { event.stopPropagation(); setMobileChipSheetCueId(cue.id); setSelection({ kind: "cue", cueId: cue.id }); }}
+                >
+                  {cue.number || "Q"}
+                </button>
+                <div className="hidden sm:block">
+                  <CueChip
+                    cue={cue}
+                    colorIdx={listIdx}
+                    selected={selection.kind === "cue" && selection.cueId === cue.id}
+                    warning={cue.warning}
+                    editable={canEditCue(cue)}
+                    presenceUsers={presenceForCue.get(cue.id) ?? []}
+                    onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
+                    onCommitNumber={value => updateCueField(cue, { number: value })}
+                    onCommitName={value => updateCueField(cue, { name: value })}
+                    highlighted={highlightedCueId === cue.id}
+                    onDragStart={canEditCue(cue) ? (event) => startCueDrag(event, cue.id, "move") : undefined}
+                  />
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <div className="flex flex-1 items-center gap-2 pr-2">
+          <div className="h-px flex-1 bg-zinc-200 transition-colors group-hover:bg-zinc-300" />
+          {activeListId && canEditActive && (
+            <span className="select-none text-[10px] text-zinc-300 transition-colors group-hover:text-zinc-400">+ Cue</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMarker = (block: Block, key: string) => {
+    if (block.type === "rehearsal_marker") {
+      const label = rehearsalLabelByMarkerId.get(block.id) ?? "";
+      return (
+        <div key={key} className="px-2 pb-1 pt-3 text-[10px] font-bold text-zinc-400">
+          {label}
+        </div>
+      );
+    }
+    const sceneId = block.sceneId ?? block.id;
+    const scene = sceneMap.get(sceneId);
+    if (!scene) return null;
+    return (
+      <div key={key} id={`cue-scene-${scene.id}`} className="scroll-mt-4 px-2 pb-1 pt-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+          {scene.number} {scene.name}
+        </p>
+      </div>
+    );
+  };
+
+  const renderSequence = (items: CueSequenceItem[], keyPrefix: string) => items.map((item, index) => (
+    item.kind === "gap"
+      ? renderGap(item.afterBlockId, `${keyPrefix}:gap:${item.afterBlockId}:${index}`)
+      : renderMarker(item.block, `${keyPrefix}:marker:${item.block.id}`)
+  ));
 
   const toolbarTriggerClass = "flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800";
 
@@ -2409,69 +2515,18 @@ export default function CuePage({
             const pendingHL = pendingHighlightForBlock.get(block.id) ?? null;
             const prevBlock = blockIdx > 0 ? blocks[blockIdx - 1] : null;
             const rehearsalLabel = block.rehearsalMark ? rehearsalLabelByMarkerId.get(block.rehearsalMark) : null;
+            const precedingSequence = sequenceBeforeTextBlock.get(block.id) ?? [];
 
             const scene = block.sceneId ? sceneMap.get(block.sceneId) : null;
             const prevScene = prevBlock?.sceneId ? sceneMap.get(prevBlock.sceneId) : null;
-            const showSceneHeading = scene && scene.id !== prevScene?.id;
-
-            const gapBlockId = prevBlock?.id ?? null;
-            const gapChips = gapBlockId ? (cuesForBlock.get(gapBlockId)?.filter(
-              ({ cue }) => cue.start.kind === "gap"
-            ) ?? []) : [];
-            const gapPending = pendingGapBlockId === gapBlockId;
+            const sequenceContainsScene = !!scene && precedingSequence.some(item => (
+              item.kind === "marker" && (item.block.sceneId ?? item.block.id) === scene.id
+            ));
+            const showSceneHeading = scene && scene.id !== prevScene?.id && !sequenceContainsScene;
 
             return (
               <div key={block.id} data-cue-bwrap={block.id}>
-                {/* Gap zone */}
-                {blockIdx > 0 && (
-                  <div
-                    data-gap-after={gapBlockId!}
-                    className={`flex items-center gap-0 rounded transition-colors cursor-pointer group
-                      ${gapPending ? "bg-zinc-200/70" : "hover:bg-zinc-100"}`}
-                    style={{ minHeight: "22px" }}
-                    onMouseDown={e => e.stopPropagation()}
-                    onClick={e => { e.stopPropagation(); handleGapClick(gapBlockId!); }}
-                  >
-                    <div className="w-8 sm:w-44 shrink-0 flex gap-1 flex-wrap px-1 sm:px-2 py-1">
-                      {gapChips.map(({ cue, listIdx }) => {
-                        const c = colorFor(listIdx);
-                        return (
-                          <React.Fragment key={cue.id}>
-                            <button
-                              className={`sm:hidden flex items-center justify-center w-6 h-6 rounded-full text-white text-[9px] font-bold shrink-0 ${c.bg} ${cue.warning ? "ring-2 ring-amber-400" : ""}`}
-                              onClick={e => { e.stopPropagation(); setMobileChipSheetCueId(cue.id); setSelection({ kind: "cue", cueId: cue.id }); }}
-                            >
-                              {cue.number || "Q"}
-                            </button>
-                            <div className="hidden sm:block">
-                              <CueChip
-                                cue={cue}
-                                colorIdx={listIdx}
-                                selected={selection.kind === "cue" && selection.cueId === cue.id}
-                                warning={cue.warning}
-                                editable={canEditCue(cue)}
-                                presenceUsers={presenceForCue.get(cue.id) ?? []}
-                                onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                                onCommitNumber={v => updateCueField(cue, { number: v })}
-                                onCommitName={v => updateCueField(cue, { name: v })}
-                                highlighted={highlightedCueId === cue.id}
-                                onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
-                              />
-                            </div>
-                          </React.Fragment>
-                        );
-                      })}
-                    </div>
-                    <div className="flex-1 flex items-center gap-2 pr-2">
-                      <div className="h-px flex-1 bg-zinc-200 group-hover:bg-zinc-300 transition-colors" />
-                      {activeListId && canEditActive && (
-                        <span className="text-[10px] text-zinc-300 group-hover:text-zinc-400 transition-colors select-none">
-                          + Cue
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {renderSequence(precedingSequence, block.id)}
 
                 {/* Scene heading */}
                 {showSceneHeading && (
@@ -2591,55 +2646,8 @@ export default function CuePage({
             );
           })}
 
-          {/* Final gap after last block */}
-          {lastBlock && (
-            <div
-              data-gap-after={lastBlock.id}
-              className={`flex items-center gap-0 rounded cursor-pointer transition-colors group
-                ${pendingGapBlockId === lastBlock.id ? "bg-zinc-200/70" : "hover:bg-zinc-100"}`}
-              style={{ minHeight: "32px" }}
-              onMouseDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); handleGapClick(lastBlock.id); }}
-            >
-              <div className="w-8 sm:w-44 shrink-0 flex gap-1 flex-wrap px-1 sm:px-2 py-1">
-                {lastGapChips.map(({ cue, listIdx }) => {
-                  const c = colorFor(listIdx);
-                  return (
-                    <React.Fragment key={cue.id}>
-                      <button
-                        className={`sm:hidden flex items-center justify-center w-6 h-6 rounded-full text-white text-[9px] font-bold shrink-0 ${c.bg} ${cue.warning ? "ring-2 ring-amber-400" : ""}`}
-                        onClick={e => { e.stopPropagation(); setMobileChipSheetCueId(cue.id); setSelection({ kind: "cue", cueId: cue.id }); }}
-                      >
-                        {cue.number || "Q"}
-                      </button>
-                      <div className="hidden sm:block">
-                        <CueChip
-                          cue={cue}
-                          colorIdx={listIdx}
-                          selected={selection.kind === "cue" && selection.cueId === cue.id}
-                          warning={cue.warning}
-                          editable={canEditCue(cue)}
-                          presenceUsers={presenceForCue.get(cue.id) ?? []}
-                          onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                          onCommitNumber={v => updateCueField(cue, { number: v })}
-                          onCommitName={v => updateCueField(cue, { name: v })}
-                          onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
-                        />
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-              <div className="flex-1 flex items-center gap-2 pr-2">
-                <div className="h-px flex-1 bg-zinc-200 group-hover:bg-zinc-300 transition-colors" />
-                {activeListId && canEditActive && (
-                  <span className="text-[10px] text-zinc-300 group-hover:text-zinc-400 transition-colors select-none">
-                    + Cue
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
+          {renderSequence(trailingSequence, "trailing")}
+          {lastOrderedBlock && renderGap(lastOrderedBlock.id, "final-gap", 32)}
           <div ref={botSpacerRef} style={{ height: spacerH.bot }} aria-hidden="true" />
         </div>
       </div>
