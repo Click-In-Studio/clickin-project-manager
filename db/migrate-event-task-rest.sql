@@ -15,6 +15,12 @@
 
 BEGIN;
 
+-- ── 0. 自足性守卫：created_via 列（add-task-created-via.sql 的幂等镜像）──────────
+-- 该 add 文件的首次 commit 晚于本迁移文件，CD 按首次 commit 顺序执行会先跑本文件；
+-- 幂等 ALTER 保证顺序无关（批A 部署事故的教训之二：跨 commit 依赖必须自足）。
+ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
+  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
+
 -- ── 1. tech_req → task ────────────────────────────────────────────────────────
 INSERT INTO resource_grant
   (production_id, user_id, resource_type, resource_id, resource_sub,
