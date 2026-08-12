@@ -93,6 +93,7 @@ const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [
   PRODUCTION_TOOLBAR_STAGE.lowPriorityStored,
 ];
 const PRODUCTION_SIDEBAR_TRANSITION_MS = 150;
+const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
 // Below this width the full production sidebar no longer fits the script layout.
 const SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX = 1496;
 
@@ -735,6 +736,50 @@ export default function AppShell({ session, productions, children, initialUnread
     setProductionToolbarStage(0);
   }, [pathname]);
 
+  useEffect(() => {
+    const hideTimers = new Map<HTMLElement, number>();
+    const scrollbarForArea = (area: HTMLElement) => area.matches(".panel-scrollbar")
+      ? area
+      : area.querySelector<HTMLElement>(".panel-scrollbar");
+    const hideActiveScrollbar = (scrollbar: HTMLElement) => {
+      const timer = hideTimers.get(scrollbar);
+      if (timer !== undefined) window.clearTimeout(timer);
+      hideTimers.delete(scrollbar);
+      scrollbar.classList.remove("is-scroll-active");
+    };
+    const revealActiveScrollbar = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const scrollbar = target.closest<HTMLElement>(".panel-scrollbar");
+      if (!scrollbar) return;
+
+      scrollbar.classList.add("is-scroll-active");
+      const previousTimer = hideTimers.get(scrollbar);
+      if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+      hideTimers.set(scrollbar, window.setTimeout(() => {
+        hideActiveScrollbar(scrollbar);
+      }, SCROLLBAR_ACTIVITY_HIDE_DELAY_MS));
+    };
+    const hideScrollbarOnPanelExit = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const area = target.closest<HTMLElement>(".panel-scrollbar-area");
+      const relatedTarget = event.relatedTarget;
+      if (!area || (relatedTarget instanceof Node && area.contains(relatedTarget))) return;
+      const scrollbar = scrollbarForArea(area);
+      if (!scrollbar) return;
+      hideActiveScrollbar(scrollbar);
+    };
+
+    document.addEventListener("scroll", revealActiveScrollbar, { passive: true, capture: true });
+    document.addEventListener("pointerout", hideScrollbarOnPanelExit, true);
+    return () => {
+      document.removeEventListener("scroll", revealActiveScrollbar, { capture: true });
+      document.removeEventListener("pointerout", hideScrollbarOnPanelExit, true);
+      for (const scrollbar of hideTimers.keys()) hideActiveScrollbar(scrollbar);
+    };
+  }, []);
+
   useLayoutEffect(() => {
     closeTopOverflow();
   }, [productionToolbarStage, productionToolbarHasStoredControls, closeTopOverflow]);
@@ -1144,7 +1189,7 @@ export default function AppShell({ session, productions, children, initialUnread
       <div className="relative flex flex-1 min-h-0">
         {/* Sidebar (desktop only) */}
         <aside
-          className={`hover-reveal-scrollbar hidden lg:flex shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] transition-[width,padding,margin] duration-150 ${
+          className={`panel-scrollbar-area panel-scrollbar hidden lg:flex shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] transition-[width,padding,margin] duration-150 ${
             isScriptPage
               ? productionSidebarOverlayOpen
                 ? "z-30 -mr-[168px] w-[240px] px-3.5 pt-9 pb-5 shadow-lg"

@@ -1054,10 +1054,10 @@ function TableOfContents({
   };
 
   const wrapClass = isRailPlacement
-    ? `flex h-full min-w-0 w-full flex-col overflow-hidden rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
+    ? `panel-scrollbar-area flex h-full min-w-0 w-full flex-col overflow-hidden rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
     : "px-8 pt-6 pb-5 border-b border-zinc-100";
   const navClass = isRailPlacement
-    ? "hover-reveal-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+    ? "panel-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
     : "flex flex-col gap-0.5";
 
   return (
@@ -1309,7 +1309,7 @@ function ScriptSceneDetailRail({
     <div
       ref={railRef}
       data-script-scene-detail="true"
-      className="group/scene-detail box-border flex h-full min-h-0 w-full flex-col rounded-lg px-3 pt-3 text-left"
+      className="panel-scrollbar-area group/scene-detail box-border flex h-full min-h-0 w-full flex-col rounded-lg px-3 pt-3 text-left"
       style={{
         background: isDeleteConfirmHighlighted
           ? "#fee2e2"
@@ -1364,11 +1364,10 @@ function ScriptSceneDetailRail({
         </div>
       ) : (
         <div
-          className="hover-reveal-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
+          className="panel-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
           style={{
             marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
             paddingRight: `calc(${scrollbarOffsetPx}px + 8px)`,
-            scrollbarGutter: "stable",
           }}
         >
           {sectionCanEdit && (

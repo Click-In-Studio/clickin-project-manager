@@ -130,34 +130,46 @@ span[data-stage-inline] {
   display: none;
 }
 
-.hover-reveal-scrollbar {
-  scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
+@property --panel-scrollbar-thumb-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
 }
 
-.hover-reveal-scrollbar:hover {
-  scrollbar-color: rgba(161, 161, 170, 0.45) transparent;
+.panel-scrollbar {
+  --panel-scrollbar-thumb-opacity: 0;
+  scrollbar-gutter: stable;
+  transition: --panel-scrollbar-thumb-opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.hover-reveal-scrollbar::-webkit-scrollbar {
+.panel-scrollbar-area.panel-scrollbar:hover,
+.panel-scrollbar-area:hover .panel-scrollbar,
+.panel-scrollbar.is-scroll-active {
+  --panel-scrollbar-thumb-opacity: 1;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .panel-scrollbar {
+    scrollbar-color: rgb(161 161 170 / calc(var(--panel-scrollbar-thumb-opacity) * 45%)) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+.panel-scrollbar::-webkit-scrollbar {
   width: 8px;
-}
-
-.hover-reveal-scrollbar::-webkit-scrollbar-track {
+  height: 8px;
   background: transparent;
 }
 
-.hover-reveal-scrollbar::-webkit-scrollbar-thumb {
+.panel-scrollbar::-webkit-scrollbar-track,
+.panel-scrollbar::-webkit-scrollbar-track-piece,
+.panel-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+.panel-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(161 161 170 / calc(var(--panel-scrollbar-thumb-opacity) * 45%));
   border-radius: 9999px;
-}
-
-.hover-reveal-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(161, 161, 170, 0.45);
-}
-
-.hover-reveal-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(113, 113, 122, 0.55);
 }
 
 /* Side panels stay above the bottom nav wherever that nav is visible. */
