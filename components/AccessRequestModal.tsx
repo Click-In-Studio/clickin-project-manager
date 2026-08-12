@@ -24,11 +24,6 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "event:edit":          "编辑日程",
   "event:publish":       "发布日程",
   "event:manage":        "管理日程",
-  "asset:view":          "查看附件",
-  "asset:download":      "下载附件",
-  "asset:share":         "分享附件",
-  "asset:rename":        "重命名附件",
-  "asset:delete":        "删除附件",
 };
 
 // ─── Resource selector options (free-form mode only) ─────────────────────────

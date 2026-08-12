@@ -23,9 +23,6 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:event/*/details@view",
     "node:event/*/followers@create",
     "contacts:view",
-    "asset:view",
-    "asset:download",
-    "asset:share",
   ]),
   script: new Set<Permission>([
     "script:import",
@@ -117,23 +114,6 @@ export const PAGE_PERMISSION_SCOPES = {
   ]),
 
   assets: new Set<Permission>([
-    "asset:rename",
-    "asset:overwrite",
-    "asset:change_type",
-    "asset:delete",
-    "asset:mount",
-    "asset:unmount",
-    "asset:view_any",
-    "asset:delete_any",
-    "asset:rename_any",
-    "asset:change_type_any",
-    "asset:overwrite_any",
-    "asset:mount_any",
-    "asset:unmount_any",
-    "asset:download_any",
-    "asset:share_downloadable",
-    "asset:share_any",
-    "asset:share_any_downloadable",
   ]),
 } as const;
 

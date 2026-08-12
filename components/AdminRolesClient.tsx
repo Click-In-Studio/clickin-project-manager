@@ -68,15 +68,11 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "附件（个人）",
     perms: [
-      "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
-      "asset:delete", "asset:mount", "asset:unmount",
     ],
   },
   {
     label: "附件（管理 _any）",
     perms: [
-      "asset:view_any", "asset:delete_any", "asset:rename_any",
-      "asset:change_type_any", "asset:overwrite_any", "asset:mount_any", "asset:unmount_any",
     ],
   },
   {
@@ -100,8 +96,6 @@ const PERM_GROUPS: PermGroup[] = [
       "contacts:view",
       "script:view", "script:comment",
       "scene:view", "character:view",
-      "asset:view", "asset:download", "asset:download_any",
-      "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
       "org:assign_member", "org:recall_member",
     ],
   },

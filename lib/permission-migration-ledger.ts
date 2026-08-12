@@ -60,13 +60,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // dramaturgy → 批E
   "dramaturgy:import": "E",
   // asset → 批D
-  "asset:view_any": "D",
-  "asset:delete_any": "D",
-  "asset:rename_any": "D",
-  "asset:change_type_any": "D",
-  "asset:overwrite_any": "D",
-  "asset:mount_any": "D",
-  "asset:unmount_any": "D",
   // dramaturgy_view → 批E
   "dramaturgy_view:create_public": "E",
   "dramaturgy_view:delete_public": "E",
@@ -146,13 +139,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "production:mount": "F",
   "production:unmount": "F",
   // asset → 批D
-  "asset:create": "D",
-  "asset:rename": "D",
-  "asset:overwrite": "D",
-  "asset:change_type": "D",
-  "asset:delete": "D",
-  "asset:mount": "D",
-  "asset:unmount": "D",
   // scene → 批E
   "scene:view": "E",
   // character → 批E
@@ -162,13 +148,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // contacts → 批F
   "contacts:view": "F",
   // asset → 批D
-  "asset:view": "D",
-  "asset:download": "D",
-  "asset:download_any": "D",
-  "asset:share": "D",
-  "asset:share_downloadable": "D",
-  "asset:share_any": "D",
-  "asset:share_any_downloadable": "D",
   // script → 批E
   "script:comment": "E",
   // org → 批G
@@ -178,6 +157,28 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批D（asset 域 REST 化，2026-08-12）
+  "asset:view_any",
+  "asset:delete_any",
+  "asset:rename_any",
+  "asset:change_type_any",
+  "asset:overwrite_any",
+  "asset:mount_any",
+  "asset:unmount_any",
+  "asset:create",
+  "asset:rename",
+  "asset:overwrite",
+  "asset:change_type",
+  "asset:delete",
+  "asset:mount",
+  "asset:unmount",
+  "asset:view",
+  "asset:download",
+  "asset:download_any",
+  "asset:share",
+  "asset:share_downloadable",
+  "asset:share_any",
+  "asset:share_any_downloadable",
   // 批A（cue 域，2026-08-11）
   // 批B（event/task 域，2026-08-12）
   // 批C（report/note 域，2026-08-12）
@@ -231,7 +232,7 @@ export const RETIRED_PERMISSION_KEYS: readonly string[] = [
  * 完成一批：对应级别的 grant 行迁移为动词行 + 从词汇表删行 + 从此处删行。
  */
 export const RESOURCE_LEVEL_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
-  "asset:mount": "D", "asset:manage": "D",
+  "asset:manage": "D",
   "scene:mount": "E", "scene:manage": "E",
   "script_view:manage": "E",
 };

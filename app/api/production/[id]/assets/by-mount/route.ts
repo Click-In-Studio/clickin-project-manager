@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAssetsByMountPoint, type MountType } from "@/lib/asset-db";
+import { filterVisibleAssets } from "@/lib/asset-perm";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -18,5 +19,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const mountAuxId = sp.has("auxId") ? sp.get("auxId") : undefined;
   const results = await getAssetsByMountPoint(id, mountType, mountId, mountAuxId);
-  return Response.json({ results });
+  // 批D：按可见性过滤（能力票∧结构 ∨ publication@view）
+  const visibleAssets = await filterVisibleAssets(access.permCtx, id, results.map(r => r.asset));
+  const visibleIds = new Set(visibleAssets.map(a => a.id));
+  return Response.json({ results: results.filter(r => visibleIds.has(r.asset.id)) });
 }

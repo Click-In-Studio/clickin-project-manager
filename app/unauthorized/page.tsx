@@ -17,7 +17,6 @@ const PERMISSION_LABELS: Record<string, string> = {
   "contacts:view": "查看人员",
   "event:view": "查看日程列表",
   "event:view_call_sheet": "查看 Call Sheet",
-  "asset:view": "查看数字资产",
   // 写权限
   "event:edit": "编辑日程",
   "event:edit_call": "编辑 Call 时间",

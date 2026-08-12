@@ -1,6 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
+import { filterVisibleAssets } from "@/lib/asset-perm";
+import { hasGrant } from "@/lib/grant-check";
 import { createAsset, listAssets, type AssetType } from "@/lib/asset-db";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
@@ -19,7 +21,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const assets = await listAssets(id);
-  return Response.json({ assets });
+  // 批D：可见性过滤（能力票∧结构 ∨ publication@view）
+  const visible = await filterVisibleAssets(access.permCtx, id, assets);
+  return Response.json({ assets: visible });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -29,6 +33,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
+  // 批D：上传 = asset/*@create（原为裸门，按名义键收紧，与批A GET 补门先例一致）
+  if (!session.isAdmin && !await hasGrant(session.userId, id, "asset", "*", "*", "create"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const ct = req.headers.get("content-type") ?? "";
 

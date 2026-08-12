@@ -188,6 +188,12 @@
       "column": "uploader_user_id",
       "type": "uuid",
       "nullable": false
+    },
+    {
+      "column": "is_public",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "asset_file": [

@@ -48,6 +48,11 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isAssetRestPreMigrationSchema,
+  createAssetRestPreMigrationData,
+  ASSET_REST_SNAPSHOT_PATH,
+} from "./asset-rest-snapshot";
+import {
   isReportNoteRestPreMigrationSchema,
   createReportNoteRestPreMigrationData,
   REPORT_NOTE_REST_SNAPSHOT_PATH,
@@ -222,6 +227,16 @@ export async function setup() {
       "utf8",
     );
     await pool.query(migrationSql);
+  }
+
+  if (await isAssetRestPreMigrationSchema(pool)) {
+    // Migration path（批D）: asset manage 词汇行仍在。
+    const assetRestSnapshot = await createAssetRestPreMigrationData(pool, TEST_USER);
+    await writeFile(ASSET_REST_SNAPSHOT_PATH, JSON.stringify(assetRestSnapshot));
+    for (const file of ["db/add-asset-visibility.sql", "db/migrate-asset-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
   }
 }
 

@@ -42,13 +42,6 @@ export type Permission =
   | "script:import"
   | "dramaturgy:import"
   // ─── 普通管理 - 附件隐私类 ────────────────────────────────────────────────────
-  | "asset:view_any"
-  | "asset:delete_any"
-  | "asset:rename_any"
-  | "asset:change_type_any"
-  | "asset:overwrite_any"
-  | "asset:mount_any"
-  | "asset:unmount_any"
   // ─── 普通管理 - 构作视图公开类 ───────────────────────────────────────────────
   | "dramaturgy_view:create_public"
   | "dramaturgy_view:delete_public"
@@ -129,25 +122,11 @@ export type Permission =
   | "production:mount"
   | "production:unmount"
   // ─── 写权限 - 附件基础操作 ────────────────────────────────────────────────────
-  | "asset:create"
-  | "asset:rename"
-  | "asset:overwrite"
-  | "asset:change_type"
-  | "asset:delete"
-  | "asset:mount"
-  | "asset:unmount"
   // ─── 读权限 ───────────────────────────────────────────────────────────────────
   | "scene:view"
   | "character:view"
   | "script:view"
   | "contacts:view"
-  | "asset:view"
-  | "asset:download"
-  | "asset:download_any"
-  | "asset:share"
-  | "asset:share_downloadable"
-  | "asset:share_any"
-  | "asset:share_any_downloadable"
   | "script:comment"
   // ─── 组织特殊权限（由 org_admin_production_grant 授予，见 #136）────────────
   | "org:assign_member"
@@ -318,20 +297,6 @@ export function hasScopedPermission(
   return hasPermission(anyPerm, ctx) || (hasPermission(basePerm, ctx) && scopeCheck);
 }
 
-// ─── Mount Permission Check ────────────────────────────────────────────────────
-// Dual verification: asset-side AND entity-side must both pass.
-// entityPerm: 'scene:mount' | 'script:mount' | 'production:mount'
-// isOwnAsset: whether asset.uploadedBy === ctx.userId
-
-export function hasMountPermission(
-  entityPerm: Permission,
-  isOwnAsset: boolean,
-  ctx: PermissionContext,
-): boolean {
-  const assetPerm: Permission = isOwnAsset ? "asset:mount" : "asset:mount_any";
-  return hasPermission(assetPerm, ctx) && hasPermission(entityPerm, ctx);
-}
-
 // ─── Member Base Permissions ───────────────────────────────────────────────────
 // Default view-class permissions included in every new role template.
 // NOT a bypass — these take effect only after self-confirm writes an active grant.
@@ -345,10 +310,6 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "character:view",
   "script:view",
   "contacts:view",
-  
-  "asset:view",
-  "asset:download",
-  "asset:share",
 ];
 
 // ─── Dramaturgy Full Set ───────────────────────────────────────────────────────
@@ -407,13 +368,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dept:unset_poc",
   "script:import",
   "dramaturgy:import",
-  "asset:view_any",
-  "asset:delete_any",
-  "asset:rename_any",
-  "asset:change_type_any",
-  "asset:overwrite_any",
-  "asset:mount_any",
-  "asset:unmount_any",
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
@@ -453,24 +407,10 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   
   "production:mount",
   "production:unmount",
-  "asset:create",
-  "asset:rename",
-  "asset:overwrite",
-  "asset:change_type",
-  "asset:delete",
-  "asset:mount",
-  "asset:unmount",
 ];
 
 const PRODUCER_READ_PERMS: readonly Permission[] = [
   ...MEMBER_BASE_PERMISSIONS,
-  
-  
-  
-  "asset:download_any",
-  "asset:share_downloadable",
-  "asset:share_any",
-  "asset:share_any_downloadable",
 ];
 
 // ─── Role Template Permissions ─────────────────────────────────────────────────
@@ -624,8 +564,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
   "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
   "script:import", "dramaturgy:import",
-  "asset:view_any", "asset:delete_any", "asset:rename_any",
-  "asset:change_type_any", "asset:overwrite_any", "asset:mount_any", "asset:unmount_any",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
   
   "character:delete",
@@ -652,12 +590,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   
   
   "production:mount", "production:unmount",
-  "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
-  "asset:delete", "asset:mount", "asset:unmount",
   "scene:view", "character:view", "script:view", "contacts:view", 
-  
-  "asset:view", "asset:download", "asset:download_any",
-  "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
   "script:comment", 
   "org:assign_member", "org:recall_member",
 ];

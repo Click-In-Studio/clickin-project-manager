@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { hasGrant } from "@/lib/grant-check";
 import { createMultipartUpload, presignedUploadPart, assetR2Key } from "@/lib/r2";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("script:view", permCtx))
+  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, id, "asset", "*", "*", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as { fileName?: string; mimeType?: string; partCount?: number; fileSize?: number };

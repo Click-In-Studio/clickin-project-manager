@@ -767,6 +767,9 @@ CREATE TABLE IF NOT EXISTS asset (
   file_name         TEXT NOT NULL,
   mime_type         TEXT,
   is_universal      BOOLEAN NOT NULL DEFAULT true,
+  -- 批D 隐私/公开：可见 = 能力票 ∧ (is_public ∨ ∃挂载边:宿主可见) ∨ publication@view。
+  -- 存量迁移置 true（保真）；新建默认隐私
+  is_public         BOOLEAN NOT NULL DEFAULT false,
   storage_type      TEXT NOT NULL DEFAULT 'r2',
   feishu_url        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1013,10 +1016,10 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('script_view', 'view',           1),
   ('script_view', 'edit',           2),
   ('script_view', 'manage',         3),
+  -- asset 已 REST 化（批D）：view/edit 沿用为动词（mount→publication 面、manage 退役），
+  -- create/delete 在批0 INSERT
   ('asset',       'view',           1),
-  ('asset',       'mount',          2),
   ('asset',       'edit',           3),
-  ('asset',       'manage',         4),
   -- dept = event_department（批C C3）：notes 权限面锚点，四动词
   ('dept',        'view',           0),
   ('dept',        'create',         0),
@@ -1234,4 +1237,19 @@ ON CONFLICT DO NOTHING;
 -- 批C C3：导演任意部门发 note（dept 锚通配）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('导演', 'node:dept/*/notes@create')
+ON CONFLICT DO NOTHING;
+
+-- 批D：asset 能力票（全员三枚，MEMBER_BASE 保真）+ 制作人 any 全系
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:asset/*/meta@view'),
+  ('*', 'node:asset/*/file@view'),
+  ('*', 'node:asset/*/shares@create')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT '制作人', k FROM (VALUES
+  ('node:asset/*@create'), ('node:asset/*@delete'),
+  ('node:asset/*/meta@edit'), ('node:asset/*/file@create'),
+  ('node:asset/*/publication@create'), ('node:asset/*/publication@delete')
+) AS t(k)
 ON CONFLICT DO NOTHING;
