@@ -253,6 +253,19 @@ export async function setup() {
       await pool.query(migrationSql);
     }
   }
+
+  const legacyCueNumberConstraint = await pool.query(
+    `SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'cue'::regclass
+       AND conname = 'cue_cue_list_id_number_key'`,
+  );
+  if (legacyCueNumberConstraint.rows.length > 0) {
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-revision-number-uniqueness.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
