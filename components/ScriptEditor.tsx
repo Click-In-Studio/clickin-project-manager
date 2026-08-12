@@ -3154,6 +3154,11 @@ const PRINT_WRAPPER_PADDING_HEIGHT = 8;
 const PRINT_TEXT_CLASS = "w-full break-words text-sm leading-7";
 const PRINT_STAGE_COMMENT_CLASS = "font-stage text-sm italic leading-7 text-zinc-400 whitespace-pre-wrap";
 const PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX: number = 1;
+const PRINT_TOOLBAR_UNFOLD_BUFFER_PX = 16;
+const PRINT_PREVIEW_MIN_SCALE = 0.1;
+const PRINT_PREVIEW_MAX_SCALE = 2;
+const PRINT_PREVIEW_SIDE_GUTTER_PX = 32;
+const PRINT_PREVIEW_PAGE_GUTTER_PX = 64;
 
 type PrintPageData = {
   items: PrintItem[];
@@ -3161,6 +3166,7 @@ type PrintPageData = {
   pageNum: number;
 };
 type PrintHeaderMode = "all-left" | "all-right" | "first-right" | "first-left";
+type PrintToolbarStage = 0 | 1 | 2 | 3;
 const PRINT_HEADER_MODES: PrintHeaderMode[] = ["all-left", "all-right", "first-right", "first-left"];
 const PRINT_HEADER_MODE_LABELS: Record<PrintHeaderMode, string> = {
   "all-left": "页眉统一靠左",
@@ -3541,10 +3547,10 @@ function PrintHeaderModeMenu({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative" onMouseLeave={() => setOpen(false)}>
+    <div className="relative shrink-0" onMouseLeave={() => setOpen(false)}>
       <button
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+        className="flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
         title="选择页眉位置"
       >
         <span>{PRINT_HEADER_MODE_LABELS[headerMode]}</span>
@@ -3564,6 +3570,329 @@ function PrintHeaderModeMenu({
               {headerMode === mode && <span className="text-[10px] text-zinc-900">✓</span>}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrintCompactLayoutControl({
+  compactLayout,
+  canEdit,
+  ready,
+  label,
+  stored = false,
+  onToggle,
+}: {
+  compactLayout: boolean;
+  canEdit: boolean;
+  ready: boolean;
+  label: string;
+  stored?: boolean;
+  onToggle: () => void;
+}) {
+  const enabled = canEdit && ready;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={!enabled}
+      className={`flex items-center gap-2 whitespace-nowrap text-sm transition-colors ${
+        stored ? "w-full justify-between px-3 py-2" : "shrink-0 rounded-md px-3 py-1.5"
+      } ${enabled ? "text-zinc-600 hover:bg-zinc-100" : "cursor-not-allowed text-zinc-300"}`}
+      title={
+        !canEdit
+          ? "无权修改剧本排版模式"
+          : ready
+            ? "保存为所有人共用的剧本排版模式"
+            : "打印预览加载中"
+      }
+    >
+      <span>{label}</span>
+      <ModeSwitch active={compactLayout} activeClassName="bg-[#637ca1]" />
+    </button>
+  );
+}
+
+function PrintScaleControl({
+  scale,
+  fitWidth,
+  fitPage,
+  onScaleChange,
+  onZoomIn,
+  onZoomOut,
+  onFitWidth,
+  onFitPage,
+}: {
+  scale: number;
+  fitWidth: boolean;
+  fitPage: boolean;
+  onScaleChange: (scale: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFitWidth: () => void;
+  onFitPage: () => void;
+}) {
+  const percent = Math.round(scale * 100);
+  const [percentDraft, setPercentDraft] = useState(String(percent));
+  const [editingPercent, setEditingPercent] = useState(false);
+  const fillPercent = ((percent - PRINT_PREVIEW_MIN_SCALE * 100) /
+    ((PRINT_PREVIEW_MAX_SCALE - PRINT_PREVIEW_MIN_SCALE) * 100)) * 100;
+  useEffect(() => {
+    if (!editingPercent) setPercentDraft(String(percent));
+  }, [editingPercent, percent]);
+  const commitPercent = () => {
+    setEditingPercent(false);
+    const nextPercent = Number(percentDraft);
+    if (Number.isFinite(nextPercent)) onScaleChange(nextPercent / 100);
+    else setPercentDraft(String(percent));
+  };
+  return (
+    <div className="space-y-2 px-3 py-2">
+      <div className="flex items-center justify-between text-xs text-zinc-500">
+        <span>预览缩放</span>
+        <label className="flex items-center gap-0.5 text-zinc-700">
+          <input
+            type="number"
+            min={PRINT_PREVIEW_MIN_SCALE * 100}
+            max={PRINT_PREVIEW_MAX_SCALE * 100}
+            step={1}
+            value={percentDraft}
+            aria-label="打印预览缩放百分比"
+            onFocus={() => setEditingPercent(true)}
+            onChange={(event) => setPercentDraft(event.target.value)}
+            onBlur={commitPercent}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") {
+                setPercentDraft(String(percent));
+                event.currentTarget.blur();
+              }
+            }}
+            className="print-preview-scale-percent w-14 border-b border-zinc-200 bg-transparent text-right tabular-nums outline-none focus:border-zinc-400"
+          />
+          <span>%</span>
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="缩小打印预览"
+          title="缩小"
+          onClick={onZoomOut}
+          disabled={scale <= PRINT_PREVIEW_MIN_SCALE}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-base leading-none text-[#637ca1] hover:bg-zinc-100 disabled:text-zinc-300"
+        >
+          −
+        </button>
+        <input
+          type="range"
+          min={PRINT_PREVIEW_MIN_SCALE * 100}
+          max={PRINT_PREVIEW_MAX_SCALE * 100}
+          step={1}
+          value={percent}
+          aria-label="打印预览缩放"
+          onChange={(event) => onScaleChange(Number(event.target.value) / 100)}
+          className="print-preview-scale-slider-v2 block min-w-0 flex-1 cursor-pointer"
+          style={{ "--print-preview-scale-fill": `${fillPercent}%` } as React.CSSProperties}
+        />
+        <button
+          type="button"
+          aria-label="放大打印预览"
+          title="放大"
+          onClick={onZoomIn}
+          disabled={scale >= PRINT_PREVIEW_MAX_SCALE}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-base leading-none text-[#637ca1] hover:bg-zinc-100 disabled:text-zinc-300"
+        >
+          +
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={onFitWidth}
+          disabled={fitWidth}
+          className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-50"
+        >
+          适合宽度
+        </button>
+        <button
+          type="button"
+          onClick={onFitPage}
+          disabled={fitPage}
+          className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-50"
+        >
+          适合整页
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PrintScaleMenu({
+  scale,
+  fitWidth,
+  fitPage,
+  shortLabel,
+  onScaleChange,
+  onZoomIn,
+  onZoomOut,
+  onFitWidth,
+  onFitPage,
+}: {
+  scale: number;
+  fitWidth: boolean;
+  fitPage: boolean;
+  shortLabel: boolean;
+  onScaleChange: (scale: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFitWidth: () => void;
+  onFitPage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const percent = Math.round(scale * 100);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={`flex items-center justify-between gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 ${
+          shortLabel ? "w-[68px]" : "w-24"
+        }`}
+        title="调整打印预览缩放"
+      >
+        <span>{shortLabel ? `${percent}%` : `缩放 ${percent}%`}</span>
+        <ChevronIcon size={12} className="opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-md">
+          <PrintScaleControl
+            scale={scale}
+            fitWidth={fitWidth}
+            fitPage={fitPage}
+            onScaleChange={onScaleChange}
+            onZoomIn={onZoomIn}
+            onZoomOut={onZoomOut}
+            onFitWidth={onFitWidth}
+            onFitPage={onFitPage}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrintPageSettingsMenu({
+  ellipsis = false,
+  compactLayout,
+  canEditTextLayout,
+  printPreviewReady,
+  headerMode,
+  previewScale,
+  previewScaleFitWidth,
+  previewScaleFitPage,
+  onTextLayoutModeToggle,
+  onHeaderModeChange,
+  onPreviewScaleChange,
+  onPreviewZoomIn,
+  onPreviewZoomOut,
+  onPreviewFitWidth,
+  onPreviewFitPage,
+}: {
+  ellipsis?: boolean;
+  compactLayout: boolean;
+  canEditTextLayout: boolean;
+  printPreviewReady: boolean;
+  headerMode: PrintHeaderMode;
+  previewScale: number;
+  previewScaleFitWidth: boolean;
+  previewScaleFitPage: boolean;
+  onTextLayoutModeToggle: () => void;
+  onHeaderModeChange: (mode: PrintHeaderMode) => void;
+  onPreviewScaleChange: (scale: number) => void;
+  onPreviewZoomIn: () => void;
+  onPreviewZoomOut: () => void;
+  onPreviewFitWidth: () => void;
+  onPreviewFitPage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-label={ellipsis ? "更多页面设置" : undefined}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={ellipsis
+          ? "flex h-8 w-8 items-center justify-center rounded-md text-base font-bold text-zinc-500 transition-colors hover:bg-zinc-100"
+          : "flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+        }
+      >
+        {ellipsis ? (
+          <span aria-hidden="true">⋮</span>
+        ) : (
+          <>
+            页面设置
+            <ChevronIcon size={12} className="opacity-50" />
+          </>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
+          <PrintCompactLayoutControl
+            compactLayout={compactLayout}
+            canEdit={canEditTextLayout}
+            ready={printPreviewReady}
+            label="紧凑排版"
+            stored
+            onToggle={onTextLayoutModeToggle}
+          />
+          <div className="my-1 border-t border-zinc-100" />
+          <p className="px-3 pb-1 pt-1 text-[10px] font-medium tracking-wide text-zinc-400">页眉位置</p>
+          {PRINT_HEADER_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onHeaderModeChange(mode)}
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${
+                headerMode === mode ? "font-medium text-zinc-900" : "text-zinc-500"
+              }`}
+            >
+              <span>{PRINT_HEADER_MODE_LABELS[mode]}</span>
+              {headerMode === mode && <span className="text-[10px] text-zinc-900">✓</span>}
+            </button>
+          ))}
+          <div className="my-1 border-t border-zinc-100" />
+          <PrintScaleControl
+            scale={previewScale}
+            fitWidth={previewScaleFitWidth}
+            fitPage={previewScaleFitPage}
+            onScaleChange={onPreviewScaleChange}
+            onZoomIn={onPreviewZoomIn}
+            onZoomOut={onPreviewZoomOut}
+            onFitWidth={onPreviewFitWidth}
+            onFitPage={onPreviewFitPage}
+          />
         </div>
       )}
     </div>
@@ -3748,6 +4077,35 @@ function PrintPreview({
   const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
   const [headerMode, setHeaderMode] = useState<PrintHeaderMode>("first-right");
+  const [printToolbarStage, setPrintToolbarStage] = useState<PrintToolbarStage>(0);
+  const printToolbarRef = useRef<HTMLDivElement>(null);
+  const printToolbarRequiredWidthRef = useRef<Partial<Record<PrintToolbarStage, number>>>({});
+  const previewViewportRef = useRef<HTMLDivElement>(null);
+  const [fitPreviewScales, setFitPreviewScales] = useState({ width: 1, page: 1 });
+  const [previewFitMode, setPreviewFitMode] = useState<"width" | "page">("width");
+  const [customPreviewScale, setCustomPreviewScale] = useState<number | null>(null);
+  const previewScale = customPreviewScale ?? fitPreviewScales[previewFitMode];
+  const previewScaleFitWidth = customPreviewScale === null && previewFitMode === "width";
+  const previewScaleFitPage = customPreviewScale === null && previewFitMode === "page";
+  const setPreviewScale = useCallback((scale: number) => {
+    const clamped = Math.min(PRINT_PREVIEW_MAX_SCALE, Math.max(PRINT_PREVIEW_MIN_SCALE, scale));
+    setCustomPreviewScale(Math.round(clamped * 100) / 100);
+  }, []);
+  const adjustPreviewScale = useCallback((delta: number) => {
+    setCustomPreviewScale((current) => {
+      const scale = current ?? fitPreviewScales[previewFitMode];
+      const clamped = Math.min(PRINT_PREVIEW_MAX_SCALE, Math.max(PRINT_PREVIEW_MIN_SCALE, scale + delta));
+      return Math.round(clamped * 100) / 100;
+    });
+  }, [fitPreviewScales, previewFitMode]);
+  const fitPreviewWidth = useCallback(() => {
+    setPreviewFitMode("width");
+    setCustomPreviewScale(null);
+  }, []);
+  const fitPreviewPage = useCallback(() => {
+    setPreviewFitMode("page");
+    setCustomPreviewScale(null);
+  }, []);
   const requestLayoutRemeasure = useCallback(() => {
     if (remeasureTimerRef.current) return;
     remeasureTimerRef.current = setTimeout(() => {
@@ -3775,6 +4133,101 @@ function PrintPreview({
     data.layoutMode === textLayoutMode &&
     data.measureTick === layoutMeasureTick;
   const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
+
+  useLayoutEffect(() => {
+    const viewport = previewViewportRef.current;
+    if (!viewport) return;
+    const updateFitScale = () => {
+      const availableWidth = Math.max(1, viewport.clientWidth - PRINT_PREVIEW_SIDE_GUTTER_PX);
+      const widthScale = Math.min(1, Math.max(
+        PRINT_PREVIEW_MIN_SCALE,
+        Math.floor((availableWidth / cfg.width) * 100) / 100,
+      ));
+      const availableHeight = Math.max(1, viewport.clientHeight - PRINT_PREVIEW_SIDE_GUTTER_PX);
+      const pageScale = Math.min(widthScale, Math.max(
+        PRINT_PREVIEW_MIN_SCALE,
+        Math.floor((availableHeight / (cfg.height + PRINT_PREVIEW_PAGE_GUTTER_PX)) * 100) / 100,
+      ));
+      setFitPreviewScales((current) => (
+        Math.abs(current.width - widthScale) < 0.001 && Math.abs(current.page - pageScale) < 0.001
+          ? current
+          : { width: widthScale, page: pageScale }
+      ));
+    };
+    updateFitScale();
+    const observer = new ResizeObserver(updateFitScale);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [cfg.height, cfg.width]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return;
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        adjustPreviewScale(0.05);
+      } else if (event.key === "-") {
+        event.preventDefault();
+        adjustPreviewScale(-0.05);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        fitPreviewWidth();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [adjustPreviewScale, fitPreviewWidth]);
+
+  const handlePreviewWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.metaKey && !event.ctrlKey) return;
+    event.preventDefault();
+    adjustPreviewScale(event.deltaY < 0 ? 0.05 : -0.05);
+  };
+
+  const measurePrintToolbar = useCallback(() => {
+    const toolbar = printToolbarRef.current;
+    if (!toolbar) return;
+    const required = toolbar.scrollWidth;
+    const available = toolbar.clientWidth;
+    if (required > available + 1 && printToolbarStage < 3) {
+      printToolbarRequiredWidthRef.current[printToolbarStage] = required;
+      setPrintToolbarStage((printToolbarStage + 1) as PrintToolbarStage);
+      return;
+    }
+    if (printToolbarStage > 0) {
+      const previous = (printToolbarStage - 1) as PrintToolbarStage;
+      const previousRequiredWidth = printToolbarRequiredWidthRef.current[previous];
+      if (previousRequiredWidth && available >= previousRequiredWidth + PRINT_TOOLBAR_UNFOLD_BUFFER_PX) {
+        setPrintToolbarStage(previous);
+      }
+    }
+  }, [printToolbarStage]);
+
+  useLayoutEffect(() => {
+    measurePrintToolbar();
+  }, [measurePrintToolbar, headerMode, canEditTextLayout, printPreviewReady, previewScale]);
+
+  useEffect(() => {
+    const toolbar = printToolbarRef.current;
+    if (!toolbar) return;
+    let frame: number | null = null;
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measurePrintToolbar();
+      });
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(toolbar);
+    for (const child of toolbar.children) {
+      if (child instanceof HTMLElement) observer.observe(child);
+    }
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [measurePrintToolbar]);
 
   useEffect(() => {
     if (!forceLoadingNotice || !printPreviewReady) return;
@@ -3906,49 +4359,89 @@ function PrintPreview({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-zinc-300 print:static print:block print:bg-white">
       {/* Preview toolbar */}
-      <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 print:hidden">
-        <span className="text-sm font-semibold text-zinc-700">打印预览</span>
-        <div className="flex items-center gap-3">
-          <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
-          <button
-            onClick={handleTextLayoutModeToggle}
-            disabled={!canEditTextLayout || !printPreviewReady}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
-              canEditTextLayout && printPreviewReady
-                ? "text-zinc-600 hover:bg-zinc-100"
-                : "cursor-not-allowed text-zinc-300"
-            }`}
-            title={
-              !canEditTextLayout
-                ? "无权修改剧本排版模式"
-                : printPreviewReady
-                  ? "保存为所有人共用的剧本排版模式"
-                  : "打印预览加载中"
-            }
-          >
-            <span>紧凑排版</span>
-            <ModeSwitch
-              active={compactLayout}
-              activeClassName="bg-[#637ca1]"
+      <div ref={printToolbarRef} className="flex shrink-0 flex-nowrap items-center overflow-visible border-b border-zinc-200 bg-white px-2 py-3 sm:px-6 print:hidden">
+        <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-zinc-700">打印预览</span>
+        <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1 sm:gap-3">
+          {printToolbarStage < 2 ? (
+            <>
+              <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
+              <PrintCompactLayoutControl
+                compactLayout={compactLayout}
+                canEdit={canEditTextLayout}
+                ready={printPreviewReady}
+                label={printToolbarStage === 0 ? "紧凑排版" : "紧凑"}
+                onToggle={handleTextLayoutModeToggle}
+              />
+              <PrintScaleMenu
+                scale={previewScale}
+                fitWidth={previewScaleFitWidth}
+                fitPage={previewScaleFitPage}
+                shortLabel={printToolbarStage === 1}
+                onScaleChange={setPreviewScale}
+                onZoomIn={() => adjustPreviewScale(0.05)}
+                onZoomOut={() => adjustPreviewScale(-0.05)}
+                onFitWidth={fitPreviewWidth}
+                onFitPage={fitPreviewPage}
+              />
+            </>
+          ) : printToolbarStage === 2 ? (
+            <PrintPageSettingsMenu
+              compactLayout={compactLayout}
+              canEditTextLayout={canEditTextLayout}
+              printPreviewReady={printPreviewReady}
+              headerMode={headerMode}
+              previewScale={previewScale}
+              previewScaleFitWidth={previewScaleFitWidth}
+              previewScaleFitPage={previewScaleFitPage}
+              onTextLayoutModeToggle={handleTextLayoutModeToggle}
+              onHeaderModeChange={setHeaderMode}
+              onPreviewScaleChange={setPreviewScale}
+              onPreviewZoomIn={() => adjustPreviewScale(0.05)}
+              onPreviewZoomOut={() => adjustPreviewScale(-0.05)}
+              onPreviewFitWidth={fitPreviewWidth}
+              onPreviewFitPage={fitPreviewPage}
             />
-          </button>
+          ) : null}
           <button
             onClick={() => window.print()}
-            className="rounded-md bg-zinc-800 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+            className="shrink-0 whitespace-nowrap rounded-md bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 sm:px-4"
           >
-            打印 / 导出 PDF
+            {printToolbarStage === 0 ? "打印 / 导出 PDF" : "导出"}
           </button>
           <button
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100"
+            className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 sm:px-3"
           >
             关闭
           </button>
+          {printToolbarStage === 3 && (
+            <PrintPageSettingsMenu
+              ellipsis
+              compactLayout={compactLayout}
+              canEditTextLayout={canEditTextLayout}
+              printPreviewReady={printPreviewReady}
+              headerMode={headerMode}
+              previewScale={previewScale}
+              previewScaleFitWidth={previewScaleFitWidth}
+              previewScaleFitPage={previewScaleFitPage}
+              onTextLayoutModeToggle={handleTextLayoutModeToggle}
+              onHeaderModeChange={setHeaderMode}
+              onPreviewScaleChange={setPreviewScale}
+              onPreviewZoomIn={() => adjustPreviewScale(0.05)}
+              onPreviewZoomOut={() => adjustPreviewScale(-0.05)}
+              onPreviewFitWidth={fitPreviewWidth}
+              onPreviewFitPage={fitPreviewPage}
+            />
+          )}
         </div>
       </div>
 
       {/* Scrollable page stack */}
-      <div className="relative flex-1 overflow-auto print:overflow-visible print:h-auto">
+      <div
+        ref={previewViewportRef}
+        onWheel={handlePreviewWheel}
+        className="relative flex-1 overflow-auto print:overflow-visible print:h-auto"
+      >
         {showLoadingNotice && (
           <div className="pointer-events-none fixed inset-x-0 bottom-0 top-14 z-[60] flex items-center justify-center bg-zinc-300 print:hidden">
             <span className="rounded-md border border-zinc-200 bg-white/95 px-4 py-2 text-sm font-medium text-zinc-500 shadow-lg">
@@ -3956,18 +4449,21 @@ function PrintPreview({
             </span>
           </div>
         )}
-        <div className="mx-auto flex flex-col items-center gap-6 py-8 print:gap-0 print:py-0">
-          <PrintMeasurementLayer
-            blocks={blocks}
-            characters={characters}
-            scenes={scenes}
-            contentW={contentW}
-            compactLayout={compactLayout}
-            stageDelimOpen={stageDelimOpen}
-            stageDelimClose={stageDelimClose}
-            measureRef={measureRef}
-            onLayoutChange={requestLayoutRemeasure}
-          />
+        <PrintMeasurementLayer
+          blocks={blocks}
+          characters={characters}
+          scenes={scenes}
+          contentW={contentW}
+          compactLayout={compactLayout}
+          stageDelimOpen={stageDelimOpen}
+          stageDelimClose={stageDelimClose}
+          measureRef={measureRef}
+          onLayoutChange={requestLayoutRemeasure}
+        />
+        <div
+          className="print-preview-pages mx-auto flex flex-col items-center gap-6 py-8 print:gap-0 print:py-0"
+          style={{ "--print-preview-scale": previewScale } as React.CSSProperties}
+        >
 
           {/* TOC page */}
           {tocScenes.length > 0 && (
