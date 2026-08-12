@@ -89,6 +89,7 @@ describe("invariance verification", () => {
   it.skipIf(!snapshot)("event manage row expands to the full verb row-set", async () => {
     expect(await rowsFor(snapshot!.manageUserId, "event", snapshot!.eventId)).toEqual(
       ["meta@view", "details@view", "*@edit",
+       "tasks@create", "tasks@delete", "reports@create", "reports@delete",
        "publication@create", "publication@edit", "publication@delete", "grants@edit"].sort(),
     );
   });

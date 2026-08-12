@@ -41,14 +41,16 @@ UPDATE resource_person_manage SET resource_type = 'task' WHERE resource_type = '
 DELETE FROM resource_permission_level WHERE resource_type = 'tech_req';
 
 -- ── 2. event 旧级别拆解（view/edit 行是合法树行，保留；补行集）────────────────
--- edit 行补 meta/details view（保真：edit 级隐含可读）
+-- edit 行补行集（view + attach 子集合——tasks/reports 挂接语义，与 cue_list/cues 对称）
 INSERT INTO resource_grant
   (production_id, user_id, resource_type, resource_id, resource_sub,
    permission_level, grant_source, confirmed_by, approval_id, expires_at)
-SELECT rg.production_id, rg.user_id, 'event', rg.resource_id, s.sub, 'view',
+SELECT rg.production_id, rg.user_id, 'event', rg.resource_id, s.sub, s.verb,
        rg.grant_source, rg.confirmed_by, rg.approval_id, rg.expires_at
 FROM resource_grant rg
-CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
+CROSS JOIN (VALUES ('meta', 'view'), ('details', 'view'),
+                   ('tasks', 'create'), ('tasks', 'delete'),
+                   ('reports', 'create'), ('reports', 'delete')) AS s(sub, verb)
 WHERE rg.resource_type = 'event' AND rg.permission_level = 'edit' AND NOT rg.is_revoked
 ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false
@@ -66,6 +68,8 @@ JOIN (VALUES
   ('edit_published', 'publication', 'edit'),
   ('revoke',         'publication', 'delete'),
   ('manage', 'meta', 'view'), ('manage', 'details', 'view'), ('manage', '*', 'edit'),
+  ('manage', 'tasks', 'create'), ('manage', 'tasks', 'delete'),
+  ('manage', 'reports', 'create'), ('manage', 'reports', 'delete'),
   ('manage', 'publication', 'create'), ('manage', 'publication', 'edit'),
   ('manage', 'publication', 'delete'), ('manage', 'grants', 'edit')
 ) AS s(level, sub, verb) ON s.level = rg.permission_level
