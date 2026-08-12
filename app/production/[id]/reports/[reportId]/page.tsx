@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hasAnyEffectiveGrant } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -85,7 +86,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", ["meta", "details"], "view"))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
   if (!report) notFound();
@@ -94,7 +95,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  const canViewReportUnpublished = isReportViewer(prodPermCtx)
+  const canViewReportUnpublished = await isReportViewer(prodPermCtx, productionId)
     || await hasResourceGrantLevel(session.userId, productionId, "report", reportId, "view");
 
   if (!canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))

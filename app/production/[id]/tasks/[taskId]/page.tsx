@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
@@ -44,7 +45,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   if (!event) notFound();
 
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
+  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view");
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);

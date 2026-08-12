@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "任务" };
 
 import { redirect, notFound } from "next/navigation";
@@ -23,7 +24,7 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
   if (!access) redirect(`/unauthorized?id=${productionId}`);
   if (!productionName) notFound();
 
-  const canViewAll = hasPermission("task:view_any", access.permCtx);
+  const canViewAll = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "task", "*", "*", "view");
 
   const tasks = canViewAll
     ? await listProductionTechReqs(productionId)

@@ -18,8 +18,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:cue_list/*/meta@view",
     "node:cue_list/*/cues@view",
     "node:cue_list/*/cues/comments@create",
+    // 批B：event 域读取+订阅（原 event:follow 两职拆分）
+    "node:event/*/meta@view",
+    "node:event/*/details@view",
+    "node:event/*/followers@create",
     "contacts:view",
-    "event:follow",
     "asset:view",
     "asset:download",
     "asset:share",
@@ -96,12 +99,13 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:cue_list/*@create",
   ]),
 
-  events: new Set<Permission>([
-    "event:create",
-    "event:view_call_sheet_any",
-    "task:view",
-    "task:view_any",
-    "task:delete_any",
+  events: new Set<string>([
+    // 批B：事件管理激活面（原 event:create/view_call_sheet_any/task:* 原子键）
+    "node:event/*@create",
+    "node:event/*/chat@create",
+    "node:event/*/call_sheet@view",
+    "node:task/*@view",
+    "node:task/*@delete",
   ]),
 
   reports: new Set<Permission>([

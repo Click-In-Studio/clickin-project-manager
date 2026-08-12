@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
@@ -16,7 +17,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", ["meta", "details"], "view")))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -28,7 +29,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!status || !VALID_STATUSES.has(status))
     return Response.json({ error: "无效 status" }, { status: 400 });
 
-  const hasFullEdit = hasPermission("event:view_call_sheet_any", permCtx);
+  const hasFullEdit = await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view");
   // Only full-editors can set back to awaiting
   if (status === "awaiting" && !hasFullEdit)
     return Response.json({ error: "权限不足" }, { status: 403 });

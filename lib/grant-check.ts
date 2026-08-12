@@ -20,8 +20,10 @@ import { getPool } from "./pg";
 
 export type GrantVerb = "view" | "create" | "edit" | "delete";
 
-/** 保留段：'*' 通配 sub 不覆盖，任何授权必须显式指到这些段（或其子路径）。 */
-export const RESERVED_SUBS: readonly string[] = ["grants", "publication"];
+/** 保留段：'*' 通配 sub 不覆盖，任何授权必须显式指到这些段（或其子路径）。
+ *  grants=授权面；publication=发布面；assignees=指派面（批B：assign 是独立能力，
+ *  持有 task 整树 edit 不自动获得指派权）。 */
+export const RESERVED_SUBS: readonly string[] = ["grants", "publication", "assignees"];
 
 export function isReservedSub(sub: string): boolean {
   return RESERVED_SUBS.some((r) => sub === r || sub.startsWith(`${r}/`));

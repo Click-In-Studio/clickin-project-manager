@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "技术需求" };
 
 import { redirect, notFound } from "next/navigation";
@@ -32,7 +33,7 @@ export default async function ReqsPage({
   if (!event) notFound();
 
   // Admin role-level OR event resource_grant edit+ → full view
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx)
+  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view")
     || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);

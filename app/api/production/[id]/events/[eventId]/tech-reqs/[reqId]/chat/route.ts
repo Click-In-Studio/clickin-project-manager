@@ -11,10 +11,10 @@
  */
 
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import {
   getProductionEvent, getEventTechReq, setTechReqChatId,
   getReqChatTargets, getProductionDeptChatIds,
@@ -39,8 +39,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!techReq) return Response.json({ error: "需求不存在" }, { status: 404 });
   if (techReq.chatId) return Response.json({ error: "需求群已存在" }, { status: 409 });
 
-  const canManage = hasPermission("task:delete_any", permCtx)
-    || await hasResourceGrantLevel(session.userId, productionId, "tech_req", reqId, "manage");
+  const canManage = await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "task", "*", "*", "delete")
+    || await hasGrant(session.userId, productionId, "task", reqId, "grants", "edit");
   if (!canManage) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { action: "create" | "bind"; chatId?: string };

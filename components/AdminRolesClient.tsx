@@ -61,29 +61,6 @@ const PERM_GROUPS: PermGroup[] = [
     ],
   },
   {
-    label: "Cue 表（个人）",
-    perms: [
-    ],
-  },
-  {
-    label: "Cue 表（管理 _any）",
-    perms: [
-    ],
-  },
-  {
-    label: "事件 & 日程",
-    perms: [
-      "event:create",
-      "event:view_call_sheet_any", "event:follow",
-    ],
-  },
-  {
-    label: "任务",
-    perms: [
-      "task:view", "task:view_any", "task:delete_any",
-    ],
-  },
-  {
     label: "报告",
     perms: [
       "report:create",
@@ -125,8 +102,6 @@ const PERM_GROUPS: PermGroup[] = [
       "contacts:view",
       "script:view", "script:comment",
       "scene:view", "character:view",
-      "event:view_call_sheet_any",
-      "event:follow",
       "report:reply",
       "asset:view", "asset:download", "asset:download_any",
       "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",

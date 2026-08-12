@@ -10,6 +10,7 @@
 
 import { getPool } from "./pg";
 import { hasPermission, type PermissionContext } from "./permissions";
+import { hasGrant } from "./grant-check";
 import { hasResourceGrantLevel } from "./resource-grant-db";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
@@ -116,8 +117,8 @@ export async function canEditTechReq(
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
   const [hasReqGrant, hasEventGrant] = await Promise.all([
-    hasResourceGrantLevel(permCtx.userId, productionId, "tech_req", techReqId, "edit"),
-    hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit"),
+    hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "edit"),
+    hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit"),
   ]);
   return hasReqGrant || hasEventGrant;
 }
@@ -142,12 +143,11 @@ export async function canViewTechReq(
   ctx: Pick<EventPermContext, "participantDeptIds">,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (hasPermission("task:view_any", permCtx)) return true;
+  if (await hasGrant(permCtx.userId, productionId, "task", "*", "*", "view")) return true;
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req
-  const level = await hasResourceGrantLevel(permCtx.userId, productionId, "tech_req", techReqId, "view");
-  return level;
+  return hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "view");
 }
 
 /**
@@ -163,7 +163,7 @@ export async function canWriteNote(
 ): Promise<boolean> {
   if (permCtx.memberPermissions === null) return false;
   if (permCtx.isAdmin) return true;
-  if (await hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit")) return true;
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
   return participantDeptIds.includes(departmentId);
 }
 
@@ -180,7 +180,7 @@ export async function canEditNote(
   participantDeptIds: string[],
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (await hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit")) return true;
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
   return permCtx.userId === noteAuthorUserId && participantDeptIds.includes(noteDepartmentId);
 }
 
@@ -194,7 +194,7 @@ export async function canModerateNotes(
   eventId: string,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "event", eventId, "edit");
+  return hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit");
 }
 
 /**
@@ -202,9 +202,10 @@ export async function canModerateNotes(
  * Phase 5a: event:edit/edit_schedule are now resource_grant levels; use event:create as a
  * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to resource_grant.
  */
-export function isReportViewer(permCtx: PermissionContext): boolean {
+export async function isReportViewer(permCtx: PermissionContext, productionId: string): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  return hasPermission("event:create", permCtx);
+  // 批B：event:create 键退役，organizer 代理 = event 集合 create 行
+  return hasGrant(permCtx.userId, productionId, "event", "*", "*", "create");
 }
 
 /**

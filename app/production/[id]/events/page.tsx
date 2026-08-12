@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { canAccessNode } from "@/lib/grant-template";
+import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "事件" };
 
 import { redirect, notFound } from "next/navigation";
@@ -18,10 +20,10 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!hasPermission("event:follow", access.permCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${id}`);
+  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, id, "event", ["meta", "details"], "view"))) redirect(`/unauthorized?resource=event%3Afollow&id=${id}`);
 
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
-  const canCreate = hasPermission("event:create", access.permCtx);
+  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, id, "event", "*", "call_sheet", "view");
+  const canCreate = (await canAccessNode(access.permCtx, id, "event", "*", "*", "create")).allowed;
 
   const [name, allEvents, myParticipations, departments] = await Promise.all([
     getProductionName(id),

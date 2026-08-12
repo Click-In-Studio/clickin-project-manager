@@ -175,23 +175,24 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
     expect(rows.filter((r) => r.sort_order === 0).map((r) => r.permission_level)).toEqual(["create", "delete"]);
   });
 
-  it("contains event workflow levels (publish, edit_published, revoke)", async () => {
+  it("event vocabulary is the four verbs (批B：workflow 级别已 REST 化为 publication 段)", async () => {
     const { rows } = await getPool().query<{ permission_level: string }>(
       `SELECT permission_level FROM resource_permission_level
-       WHERE resource_type = 'event' ORDER BY sort_order`,
+       WHERE resource_type = 'event' ORDER BY permission_level`,
     );
-    const levels = rows.map((r) => r.permission_level);
-    expect(levels).toContain("publish");
-    expect(levels).toContain("edit_published");
-    expect(levels).toContain("revoke");
+    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "edit", "view"]);
   });
 
-  it("contains tech_req 'assign' level", async () => {
-    const { rows } = await getPool().query(
-      `SELECT 1 FROM resource_permission_level
-       WHERE resource_type = 'tech_req' AND permission_level = 'assign'`,
+  it("tech_req renamed to task with four verbs (批B)", async () => {
+    const { rows: tr } = await getPool().query(
+      `SELECT 1 FROM resource_permission_level WHERE resource_type = 'tech_req'`,
     );
-    expect(rows).toHaveLength(1);
+    expect(tr).toHaveLength(0);
+    const { rows } = await getPool().query<{ permission_level: string }>(
+      `SELECT permission_level FROM resource_permission_level
+       WHERE resource_type = 'task' ORDER BY permission_level`,
+    );
+    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "edit", "view"]);
   });
 
   it("contains script_view levels", async () => {
@@ -209,7 +210,7 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
     );
     const types = rows.map((r) => r.resource_type);
     for (const expected of [
-      "asset", "cue_list", "event", "note", "report", "scene", "script_view", "tech_req",
+      "asset", "cue_list", "event", "note", "report", "scene", "script_view", "task",
     ]) {
       expect(types).toContain(expected);
     }

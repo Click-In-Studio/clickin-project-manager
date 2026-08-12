@@ -15,7 +15,7 @@ export type ProductionAccess = {
 };
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
 import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
-import { CUE_LIST_LEVEL_ROW_SETS, type CueListLevel } from "./resource-grant-db";
+import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
@@ -7242,11 +7242,14 @@ export async function approveAccessRequest(
     } else {
       // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
       // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
+      const setsByType: Record<string, Record<string, ReadonlyArray<readonly [string, string]>>> = {
+        cue_list: CUE_LIST_LEVEL_ROW_SETS,
+        event: EVENT_LEVEL_ROW_SETS,
+        task: TASK_LEVEL_ROW_SETS,
+      };
       const rows: ReadonlyArray<readonly [string, string]> =
-        req.resource_type === "cue_list"
-          ? CUE_LIST_LEVEL_ROW_SETS[req.permission_level as CueListLevel]
-            ?? [[req.resource_sub ?? "*", req.permission_level!] as const]
-          : [[req.resource_sub ?? "*", req.permission_level!] as const];
+        setsByType[req.resource_type ?? ""]?.[req.permission_level ?? ""]
+          ?? [[req.resource_sub ?? "*", req.permission_level!] as const];
       for (const [sub, verb] of rows) {
         await getPool().query(
           `INSERT INTO resource_grant
