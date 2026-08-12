@@ -108,11 +108,12 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:task/*@delete",
   ]),
 
-  reports: new Set<Permission>([
-    "report:create",
-    "report:reply",
-    "report:edit_comment_any",
-    "report:delete_comment_any",
+  reports: new Set<string>([
+    // 批C：报告挂接与评论管理走树节点键
+    "node:event/*/reports@create",
+    "node:report/*/replies@create",
+    "node:report/*/replies@edit",
+    "node:report/*/replies@delete",
   ]),
 
   assets: new Set<Permission>([

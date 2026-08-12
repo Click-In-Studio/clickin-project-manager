@@ -15,7 +15,7 @@ export type ProductionAccess = {
 };
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
 import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
-import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS } from "./resource-grant-db";
+import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
@@ -7246,6 +7246,8 @@ export async function approveAccessRequest(
         cue_list: CUE_LIST_LEVEL_ROW_SETS,
         event: EVENT_LEVEL_ROW_SETS,
         task: TASK_LEVEL_ROW_SETS,
+        report: REPORT_LEVEL_ROW_SETS,
+        note: NOTE_LEVEL_ROW_SETS,
       };
       const rows: ReadonlyArray<readonly [string, string]> =
         setsByType[req.resource_type ?? ""]?.[req.permission_level ?? ""]

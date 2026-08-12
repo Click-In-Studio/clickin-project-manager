@@ -16,6 +16,11 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   "node:event/*/call_sheet@view": "查看他人Call Sheet",
   "node:task/*@view": "查看全部任务",
   "node:task/*@delete": "删除任务",
+  // ── 树节点键（report 域，批C）──
+  "node:event/*/reports@create": "创建报告",
+  "node:report/*/replies@create": "回复报告",
+  "node:report/*/replies@edit": "编辑他人报告评论",
+  "node:report/*/replies@delete": "删除他人报告评论",
   // 项目管理
   "production:delete": "删除项目",
   "production:transfer_owner": "转让所有权",
@@ -126,10 +131,6 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   // 事件（per-event 写操作已迁移至 resource_grant，原子权限只保留生产级和管理员绕过）
   // Task（技术需求，per-task 写操作已迁移至 resource_grant）
   // 报告（per-report 写操作已迁移至 resource_grant，保留生产级和管理员绕过）
-  "report:create": "创建报告",
-  "report:edit_comment_any": "编辑他人报告评论",
-  "report:delete_comment_any": "删除他人报告评论",
-  "report:reply": "回复报告",
   // 数字资产
   "asset:view_any": "查看他人数字资产",
   "asset:delete_any": "删除他人数字资产",

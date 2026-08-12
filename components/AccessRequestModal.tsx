@@ -29,8 +29,6 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "asset:share":         "分享附件",
   "asset:rename":        "重命名附件",
   "asset:delete":        "删除附件",
-  "report:create":       "提交报告",
-  "report:reply":        "回复报告",
 };
 
 // ─── Resource selector options (free-form mode only) ─────────────────────────

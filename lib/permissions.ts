@@ -72,8 +72,6 @@ export type Permission =
   // ─── 普通管理 - 评论管理 ──────────────────────────────────────────────────────
   | "script:edit_comment_any"
   | "script:delete_comment_any"
-  | "report:edit_comment_any"
-  | "report:delete_comment_any"
   // ─── 普通管理 - 里程碑 ────────────────────────────────────────────────────────
   | "milestone:create"
   | "milestone:manage"
@@ -127,7 +125,6 @@ export type Permission =
   | "character:edit_role_type"
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
-  | "report:create"
   // ─── 写权限 - 项目挂载点 ──────────────────────────────────────────────────────
   | "production:mount"
   | "production:unmount"
@@ -152,7 +149,6 @@ export type Permission =
   | "asset:share_any"
   | "asset:share_any_downloadable"
   | "script:comment"
-  | "report:reply"
   // ─── 组织特殊权限（由 org_admin_production_grant 授予，见 #136）────────────
   | "org:assign_member"
   | "org:recall_member";
@@ -443,8 +439,8 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "tag_option:reorder",
   "script:edit_comment_any",
   "script:delete_comment_any",
-  "report:edit_comment_any",
-  "report:delete_comment_any",
+  
+  
   "production:manage_config",
 ];
 
@@ -454,7 +450,7 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   "dramaturgy_view:create",
   "dramaturgy_view:delete",
   "dramaturgy_view:overwrite",
-  "report:create",
+  
   "production:mount",
   "production:unmount",
   "asset:create",
@@ -638,7 +634,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "tag_option:create", "tag_option:delete", "tag_option:rename",
   "tag_option:edit_color", "tag_option:reorder",
   "script:edit_comment_any", "script:delete_comment_any",
-  "report:edit_comment_any", "report:delete_comment_any",
+  
   "production:manage_config",
   "milestone:create", "milestone:manage", "milestone:delete",
   "announcement:create", "announcement:edit", "announcement:delete",
@@ -654,7 +650,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "character:set_members", "character:edit_gender", "character:edit_biography",
   "character:edit_role_type",
   
-  "report:create",
+  
   "production:mount", "production:unmount",
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
@@ -662,7 +658,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   
   "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
-  "script:comment", "report:reply",
+  "script:comment", 
   "org:assign_member", "org:recall_member",
 ];
 

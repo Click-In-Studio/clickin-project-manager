@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasEventContentEdit, hasEventDomainView } from "@/lib/event-permissions";
-import { toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, listEventReports, createEventReport } from "@/lib/event-db";
@@ -40,7 +40,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
   // Creating a report requires edit-level on the event
-  if (!await hasEventContentEdit(toActor(session, permCtx), productionId, eventId, event.status))
+  // attach 语义：给 event 挂报告 = event 子集合操作（批B 已发放 reports@create 行）
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "reports", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {

@@ -50,7 +50,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "departmentId 和 content 不能为空" }, { status: 400 });
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!await canWriteNote(permCtx, productionId, eventId, body.departmentId, eventPermCtx.participantDeptIds))
+  const channel = await canWriteNote(permCtx, productionId, eventId, body.departmentId, eventPermCtx.participantDeptIds);
+  if (!channel)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const note = await createReportNote({
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     authorUserId: session.userId,
     authorName: session.name,
     mentions: body.mentions ?? [],
+    createdVia: channel,
   });
   return Response.json({ note }, { status: 201 });
 }

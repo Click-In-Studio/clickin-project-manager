@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -16,7 +16,7 @@ import {
   getSelfParticipantRole,
 } from "@/lib/event-db";
 import { hasEventDomainView, isReportViewer, loadEventPermContext } from "@/lib/event-permissions";
-import { getEventAccess, hasResourceGrantLevel } from "@/lib/resource-grant-db";
+import { getEventAccess } from "@/lib/resource-grant-db";
 import EventDetailClient from "@/components/EventDetailClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -94,7 +94,7 @@ export default async function EventDetailPage({
   const canTechReqDelete = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "task", "*", "*", "delete");
   // canWriteReport: check if user has edit+ on any report in this event OR has event edit grant
   const canWriteReport = hasEditGrant ||
-    (reports.length > 0 && await hasResourceGrantLevel(session.userId, productionId, "report", reports[0].id, "edit"));
+    (reports.length > 0 && await hasGrant(session.userId, productionId, "report", reports[0].id, "*", "edit"));
   const canEditAnyTechReq = hasEditGrant;
   const pocDeptIds = eventPermCtx.pocDeptIds;
 

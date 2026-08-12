@@ -981,6 +981,12 @@
       "column": "wiki_id",
       "type": "uuid",
       "nullable": false
+    },
+    {
+      "column": "created_via",
+      "type": "text",
+      "nullable": false,
+      "default": "'dept'::text"
     }
   ],
   "event_report_read": [

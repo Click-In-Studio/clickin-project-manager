@@ -11,7 +11,6 @@
 import { getPool } from "./pg";
 import { hasPermission, type PermissionContext } from "./permissions";
 import { hasGrant } from "./grant-check";
-import { hasResourceGrantLevel } from "./resource-grant-db";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
 
@@ -107,7 +106,7 @@ export async function canWriteReport(
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "edit");
+  return hasGrant(permCtx.userId, productionId, "report", reportId, "*", "edit");
 }
 
 /**
@@ -120,7 +119,7 @@ export async function canPublishReport(
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
-  return hasResourceGrantLevel(permCtx.userId, productionId, "report", reportId, "publish");
+  return hasGrant(permCtx.userId, productionId, "report", reportId, "publication", "create");
 }
 
 /**
@@ -187,9 +186,16 @@ export async function canViewTechReq(
   return false;
 }
 
+/** note 创建通道（落库到 event_report_note.created_via）：
+ *  dept=本部门（参与者上下文/POC 实例行）/ wildcard=通配权（导演类）/
+ *  moderator=event 编辑者（organizer 蹭 details@edit 的蕴含，用户确认保留）。 */
+export type NoteWriteChannel = "dept" | "wildcard" | "moderator";
+
 /**
  * Can create a note for a specific department in a report.
- * SM（event edit+ grant）或该部门的参与者均可创建。
+ * 返回命中的通道，null=不可创建。批C C3：dept/<D>/notes@create 行
+ * （POC 上任自动发；导演 dept/* 通配模板）为一等授权面；
+ * 部门参与者上下文保留（成员通道，剧组设置暂不收）。
  */
 export async function canWriteNote(
   permCtx: PermissionContext,
@@ -197,11 +203,24 @@ export async function canWriteNote(
   eventId: string,
   departmentId: string,
   participantDeptIds: string[],
-): Promise<boolean> {
-  if (permCtx.memberPermissions === null) return false;
-  if (permCtx.isAdmin) return true;
-  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
-  return participantDeptIds.includes(departmentId);
+): Promise<NoteWriteChannel | null> {
+  if (permCtx.memberPermissions === null) return null;
+  if (permCtx.isAdmin) return "moderator";
+  if (participantDeptIds.includes(departmentId)) return "dept";
+  if (await hasGrant(permCtx.userId, productionId, "dept", departmentId, "notes", "create")) {
+    // 归因：POC = 本部门通道；其余（通配/被授实例行的非 POC）= wildcard。
+    // 边界情形标 wildcard 只是更保守（POC 删不了那条 note），不放大权限。
+    const pocRes = await getPool().query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM event_department_member
+         WHERE department_id = $1 AND user_id = $2 AND is_poc = true
+       ) AS exists`,
+      [departmentId, permCtx.userId],
+    );
+    return pocRes.rows[0].exists ? "dept" : "wildcard";
+  }
+  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return "moderator";
+  return null;
 }
 
 /**
@@ -212,13 +231,17 @@ export async function canEditNote(
   permCtx: PermissionContext,
   productionId: string,
   eventId: string,
-  noteAuthorUserId: string,
-  noteDepartmentId: string,
+  note: { authorUserId: string; departmentId: string; createdVia: string },
   participantDeptIds: string[],
+  verb: "edit" | "delete",
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
-  return permCtx.userId === noteAuthorUserId && participantDeptIds.includes(noteDepartmentId);
+  if (permCtx.userId === note.authorUserId && participantDeptIds.includes(note.departmentId)) return true;
+  // 批C C3：POC（dept/<D>/notes@edit|delete 行）可管**本部门通道**提出的 note；
+  // 导演（wildcard）/moderator 通道提出的不在此列（created_via 过滤，树无作者维度）
+  return note.createdVia === "dept"
+    && await hasGrant(permCtx.userId, productionId, "dept", note.departmentId, "notes", verb);
 }
 
 /**
