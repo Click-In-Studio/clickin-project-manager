@@ -497,9 +497,11 @@ export async function getCueListGrantLevel(
 
 /**
  * Checks whether user is in the free-approval zone for a given level on a cue list.
- * Free-approval zone = user is member of a dept that has resource_dept_manage for this cue list
- * AND (dept.permissions[] ⊇ 'cue_list:edit' OR user is POC of that dept).
- * For manage level, only POC qualifies.
+ *
+ * 批A（六步链 §0.8）：
+ *   edit 档 = production_dept_permission 节点行（zone 键与 grant 键同词汇；
+ *             POC 兜底保留——管理部门的 POC 天然有 edit 资格）
+ *   manage 档 = 管理 dept 的 POC（代码规则；模板行不区分 POC，已知例外记总表）
  */
 export async function checkCueListFreeApprovalZone(
   userId: string,
@@ -523,19 +525,31 @@ export async function checkCueListFreeApprovalZone(
     return rows.length > 0;
   }
 
-  // edit level: POC or dept has 'cue_list:edit' in permissions[]
+  // edit 档：dept 节点行（含通配）∪ 管理 dept 的 POC
+  const editKeys = [
+    `node:cue_list/${cueListId}@edit`,
+    `node:cue_list/*@edit`,
+  ];
   const { rows } = await getPool().query(
     `SELECT 1
-     FROM resource_dept_manage rdm
-     JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE rdm.production_id = $1
-       AND rdm.resource_type = 'cue_list'
-       AND rdm.resource_id = $2
-       AND pdm.user_id = $3
-       AND (pdm.is_poc = true OR 'cue_list:edit' = ANY(pd.permissions))
+     FROM production_dept_member pdm
+     WHERE pdm.production_id = $1
+       AND pdm.user_id = $2
+       AND (
+         EXISTS (
+           SELECT 1 FROM production_dept_permission pdp
+           WHERE pdp.dept_id = pdm.dept_id AND pdp.permission_key = ANY($4)
+         )
+         OR (pdm.is_poc AND EXISTS (
+           SELECT 1 FROM resource_dept_manage rdm
+           WHERE rdm.production_id = $1
+             AND rdm.resource_type = 'cue_list'
+             AND rdm.resource_id = $3
+             AND rdm.dept_id = pdm.dept_id
+         ))
+       )
      LIMIT 1`,
-    [productionId, cueListId, userId],
+    [productionId, userId, cueListId, editKeys],
   );
   return rows.length > 0;
 }

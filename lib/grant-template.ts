@@ -1,141 +1,29 @@
 /**
- * Grant Template — 行集模板解析（总表 §0.7 三层管线的"模板/资格"层）。
+ * 权限判定链 — permission（免审批区间）与 grant（访问权）二分（总表 §0.8）。
  *
- * 模板行只是资格：生效需 self-confirm 写 resource_grant 个人行（激活层），
- * 存续由 recomputeAndRevokeGrants 按"资格仍在"判定（存续层）。
+ * permission = 资格，三张演出内表（六步链的 2-5 步资格源）：
+ *   production_dept_permission   dept 区间（第 3 步；含 dept 树祖先，伞语义）
+ *   production_role_permission   role 区间（第 4 步）
+ *   production_member_permission 个人 override（granted=false 第 2 步拒绝区间 /
+ *                                granted=true 第 5 步个人区间）
+ * grant = 访问权，单表 resource_grant（第 1 步；终局更名 production_member_grant）。
  *
- * 解析规则：
- *   - holder = 我的角色（production_member_role）∪ 我的部门及其全部祖先（伞语义）
- *   - 覆盖：某 holder 在演出级（production_id 非空）有任何行 → 只用演出级行；
- *     否则回落全局行（role 按名字匹配；member base 全局 holder_name='*'，
- *     演出级对应 holder_id='*'）
- *   - 节点匹配与 lib/grant-check.ts 同构：(id|'*')×(sub|'*')，保留段不被通配覆盖
+ * 六步判定链（canAccessNode）：
+ *   1. 有 grant 行 → 操作（admin/owner 旁路视作恒有）
+ *   2. 个人拒绝区间 → 直接申请流（deny 不否决已有行——撤销走 sweep，判定只信行）
+ *   3. dept 区间 → 可自我确认（写入 grant）
+ *   4. role 区间 → 可自我确认
+ *   5. 个人允许区间 → 可自我确认
+ *   6. 申请流
+ *
+ * 词汇统一：permission 表的 permission_key 与激活面同格式——迁移期原子键与
+ * 树节点串 `node:<type>/<id>[/<sub>]@<verb>` 同列共存；zone 键与 grant 键时刻一致。
+ *
+ * grant_template（全局模板）运行时零读取：仅在演出/角色创建时按 production_type
+ * seed 进 production_role_permission，之后演出自治。
  */
 import { getPool } from "./pg";
 import { hasGrant, isReservedSub, type GrantVerb } from "./grant-check";
-
-export type TemplateRow = {
-  resourceType: string;
-  resourceId: string;
-  resourceSub: string;
-  verb: GrantVerb;
-};
-
-type RawRow = {
-  production_id: string | null;
-  holder_type: string;
-  holder_id: string | null;
-  holder_name: string | null;
-  resource_type: string;
-  resource_id: string;
-  resource_sub: string;
-  verb: GrantVerb;
-};
-
-/** 用户在该演出的全部生效模板行（覆盖语义已应用）。 */
-export async function getUserTemplateRows(
-  userId: string,
-  productionId: string,
-): Promise<TemplateRow[]> {
-  const pool = getPool();
-
-  const [rolesRes, deptsRes] = await Promise.all([
-    pool.query<{ role_id: string; role_name: string }>(
-      `SELECT pmr.role_id, pr.name AS role_name
-       FROM production_member_role pmr
-       JOIN production_role pr ON pr.id = pmr.role_id
-       WHERE pmr.production_id = $1 AND pmr.user_id = $2`,
-      [productionId, userId],
-    ),
-    // 我的部门 + 全部祖先（伞语义：父组模板行覆盖子部门成员）
-    pool.query<{ dept_id: string }>(
-      `WITH RECURSIVE chain AS (
-         SELECT pd.id, pd.parent_id
-         FROM production_dept_member pdm
-         JOIN production_dept pd ON pd.id = pdm.dept_id
-         WHERE pdm.production_id = $1 AND pdm.user_id = $2
-         UNION
-         SELECT pd2.id, pd2.parent_id
-         FROM production_dept pd2
-         JOIN chain c ON pd2.id = c.parent_id
-       )
-       SELECT id AS dept_id FROM chain`,
-      [productionId, userId],
-    ),
-  ]);
-
-  const roleIds = rolesRes.rows.map((r) => r.role_id);
-  const roleNames = rolesRes.rows.map((r) => r.role_name);
-  const deptIds = deptsRes.rows.map((r) => r.dept_id);
-
-  const { rows } = await pool.query<RawRow>(
-    `SELECT production_id, holder_type, holder_id, holder_name,
-            resource_type, resource_id, resource_sub, verb
-     FROM grant_template
-     WHERE
-       -- 演出级 role 行（含 member base holder_id='*'）
-       (production_id = $1 AND holder_type = 'role' AND holder_id = ANY($2 || ARRAY['*']))
-       -- 全局 role 行（通用模板；per-type 模板未启用）
-       OR (production_id IS NULL AND production_type IS NULL AND holder_type = 'role'
-           AND holder_name = ANY($3 || ARRAY['*']))
-       -- 演出级 dept 行（本部门及祖先）
-       OR (production_id = $1 AND holder_type = 'dept' AND holder_id = ANY($4))`,
-    [productionId, roleIds, roleNames, deptIds],
-  );
-
-  // 覆盖语义：holder 有演出级行 → 丢弃其全局行。
-  // 全局行的 holder 标识是名字；对应的演出级标识是 role_id（member base 为 '*'）。
-  const roleIdByName = new Map(rolesRes.rows.map((r) => [r.role_name, r.role_id]));
-  const prodHolders = new Set(
-    rows.filter((r) => r.production_id !== null).map((r) => `${r.holder_type}:${r.holder_id}`),
-  );
-
-  const effective: TemplateRow[] = [];
-  for (const r of rows) {
-    if (r.production_id === null) {
-      const prodEquivalent = r.holder_name === "*" ? "*" : roleIdByName.get(r.holder_name!) ?? null;
-      if (prodEquivalent !== null && prodHolders.has(`role:${prodEquivalent}`)) continue; // 被演出级覆盖
-    }
-    effective.push({
-      resourceType: r.resource_type,
-      resourceId: r.resource_id,
-      resourceSub: r.resource_sub,
-      verb: r.verb,
-    });
-  }
-  return effective;
-}
-
-/** 节点匹配（与 hasGrant 同构：精确 + '*'，保留段必须显式）。 */
-export function templateMatchesNode(
-  row: TemplateRow,
-  resourceType: string,
-  resourceId: string,
-  resourceSub: string,
-  verb: GrantVerb,
-): boolean {
-  if (row.resourceType !== resourceType || row.verb !== verb) return false;
-  if (row.resourceId !== resourceId && row.resourceId !== "*") return false;
-  if (row.resourceSub === resourceSub) return true;
-  return row.resourceSub === "*" && !isReservedSub(resourceSub);
-}
-
-/** 用户对指定节点是否有模板资格（未激活也算——资格≠生效）。 */
-export async function hasTemplateEligibility(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-  resourceSub: string,
-  verb: GrantVerb,
-): Promise<boolean> {
-  const rows = await getUserTemplateRows(userId, productionId);
-  return rows.some((r) => templateMatchesNode(r, resourceType, resourceId, resourceSub, verb));
-}
-
-// ─── 节点字符串键 ──────────────────────────────────────────────────────────────
-// 激活面（my-permissions / PageActivationGate）用字符串键承载树节点，与原子键
-// 同走一条 pending/confirm 管道：`node:<type>/<id>/<sub...>@<verb>`。
 
 export type NodeKeyParts = {
   resourceType: string;
@@ -157,13 +45,86 @@ export function formatNodeKey(n: NodeKeyParts): string {
   return `node:${n.resourceType}/${n.resourceId}${sub}@${n.verb}`;
 }
 
-// ─── 路由面组合判定 ────────────────────────────────────────────────────────────
-// 与 canAccess() 同构的三态：生效（admin/owner 旁路或个人行）→ 可自我确认
-// （模板资格未激活）→ 走申请流。最小权限模型：模板从不直接授权。
+/**
+ * 能命中指定节点的全部键形态（含通配组合）。zone 查询用
+ * `permission_key = ANY(candidates)` 完成通配匹配，无需在 SQL 里解析。
+ * 保留段（grants/publication）不被 sub 通配覆盖。
+ */
+export function nodeKeyCandidates(n: NodeKeyParts): string[] {
+  const ids = n.resourceId === "*" ? ["*"] : [n.resourceId, "*"];
+  const subs = n.resourceSub === "*" || isReservedSub(n.resourceSub)
+    ? [n.resourceSub]
+    : [n.resourceSub, "*"];
+  const out: string[] = [];
+  for (const id of ids) {
+    for (const sub of subs) {
+      out.push(formatNodeKey({ resourceType: n.resourceType, resourceId: id, resourceSub: sub, verb: n.verb }));
+    }
+  }
+  return out;
+}
+
+// ─── 三层资格源查询 ────────────────────────────────────────────────────────────
+
+/** dept 区间：本部门及全部祖先（伞语义）持有的匹配键。 */
+async function deptZoneHit(
+  userId: string, productionId: string, candidates: string[],
+): Promise<boolean> {
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       WITH RECURSIVE chain AS (
+         SELECT pd.id, pd.parent_id
+         FROM production_dept_member pdm
+         JOIN production_dept pd ON pd.id = pdm.dept_id
+         WHERE pdm.production_id = $1 AND pdm.user_id = $2
+         UNION
+         SELECT pd2.id, pd2.parent_id
+         FROM production_dept pd2 JOIN chain c ON pd2.id = c.parent_id
+       )
+       SELECT 1 FROM production_dept_permission pdp
+       JOIN chain ON chain.id = pdp.dept_id
+       WHERE pdp.production_id = $1 AND pdp.permission_key = ANY($3)
+     ) AS ok`,
+    [productionId, userId, candidates],
+  );
+  return rows[0]?.ok ?? false;
+}
+
+/** role 区间：用户全部角色持有的匹配键。 */
+async function roleZoneHit(
+  userId: string, productionId: string, candidates: string[],
+): Promise<boolean> {
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM production_member_role pmr
+       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+       WHERE pmr.production_id = $1 AND pmr.user_id = $2
+         AND prp.permission_key = ANY($3)
+     ) AS ok`,
+    [productionId, userId, candidates],
+  );
+  return rows[0]?.ok ?? false;
+}
+
+/** 个人 override：返回匹配键的 granted 值（deny 优先于 allow）。 */
+async function memberOverrideHit(
+  userId: string, productionId: string, candidates: string[],
+): Promise<"deny" | "allow" | null> {
+  const { rows } = await getPool().query<{ granted: boolean }>(
+    `SELECT granted FROM production_member_permission
+     WHERE production_id = $1 AND user_id = $2 AND permission = ANY($3)`,
+    [productionId, userId, candidates],
+  );
+  if (rows.length === 0) return null;
+  return rows.some((r) => !r.granted) ? "deny" : "allow";
+}
+
+// ─── 六步判定链 ────────────────────────────────────────────────────────────────
 
 export type NodeAccessResult =
   | { allowed: true }
-  | { allowed: false; reason: "needs_self_confirm" | "needs_approval" };
+  | { allowed: false; reason: "needs_self_confirm"; source: "dept" | "role" | "personal" }
+  | { allowed: false; reason: "needs_approval" };
 
 export async function canAccessNode(
   ctx: { userId: string; isAdmin: boolean; isOwner: boolean },
@@ -173,30 +134,55 @@ export async function canAccessNode(
   resourceSub: string,
   verb: GrantVerb,
 ): Promise<NodeAccessResult> {
+  // 1. grant（admin/owner 旁路）
   if (ctx.isAdmin || ctx.isOwner) return { allowed: true };
   if (await hasGrant(ctx.userId, productionId, resourceType, resourceId, resourceSub, verb)) {
     return { allowed: true };
   }
-  if (await hasTemplateEligibility(ctx.userId, productionId, resourceType, resourceId, resourceSub, verb)) {
-    return { allowed: false, reason: "needs_self_confirm" };
+  const node: NodeKeyParts = { resourceType, resourceId, resourceSub, verb };
+  const candidates = nodeKeyCandidates(node);
+  // 2/5. 个人 override（deny 短路一切区间）
+  const override = await memberOverrideHit(ctx.userId, productionId, candidates);
+  if (override === "deny") return { allowed: false, reason: "needs_approval" };
+  // 3. dept 区间
+  if (await deptZoneHit(ctx.userId, productionId, candidates)) {
+    return { allowed: false, reason: "needs_self_confirm", source: "dept" };
   }
+  // 4. role 区间
+  if (await roleZoneHit(ctx.userId, productionId, candidates)) {
+    return { allowed: false, reason: "needs_self_confirm", source: "role" };
+  }
+  // 5. 个人允许区间
+  if (override === "allow") {
+    return { allowed: false, reason: "needs_self_confirm", source: "personal" };
+  }
+  // 6. 申请流
   return { allowed: false, reason: "needs_approval" };
 }
 
-/** self-confirm 激活：把用户持有模板资格的行落成 resource_grant 个人行。
- *  只落用户实际有资格的行（防伪造）；幂等。返回实际写入数。 */
+/** 节点是否在用户免审批区间内（deny 生效；不含已有 grant）。 */
+export async function hasZoneEligibility(
+  userId: string,
+  productionId: string,
+  node: NodeKeyParts,
+): Promise<boolean> {
+  const candidates = nodeKeyCandidates(node);
+  const override = await memberOverrideHit(userId, productionId, candidates);
+  if (override === "deny") return false;
+  if (override === "allow") return true;
+  if (await deptZoneHit(userId, productionId, candidates)) return true;
+  return roleZoneHit(userId, productionId, candidates);
+}
+
+/** self-confirm 激活：把用户区间内的节点落成 resource_grant 个人行（防伪造，幂等）。 */
 export async function selfConfirmTemplateNodes(
   userId: string,
   productionId: string,
-  nodes: Array<{ resourceType: string; resourceId: string; resourceSub: string; verb: GrantVerb }>,
+  nodes: NodeKeyParts[],
 ): Promise<number> {
-  const templates = await getUserTemplateRows(userId, productionId);
   let written = 0;
   for (const n of nodes) {
-    const eligible = templates.some((t) =>
-      templateMatchesNode(t, n.resourceType, n.resourceId, n.resourceSub, n.verb),
-    );
-    if (!eligible) continue;
+    if (!(await hasZoneEligibility(userId, productionId, n))) continue;
     const res = await getPool().query(
       `INSERT INTO resource_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -210,4 +196,44 @@ export async function selfConfirmTemplateNodes(
     written += res.rowCount ?? 0;
   }
   return written;
+}
+
+// ─── 全局模板 seed（创建时注入，运行时零读取） ─────────────────────────────────
+
+/**
+ * 按角色名（含 '*' 成员基础）取全局模板键：production_type 专属行优先，
+ * 无则回落通用（production_type IS NULL）。
+ */
+export async function templateKeysForRole(
+  roleName: string,
+  productionType: string | null,
+): Promise<string[]> {
+  const { rows } = await getPool().query<{ permission_key: string }>(
+    `SELECT DISTINCT permission_key FROM grant_template
+     WHERE role_name IN ($1, '*')
+       AND (production_type = $2 OR (production_type IS NULL AND NOT EXISTS (
+              SELECT 1 FROM grant_template t2
+              WHERE t2.role_name = grant_template.role_name
+                AND t2.permission_key = grant_template.permission_key
+                AND t2.production_type = $2
+            )))`,
+    [roleName, productionType],
+  );
+  return rows.map((r) => r.permission_key);
+}
+
+/** 把全局模板键 seed 进指定角色的 production_role_permission（幂等）。 */
+export async function seedRoleFromTemplate(
+  roleId: string,
+  roleName: string,
+  productionType: string | null,
+): Promise<void> {
+  const keys = await templateKeysForRole(roleName, productionType);
+  if (keys.length === 0) return;
+  await getPool().query(
+    `INSERT INTO production_role_permission (role_id, permission_key)
+     SELECT $1, unnest($2::text[])
+     ON CONFLICT DO NOTHING`,
+    [roleId, keys],
+  );
 }

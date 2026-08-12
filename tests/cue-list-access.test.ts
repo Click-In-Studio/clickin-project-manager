@@ -100,8 +100,9 @@ beforeAll(async () => {
     addMember(prodId, POC_USER),
   ]);
 
-  // Create dept with 灯光 in allowed_cue_types and 'cue_list:edit' in permissions
-  deptId = await createDept(prodId, "灯光组", ["cue_list:edit"], ["灯光"]);
+  // Create dept with 灯光 in allowed_cue_types（批A：伪键退役，zone 资格走
+  // production_dept_permission 节点行——迁移后的真实形态）
+  deptId = await createDept(prodId, "灯光组", [], ["灯光"]);
   await addDeptMember(deptId, prodId, EDITOR_USER, false);
   await addDeptMember(deptId, prodId, POC_USER, true);
 
@@ -233,6 +234,17 @@ describe("checkCueListFreeApprovalZone", () => {
        VALUES ($1, $2, 'cue_list', $3, $4) ON CONFLICT DO NOTHING`,
       [prodId, deptId, managedListId, CREATOR_USER],
     );
+    // 批A：dept 管辖的表 → dept_permission 实例行集（zone 键与 grant 键同词汇）
+    await getPool().query(
+      `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+       SELECT $1, $2, unnest(ARRAY[
+         'node:cue_list/' || $3 || '@view',
+         'node:cue_list/' || $3 || '@edit',
+         'node:cue_list/' || $3 || '/cues@create',
+         'node:cue_list/' || $3 || '/cues@delete'
+       ]) ON CONFLICT DO NOTHING`,
+      [prodId, deptId, managedListId],
+    );
   });
 
   it("EDITOR_USER (dept member with cue_list:edit) can self-confirm edit", async () => {
@@ -255,7 +267,7 @@ describe("checkCueListFreeApprovalZone", () => {
     expect(await checkCueListFreeApprovalZone(OUTSIDER_USER, prodId, managedListId, "edit")).toBe(false);
   });
 
-  it("returns false for a cue list with no resource_dept_manage entry", async () => {
+  it("returns false for a cue list not covered by dept permission rows", async () => {
     expect(await checkCueListFreeApprovalZone(EDITOR_USER, prodId, cueListId, "edit")).toBe(false);
   });
 });
@@ -275,6 +287,17 @@ describe("getCueListAccess", () => {
       `INSERT INTO resource_dept_manage (production_id, dept_id, resource_type, resource_id, established_by)
        VALUES ($1, $2, 'cue_list', $3, $4) ON CONFLICT DO NOTHING`,
       [prodId, deptId, managedListId, CREATOR_USER],
+    );
+    // 批A：dept 管辖的表 → dept_permission 实例行集（zone 键与 grant 键同词汇）
+    await getPool().query(
+      `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+       SELECT $1, $2, unnest(ARRAY[
+         'node:cue_list/' || $3 || '@view',
+         'node:cue_list/' || $3 || '@edit',
+         'node:cue_list/' || $3 || '/cues@create',
+         'node:cue_list/' || $3 || '/cues@delete'
+       ]) ON CONFLICT DO NOTHING`,
+      [prodId, deptId, managedListId],
     );
   });
 

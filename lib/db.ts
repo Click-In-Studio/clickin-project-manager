@@ -16,6 +16,7 @@ export type ProductionAccess = {
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
 import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_LEVEL_ROW_SETS, type CueListLevel } from "./resource-grant-db";
+import { seedRoleFromTemplate } from "./grant-template";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -2034,6 +2035,9 @@ export async function createProduction(id: string, name: string, ownerUserId?: s
 /** Populate production_role + production_role_permission + production_role_cue_type from templates. */
 export async function seedProductionRoles(productionId: string): Promise<void> {
   const pool = getPool();
+  const prodType = (await pool.query<{ type: string | null }>(
+    "SELECT type FROM production WHERE id = $1", [productionId],
+  )).rows[0]?.type ?? null;
 
   // Build cue-type map: roleName → cue_type[]
   const roleCueTypes = new Map<string, string[]>();
@@ -2068,6 +2072,8 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
         [actualId, perms],
       );
     }
+    // 批A：REST 化域的资格从全局模板 seed（node 键；按 production.type，运行时零读取）
+    await seedRoleFromTemplate(actualId, roleName, prodType);
     // Phase 4: production_role_cue_type dropped; cue type auth moved to production_dept.allowed_cue_types
   }
 }
@@ -4031,6 +4037,25 @@ export async function createCueList(data: {
          DO NOTHING`,
         [data.productionId, data.id, data.createdBy, data.template],
       );
+      // 批A 六步链：归属 dept 同时获得该表的 edit 行集资格（production_dept_permission，
+      // 节点串词汇——zone 键与 grant 键时刻一致；成员经第 3 步自我确认落行）
+      await client.query(
+        `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+         SELECT DISTINCT $1, pdm.dept_id, k.key
+         FROM production_dept_member pdm
+         JOIN production_dept pd ON pd.id = pdm.dept_id
+         CROSS JOIN (VALUES
+           ('node:cue_list/' || $2 || '@view'),
+           ('node:cue_list/' || $2 || '@edit'),
+           ('node:cue_list/' || $2 || '/cues@create'),
+           ('node:cue_list/' || $2 || '/cues@delete')
+         ) AS k(key)
+         WHERE pdm.user_id = $3
+           AND pdm.production_id = $1
+           AND $4 = ANY(pd.allowed_cue_types)
+         ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+        [data.productionId, data.id, data.createdBy, data.template],
+      );
     }
     // Person fallback: no dept managers → creator manages this cue_list
     const hasDept = await client.query(
@@ -4137,7 +4162,15 @@ export async function createProductionRole(productionId: string, name: string): 
     [id, productionId, name],
   );
   const row = res.rows[0];
-  return { id: row.id, name: row.name, permissions: [], createdAt: row.created_at.toISOString() };
+  // 批A：自定义角色也获得成员基础模板键（'*'；若名字命中模板角色则一并 seed）
+  const prodType = (await getPool().query<{ type: string | null }>(
+    "SELECT type FROM production WHERE id = $1", [productionId],
+  )).rows[0]?.type ?? null;
+  await seedRoleFromTemplate(row.id, name, prodType);
+  const seeded = await getPool().query<{ permission_key: string }>(
+    "SELECT permission_key FROM production_role_permission WHERE role_id = $1", [row.id],
+  );
+  return { id: row.id, name: row.name, permissions: seeded.rows.map((r) => r.permission_key), createdAt: row.created_at.toISOString() };
 }
 
 export async function renameProductionRole(roleId: string, productionId: string, name: string): Promise<void> {
@@ -7212,8 +7245,8 @@ export async function approveAccessRequest(
       const rows: ReadonlyArray<readonly [string, string]> =
         req.resource_type === "cue_list"
           ? CUE_LIST_LEVEL_ROW_SETS[req.permission_level as CueListLevel]
-            ?? [[req.resource_sub ?? "*", req.permission_level] as const]
-          : [[req.resource_sub ?? "*", req.permission_level] as const];
+            ?? [[req.resource_sub ?? "*", req.permission_level!] as const]
+          : [[req.resource_sub ?? "*", req.permission_level!] as const];
       for (const [sub, verb] of rows) {
         await getPool().query(
           `INSERT INTO resource_grant

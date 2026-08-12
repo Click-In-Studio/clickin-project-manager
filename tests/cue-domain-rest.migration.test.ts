@@ -26,13 +26,20 @@ describe("schema verification", () => {
     expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "edit", "view"]);
   });
 
-  it("grant_template table exists with expected columns", async () => {
+  it("grant_template is pure global (production_type × role_name × permission_key)", async () => {
     const { rows } = await getPool().query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns
        WHERE table_name = 'grant_template' AND column_name IN
-         ('production_id', 'production_type', 'holder_type', 'holder_id', 'holder_name', 'verb')`,
+         ('production_type', 'role_name', 'permission_key')`,
     );
-    expect(rows.length).toBe(6);
+    expect(rows.length).toBe(3);
+  });
+
+  it("production_dept_permission table exists", async () => {
+    const { rows } = await getPool().query(
+      `SELECT 1 FROM information_schema.tables WHERE table_name = 'production_dept_permission'`,
+    );
+    expect(rows).toHaveLength(1);
   });
 });
 
@@ -45,23 +52,29 @@ describe("integrity verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("no cue-domain keys remain in atomic_permission_grant or production_role_permission", async () => {
-    const { rows: apg } = await getPool().query(
-      `SELECT 1 FROM atomic_permission_grant
-       WHERE permission_key LIKE 'cue_list:%' OR permission_key LIKE 'cue:%' LIMIT 1`,
+  it("no cue-domain atomic keys remain in any permission/grant table", async () => {
+    for (const [table, col] of [
+      ["atomic_permission_grant", "permission_key"],
+      ["production_role_permission", "permission_key"],
+      ["production_member_permission", "permission"],
+    ] as const) {
+      const { rows } = await getPool().query(
+        `SELECT 1 FROM ${table}
+         WHERE ${col} LIKE 'cue_list:%' OR ${col} LIKE 'cue:%' LIMIT 1`,
+      );
+      expect(rows, `${table} 不应残留 cue 原子键`).toHaveLength(0);
+    }
+    // dept 数组伪键清除
+    const { rows: pd } = await getPool().query(
+      `SELECT 1 FROM production_dept WHERE 'cue_list:edit' = ANY(permissions) LIMIT 1`,
     );
-    expect(apg).toHaveLength(0);
-    const { rows: prp } = await getPool().query(
-      `SELECT 1 FROM production_role_permission
-       WHERE permission_key LIKE 'cue_list:%' OR permission_key LIKE 'cue:%' LIMIT 1`,
-    );
-    expect(prp).toHaveLength(0);
+    expect(pd).toHaveLength(0);
   });
 
   it("global template seeds exist (member base + collection create)", async () => {
     const { rows } = await getPool().query<{ n: string }>(
       `SELECT count(*) AS n FROM grant_template
-       WHERE production_id IS NULL AND holder_name = '*' AND resource_type = 'cue_list'`,
+       WHERE production_type IS NULL AND role_name = '*' AND permission_key LIKE 'node:cue_list%'`,
     );
     expect(Number(rows[0].n)).toBeGreaterThanOrEqual(3);
   });
@@ -97,16 +110,39 @@ describe("invariance verification", () => {
     );
   });
 
-  it.skipIf(!snapshot)("role cue keys convert to production-level template rows; base write keys drop", async () => {
-    const { rows } = await getPool().query<{ resource_sub: string; verb: string }>(
-      `SELECT resource_sub, verb FROM grant_template
-       WHERE production_id = $1 AND holder_type = 'role' AND holder_id = $2
-         AND resource_type = 'cue_list'`,
-      [snapshot!.productionId, snapshot!.roleId],
+  it.skipIf(!snapshot)("role cue keys convert to node-key strings in the same table; base write keys drop", async () => {
+    const { rows } = await getPool().query<{ permission_key: string }>(
+      `SELECT permission_key FROM production_role_permission WHERE role_id = $1`,
+      [snapshot!.roleId],
     );
-    const got = rows.map((r) => `${r.resource_sub}@${r.verb}`).sort();
-    // cue_list:view → meta view + cues view；cue_list:create → 集合 create；
+    const got = rows.map((r) => r.permission_key).sort();
+    // cue_list:view → meta+cues view；cue_list:create → 集合 create；
     // cue_list:delete（base 写键）→ 无转换（创建者自动行集承担）
-    expect(got).toEqual(["*@create", "cues@view", "meta@view"].sort());
+    expect(got).toEqual([
+      "node:cue_list/*/meta@view",
+      "node:cue_list/*/cues@view",
+      "node:cue_list/*@create",
+    ].sort());
+  });
+
+  it.skipIf(!snapshot)("dept pseudo-key × rdm converts to instance-level dept permission rows", async () => {
+    const { rows } = await getPool().query<{ permission_key: string }>(
+      `SELECT permission_key FROM production_dept_permission WHERE dept_id = $1`,
+      [snapshot!.deptId],
+    );
+    const got = rows.map((r) => r.permission_key).sort();
+    const id = snapshot!.cueListId;
+    expect(got).toEqual([
+      `node:cue_list/${id}@view`,
+      `node:cue_list/${id}@edit`,
+      `node:cue_list/${id}/cues@create`,
+      `node:cue_list/${id}/cues@delete`,
+    ].sort());
+    // 数组里的非 cue 伪键保留
+    const { rows: pd } = await getPool().query<{ permissions: string[] }>(
+      `SELECT permissions FROM production_dept WHERE id = $1`, [snapshot!.deptId],
+    );
+    expect(pd[0].permissions).toContain("event:edit");
+    expect(pd[0].permissions).not.toContain("cue_list:edit");
   });
 });

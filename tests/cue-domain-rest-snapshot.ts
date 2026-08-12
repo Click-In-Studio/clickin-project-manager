@@ -31,6 +31,7 @@ export type CueDomainRestSnapshot = {
   editUserId: string;
   atomicUserId: string;
   roleId: string;
+  deptId: string;
 };
 
 export async function isCueDomainRestPreMigrationSchema(pool: Pool): Promise<boolean> {
@@ -93,7 +94,7 @@ export async function createCueDomainRestPreMigrationData(
     [productionId, atomicUserId],
   );
 
-  // 角色的 cue 键（view→模板转换；create→集合行；delete=base 写键→无转换）
+  // 角色的 cue 键（view→节点串转换；create→集合键；delete=base 写键→无转换）
   const roleId = `role_cdr_${faker.string.alphanumeric(8)}`;
   await pool.query(
     "INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, $3)",
@@ -105,5 +106,17 @@ export async function createCueDomainRestPreMigrationData(
     [roleId],
   );
 
-  return { productionId, cueListId, manageUserId, editUserId, atomicUserId, roleId };
+  // dept 伪键：'cue_list:edit' 数组项 + rdm 管理该表 → 迁移应产出实例级 dept 区间行
+  const deptId = (await pool.query<{ id: string }>(
+    `INSERT INTO production_dept (production_id, name, permissions)
+     VALUES ($1, $2, '{cue_list:edit,event:edit}') RETURNING id`,
+    [productionId, `批A部门${faker.string.alphanumeric(4)}`],
+  )).rows[0].id;
+  await pool.query(
+    `INSERT INTO resource_dept_manage (production_id, dept_id, resource_type, resource_id, established_by)
+     VALUES ($1, $2, 'cue_list', $3, $4)`,
+    [productionId, deptId, cueListId, testUserId],
+  );
+
+  return { productionId, cueListId, manageUserId, editUserId, atomicUserId, roleId, deptId };
 }

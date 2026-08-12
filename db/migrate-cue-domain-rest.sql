@@ -1,6 +1,7 @@
 -- 权限REST化 批A：cue 域存量迁移（总表批A + §0.6/§0.7）。
 --
--- 前置：add-rest-verbs.sql（动词词汇行）、add-grant-template.sql（模板表）已应用。
+-- 前置：add-rest-verbs.sql（动词词汇行）、add-grant-template.sql（全局模板表）、
+--       add-production-dept-permission.sql（dept 免审批区间表）已应用。
 --
 -- 内容：
 --   1. resource_grant 旧级别行拆解为动词行集（edit 补行集；manage/mount 拆解后删除）
@@ -104,41 +105,73 @@ DO NOTHING;
 DELETE FROM atomic_permission_grant
 WHERE permission_key LIKE 'cue_list:%' OR permission_key LIKE 'cue:%';
 
--- ── 3. production_role_permission cue 域键 → 演出级模板行，随后删除 ─────────────
--- 覆盖语义注意：#158 起所有演出角色都有 DB 行，因此本转换给所有存量角色写演出级
--- 模板行（覆盖全局种子）；新演出的角色无演出级行 → 回落全局模板。
-INSERT INTO grant_template
-  (production_id, holder_type, holder_id, resource_type, resource_id, resource_sub, verb)
-SELECT DISTINCT pr.production_id, 'role', prp.role_id, 'cue_list', '*', m.sub, m.verb
+-- ── 3a. production_role_permission cue 域键 → 同表节点串（zone 键与 grant 键同词汇）──
+INSERT INTO production_role_permission (role_id, permission_key)
+SELECT DISTINCT prp.role_id, m.node_key
 FROM production_role_permission prp
-JOIN production_role pr ON pr.id = prp.role_id
 JOIN (VALUES
-  ('cue_list:view',                 'meta',             'view'),
-  ('cue_list:view',                 'cues',             'view'),
-  ('cue:view',                      'cues',             'view'),
-  ('cue:comment',                   'cues/comments',    'create'),
-  ('cue_list:create',               '*',                'create'),
-  ('cue_list:create_any',           '*',                'create'),
-  ('cue_list:delete_any',           '*',                'delete'),
-  ('cue_list:rename_any',           'meta/name',        'edit'),
-  ('cue_list:reorder_any',          'meta/position',    'edit'),
-  ('cue_list:edit_abbr_any',        'meta/abbr',        'edit'),
-  ('cue_list:edit_description_any', 'meta/description', 'edit'),
-  ('cue_list:manage_permissions_any', 'grants',         'edit'),
-  ('cue:create_any',                'cues',             'create'),
-  ('cue:delete_any',                'cues',             'delete'),
-  ('cue:renumber_any',              'cues/numbering',   'edit'),
-  ('cue:rename_any',                'cues/name',        'edit'),
-  ('cue:edit_description_any',      'cues/description', 'edit'),
-  ('cue:move_any',                  'cues/position',    'edit'),
-  ('cue:mount_any',                 'cues/mounts',      'create'),
-  ('cue:edit_comment_any',          'cues/comments',    'edit'),
-  ('cue:delete_comment_any',        'cues/comments',    'delete')
-) AS m(key, sub, verb) ON m.key = prp.permission_key
+  ('cue_list:view',                 'node:cue_list/*/meta@view'),
+  ('cue_list:view',                 'node:cue_list/*/cues@view'),
+  ('cue:view',                      'node:cue_list/*/cues@view'),
+  ('cue:comment',                   'node:cue_list/*/cues/comments@create'),
+  ('cue_list:create',               'node:cue_list/*@create'),
+  ('cue_list:create_any',           'node:cue_list/*@create'),
+  ('cue_list:delete_any',           'node:cue_list/*@delete'),
+  ('cue_list:rename_any',           'node:cue_list/*/meta/name@edit'),
+  ('cue_list:reorder_any',          'node:cue_list/*/meta/position@edit'),
+  ('cue_list:edit_abbr_any',        'node:cue_list/*/meta/abbr@edit'),
+  ('cue_list:edit_description_any', 'node:cue_list/*/meta/description@edit'),
+  ('cue_list:manage_permissions_any', 'node:cue_list/*/grants@edit'),
+  ('cue:create_any',                'node:cue_list/*/cues@create'),
+  ('cue:delete_any',                'node:cue_list/*/cues@delete'),
+  ('cue:renumber_any',              'node:cue_list/*/cues/numbering@edit'),
+  ('cue:rename_any',                'node:cue_list/*/cues/name@edit'),
+  ('cue:edit_description_any',      'node:cue_list/*/cues/description@edit'),
+  ('cue:move_any',                  'node:cue_list/*/cues/position@edit'),
+  ('cue:mount_any',                 'node:cue_list/*/cues/mounts@create'),
+  ('cue:edit_comment_any',          'node:cue_list/*/cues/comments@edit'),
+  ('cue:delete_comment_any',        'node:cue_list/*/cues/comments@delete')
+) AS m(key, node_key) ON m.key = prp.permission_key
 ON CONFLICT DO NOTHING;
 
 DELETE FROM production_role_permission
 WHERE permission_key LIKE 'cue_list:%' OR permission_key LIKE 'cue:%';
+
+-- ── 3b. dept 伪键退役：'cue_list:edit' × rdm(cue_list) → production_dept_permission
+--        实例级 edit 行集（zone 键与 grant 键时刻一致；六步链第 3 步资格源）──────
+INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+SELECT DISTINCT rdm.production_id, rdm.dept_id, k.key
+FROM resource_dept_manage rdm
+JOIN production_dept pd ON pd.id = rdm.dept_id
+CROSS JOIN LATERAL (VALUES
+  ('node:cue_list/' || rdm.resource_id || '@view'),
+  ('node:cue_list/' || rdm.resource_id || '@edit'),
+  ('node:cue_list/' || rdm.resource_id || '/cues@create'),
+  ('node:cue_list/' || rdm.resource_id || '/cues@delete')
+) AS k(key)
+WHERE rdm.resource_type = 'cue_list'
+  AND 'cue_list:edit' = ANY(pd.permissions)
+ON CONFLICT (dept_id, permission_key) DO NOTHING;
+
+UPDATE production_dept
+SET permissions = array_remove(permissions, 'cue_list:edit')
+WHERE 'cue_list:edit' = ANY(permissions);
+
+-- 个人 override 表中的 cue 原子键（如有）：读键转节点串，写基类键直接删除
+INSERT INTO production_member_permission (production_id, user_id, permission, granted)
+SELECT DISTINCT pmp.production_id, pmp.user_id, m.node_key, pmp.granted
+FROM production_member_permission pmp
+JOIN (VALUES
+  ('cue_list:view', 'node:cue_list/*/meta@view'),
+  ('cue_list:view', 'node:cue_list/*/cues@view'),
+  ('cue:view',      'node:cue_list/*/cues@view'),
+  ('cue:comment',   'node:cue_list/*/cues/comments@create'),
+  ('cue_list:create', 'node:cue_list/*@create')
+) AS m(key, node_key) ON m.key = pmp.permission
+ON CONFLICT DO NOTHING;
+
+DELETE FROM production_member_permission
+WHERE permission LIKE 'cue_list:%' OR permission LIKE 'cue:%';
 
 -- ── 4. 词汇表删除 cue_list 旧级别（此时已无任何行引用） ─────────────────────────
 DELETE FROM resource_permission_level
