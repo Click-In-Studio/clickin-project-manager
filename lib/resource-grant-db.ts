@@ -165,13 +165,13 @@ export type NoteLevel = "view" | "edit" | "manage";
  */
 export const EVENT_LEVEL_ROW_SETS: Record<EventLevel, ReadonlyArray<readonly [string, string]>> = {
   view:           [["meta", "view"], ["details", "view"]],
-  edit:           [["meta", "view"], ["details", "view"], ["*", "edit"],
+  edit:           [["meta", "view"], ["details", "view"], ["publication", "view"], ["*", "edit"],
                    ["tasks", "create"], ["tasks", "delete"],
                    ["reports", "create"], ["reports", "delete"]],
   publish:        [["publication", "create"]],
   edit_published: [["publication", "edit"]],
   revoke:         [["publication", "delete"]],
-  manage:         [["meta", "view"], ["details", "view"], ["*", "edit"],
+  manage:         [["meta", "view"], ["details", "view"], ["publication", "view"], ["*", "edit"],
                    ["tasks", "create"], ["tasks", "delete"],
                    ["reports", "create"], ["reports", "delete"],
                    ["publication", "create"], ["publication", "edit"], ["publication", "delete"],

@@ -529,9 +529,9 @@ export async function setEventStageManagers(
          SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
          FROM unnest($2::uuid[]) AS u
          CROSS JOIN (VALUES
-           ('meta', 'view'), ('details', 'view'), ('call_sheet', 'view'),
-           ('tasks', 'view'), ('reports', 'view'), ('reports', 'create'),
-           ('reports', 'edit'), ('reports', 'delete')
+           ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
+           ('call_sheet', 'view'), ('tasks', 'view'), ('reports', 'view'),
+           ('reports', 'create'), ('reports', 'edit'), ('reports', 'delete')
          ) AS s(sub, verb)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
@@ -1081,6 +1081,9 @@ export async function createEventTechReq(data: {
     );
     if (prodRow.rows[0]) {
       await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy, data.eventId);
+      if (data.departmentId) {
+        await writeTaskDeptEventVisibility(data.eventId, data.departmentId, prodRow.rows[0].production_id, data.createdBy);
+      }
     }
     return rowToTechReq(res.rows[0], data.assignees, unique);
   } catch (err) {
@@ -1184,7 +1187,44 @@ export async function upsertAwaitingTechReqs(
     if (req) result.push(req);
   }
 
+  // 规则4：部门被 assign（dept_auto 路径）→ event 可见性行
+  const prodRow = await pool.query<{ production_id: string; created_by: string }>(
+    "SELECT production_id, created_by FROM production_event WHERE id = $1", [eventId],
+  );
+  if (prodRow.rows[0]) {
+    for (const deptId of departmentIds) {
+      await writeTaskDeptEventVisibility(eventId, deptId, prodRow.rows[0].production_id, prodRow.rows[0].created_by);
+    }
+  }
+
   return result;
+}
+
+/** 部门被 assign 进 tech req（任何路径）时的 event 可见性行（用户规则4）：
+ *  POC = meta+details+publication view（提前确认/组织）；成员 = meta+details view
+ *  （发布后可见）。物化当下成员（模板只是模板）；解绑不撤行。 */
+export async function writeTaskDeptEventVisibility(
+  eventId: string,
+  eventDeptId: string,
+  productionId: string,
+  establishedBy: string,
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO resource_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub,
+        permission_level, grant_source, confirmed_by)
+     SELECT $1, edm.user_id, 'event', $2, s.sub, 'view', 'assigned', $4
+     FROM event_department_member edm
+     CROSS JOIN LATERAL (
+       SELECT sub FROM (VALUES ('meta'), ('details'), ('publication')) AS v(sub)
+       WHERE edm.is_poc OR v.sub != 'publication'
+     ) AS s
+     WHERE edm.department_id = $3
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+       WHERE is_revoked = false
+     DO NOTHING`,
+    [productionId, eventId, eventDeptId, establishedBy],
+  );
 }
 
 export async function completeAllEventTechReqs(eventId: string): Promise<void> {
@@ -1220,7 +1260,7 @@ export async function setTechReqAssignees(
          FROM event_tech_req etr
          JOIN production_event pe ON pe.id = etr.event_id
          CROSS JOIN unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
+         CROSS JOIN (VALUES ('meta'), ('details'), ('publication')) AS s(sub)
          WHERE etr.id = $1
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false

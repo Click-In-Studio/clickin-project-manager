@@ -42,7 +42,9 @@ export default async function CallSheetPage({
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
-  if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
+  // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
+  const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+  if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   if (!canViewFull && !eventPermCtx.isInCall) redirect(`/production/${productionId}/events/${eventId}/view`);

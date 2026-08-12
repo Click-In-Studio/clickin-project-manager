@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasAnyEffectiveGrant, hasGrant } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant, hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -47,7 +47,9 @@ export default async function EventViewPage({
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   // Non-editors cannot see unpublished events
-  if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
+  // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
+  const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+  if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   const [scheduleItems, reports, isAssignee, selfRole, departments, hasAnyTechReqGrant] = await Promise.all([

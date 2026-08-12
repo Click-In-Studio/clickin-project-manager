@@ -39,7 +39,9 @@ export default async function ReqsPage({
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
-  if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
+  // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
+  const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+  if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   const [isAssignee, departments, productionMembers, grantedReqIds] = await Promise.all([

@@ -92,7 +92,7 @@ describe("规则2：assignee 恒可见（不论路径/进度）", () => {
          AND resource_id = $3 AND permission_level = 'view' AND NOT is_revoked`,
       [prodId, assigneeId, eventId],
     );
-    expect(rows.map((r) => r.resource_sub).sort()).toEqual(["details", "meta"]);
+    expect(rows.map((r) => r.resource_sub).sort()).toEqual(["details", "meta", "publication"]);
   });
 });
 

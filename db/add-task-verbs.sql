@@ -29,6 +29,7 @@ CROSS JOIN (VALUES
   ('node:event/*/chat@create'),
   ('node:event/*/call_sheet@view'),
   ('node:event/*/reports@view'),
+  ('node:event/*/publication@view'),
   ('node:task/*@view'),
   ('node:task/*@delete')
 ) AS k(key)

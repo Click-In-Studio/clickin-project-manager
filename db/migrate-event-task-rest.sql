@@ -48,7 +48,7 @@ INSERT INTO resource_grant
 SELECT rg.production_id, rg.user_id, 'event', rg.resource_id, s.sub, s.verb,
        rg.grant_source, rg.confirmed_by, rg.approval_id, rg.expires_at
 FROM resource_grant rg
-CROSS JOIN (VALUES ('meta', 'view'), ('details', 'view'),
+CROSS JOIN (VALUES ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
                    ('tasks', 'create'), ('tasks', 'delete'),
                    ('reports', 'create'), ('reports', 'delete')) AS s(sub, verb)
 WHERE rg.resource_type = 'event' AND rg.permission_level = 'edit' AND NOT rg.is_revoked
@@ -86,7 +86,8 @@ JOIN (VALUES
   ('publish',        'publication', 'create'),
   ('edit_published', 'publication', 'edit'),
   ('revoke',         'publication', 'delete'),
-  ('manage', 'meta', 'view'), ('manage', 'details', 'view'), ('manage', '*', 'edit'),
+  ('manage', 'meta', 'view'), ('manage', 'details', 'view'), ('manage', 'publication', 'view'),
+  ('manage', '*', 'edit'),
   ('manage', 'tasks', 'create'), ('manage', 'tasks', 'delete'),
   ('manage', 'reports', 'create'), ('manage', 'reports', 'delete'),
   ('manage', 'publication', 'create'), ('manage', 'publication', 'edit'),
@@ -119,6 +120,7 @@ JOIN (VALUES
   ('event:follow',              'event', 'details',   'view'),
   ('event:follow',              'event', 'followers', 'create'),
   ('event:view_call_sheet_any', 'event', 'call_sheet','view'),
+  ('event:view_call_sheet_any', 'event', 'publication','view'),
   ('task:view_any',             'task',  '*',         'view'),
   ('task:delete_any',           'task',  '*',         'delete')
 ) AS m(key, rtype, sub, verb) ON m.key = apg.permission_key
@@ -143,6 +145,7 @@ JOIN (VALUES
   ('event:follow',              'node:event/*/details@view'),
   ('event:follow',              'node:event/*/followers@create'),
   ('event:view_call_sheet_any', 'node:event/*/call_sheet@view'),
+  ('event:view_call_sheet_any', 'node:event/*/publication@view'),
   ('task:view_any',             'node:task/*@view'),
   ('task:delete_any',           'node:task/*@delete')
 ) AS m(key, node_key) ON m.key = prp.permission_key
@@ -161,6 +164,7 @@ JOIN (VALUES
   ('event:follow',              'node:event/*/details@view'),
   ('event:follow',              'node:event/*/followers@create'),
   ('event:view_call_sheet_any', 'node:event/*/call_sheet@view'),
+  ('event:view_call_sheet_any', 'node:event/*/publication@view'),
   ('task:view_any',             'node:task/*@view'),
   ('task:delete_any',           'node:task/*@delete')
 ) AS m(key, node_key) ON m.key = pmp.permission

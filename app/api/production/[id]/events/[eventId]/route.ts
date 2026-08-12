@@ -26,6 +26,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
+  if (event.status !== "published" && event.status !== "completed") {
+    const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+    if (!canSeeDraft) return Response.json({ error: "无权访问" }, { status: 403 });
+  }
   return Response.json({ event });
 }
 
