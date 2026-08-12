@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { hasAnyEffectiveGrant, hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -37,7 +37,7 @@ export default async function EventViewPage({
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", ["meta", "details"], "view"))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
@@ -48,7 +48,7 @@ export default async function EventViewPage({
 
   // Non-editors cannot see unpublished events
   // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
-  const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+  const canSeeDraft = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "event", eventId, "publication", "view");
   if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 

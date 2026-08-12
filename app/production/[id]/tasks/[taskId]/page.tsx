@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getTechReqByProduction,
   getProductionEvent,
@@ -45,7 +44,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   if (!event) notFound();
 
-  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "task", "*", "*", "view");
+  const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);

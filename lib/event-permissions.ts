@@ -73,6 +73,26 @@ export async function loadEventPermContext(
   };
 }
 
+// ─── 域级门 helper（消除路由层复制，review findings 1/2）───────────────────────
+
+import { hasAnyEffectiveGrant, hasEffectiveGrant, type GrantActor } from "./grant-check";
+
+/** event 域读取门的节点集（原 event:follow 读取职责）。改这里=改所有调用点。 */
+export const EVENT_DOMAIN_VIEW_SUBS = ["meta", "details"] as const;
+
+/** event 域可见（任一 meta/details view 行；admin/owner 旁路）。 */
+export function hasEventDomainView(actor: GrantActor, productionId: string): Promise<boolean> {
+  return hasAnyEffectiveGrant(actor, productionId, "event", EVENT_DOMAIN_VIEW_SUBS, "view");
+}
+
+/** 事件内容写门（状态感知）：published → publication@edit；否则 details@edit。 */
+export function hasEventContentEdit(
+  actor: GrantActor, productionId: string, eventId: string, status: string,
+): Promise<boolean> {
+  const sub = status === "published" ? "publication" : "details";
+  return hasEffectiveGrant(actor, productionId, "event", eventId, sub, "edit");
+}
+
 // ─── Permission checks ────────────────────────────────────────────────────────
 
 /**

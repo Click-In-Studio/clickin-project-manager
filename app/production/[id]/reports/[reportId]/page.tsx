@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import { hasAnyEffectiveGrant, hasGrant } from "@/lib/grant-check";
+import { hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
 import { getProductionPermissionContext, listProductionMembers } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getReportByProduction,
   getProductionEvent,
@@ -18,6 +17,7 @@ import {
   loadEventPermContext,
   canModerateNotes, isReportViewer,
   canReplyToReport,
+  hasEventDomainView,
 } from "@/lib/event-permissions";
 import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import ReportViewClient from "@/components/ReportViewClient";
@@ -86,7 +86,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", ["meta", "details"], "view"))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
   if (!report) notFound();

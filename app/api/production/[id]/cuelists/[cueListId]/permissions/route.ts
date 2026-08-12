@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getCueList, listCueListPermissions, setCueListPermission,
 } from "@/lib/db";
-import { hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 
 // PATCH /api/production/[id]/cuelists/[cueListId]/permissions
 // body: { userId: string; canEdit: boolean | null }  (null = remove override)
@@ -24,7 +24,7 @@ export async function PATCH(
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
   // 批A：管理面 = grants 显式行（admin/owner 旁路）
   const canManage = await hasEffectiveGrant(
-    { userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner },
+    toActor(session, permCtx),
     id, "cue_list", cueListId, "grants", "edit",
   );
   if (!canManage)

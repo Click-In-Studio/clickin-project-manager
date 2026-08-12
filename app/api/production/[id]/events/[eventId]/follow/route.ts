@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
-import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, selfFollowEvent, selfUnfollowEvent, getSelfParticipantRole } from "@/lib/event-db";
 import { addChatMembers } from "@/lib/platform/feishu/feishu-chat";
 
@@ -15,7 +14,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "followers", "create"))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "followers", "create"))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -38,7 +37,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "followers", "create"))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "followers", "create"))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

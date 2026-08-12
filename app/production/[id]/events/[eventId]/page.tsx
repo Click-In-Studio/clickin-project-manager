@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -16,7 +15,7 @@ import {
   listEventDepartments,
   getSelfParticipantRole,
 } from "@/lib/event-db";
-import { loadEventPermContext, isReportViewer } from "@/lib/event-permissions";
+import { hasEventDomainView, isReportViewer, loadEventPermContext } from "@/lib/event-permissions";
 import { getEventAccess, hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import EventDetailClient from "@/components/EventDetailClient";
 
@@ -39,7 +38,7 @@ export default async function EventDetailPage({
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", ["meta", "details"], "view"))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
@@ -92,7 +91,7 @@ export default async function EventDetailPage({
   const canAssignPeople = hasEditGrant;
   const canCallEdit = hasEditGrant;
   // admin bypass for deleting any tech req stays as atomic
-  const canTechReqDelete = await hasEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "task", "*", "*", "delete");
+  const canTechReqDelete = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "task", "*", "*", "delete");
   // canWriteReport: check if user has edit+ on any report in this event OR has event edit grant
   const canWriteReport = hasEditGrant ||
     (reports.length > 0 && await hasResourceGrantLevel(session.userId, productionId, "report", reports[0].id, "edit"));

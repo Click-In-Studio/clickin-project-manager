@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
 import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify";
 
@@ -21,13 +21,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", ["meta", "details"], "view")))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
   if (event.status !== "published" && event.status !== "completed") {
-    const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+    const canSeeDraft = await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "publication", "view");
     if (!canSeeDraft) return Response.json({ error: "无权访问" }, { status: 403 });
   }
   return Response.json({ event });
@@ -69,7 +69,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     edit_published: ["publication", "edit"], revoke: ["publication", "delete"],
   };
   const [reqSub, reqVerb] = REQ_NODE[requiredLevel];
-  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, reqSub, reqVerb as "view" | "create" | "edit" | "delete"))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, reqSub, reqVerb as "view" | "create" | "edit" | "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const validStatuses = new Set(["draft", "published", "completed", "cancelled"]);
@@ -123,7 +123,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "grants", "edit"))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "grants", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteProductionEvent(eventId, productionId);

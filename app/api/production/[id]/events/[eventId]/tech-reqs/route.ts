@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { createEventTechReq, getEventDepartment, getProductionEvent, isUserDeptPoc, listEventTechReqs } from "@/lib/event-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", ["meta", "details"], "view")))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -53,9 +53,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 成员模板通配行命中；严格剧组（模板撤掉 details@view）未被授视图的 POC 发不了
   const viaPoc = typeof bodyPeek.departmentId === "string"
     && await isUserDeptPoc(bodyPeek.departmentId, session.userId)
-    && await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "details", "view");
+    && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "details", "view");
   if (!viaPoc
-      && !await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "tasks", "create"))
+      && !await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {

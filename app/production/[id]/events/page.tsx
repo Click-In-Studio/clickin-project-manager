@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
+import { hasEventDomainView } from "@/lib/event-permissions";
 import { canAccessNode } from "@/lib/grant-template";
-import { hasAnyEffectiveGrant, hasEffectiveGrant, listGrantedResourceIds } from "@/lib/grant-check";
+import { hasEffectiveGrant, listGrantedResourceIds, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "事件" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { listProductionEvents, listUserEventParticipations, listEventDepartments } from "@/lib/event-db";
 import EventsClient from "@/components/EventsClient";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -20,9 +20,9 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, id, "event", ["meta", "details"], "view"))) redirect(`/unauthorized?resource=event%3Afollow&id=${id}`);
+  if (!(await hasEventDomainView(toActor(session, access.permCtx), id))) redirect(`/unauthorized?resource=event%3Afollow&id=${id}`);
 
-  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, id, "event", "*", "call_sheet", "view");
+  const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), id, "event", "*", "call_sheet", "view");
   const canCreate = (await canAccessNode(access.permCtx, id, "event", "*", "*", "create")).allowed;
 
   const [name, allEvents, myParticipations, departments] = await Promise.all([

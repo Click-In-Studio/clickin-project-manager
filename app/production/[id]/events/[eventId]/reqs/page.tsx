@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "技术需求" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getUserTechReqGrantIdsInEvent } from "@/lib/resource-grant-db";
 import {
   getProductionEvent,
@@ -34,13 +33,13 @@ export default async function ReqsPage({
 
   // Admin role-level OR event resource_grant edit+ → full view
   // 批B：别人的技术需求是独立层（tasks@view / task 域通配），不与 call_sheet 合并
-  const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "task", "*", "*", "view")
+  const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view")
     || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
-  const canSeeDraft = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", eventId, "publication", "view");
+  const canSeeDraft = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "event", eventId, "publication", "view");
   if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 

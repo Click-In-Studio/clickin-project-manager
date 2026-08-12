@@ -64,6 +64,16 @@ export async function hasGrant(
   return rows[0]?.ok ?? false;
 }
 
+/** 判定主体：路由层统一经 toActor 构造，避免手写字面量的字段错位风险。 */
+export type GrantActor = { userId: string; isAdmin: boolean; isOwner: boolean };
+
+export function toActor(
+  session: { userId: string },
+  permCtx: { isAdmin: boolean; isOwner: boolean },
+): GrantActor {
+  return { userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner };
+}
+
 /** 路由布尔门：admin/owner 旁路 + 个人行。三态判定用 grant-template 的 canAccessNode。 */
 export async function hasEffectiveGrant(
   ctx: { userId: string; isAdmin: boolean; isOwner: boolean },

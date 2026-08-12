@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
 import { canAccessNode } from "@/lib/grant-template";
-import { hasAnyEffectiveGrant } from "@/lib/grant-check";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { listProductionEvents, createProductionEvent } from "@/lib/event-db";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(await hasAnyEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", ["meta", "details"], "view")))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const events = await listProductionEvents(productionId);
