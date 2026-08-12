@@ -530,7 +530,7 @@ export async function writeTechReqGrants(
     await pool.query(
       `INSERT INTO resource_dept_manage
          (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-       SELECT DISTINCT $1, pd_mapped.id, 'task', $2, '*', $4
+       SELECT DISTINCT $1, pd_mapped.id, 'task', $2, '*', $4::uuid
        FROM event_department ed
        JOIN production_dept pd_mapped
          ON pd_mapped.production_id = $1 AND pd_mapped.name = ed.name

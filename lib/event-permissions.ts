@@ -120,7 +120,13 @@ export async function canEditTechReq(
     hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "edit"),
     hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit"),
   ]);
-  return hasReqGrant || hasEventGrant;
+  if (hasReqGrant || hasEventGrant) return true;
+  // 规则（用户规范）：不论创建路径与进度，task 关联部门的 POC 恒可编辑内容并推进
+  // 状态——上下文关系判定（Type B），部门后关联/POC 变更自动跟踪，无需行同步
+  const { getEventTechReq, isUserDeptPoc } = await import("./event-db");
+  const req = await getEventTechReq(techReqId, eventId);
+  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  return false;
 }
 
 /** Can assign tech personnel to a requirement. Same rule as canEditTechReq. */
@@ -148,7 +154,17 @@ export async function canViewTechReq(
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req
-  return hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "view");
+  if (await hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "view")) return true;
+  // 规则（用户规范，上下文判定）：
+  //   - assign 了个人 → 个人恒可见（并可推进进度，见 status 路由）
+  //   - task 已确认（非 awaiting）且关联部门 → 部门全员可见
+  const { isUserReqAssignee, isUserDeptMember, getEventTechReq } = await import("./event-db");
+  if (await isUserReqAssignee(techReqId, permCtx.userId)) return true;
+  if (techReqDeptId) {
+    const req = await getEventTechReq(techReqId, eventId);
+    if (req && req.status !== "awaiting" && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
+  }
+  return false;
 }
 
 /**

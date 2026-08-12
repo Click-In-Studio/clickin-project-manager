@@ -198,4 +198,7 @@ WHERE 'event:edit' = ANY(permissions)
    OR 'event:create' = ANY(permissions)
    OR 'tech_req:edit' = ANY(permissions);
 
+-- ── 7. task 创建路径回填（仅 awaiting 可确证为 dept_auto；已确认存量保守取 explicit）──
+UPDATE event_tech_req SET created_via = 'dept_auto' WHERE status = 'awaiting';
+
 COMMIT;

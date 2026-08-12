@@ -89,6 +89,7 @@ export type EventTechReq = {
   assignees: EventTechReqAssignee[];
   chatId: string | null;
   createdAt: string;
+  createdVia: "explicit" | "dept_auto";
 };
 
 export type Mention = { userId: string; name: string };
@@ -166,6 +167,7 @@ type TechReqRow = {
   id: string; event_id: string;
   title: string; description: string; preset_minutes: number | null;
   department_id: string | null; status: string; chat_id: string | null; created_at: Date;
+  created_via?: string | null;
 };
 
 type TechAssigneeRow = { req_id: string; user_id: string; name: string };
@@ -241,6 +243,7 @@ function rowToTechReq(r: TechReqRow, assignees: EventTechReqAssignee[], schedule
     title: r.title, description: r.description,
     presetMinutes: r.preset_minutes, departmentId: r.department_id,
     status: r.status, assignees, chatId: r.chat_id ?? null,
+    createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto",
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -933,7 +936,7 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
   const [reqRes, assigneeRes, itemRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_at
+              preset_minutes, department_id, status, chat_id, created_via, created_at
        FROM event_tech_req WHERE event_id = $1 ORDER BY created_at`,
       [eventId]
     ),
@@ -970,7 +973,7 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
   const [reqRes, assigneeRes, itemRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_at
+              preset_minutes, department_id, status, chat_id, created_via, created_at
        FROM event_tech_req WHERE id = $1 AND event_id = $2`,
       [id, eventId]
     ),
@@ -1054,7 +1057,7 @@ export async function createEventTechReq(data: {
          (id, event_id, title, description, preset_minutes, department_id)
        VALUES ($1,$2,$3,$4,$5,$6)
        RETURNING id, event_id, title, description,
-                 preset_minutes, department_id, status, chat_id, created_at`,
+                 preset_minutes, department_id, status, chat_id, created_via, created_at`,
       [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId]
     );
     const unique = [...new Set(data.scheduleItemIds)];
@@ -1105,7 +1108,7 @@ export async function updateEventTechReq(
   const res = await getPool().query<TechReqRow>(
     `UPDATE event_tech_req SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
      RETURNING id, event_id, title, description,
-               preset_minutes, department_id, status, chat_id, created_at`,
+               preset_minutes, department_id, status, chat_id, created_via, created_at`,
     vals
   );
   if (!res.rows[0]) return null;
@@ -1164,8 +1167,8 @@ export async function upsertAwaitingTechReqs(
     } else {
       reqId = uid();
       await pool.query(
-        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status)
-         VALUES ($1, $2, '', '', $3, 'awaiting')`,
+        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status, created_via)
+         VALUES ($1, $2, '', '', $3, 'awaiting', 'dept_auto')`,
         [reqId, eventId, deptId],
       );
       if (scheduleItemId) {
@@ -1641,6 +1644,18 @@ export async function isUserReqAssignee(reqId: string, userId: string): Promise<
        SELECT 1 FROM event_tech_assignee WHERE req_id = $1 AND user_id = $2
      ) AS exists`,
     [reqId, userId]
+  );
+  return res.rows[0].exists;
+}
+
+/** True if the user is a member of a specific event department. */
+export async function isUserDeptMember(deptId: string, userId: string): Promise<boolean> {
+  const res = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM event_department_member
+       WHERE department_id = $1 AND user_id = $2
+     ) AS exists`,
+    [deptId, userId]
   );
   return res.rows[0].exists;
 }

@@ -1231,6 +1231,12 @@
       "column": "chat_id",
       "type": "text",
       "nullable": true
+    },
+    {
+      "column": "created_via",
+      "type": "text",
+      "nullable": false,
+      "default": "'explicit'::text"
     }
   ],
   "event_tech_req_item": [

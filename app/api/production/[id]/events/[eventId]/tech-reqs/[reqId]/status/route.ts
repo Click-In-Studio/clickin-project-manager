@@ -29,7 +29,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!status || !VALID_STATUSES.has(status))
     return Response.json({ error: "无效 status" }, { status: 400 });
 
-  const hasFullEdit = await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view");
+  const hasFullEdit =
+    await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "details", "edit")
+    || await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "task", "*", "*", "edit");
   // Only full-editors can set back to awaiting
   if (status === "awaiting" && !hasFullEdit)
     return Response.json({ error: "权限不足" }, { status: 403 });
