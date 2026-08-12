@@ -50,6 +50,7 @@ import ProductionTopMenu, {
   PRODUCTION_TOOLBAR_STAGE,
   useAnchoredMenu,
   useProductionToolbar,
+  useProductionToolbarStage,
 } from "@/components/ProductionTopMenu";
 
 let _seq = 0;
@@ -6685,6 +6686,105 @@ function markerChangeFromOperations(changes: BlockChange[]): MarkerChange {
   };
 }
 
+type ScriptToolbarOpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
+type ScriptToolbarMode = "full" | "short" | "compact";
+
+type ScriptToolbarMenuControls = {
+  openMenu: ScriptToolbarOpenMenu;
+  setOpenMenu: (menu: ScriptToolbarOpenMenu) => void;
+  toggleMenu: (menu: Exclude<ScriptToolbarOpenMenu, null>) => void;
+  openNestedMenu: (menu: Exclude<ScriptToolbarOpenMenu, null>, anchor: HTMLButtonElement) => void;
+  handleCharacterPanelOpenChange: (open: boolean) => void;
+  scriptMenuPosition: ReturnType<typeof useAnchoredMenu<HTMLButtonElement>>;
+  nestedMenuPosition: ReturnType<typeof useAnchoredMenu<HTMLButtonElement>>;
+};
+
+function ScriptToolbarMenuController({
+  toolbarCompact,
+  characterCloseBlocked,
+  openMenuRef,
+  closeMenuRef,
+  children,
+}: {
+  toolbarCompact: boolean;
+  characterCloseBlocked: boolean;
+  openMenuRef: React.MutableRefObject<ScriptToolbarOpenMenu>;
+  closeMenuRef: React.MutableRefObject<() => void>;
+  children: (controls: ScriptToolbarMenuControls) => React.ReactNode;
+}) {
+  const { overflowOpen } = useProductionToolbar();
+  const [openMenu, setOpenMenuState] = useState<ScriptToolbarOpenMenu>(null);
+  const scriptMenuPosition = useAnchoredMenu<HTMLButtonElement>(openMenu === "script", "bottom");
+  const nestedMenuPosition = useAnchoredMenu<HTMLButtonElement>(
+    toolbarCompact && openMenu !== null && openMenu !== "script",
+    "left",
+    openMenu,
+  );
+  const setOpenMenu = useCallback((menu: ScriptToolbarOpenMenu) => {
+    openMenuRef.current = menu;
+    setOpenMenuState(menu);
+  }, [openMenuRef]);
+  const closeMenu = useCallback(() => setOpenMenu(null), [setOpenMenu]);
+  const toggleMenu = useCallback((menu: Exclude<ScriptToolbarOpenMenu, null>) => {
+    setOpenMenuState((current) => {
+      const next = current === menu ? null : menu;
+      openMenuRef.current = next;
+      return next;
+    });
+  }, [openMenuRef]);
+  const openNestedMenu = useCallback((menu: Exclude<ScriptToolbarOpenMenu, null>, anchor: HTMLButtonElement) => {
+    nestedMenuPosition.anchorRef.current = anchor;
+    setOpenMenuState((current) => {
+      const next = current === menu ? null : menu;
+      openMenuRef.current = next;
+      return next;
+    });
+  }, [nestedMenuPosition.anchorRef, openMenuRef]);
+  const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
+    if (!open && characterCloseBlocked) return;
+    setOpenMenu(open ? "char" : null);
+  }, [characterCloseBlocked, setOpenMenu]);
+
+  closeMenuRef.current = closeMenu;
+
+  useEffect(() => {
+    if (toolbarCompact && !overflowOpen) closeMenu();
+  }, [closeMenu, overflowOpen, toolbarCompact]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismissOnOutsideMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const panel = target.closest<HTMLElement>("[data-script-toolbar-menu-panel]");
+      const scriptTrigger = target.closest<HTMLElement>("[data-script-toolbar-menu-trigger]");
+      const overflowTrigger = target.closest<HTMLElement>("[data-production-overflow-submenu-trigger]");
+      const triggerMenu = scriptTrigger?.dataset.scriptToolbarMenuTrigger
+        ?? overflowTrigger?.dataset.productionOverflowSubmenuTrigger;
+      if (panel?.dataset.scriptToolbarMenuPanel === openMenu || triggerMenu === openMenu) return;
+      if (openMenu === "char") handleCharacterPanelOpenChange(false);
+      else closeMenu();
+    };
+    document.addEventListener("mousedown", dismissOnOutsideMouseDown);
+    return () => document.removeEventListener("mousedown", dismissOnOutsideMouseDown);
+  }, [closeMenu, handleCharacterPanelOpenChange, openMenu]);
+
+  useEffect(() => () => {
+    openMenuRef.current = null;
+    if (closeMenuRef.current === closeMenu) closeMenuRef.current = () => {};
+  }, [closeMenu, closeMenuRef, openMenuRef]);
+
+  return children({
+    openMenu,
+    setOpenMenu,
+    toggleMenu,
+    openNestedMenu,
+    handleCharacterPanelOpenChange,
+    scriptMenuPosition,
+    nestedMenuPosition,
+  });
+}
+
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
@@ -6706,7 +6806,7 @@ export default function ScriptEditor({
   versionId?: string | null;
   initialSearchQuery?: string;
 }) {
-  const { stage: toolbarStage, overflowOpen } = useProductionToolbar();
+  const toolbarStage = useProductionToolbarStage();
   const effectiveScriptId = productionId ?? scriptId;
 
   // ── Version state ─────────────────────────────────────────────────────────────
@@ -6848,6 +6948,9 @@ export default function ScriptEditor({
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
+  const toolbarOpenMenuRef = useRef<ScriptToolbarOpenMenu>(null);
+  const toolbarMenuCloseRef = useRef<() => void>(() => {});
+  const closeToolbarMenu = useCallback(() => toolbarMenuCloseRef.current(), []);
 
   const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
     if (!baseCanEditMetadata) return;
@@ -6890,12 +6993,12 @@ export default function ScriptEditor({
 
   const requestStageDelimiterChange = useCallback((open: string, close: string) => {
     if (scriptConfig.stageDelimOpen === open && scriptConfig.stageDelimClose === close) {
-      setOpenMenu(null);
+      closeToolbarMenu();
       return;
     }
     setPendingStageDelimiterChange({ open, close });
-    setOpenMenu(null);
-  }, [scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
+    closeToolbarMenu();
+  }, [closeToolbarMenu, scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
 
   // ── Page map (computed client-side, deterministic) ──────────────────────────
   const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
@@ -7117,10 +7220,7 @@ export default function ScriptEditor({
   const [jumpValue, setJumpValue] = useState("");
 
   // ── Toolbar dropdowns ────────────────────────────────────────────────────────
-  type OpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
-  type ToolbarMode = "full" | "short" | "compact";
-  const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
-  const [toolbarMode, setToolbarMode] = useState<ToolbarMode>("full");
+  const [toolbarMode, setToolbarMode] = useState<ScriptToolbarMode>("full");
   const [toolbarMeasureTick, setToolbarMeasureTick] = useState(0);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const fullToolbarWidthRef = useRef(0);
@@ -7128,40 +7228,6 @@ export default function ScriptEditor({
   const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored || toolbarMode === "compact";
   const toolbarShort = !toolbarCompact && (toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || toolbarMode === "short");
   const presenceFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.lowPriorityStored;
-  const scriptMenuPosition = useAnchoredMenu<HTMLButtonElement>(openMenu === "script", "bottom");
-  const nestedMenuPosition = useAnchoredMenu<HTMLButtonElement>(toolbarCompact && openMenu !== null && openMenu !== "script", "left", openMenu);
-  const toggleMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setOpenMenu(prev => prev === name ? null : name);
-  }, []);
-  const openNestedMenu = useCallback((name: Exclude<OpenMenu, null>, anchor: HTMLButtonElement) => {
-    nestedMenuPosition.anchorRef.current = anchor;
-    setOpenMenu(current => current === name ? null : name);
-  }, [nestedMenuPosition.anchorRef]);
-  useEffect(() => {
-    if (toolbarCompact && !overflowOpen) setOpenMenu(null);
-  }, [toolbarCompact, overflowOpen]);
-  const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
-    if (!open && pendingAggregateFocusPrompt) return;
-    setOpenMenu(open ? "char" : null);
-  }, [pendingAggregateFocusPrompt]);
-  useEffect(() => {
-    if (!openMenu) return;
-    const dismissOnOutsideMouseDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const panel = target.closest<HTMLElement>("[data-script-toolbar-menu-panel]");
-      const scriptTrigger = target.closest<HTMLElement>("[data-script-toolbar-menu-trigger]");
-      const overflowTrigger = target.closest<HTMLElement>("[data-production-overflow-submenu-trigger]");
-      const triggerMenu = scriptTrigger?.dataset.scriptToolbarMenuTrigger
-        ?? overflowTrigger?.dataset.productionOverflowSubmenuTrigger;
-      if (panel?.dataset.scriptToolbarMenuPanel === openMenu
-        || triggerMenu === openMenu) return;
-      if (openMenu === "char") handleCharacterPanelOpenChange(false);
-      else setOpenMenu(null);
-    };
-    document.addEventListener("mousedown", dismissOnOutsideMouseDown);
-    return () => document.removeEventListener("mousedown", dismissOnOutsideMouseDown);
-  }, [openMenu, handleCharacterPanelOpenChange]);
   const setToolbarElement = useCallback((el: HTMLDivElement | null) => {
     toolbarRef.current = el;
     if (el) setToolbarMeasureTick(tick => tick + 1);
@@ -7171,9 +7237,9 @@ export default function ScriptEditor({
     shortToolbarWidthRef.current = 0;
     setToolbarMode("full");
     if (closeMenus) {
-      setOpenMenu(null);
+      closeToolbarMenu();
     }
-  }, []);
+  }, [closeToolbarMenu]);
 
   useEffect(() => {
     const el = toolbarRef.current;
@@ -7183,7 +7249,7 @@ export default function ScriptEditor({
     let frame: number | null = null;
     const measure = () => {
       frame = null;
-      if (navigatingAwayRef.current || openMenu) return;
+      if (navigatingAwayRef.current || toolbarOpenMenuRef.current) return;
       const available = el.clientWidth;
       const required = el.scrollWidth;
       if (toolbarMode === "full") {
@@ -7223,7 +7289,7 @@ export default function ScriptEditor({
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [toolbarMode, openMenu, toolbarMeasureTick]);
+  }, [toolbarMode, toolbarMeasureTick]);
 
   useEffect(() => {
     resetToolbarMeasurement();
@@ -7470,8 +7536,8 @@ export default function ScriptEditor({
   const toggleLockedMode = useCallback(() => {
     if (versionForcesLockedMode) return;
     setPendingLockedMode(!manualLockedMode);
-    setOpenMenu(null);
-  }, [manualLockedMode, versionForcesLockedMode]);
+    closeToolbarMenu();
+  }, [closeToolbarMenu, manualLockedMode, versionForcesLockedMode]);
 
   const confirmLockedModeChange = useCallback(() => {
     if (pendingLockedMode === null) return;
@@ -7489,7 +7555,7 @@ export default function ScriptEditor({
         : null;
     }
     resetScriptInteractions();
-    setOpenMenu(null);
+    closeToolbarMenu();
     setManualLockedMode(pendingLockedMode);
     setDisplay(prev => {
       const next = { ...prev, rehearsalMode: pendingLockedMode };
@@ -7497,7 +7563,7 @@ export default function ScriptEditor({
       return next;
     });
     setPendingLockedMode(null);
-  }, [pendingLockedMode, resetScriptInteractions]);
+  }, [closeToolbarMenu, pendingLockedMode, resetScriptInteractions]);
 
   const unlockReorder = useCallback(() => {
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
@@ -9860,12 +9926,12 @@ export default function ScriptEditor({
     );
     if (!cleanupAnalysis.hasEmptyTextBlock && cleanupAnalysis.targets.length === 0) {
       showReorderNotice("没有可清除的空白内容。");
-      setOpenMenu(null);
+      closeToolbarMenu();
       return;
     }
     setEmptyScriptCleanupDialog(cleanupAnalysis.targets);
-    setOpenMenu(null);
-  }, [canEditText, isLockedMode, sceneDetailById, setEmptyScriptCleanupDialog, showReorderNotice]);
+    closeToolbarMenu();
+  }, [canEditText, closeToolbarMenu, isLockedMode, sceneDetailById, setEmptyScriptCleanupDialog, showReorderNotice]);
 
   const applyEmptyScriptCleanup = useCallback((selectedTargetKeys: Set<string>) => {
     if (isLockedMode || !canEditText) return;
@@ -10846,56 +10912,6 @@ export default function ScriptEditor({
       </div>
     );
   };
-  const toolbarOverflow = toolbarCompact ? (
-    <>
-      {presenceFolded && onlineUsers.length > 0 && (
-        <div className="border-b border-zinc-100">
-          <ProductionOverflowSubmenuButton
-            menuId="presence"
-            label={<span className="text-[10px] font-medium tracking-wide text-zinc-400">当前在线</span>}
-            detail={renderPresenceStack(4)}
-            expanded={openMenu === "presence"}
-            onToggle={(anchor) => openNestedMenu("presence", anchor)}
-          />
-        </div>
-      )}
-      {canEditMetadata && (
-        <ProductionOverflowSubmenuButton
-          menuId="scene"
-          label="章节"
-          expanded={openMenu === "scene"}
-          onToggle={(anchor) => openNestedMenu("scene", anchor)}
-        />
-      )}
-      {(canEditMetadata || isLockedMode) && (
-        <ProductionOverflowSubmenuButton
-          menuId="char"
-          label="角色"
-          expanded={openMenu === "char"}
-          onToggle={(anchor) => openNestedMenu("char", anchor)}
-        />
-      )}
-      <ProductionOverflowSubmenuButton
-        menuId="edit"
-        label={isLockedMode ? "查找" : "编辑"}
-        expanded={openMenu === "edit"}
-        onToggle={(anchor) => openNestedMenu("edit", anchor)}
-      />
-      <ProductionOverflowSubmenuButton
-        menuId="display"
-        label="显示"
-        expanded={openMenu === "display"}
-        onToggle={(anchor) => openNestedMenu("display", anchor)}
-      />
-      <ProductionOverflowSubmenuButton
-        menuId="export"
-        label="导出"
-        expanded={openMenu === "export"}
-        onToggle={(anchor) => openNestedMenu("export", anchor)}
-      />
-    </>
-  ) : null;
-
   return (
     <div ref={setWorkspaceMeasureRef} className="bg-[var(--paper)]">
       {/* Toolbar */}
@@ -10903,6 +10919,72 @@ export default function ScriptEditor({
         ? "sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm"
         : "contents"
       }>
+        <ScriptToolbarMenuController
+          toolbarCompact={toolbarCompact}
+          characterCloseBlocked={pendingAggregateFocusPrompt !== null}
+          openMenuRef={toolbarOpenMenuRef}
+          closeMenuRef={toolbarMenuCloseRef}
+        >
+          {({
+            openMenu,
+            setOpenMenu,
+            toggleMenu,
+            openNestedMenu,
+            handleCharacterPanelOpenChange,
+            scriptMenuPosition,
+            nestedMenuPosition,
+          }) => {
+            const toolbarOverflow = toolbarCompact ? (
+              <>
+                {presenceFolded && onlineUsers.length > 0 && (
+                  <div className="border-b border-zinc-100">
+                    <ProductionOverflowSubmenuButton
+                      menuId="presence"
+                      label={<span className="text-[10px] font-medium tracking-wide text-zinc-400">当前在线</span>}
+                      detail={renderPresenceStack(4)}
+                      expanded={openMenu === "presence"}
+                      onToggle={(anchor) => openNestedMenu("presence", anchor)}
+                    />
+                  </div>
+                )}
+                {canEditMetadata && (
+                  <ProductionOverflowSubmenuButton
+                    menuId="scene"
+                    label="章节"
+                    expanded={openMenu === "scene"}
+                    onToggle={(anchor) => openNestedMenu("scene", anchor)}
+                  />
+                )}
+                {(canEditMetadata || isLockedMode) && (
+                  <ProductionOverflowSubmenuButton
+                    menuId="char"
+                    label="角色"
+                    expanded={openMenu === "char"}
+                    onToggle={(anchor) => openNestedMenu("char", anchor)}
+                  />
+                )}
+                <ProductionOverflowSubmenuButton
+                  menuId="edit"
+                  label={isLockedMode ? "查找" : "编辑"}
+                  expanded={openMenu === "edit"}
+                  onToggle={(anchor) => openNestedMenu("edit", anchor)}
+                />
+                <ProductionOverflowSubmenuButton
+                  menuId="display"
+                  label="显示"
+                  expanded={openMenu === "display"}
+                  onToggle={(anchor) => openNestedMenu("display", anchor)}
+                />
+                <ProductionOverflowSubmenuButton
+                  menuId="export"
+                  label="导出"
+                  expanded={openMenu === "export"}
+                  onToggle={(anchor) => openNestedMenu("export", anchor)}
+                />
+              </>
+            ) : null;
+
+            return (
         <ProductionTopMenu
           barRef={setToolbarElement}
           fallbackClassName="gap-0 px-6"
@@ -11408,6 +11490,9 @@ export default function ScriptEditor({
             </>
           )}
         </ProductionTopMenu>
+            );
+          }}
+        </ScriptToolbarMenuController>
 
         {/* 搜索栏 */}
         {searchOpen && (
