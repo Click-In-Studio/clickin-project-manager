@@ -33,13 +33,6 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "asset:share":         "分享附件",
   "asset:rename":        "重命名附件",
   "asset:delete":        "删除附件",
-  "cue_list:view":       "查看 Cue 表",
-  "cue_list:edit":       "编辑 Cue 表",
-  "cue_list:manage":     "管理 Cue 表",
-  "cue_list:create":     "创建 Cue 表",
-  "cue:view":            "查看 Cue",
-  "cue:create":          "创建 Cue",
-  "cue:edit":            "编辑 Cue",
   "report:create":       "提交报告",
   "report:reply":        "回复报告",
 };

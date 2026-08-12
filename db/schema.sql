@@ -970,10 +970,9 @@ CREATE TABLE IF NOT EXISTS resource_permission_level (
 );
 
 INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  -- cue_list 已 REST 化（批A）：只余四动词（view/edit 在此，create/delete 在下方批0 INSERT）
   ('cue_list',    'view',           1),
-  ('cue_list',    'mount',          2),
   ('cue_list',    'edit',           3),
-  ('cue_list',    'manage',         4),
   ('scene',       'view',           1),
   ('scene',       'mount',          2),
   ('scene',       'edit',           3),

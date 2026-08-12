@@ -15,6 +15,7 @@ export type ProductionAccess = {
 };
 import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
 import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
+import { CUE_LIST_LEVEL_ROW_SETS, type CueListLevel } from "./resource-grant-db";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -7206,26 +7207,35 @@ export async function approveAccessRequest(
         ],
       );
     } else {
-      await getPool().query(
-        `INSERT INTO resource_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by, approval_id, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [
-          req.production_id,
-          req.subject_id,
-          req.resource_type,
-          req.resource_id ?? "*",
-          req.resource_sub ?? "*",
-          req.permission_level,
-          actorId,
-          requestId,
-          fresh?.expires_at ?? null,
-        ],
-      );
+      // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
+      // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
+      const rows: ReadonlyArray<readonly [string, string]> =
+        req.resource_type === "cue_list"
+          ? CUE_LIST_LEVEL_ROW_SETS[req.permission_level as CueListLevel]
+            ?? [[req.resource_sub ?? "*", req.permission_level] as const]
+          : [[req.resource_sub ?? "*", req.permission_level] as const];
+      for (const [sub, verb] of rows) {
+        await getPool().query(
+          `INSERT INTO resource_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by, approval_id, expires_at)
+           VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
+           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+             WHERE is_revoked = false
+           DO NOTHING`,
+          [
+            req.production_id,
+            req.subject_id,
+            req.resource_type,
+            req.resource_id ?? "*",
+            sub,
+            verb,
+            actorId,
+            requestId,
+            fresh?.expires_at ?? null,
+          ],
+        );
+      }
     }
 
     // Expire any pending action notifications for this request

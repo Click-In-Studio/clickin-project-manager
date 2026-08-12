@@ -25,13 +25,13 @@ describe("atomic_permission_grant 过期过滤", () => {
     await getPool().query(
       `INSERT INTO atomic_permission_grant
          (production_id, user_id, permission_key, grant_source, confirmed_by, expires_at)
-       VALUES ($1, $2, 'cue_list:create', 'approval', $2, '2000-01-01T00:00:00Z'),
+       VALUES ($1, $2, 'report:create', 'approval', $2, '2000-01-01T00:00:00Z'),
               ($1, $2, 'event:create',    'approval', $2, '2099-01-01T00:00:00Z')`,
       [prodId, userId],
     );
     const access = await getProductionPermissionContext(userId, false, prodId);
     expect(access).not.toBeNull();
-    expect(access!.permCtx.activeGrants.has("cue_list:create")).toBe(false);
+    expect(access!.permCtx.activeGrants.has("report:create")).toBe(false);
     expect(access!.permCtx.activeGrants.has("event:create")).toBe(true);
   });
 });

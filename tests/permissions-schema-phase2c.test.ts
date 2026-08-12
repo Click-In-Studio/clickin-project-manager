@@ -170,7 +170,8 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
       `SELECT permission_level, sort_order FROM resource_permission_level
        WHERE resource_type = 'cue_list' ORDER BY sort_order, permission_level`,
     );
-    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "view", "mount", "edit", "manage"]);
+    // 批A：cue_list 已 REST 化，词汇 = 四动词（mount/manage 退役）
+    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "view", "edit"]);
     expect(rows.filter((r) => r.sort_order === 0).map((r) => r.permission_level)).toEqual(["create", "delete"]);
   });
 

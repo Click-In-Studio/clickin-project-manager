@@ -56,7 +56,7 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("resource_permission_level has cue_list/edit and cue_list/manage entries", async () => {
+  it("resource_permission_level has cue_list verb entries (批A 后 manage/mount 退役)", async () => {
     const { rows } = await getPool().query(`
       SELECT permission_level FROM resource_permission_level
       WHERE resource_type = 'cue_list'
@@ -64,7 +64,8 @@ describe("schema verification", () => {
     `);
     const levels = rows.map((r) => r.permission_level);
     expect(levels).toContain("edit");
-    expect(levels).toContain("manage");
+    expect(levels).toContain("view");
+    expect(levels).not.toContain("manage");
   });
 });
 

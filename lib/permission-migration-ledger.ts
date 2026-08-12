@@ -67,22 +67,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "asset:overwrite_any": "D",
   "asset:mount_any": "D",
   "asset:unmount_any": "D",
-  // cue_list → 批A
-  "cue_list:create_any": "A",
-  "cue_list:delete_any": "A",
-  "cue_list:rename_any": "A",
-  "cue_list:reorder_any": "A",
-  "cue_list:edit_abbr_any": "A",
-  "cue_list:edit_description_any": "A",
-  "cue_list:manage_permissions_any": "A",
-  // cue → 批A
-  "cue:create_any": "A",
-  "cue:delete_any": "A",
-  "cue:renumber_any": "A",
-  "cue:rename_any": "A",
-  "cue:edit_description_any": "A",
-  "cue:move_any": "A",
-  "cue:mount_any": "A",
   // dramaturgy_view → 批E
   "dramaturgy_view:create_public": "E",
   "dramaturgy_view:delete_public": "E",
@@ -108,9 +92,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // script → 批E
   "script:edit_comment_any": "E",
   "script:delete_comment_any": "E",
-  // cue → 批A
-  "cue:edit_comment_any": "A",
-  "cue:delete_comment_any": "A",
   // report → 批C
   "report:edit_comment_any": "C",
   "report:delete_comment_any": "C",
@@ -166,22 +147,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "character:edit_gender": "E",
   "character:edit_biography": "E",
   "character:edit_role_type": "E",
-  // cue_list → 批A
-  "cue_list:create": "A",
-  "cue_list:delete": "A",
-  "cue_list:rename": "A",
-  "cue_list:reorder": "A",
-  "cue_list:edit_abbr": "A",
-  "cue_list:edit_description": "A",
-  "cue_list:manage_permissions": "A",
-  // cue → 批A
-  "cue:create": "A",
-  "cue:delete": "A",
-  "cue:renumber": "A",
-  "cue:rename": "A",
-  "cue:edit_description": "A",
-  "cue:move": "A",
-  "cue:mount": "A",
   // event → 批B
   "event:create": "B",
   // report → 批C
@@ -203,10 +168,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "character:view": "E",
   // script → 批E
   "script:view": "E",
-  // cue_list → 批A
-  "cue_list:view": "A",
-  // cue → 批A
-  "cue:view": "A",
   // contacts → 批F
   "contacts:view": "F",
   // event → 批B
@@ -225,8 +186,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   "asset:share_any_downloadable": "D",
   // script → 批E
   "script:comment": "E",
-  // cue → 批A
-  "cue:comment": "A",
   // report → 批C
   "report:reply": "C",
   // org → 批G
@@ -235,14 +194,48 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 };
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
-export const RETIRED_PERMISSION_KEYS: readonly string[] = [];
+export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批A（cue 域，2026-08-11）
+  "cue:comment",
+  "cue:create",
+  "cue:create_any",
+  "cue:delete",
+  "cue:delete_any",
+  "cue:delete_comment_any",
+  "cue:edit_comment_any",
+  "cue:edit_description",
+  "cue:edit_description_any",
+  "cue:mount",
+  "cue:mount_any",
+  "cue:move",
+  "cue:move_any",
+  "cue:rename",
+  "cue:rename_any",
+  "cue:renumber",
+  "cue:renumber_any",
+  "cue:view",
+  "cue_list:create",
+  "cue_list:create_any",
+  "cue_list:delete",
+  "cue_list:delete_any",
+  "cue_list:edit_abbr",
+  "cue_list:edit_abbr_any",
+  "cue_list:edit_description",
+  "cue_list:edit_description_any",
+  "cue_list:manage_permissions",
+  "cue_list:manage_permissions_any",
+  "cue_list:rename",
+  "cue_list:rename_any",
+  "cue_list:reorder",
+  "cue_list:reorder_any",
+  "cue_list:view",
+];
 
 /**
  * resource_permission_level 旧级别的退役账本（view/edit 字符串沿用为动词，不在此列）。
  * 完成一批：对应级别的 grant 行迁移为动词行 + 从词汇表删行 + 从此处删行。
  */
 export const RESOURCE_LEVEL_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
-  "cue_list:mount": "A", "cue_list:manage": "A",
   "event:manage": "B", "event:publish": "B", "event:edit_published": "B", "event:revoke": "B",
   "tech_req:assign": "B", "tech_req:manage": "B",
   "report:manage": "C", "report:publish": "C", "report:edit_published": "C", "report:revoke": "C",

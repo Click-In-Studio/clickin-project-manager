@@ -111,10 +111,12 @@ beforeAll(async () => {
     "INSERT INTO cue_list (id, production_id, name, notes, created_by) VALUES ($1, $2, $3, '', $4)",
     [cueListId, prodId, "测试灯光表", CREATOR_USER],
   );
-  // Manually give EDITOR_USER an edit grant
+  // Manually give EDITOR_USER an edit grant（批A：行集——授权时发多行，edit 必伴 view）
   await getPool().query(
     `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
-     VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'direct') ON CONFLICT DO NOTHING`,
+     VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'direct'),
+            ($1, $2, 'cue_list', $3, '*', 'view', 'direct')
+     ON CONFLICT DO NOTHING`,
     [prodId, EDITOR_USER, cueListId],
   );
 });
@@ -140,20 +142,22 @@ afterAll(async () => {
 // ── 1. createCueList writes manage grant ──────────────────────────────────────
 
 describe("createCueList", () => {
-  it("writes manage grant for creator", async () => {
+  it("writes creator verb row-set (批A：manage 单行 → 六行动词行集)", async () => {
     const listId = nextListId();
     await createCueList({
       id: listId, productionId: prodId, name: "新建表",
       notes: "", abbr: null, template: null, createdBy: CREATOR_USER,
     });
-    const { rows } = await getPool().query(
-      `SELECT permission_level FROM resource_grant
+    const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM resource_grant
        WHERE production_id = $1 AND user_id = $2
-         AND resource_type = 'cue_list' AND resource_id = $3
-         AND permission_level = 'manage' AND NOT is_revoked`,
+         AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
       [prodId, CREATOR_USER, listId],
     );
-    expect(rows).toHaveLength(1);
+    const got = rows.map((r) => `${r.resource_sub}@${r.permission_level}`).sort();
+    expect(got).toEqual(
+      ["*@view", "*@edit", "*@delete", "cues@create", "cues@delete", "grants@edit"].sort(),
+    );
   });
 
   it("writes resource_dept_manage when template matches dept.allowed_cue_types", async () => {
@@ -405,9 +409,12 @@ describe("listCueListsWithAccess", () => {
     expect(target?.canEdit).toBe(true);
   });
 
-  it("marks non-granted lists as not editable", async () => {
+  it("hides non-granted lists entirely (批A 目录三态：无 view 行不可见)", async () => {
     const lists = await listCueListsWithAccess(prodId, OUTSIDER_USER);
-    const target = lists.find((l) => l.id === cueListId);
+    expect(lists.find((l) => l.id === cueListId)).toBeUndefined();
+    // seeAll（admin/owner）仍可见且 canEdit=false
+    const all = await listCueListsWithAccess(prodId, OUTSIDER_USER, { seeAll: true });
+    const target = all.find((l) => l.id === cueListId);
     expect(target?.canEdit).toBe(false);
   });
 });

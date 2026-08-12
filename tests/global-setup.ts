@@ -47,6 +47,12 @@ import {
   CUE_LIST_GRANT_SNAPSHOT_PATH,
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
+import {
+  isCueDomainRestPreMigrationSchema,
+  createCueDomainRestPreMigrationData,
+  CUE_DOMAIN_REST_SNAPSHOT_PATH,
+  type CueDomainRestSnapshot,
+} from "./cue-domain-rest-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -155,6 +161,17 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isCueDomainRestPreMigrationSchema(pool)) {
+    // 批A migration path: legacy cue_list manage level still in vocabulary.
+    const cueDomainRestSnapshot = await createCueDomainRestPreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_DOMAIN_REST_SNAPSHOT_PATH, JSON.stringify(cueDomainRestSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-domain-rest.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -185,6 +202,31 @@ export async function teardown() {
       [cueListGrantSnapshot.personalGrantUserId, cueListGrantSnapshot.roleGrantUserId],
     ).catch(() => {});
     await unlink(CUE_LIST_GRANT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批A cue-domain-rest migration factory data (migration path only; no-op otherwise).
+  let cueDomainRestSnapshot: CueDomainRestSnapshot | null = null;
+  try {
+    cueDomainRestSnapshot = JSON.parse(
+      await readFile(CUE_DOMAIN_REST_SNAPSHOT_PATH, "utf8"),
+    ) as CueDomainRestSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (cueDomainRestSnapshot) {
+    await pool.query(
+      "DELETE FROM cue_list WHERE id = $1",
+      [cueDomainRestSnapshot.cueListId],
+    ).catch(() => {});
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [cueDomainRestSnapshot.productionId],
+    ).catch(() => {});
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2, $3)",
+      [cueDomainRestSnapshot.manageUserId, cueDomainRestSnapshot.editUserId, cueDomainRestSnapshot.atomicUserId],
+    ).catch(() => {});
+    await unlink(CUE_DOMAIN_REST_SNAPSHOT_PATH).catch(() => {});
   }
 
   // Clean up role-cue-type migration factory data (migration path only; no-op otherwise).

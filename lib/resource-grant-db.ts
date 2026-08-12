@@ -447,6 +447,19 @@ export async function writeTechReqGrants(
 
 export type CueListLevel = "manage" | "edit" | "mount" | "view";
 
+/**
+ * 批A：cue_list 伪级别 → 动词行集（授权面统一展开表）。
+ * 非线性模型下"级别"只是授权 UX 的语言，蕴含由授权时发多行表达（总表 §0）。
+ * selfConfirm / 直接授权 / 审批发行共用此表。
+ */
+export const CUE_LIST_LEVEL_ROW_SETS: Record<CueListLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["*", "view"]],
+  mount:  [["*", "view"], ["mounts", "create"]],
+  edit:   [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"]],
+  manage: [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"],
+           ["*", "delete"], ["grants", "edit"]],
+};
+
 export type CueListAccessResult =
   | { canAccess: true; level: CueListLevel }
   | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "manage" | "edit" }
@@ -702,14 +715,7 @@ export async function setCueListGrant(
         [productionId, userId, cueListId],
       );
       // 批A：按伪级别写动词行集（direct 授权不受 dept/role sweep 影响）
-      const rowSets: Record<string, Array<[string, string]>> = {
-        view:   [["*", "view"]],
-        mount:  [["*", "view"], ["mounts", "create"]],
-        edit:   [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"]],
-        manage: [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"],
-                 ["*", "delete"], ["grants", "edit"]],
-      };
-      for (const [sub, verb] of rowSets[level] ?? rowSets.edit) {
+      for (const [sub, verb] of CUE_LIST_LEVEL_ROW_SETS[level] ?? CUE_LIST_LEVEL_ROW_SETS.edit) {
         await client.query(
           `INSERT INTO resource_grant
              (production_id, user_id, resource_type, resource_id, resource_sub,

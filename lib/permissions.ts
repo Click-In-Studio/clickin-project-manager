@@ -49,21 +49,6 @@ export type Permission =
   | "asset:overwrite_any"
   | "asset:mount_any"
   | "asset:unmount_any"
-  // ─── 普通管理 - Cue _any 类 ───────────────────────────────────────────────────
-  | "cue_list:create_any"
-  | "cue_list:delete_any"
-  | "cue_list:rename_any"
-  | "cue_list:reorder_any"
-  | "cue_list:edit_abbr_any"
-  | "cue_list:edit_description_any"
-  | "cue_list:manage_permissions_any"
-  | "cue:create_any"
-  | "cue:delete_any"
-  | "cue:renumber_any"
-  | "cue:rename_any"
-  | "cue:edit_description_any"
-  | "cue:move_any"
-  | "cue:mount_any"
   // ─── 普通管理 - 构作视图公开类 ───────────────────────────────────────────────
   | "dramaturgy_view:create_public"
   | "dramaturgy_view:delete_public"
@@ -88,8 +73,6 @@ export type Permission =
   // ─── 普通管理 - 评论管理 ──────────────────────────────────────────────────────
   | "script:edit_comment_any"
   | "script:delete_comment_any"
-  | "cue:edit_comment_any"
-  | "cue:delete_comment_any"
   | "report:edit_comment_any"
   | "report:delete_comment_any"
   // ─── 普通管理 - 里程碑 ────────────────────────────────────────────────────────
@@ -143,21 +126,6 @@ export type Permission =
   | "character:edit_gender"
   | "character:edit_biography"
   | "character:edit_role_type"
-  // ─── 写权限 - Cue ─────────────────────────────────────────────────────────────
-  | "cue_list:create"
-  | "cue_list:delete"
-  | "cue_list:rename"
-  | "cue_list:reorder"
-  | "cue_list:edit_abbr"
-  | "cue_list:edit_description"
-  | "cue_list:manage_permissions"
-  | "cue:create"
-  | "cue:delete"
-  | "cue:renumber"
-  | "cue:rename"
-  | "cue:edit_description"
-  | "cue:move"
-  | "cue:mount"
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   | "event:create"
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
@@ -177,8 +145,6 @@ export type Permission =
   | "scene:view"
   | "character:view"
   | "script:view"
-  | "cue_list:view"
-  | "cue:view"
   | "contacts:view"
   | "event:view_call_sheet_any"
   | "event:follow"
@@ -192,7 +158,6 @@ export type Permission =
   | "asset:share_any"
   | "asset:share_any_downloadable"
   | "script:comment"
-  | "cue:comment"
   | "report:reply"
   // ─── 组织特殊权限（由 org_admin_production_grant 授予，见 #136）────────────
   | "org:assign_member"
@@ -365,7 +330,7 @@ export function hasScopedPermission(
 
 // ─── Mount Permission Check ────────────────────────────────────────────────────
 // Dual verification: asset-side AND entity-side must both pass.
-// entityPerm: 'scene:mount' | 'script:mount' | 'cue:mount' | 'production:mount'
+// entityPerm: 'scene:mount' | 'script:mount' | 'production:mount'
 // isOwnAsset: whether asset.uploadedBy === ctx.userId
 
 export function hasMountPermission(
@@ -389,30 +354,11 @@ export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
   "scene:view",
   "character:view",
   "script:view",
-  "cue_list:view",
-  "cue:view",
   "contacts:view",
   "event:follow",
   "asset:view",
   "asset:download",
   "asset:share",
-];
-
-// ─── Cue Operation Full Set ────────────────────────────────────────────────────
-const CUE_FULL_SET: readonly Permission[] = [
-  "cue_list:create",
-  "cue_list:delete",
-  "cue_list:rename",
-  "cue_list:reorder",
-  "cue_list:edit_abbr",
-  "cue_list:edit_description",
-  "cue_list:manage_permissions",
-  "cue:create",
-  "cue:delete",
-  "cue:renumber",
-  "cue:rename",
-  "cue:edit_description",
-  "cue:move",
 ];
 
 // ─── Dramaturgy Full Set ───────────────────────────────────────────────────────
@@ -490,20 +436,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "asset:overwrite_any",
   "asset:mount_any",
   "asset:unmount_any",
-  "cue_list:create_any",
-  "cue_list:delete_any",
-  "cue_list:rename_any",
-  "cue_list:reorder_any",
-  "cue_list:edit_abbr_any",
-  "cue_list:edit_description_any",
-  "cue_list:manage_permissions_any",
-  "cue:create_any",
-  "cue:delete_any",
-  "cue:renumber_any",
-  "cue:rename_any",
-  "cue:edit_description_any",
-  "cue:move_any",
-  "cue:mount_any",
   "dramaturgy_view:create_public",
   "dramaturgy_view:delete_public",
   "dramaturgy_view:overwrite_public",
@@ -529,8 +461,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "tag_option:reorder",
   "script:edit_comment_any",
   "script:delete_comment_any",
-  "cue:edit_comment_any",
-  "cue:delete_comment_any",
   "report:edit_comment_any",
   "report:delete_comment_any",
   "production:manage_config",
@@ -542,7 +472,6 @@ const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   "dramaturgy_view:create",
   "dramaturgy_view:delete",
   "dramaturgy_view:overwrite",
-  ...CUE_FULL_SET,
   ...SM_EVENT_PERMS,
   "report:create",
   "production:mount",
@@ -608,7 +537,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "scene:mount",
     "production:mount",
     ...DIRECTOR_EVENT_PERMS,
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "作曲": [
@@ -617,7 +545,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "script:mount",
     "scene:mount",
     "production:mount",
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "编曲": [
@@ -625,7 +552,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "script:mount",
     "scene:mount",
     "production:mount",
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
@@ -634,26 +560,21 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     "production:mount",
     "scene:mount",
     "script:mount",
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "灯光设计": [
     "production:mount",
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "多媒体设计": [
     "production:mount",
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "服化设计": [
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "音响设计": [
     "production:mount",
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
@@ -671,7 +592,6 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
   // 舞台监督
   "舞台监督": [
     ...SM_EVENT_PERMS,
-    ...CUE_FULL_SET,
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
@@ -735,11 +655,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "script:import", "dramaturgy:import",
   "asset:view_any", "asset:delete_any", "asset:rename_any",
   "asset:change_type_any", "asset:overwrite_any", "asset:mount_any", "asset:unmount_any",
-  "cue_list:create_any", "cue_list:delete_any", "cue_list:rename_any",
-  "cue_list:reorder_any", "cue_list:edit_abbr_any", "cue_list:edit_description_any",
-  "cue_list:manage_permissions_any",
-  "cue:create_any", "cue:delete_any", "cue:renumber_any", "cue:rename_any",
-  "cue:edit_description_any", "cue:move_any", "cue:mount_any",
   "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
   "task:delete_any",
   "character:delete",
@@ -748,7 +663,6 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "tag_option:create", "tag_option:delete", "tag_option:rename",
   "tag_option:edit_color", "tag_option:reorder",
   "script:edit_comment_any", "script:delete_comment_any",
-  "cue:edit_comment_any", "cue:delete_comment_any",
   "report:edit_comment_any", "report:delete_comment_any",
   "production:manage_config",
   "milestone:create", "milestone:manage", "milestone:delete",
@@ -764,21 +678,16 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "character:create", "character:rename", "character:change_type",
   "character:set_members", "character:edit_gender", "character:edit_biography",
   "character:edit_role_type",
-  "cue_list:create", "cue_list:delete", "cue_list:rename", "cue_list:reorder",
-  "cue_list:edit_abbr", "cue_list:edit_description", "cue_list:manage_permissions",
-  "cue:create", "cue:delete", "cue:renumber", "cue:rename",
-  "cue:edit_description", "cue:move", "cue:mount",
   "event:create",
   "report:create",
   "production:mount", "production:unmount",
   "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
   "asset:delete", "asset:mount", "asset:unmount",
-  "scene:view", "character:view", "script:view", "cue_list:view", "cue:view",
-  "contacts:view", "event:view_call_sheet_any", "event:follow",
+  "scene:view", "character:view", "script:view", "contacts:view", "event:view_call_sheet_any", "event:follow",
   "task:view", "task:view_any",
   "asset:view", "asset:download", "asset:download_any",
   "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
-  "script:comment", "cue:comment", "report:reply",
+  "script:comment", "report:reply",
   "org:assign_member", "org:recall_member",
 ];
 
