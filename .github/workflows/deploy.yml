@@ -143,7 +143,7 @@ jobs:
               # `read -r FILEPATH` for the same fd and can silently swallow the next
               # line(s), dropping migrations from a run with 2+ pending files without
               # any error (this is exactly what happened to migrate-cue-list-role.sql).
-              ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null
+              ssh prod "sudo -u postgres psql -v ON_ERROR_STOP=1 -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null
               # Record in manifest
               ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
               echo "$FILENAME" >> /tmp/db-applied.txt
