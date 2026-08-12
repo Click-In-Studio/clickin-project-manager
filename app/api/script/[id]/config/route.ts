@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getActiveVersionId, getVersion, saveScriptConfig } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
+import { hasGrant } from "@/lib/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
 import type { ScriptConfig } from "@/lib/script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
@@ -15,7 +16,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档" }, { status: 403 });
-  if (!hasPermission("scene:rename", permCtx)) {
+  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, id, "scene", "*", "meta/name", "edit")) {
     return Response.json({ error: "无权修改剧本设置" }, { status: 403 });
   }
 

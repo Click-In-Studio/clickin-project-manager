@@ -999,10 +999,10 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   -- cue_list 已 REST 化（批A）：只余四动词（view/edit 在此，create/delete 在下方批0 INSERT）
   ('cue_list',    'view',           1),
   ('cue_list',    'edit',           3),
+  -- scene 已 REST 化（批E PR-E1）：view/edit 沿用为动词（mount→mounts 面、manage 退役），
+  -- create/delete 在批0 INSERT；结构型资源无 grants 段（§0.10 持有者判据）
   ('scene',       'view',           1),
-  ('scene',       'mount',          2),
   ('scene',       'edit',           3),
-  ('scene',       'manage',         4),
   -- event 已 REST 化（批B）：view/edit 沿用为动词，create/delete 在批0 INSERT
   ('event',       'view',           1),
   ('event',       'edit',           2),
@@ -1024,7 +1024,16 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('dept',        'view',           0),
   ('dept',        'create',         0),
   ('dept',        'edit',           0),
-  ('dept',        'delete',         0)
+  ('dept',        'delete',         0),
+  -- character / tag_group（批E PR-E1）：结构型资源四动词；tag_option 并入 tag_group 树
+  ('character',   'view',           0),
+  ('character',   'create',         0),
+  ('character',   'edit',           0),
+  ('character',   'delete',         0),
+  ('tag_group',   'view',           0),
+  ('tag_group',   'create',         0),
+  ('tag_group',   'edit',           0),
+  ('tag_group',   'delete',         0)
 ON CONFLICT DO NOTHING;
 
 -- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
@@ -1252,4 +1261,18 @@ SELECT '制作人', k FROM (VALUES
   ('node:asset/*/meta@edit'), ('node:asset/*/file@create'),
   ('node:asset/*/publication@create'), ('node:asset/*/publication@delete')
 ) AS t(k)
+ON CONFLICT DO NOTHING;
+
+-- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:scene/*/meta@view'),
+  ('*', 'node:scene/*/synopsis@view'),
+  ('*', 'node:scene/*/action_line@view'),
+  ('*', 'node:scene/*/music@view'),
+  ('*', 'node:scene/*/stage_notes@view'),
+  ('*', 'node:character/*/meta@view'),
+  ('*', 'node:character/*/gender@view'),
+  ('*', 'node:character/*/biography@view'),
+  ('*', 'node:character/*/role_type@view'),
+  ('*', 'node:character/*/members@view')
 ON CONFLICT DO NOTHING;

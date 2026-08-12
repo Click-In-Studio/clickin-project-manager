@@ -1,5 +1,5 @@
 import { getPool } from "./pg";
-import { hasGrant, listGrantedResourceIds } from "./grant-check";
+import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
 import { hasPermission, type PermissionContext } from "./permissions";
 import type { Asset } from "./asset-db";
 
@@ -55,7 +55,7 @@ async function anyMountHostVisible(
   if (mounts.some(m => SCRIPT_MOUNT_TYPES.includes(m.mount_type))
       && hasPermission("script:view", permCtx)) return true;
   if (mounts.some(m => SCENE_MOUNT_TYPES.includes(m.mount_type))
-      && hasPermission("scene:view", permCtx)) return true;
+      && await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view")) return true;
   return cueMountHostVisible(permCtx.userId, productionId, mounts);
 }
 
@@ -79,7 +79,8 @@ async function structurallyVisibleAssetIds(
   productionId: string,
 ): Promise<Set<string>> {
   const hasScriptView = hasPermission("script:view", permCtx);
-  const hasSceneView = hasPermission("scene:view", permCtx);
+  // E1：scene 域已行化（域级目录票；per-instance 精确化待客座授权场景出现）
+  const hasSceneView = await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view");
   const { rows } = await getPool().query<{ asset_id: string }>(
     `SELECT DISTINCT am.asset_id
      FROM asset_mount am
@@ -139,14 +140,17 @@ export async function canPublishAsset(
   return hasGrant(permCtx.userId, productionId, "asset", assetId, "publication", verb);
 }
 
-/** 宿主侧门：批E/F 域 REST 化前沿用其现有原子键（该域现状语义） */
-export function mountHostSidePermitted(
+/** 宿主侧门：scene 域已行化（E1）；script/production 待批E2/F REST 化前沿用原子键 */
+export async function mountHostSidePermitted(
   permCtx: PermissionContext,
+  productionId: string,
   mountType: string,
-): boolean {
+  mountId: string,
+): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (mountType === "production") return hasPermission("production:mount", permCtx);
-  if (SCENE_MOUNT_TYPES.includes(mountType)) return hasPermission("scene:mount", permCtx);
+  if (SCENE_MOUNT_TYPES.includes(mountType))
+    return hasGrant(permCtx.userId, productionId, "scene", mountId, "mounts", "create");
   // version/block/block_snapshot/comment/cue/cue_revision 均属剧本流
   return hasPermission("script:mount", permCtx);
 }

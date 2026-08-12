@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
+import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getSceneById, getProductionName, listVersions, type SceneDetail } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import SceneDetailView from "@/components/SceneDetail";
@@ -33,9 +34,11 @@ export default async function SceneDetailPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!hasPermission("scene:view", access.permCtx)) redirect(`/unauthorized?resource=scene%3Aview&id=${id}`);
+  if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
+    redirect(`/unauthorized?resource=scene%3Aview&id=${id}`);
 
-  const canEdit = hasPermission("scene:rename", access.permCtx);
+  const canEdit = access.permCtx.isAdmin
+    || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
   const versions = await listVersions(id);

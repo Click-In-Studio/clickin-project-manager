@@ -4,6 +4,7 @@ export const metadata: Metadata = { title: "剧本" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import ScriptEditor from "@/components/ScriptEditor";
@@ -41,7 +42,7 @@ export default async function ProductionScriptPage({
         productionId={id}
         productionName={name ?? undefined}
         canEditText={p("script:edit")}
-        canEditMetadata={p("scene:rename")}
+        canEditMetadata={access.permCtx.isAdmin || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit")}
         canEditRehearsalMark={p("rehearsal_mark:create")}
         canImport={p("script:import")}
         versionId={versionId}

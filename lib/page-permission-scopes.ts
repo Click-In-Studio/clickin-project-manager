@@ -11,8 +11,6 @@ import type { Permission } from "./permissions";
  */
 export const PAGE_PERMISSION_SCOPES = {
   base: new Set<string>([
-    "scene:view",
-    "character:view",
     "script:view",
     // 批A：cue 域读权限改为树节点键（node:<type>/<id>[/<sub>]@<verb>）
     "node:cue_list/*/meta@view",
@@ -47,17 +45,6 @@ export const PAGE_PERMISSION_SCOPES = {
   ]),
 
   dramaturgy: new Set<Permission>([
-    "scene:create",
-    "scene:delete",
-    "scene:rename",
-    "scene:renumber",
-    "scene:change_type",
-    "scene:edit_synopsis",
-    "scene:edit_action_line",
-    "scene:edit_music",
-    "scene:edit_stage_notes",
-    "scene:edit_expected_duration",
-    "scene:mount",
     "dramaturgy:import",
     "dramaturgy_view:create",
     "dramaturgy_view:delete",
@@ -65,29 +52,9 @@ export const PAGE_PERMISSION_SCOPES = {
     "dramaturgy_view:create_public",
     "dramaturgy_view:delete_public",
     "dramaturgy_view:overwrite_public",
-    "tag_group:create",
-    "tag_group:delete",
-    "tag_group:rename",
-    "tag_group:edit_range_config",
-    "tag_group:set_default_option",
-    "tag_group:set_lyric_split",
-    "tag_group:reorder",
-    "tag_option:create",
-    "tag_option:delete",
-    "tag_option:rename",
-    "tag_option:edit_color",
-    "tag_option:reorder",
   ]),
 
   characters: new Set<Permission>([
-    "character:create",
-    "character:delete",
-    "character:rename",
-    "character:change_type",
-    "character:set_members",
-    "character:edit_gender",
-    "character:edit_biography",
-    "character:edit_role_type",
   ]),
 
   // 批A：cue 域激活面全部走树节点键。集合 create 是唯一需要页面级激活的

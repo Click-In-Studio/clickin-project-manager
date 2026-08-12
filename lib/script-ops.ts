@@ -179,9 +179,11 @@ export function patchAffectsMarkerProjection(patch: ScriptPatch, prevState: Scri
 
 // ─── Permission classification ────────────────────────────────────────────────
 
+// E1 过渡：scene 结构操作已行化（node: 前缀键走 hasGrant，其余仍走 hasPermission；
+// script:edit_block / rehearsal_mark:create 批E2 转换）
 export type ScriptPermissions = {
   "script:edit_block": boolean;
-  "scene:rename": boolean;
+  "node:scene/*@edit": boolean;
   "rehearsal_mark:create": boolean;
 };
 
@@ -189,7 +191,7 @@ function addMarkerPermission(block: Block, needed: Set<keyof ScriptPermissions>)
   if (block.type === "rehearsal_marker") {
     needed.add("rehearsal_mark:create");
   } else if (block.type === "chapter_marker" || block.type === "scene_marker") {
-    needed.add("scene:rename");
+    needed.add("node:scene/*@edit");
   }
 }
 
@@ -204,8 +206,8 @@ export function requiredPermissions(
   const needed = new Set<keyof ScriptPermissions>();
   const prevBlockMap = new Map(prevState.blocks.map((b) => [b.id, b]));
 
-  if (patch.charOps.length > 0) needed.add("scene:rename");
-  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("scene:rename");
+  if (patch.charOps.length > 0) needed.add("node:scene/*@edit");
+  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("node:scene/*@edit");
 
   for (const op of patch.blockOps) {
     if (op.op === "insert") {
@@ -256,7 +258,7 @@ export function requiredPermissions(
       JSON.stringify(op.block.characterIds) !== JSON.stringify(old.characterIds)
     ) needed.add("script:edit_block");
     if (op.block.rehearsalMark !== old.rehearsalMark) needed.add("rehearsal_mark:create");
-    if (op.block.sceneId !== old.sceneId) needed.add("scene:rename");
+    if (op.block.sceneId !== old.sceneId) needed.add("node:scene/*@edit");
   }
 
   return needed;
