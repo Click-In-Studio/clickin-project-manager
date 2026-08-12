@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { updateCuePresence } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasAnyGrant } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/grant-check";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -11,8 +11,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   // 批A：全项目级通道——任一 cue 表可见即可接入（admin/owner 旁路）
-  const canSee = access.permCtx.isAdmin || access.permCtx.isOwner
-    || await hasAnyGrant(session.userId, id, "cue_list", ["meta", "cues"], "view");
+  const canSee = await hasAnyEffectiveGrant(
+    { userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner },
+    id, "cue_list", ["meta", "cues"], "view",
+  );
   if (!canSee) return Response.json({ error: "无权访问" }, { status: 403 });
 
   const { clientId, userName, listId, cueId } = await req.json() as {

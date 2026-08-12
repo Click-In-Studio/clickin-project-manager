@@ -62,6 +62,31 @@ export async function hasGrant(
   return rows[0]?.ok ?? false;
 }
 
+/** 路由布尔门：admin/owner 旁路 + 个人行。三态判定用 grant-template 的 canAccessNode。 */
+export async function hasEffectiveGrant(
+  ctx: { userId: string; isAdmin: boolean; isOwner: boolean },
+  productionId: string,
+  resourceType: string,
+  resourceId: string,
+  resourceSub: string,
+  verb: GrantVerb,
+): Promise<boolean> {
+  if (ctx.isAdmin || ctx.isOwner) return true;
+  return hasGrant(ctx.userId, productionId, resourceType, resourceId, resourceSub, verb);
+}
+
+/** 路由布尔门（域级）：admin/owner 旁路 + 任一实例行。 */
+export async function hasAnyEffectiveGrant(
+  ctx: { userId: string; isAdmin: boolean; isOwner: boolean },
+  productionId: string,
+  resourceType: string,
+  subs: readonly string[],
+  verb: GrantVerb,
+): Promise<boolean> {
+  if (ctx.isAdmin || ctx.isOwner) return true;
+  return hasAnyGrant(ctx.userId, productionId, resourceType, subs, verb);
+}
+
 /**
  * 域级可见性：用户对某类型是否持有任一实例的指定动词行（不限实例）。
  * 用于全项目级通道（如 cue-stream SSE）的粗粒度门。

@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
-import { hasAnyGrant } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/grant-check";
 import { notifyUsers } from "@/lib/notify";
 
 async function guard(req: NextRequest, productionId: string) {
@@ -12,8 +12,10 @@ async function guard(req: NextRequest, productionId: string) {
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
   // 批A：任一 cue 表可见即可读评论流（admin/owner 旁路）
-  const canSee = permCtx.isAdmin || permCtx.isOwner
-    || await hasAnyGrant(session.userId, productionId, "cue_list", ["meta", "cues"], "view");
+  const canSee = await hasAnyEffectiveGrant(
+    { userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner },
+    productionId, "cue_list", ["meta", "cues"], "view",
+  );
   if (!canSee)
     return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }), isArchived };
   return { session, deny: null, isArchived };

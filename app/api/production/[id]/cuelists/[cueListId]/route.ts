@@ -7,7 +7,7 @@ import {
 } from "@/lib/db";
 import { listCueListGrants, listCueListDeptAccess } from "@/lib/resource-grant-db";
 import { canAccessNode } from "@/lib/grant-template";
-import { hasGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 import { type PermissionContext } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -34,8 +34,10 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const canManage = permCtx.isAdmin || permCtx.isOwner
-    || await hasGrant(session.userId, id, "cue_list", cueListId, "grants", "edit");
+  const canManage = await hasEffectiveGrant(
+    { userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner },
+    id, "cue_list", cueListId, "grants", "edit",
+  );
 
   const [grants, deptAccess, productionDepts] = await Promise.all([
     canManage ? listCueListGrants(cueListId) : Promise.resolve([]),
