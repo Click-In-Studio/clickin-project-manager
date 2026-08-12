@@ -595,6 +595,9 @@ CREATE TABLE IF NOT EXISTS event_report_note (
   report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
   department_id  TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
   wiki_id        UUID NOT NULL REFERENCES wiki(id),
+  -- 创建通道（批C C3）：dept=本部门 / wildcard=通配权 / moderator=event 编辑者；
+  -- POC 的 ud 门 = dept/<D>/notes@edit|delete 行 ∧ created_via='dept'（导演提的不可被 POC 删）
+  created_via    TEXT NOT NULL DEFAULT 'dept' CHECK (created_via IN ('dept', 'wildcard', 'moderator')),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1013,7 +1016,12 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('asset',       'view',           1),
   ('asset',       'mount',          2),
   ('asset',       'edit',           3),
-  ('asset',       'manage',         4)
+  ('asset',       'manage',         4),
+  -- dept = event_department（批C C3）：notes 权限面锚点，四动词
+  ('dept',        'view',           0),
+  ('dept',        'create',         0),
+  ('dept',        'edit',           0),
+  ('dept',        'delete',         0)
 ON CONFLICT DO NOTHING;
 
 -- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
@@ -1221,4 +1229,9 @@ ON CONFLICT DO NOTHING;
 -- 批C：制作人的报告挂接资格（原 report:create）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('制作人', 'node:event/*/reports@create')
+ON CONFLICT DO NOTHING;
+
+-- 批C C3：导演任意部门发 note（dept 锚通配）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('导演', 'node:dept/*/notes@create')
 ON CONFLICT DO NOTHING;

@@ -117,6 +117,7 @@ export type EventReportNote = {
   createdAt: string;
   updatedAt: string;
   mentions: Mention[];
+  createdVia: "dept" | "wildcard" | "moderator";
 };
 
 export type UnreadReportEntry = {
@@ -182,6 +183,7 @@ type ReportNoteRow = {
   id: string; report_id: string; department_id: string; content: string;
   author_user_id: string; author_name: string;
   created_at: Date; updated_at: Date; mentions: Mention[];
+  created_via: "dept" | "wildcard" | "moderator";
 };
 
 // ─── Row converters ───────────────────────────────────────────────────────────
@@ -263,7 +265,7 @@ function rowToReportNote(r: ReportNoteRow): EventReportNote {
     id: r.id, reportId: r.report_id, departmentId: r.department_id,
     content: r.content, authorUserId: r.author_user_id, authorName: r.author_name,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
-    mentions: r.mentions ?? [],
+    mentions: r.mentions ?? [], createdVia: r.created_via,
   };
 }
 
@@ -375,11 +377,48 @@ export async function setDepartmentMembers(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const prevPocRes = await client.query<{ user_id: string }>(
+      "SELECT user_id FROM event_department_member WHERE department_id = $1 AND is_poc",
+      [deptId],
+    );
     await client.query("DELETE FROM event_department_member WHERE department_id = $1", [deptId]);
     for (const m of unique) {
       await client.query(
         "INSERT INTO event_department_member (department_id, user_id, is_member, is_poc) VALUES ($1,$2,$3,$4)",
         [deptId, m.userId, m.isMember, m.isPoc],
+      );
+    }
+    // POC 上任/卸任 diff（批C C3）：dept/<D>/notes@create|edit|delete 三行随任期发/收。
+    // 行是 production 级（未参与 event 的部门也可被提 note）；卸任显式撤销，不走 sweep
+    // （auto 行不在 recompute 的 self_confirmed 扫描面内）。
+    const prevPoc = new Set(prevPocRes.rows.map(r => r.user_id));
+    const nowPoc = new Set(unique.filter(m => m.isPoc).map(m => m.userId));
+    const promoted = [...nowPoc].filter(u => !prevPoc.has(u));
+    const demoted = [...prevPoc].filter(u => !nowPoc.has(u));
+    if (promoted.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source)
+         SELECT ed.production_id, u, 'dept', ed.id, 'notes', v.verb, 'auto'
+         FROM event_department ed
+         CROSS JOIN unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('create'), ('edit'), ('delete')) AS v(verb)
+         WHERE ed.id = $1
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [deptId, promoted],
+      );
+    }
+    if (demoted.length > 0) {
+      await client.query(
+        `UPDATE resource_grant
+         SET is_revoked = true, revoked_reason = 'poc_change'
+         WHERE resource_type = 'dept' AND resource_id = $1 AND resource_sub = 'notes'
+           AND grant_source = 'auto' AND is_revoked = false
+           AND user_id = ANY($2::uuid[])`,
+        [deptId, demoted],
       );
     }
     await client.query("COMMIT");
@@ -428,6 +467,23 @@ export async function setEventParticipants(
            WHERE is_revoked = false
          DO NOTHING`,
         [productionId, unique.map(p => p.userId), eventId, assignedBy],
+      );
+    }
+    // 部门加入 event（批C C3）：参与部门的 POC 获得 draft report 可见
+    // （event/<id>/reports@view）——发布前给本部门写 note 的前提，POC 本人无需在场。
+    const deptIds = [...new Set(unique.map(p => p.departmentId).filter((d): d is string => d !== null))];
+    if (deptIds.length > 0) {
+      await client.query(
+        `INSERT INTO resource_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT DISTINCT $1, edm.user_id, 'event', $3, 'reports', 'view', 'assigned', $4::uuid
+         FROM event_department_member edm
+         WHERE edm.department_id = ANY($2::text[]) AND edm.is_poc
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, deptIds, eventId, assignedBy],
       );
     }
     await client.query("COMMIT");
@@ -1216,8 +1272,9 @@ export async function writeTaskDeptEventVisibility(
      SELECT $1, edm.user_id, 'event', $2, s.sub, 'view', 'assigned', $4
      FROM event_department_member edm
      CROSS JOIN LATERAL (
-       SELECT sub FROM (VALUES ('meta'), ('details'), ('publication')) AS v(sub)
-       WHERE edm.is_poc OR v.sub != 'publication'
+       -- POC 追加 publication（提前确认/组织）+ reports（draft report 可见，批C C3）
+       SELECT sub FROM (VALUES ('meta'), ('details'), ('publication'), ('reports')) AS v(sub)
+       WHERE edm.is_poc OR v.sub NOT IN ('publication', 'reports')
      ) AS s
      WHERE edm.department_id = $3
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
@@ -1398,7 +1455,7 @@ export async function deleteEventReport(id: string, eventId: string): Promise<vo
 export async function listReportNotes(reportId: string): Promise<EventReportNote[]> {
   const res = await getPool().query<ReportNoteRow>(
     `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
-            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions
+            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
      FROM event_report_note n
      JOIN wiki w ON w.id = n.wiki_id
      LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
@@ -1411,7 +1468,7 @@ export async function listReportNotes(reportId: string): Promise<EventReportNote
 export async function createReportNote(data: {
   id: string; reportId: string; departmentId: string;
   content: string; authorUserId: string; authorName: string;
-  mentions?: Mention[];
+  mentions?: Mention[]; createdVia: "dept" | "wildcard" | "moderator";
 }): Promise<EventReportNote> {
   // 拆分模型：note 内容进 wiki 实体，边表只存 (report, wiki, dept) 联合关系
   const client = await getPool().connect();
@@ -1426,9 +1483,9 @@ export async function createReportNote(data: {
       [data.content, JSON.stringify(data.mentions ?? []), data.authorUserId, data.reportId]
     );
     await client.query(
-      `INSERT INTO event_report_note (id, report_id, department_id, wiki_id)
-       VALUES ($1,$2,$3,$4)`,
-      [data.id, data.reportId, data.departmentId, wikiRow.rows[0].id]
+      `INSERT INTO event_report_note (id, report_id, department_id, wiki_id, created_via)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [data.id, data.reportId, data.departmentId, wikiRow.rows[0].id, data.createdVia]
     );
     await client.query("COMMIT");
   } catch (e) {
@@ -1485,7 +1542,7 @@ export async function deleteReportNote(
 export async function getReportNote(id: string, reportId: string): Promise<EventReportNote | null> {
   const res = await getPool().query<ReportNoteRow>(
     `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
-            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions
+            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
      FROM event_report_note n
      JOIN wiki w ON w.id = n.wiki_id
      LEFT JOIN feishu_user fu ON fu.user_id = w.created_by

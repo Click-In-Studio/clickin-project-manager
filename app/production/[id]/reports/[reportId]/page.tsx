@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant, toActor } from "@/lib/grant-check";
+import { hasGrant, hasAnyGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -123,6 +123,8 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   // Page-level: can write note for at least one dept (specific dept check is in POST /notes)
   const userCanWriteNote = prodPermCtx.isAdmin
     || eventPermCtx.participantDeptIds.length > 0
+    // 批C C3：dept/<D>/notes@create 行（POC/导演通配）——本人无需在 event 中
+    || await hasAnyGrant(session.userId, productionId, "dept", ["notes"], "create")
     || await canModerateNotes(prodPermCtx, productionId, eventId);
   const userCanModerate = await canModerateNotes(prodPermCtx, productionId, eventId);
   const userCanReply = canReplyToReport(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);
