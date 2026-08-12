@@ -927,17 +927,6 @@
       "default": "'rehearsal'::text"
     },
     {
-      "column": "title",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "body",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -955,13 +944,7 @@
       "nullable": true
     },
     {
-      "column": "mentions",
-      "type": "jsonb",
-      "nullable": false,
-      "default": "'[]'::jsonb"
-    },
-    {
-      "column": "created_by",
+      "column": "wiki_id",
       "type": "uuid",
       "nullable": false
     }
@@ -983,16 +966,6 @@
       "nullable": false
     },
     {
-      "column": "content",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "author_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -1005,13 +978,7 @@
       "default": "now()"
     },
     {
-      "column": "mentions",
-      "type": "jsonb",
-      "nullable": false,
-      "default": "'[]'::jsonb"
-    },
-    {
-      "column": "author_user_id",
+      "column": "wiki_id",
       "type": "uuid",
       "nullable": false
     }
@@ -1027,55 +994,6 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
-    },
-    {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    }
-  ],
-  "event_report_reply": [
-    {
-      "column": "id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "report_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "parent_type",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "parent_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "author_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "content",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
-      "column": "mentions",
-      "type": "jsonb",
-      "nullable": false,
-      "default": "'[]'::jsonb"
     },
     {
       "column": "user_id",
@@ -2753,6 +2671,98 @@
       "type": "bigint",
       "nullable": false,
       "default": "0"
+    }
+  ],
+  "wiki": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "mentions",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[]'::jsonb"
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "wiki_comment": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "parent_comment_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "author_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "mentions",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[]'::jsonb"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ]
 }

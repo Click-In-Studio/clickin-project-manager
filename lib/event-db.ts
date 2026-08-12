@@ -1281,9 +1281,10 @@ export async function setTechReqAssignees(
 
 export async function listEventReports(eventId: string): Promise<EventReport[]> {
   const res = await getPool().query<ReportRow>(
-    `SELECT id, event_id, report_type, title, body, created_by,
-            created_at, updated_at, published_at, mentions
-     FROM event_report WHERE event_id = $1 ORDER BY created_at`,
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions
+     FROM event_report er JOIN wiki w ON w.id = er.wiki_id
+     WHERE er.event_id = $1 ORDER BY er.created_at`,
     [eventId]
   );
   return res.rows.map(rowToReport);
@@ -1291,9 +1292,10 @@ export async function listEventReports(eventId: string): Promise<EventReport[]> 
 
 export async function getEventReport(id: string, eventId: string): Promise<EventReport | null> {
   const res = await getPool().query<ReportRow>(
-    `SELECT id, event_id, report_type, title, body, created_by,
-            created_at, updated_at, published_at, mentions
-     FROM event_report WHERE id = $1 AND event_id = $2`,
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions
+     FROM event_report er JOIN wiki w ON w.id = er.wiki_id
+     WHERE er.id = $1 AND er.event_id = $2`,
     [id, eventId]
   );
   return res.rows[0] ? rowToReport(res.rows[0]) : null;
@@ -1301,9 +1303,10 @@ export async function getEventReport(id: string, eventId: string): Promise<Event
 
 export async function getReportByProduction(id: string, productionId: string): Promise<EventReport | null> {
   const res = await getPool().query<ReportRow>(
-    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
-            er.created_at, er.updated_at, er.published_at, er.mentions
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE er.id = $1 AND pe.production_id = $2`,
     [id, productionId]
@@ -1315,20 +1318,36 @@ export async function createEventReport(data: {
   id: string; eventId: string; reportType: string;
   title: string; body: string; createdBy: string;
 }): Promise<EventReport> {
-  const res = await getPool().query<ReportRow>(
-    `INSERT INTO event_report (id, event_id, report_type, title, body, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     RETURNING id, event_id, report_type, title, body, created_by,
-               created_at, updated_at, published_at`,
-    [data.id, data.eventId, data.reportType, data.title, data.body, data.createdBy]
-  );
-  const prodRow = await getPool().query<{ production_id: string }>(
-    "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
-  );
-  if (prodRow.rows[0]) {
+  // 拆分模型：wiki=内容实体、event_report=挂载边（id 即边 id）
+  const client = await getPool().connect();
+  let row: ReportRow;
+  try {
+    await client.query("BEGIN");
+    const prodRow = await client.query<{ production_id: string }>(
+      "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
+    );
+    if (!prodRow.rows[0]) throw new Error(`event not found: ${data.eventId}`);
+    const wikiRow = await client.query<{ id: string }>(
+      `INSERT INTO wiki (production_id, title, body, created_by)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [prodRow.rows[0].production_id, data.title, data.body, data.createdBy]
+    );
+    const res = await client.query<ReportRow>(
+      `INSERT INTO event_report (id, event_id, report_type, wiki_id)
+       VALUES ($1,$2,$3,$4)
+       RETURNING id, event_id, report_type, created_at, updated_at, published_at`,
+      [data.id, data.eventId, data.reportType, wikiRow.rows[0].id]
+    );
+    await client.query("COMMIT");
+    row = { ...res.rows[0], title: data.title, body: data.body, created_by: data.createdBy, mentions: [] } as ReportRow;
     await writeReportGrants(data.id, prodRow.rows[0].production_id, data.createdBy, data.eventId);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
-  return rowToReport(res.rows[0]);
+  return rowToReport(row);
 }
 
 export async function updateEventReport(
@@ -1338,27 +1357,38 @@ export async function updateEventReport(
     publishedAt?: string | null; mentions?: Mention[];
   }
 ): Promise<EventReport | null> {
-  const sets: string[] = [];
-  const vals: unknown[] = [id, eventId];
-  if (fields.reportType  !== undefined) sets.push(`report_type  = $${vals.push(fields.reportType)}`);
-  if (fields.title       !== undefined) sets.push(`title        = $${vals.push(fields.title)}`);
-  if (fields.body        !== undefined) sets.push(`body         = $${vals.push(fields.body)}`);
-  if (fields.publishedAt !== undefined) sets.push(`published_at = $${vals.push(fields.publishedAt)}`);
-  if (fields.mentions    !== undefined) sets.push(`mentions     = $${vals.push(JSON.stringify(fields.mentions))}`);
-  if (!sets.length) return getEventReport(id, eventId);
-  sets.push(`updated_at = now()`);
-  const res = await getPool().query<ReportRow>(
-    `UPDATE event_report SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
-     RETURNING id, event_id, report_type, title, body, created_by,
-               created_at, updated_at, published_at, mentions`,
-    vals
-  );
-  return res.rows[0] ? rowToReport(res.rows[0]) : null;
+  // 拆分模型：title/body/mentions → wiki 实体；report_type/published_at → 边
+  const edgeSets: string[] = [];
+  const edgeVals: unknown[] = [id, eventId];
+  if (fields.reportType  !== undefined) edgeSets.push(`report_type  = $${edgeVals.push(fields.reportType)}`);
+  if (fields.publishedAt !== undefined) edgeSets.push(`published_at = $${edgeVals.push(fields.publishedAt)}`);
+  const wikiSets: string[] = [];
+  const wikiVals: unknown[] = [id, eventId];
+  if (fields.title    !== undefined) wikiSets.push(`title    = $${wikiVals.push(fields.title)}`);
+  if (fields.body     !== undefined) wikiSets.push(`body     = $${wikiVals.push(fields.body)}`);
+  if (fields.mentions !== undefined) wikiSets.push(`mentions = $${wikiVals.push(JSON.stringify(fields.mentions))}`);
+  if (!edgeSets.length && !wikiSets.length) return getEventReport(id, eventId);
+  if (edgeSets.length) {
+    edgeSets.push(`updated_at = now()`);
+    await getPool().query(
+      `UPDATE event_report SET ${edgeSets.join(", ")} WHERE id = $1 AND event_id = $2`, edgeVals,
+    );
+  }
+  if (wikiSets.length) {
+    wikiSets.push(`updated_at = now()`);
+    await getPool().query(
+      `UPDATE wiki SET ${wikiSets.join(", ")}
+       WHERE id = (SELECT wiki_id FROM event_report WHERE id = $1 AND event_id = $2)`, wikiVals,
+    );
+  }
+  return getEventReport(id, eventId);
 }
 
 export async function deleteEventReport(id: string, eventId: string): Promise<void> {
+  // 边删除 + 内容实体删除（wiki 独立文档库上线前，report 内容随边生灭）
   await getPool().query(
-    "DELETE FROM event_report WHERE id = $1 AND event_id = $2",
+    `WITH edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
+     DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge)`,
     [id, eventId]
   );
 }
@@ -1367,9 +1397,12 @@ export async function deleteEventReport(id: string, eventId: string): Promise<vo
 
 export async function listReportNotes(reportId: string): Promise<EventReportNote[]> {
   const res = await getPool().query<ReportNoteRow>(
-    `SELECT id, report_id, department_id, content, author_user_id, author_name,
-            created_at, updated_at, mentions
-     FROM event_report_note WHERE report_id = $1 ORDER BY created_at`,
+    `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
+            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions
+     FROM event_report_note n
+     JOIN wiki w ON w.id = n.wiki_id
+     LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
+     WHERE n.report_id = $1 ORDER BY n.created_at`,
     [reportId]
   );
   return res.rows.map(rowToReportNote);
@@ -1380,46 +1413,70 @@ export async function createReportNote(data: {
   content: string; authorUserId: string; authorName: string;
   mentions?: Mention[];
 }): Promise<EventReportNote> {
-  const res = await getPool().query<ReportNoteRow>(
-    `INSERT INTO event_report_note
-       (id, report_id, department_id, content, author_user_id, author_name, mentions)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id, report_id, department_id, content, author_user_id, author_name,
-               created_at, updated_at, mentions`,
-    [data.id, data.reportId, data.departmentId, data.content, data.authorUserId, data.authorName,
-     JSON.stringify(data.mentions ?? [])]
-  );
-  return rowToReportNote(res.rows[0]);
+  // 拆分模型：note 内容进 wiki 实体，边表只存 (report, wiki, dept) 联合关系
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const wikiRow = await client.query<{ id: string }>(
+      `INSERT INTO wiki (production_id, body, mentions, created_by)
+       SELECT pe.production_id, $1, $2, $3
+       FROM event_report er JOIN production_event pe ON pe.id = er.event_id
+       WHERE er.id = $4
+       RETURNING id`,
+      [data.content, JSON.stringify(data.mentions ?? []), data.authorUserId, data.reportId]
+    );
+    await client.query(
+      `INSERT INTO event_report_note (id, report_id, department_id, wiki_id)
+       VALUES ($1,$2,$3,$4)`,
+      [data.id, data.reportId, data.departmentId, wikiRow.rows[0].id]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+  return (await getReportNote(data.id, data.reportId))!;
 }
 
 export async function updateReportNote(
   id: string, reportId: string, content: string, mentions?: Mention[]
 ): Promise<EventReportNote | null> {
-  const sets = ["content = $1", "updated_at = now()"];
+  const sets = ["body = $1", "updated_at = now()"];
   const vals: unknown[] = [content, id, reportId];
   if (mentions !== undefined) {
     sets.push(`mentions = $${vals.push(JSON.stringify(mentions))}`);
   }
-  const res = await getPool().query<ReportNoteRow>(
-    `UPDATE event_report_note SET ${sets.join(", ")}
-     WHERE id = $2 AND report_id = $3
-     RETURNING id, report_id, department_id, content, author_user_id, author_name,
-               created_at, updated_at, mentions`,
+  await getPool().query(
+    `UPDATE wiki SET ${sets.join(", ")}
+     WHERE id = (SELECT wiki_id FROM event_report_note WHERE id = $2 AND report_id = $3)`,
     vals
   );
-  return res.rows[0] ? rowToReportNote(res.rows[0]) : null;
+  await getPool().query(
+    `UPDATE event_report_note SET updated_at = now() WHERE id = $1 AND report_id = $2`,
+    [id, reportId]
+  );
+  return getReportNote(id, reportId);
 }
 
 export async function deleteReportNote(
   id: string, reportId: string, userId: string, isAdmin: boolean
 ): Promise<boolean> {
+  // 作者判定在 wiki.created_by；边+内容一并删
   const res = isAdmin
     ? await getPool().query(
-        "DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 RETURNING id",
+        `WITH edge AS (DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 RETURNING wiki_id)
+         DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge) RETURNING id`,
         [id, reportId]
       )
     : await getPool().query(
-        "DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 AND author_user_id = $3 RETURNING id",
+        `WITH edge AS (
+           DELETE FROM event_report_note n USING wiki w
+           WHERE n.id = $1 AND n.report_id = $2 AND n.wiki_id = w.id AND w.created_by = $3
+           RETURNING n.wiki_id
+         )
+         DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge) RETURNING id`,
         [id, reportId, userId]
       );
   return res.rows.length > 0;
@@ -1427,9 +1484,12 @@ export async function deleteReportNote(
 
 export async function getReportNote(id: string, reportId: string): Promise<EventReportNote | null> {
   const res = await getPool().query<ReportNoteRow>(
-    `SELECT id, report_id, department_id, content, author_user_id, author_name,
-            created_at, updated_at, mentions
-     FROM event_report_note WHERE id = $1 AND report_id = $2`,
+    `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
+            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions
+     FROM event_report_note n
+     JOIN wiki w ON w.id = n.wiki_id
+     LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
+     WHERE n.id = $1 AND n.report_id = $2`,
     [id, reportId]
   );
   return res.rows[0] ? rowToReportNote(res.rows[0]) : null;
@@ -1440,11 +1500,11 @@ export async function listAllReportMentionedUserIds(reportId: string): Promise<s
   const pool = getPool();
   const [rptRes, noteRes] = await Promise.all([
     pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(mentions)->>'userId' AS user_id FROM event_report WHERE id = $1`,
+      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report er JOIN wiki w ON w.id = er.wiki_id WHERE er.id = $1`,
       [reportId],
     ),
     pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(mentions)->>'userId' AS user_id FROM event_report_note WHERE report_id = $1`,
+      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report_note n JOIN wiki w ON w.id = n.wiki_id WHERE n.report_id = $1`,
       [reportId],
     ),
   ]);
@@ -1472,10 +1532,11 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
     report_id: string; report_title: string; published_at: Date | null;
     event_id: string; event_title: string; production_id: string; production_name: string;
   }>(
-    `SELECT er.id AS report_id, er.title AS report_title, er.published_at,
+    `SELECT er.id AS report_id, w.title AS report_title, er.published_at,
             pe.id AS event_id, pe.title AS event_title,
             pe.production_id, p.name AS production_name
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE (
@@ -1487,7 +1548,7 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+         OR w.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
        ${prodFilter}
      ) OR (
@@ -1533,7 +1594,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
     event_id: string; event_title: string; production_id: string; production_name: string;
     is_read: boolean;
   }>(
-    `SELECT er.id AS report_id, er.title AS report_title, er.report_type,
+    `SELECT er.id AS report_id, w.title AS report_title, er.report_type,
             er.published_at,
             pe.id AS event_id, pe.title AS event_title,
             pe.production_id, p.name AS production_name,
@@ -1542,6 +1603,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
               WHERE err.report_id = er.id AND err.user_id = $1
             ) AS is_read
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE (
@@ -1549,7 +1611,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+         OR w.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
      ) OR (
        er.published_at IS NULL
@@ -1884,10 +1946,10 @@ export async function listProductionReports(
     event_title: string; event_start_time: string | null; event_status: string;
     is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
   }>(
-    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
-            er.created_at, er.updated_at, er.published_at, er.mentions,
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions,
             pe.title AS event_title, pe.start_time AS event_start_time, pe.status AS event_status,
-            (er.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
+            (w.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
             EXISTS (
               SELECT 1 FROM event_participant ep
               WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'follower'
@@ -1897,6 +1959,7 @@ export async function listProductionReports(
               WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'participant'
             ) AS is_participant
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE pe.production_id = $1
        AND ($3 OR er.published_at IS NOT NULL
@@ -2148,9 +2211,18 @@ function rowToReply(r: ReplyRow): ReportReply {
 }
 
 export async function listReportReplies(reportId: string): Promise<ReportReply[]> {
+  // 拆分模型：评论存 wiki_comment（挂内容实体）；parentType/parentId 由关系投影反推
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at
-     FROM event_report_reply WHERE report_id = $1 ORDER BY created_at ASC`,
+    `SELECT wc.id, $1 AS report_id,
+            CASE WHEN wc.parent_comment_id IS NOT NULL THEN 'reply'
+                 WHEN n.id IS NOT NULL THEN 'note' ELSE 'report' END AS parent_type,
+            COALESCE(wc.parent_comment_id::text, n.id, $1) AS parent_id,
+            wc.user_id, wc.author_name, wc.content, wc.mentions, wc.created_at
+     FROM wiki_comment wc
+     LEFT JOIN event_report er ON er.wiki_id = wc.wiki_id AND er.id = $1
+     LEFT JOIN event_report_note n ON n.wiki_id = wc.wiki_id AND n.report_id = $1
+     WHERE er.id IS NOT NULL OR n.id IS NOT NULL
+     ORDER BY wc.created_at ASC`,
     [reportId]
   );
   return res.rows.map(rowToReply);
@@ -2160,21 +2232,53 @@ export async function createReportReply(params: {
   id: string; reportId: string; parentType: ReportReply["parentType"];
   parentId: string; userId: string; authorName: string; content: string; mentions?: Mention[];
 }): Promise<ReportReply> {
-  const res = await getPool().query<ReplyRow>(
-    `INSERT INTO event_report_reply
-       (id, report_id, parent_type, parent_id, user_id, author_name, content, mentions)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at`,
-    [params.id, params.reportId, params.parentType, params.parentId,
-     params.userId, params.authorName, params.content, JSON.stringify(params.mentions ?? [])]
+  // 拆分模型：目标 wiki 依 parentType 解析；id 由 wiki_comment 生成（UUID），
+  // 忽略调用方 params.id（API 消费方使用返回值 id）
+  const pool = getPool();
+  let wikiId: string | null = null;
+  let parentCommentId: string | null = null;
+  if (params.parentType === "note") {
+    const r = await pool.query<{ wiki_id: string }>(
+      "SELECT wiki_id FROM event_report_note WHERE id = $1 AND report_id = $2",
+      [params.parentId, params.reportId]);
+    wikiId = r.rows[0]?.wiki_id ?? null;
+  } else if (params.parentType === "reply") {
+    const r = await pool.query<{ wiki_id: string }>(
+      "SELECT wiki_id FROM wiki_comment WHERE id = $1::uuid", [params.parentId]);
+    wikiId = r.rows[0]?.wiki_id ?? null;
+    parentCommentId = params.parentId;
+  } else {
+    const r = await pool.query<{ wiki_id: string }>(
+      "SELECT wiki_id FROM event_report WHERE id = $1", [params.reportId]);
+    wikiId = r.rows[0]?.wiki_id ?? null;
+  }
+  if (!wikiId) throw new Error(`reply target not found: ${params.parentType}/${params.parentId}`);
+  const res = await pool.query<{ id: string; created_at: Date }>(
+    `INSERT INTO wiki_comment (wiki_id, parent_comment_id, user_id, author_name, content, mentions)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
+    [wikiId, parentCommentId, params.userId, params.authorName, params.content,
+     JSON.stringify(params.mentions ?? [])]
   );
-  return rowToReply(res.rows[0]);
+  return {
+    id: res.rows[0].id, reportId: params.reportId,
+    parentType: params.parentType, parentId: params.parentId,
+    userId: params.userId, authorName: params.authorName,
+    content: params.content, mentions: params.mentions ?? [],
+    createdAt: res.rows[0].created_at.toISOString(),
+  };
 }
 
 export async function getReportReply(id: string, reportId: string): Promise<ReportReply | null> {
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at
-     FROM event_report_reply WHERE id = $1 AND report_id = $2`,
+    `SELECT wc.id, $2 AS report_id,
+            CASE WHEN wc.parent_comment_id IS NOT NULL THEN 'reply'
+                 WHEN n.id IS NOT NULL THEN 'note' ELSE 'report' END AS parent_type,
+            COALESCE(wc.parent_comment_id::text, n.id, $2) AS parent_id,
+            wc.user_id, wc.author_name, wc.content, wc.mentions, wc.created_at
+     FROM wiki_comment wc
+     LEFT JOIN event_report er ON er.wiki_id = wc.wiki_id AND er.id = $2
+     LEFT JOIN event_report_note n ON n.wiki_id = wc.wiki_id AND n.report_id = $2
+     WHERE wc.id = $1::uuid AND (er.id IS NOT NULL OR n.id IS NOT NULL)`,
     [id, reportId]
   );
   return res.rows[0] ? rowToReply(res.rows[0]) : null;
@@ -2182,7 +2286,12 @@ export async function getReportReply(id: string, reportId: string): Promise<Repo
 
 export async function deleteReportReply(id: string, reportId: string): Promise<void> {
   await getPool().query(
-    "DELETE FROM event_report_reply WHERE id = $1 AND report_id = $2",
+    `DELETE FROM wiki_comment wc
+     USING wiki w
+     WHERE wc.id = $1::uuid AND wc.wiki_id = w.id
+       AND (EXISTS (SELECT 1 FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id WHERE er.wiki_id = w.id AND er.id = $2)
+         OR EXISTS (SELECT 1 FROM event_report_note n WHERE n.wiki_id = w.id AND n.report_id = $2))`,
     [id, reportId]
   );
 }
@@ -2297,6 +2406,7 @@ export async function countUnreadReportsForUser(userId: string, productionId?: s
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(DISTINCT er.id) AS count
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE (
        er.published_at IS NOT NULL
@@ -2307,7 +2417,7 @@ export async function countUnreadReportsForUser(userId: string, productionId?: s
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+         OR w.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
        ${prodFilter}
      ) OR (

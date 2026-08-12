@@ -542,31 +542,57 @@ CREATE TABLE IF NOT EXISTS event_tech_assignee (
 
 -- ── Reports ───────────────────────────────────────────────────────────────────
 
+-- ── Wiki（批C PR-C1：内容实体——未来独立文档库；命名跟飞书）────────────────────
+-- report/note 的本体拆分产物：wiki=内容内禀（title/body/mentions/作者），
+-- event_report / event_report_note 退化为纯挂载边。
+
+CREATE TABLE IF NOT EXISTS wiki (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  title         TEXT        NULL,
+  body          TEXT        NOT NULL DEFAULT '',
+  mentions      JSONB       NOT NULL DEFAULT '[]',
+  created_by    UUID        NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wiki_production_idx ON wiki (production_id);
+
+CREATE TABLE IF NOT EXISTS wiki_comment (
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  wiki_id           UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  parent_comment_id UUID        NULL REFERENCES wiki_comment(id) ON DELETE CASCADE,
+  user_id           UUID        NULL REFERENCES app_user(id),
+  author_name       TEXT        NOT NULL,
+  content           TEXT        NOT NULL,
+  mentions          JSONB       NOT NULL DEFAULT '[]',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wiki_comment_wiki_idx ON wiki_comment (wiki_id, created_at);
+
+-- event_report = event↔wiki 挂载边（id 即边 id；发布是这次挂载的生命周期）
 CREATE TABLE IF NOT EXISTS event_report (
   id           TEXT PRIMARY KEY,
   event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   report_type  TEXT NOT NULL DEFAULT 'rehearsal',
-  title        TEXT NOT NULL,
-  body         TEXT NOT NULL DEFAULT '',
-  created_by   UUID NOT NULL REFERENCES app_user(id),
+  wiki_id      UUID NOT NULL REFERENCES wiki(id),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  published_at TIMESTAMPTZ,
-  mentions     JSONB NOT NULL DEFAULT '[]'
+  published_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS event_report_event_idx ON event_report(event_id);
 
+-- event_report_note = report边↔wiki×dept 挂载边（per-dept 联合关系）
 CREATE TABLE IF NOT EXISTS event_report_note (
   id             TEXT PRIMARY KEY,
   report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
   department_id  TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
-  content        TEXT NOT NULL,
-  author_user_id UUID NOT NULL REFERENCES app_user(id),
-  author_name    TEXT NOT NULL,
+  wiki_id        UUID NOT NULL REFERENCES wiki(id),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mentions       JSONB NOT NULL DEFAULT '[]'
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS event_report_note_report_idx ON event_report_note(report_id);
@@ -578,20 +604,7 @@ CREATE TABLE IF NOT EXISTS event_report_read (
   PRIMARY KEY (report_id, user_id)
 );
 
--- user_id and parent_id have no FK on user_id — replies may reference either a report or a note.
-CREATE TABLE IF NOT EXISTS event_report_reply (
-  id          TEXT PRIMARY KEY,
-  report_id   TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  parent_type TEXT NOT NULL,
-  parent_id   TEXT NOT NULL,
-  user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  author_name TEXT NOT NULL,
-  content     TEXT NOT NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mentions    JSONB NOT NULL DEFAULT '[]'
-);
-
-CREATE INDEX IF NOT EXISTS idx_event_report_reply_report_id ON event_report_reply(report_id);
+-- event_report_reply 已拆入 wiki_comment（migrate-report-note-wiki-split.sql）
 
 -- ── Platform identities ───────────────────────────────────────────────────────
 

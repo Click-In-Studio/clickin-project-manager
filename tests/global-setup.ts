@@ -48,6 +48,12 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isWikiSplitPreMigrationSchema,
+  createWikiSplitPreMigrationData,
+  WIKI_SPLIT_SNAPSHOT_PATH,
+  type WikiSplitSnapshot,
+} from "./wiki-split-snapshot";
+import {
   isEventTaskRestPreMigrationSchema,
   createEventTaskRestPreMigrationData,
   EVENT_TASK_REST_SNAPSHOT_PATH,
@@ -189,6 +195,17 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  if (await isWikiSplitPreMigrationSchema(pool)) {
+    // 批C PR-C1 migration path: event_report still carries content columns.
+    const wikiSplitSnapshot = await createWikiSplitPreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_SPLIT_SNAPSHOT_PATH, JSON.stringify(wikiSplitSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-report-note-wiki-split.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -219,6 +236,21 @@ export async function teardown() {
       [cueListGrantSnapshot.personalGrantUserId, cueListGrantSnapshot.roleGrantUserId],
     ).catch(() => {});
     await unlink(CUE_LIST_GRANT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批C wiki-split migration factory data (migration path only; no-op otherwise).
+  let wikiSplitSnapshot: WikiSplitSnapshot | null = null;
+  try {
+    wikiSplitSnapshot = JSON.parse(
+      await readFile(WIKI_SPLIT_SNAPSHOT_PATH, "utf8"),
+    ) as WikiSplitSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (wikiSplitSnapshot) {
+    await pool.query("DELETE FROM production_event WHERE id = $1", [wikiSplitSnapshot.eventId]).catch(() => {});
+    await pool.query("DELETE FROM production WHERE id = $1", [wikiSplitSnapshot.productionId]).catch(() => {});
+    await unlink(WIKI_SPLIT_SNAPSHOT_PATH).catch(() => {});
   }
 
   // Clean up 批B event-task-rest migration factory data (migration path only; no-op otherwise).
