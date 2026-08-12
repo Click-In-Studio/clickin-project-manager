@@ -410,13 +410,17 @@ export async function setEventParticipants(
         [pid(), eventId, p.userId, p.name, p.departmentId, p.role],
       );
     }
-    // Write assigned view grants for all participants (idempotent).
+    // 被指派自动授权：meta+details view（五层模型第②层——不用 '*' 通配，
+    // 那会把 call_sheet/tasks/reports 层白送）。写入即独立事实：移除参与者
+    // **不**自动撤行（撤销走 sweep/手动；模板只是模板）。
     if (unique.length > 0) {
       await client.query(
         `INSERT INTO resource_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
-         SELECT $1, unnest($2::uuid[]), 'event', $3, '*', 'view', 'assigned', $4
+         SELECT $1, u, 'event', $3, s.sub, 'view', 'assigned', $4
+         FROM unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,

@@ -56,6 +56,25 @@ ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, p
   WHERE is_revoked = false
 DO NOTHING;
 
+-- 存量 ('*','view') 行收窄为 meta+details（'*' 通配在新模型下会覆盖
+-- call_sheet/tasks/reports 层，超出原 view 级语义）
+INSERT INTO resource_grant
+  (production_id, user_id, resource_type, resource_id, resource_sub,
+   permission_level, grant_source, confirmed_by, approval_id, expires_at)
+SELECT rg.production_id, rg.user_id, 'event', rg.resource_id, s.sub, 'view',
+       rg.grant_source, rg.confirmed_by, rg.approval_id, rg.expires_at
+FROM resource_grant rg
+CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
+WHERE rg.resource_type = 'event' AND rg.permission_level = 'view'
+  AND rg.resource_sub = '*' AND rg.resource_id != '*' AND NOT rg.is_revoked
+ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+  WHERE is_revoked = false
+DO NOTHING;
+
+DELETE FROM resource_grant
+WHERE resource_type = 'event' AND permission_level = 'view' AND resource_sub = '*'
+  AND resource_id != '*';
+
 -- publish/edit_published/revoke → publication 动词行；manage → 全集
 INSERT INTO resource_grant
   (production_id, user_id, resource_type, resource_id, resource_sub,

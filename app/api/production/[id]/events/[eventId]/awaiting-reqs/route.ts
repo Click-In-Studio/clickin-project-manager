@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
 import { getPool } from "@/lib/pg";
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, event.status === "published" ? "publication" : "details", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { departmentIds?: string[]; scheduleItemId?: string };

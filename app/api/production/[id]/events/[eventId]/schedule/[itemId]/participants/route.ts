@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getScheduleItem, setScheduleItemParticipants } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };
 
@@ -23,7 +23,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
   const item = await getScheduleItem(itemId, eventId);
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, event.status === "published" ? "publication" : "details", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (!item) return Response.json({ error: "流程项不存在" }, { status: 404 });
 

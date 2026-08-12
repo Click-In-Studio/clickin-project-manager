@@ -1,11 +1,10 @@
 import { type NextRequest } from "next/server";
-import { hasAnyEffectiveGrant } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant, hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
 import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -61,7 +60,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     requiredLevel = "publish";
   }
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, requiredLevel))
+  const REQ_NODE: Record<string, [string, string]> = {
+    edit: ["details", "edit"], publish: ["publication", "create"],
+    edit_published: ["publication", "edit"], revoke: ["publication", "delete"],
+  };
+  const [reqSub, reqVerb] = REQ_NODE[requiredLevel];
+  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, reqSub, reqVerb as "view" | "create" | "edit" | "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const validStatuses = new Set(["draft", "published", "completed", "cancelled"]);
@@ -115,7 +119,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "manage"))
+  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "grants", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteProductionEvent(eventId, productionId);

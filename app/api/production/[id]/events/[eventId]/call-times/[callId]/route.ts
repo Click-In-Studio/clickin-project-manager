@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, updateEventCallTime, deleteEventCallTime } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; callId: string }> };
 
@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, event.status === "published" ? "publication" : "details", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
@@ -49,7 +49,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, event.status === "published" ? "publication" : "details", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteEventCallTime(callId, eventId);
