@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "Call Sheet" };
 
 import { redirect, notFound } from "next/navigation";
@@ -14,7 +14,6 @@ import {
   listEventCallTimes,
   listEventDepartments,
 } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import CallSheetClient from "@/components/CallSheetClient";
 
 export default async function CallSheetPage({
@@ -40,7 +39,7 @@ export default async function CallSheetPage({
   const { permCtx: prodPermCtx } = _prodAccess;
   const canViewFull = prodPermCtx.isAdmin
     || await hasEffectiveGrant({ userId: session.userId, isAdmin: prodPermCtx.isAdmin, isOwner: prodPermCtx.isOwner }, productionId, "event", "*", "call_sheet", "view")
-    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))

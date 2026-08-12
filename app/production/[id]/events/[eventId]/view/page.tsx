@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasAnyEffectiveGrant } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant, hasGrant } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
@@ -44,7 +44,7 @@ export default async function EventViewPage({
 
   // Per-instance resource_grant edit+ → full editor view on this page
   const canViewFull = prodPermCtx.isAdmin
-    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   // Non-editors cannot see unpublished events
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))

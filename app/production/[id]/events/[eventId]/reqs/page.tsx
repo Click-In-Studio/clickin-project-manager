@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "技术需求" };
 
 import { redirect, notFound } from "next/navigation";
@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
-import { hasResourceGrantLevel, getUserTechReqGrantIdsInEvent } from "@/lib/resource-grant-db";
+import { getUserTechReqGrantIdsInEvent } from "@/lib/resource-grant-db";
 import {
   getProductionEvent,
   listEventTechReqs,
@@ -34,7 +34,7 @@ export default async function ReqsPage({
 
   // Admin role-level OR event resource_grant edit+ → full view
   const canViewFull = await hasEffectiveGrant({ userId: session.userId, isAdmin: access.permCtx.isAdmin, isOwner: access.permCtx.isOwner }, productionId, "event", "*", "call_sheet", "view")
-    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   const VISIBLE_STATUSES = new Set(["published", "completed"]);
   if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
