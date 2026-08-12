@@ -73,7 +73,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   const body = await req.json() as { type: "user" | "dept"; userId?: string; deptId?: string };
 
   if (body.type === "dept" && body.deptId) {
-    await removeCueListDeptAccess(cueListId, body.deptId);
+    await removeCueListDeptAccess(cueListId, id, body.deptId);
   } else if (body.type === "user" && body.userId) {
     await setCueListGrant(cueListId, id, body.userId, false, mc.session.userId);
   } else {

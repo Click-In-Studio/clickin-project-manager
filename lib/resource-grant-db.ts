@@ -680,12 +680,24 @@ export async function addCueListDeptAccess(
   deptId: string,
   establishedBy: string,
 ): Promise<void> {
+  // dept 分享 = 归属（rdm，审批人/POC manage 档）+ zone 资格（dept_permission
+  // 实例级 edit 行集，成员经六步链第 3 步自我确认落 grant）
   await getPool().query(
     `INSERT INTO resource_dept_manage
        (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
      VALUES ($1, $2, 'cue_list', $3, '*', $4)
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
     [productionId, deptId, cueListId, establishedBy],
+  );
+  await getPool().query(
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+     SELECT $1, $2, unnest(ARRAY[
+       'node:cue_list/' || $3 || '@view',
+       'node:cue_list/' || $3 || '@edit',
+       'node:cue_list/' || $3 || '/cues@create',
+       'node:cue_list/' || $3 || '/cues@delete'
+     ]) ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+    [productionId, deptId, cueListId],
   );
 }
 
@@ -694,6 +706,7 @@ export async function addCueListDeptAccess(
  */
 export async function removeCueListDeptAccess(
   cueListId: string,
+  productionId: string,
   deptId: string,
 ): Promise<void> {
   await getPool().query(
@@ -701,6 +714,21 @@ export async function removeCueListDeptAccess(
      WHERE resource_type = 'cue_list' AND resource_id = $1 AND dept_id = $2`,
     [cueListId, deptId],
   );
+  // 撤 zone 资格行，并对该 dept 成员立即重算存续（资格消失 → self_confirmed 行收走，
+  // 不等下次偶然的 role/dept 变动）
+  await getPool().query(
+    `DELETE FROM production_dept_permission
+     WHERE dept_id = $1 AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
+    [deptId, cueListId],
+  );
+  const { rows: members } = await getPool().query<{ user_id: string }>(
+    `SELECT user_id FROM production_dept_member WHERE dept_id = $1`,
+    [deptId],
+  );
+  const { recomputeAndRevokeGrants } = await import("./dept-db");
+  for (const m of members) {
+    await recomputeAndRevokeGrants(m.user_id, productionId, "dept_change");
+  }
 }
 
 /**
