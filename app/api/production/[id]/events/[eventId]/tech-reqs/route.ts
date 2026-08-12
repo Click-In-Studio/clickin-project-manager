@@ -49,8 +49,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 路径三（用户场景：服装设计看到排练 schedule 主动来对装）：部门 POC 可为
   // **本部门**对可见 event 发起 task——可见性由成员基础 details@view 天然界定
   const bodyPeek = (await req.clone().json()) as { departmentId?: string | null };
+  // 路径三前提=对该 event 有 details 视图（"对看得见的东西反应"）：宽松剧组经
+  // 成员模板通配行命中；严格剧组（模板撤掉 details@view）未被授视图的 POC 发不了
   const viaPoc = typeof bodyPeek.departmentId === "string"
-    && await isUserDeptPoc(bodyPeek.departmentId, session.userId);
+    && await isUserDeptPoc(bodyPeek.departmentId, session.userId)
+    && await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "details", "view");
   if (!viaPoc
       && !await hasEffectiveGrant({ userId: session.userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner }, productionId, "event", eventId, "tasks", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
