@@ -14,6 +14,7 @@ import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
 import type { Permission } from "./permissions";
 import { DEPT_ASSIGNABLE_PERMISSIONS } from "./permissions";
+import { RESERVED_TYPES } from "./grant-template";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -685,6 +686,7 @@ export async function recomputeAndRevokeGrants(
        --    保留段 grants/publication 不被 sub 通配覆盖）
        AND NOT EXISTS (
          SELECT 1 FROM (
+           -- base 候选（id 通配 × sub 通配，保留段 sub 不被 '*' 覆盖）
            SELECT unnest(ARRAY[
              'node:' || rg.resource_type || '/' || rg.resource_id
                || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
@@ -702,9 +704,19 @@ export async function recomputeAndRevokeGrants(
                 ELSE ARRAY[
                   'node:' || rg.resource_type || '/' || rg.resource_id || '@' || rg.permission_level,
                   'node:' || rg.resource_type || '/*@' || rg.permission_level
-                ] END) AS key
-         ) cand
-         WHERE cand.key IN (
+                ] END) AS base_key
+         ) base
+         -- 批G 通配区间：type 通配（RESERVED_TYPES 治理域除外）× verb 通配
+         CROSS JOIN LATERAL (VALUES
+           (base.base_key),
+           (CASE WHEN rg.resource_type <> ALL($4::text[])
+                 THEN regexp_replace(base.base_key, '^node:[^/]+/[^/@]+', 'node:*/*') END)
+         ) AS t(k1)
+         CROSS JOIN LATERAL (VALUES
+           (t.k1),
+           (regexp_replace(t.k1, '@[a-z]+$', '@*'))
+         ) AS cand(key)
+         WHERE cand.key IS NOT NULL AND cand.key IN (
            SELECT prp.permission_key
            FROM production_member_role pmr
            JOIN production_role_permission prp ON prp.role_id = pmr.role_id
@@ -732,7 +744,7 @@ export async function recomputeAndRevokeGrants(
              AND pmp.granted = true
          )
        )`,
-    [productionId, userId, reason],
+    [productionId, userId, reason, [...RESERVED_TYPES]],
   );
 }
 

@@ -1263,8 +1263,14 @@ FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
 ON CONFLICT DO NOTHING;
 
 -- 批C：制作人的报告挂接资格（原 report:create）
+-- 批G G-1：制作人通配区间（收敛历史枚举 seed；主行+保留段四行=永久稳定全集；
+-- RESERVED_TYPES=production/producer 不被类型通配穿透）
 INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('制作人', 'node:event/*/reports@create')
+  ('制作人', 'node:*/*@*'),
+  ('制作人', 'node:*/*/grants@*'),
+  ('制作人', 'node:*/*/publication@*'),
+  ('制作人', 'node:*/*/assignees@*'),
+  ('制作人', 'node:*/*/imports@create')
 ON CONFLICT DO NOTHING;
 
 -- 批C C3：导演任意部门发 note（dept 锚通配）
@@ -1277,14 +1283,6 @@ INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:asset/*/meta@view'),
   ('*', 'node:asset/*/file@view'),
   ('*', 'node:asset/*/shares@create')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO grant_template (role_name, permission_key)
-SELECT '制作人', k FROM (VALUES
-  ('node:asset/*@create'), ('node:asset/*@delete'),
-  ('node:asset/*/meta@edit'), ('node:asset/*/file@create'),
-  ('node:asset/*/publication@create'), ('node:asset/*/publication@delete')
-) AS t(k)
 ON CONFLICT DO NOTHING;
 
 -- 批F：通讯录并入 member 树（MEMBER_BASE 保真：contacts:view → meta+contact 两面）

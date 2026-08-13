@@ -25,7 +25,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as { name?: string };
   const name = body.name?.trim();
   if (!name) return Response.json({ error: "名称不能为空" }, { status: 400 });
-  await renameProductionRole(roleId, id, name);
+  try {
+    await renameProductionRole(roleId, id, name);
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : "操作失败" }, { status: 403 });
+  }
   return Response.json({ ok: true });
 }
 
@@ -33,6 +37,10 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id, roleId } = await ctx.params;
   const { deny } = await requireManage(req, id);
   if (deny) return deny;
-  await deleteProductionRole(roleId, id);
+  try {
+    await deleteProductionRole(roleId, id);
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : "操作失败" }, { status: 403 });
+  }
   return Response.json({ ok: true });
 }

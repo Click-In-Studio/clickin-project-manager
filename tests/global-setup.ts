@@ -298,6 +298,20 @@ export async function setup() {
       }
     }
   }
+
+  {
+    // 批G G-1（制作人通配区间）：CI 迁移路径重放。PRE 判据：模板尚无通配主行。
+    const g1Pre = await pool.query(
+      `SELECT 1 FROM grant_template WHERE role_name = '制作人' AND permission_key = 'node:*/*@*'`,
+    );
+    if (g1Pre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-producer-wildcard.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
 }
 
 export async function teardown() {

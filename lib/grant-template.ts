@@ -50,18 +50,32 @@ export function formatNodeKey(n: NodeKeyParts): string {
  * `permission_key = ANY(candidates)` 完成通配匹配，无需在 SQL 里解析。
  * 保留段（grants/publication）不被 sub 通配覆盖。
  */
+/** 类型通配不覆盖的治理敏感类型（与 RESERVED_SUBS 对偶，批G 通配区间）：
+ *  制作人主通配 node:* 不穿透治理域——SENSITIVE 三态由显式节点串表达。 */
+export const RESERVED_TYPES: readonly string[] = ["production", "producer"];
+
 export function nodeKeyCandidates(n: NodeKeyParts): string[] {
   const ids = n.resourceId === "*" ? ["*"] : [n.resourceId, "*"];
   const subs = n.resourceSub === "*" || isReservedSub(n.resourceSub)
     ? [n.resourceSub]
     : [n.resourceSub, "*"];
+  // 批G 通配区间：type / verb 位通配（仅区间键语法；动词闭集不变，'*' 是区间表达）。
+  // RESERVED_TYPES 不生成 type 通配候选（治理域必须显式指名类型）。
+  const types = RESERVED_TYPES.includes(n.resourceType)
+    ? [n.resourceType]
+    : [n.resourceType, "*"];
+  const verbs: string[] = [n.verb, "*"];
   const out: string[] = [];
-  for (const id of ids) {
-    for (const sub of subs) {
-      out.push(formatNodeKey({ resourceType: n.resourceType, resourceId: id, resourceSub: sub, verb: n.verb }));
+  for (const type of types) {
+    for (const id of type === "*" ? ["*"] : ids) {
+      for (const sub of subs) {
+        for (const verb of verbs) {
+          out.push(`node:${type}/${id}${sub === "*" ? "" : `/${sub}`}@${verb}`);
+        }
+      }
     }
   }
-  return out;
+  return [...new Set(out)];
 }
 
 // ─── 三层资格源查询 ────────────────────────────────────────────────────────────
