@@ -40,13 +40,18 @@ afterAll(async () => {
 });
 
 describe("节点分类", () => {
-  it("SENSITIVE：production meta/archival/integrations、producer 全部、member imports", () => {
+  it("SENSITIVE：production 修改动作、producer 全部、member imports；view 面是基线", () => {
     expect(isSensitiveNode("production", "meta/name", "edit")).toBe(true);
     expect(isSensitiveNode("production", "archival", "create")).toBe(true);
     expect(isSensitiveNode("producer", "*", "create")).toBe(true);
     expect(isSensitiveNode("member", "imports", "create")).toBe(true);
     expect(isSensitiveNode("production", "config", "edit")).toBe(false);
     expect(isSensitiveNode("milestone", "*", "create")).toBe(false);
+    // 基线原则（2026-08-13）：权限越基线，修改该权限越敏感——view 不 sensitive
+    expect(isSensitiveNode("production", "meta", "view")).toBe(false);
+    expect(isSensitiveNode("production", "meta/name", "view")).toBe(false);
+    expect(isSensitiveNode("production", "mounts", "view")).toBe(false);
+    expect(isSensitiveNode("production", "archival", "view")).toBe(false);
   });
 
   it("ROOT：production delete/owner/restores（owner-only）", () => {
