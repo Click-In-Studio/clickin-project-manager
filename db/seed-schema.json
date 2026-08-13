@@ -667,6 +667,41 @@
       "nullable": false
     }
   ],
+  "dept_cue_list_template": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "template",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "can_create",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "permissions",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "email_otp": [
     {
       "column": "id",
