@@ -16,13 +16,22 @@ type Props = {
   onChange: (key: string, value: number | number[] | null) => void;
   /** If true, show a preview of row[0] under each selector */
   showPreview?: boolean;
+  headerRowIncluded?: boolean;
 };
 
-export default function ColumnMapper({ sheetData, columns, mapping, onChange, showPreview }: Props) {
-  const { headers, rows } = sheetData;
-  const previewRow = rows[0] ?? [];
+export function columnLetter(index: number): string {
+  let label = "";
+  for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+    label = String.fromCharCode(65 + ((value - 1) % 26)) + label;
+  }
+  return label;
+}
 
-  const options = headers.map((h, i) => ({ label: h, idx: i }));
+export default function ColumnMapper({ sheetData, columns, mapping, onChange, showPreview, headerRowIncluded = true }: Props) {
+  const { headers, rows } = sheetData;
+  const previewRow = headerRowIncluded ? (rows[0] ?? []) : sheetData.rawHeaders;
+
+  const options = headers.map((h, i) => ({ label: headerRowIncluded ? h : columnLetter(i), idx: i }));
 
   return (
     <div className="space-y-3">
@@ -39,7 +48,7 @@ export default function ColumnMapper({ sheetData, columns, mapping, onChange, sh
               <div className="flex flex-wrap gap-1 mb-1">
                 {selected.map(idx => (
                   <span key={idx} className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded">
-                    {headers[idx]}
+                    {options[idx]?.label ?? columnLetter(idx)}
                     <button onClick={() => onChange(col.key, selected.filter(i => i !== idx))} className="hover:text-red-600">×</button>
                   </span>
                 ))}

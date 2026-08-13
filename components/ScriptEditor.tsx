@@ -14,6 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, Version, VersionStatus, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
@@ -31,7 +32,7 @@ import ScriptDialog, {
   SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS,
   SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS,
 } from "@/components/ScriptDialog";
-import { COMPACT_TEXT_SIDE_WIDTH_REM, PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
+import { PAGE_CONFIGS, updateEstimatedPageMap } from "@/lib/script-page";
 import type { EstimatedPageMapCache, PageConfig } from "@/lib/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
@@ -41,6 +42,17 @@ import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
+import ProductionTopMenu, {
+  ProductionOverflowSubmenuButton,
+  ProductionTopMenuDivider,
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  PRODUCTION_TOP_MENU_SLOT_ID,
+  PRODUCTION_TOOLBAR_STAGE,
+  useAnchoredMenu,
+  useProductionToolbar,
+  useProductionToolbarStage,
+} from "@/components/ProductionTopMenu";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -51,16 +63,20 @@ const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
 const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;
 const SCRIPT_TOC_CENTER_EVENT = "script-toc-center-active";
 const SCRIPT_EDITOR_MAX_WIDTH_PX = 768; // Tailwind max-w-3xl
-const SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM = 14;
-const SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM = 4;
+const SCRIPT_BODY_HORIZONTAL_PADDING_REM = 1; // Tailwind px-4; side rails may overlap this padding.
+const SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX = 240;
+const SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM = 11;
 const SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM = 2.5;
+const SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM = 1.75;
 const SCRIPT_TOC_RAIL_NUMBER_SLOT_REM = 0.5; // Minimum number slot width; widened when longer scene numbers need it.
 const SCRIPT_TOC_RAIL_LABEL_GAP_REM = 1.5;
-const SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM = 2; // Right-edge gap between chapter numbers and scene numbers.
-const SCRIPT_TOC_RAIL_GAP_REM = -1;
+const SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM = 1; // Right-edge gap between chapter numbers and scene numbers.
 const SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM = 18;
+const SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX = 576;
+const SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX = 12;
 const SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM = 0.25;
 const SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM = 2.5;
+const SCRIPT_SCENE_DETAIL_MODE_LABEL = { view: "编辑", edit: "完成" } as const;
 const SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX = 80;
 /** Returns the workspace scroll container element, or document.documentElement as fallback. */
 function getScrollEl(): HTMLElement {
@@ -86,6 +102,22 @@ function scrollContainerBy(opts: ScrollToOptions) {
   if (el) el.scrollBy(opts); else window.scrollBy(opts);
 }
 
+function scrollElementIntoView(
+  element: HTMLElement,
+  align: ScrollLogicalPosition,
+  viewportTopRatio?: number,
+) {
+  if (viewportTopRatio === undefined) {
+    element.scrollIntoView({ behavior: "instant", block: align });
+    return;
+  }
+  const blockElement = element.closest<HTMLElement>("[data-bwrap]") ?? element;
+  const { clientHeight, viewTop } = getScrollMetrics();
+  const targetTop = viewTop + clientHeight * viewportTopRatio;
+  const delta = blockElement.getBoundingClientRect().top - targetTop;
+  if (Math.abs(delta) >= 0.5) scrollContainerBy({ top: delta, behavior: "instant" });
+}
+
 const REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM = 1.75;
 const REHEARSAL_MARKER_ROW_HEIGHT_SCALE = 0;
 const REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX = 1;
@@ -98,28 +130,33 @@ const MARKER_DIVIDER_RIGHT_MARGIN = 0.2;
 let scriptTocMeasureElement: HTMLSpanElement | null = null;
 let scriptTocMeasureCache: {
   scenes: Scene[];
-  layoutKey: string;
-  railWidthPx: number;
+  rootFontSizePx: number;
   chapterNumberSlotWidthPx: number;
   sceneNumberSlotWidthPx: number;
 } | null = null;
 
-function measureScriptTocTextWidth(
-  text: string,
-  {
-    fontSizePx,
-    fontWeight,
-    letterSpacingPx = 0,
-  }: {
-    fontSizePx: number;
-    fontWeight: number;
-    letterSpacingPx?: number;
+function measureScriptTocNumberWidths(scenes: Scene[], rootFontSizePx: number): {
+  chapterNumberSlotWidthPx: number;
+  sceneNumberSlotWidthPx: number;
+} {
+  const minimumNumberSlotWidthPx = SCRIPT_TOC_RAIL_NUMBER_SLOT_REM * rootFontSizePx;
+  if (scriptTocMeasureCache?.scenes === scenes && scriptTocMeasureCache.rootFontSizePx === rootFontSizePx) {
+    return scriptTocMeasureCache;
   }
-): number {
+  if (typeof document === "undefined" || scenes.length === 0) {
+    return {
+      chapterNumberSlotWidthPx: minimumNumberSlotWidthPx,
+      sceneNumberSlotWidthPx: minimumNumberSlotWidthPx,
+    };
+  }
+
+  let chapterNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  let sceneNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  const numberFontSizePx = 0.75 * rootFontSizePx;
   scriptTocMeasureElement ??= document.createElement("span");
-  const el = scriptTocMeasureElement;
-  if (!el.isConnected) document.body.appendChild(el);
-  Object.assign(el.style, {
+  const measureElement = scriptTocMeasureElement;
+  if (!measureElement.isConnected) document.body.appendChild(measureElement);
+  Object.assign(measureElement.style, {
     position: "fixed",
     top: "-9999px",
     left: "-9999px",
@@ -127,96 +164,28 @@ function measureScriptTocTextWidth(
     whiteSpace: "nowrap",
     pointerEvents: "none",
     fontFamily: window.getComputedStyle(document.body).fontFamily,
-    fontSize: `${fontSizePx}px`,
-    fontWeight: String(fontWeight),
-    letterSpacing: `${letterSpacingPx}px`,
+    fontSize: `${numberFontSizePx}px`,
+    fontWeight: "700",
+    letterSpacing: `${0.05 * numberFontSizePx}px`,
   });
-  el.textContent = text;
-  return el.getBoundingClientRect().width;
-}
-
-function measureScriptTocRailLayout(scenes: Scene[], rootFontSizePx: number): {
-  railWidthPx: number;
-  chapterNumberSlotWidthPx: number;
-  sceneNumberSlotWidthPx: number;
-} {
-  const maxWidthPx = SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM * rootFontSizePx;
-  const minimumNumberSlotWidthPx = SCRIPT_TOC_RAIL_NUMBER_SLOT_REM * rootFontSizePx;
-  const gapPx = SCRIPT_TOC_RAIL_LABEL_GAP_REM * rootFontSizePx;
-  const subSceneIndentPx = SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM * rootFontSizePx;
-  const scrollbarWidthPx = SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM * rootFontSizePx;
-  const minWidthPx = (SCRIPT_TOC_RAIL_COMPACT_WIDTH_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
-  const layoutKey = [
-    rootFontSizePx,
-    maxWidthPx,
-    minimumNumberSlotWidthPx,
-    gapPx,
-    subSceneIndentPx,
-    scrollbarWidthPx,
-    minWidthPx,
-  ].join("|");
-  if (scriptTocMeasureCache?.scenes === scenes && scriptTocMeasureCache.layoutKey === layoutKey) {
-    return {
-      railWidthPx: scriptTocMeasureCache.railWidthPx,
-      chapterNumberSlotWidthPx: scriptTocMeasureCache.chapterNumberSlotWidthPx,
-      sceneNumberSlotWidthPx: scriptTocMeasureCache.sceneNumberSlotWidthPx,
-    };
-  }
-  if (typeof document === "undefined" || scenes.length === 0) {
-    return {
-      railWidthPx: maxWidthPx,
-      chapterNumberSlotWidthPx: minimumNumberSlotWidthPx,
-      sceneNumberSlotWidthPx: minimumNumberSlotWidthPx,
-    };
-  }
-
-  const horizontalPaddingPx = 2 * rootFontSizePx;
-  let requiredWidthPx = 0;
-  const sceneNameWidths: Array<{ scene: Scene; nameWidthPx: number }> = [];
-  let chapterNumberSlotWidthPx = minimumNumberSlotWidthPx;
-  let sceneNumberSlotWidthPx = minimumNumberSlotWidthPx;
-
-  const numberFontSizePx = 0.75 * rootFontSizePx;
-  const numberTrackingPx = 0.05 * numberFontSizePx;
 
   for (const scene of scenes) {
-    const numberText = scene.number || "—";
-    const measuredNumberWidthPx = measureScriptTocTextWidth(numberText, {
-      fontSizePx: numberFontSizePx,
-      fontWeight: 700,
-      letterSpacingPx: numberTrackingPx,
-    });
+    measureElement.textContent = scene.number || "—";
+    const measuredNumberWidthPx = measureElement.getBoundingClientRect().width;
     if (scene.parentId === null) {
       chapterNumberSlotWidthPx = Math.max(chapterNumberSlotWidthPx, measuredNumberWidthPx);
     } else {
       sceneNumberSlotWidthPx = Math.max(sceneNumberSlotWidthPx, measuredNumberWidthPx);
     }
-    const nameWidthPx = scene.name
-      ? measureScriptTocTextWidth(scene.name, {
-        fontSizePx: scene.parentId === null ? 0.875 * rootFontSizePx : 0.75 * rootFontSizePx,
-        fontWeight: scene.parentId === null ? 500 : 400,
-      })
-      : 32;
-    sceneNameWidths.push({ scene, nameWidthPx });
   }
 
-  for (const { scene, nameWidthPx } of sceneNameWidths) {
-    const numberSlotWidthPx = scene.parentId === null ? chapterNumberSlotWidthPx : sceneNumberSlotWidthPx;
-    requiredWidthPx = Math.max(
-      requiredWidthPx,
-      horizontalPaddingPx + (scene.parentId === null ? 0 : subSceneIndentPx) + numberSlotWidthPx + gapPx + nameWidthPx + scrollbarWidthPx
-    );
-  }
-
-  const railWidthPx = Math.ceil(Math.min(maxWidthPx, Math.max(minWidthPx, requiredWidthPx)));
   scriptTocMeasureCache = {
     scenes,
-    layoutKey,
-    railWidthPx,
+    rootFontSizePx,
     chapterNumberSlotWidthPx,
     sceneNumberSlotWidthPx,
   };
-  return { railWidthPx, chapterNumberSlotWidthPx, sceneNumberSlotWidthPx };
+  return scriptTocMeasureCache;
 }
 
 /**
@@ -361,11 +330,10 @@ function largeSelectionOperationMessage(operation: LargeSelectionOperation, coun
   return `${actionLabel} ${objectLabel}可能导致页面卡顿，建议分批次进行。\n是否确认继续操作？`;
 }
 
-const Chevron = () => (
-  <svg className="h-3 w-3 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden>
-    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+function anchoredManagementPanelStyle(style: React.CSSProperties): React.CSSProperties {
+  const availableHeight = typeof style.maxHeight === "number" ? `${style.maxHeight}px` : "calc(100vh - 1rem)";
+  return { ...style, maxHeight: `min(28rem, ${availableHeight})`, overflowY: undefined };
+}
 
 const FoldTriangle = ({ open }: { open: boolean }) => (
   <span
@@ -376,22 +344,32 @@ const FoldTriangle = ({ open }: { open: boolean }) => (
   />
 );
 
+const CHECKBOX_OPTION_BASE_CLASS = "h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors";
+const DISABLED_CHECKBOX_OPTION_CLASS = "cursor-not-allowed text-zinc-300 hover:bg-zinc-50";
+function checkboxOptionClass(selected: boolean): string {
+  return `${CHECKBOX_OPTION_BASE_CLASS} ${
+    selected
+      ? "border-zinc-800 bg-zinc-800 text-white"
+      : "border-zinc-300 text-transparent"
+  }`;
+}
+
 // ── Display settings (cookie-persisted) ───────────────────────────────────────
 type DisplaySettings = {
   pageBreaks: boolean;
   lineNumbers: boolean;
-  rehearsalMarks: boolean;
   blockTags: boolean;
   rehearsalMode: boolean;
   rehearsalBlockScenes: boolean;
+  sceneDetail: boolean;
 };
 const DEFAULT_DISPLAY: DisplaySettings = {
   pageBreaks: true,
   lineNumbers: true,
-  rehearsalMarks: true,
   blockTags: true,
   rehearsalMode: false,
   rehearsalBlockScenes: true,
+  sceneDetail: true,
 };
 const DISPLAY_COOKIE = "script_display";
 const CHARACTER_FOCUS_STORAGE_PREFIX = "script_character_focus";
@@ -1076,10 +1054,10 @@ function TableOfContents({
   };
 
   const wrapClass = isRailPlacement
-    ? `flex h-full flex-col rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
+    ? `panel-scrollbar-area flex h-full min-w-0 w-full flex-col overflow-hidden rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
     : "px-8 pt-6 pb-5 border-b border-zinc-100";
   const navClass = isRailPlacement
-    ? "script-toc-rail-scrollbar flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain pr-1"
+    ? "panel-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
     : "flex flex-col gap-0.5";
 
   return (
@@ -1104,7 +1082,7 @@ function TableOfContents({
                 columnGap: `${SCRIPT_TOC_RAIL_LABEL_GAP_REM}rem`,
                 ...(isRailPlacement && isSubScene ? { paddingLeft: `calc(0.5rem + ${SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM}rem)` } : {}),
               }}
-              className={`flex items-baseline rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group ${
+              className={`flex w-full min-w-0 shrink-0 items-baseline overflow-hidden rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group ${
                 isCompactRail ? "justify-center gap-0" : `${!isRailPlacement && isSubScene ? "pl-6" : ""}`
               } ${
                 isActive ? "bg-white hover:bg-white" : ""
@@ -1114,7 +1092,7 @@ function TableOfContents({
                 style={isCompactRail
                   ? undefined
                   : { minWidth: numberSlotWidthPx ? `${numberSlotWidthPx}px` : `${SCRIPT_TOC_RAIL_NUMBER_SLOT_REM}rem` }}
-                className={`${isCompactRail ? "min-w-0" : "inline-block text-right"} text-xs tracking-wider ${
+                className={`${isCompactRail ? "min-w-0" : "inline-block shrink-0 text-right"} text-xs tracking-wider ${
                 isActive
                   ? "font-bold text-[#637ca1]"
                   : isSubScene
@@ -1125,12 +1103,12 @@ function TableOfContents({
                 {scene.number || "—"}
               </span>
               {!isCompactRail && (
-                <span className={`min-w-0 truncate ${
+                <span className={`min-w-0 flex-1 truncate ${
                   isActive
                     ? `${isSubScene ? "text-xs" : "text-sm"} font-semibold text-zinc-700`
                     : isSubScene
                       ? "text-xs text-zinc-300 group-hover:text-zinc-500"
-                      : "text-sm font-medium text-zinc-500 group-hover:text-zinc-700"
+                      : "text-sm font-medium text-zinc-400 group-hover:text-zinc-700"
                 }`}>
                   {scene.name || <span className="italic text-zinc-200">未命名</span>}
                 </span>
@@ -1158,10 +1136,20 @@ function ScriptSceneMetaField({
 }) {
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setDraft(value);
   }, [value]);
+
+  useLayoutEffect(() => {
+    if (!canEdit || !multiline) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    const borderHeight = textarea.offsetHeight - textarea.clientHeight;
+    textarea.style.height = `${textarea.scrollHeight + borderHeight}px`;
+  }, [canEdit, draft, multiline]);
 
   const commit = async () => {
     if (draft === value) return;
@@ -1181,12 +1169,13 @@ function ScriptSceneMetaField({
       {canEdit ? (
         multiline ? (
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             disabled={saving}
             rows={3}
-            className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
+            className="w-full resize-none overflow-hidden rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
             placeholder="—"
           />
         ) : (
@@ -1215,6 +1204,8 @@ function ScriptSceneDetailRail({
   productionId,
   versionId,
   canEdit,
+  controlledEditMode,
+  showHeader = true,
   isDeleteConfirmHighlighted = false,
   scrollbarOffsetPx,
   onUpdateIdentity,
@@ -1225,6 +1216,8 @@ function ScriptSceneDetailRail({
   productionId: string;
   versionId: string | null;
   canEdit: boolean;
+  controlledEditMode?: boolean;
+  showHeader?: boolean;
   isDeleteConfirmHighlighted?: boolean;
   scrollbarOffsetPx: number;
   onUpdateIdentity: (id: string, name: string) => void;
@@ -1232,7 +1225,8 @@ function ScriptSceneDetailRail({
 }) {
   const [nameDraft, setNameDraft] = useState(scene?.name ?? "");
   const [savingIdentity, setSavingIdentity] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const [internalEditMode, setInternalEditMode] = useState(false);
+  const editMode = controlledEditMode ?? internalEditMode;
   const railRef = useRef<HTMLDivElement | null>(null);
   const sectionCanEdit = canEdit && editMode;
   const chapterDurationDisplay = useMemo(
@@ -1262,20 +1256,20 @@ function ScriptSceneDetailRail({
     setNameDraft(scene?.name ?? "");
   }, [scene?.id, scene?.name]);
   useEffect(() => {
-    setEditMode(false);
+    setInternalEditMode(false);
   }, [scene?.id]);
   useEffect(() => {
-    if (!editMode) return;
+    if (!editMode || controlledEditMode !== undefined) return;
     const handlePointerDown = (event: PointerEvent) => {
       const rail = railRef.current;
       if (!rail || rail.contains(event.target as Node)) return;
       const active = document.activeElement;
       if (active instanceof HTMLElement && rail.contains(active)) active.blur();
-      window.setTimeout(() => setEditMode(false), 0);
+      window.setTimeout(() => setInternalEditMode(false), 0);
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [editMode]);
+  }, [controlledEditMode, editMode]);
 
   const commitIdentity = async () => {
     if (!scene) return;
@@ -1315,14 +1309,14 @@ function ScriptSceneDetailRail({
     <div
       ref={railRef}
       data-script-scene-detail="true"
-      className="group/scene-detail box-border flex h-full min-h-0 w-full flex-col rounded-lg px-3 pt-3 text-left"
+      className="panel-scrollbar-area group/scene-detail box-border flex h-full min-h-0 w-full flex-col rounded-lg px-3 pt-3 text-left"
       style={{
         background: isDeleteConfirmHighlighted
           ? "#fee2e2"
           : `linear-gradient(to bottom, rgb(255, 255, 255) 0, rgb(255, 255, 255) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) 100%)`,
       }}
     >
-      <div
+      {showHeader && <div
         className="mb-3 flex shrink-0 items-center justify-between gap-2"
         style={{
           marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
@@ -1351,30 +1345,29 @@ function ScriptSceneDetailRail({
         {canEdit ? (
           <button
             type="button"
-            onClick={() => setEditMode((value) => !value)}
+            onClick={() => setInternalEditMode((value) => !value)}
             className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
               editMode
                 ? "bg-zinc-700 text-white opacity-100 hover:bg-zinc-600"
                 : "pointer-events-none bg-[#637ca1] text-white opacity-0 hover:bg-[#91a8ca] group-hover/scene-detail:pointer-events-auto group-hover/scene-detail:opacity-100"
             }`}
           >
-            {editMode ? "确认" : "编辑"}
+            {editMode ? SCRIPT_SCENE_DETAIL_MODE_LABEL.edit : SCRIPT_SCENE_DETAIL_MODE_LABEL.view}
           </button>
         ) : (
           <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">只读</span>
         )}
-      </div>
+      </div>}
       {!scene ? (
         <div className="flex flex-1 items-center justify-center text-center text-xs leading-relaxed text-zinc-500">
           滚动或选择目录中的章节
         </div>
       ) : (
         <div
-          className="script-toc-rail-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
+          className="panel-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
           style={{
             marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
-            paddingRight: `${scrollbarOffsetPx}px`,
-            scrollbarGutter: "stable",
+            paddingRight: `calc(${scrollbarOffsetPx}px + 8px)`,
           }}
         >
           {sectionCanEdit && (
@@ -1508,6 +1501,8 @@ function ScenePanel({
   onNavigate,
   triggerClassName,
   nestedFromMore = false,
+  nestedMenuRef,
+  nestedMenuStyle,
   label = "章节",
 }: {
   scenes: Scene[];
@@ -1521,31 +1516,26 @@ function ScenePanel({
   onNavigate?: () => void;
   triggerClassName?: string;
   nestedFromMore?: boolean;
+  nestedMenuRef?: React.RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: React.CSSProperties;
   label?: string;
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onOpenChange(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, onOpenChange]);
-
   return (
-    <div ref={wrapRef} className="relative shrink-0">
+    <div className="relative shrink-0">
       <button
+        data-script-toolbar-menu-trigger="scene"
         onClick={() => onOpenChange(!open)}
         className={triggerClassName ?? "flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"}
       >
-        {label} <Chevron />
+        {label} <ChevronIcon size={12} className="opacity-50" />
       </button>
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          data-script-toolbar-menu-panel="scene"
+          data-production-overflow-menu-child={nestedFromMore ? "true" : undefined}
+          ref={nestedFromMore ? nestedMenuRef : undefined}
+          className={`${nestedFromMore ? "" : "absolute right-0 top-full mt-2.5"} z-40 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
@@ -1722,6 +1712,8 @@ function ScriptMarkerRow({
   canEdit,
   isSelected,
   isDeleteConfirmHighlighted,
+  isDeleteConfirmationOpen,
+  isMobileMenuOpen = false,
   isReorderLocked,
   isScriptDragging,
   dragTarget,
@@ -1739,18 +1731,22 @@ function ScriptMarkerRow({
   onAddRehearsalBefore,
   onConvertToChapter,
   onConvertToScene,
+  onOpenSceneDetail,
   onDeleteConfirmChange,
   onSceneNameChange,
+  onMobileMenuOpen,
   deleteCount = 1,
   lineIndexWidth,
-  dismissToken = 0,
   isRecentlyMoved = false,
   isTocHighlighted = false,
+  reserveRehearsalGap = false,
 }: {
   node: ScriptMarkerNode;
   canEdit: boolean;
   isSelected: boolean;
   isDeleteConfirmHighlighted: boolean;
+  isDeleteConfirmationOpen: boolean;
+  isMobileMenuOpen?: boolean;
   isReorderLocked: boolean;
   isScriptDragging: boolean;
   dragTarget?: DragTarget | null;
@@ -1768,25 +1764,23 @@ function ScriptMarkerRow({
   onAddRehearsalBefore: () => void;
   onConvertToChapter?: () => void;
   onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
   onDeleteConfirmChange?: (confirming: boolean) => void;
   onSceneNameChange?: (id: string, name: string) => void;
+  onMobileMenuOpen?: () => void;
   deleteCount?: number;
   lineIndexWidth?: string;
-  dismissToken?: number;
   isRecentlyMoved?: boolean;
   isTocHighlighted?: boolean;
+  reserveRehearsalGap?: boolean;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  useEffect(() => {
-    setConfirmDelete(false);
-  }, [dismissToken]);
   const isRehearsal = node.kind === "rehearsal";
   const markerRootStyle: React.CSSProperties | undefined = lineIndexWidth
     ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)`,
         marginRight: `${MARKER_DIVIDER_RIGHT_MARGIN}rem` }
     : undefined;
   const rehearsalMarkerStyle: React.CSSProperties | undefined = isRehearsal
-    ? { height: `max(${REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX}px, ${REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM * REHEARSAL_MARKER_ROW_HEIGHT_SCALE}rem)` }
+    ? { height: reserveRehearsalGap ? "1.25rem" : `max(${REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX}px, ${REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM * REHEARSAL_MARKER_ROW_HEIGHT_SCALE}rem)` }
     : undefined;
   const rehearsalFloatStyle: React.CSSProperties | undefined = isRehearsal
     ? { left: `calc(1.5rem + ${REHEARSAL_MARKER_FLOAT_LEFT_OFFSET_REM}rem)` }
@@ -1803,7 +1797,7 @@ function ScriptMarkerRow({
         : "确认删除此排练记号？";
   const markerMovedGlowClass = isRecentlyMoved && !isRehearsal ? "script-block-moved-glow" : "";
   const markerTocGlowClass = !isRehearsal && !isRecentlyMoved && isTocHighlighted ? "script-toc-marker-glow" : "";
-  const isDeleteHighlighted = confirmDelete || isDeleteConfirmHighlighted;
+  const isDeleteHighlighted = isDeleteConfirmationOpen || isDeleteConfirmHighlighted;
   const markerGlowEndColor = !isRehearsal && isTocHighlighted
     ? isDeleteHighlighted ? "#fee2e2" : isSelected ? "#eef3fa" : "#ffffff"
     : undefined;
@@ -1813,7 +1807,8 @@ function ScriptMarkerRow({
     canAddChapterScene ||
     canAddRehearsal ||
     !!convertToChapter ||
-    !!convertToScene
+    !!convertToScene ||
+    !!onOpenSceneDetail
   );
   const boundaryMenuControl = canShowBoundaryMenu ? (
     <RehearsalMarkInput
@@ -1825,6 +1820,7 @@ function ScriptMarkerRow({
       onAddRehearsalBefore={onAddRehearsalBefore}
       onConvertToChapter={convertToChapter}
       onConvertToScene={convertToScene}
+      onOpenSceneDetail={isRehearsal ? undefined : onOpenSceneDetail}
     />
   ) : null;
   const markerRootCombinedStyle: React.CSSProperties | undefined = (
@@ -1841,7 +1837,6 @@ function ScriptMarkerRow({
     e.stopPropagation();
     if (isScriptDragging) return;
     if (!onRequestDelete()) return;
-    setConfirmDelete(true);
     onDeleteConfirmChange?.(true);
   };
   const deleteConfirmationControl = (
@@ -1854,7 +1849,6 @@ function ScriptMarkerRow({
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
-          setConfirmDelete(false);
           onDeleteConfirmChange?.(false);
           onRemove();
         }}
@@ -1866,7 +1860,6 @@ function ScriptMarkerRow({
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
-          setConfirmDelete(false);
           onDeleteConfirmChange?.(false);
         }}
         className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
@@ -1916,9 +1909,9 @@ function ScriptMarkerRow({
       )}
       {!isRehearsal && (canEdit || boundaryMenuControl) && (
         <div className="absolute left-0 top-1 bottom-1 z-20 w-12">
-          {canEdit && confirmDelete ? (
+          {canEdit && isDeleteConfirmationOpen ? (
             <span
-              className="absolute left-0 top-1/2 z-10 -translate-y-1/2 translate-x-8"
+              className="absolute left-0 top-1/2 z-10 hidden -translate-y-1/2 translate-x-8 sm:block"
             >
               {deleteConfirmationControl}
             </span>
@@ -1935,7 +1928,7 @@ function ScriptMarkerRow({
                 e.stopPropagation();
               }}
               style={{ left: MARKER_CONTROL_DELETE_LEFT_PX }}
-              className="absolute top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100"
+              className="absolute top-1/2 hidden h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100 sm:flex"
               title="删除此标记"
               aria-label="删除此标记"
             >
@@ -1958,24 +1951,28 @@ function ScriptMarkerRow({
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect(e);
+                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
               }}
               style={{ left: MARKER_CONTROL_BAR_LEFT_PX }}
-              className={`absolute top-1/2 h-[max(1.25rem,calc(100%-0.25rem))] w-4 -translate-y-1/2 select-none rounded opacity-0 outline-none transition-all focus:outline-none focus-visible:outline-none group-hover/marker:opacity-100 ${
+              className={`absolute top-1/2 h-[max(1.25rem,calc(100%-0.25rem))] w-4 -translate-y-1/2 select-none rounded text-zinc-300 outline-none transition-colors hover:text-zinc-500 focus:outline-none focus-visible:outline-none sm:opacity-0 sm:transition-all sm:group-hover/marker:opacity-100 ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
-                  : `cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
-                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] opacity-100" : "text-zinc-200"
-                    }`
+                  : isDeleteHighlighted
+                    ? "cursor-grab bg-red-100 text-red-500 hover:bg-red-100 hover:text-red-600 active:cursor-grabbing sm:opacity-100"
+                    : `cursor-grab active:cursor-grabbing sm:hover:bg-[#dbe5f3] sm:hover:text-[#91a8ca] ${
+                        isSelected ? "sm:bg-[#dbe5f3] sm:text-[#91a8ca] sm:opacity-100" : "sm:text-zinc-200"
+                      }`
               }`}
               title="拖动调整标记位置"
               aria-label="拖动调整标记位置"
             >
-              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current" />
+              <span className="pointer-events-none flex h-full items-center justify-center text-[11px] font-bold sm:hidden">▶</span>
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 hidden w-0.5 -translate-x-1/2 rounded bg-current sm:block" />
             </button>
           )}
           {boundaryMenuControl && (
             <span
-              className="absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/marker:opacity-100"
+              className="absolute top-1/2 hidden -translate-y-1/2 opacity-0 transition-opacity group-hover/marker:opacity-100 sm:block"
               style={{
                 left: MARKER_CONTROL_TRIANGLE_LEFT_PX,
                 marginTop: MARKER_CONTROL_TRIANGLE_TOP_OFFSET_PX,
@@ -2008,10 +2005,10 @@ function ScriptMarkerRow({
               if (!canEdit) return;
               onSelect(e);
             }}
-            className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${confirmDelete ? "transition-none" : "transition-all"} ${
+            className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${isDeleteConfirmationOpen ? "transition-none" : "transition-all"} ${
               isDeleteHighlighted
                 ? "bg-red-100 text-red-600 ring-1 ring-red-300"
-                : isSelected ? "bg-[#eef3fa] text-[#637ca1] ring-1 ring-[#91a8ca]" : "bg-zinc-100 text-zinc-500"
+                : isSelected || isMobileMenuOpen ? "bg-[#eef3fa] text-[#637ca1] ring-1 ring-[#91a8ca]" : "bg-zinc-100 text-zinc-500"
             } ${
               canEdit && !isReorderLocked
                 ? isDeleteHighlighted
@@ -2024,7 +2021,7 @@ function ScriptMarkerRow({
           >
             {node.mark}
           </button>
-          {canEdit && confirmDelete ? (
+          {canEdit && isDeleteConfirmationOpen ? (
             deleteConfirmationControl
           ) : canEdit ? (
             <button
@@ -2038,7 +2035,7 @@ function ScriptMarkerRow({
               onClick={(e) => {
                 e.stopPropagation();
               }}
-              className={`flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 transition-all hover:bg-red-100 hover:text-red-500 ${
+              className={`hidden h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 transition-all hover:bg-red-100 hover:text-red-500 sm:flex ${
                 isSelected ? "opacity-100" : "opacity-0 group-hover/marker:opacity-100"
               }`}
               title="删除此排练记号"
@@ -2047,10 +2044,24 @@ function ScriptMarkerRow({
               ×
             </button>
           ) : null}
-          {!confirmDelete && boundaryMenuControl ? (
-            <span className="flex h-4 items-center opacity-0 transition-opacity group-hover/marker:opacity-100">
+          {!isDeleteConfirmationOpen && boundaryMenuControl ? (
+            <span className="hidden h-4 items-center opacity-0 transition-opacity group-hover/marker:opacity-100 sm:flex">
               {boundaryMenuControl}
             </span>
+          ) : null}
+          {!isDeleteConfirmationOpen && (canEdit || boundaryMenuControl) ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMobileMenuOpen?.();
+              }}
+              className="flex h-5 w-4 items-center justify-center rounded text-zinc-300 transition-colors hover:text-zinc-500 sm:hidden"
+              title="更多操作"
+              aria-label="更多操作"
+            >
+              <span className="pointer-events-none flex h-full items-center justify-center text-[11px] font-bold">▶</span>
+            </button>
           ) : null}
         </div>
       ) : (
@@ -2076,6 +2087,7 @@ function BoundaryInsertMenu({
   onAddRehearsal,
   onConvertToChapter,
   onConvertToScene,
+  onOpenSceneDetail,
 }: {
   canAddChapterScene: boolean;
   canAddRehearsal: boolean;
@@ -2084,6 +2096,7 @@ function BoundaryInsertMenu({
   onAddRehearsal: () => void;
   onConvertToChapter?: () => void;
   onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
 }) {
   const actions: Array<[string, () => void]> = [
     ...(canAddChapterScene ? [
@@ -2125,6 +2138,13 @@ function BoundaryInsertMenu({
           {conversionActions.map(renderAction)}
         </>
       )}
+      {onOpenSceneDetail && (
+        <>
+          {(actions.length > 0 || conversionActions.length > 0) && <div className="my-1 h-px bg-zinc-100" />}
+          <div className="px-3 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">详情</div>
+          {renderAction(["查看构作详情", onOpenSceneDetail])}
+        </>
+      )}
     </div>
   );
 }
@@ -2153,6 +2173,7 @@ function RehearsalMarkInput({
   onAddRehearsalBefore,
   onConvertToChapter,
   onConvertToScene,
+  onOpenSceneDetail,
 }: {
   variant?: "script-block" | "marker-control";
   canAddChapterScene: boolean;
@@ -2162,6 +2183,7 @@ function RehearsalMarkInput({
   onAddRehearsalBefore: () => void;
   onConvertToChapter?: () => void;
   onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -2182,6 +2204,11 @@ function RehearsalMarkInput({
   const triggerLayoutClass = variant === "marker-control"
     ? "flex h-4 w-4 items-center justify-center p-0"
     : "px-0.5 py-0";
+  const triggerTitle = canAddRehearsal
+    ? "添加章节/段落/排练记号"
+    : canAddChapterScene
+      ? "添加章节/段落"
+      : "标记操作";
 
   return (
     <span
@@ -2194,7 +2221,7 @@ function RehearsalMarkInput({
         type="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((value) => !value)}
-        title="添加章节/段落/排练记号"
+        title={triggerTitle}
         data-rehearsal-triangle="true"
         className={`rounded ${triggerLayoutClass} text-[8px] font-bold leading-none tracking-wide text-zinc-300 transition-colors hover:text-zinc-500`}
       >
@@ -2209,6 +2236,7 @@ function RehearsalMarkInput({
           onAddRehearsal={() => closeAfter(onAddRehearsalBefore)}
           onConvertToChapter={onConvertToChapter ? () => closeAfter(onConvertToChapter) : undefined}
           onConvertToScene={onConvertToScene ? () => closeAfter(onConvertToScene) : undefined}
+          onOpenSceneDetail={onOpenSceneDetail ? () => closeAfter(onOpenSceneDetail) : undefined}
         />
       )}
     </span>
@@ -2345,6 +2373,8 @@ function CharacterPanel({
   readOnly = false,
   triggerClassName,
   nestedFromMore = false,
+  nestedMenuRef,
+  nestedMenuStyle,
   label = "角色",
 }: {
   characters: Character[];
@@ -2361,19 +2391,11 @@ function CharacterPanel({
   readOnly?: boolean;
   triggerClassName?: string;
   nestedFromMore?: boolean;
+  nestedMenuRef?: React.RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: React.CSSProperties;
   label?: string;
 }) {
   const [draft, setDraft] = useState("");
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!panelRef.current?.contains(e.target as Node)) onOpenChange(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open, onOpenChange]);
 
   const submit = () => {
     if (readOnly) return;
@@ -2384,8 +2406,9 @@ function CharacterPanel({
   };
 
   return (
-    <div ref={panelRef} className="relative shrink-0">
+    <div className="relative shrink-0">
       <button
+        data-script-toolbar-menu-trigger="char"
         onClick={() => onOpenChange(!open)}
         className={triggerClassName ?? `flex items-center gap-0.5 rounded px-1.5 py-1 text-sm transition-colors ${
           open
@@ -2393,16 +2416,19 @@ function CharacterPanel({
             : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
         }`}
       >
-        {label} <Chevron />
+        {label} <ChevronIcon size={12} className="opacity-50" />
       </button>
 
       {open && (
         <div
-          className={`${nestedFromMore ? "fixed right-2 top-[7.5rem]" : "absolute right-0 top-full"} z-30 mt-1 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
-          style={{ maxHeight: nestedFromMore ? "min(28rem, calc(100vh - 10rem))" : "min(28rem, calc(100vh - 8rem))" }}
+          data-script-toolbar-menu-panel="char"
+          data-production-overflow-menu-child={nestedFromMore ? "true" : undefined}
+          ref={nestedFromMore ? nestedMenuRef : undefined}
+          className={`${nestedFromMore ? "" : "absolute right-0 top-full mt-2.5"} z-40 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
         >
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">角色管理</span>
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">{readOnly ? "聚焦角色" : "角色管理"}</span>
             {(focusedCharacterIds.size > 0 || !readOnly) && (
               <div className="flex items-center gap-2">
                 {focusedCharacterIds.size > 0 && (
@@ -2473,6 +2499,33 @@ function CharacterPanel({
 
 // ─── BlockCharacterSelector ───────────────────────────────────────────────────
 
+function CharacterControlBottomSheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:hidden" onClick={onClose}>
+      <div
+        data-script-selection-action="true"
+        className="max-h-[75vh] w-full overflow-y-auto rounded-t-2xl border-t border-[var(--line)] bg-[var(--surface)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="h-1 w-10 rounded-full bg-zinc-200" />
+        </div>
+        <p className="px-5 py-2 text-xs font-medium text-zinc-400">{title}</p>
+        {children}
+        <div className="h-6" />
+      </div>
+    </div>
+  );
+}
+
 function BlockCharacterSelector({
   block,
   characters,
@@ -2506,6 +2559,7 @@ function BlockCharacterSelector({
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [displayMenuOpen, setDisplayMenuOpen] = useState(false);
+  const [mobileControlMenu, setMobileControlMenu] = useState<"display" | "annotations" | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -2526,6 +2580,7 @@ function BlockCharacterSelector({
     } else {
       setShowAnnotations(false);
       setDisplayMenuOpen(false);
+      setMobileControlMenu(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
@@ -2676,16 +2731,25 @@ function BlockCharacterSelector({
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="relative flex h-4 items-center">
               <button
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setDisplayMenuOpen((v) => !v); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (window.matchMedia("(max-width: 639px)").matches) {
+                    setMobileControlMenu((current) => current === "display" ? null : "display");
+                    return;
+                  }
+                  setDisplayMenuOpen((v) => !v);
+                }}
                 className={`${selectorControlClass} ${
                   block.forceShowCharacterName ? "text-zinc-600" : "text-zinc-300 hover:text-zinc-500"
                 }`}
               >
                 <span>显示状态</span>
-                <FoldTriangle open={displayMenuOpen} />
+                <span className="sm:hidden"><FoldTriangle open={mobileControlMenu === "display"} /></span>
+                <span className="hidden sm:inline"><FoldTriangle open={displayMenuOpen} /></span>
               </button>
               {displayMenuOpen && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl">
+                <div className="absolute right-0 top-full z-50 mt-1 hidden w-32 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl sm:block">
                   <button
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -2716,17 +2780,26 @@ function BlockCharacterSelector({
               )}
             </div>
             <button
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowAnnotations((v) => !v); }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.matchMedia("(max-width: 639px)").matches) {
+                  setMobileControlMenu((current) => current === "annotations" ? null : "annotations");
+                  return;
+                }
+                setShowAnnotations((v) => !v);
+              }}
               className={`${selectorControlClass} text-zinc-300 hover:text-zinc-500`}
             >
               <span>备注</span>
-              <FoldTriangle open={showAnnotations} />
+              <span className="sm:hidden"><FoldTriangle open={mobileControlMenu === "annotations"} /></span>
+              <span className="hidden sm:inline"><FoldTriangle open={showAnnotations} /></span>
             </button>
           </div>
         )}
       </div>
       {showAnnotations && selected.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 rounded-b-lg border border-t-0 border-zinc-200 px-2.5 py-1.5">
+        <div className="hidden flex-wrap gap-x-4 gap-y-0.5 rounded-b-lg border border-t-0 border-zinc-200 px-2.5 py-1.5 sm:flex">
           {selected.map((c) => (
             <label key={c.id} className="flex items-center gap-1">
               <span className="text-[11px] text-zinc-400">{c.name}</span>
@@ -2740,6 +2813,61 @@ function BlockCharacterSelector({
             </label>
           ))}
         </div>
+      )}
+      {mobileControlMenu === "display" && (
+        <CharacterControlBottomSheet title="显示状态" onClose={() => setMobileControlMenu(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              onForceShowCharacterNameChange(true);
+              setMobileControlMenu(null);
+            }}
+            className={`flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] ${
+              block.forceShowCharacterName ? "font-medium text-zinc-900" : "text-zinc-600"
+            }`}
+          >
+            <span>永远显示该行角色</span>
+            {block.forceShowCharacterName && <span className="text-xs">✓</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onForceShowCharacterNameChange(false);
+              setMobileControlMenu(null);
+            }}
+            className={`flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] ${
+              block.forceShowCharacterName ? "text-zinc-600" : "font-medium text-zinc-900"
+            }`}
+          >
+            <span>自动</span>
+            {!block.forceShowCharacterName && <span className="text-xs">✓</span>}
+          </button>
+        </CharacterControlBottomSheet>
+      )}
+      {mobileControlMenu === "annotations" && (
+        <CharacterControlBottomSheet title="备注" onClose={() => setMobileControlMenu(null)}>
+          <div className="border-t border-zinc-100 px-5 py-2">
+            {selected.map((c) => (
+              <label key={c.id} className="flex items-center gap-3 border-b border-zinc-100 py-3 last:border-0">
+                <span className="w-20 shrink-0 truncate text-sm text-zinc-500">{c.name}</span>
+                <input
+                  value={block.characterAnnotations[c.id] ?? ""}
+                  onChange={(e) => onAnnotationChange(c.id, e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  placeholder="备注…"
+                  className="min-w-0 flex-1 border-b border-zinc-200 bg-transparent py-1 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-500"
+                />
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileControlMenu(null)}
+            className="w-full border-t border-zinc-100 px-5 py-3.5 text-center text-[15px] font-medium text-zinc-700"
+          >
+            完成
+          </button>
+        </CharacterControlBottomSheet>
       )}
       {suggestions.length > 0 && (
         <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(16rem, calc(100vh - 12rem))" }}>
@@ -3005,6 +3133,24 @@ const PRINT_WRAPPER_PADDING_HEIGHT = 8;
 const PRINT_TEXT_CLASS = "w-full break-words text-sm leading-7";
 const PRINT_STAGE_COMMENT_CLASS = "font-stage text-sm italic leading-7 text-zinc-400 whitespace-pre-wrap";
 const PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX: number = 1;
+const PRINT_TOOLBAR_UNFOLD_BUFFER_PX = 16;
+const PRINT_PREVIEW_MIN_SCALE = 0.1;
+const PRINT_PREVIEW_MAX_SCALE = 2;
+const PRINT_PREVIEW_SIDE_GUTTER_PX = 32;
+const PRINT_PREVIEW_PAGE_GUTTER_PX = 64;
+const PRINT_PAGINATION_MEASURE_BATCH_SIZE = 32;
+
+type PrintPaginationMeasurement = {
+  generation: number;
+  blocks: Block[];
+  characters: Character[];
+  scenes: Scene[];
+  pageLayout: PageLayout;
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  textLayoutMode: ScriptTextLayoutMode;
+  batchStart: number;
+};
 
 type PrintPageData = {
   items: PrintItem[];
@@ -3012,6 +3158,7 @@ type PrintPageData = {
   pageNum: number;
 };
 type PrintHeaderMode = "all-left" | "all-right" | "first-right" | "first-left";
+type PrintToolbarStage = 0 | 1 | 2 | 3;
 const PRINT_HEADER_MODES: PrintHeaderMode[] = ["all-left", "all-right", "first-right", "first-left"];
 const PRINT_HEADER_MODE_LABELS: Record<PrintHeaderMode, string> = {
   "all-left": "页眉统一靠左",
@@ -3127,6 +3274,7 @@ function PrintMeasurementLayer({
   stageDelimClose,
   measureRef,
   onLayoutChange,
+  blockRange,
 }: {
   blocks: Block[];
   characters: Character[];
@@ -3137,10 +3285,14 @@ function PrintMeasurementLayer({
   stageDelimClose: string;
   measureRef: React.RefObject<HTMLDivElement | null>;
   onLayoutChange?: () => void;
+  blockRange?: { start: number; end: number };
 }) {
   const characterById = useMemo(() => new Map(characters.map((c) => [c.id, c])), [characters]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
-  const measuredBlocks = useMemo(() => blocks.filter(isTextBlock), [blocks]);
+  const allMeasuredBlocks = useMemo(() => blocks.filter(isTextBlock), [blocks]);
+  const rangeStart = blockRange?.start ?? 0;
+  const rangeEnd = blockRange?.end ?? allMeasuredBlocks.length;
+  const measuredBlocks = allMeasuredBlocks.slice(rangeStart, rangeEnd);
 
   const renderSceneHeader = (scene: Scene) => (
     <div className="flex items-center gap-3 py-3">
@@ -3224,7 +3376,7 @@ function PrintMeasurementLayer({
       }}
     >
       {measuredBlocks.map((block, i) => {
-        const prev = i > 0 ? measuredBlocks[i - 1] : null;
+        const prev = allMeasuredBlocks[rangeStart + i - 1] ?? null;
         const hideChar = shouldHideCharacterLabel(prev, block);
         const sceneStart = isSceneBoundaryBlock(block, prev);
         return (
@@ -3266,13 +3418,42 @@ function PrintPaginationMeasure({
   textLayoutMode: ScriptTextLayoutMode;
   onPageMapChange: (pageMap: Record<string, number>) => void;
 }) {
-  const cfg = PAGE_CONFIGS[pageLayout];
-  const contentW = cfg.width - cfg.marginX * 2;
-  const contentH = cfg.height - cfg.marginTop - cfg.marginBottom;
-  const compactLayout = textLayoutMode === "compact";
   const measureRef = useRef<HTMLDivElement>(null);
   const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
+  const measurementGenerationRef = useRef(0);
+  const pendingMeasureWorkRef = useRef<{ kind: "idle" | "timer"; id: number } | null>(null);
+  const pendingMeasureFrameRef = useRef<number | null>(null);
+  const measuredPrintHeightsRef = useRef<Record<string, number>>({});
+  const [measurement, setMeasurement] = useState<PrintPaginationMeasurement | null>(null);
+  const cancelPendingMeasureWork = useCallback(() => {
+    const pending = pendingMeasureWorkRef.current;
+    if (!pending) return;
+    if (pending.kind === "idle") window.cancelIdleCallback(pending.id);
+    else window.clearTimeout(pending.id);
+    pendingMeasureWorkRef.current = null;
+  }, []);
+  const cancelPendingMeasureFrame = useCallback(() => {
+    if (pendingMeasureFrameRef.current === null) return;
+    cancelAnimationFrame(pendingMeasureFrameRef.current);
+    pendingMeasureFrameRef.current = null;
+  }, []);
+  const scheduleMeasureWork = useCallback((work: () => void) => {
+    cancelPendingMeasureWork();
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(() => {
+        pendingMeasureWorkRef.current = null;
+        work();
+      }, { timeout: 100 });
+      pendingMeasureWorkRef.current = { kind: "idle", id };
+      return;
+    }
+    const id = window.setTimeout(() => {
+      pendingMeasureWorkRef.current = null;
+      work();
+    }, 0);
+    pendingMeasureWorkRef.current = { kind: "timer", id };
+  }, [cancelPendingMeasureWork]);
   const requestLayoutRemeasure = useCallback(() => {
     if (remeasureTimerRef.current) return;
     remeasureTimerRef.current = setTimeout(() => {
@@ -3282,33 +3463,104 @@ function PrintPaginationMeasure({
   }, []);
 
   useEffect(() => {
+    const generation = ++measurementGenerationRef.current;
+    measuredPrintHeightsRef.current = {};
+    cancelPendingMeasureFrame();
+    scheduleMeasureWork(() => {
+      setMeasurement({
+        generation,
+        blocks: blocks.filter(isTextBlock),
+        characters,
+        scenes,
+        pageLayout,
+        stageDelimOpen,
+        stageDelimClose,
+        textLayoutMode,
+        batchStart: 0,
+      });
+    });
     return () => {
-      if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
+      if (remeasureTimerRef.current) {
+        clearTimeout(remeasureTimerRef.current);
+        remeasureTimerRef.current = null;
+      }
+      cancelPendingMeasureWork();
+      cancelPendingMeasureFrame();
     };
-  }, []);
+  }, [blocks, characters, scenes, pageLayout, stageDelimOpen, stageDelimClose, textLayoutMode, cancelPendingMeasureFrame, cancelPendingMeasureWork, scheduleMeasureWork]);
 
   useEffect(() => {
-    const el = measureRef.current;
-    if (!el) return;
-    const heights: Record<string, number> = {};
-    el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
-      if (node.dataset.mid) heights[node.dataset.mid] = node.offsetHeight;
+    if (!measurement) return;
+    if (measurement.generation !== measurementGenerationRef.current) return;
+    const textBlockCount = measurement.blocks.length;
+    if (textBlockCount === 0) {
+      onPageMapChange({});
+      setMeasurement((current) => current?.generation === measurementGenerationRef.current
+        ? null
+        : current
+      );
+      return;
+    }
+    const batchEnd = Math.min(
+      textBlockCount,
+      measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE,
+    );
+    cancelPendingMeasureFrame();
+    pendingMeasureFrameRef.current = requestAnimationFrame(() => {
+      pendingMeasureFrameRef.current = requestAnimationFrame(() => {
+        pendingMeasureFrameRef.current = null;
+        if (measurement.generation !== measurementGenerationRef.current) return;
+        const el = measureRef.current;
+        if (!el) return;
+        el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
+          if (node.dataset.mid) measuredPrintHeightsRef.current[node.dataset.mid] = node.offsetHeight;
+        });
+        if (batchEnd < textBlockCount) {
+          scheduleMeasureWork(() => {
+            setMeasurement((current) => current?.generation === measurementGenerationRef.current
+              ? { ...current, batchStart: batchEnd }
+              : current
+            );
+          });
+          return;
+        }
+        const measurementCfg = PAGE_CONFIGS[measurement.pageLayout];
+        const measurementContentH = measurementCfg.height - measurementCfg.marginTop - measurementCfg.marginBottom;
+        const result = computePrintPages(
+          measurement.blocks,
+          measurement.scenes,
+          measuredPrintHeightsRef.current,
+          measurementContentH,
+        );
+        onPageMapChange(pageMapFromPrintPages(result.pages));
+        setMeasurement((current) => current?.generation === measurementGenerationRef.current
+          ? null
+          : current
+        );
+      });
     });
-    const result = computePrintPages(blocks, scenes, heights, contentH);
-    onPageMapChange(pageMapFromPrintPages(result.pages));
-  }, [blocks, characters, scenes, contentW, contentH, textLayoutMode, stageDelimOpen, stageDelimClose, layoutMeasureTick, onPageMapChange]);
+    return cancelPendingMeasureFrame;
+  }, [measurement, layoutMeasureTick, cancelPendingMeasureFrame, onPageMapChange, scheduleMeasureWork]);
+
+  if (!measurement) return null;
+
+  const batchEnd = Math.min(
+    measurement.blocks.length,
+    measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE,
+  );
 
   return (
     <PrintMeasurementLayer
-      blocks={blocks}
-      characters={characters}
-      scenes={scenes}
-      contentW={contentW}
-      compactLayout={compactLayout}
-      stageDelimOpen={stageDelimOpen}
-      stageDelimClose={stageDelimClose}
+      blocks={measurement.blocks}
+      characters={measurement.characters}
+      scenes={measurement.scenes}
+      contentW={PAGE_CONFIGS[measurement.pageLayout].width - PAGE_CONFIGS[measurement.pageLayout].marginX * 2}
+      compactLayout={measurement.textLayoutMode === "compact"}
+      stageDelimOpen={measurement.stageDelimOpen}
+      stageDelimClose={measurement.stageDelimClose}
       measureRef={measureRef}
       onLayoutChange={requestLayoutRemeasure}
+      blockRange={{ start: measurement.batchStart, end: batchEnd }}
     />
   );
 }
@@ -3392,14 +3644,14 @@ function PrintHeaderModeMenu({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative" onMouseLeave={() => setOpen(false)}>
+    <div className="relative shrink-0" onMouseLeave={() => setOpen(false)}>
       <button
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+        className="flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
         title="选择页眉位置"
       >
         <span>{PRINT_HEADER_MODE_LABELS[headerMode]}</span>
-        <Chevron />
+        <ChevronIcon size={12} className="opacity-50" />
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 w-36 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
@@ -3415,6 +3667,329 @@ function PrintHeaderModeMenu({
               {headerMode === mode && <span className="text-[10px] text-zinc-900">✓</span>}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrintCompactLayoutControl({
+  compactLayout,
+  canEdit,
+  ready,
+  label,
+  stored = false,
+  onToggle,
+}: {
+  compactLayout: boolean;
+  canEdit: boolean;
+  ready: boolean;
+  label: string;
+  stored?: boolean;
+  onToggle: () => void;
+}) {
+  const enabled = canEdit && ready;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={!enabled}
+      className={`flex items-center gap-2 whitespace-nowrap text-sm transition-colors ${
+        stored ? "w-full justify-between px-3 py-2" : "shrink-0 rounded-md px-3 py-1.5"
+      } ${enabled ? "text-zinc-600 hover:bg-zinc-100" : "cursor-not-allowed text-zinc-300"}`}
+      title={
+        !canEdit
+          ? "无权修改剧本排版模式"
+          : ready
+            ? "保存为所有人共用的剧本排版模式"
+            : "打印预览加载中"
+      }
+    >
+      <span>{label}</span>
+      <ModeSwitch active={compactLayout} activeClassName="bg-[#637ca1]" />
+    </button>
+  );
+}
+
+function PrintScaleControl({
+  scale,
+  fitWidth,
+  fitPage,
+  onScaleChange,
+  onZoomIn,
+  onZoomOut,
+  onFitWidth,
+  onFitPage,
+}: {
+  scale: number;
+  fitWidth: boolean;
+  fitPage: boolean;
+  onScaleChange: (scale: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFitWidth: () => void;
+  onFitPage: () => void;
+}) {
+  const percent = Math.round(scale * 100);
+  const [percentDraft, setPercentDraft] = useState(String(percent));
+  const [editingPercent, setEditingPercent] = useState(false);
+  const fillPercent = ((percent - PRINT_PREVIEW_MIN_SCALE * 100) /
+    ((PRINT_PREVIEW_MAX_SCALE - PRINT_PREVIEW_MIN_SCALE) * 100)) * 100;
+  useEffect(() => {
+    if (!editingPercent) setPercentDraft(String(percent));
+  }, [editingPercent, percent]);
+  const commitPercent = () => {
+    setEditingPercent(false);
+    const nextPercent = Number(percentDraft);
+    if (Number.isFinite(nextPercent)) onScaleChange(nextPercent / 100);
+    else setPercentDraft(String(percent));
+  };
+  return (
+    <div className="space-y-2 px-3 py-2">
+      <div className="flex items-center justify-between text-xs text-zinc-500">
+        <span>预览缩放</span>
+        <label className="flex items-center gap-0.5 text-zinc-700">
+          <input
+            type="number"
+            min={PRINT_PREVIEW_MIN_SCALE * 100}
+            max={PRINT_PREVIEW_MAX_SCALE * 100}
+            step={1}
+            value={percentDraft}
+            aria-label="打印预览缩放百分比"
+            onFocus={() => setEditingPercent(true)}
+            onChange={(event) => setPercentDraft(event.target.value)}
+            onBlur={commitPercent}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") {
+                setPercentDraft(String(percent));
+                event.currentTarget.blur();
+              }
+            }}
+            className="print-preview-scale-percent w-14 border-b border-zinc-200 bg-transparent text-right tabular-nums outline-none focus:border-zinc-400"
+          />
+          <span>%</span>
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="缩小打印预览"
+          title="缩小"
+          onClick={onZoomOut}
+          disabled={scale <= PRINT_PREVIEW_MIN_SCALE}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-base leading-none text-[#637ca1] hover:bg-zinc-100 disabled:text-zinc-300"
+        >
+          −
+        </button>
+        <input
+          type="range"
+          min={PRINT_PREVIEW_MIN_SCALE * 100}
+          max={PRINT_PREVIEW_MAX_SCALE * 100}
+          step={1}
+          value={percent}
+          aria-label="打印预览缩放"
+          onChange={(event) => onScaleChange(Number(event.target.value) / 100)}
+          className="print-preview-scale-slider-v2 block min-w-0 flex-1 cursor-pointer"
+          style={{ "--print-preview-scale-fill": `${fillPercent}%` } as React.CSSProperties}
+        />
+        <button
+          type="button"
+          aria-label="放大打印预览"
+          title="放大"
+          onClick={onZoomIn}
+          disabled={scale >= PRINT_PREVIEW_MAX_SCALE}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-base leading-none text-[#637ca1] hover:bg-zinc-100 disabled:text-zinc-300"
+        >
+          +
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={onFitWidth}
+          disabled={fitWidth}
+          className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-50"
+        >
+          适合宽度
+        </button>
+        <button
+          type="button"
+          onClick={onFitPage}
+          disabled={fitPage}
+          className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-50"
+        >
+          适合整页
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PrintScaleMenu({
+  scale,
+  fitWidth,
+  fitPage,
+  shortLabel,
+  onScaleChange,
+  onZoomIn,
+  onZoomOut,
+  onFitWidth,
+  onFitPage,
+}: {
+  scale: number;
+  fitWidth: boolean;
+  fitPage: boolean;
+  shortLabel: boolean;
+  onScaleChange: (scale: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFitWidth: () => void;
+  onFitPage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const percent = Math.round(scale * 100);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={`flex items-center justify-between gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 ${
+          shortLabel ? "w-[68px]" : "w-24"
+        }`}
+        title="调整打印预览缩放"
+      >
+        <span>{shortLabel ? `${percent}%` : `缩放 ${percent}%`}</span>
+        <ChevronIcon size={12} className="opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-md">
+          <PrintScaleControl
+            scale={scale}
+            fitWidth={fitWidth}
+            fitPage={fitPage}
+            onScaleChange={onScaleChange}
+            onZoomIn={onZoomIn}
+            onZoomOut={onZoomOut}
+            onFitWidth={onFitWidth}
+            onFitPage={onFitPage}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrintPageSettingsMenu({
+  ellipsis = false,
+  compactLayout,
+  canEditTextLayout,
+  printPreviewReady,
+  headerMode,
+  previewScale,
+  previewScaleFitWidth,
+  previewScaleFitPage,
+  onTextLayoutModeToggle,
+  onHeaderModeChange,
+  onPreviewScaleChange,
+  onPreviewZoomIn,
+  onPreviewZoomOut,
+  onPreviewFitWidth,
+  onPreviewFitPage,
+}: {
+  ellipsis?: boolean;
+  compactLayout: boolean;
+  canEditTextLayout: boolean;
+  printPreviewReady: boolean;
+  headerMode: PrintHeaderMode;
+  previewScale: number;
+  previewScaleFitWidth: boolean;
+  previewScaleFitPage: boolean;
+  onTextLayoutModeToggle: () => void;
+  onHeaderModeChange: (mode: PrintHeaderMode) => void;
+  onPreviewScaleChange: (scale: number) => void;
+  onPreviewZoomIn: () => void;
+  onPreviewZoomOut: () => void;
+  onPreviewFitWidth: () => void;
+  onPreviewFitPage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-label={ellipsis ? "更多页面设置" : undefined}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={ellipsis
+          ? "flex h-8 w-8 items-center justify-center rounded-md text-base font-bold text-zinc-500 transition-colors hover:bg-zinc-100"
+          : "flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+        }
+      >
+        {ellipsis ? (
+          <span aria-hidden="true">⋮</span>
+        ) : (
+          <>
+            页面设置
+            <ChevronIcon size={12} className="opacity-50" />
+          </>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
+          <PrintCompactLayoutControl
+            compactLayout={compactLayout}
+            canEdit={canEditTextLayout}
+            ready={printPreviewReady}
+            label="紧凑排版"
+            stored
+            onToggle={onTextLayoutModeToggle}
+          />
+          <div className="my-1 border-t border-zinc-100" />
+          <p className="px-3 pb-1 pt-1 text-[10px] font-medium tracking-wide text-zinc-400">页眉位置</p>
+          {PRINT_HEADER_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onHeaderModeChange(mode)}
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${
+                headerMode === mode ? "font-medium text-zinc-900" : "text-zinc-500"
+              }`}
+            >
+              <span>{PRINT_HEADER_MODE_LABELS[mode]}</span>
+              {headerMode === mode && <span className="text-[10px] text-zinc-900">✓</span>}
+            </button>
+          ))}
+          <div className="my-1 border-t border-zinc-100" />
+          <PrintScaleControl
+            scale={previewScale}
+            fitWidth={previewScaleFitWidth}
+            fitPage={previewScaleFitPage}
+            onScaleChange={onPreviewScaleChange}
+            onZoomIn={onPreviewZoomIn}
+            onZoomOut={onPreviewZoomOut}
+            onFitWidth={onPreviewFitWidth}
+            onFitPage={onPreviewFitPage}
+          />
         </div>
       )}
     </div>
@@ -3599,6 +4174,35 @@ function PrintPreview({
   const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
   const [headerMode, setHeaderMode] = useState<PrintHeaderMode>("first-right");
+  const [printToolbarStage, setPrintToolbarStage] = useState<PrintToolbarStage>(0);
+  const printToolbarRef = useRef<HTMLDivElement>(null);
+  const printToolbarRequiredWidthRef = useRef<Partial<Record<PrintToolbarStage, number>>>({});
+  const previewViewportRef = useRef<HTMLDivElement>(null);
+  const [fitPreviewScales, setFitPreviewScales] = useState({ width: 1, page: 1 });
+  const [previewFitMode, setPreviewFitMode] = useState<"width" | "page">("width");
+  const [customPreviewScale, setCustomPreviewScale] = useState<number | null>(null);
+  const previewScale = customPreviewScale ?? fitPreviewScales[previewFitMode];
+  const previewScaleFitWidth = customPreviewScale === null && previewFitMode === "width";
+  const previewScaleFitPage = customPreviewScale === null && previewFitMode === "page";
+  const setPreviewScale = useCallback((scale: number) => {
+    const clamped = Math.min(PRINT_PREVIEW_MAX_SCALE, Math.max(PRINT_PREVIEW_MIN_SCALE, scale));
+    setCustomPreviewScale(Math.round(clamped * 100) / 100);
+  }, []);
+  const adjustPreviewScale = useCallback((delta: number) => {
+    setCustomPreviewScale((current) => {
+      const scale = current ?? fitPreviewScales[previewFitMode];
+      const clamped = Math.min(PRINT_PREVIEW_MAX_SCALE, Math.max(PRINT_PREVIEW_MIN_SCALE, scale + delta));
+      return Math.round(clamped * 100) / 100;
+    });
+  }, [fitPreviewScales, previewFitMode]);
+  const fitPreviewWidth = useCallback(() => {
+    setPreviewFitMode("width");
+    setCustomPreviewScale(null);
+  }, []);
+  const fitPreviewPage = useCallback(() => {
+    setPreviewFitMode("page");
+    setCustomPreviewScale(null);
+  }, []);
   const requestLayoutRemeasure = useCallback(() => {
     if (remeasureTimerRef.current) return;
     remeasureTimerRef.current = setTimeout(() => {
@@ -3626,6 +4230,101 @@ function PrintPreview({
     data.layoutMode === textLayoutMode &&
     data.measureTick === layoutMeasureTick;
   const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
+
+  useLayoutEffect(() => {
+    const viewport = previewViewportRef.current;
+    if (!viewport) return;
+    const updateFitScale = () => {
+      const availableWidth = Math.max(1, viewport.clientWidth - PRINT_PREVIEW_SIDE_GUTTER_PX);
+      const widthScale = Math.min(1, Math.max(
+        PRINT_PREVIEW_MIN_SCALE,
+        Math.floor((availableWidth / cfg.width) * 100) / 100,
+      ));
+      const availableHeight = Math.max(1, viewport.clientHeight - PRINT_PREVIEW_SIDE_GUTTER_PX);
+      const pageScale = Math.min(widthScale, Math.max(
+        PRINT_PREVIEW_MIN_SCALE,
+        Math.floor((availableHeight / (cfg.height + PRINT_PREVIEW_PAGE_GUTTER_PX)) * 100) / 100,
+      ));
+      setFitPreviewScales((current) => (
+        Math.abs(current.width - widthScale) < 0.001 && Math.abs(current.page - pageScale) < 0.001
+          ? current
+          : { width: widthScale, page: pageScale }
+      ));
+    };
+    updateFitScale();
+    const observer = new ResizeObserver(updateFitScale);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [cfg.height, cfg.width]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return;
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        adjustPreviewScale(0.05);
+      } else if (event.key === "-") {
+        event.preventDefault();
+        adjustPreviewScale(-0.05);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        fitPreviewWidth();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [adjustPreviewScale, fitPreviewWidth]);
+
+  const handlePreviewWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.metaKey && !event.ctrlKey) return;
+    event.preventDefault();
+    adjustPreviewScale(event.deltaY < 0 ? 0.05 : -0.05);
+  };
+
+  const measurePrintToolbar = useCallback(() => {
+    const toolbar = printToolbarRef.current;
+    if (!toolbar) return;
+    const required = toolbar.scrollWidth;
+    const available = toolbar.clientWidth;
+    if (required > available + 1 && printToolbarStage < 3) {
+      printToolbarRequiredWidthRef.current[printToolbarStage] = required;
+      setPrintToolbarStage((printToolbarStage + 1) as PrintToolbarStage);
+      return;
+    }
+    if (printToolbarStage > 0) {
+      const previous = (printToolbarStage - 1) as PrintToolbarStage;
+      const previousRequiredWidth = printToolbarRequiredWidthRef.current[previous];
+      if (previousRequiredWidth && available >= previousRequiredWidth + PRINT_TOOLBAR_UNFOLD_BUFFER_PX) {
+        setPrintToolbarStage(previous);
+      }
+    }
+  }, [printToolbarStage]);
+
+  useLayoutEffect(() => {
+    measurePrintToolbar();
+  }, [measurePrintToolbar, headerMode, canEditTextLayout, printPreviewReady, previewScale]);
+
+  useEffect(() => {
+    const toolbar = printToolbarRef.current;
+    if (!toolbar) return;
+    let frame: number | null = null;
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measurePrintToolbar();
+      });
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(toolbar);
+    for (const child of toolbar.children) {
+      if (child instanceof HTMLElement) observer.observe(child);
+    }
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [measurePrintToolbar]);
 
   useEffect(() => {
     if (!forceLoadingNotice || !printPreviewReady) return;
@@ -3757,49 +4456,89 @@ function PrintPreview({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-zinc-300 print:static print:block print:bg-white">
       {/* Preview toolbar */}
-      <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 print:hidden">
-        <span className="text-sm font-semibold text-zinc-700">打印预览</span>
-        <div className="flex items-center gap-3">
-          <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
-          <button
-            onClick={handleTextLayoutModeToggle}
-            disabled={!canEditTextLayout || !printPreviewReady}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
-              canEditTextLayout && printPreviewReady
-                ? "text-zinc-600 hover:bg-zinc-100"
-                : "cursor-not-allowed text-zinc-300"
-            }`}
-            title={
-              !canEditTextLayout
-                ? "无权修改剧本排版模式"
-                : printPreviewReady
-                  ? "保存为所有人共用的剧本排版模式"
-                  : "打印预览加载中"
-            }
-          >
-            <span>紧凑排版</span>
-            <ModeSwitch
-              active={compactLayout}
-              activeClassName="bg-[#637ca1]"
+      <div ref={printToolbarRef} className="flex shrink-0 flex-nowrap items-center overflow-visible border-b border-zinc-200 bg-white px-2 py-3 sm:px-6 print:hidden">
+        <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-zinc-700">打印预览</span>
+        <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1 sm:gap-3">
+          {printToolbarStage < 2 ? (
+            <>
+              <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
+              <PrintCompactLayoutControl
+                compactLayout={compactLayout}
+                canEdit={canEditTextLayout}
+                ready={printPreviewReady}
+                label={printToolbarStage === 0 ? "紧凑排版" : "紧凑"}
+                onToggle={handleTextLayoutModeToggle}
+              />
+              <PrintScaleMenu
+                scale={previewScale}
+                fitWidth={previewScaleFitWidth}
+                fitPage={previewScaleFitPage}
+                shortLabel={printToolbarStage === 1}
+                onScaleChange={setPreviewScale}
+                onZoomIn={() => adjustPreviewScale(0.05)}
+                onZoomOut={() => adjustPreviewScale(-0.05)}
+                onFitWidth={fitPreviewWidth}
+                onFitPage={fitPreviewPage}
+              />
+            </>
+          ) : printToolbarStage === 2 ? (
+            <PrintPageSettingsMenu
+              compactLayout={compactLayout}
+              canEditTextLayout={canEditTextLayout}
+              printPreviewReady={printPreviewReady}
+              headerMode={headerMode}
+              previewScale={previewScale}
+              previewScaleFitWidth={previewScaleFitWidth}
+              previewScaleFitPage={previewScaleFitPage}
+              onTextLayoutModeToggle={handleTextLayoutModeToggle}
+              onHeaderModeChange={setHeaderMode}
+              onPreviewScaleChange={setPreviewScale}
+              onPreviewZoomIn={() => adjustPreviewScale(0.05)}
+              onPreviewZoomOut={() => adjustPreviewScale(-0.05)}
+              onPreviewFitWidth={fitPreviewWidth}
+              onPreviewFitPage={fitPreviewPage}
             />
-          </button>
+          ) : null}
           <button
             onClick={() => window.print()}
-            className="rounded-md bg-zinc-800 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+            className="shrink-0 whitespace-nowrap rounded-md bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 sm:px-4"
           >
-            打印 / 导出 PDF
+            {printToolbarStage === 0 ? "打印 / 导出 PDF" : "导出"}
           </button>
           <button
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100"
+            className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 sm:px-3"
           >
             关闭
           </button>
+          {printToolbarStage === 3 && (
+            <PrintPageSettingsMenu
+              ellipsis
+              compactLayout={compactLayout}
+              canEditTextLayout={canEditTextLayout}
+              printPreviewReady={printPreviewReady}
+              headerMode={headerMode}
+              previewScale={previewScale}
+              previewScaleFitWidth={previewScaleFitWidth}
+              previewScaleFitPage={previewScaleFitPage}
+              onTextLayoutModeToggle={handleTextLayoutModeToggle}
+              onHeaderModeChange={setHeaderMode}
+              onPreviewScaleChange={setPreviewScale}
+              onPreviewZoomIn={() => adjustPreviewScale(0.05)}
+              onPreviewZoomOut={() => adjustPreviewScale(-0.05)}
+              onPreviewFitWidth={fitPreviewWidth}
+              onPreviewFitPage={fitPreviewPage}
+            />
+          )}
         </div>
       </div>
 
       {/* Scrollable page stack */}
-      <div className="relative flex-1 overflow-auto print:overflow-visible print:h-auto">
+      <div
+        ref={previewViewportRef}
+        onWheel={handlePreviewWheel}
+        className="relative flex-1 overflow-auto print:overflow-visible print:h-auto"
+      >
         {showLoadingNotice && (
           <div className="pointer-events-none fixed inset-x-0 bottom-0 top-14 z-[60] flex items-center justify-center bg-zinc-300 print:hidden">
             <span className="rounded-md border border-zinc-200 bg-white/95 px-4 py-2 text-sm font-medium text-zinc-500 shadow-lg">
@@ -3807,18 +4546,21 @@ function PrintPreview({
             </span>
           </div>
         )}
-        <div className="mx-auto flex flex-col items-center gap-6 py-8 print:gap-0 print:py-0">
-          <PrintMeasurementLayer
-            blocks={blocks}
-            characters={characters}
-            scenes={scenes}
-            contentW={contentW}
-            compactLayout={compactLayout}
-            stageDelimOpen={stageDelimOpen}
-            stageDelimClose={stageDelimClose}
-            measureRef={measureRef}
-            onLayoutChange={requestLayoutRemeasure}
-          />
+        <PrintMeasurementLayer
+          blocks={blocks}
+          characters={characters}
+          scenes={scenes}
+          contentW={contentW}
+          compactLayout={compactLayout}
+          stageDelimOpen={stageDelimOpen}
+          stageDelimClose={stageDelimClose}
+          measureRef={measureRef}
+          onLayoutChange={requestLayoutRemeasure}
+        />
+        <div
+          className="print-preview-pages mx-auto flex flex-col items-center gap-6 py-8 print:gap-0 print:py-0"
+          style={{ "--print-preview-scale": previewScale } as React.CSSProperties}
+        >
 
           {/* TOC page */}
           {tocScenes.length > 0 && (
@@ -3927,6 +4669,13 @@ type SideBlockPanelNavigation = {
   onNext: () => void;
 };
 
+type BlockSidePanelKind = "comment" | "asset";
+
+type CommentDraft = {
+  text: string;
+  mentions: Mention[];
+};
+
 type SideBlockPanelNavigationTargets = {
   previousBlockId: string | null;
   nextBlockId: string | null;
@@ -3941,16 +4690,14 @@ type BlockAssetBubbleItem = {
 const EMPTY_COMMENTS: Comment[] = [];
 const EMPTY_BLOCK_ASSETS: BlockAssetBubbleItem[] = [];
 const COMMENT_BUBBLE_MIN_WIDTH_PX = 135;
-const COMMENT_BUBBLE_MIN_GUTTER_PX = 170;
+const COMMENT_BUBBLE_GAP_REM = 1.5; // Tailwind ml-6
 const SPEECH_TAIL_PIN_OFFSET_PX = 96;
 const SPEECH_TAIL_BASE_HALF_PX = 14;
 const SPEECH_TAIL_EDGE_INSET_PX = 24;
-const SIDE_PANEL_TOP_PX = 120; // AppShell header (64px) + ScriptEditor toolbar (56px)
-const SIDE_PANEL_MIN_WIDTH_PX = 360;
-const SIDE_PANEL_MAX_WIDTH_PX = 576;
-const SIDE_PANEL_GUTTER_PADDING_PX = 15;
+const SIDE_PANEL_TOP_PX = 64; // Merged AppShell and ScriptEditor header
+const SIDE_PANEL_FALLBACK_WIDTH_PX = 270;
 
-function buildCommentBlockCaption(block: Block, characters: Character[], index: number): CommentBlockCaption {
+function buildCommentBlockCaption(block: Block, characters: Character[], displayNumber: number): CommentBlockCaption {
   const normalizedBlockContent = block.content.replace(/\s+/g, " ").trim();
   const blockContentPreview = normalizedBlockContent.slice(0, 20);
   const blockContentSuffix = normalizedBlockContent.length > blockContentPreview.length ? "..." : "";
@@ -3962,7 +4709,7 @@ function buildCommentBlockCaption(block: Block, characters: Character[], index: 
         .join("/");
 
   return {
-    label: `【${index + 1}】`,
+    label: `【${displayNumber}】`,
     body: `${characterCaption ? `${characterCaption}: ` : ""}${blockContentPreview || "（空）"}${blockContentSuffix}`,
   };
 }
@@ -4090,8 +4837,8 @@ function CommentBubble({
   assets,
   active,
   offsetY = 0,
-  hasGutterSpace,
-  maxWidth,
+  mode,
+  width,
   blockLabel,
   captionBody,
   onCommentClick,
@@ -4102,42 +4849,48 @@ function CommentBubble({
   assets: BlockAssetBubbleItem[];
   active: boolean;
   offsetY?: number;
-  hasGutterSpace: boolean;
-  maxWidth: number;
+  mode: "full" | "compact" | null;
+  width: number;
   blockLabel: string;
   captionBody: string;
   onCommentClick: () => void;
   onAssetClick: () => void;
   onHoverChange: (hovered: boolean) => void;
 }) {
-  if ((comments.length === 0 && assets.length === 0) || !hasGutterSpace) return null;
+  if ((comments.length === 0 && assets.length === 0) || mode === null) return null;
 
   if (active) return null;
 
-  const sortedComments = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const childrenByParent = new Map<string, Comment[]>();
-  for (const comment of sortedComments) {
-    if (!comment.parentId) continue;
-    const replies = childrenByParent.get(comment.parentId) ?? [];
-    replies.push(comment);
-    childrenByParent.set(comment.parentId, replies);
-  }
-  const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
-  for (const comment of sortedComments.filter(c => c.parentId === null)) {
-    orderedComments.push({ comment, reply: false });
-    for (const reply of childrenByParent.get(comment.id) ?? []) {
-      orderedComments.push({ comment: reply, reply: true });
+  let visibleComments: Array<{ comment: Comment; reply: boolean }> = [];
+  let visibleAssets = EMPTY_BLOCK_ASSETS;
+  let hiddenCommentCount = 0;
+  let hiddenAssetCount = 0;
+  if (mode === "full") {
+    const sortedComments = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const childrenByParent = new Map<string, Comment[]>();
+    for (const comment of sortedComments) {
+      if (!comment.parentId) continue;
+      const replies = childrenByParent.get(comment.parentId) ?? [];
+      replies.push(comment);
+      childrenByParent.set(comment.parentId, replies);
     }
+    const commentIds = new Set(sortedComments.map(comment => comment.id));
+    const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
+    for (const comment of sortedComments.filter(c => c.parentId === null)) {
+      orderedComments.push({ comment, reply: false });
+      for (const reply of childrenByParent.get(comment.id) ?? []) {
+        orderedComments.push({ comment: reply, reply: true });
+      }
+    }
+    for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !commentIds.has(c.parentId))) {
+      orderedComments.push({ comment: orphanReply, reply: true });
+    }
+    const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : 4;
+    visibleComments = orderedComments.slice(0, visibleCommentLimit);
+    visibleAssets = assets.slice(0, 4 - visibleComments.length);
+    hiddenCommentCount = orderedComments.length - visibleComments.length;
+    hiddenAssetCount = assets.length - visibleAssets.length;
   }
-  for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !sortedComments.some(parent => parent.id === c.parentId))) {
-    orderedComments.push({ comment: orphanReply, reply: true });
-  }
-  const maxVisible = 4;
-  const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : maxVisible;
-  const visibleComments = orderedComments.slice(0, visibleCommentLimit);
-  const visibleAssets = assets.slice(0, maxVisible - visibleComments.length);
-  const hiddenCommentCount = orderedComments.length - visibleComments.length;
-  const hiddenAssetCount = assets.length - visibleAssets.length;
   const defaultAction = comments.length > 0 ? onCommentClick : onAssetClick;
   const handleClick = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
@@ -4146,25 +4899,42 @@ function CommentBubble({
 
   return (
     <div
-      className="absolute left-full top-1/2 z-10 ml-6 hover:z-40 focus-within:z-40"
-      style={{ transform: `translateY(calc(-50% + ${offsetY}px))` }}
+      className="absolute left-full top-1/2 z-0 ml-6"
+      style={{ transform: mode === "compact" ? "translateY(-50%)" : `translateY(calc(-50% + ${offsetY}px))` }}
       onMouseEnter={() => onHoverChange(true)}
       onMouseLeave={() => onHoverChange(false)}
     >
       <div
-        className="relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300"
-        style={{ width: maxWidth, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
+        className={`relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300 ${mode === "compact" ? "w-max" : ""}`}
+        style={mode === "compact"
+          ? { maxWidth: width }
+          : { width, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
       >
-        <button
-          type="button"
-          onClick={(e) => handleClick(e, defaultAction)}
-          className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-100 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-600"
-          title={`${blockLabel} ${captionBody}`}
-        >
-          <span className="font-bold text-zinc-800">{blockLabel}</span>{" "}
-          <span>{captionBody}</span>
-        </button>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {mode === "compact" ? (
+          <div className="flex items-center justify-center gap-2 whitespace-nowrap px-2 py-1.5 text-[10px] font-medium text-zinc-600">
+            {comments.length > 0 && (
+              <button type="button" onClick={(e) => handleClick(e, onCommentClick)} className="hover:text-zinc-900">
+                评 {comments.length}
+              </button>
+            )}
+            {assets.length > 0 && (
+              <button type="button" onClick={(e) => handleClick(e, onAssetClick)} className="hover:text-zinc-900">
+                附 {assets.length}
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={(e) => handleClick(e, defaultAction)}
+              className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-100 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-600"
+              title={`${blockLabel} ${captionBody}`}
+            >
+              <span className="font-bold text-zinc-800">{blockLabel}</span>{" "}
+              <span>{captionBody}</span>
+            </button>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {(visibleComments.length > 0 || hiddenCommentCount > 0) && (
             <div
               className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenCommentCount > 0 ? "relative pr-10" : ""}`}
@@ -4223,7 +4993,9 @@ function CommentBubble({
               )}
             </div>
           )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -4233,8 +5005,8 @@ const PRESENCE_COLORS = [
   "#E53E3E", "#DD6B20", "#D69E2E", "#38A169",
   "#3182CE", "#805AD5", "#D53F8C", "#00B5D8",
 ];
-const EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS = 3;
-const REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS = 5;
+const EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS = 5;
+const REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS = 8;
 
 function presenceColor(clientId: string): string {
   let h = 0;
@@ -4948,8 +5720,22 @@ function TagPicker({
 const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
 const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
 const COMPACT_CONTENT_OPTICAL_OFFSET_PX = -2;
+const COMPACT_CHARACTER_COLUMN_WIDTH_REM = 7.5;
+const NARROW_COMPACT_CHARACTER_COLUMN_WIDTH_REM = 3.5;
+const COMPACT_TEXT_AUXILIARY_WIDTH_REM = 2;
+const COMPACT_TEXT_GRID_STYLE = {
+  "--compact-character-column-width": `${NARROW_COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+  "--compact-character-column-width-wide": `${COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+} as React.CSSProperties;
+const COMPACT_TEXT_GRID_UNFOLDED_STYLE = {
+  ...COMPACT_TEXT_GRID_STYLE,
+  "--compact-character-column-width": `${COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+} as React.CSSProperties;
 const IN_BLOCK_STAGE_COMMENT_MANUAL_OFFSET_PX = -2;
 const REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS = "mb-[0.18rem]";
+const REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mb-2";
+const REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mt-1";
+const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
 function getCompactFallbackLineHeightPx() {
   if (typeof window === "undefined") return 28;
@@ -4996,8 +5782,8 @@ function ScriptBlock({
   isCommentPanelActive,
   isAssetPanelActive,
   commentBubbleOffsetY = 0,
-  rightGutterCanShowComments,
-  commentBubbleMaxWidth,
+  commentBubbleMode,
+  commentBubbleWidth,
   onCommentClick,
   onAssetClick,
   dragTarget = null,
@@ -5012,14 +5798,14 @@ function ScriptBlock({
   deleteConfirmNoopMessage,
   isReorderLocked = false,
   isScriptDragging = false,
-  index = 0,
   lineNum,
+  captionLineNum,
   lineIndexWidth,
   isSearchHighlight,
-  showRehearsalMark = true,
   showReadOnlyRehearsalMark = false,
   readOnlyRehearsalMode = false,
   readOnlyScene = null,
+  showSceneLabel = true,
   stageDelimOpen = "（",
   stageDelimClose = "）",
   textLayoutMode = "center",
@@ -5076,8 +5862,8 @@ function ScriptBlock({
   isCommentPanelActive: boolean;
   isAssetPanelActive: boolean;
   commentBubbleOffsetY?: number;
-  rightGutterCanShowComments: boolean;
-  commentBubbleMaxWidth: number;
+  commentBubbleMode: "full" | "compact" | null;
+  commentBubbleWidth: number;
   onCommentClick: () => void;
   onAssetClick: () => void;
   dragTarget?: BlockDragTarget | null;
@@ -5092,14 +5878,14 @@ function ScriptBlock({
   deleteConfirmNoopMessage?: string;
   isReorderLocked?: boolean;
   isScriptDragging?: boolean;
-  index?: number;
   lineNum?: number;
+  captionLineNum: number;
   lineIndexWidth?: string;
   isSearchHighlight?: "match" | "focused";
-  showRehearsalMark?: boolean;
   showReadOnlyRehearsalMark?: boolean;
   readOnlyRehearsalMode?: boolean;
   readOnlyScene?: Scene | null;
+  showSceneLabel?: boolean;
   stageDelimOpen?: string;
   stageDelimClose?: string;
   textLayoutMode?: ScriptTextLayoutMode;
@@ -5399,14 +6185,16 @@ function ScriptBlock({
         ? "bg-emerald-500/10"
     : isCharacterFocusHighlighted
       ? "bg-purple-50"
-      : (index ?? 0) % 2 === 1
+      : captionLineNum % 2 === 1
         ? "bg-zinc-50/60"
         : "";
   const movedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
   const compactDeleteStyle: React.CSSProperties | undefined = compactControlLayout?.deleteLeft !== null && compactControlLayout?.deleteLeft !== undefined
     ? { left: compactControlLayout.deleteLeft }
     : undefined;
-  const displayScene = readOnlyScene ?? (block.sceneId ? scenes.find((scene) => scene.id === block.sceneId) ?? null : null);
+  const displayScene = showSceneLabel
+    ? readOnlyScene ?? (block.sceneId ? scenes.find((scene) => scene.id === block.sceneId) ?? null : null)
+    : null;
   const hasSceneLabel = !!displayScene;
   const hasStageComment = !!block.stageComment?.trim();
   const showCompactStageCommentRow = hasStageComment || stageCommentEditing;
@@ -5416,7 +6204,9 @@ function ScriptBlock({
       : 0;
   const characterBottomGapClassName =
     readOnlyRehearsalMode && !isCompactTextLayout && block.characterIds.length > 0
-      ? REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS
+      ? hasStageComment
+        ? REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS
+        : REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS
       : undefined;
   const compactCharacterLastLineCenter = compactCharacterColumnHeight - compactCharacterLineHeight / 2;
   const compactContentFirstLineTop = Math.max(
@@ -5436,6 +6226,10 @@ function ScriptBlock({
     onAssetClick();
   };
   const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
+  const stageCommentPlacementClassName =
+    readOnlyRehearsalMode && !isCompactTextLayout && hasStageComment && !showCharacterSelector
+      ? REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS
+      : undefined;
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
     ? { width: compactControlLayout.hoverWidth }
     : undefined;
@@ -5468,12 +6262,19 @@ function ScriptBlock({
           ...partialFocusStyle,
         } as React.CSSProperties)
       : undefined;
-  const commentBlockCaption = buildCommentBlockCaption(block, characters, index ?? 0);
-  const lineIndexSlotStyle: React.CSSProperties = {
-    width: lineIndexWidth
-      ? lineIndexWidth
-      : `${LINE_INDEX_CONTROL_MIN_WIDTH_REM}rem`,
-  };
+  const commentBlockCaption = commentBubbleMode === "full"
+    && !isCommentPanelActive
+    && !isAssetPanelActive
+    && (blockComments.length > 0 || blockAssets.length > 0)
+    ? buildCommentBlockCaption(block, characters, captionLineNum)
+    : null;
+  const lineIndexSlotStyle: React.CSSProperties | undefined = lineNum === undefined
+    ? {
+        width: lineIndexWidth
+          ? lineIndexWidth
+          : `${LINE_INDEX_CONTROL_MIN_WIDTH_REM}rem`,
+      }
+    : undefined;
 
   const measureStageCommentEditorWidth = useCallback(() => {
     const blockEl = blockRootRef.current;
@@ -5485,19 +6286,15 @@ function ScriptBlock({
       blockEl.getBoundingClientRect().width -
       parseFloat(blockStyle.paddingLeft) -
       parseFloat(blockStyle.paddingRight);
-    const compactContentWidth = blockContentWidth - COMPACT_TEXT_SIDE_WIDTH_REM * remPx;
+    const compactCharacterWidth = compactCharacterColumnRef.current?.getBoundingClientRect().width
+      ?? COMPACT_CHARACTER_COLUMN_WIDTH_REM * remPx;
+    const compactContentWidth = blockContentWidth - compactCharacterWidth - COMPACT_TEXT_AUXILIARY_WIDTH_REM * remPx;
     const width = Math.round(compactContentWidth * COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO);
     return width > 0 ? width : null;
   }, []);
 
-  useEffect(() => {
-    if (!isCompactTextLayout) {
-      setCompactCharacterColumnHeight(0);
-      const fallbackLineHeight = getCompactFallbackLineHeightPx();
-      setCompactCharacterLineHeight(fallbackLineHeight);
-      setCompactContentLineHeight(fallbackLineHeight);
-      return;
-    }
+  useLayoutEffect(() => {
+    if (!isCompactTextLayout) return;
     const el = compactCharacterColumnRef.current;
     if (!el) return;
     const measure = () => {
@@ -5549,8 +6346,7 @@ function ScriptBlock({
         <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
           {lineNum !== undefined && (
             <span
-              style={lineIndexSlotStyle}
-              className={`pointer-events-none shrink-0 select-none text-left tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
+              className={`pointer-events-none select-none tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
             >
               {lineNum}
             </span>
@@ -5561,7 +6357,7 @@ function ScriptBlock({
           {(canEditMetadata || canEditRehearsalMark) && (
             <span
               onMouseEnter={unfoldCompactControls}
-              className={`relative top-[1px] transition-opacity ${isMarkStart && block.rehearsalMark && showRehearsalMark ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              className="relative top-[1px] hidden opacity-0 transition-opacity group-hover:opacity-100 sm:inline-flex"
             >
               <RehearsalMarkInput
                 canAddChapterScene={canEditMetadata}
@@ -5592,7 +6388,7 @@ function ScriptBlock({
           {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
             confirmDelete ? (
               <span
-                className="absolute left-0 bottom-0 z-10 flex translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm"
+                className="absolute left-0 bottom-0 z-10 hidden translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm sm:flex"
                 style={compactDeleteStyle}
                 data-script-confirmation="true"
               >
@@ -5639,7 +6435,7 @@ function ScriptBlock({
                   else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
                 }}
                 style={compactDeleteStyle}
-                className="relative flex h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
+                className="relative hidden h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100 sm:flex"
                 title="删除此行"
                 aria-label="删除此行"
               >
@@ -5659,12 +6455,19 @@ function ScriptBlock({
                 if (e.shiftKey) e.preventDefault();
                 e.stopPropagation();
               }}
-              onClick={(e) => { onToggleSelected(e); onMobileMenuOpen?.(); }}
+              onClick={(e) => {
+                onToggleSelected(e);
+                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
+              }}
               className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
-                  : `sm:cursor-grab hover:bg-[#dbe5f3] hover:text-[#91a8ca] active:cursor-grabbing ${
-                      isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
+                  : `sm:cursor-grab active:cursor-grabbing ${
+                      isDeleteConfirmHighlighted
+                        ? "bg-red-100 text-red-500 hover:bg-red-100 hover:text-red-600 sm:opacity-100"
+                        : `hover:bg-[#dbe5f3] hover:text-[#91a8ca] ${
+                            isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
+                          }`
                     }`
               }`}
               title="更多操作"
@@ -5702,10 +6505,10 @@ function ScriptBlock({
         assets={blockAssets}
         active={isCommentPanelActive || isAssetPanelActive}
         offsetY={commentBubbleOffsetY}
-        hasGutterSpace={rightGutterCanShowComments}
-        maxWidth={commentBubbleMaxWidth}
-        blockLabel={commentBlockCaption.label}
-        captionBody={commentBlockCaption.body}
+        mode={commentBubbleMode}
+        width={commentBubbleWidth}
+        blockLabel={commentBlockCaption?.label ?? ""}
+        captionBody={commentBlockCaption?.body ?? ""}
         onCommentClick={handleCommentClick}
         onAssetClick={handleAssetClick}
         onHoverChange={setCommentBubbleHovered}
@@ -5793,7 +6596,10 @@ function ScriptBlock({
       )}
 
       {isCompactTextLayout ? (
-        <div className="grid grid-cols-[7.5rem_1rem_minmax(0,1fr)] items-start gap-x-2 text-left">
+        <div
+          className="grid grid-cols-[var(--compact-character-column-width)_1rem_minmax(0,1fr)] items-start gap-x-2 text-left sm:grid-cols-[var(--compact-character-column-width-wide)_1rem_minmax(0,1fr)]"
+          style={charSelectorOpen ? COMPACT_TEXT_GRID_UNFOLDED_STYLE : COMPACT_TEXT_GRID_STYLE}
+        >
           <div ref={compactCharacterColumnRef} className="col-start-1 row-start-1 min-w-0 pt-0.5">
             {(showCharacterSelector || hiddenCharacterCollapsed) && (
               <div className={hiddenCharacterCollapsed && !showCharacterSelector ? "opacity-0 transition-opacity group-hover:opacity-100" : undefined}>
@@ -5925,6 +6731,7 @@ function ScriptBlock({
               readOnly={!canEditText || isEditingLocked}
               stageDelimOpen={stageDelimOpen}
               stageDelimClose={stageDelimClose}
+              placementClassName={stageCommentPlacementClassName}
               addButtonRevealOnHover
               zeroHeightAddButton
               getEditorWidth={measureStageCommentEditorWidth}
@@ -6067,19 +6874,19 @@ function relativeTime(iso: string): string {
 
 function SideBlockPanel({
   blockId,
-  title,
+  activePanel,
+  onPanelChange,
   blockCaption,
-  hasGutterSpace,
-  gutterWidth,
+  width,
   navigation,
   onClose,
   children,
 }: {
   blockId: string;
-  title: string;
+  activePanel: BlockSidePanelKind;
+  onPanelChange: (panel: BlockSidePanelKind) => void;
   blockCaption?: CommentBlockCaption | null;
-  hasGutterSpace: boolean;
-  gutterWidth: number;
+  width: number;
   navigation?: SideBlockPanelNavigation;
   onClose: () => void;
   children: React.ReactNode;
@@ -6093,7 +6900,7 @@ function SideBlockPanel({
     updateHeaderHeight();
     window.addEventListener("resize", updateHeaderHeight);
     return () => window.removeEventListener("resize", updateHeaderHeight);
-  }, [title, blockCaption?.label, blockCaption?.body]);
+  }, [activePanel, blockCaption?.label, blockCaption?.body]);
 
   const tailUsesHeaderFill = pointerTop + SPEECH_TAIL_BASE_HALF_PX <= headerHeight;
 
@@ -6102,61 +6909,73 @@ function SideBlockPanel({
       className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full"
       style={{
         top: SIDE_PANEL_TOP_PX,
-        width: hasGutterSpace
-          ? Math.min(SIDE_PANEL_MAX_WIDTH_PX, Math.max(SIDE_PANEL_MIN_WIDTH_PX, gutterWidth - SIDE_PANEL_GUTTER_PADDING_PX))
-          : SIDE_PANEL_MIN_WIDTH_PX,
+        width,
       }}
     >
       <SpeechTail top={pointerTop} offsetY={pointerOffsetY} fillClassName={tailUsesHeaderFill ? "fill-zinc-100" : "fill-white"} />
-      <div ref={headerRef} className="relative z-10 flex shrink-0 items-start justify-between gap-3 border-y border-emerald-600/80 bg-zinc-100 px-4 py-3">
-        <div className="min-w-0">
-          <span className="block text-sm font-semibold text-zinc-700">{title}</span>
-          {blockCaption && (
-            <p className="mt-1 line-clamp-1 text-xs leading-snug text-zinc-500" title={`${blockCaption.label} ${blockCaption.body}`}>
-              <span className="font-bold text-zinc-700">{blockCaption.label}</span>{" "}
-              <span>{blockCaption.body}</span>
-            </p>
-          )}
+      <div ref={headerRef} className="relative z-10 shrink-0 border-y border-emerald-600/80 bg-zinc-100 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => onPanelChange("comment")}
+              aria-pressed={activePanel === "comment"}
+              className={activePanel === "comment" ? "text-zinc-700" : "text-zinc-300 hover:text-emerald-600/80"}
+            >
+              评论
+            </button>
+            <span className="text-zinc-300" aria-hidden="true">/</span>
+            <button
+              type="button"
+              onClick={() => onPanelChange("asset")}
+              aria-pressed={activePanel === "asset"}
+              className={activePanel === "asset" ? "text-zinc-700" : "text-zinc-300 hover:text-emerald-600/80"}
+            >
+              附件
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {navigation && (
+              <>
+                <button
+                  type="button"
+                  onClick={navigation.onPrevious}
+                  disabled={!navigation.hasPrevious}
+                  className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                  title="上一条"
+                >
+                  <ChevronIcon direction="up" />
+                </button>
+                <button
+                  type="button"
+                  onClick={navigation.onNext}
+                  disabled={!navigation.hasNext}
+                  className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                  title="下一条"
+                >
+                  <ChevronIcon />
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80"
+              title="关闭"
+            >
+              <span className="relative h-3 w-3" aria-hidden="true">
+                <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+                <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 -rotate-45 bg-current" />
+              </span>
+            </button>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {navigation && (
-            <>
-              <button
-                type="button"
-                onClick={navigation.onPrevious}
-                disabled={!navigation.hasPrevious}
-                className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
-                title="上一条"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <polyline points="3 7.5 6 4.5 9 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={navigation.onNext}
-                disabled={!navigation.hasNext}
-                className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
-                title="下一条"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <polyline points="3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
-                </svg>
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80"
-            title="关闭"
-          >
-            <span className="relative h-3 w-3" aria-hidden="true">
-              <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
-              <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 -rotate-45 bg-current" />
-            </span>
-          </button>
-        </div>
+        {blockCaption && (
+          <p className="mt-2 line-clamp-1 text-xs leading-snug text-zinc-500" title={`${blockCaption.label} ${blockCaption.body}`}>
+            <span className="font-bold text-zinc-700">{blockCaption.label}</span>{" "}
+            <span>{blockCaption.body}</span>
+          </p>
+        )}
       </div>
       {children}
     </div>
@@ -6168,8 +6987,8 @@ function SideBlockPanel({
 function CommentsPanel({
   blockId, productionId, comments, currentUserId, isAdmin,
   onAdd, onEdit, onDelete, onClose, onNavigate,
-  hasGutterSpace,
-  gutterWidth,
+  onPanelChange, draft, onDraftChange,
+  width,
   blockCaption,
   navigation,
 }: {
@@ -6178,14 +6997,16 @@ function CommentsPanel({
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
   onNavigate?: () => void;
-  hasGutterSpace: boolean;
-  gutterWidth: number;
+  onPanelChange: (panel: BlockSidePanelKind) => void;
+  draft?: CommentDraft;
+  onDraftChange: (blockId: string, draft: CommentDraft) => void;
+  width: number;
   blockCaption?: CommentBlockCaption | null;
   navigation?: SideBlockPanelNavigation;
 }) {
   const [members, setMembers] = useState<Mention[]>([]);
-  const [newText, setNewText] = useState("");
-  const [newMentions, setNewMentions] = useState<Mention[]>([]);
+  const [newText, setNewText] = useState(draft?.text ?? "");
+  const [newMentions, setNewMentions] = useState<Mention[]>(draft?.mentions ?? []);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
@@ -6194,6 +7015,13 @@ function CommentsPanel({
   const [submitting, setSubmitting] = useState(false);
   const [pendingNewAssets, setPendingNewAssets] = useState<PendingAsset[]>([]);
   const [pendingReplyAssets, setPendingReplyAssets] = useState<PendingAsset[]>([]);
+  const draftRef = useRef<CommentDraft>(draft ?? { text: "", mentions: [] });
+
+  const updateDraft = (patch: Partial<CommentDraft>) => {
+    const next = { ...draftRef.current, ...patch };
+    draftRef.current = next;
+    onDraftChange(blockId, next);
+  };
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/production/${productionId}/mention-users`)
@@ -6239,6 +7067,9 @@ function CommentsPanel({
     const c = await postComment({ text, mentions: newMentions });
     if (c) {
       if (pendingNewAssets.length > 0) await mountAssets(c.id, pendingNewAssets);
+      const emptyDraft = { text: "", mentions: [] };
+      draftRef.current = emptyDraft;
+      onDraftChange(blockId, emptyDraft);
       onAdd(c); setNewText(""); setNewMentions([]); setPendingNewAssets([]);
     }
   };
@@ -6330,10 +7161,10 @@ function CommentsPanel({
   return (
     <SideBlockPanel
       blockId={blockId}
-      title="评论"
+      activePanel="comment"
+      onPanelChange={onPanelChange}
       blockCaption={blockCaption}
-      hasGutterSpace={hasGutterSpace}
-      gutterWidth={gutterWidth}
+      width={width}
       navigation={navigation}
       onClose={onClose}
     >
@@ -6403,8 +7234,8 @@ function CommentsPanel({
       </div>
 
       <div className="relative z-10 shrink-0 border-t border-zinc-100 bg-white px-4 py-3">
-        <SmartTextarea value={newText} onChange={setNewText}
-          memberMention={{ members, onMentionsChange: setNewMentions }}
+        <SmartTextarea value={newText} onChange={value => { setNewText(value); updateDraft({ text: value }); }}
+          memberMention={{ members, onMentionsChange: mentions => { setNewMentions(mentions); updateDraft({ mentions }); } }}
           placeholder="添加评论… (⌘↵ 发布)" rows={3}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
           className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
@@ -6442,6 +7273,105 @@ function markerChangeFromOperations(changes: BlockChange[]): MarkerChange {
   };
 }
 
+type ScriptToolbarOpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
+type ScriptToolbarMode = "full" | "short" | "compact";
+
+type ScriptToolbarMenuControls = {
+  openMenu: ScriptToolbarOpenMenu;
+  setOpenMenu: (menu: ScriptToolbarOpenMenu) => void;
+  toggleMenu: (menu: Exclude<ScriptToolbarOpenMenu, null>) => void;
+  openNestedMenu: (menu: Exclude<ScriptToolbarOpenMenu, null>, anchor: HTMLButtonElement) => void;
+  handleCharacterPanelOpenChange: (open: boolean) => void;
+  scriptMenuPosition: ReturnType<typeof useAnchoredMenu<HTMLButtonElement>>;
+  nestedMenuPosition: ReturnType<typeof useAnchoredMenu<HTMLButtonElement>>;
+};
+
+function ScriptToolbarMenuController({
+  toolbarCompact,
+  characterCloseBlocked,
+  openMenuRef,
+  closeMenuRef,
+  children,
+}: {
+  toolbarCompact: boolean;
+  characterCloseBlocked: boolean;
+  openMenuRef: React.MutableRefObject<ScriptToolbarOpenMenu>;
+  closeMenuRef: React.MutableRefObject<() => void>;
+  children: (controls: ScriptToolbarMenuControls) => React.ReactNode;
+}) {
+  const { overflowOpen } = useProductionToolbar();
+  const [openMenu, setOpenMenuState] = useState<ScriptToolbarOpenMenu>(null);
+  const scriptMenuPosition = useAnchoredMenu<HTMLButtonElement>(openMenu === "script", "bottom");
+  const nestedMenuPosition = useAnchoredMenu<HTMLButtonElement>(
+    toolbarCompact && openMenu !== null && openMenu !== "script",
+    "left",
+    openMenu,
+  );
+  const setOpenMenu = useCallback((menu: ScriptToolbarOpenMenu) => {
+    openMenuRef.current = menu;
+    setOpenMenuState(menu);
+  }, [openMenuRef]);
+  const closeMenu = useCallback(() => setOpenMenu(null), [setOpenMenu]);
+  const toggleMenu = useCallback((menu: Exclude<ScriptToolbarOpenMenu, null>) => {
+    setOpenMenuState((current) => {
+      const next = current === menu ? null : menu;
+      openMenuRef.current = next;
+      return next;
+    });
+  }, [openMenuRef]);
+  const openNestedMenu = useCallback((menu: Exclude<ScriptToolbarOpenMenu, null>, anchor: HTMLButtonElement) => {
+    nestedMenuPosition.anchorRef.current = anchor;
+    setOpenMenuState((current) => {
+      const next = current === menu ? null : menu;
+      openMenuRef.current = next;
+      return next;
+    });
+  }, [nestedMenuPosition.anchorRef, openMenuRef]);
+  const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
+    if (!open && characterCloseBlocked) return;
+    setOpenMenu(open ? "char" : null);
+  }, [characterCloseBlocked, setOpenMenu]);
+
+  closeMenuRef.current = closeMenu;
+
+  useEffect(() => {
+    if (toolbarCompact && !overflowOpen) closeMenu();
+  }, [closeMenu, overflowOpen, toolbarCompact]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismissOnOutsideMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const panel = target.closest<HTMLElement>("[data-script-toolbar-menu-panel]");
+      const scriptTrigger = target.closest<HTMLElement>("[data-script-toolbar-menu-trigger]");
+      const overflowTrigger = target.closest<HTMLElement>("[data-production-overflow-submenu-trigger]");
+      const triggerMenu = scriptTrigger?.dataset.scriptToolbarMenuTrigger
+        ?? overflowTrigger?.dataset.productionOverflowSubmenuTrigger;
+      if (panel?.dataset.scriptToolbarMenuPanel === openMenu || triggerMenu) return;
+      if (openMenu === "char") handleCharacterPanelOpenChange(false);
+      else closeMenu();
+    };
+    document.addEventListener("mousedown", dismissOnOutsideMouseDown);
+    return () => document.removeEventListener("mousedown", dismissOnOutsideMouseDown);
+  }, [closeMenu, handleCharacterPanelOpenChange, openMenu]);
+
+  useEffect(() => () => {
+    openMenuRef.current = null;
+    if (closeMenuRef.current === closeMenu) closeMenuRef.current = () => {};
+  }, [closeMenu, closeMenuRef, openMenuRef]);
+
+  return children({
+    openMenu,
+    setOpenMenu,
+    toggleMenu,
+    openNestedMenu,
+    handleCharacterPanelOpenChange,
+    scriptMenuPosition,
+    nestedMenuPosition,
+  });
+}
+
 export default function ScriptEditor({
   scriptId = "default",
   productionId,
@@ -6463,6 +7393,7 @@ export default function ScriptEditor({
   versionId?: string | null;
   initialSearchQuery?: string;
 }) {
+  const toolbarStage = useProductionToolbarStage();
   const effectiveScriptId = productionId ?? scriptId;
 
   // ── Version state ─────────────────────────────────────────────────────────────
@@ -6483,7 +7414,7 @@ export default function ScriptEditor({
   const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
   const versionForcesLockedMode =
     versionStatus === "committed" || versionStatus === "frozen" || versionStatus === "archived";
-  const isLockedMode = manualLockedMode || versionForcesLockedMode;
+  const isLockedMode = !baseCanEdit || manualLockedMode || versionForcesLockedMode;
   const canEditText = baseCanEditText && !isLockedMode;
   const canEditMetadata = baseCanEditMetadata && !isLockedMode;
   const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
@@ -6495,6 +7426,7 @@ export default function ScriptEditor({
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [sceneDetails, setSceneDetails] = useState<SceneDetail[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
+  const [rehearsalLabels, setRehearsalLabels] = useState(() => buildMarkerLabelIndex(blocks));
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
@@ -6506,6 +7438,36 @@ export default function ScriptEditor({
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
+  const [mobileInsertMenuOpen, setMobileInsertMenuOpen] = useState(false);
+  const [mobileBatchAction, setMobileBatchAction] = useState<"type" | "lyric" | null>(null);
+  const closeMobileBlockMenu = useCallback(() => {
+    setMobileBatchAction(null);
+    setMobileInsertMenuOpen(false);
+    setMobileBlockMenuBlockId(null);
+  }, []);
+  useEffect(() => {
+    if (mobileBlockMenuBlockId === null) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest("[data-script-mobile-block-menu='true']") ||
+        target.closest("[data-script-block-bar='true']:not([data-script-marker-bar='true'])")
+      ) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMobileBlockMenu();
+    };
+    document.addEventListener("click", handleOutsideClick, true);
+    return () => document.removeEventListener("click", handleOutsideClick, true);
+  }, [closeMobileBlockMenu, mobileBlockMenuBlockId]);
+  const [sceneDetailDialogSceneId, setSceneDetailDialogSceneId] = useState<string | null>(null);
+  const [sceneDetailDialogEditing, setSceneDetailDialogEditing] = useState(false);
+  const [mobileDeleteConfirmation, setMobileDeleteConfirmation] = useState<
+    | { kind: "marker"; markerId: string; message: string }
+    | { kind: "blocks"; blockIds: string[]; message: string; blocked: boolean }
+    | null
+  >(null);
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
@@ -6518,7 +7480,7 @@ export default function ScriptEditor({
   const [tocHighlightedMarkerIds, setTocHighlightedMarkerIds] = useState<Set<string>>(() => new Set());
   const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
   const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
-  const [markerDetailDeleteConfirmBlockId, setMarkerDetailDeleteConfirmBlockId] = useState<string | null>(null);
+  const [markerDeleteConfirmBlockId, setMarkerDeleteConfirmBlockId] = useState<string | null>(null);
   const [markerDeleteDialog, setMarkerDeleteDialog] = useState<(MarkerDeleteDialogState & { source: "local" | "server" }) | null>(null);
   const [markerDeleteDialogBusy, setMarkerDeleteDialogBusy] = useState(false);
   const [dismissActionToken, setDismissActionToken] = useState(0);
@@ -6546,6 +7508,14 @@ export default function ScriptEditor({
   const lineIndexMinMeasureRef = useRef<HTMLSpanElement | null>(null);
   const [lineIndexWidth, setLineIndexWidth] = useState(0);
   const [lineIndexMinWidth, setLineIndexMinWidth] = useState(0);
+  const openSceneDetailDialog = (sceneId: string) => {
+    setSceneDetailDialogEditing(false);
+    setSceneDetailDialogSceneId(sceneId);
+  };
+  const closeSceneDetailDialog = () => {
+    setSceneDetailDialogEditing(false);
+    setSceneDetailDialogSceneId(null);
+  };
 
   // ── Block tags ───────────────────────────────────────────────────────────────
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -6555,26 +7525,38 @@ export default function ScriptEditor({
 
   // ── Script config (page layout, stage delimiters) ─────────────────────────
   const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
+  const canAddRehearsalMark = effectiveCanEditRehearsalMark && scriptConfig.useRehearsalMarks;
   const scriptConfigRef = useRef(scriptConfig);
   useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
   const syncOpeningChapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current); }, []);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
+  const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingPageMapScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingTextLayoutPageMapRef = useRef(false);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
+  const toolbarOpenMenuRef = useRef<ScriptToolbarOpenMenu>(null);
+  const toolbarMenuCloseRef = useRef<() => void>(() => {});
+  const closeToolbarMenu = useCallback(() => toolbarMenuCloseRef.current(), []);
 
   const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
     if (!baseCanEditMetadata) return;
-    const next = { ...scriptConfigRef.current, ...patch };
+    const previous = scriptConfigRef.current;
+    const next = { ...previous, ...patch };
     scriptConfigRef.current = next;
     setScriptConfig(next);
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
+    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(next),
     });
+    if (!response.ok && scriptConfigRef.current === next) {
+      scriptConfigRef.current = previous;
+      setScriptConfig(previous);
+    }
   }, [activeVersionId, baseCanEditMetadata, effectiveScriptId]);
 
   const syncOpeningChapterMarkerId = useCallback((nextBlocks: Block[]) => {
@@ -6600,18 +7582,17 @@ export default function ScriptEditor({
 
   const requestStageDelimiterChange = useCallback((open: string, close: string) => {
     if (scriptConfig.stageDelimOpen === open && scriptConfig.stageDelimClose === close) {
-      setOpenMenu(null);
+      closeToolbarMenu();
       return;
     }
     setPendingStageDelimiterChange({ open, close });
-    setOpenMenu(null);
-  }, [scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
+    closeToolbarMenu();
+  }, [closeToolbarMenu, scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
 
   // ── Page map (computed client-side, deterministic) ──────────────────────────
   const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
   const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
   const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
-  const markerLabelDirtyRef = useRef(true);
   const markPageMapDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
     pageMapDirtyRef.current = mergeDirtyRanges(pageMapDirtyRef.current, dirty);
   }, []);
@@ -6622,7 +7603,7 @@ export default function ScriptEditor({
   const markBlockStructureDirty = useCallback((previous: Block[], next: Block[], movedBlockIds?: Iterable<string>) => {
     const change = getMarkerChange(previous, next, movedBlockIds);
     if (change.positions.length === 0) return;
-    if (change.markerStructureChanged) markerLabelDirtyRef.current = true;
+    if (change.markerStructureChanged) setRehearsalLabels(buildMarkerLabelIndex(next));
     markPageMapDirty(change.positions.map((start) => ({ start, end: start + 1 })));
     const nextIndexById = new Map(next.map((block, index) => [block.id, index]));
     const ownershipRanges = markerCacheUpdateBlockIds(next, change).flatMap((id): MarkerOwnershipRange[] => {
@@ -6641,12 +7622,6 @@ export default function ScriptEditor({
     () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
     [markerContextById, ownedBlocks],
   );
-  const markerLabelCacheRef = useRef<ReturnType<typeof buildMarkerLabelIndex> | null>(null);
-  if (!markerLabelCacheRef.current || markerLabelDirtyRef.current) {
-    markerLabelCacheRef.current = buildMarkerLabelIndex(blocks);
-    markerLabelDirtyRef.current = false;
-  }
-  const rehearsalLabels = markerLabelCacheRef.current;
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
     const markerIndex = openingChapterMarkerId
@@ -6690,10 +7665,7 @@ export default function ScriptEditor({
     return cache.pageMap;
   }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode]);
   const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
-  const [printPageMapMeasureEnabled, setPrintPageMapMeasureEnabled] = useState(false);
-  const handlePrintPageMapChange = useCallback((nextPageMap: Record<string, number>) => {
-    setPrintDividerPageMap((prev) => samePageMap(prev, nextPageMap) ? prev : nextPageMap);
-  }, []);
+  const printDividerPageMapRef = useRef<Record<string, number> | null>(null);
   const reloadScriptState = useCallback(async () => {
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
@@ -6702,7 +7674,7 @@ export default function ScriptEditor({
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
     const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
     markOwnershipDirty("full");
-    markerLabelDirtyRef.current = true;
+    setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
     setBlocks(normalized.blocks);
     setCharacters(serverState.characters);
     setScenes(normalized.scenes);
@@ -6711,7 +7683,15 @@ export default function ScriptEditor({
     syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
   }, [activeVersionId, effectiveScriptId, markOwnershipDirty]);
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
+  const sceneParentIdById = useMemo(() => sceneParentIdMap(scenes), [scenes]);
   const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);
+  const firstRehearsalMarkerLabel = useMemo(() => {
+    const markerId = rehearsalLabels.rehearsalLabelByMarkerId.keys().next().value;
+    if (!markerId) return null;
+    return rehearsalLabels.labelByMarkerId.get(markerId)
+      ?? "（未命名）";
+  }, [rehearsalLabels]);
+  const rehearsalMarksCannotBeDisabled = scriptConfig.useRehearsalMarks && firstRehearsalMarkerLabel !== null;
   const scriptLineNumberByBlockId = useMemo(() => {
     const map = new Map<string, number>();
     let lineNumber = 0;
@@ -6731,7 +7711,7 @@ export default function ScriptEditor({
       change === "full" ? undefined : change,
     );
     if (change === "full") {
-      markerLabelDirtyRef.current = true;
+      setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
       markOwnershipDirty("full");
     }
     else markBlockStructureDirty(previousBlocks, normalized.blocks);
@@ -6827,36 +7807,14 @@ export default function ScriptEditor({
   const [jumpValue, setJumpValue] = useState("");
 
   // ── Toolbar dropdowns ────────────────────────────────────────────────────────
-  type OpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
-  type ToolbarMode = "full" | "short" | "compact";
-  const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [toolbarMode, setToolbarMode] = useState<ToolbarMode>("full");
+  const [toolbarMode, setToolbarMode] = useState<ScriptToolbarMode>("full");
   const [toolbarMeasureTick, setToolbarMeasureTick] = useState(0);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const fullToolbarWidthRef = useRef(0);
   const shortToolbarWidthRef = useRef(0);
-  const toolbarCompact = toolbarMode === "compact";
-  const toolbarShort = toolbarMode === "short";
-  const toggleMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setMoreMenuOpen(false);
-    setOpenMenu(prev => prev === name ? null : name);
-  }, []);
-  const toggleMoreMenu = useCallback(() => {
-    setMoreMenuOpen(prev => {
-      const next = !prev;
-      setOpenMenu(null);
-      return next;
-    });
-  }, []);
-  const openNestedMenu = useCallback((name: Exclude<OpenMenu, null>) => {
-    setMoreMenuOpen(false);
-    setOpenMenu(name);
-  }, []);
-  const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
-    if (!open && pendingAggregateFocusPrompt) return;
-    setOpenMenu(open ? "char" : null);
-  }, [pendingAggregateFocusPrompt]);
+  const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored || toolbarMode === "compact";
+  const toolbarShort = !toolbarCompact && (toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || toolbarMode === "short");
+  const presenceFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.lowPriorityStored;
   const setToolbarElement = useCallback((el: HTMLDivElement | null) => {
     toolbarRef.current = el;
     if (el) setToolbarMeasureTick(tick => tick + 1);
@@ -6866,18 +7824,19 @@ export default function ScriptEditor({
     shortToolbarWidthRef.current = 0;
     setToolbarMode("full");
     if (closeMenus) {
-      setMoreMenuOpen(false);
-      setOpenMenu(null);
+      closeToolbarMenu();
     }
-  }, []);
+  }, [closeToolbarMenu]);
 
   useEffect(() => {
     const el = toolbarRef.current;
     if (!el) return;
+    const productionTopMenuSlot = el.closest(`#${PRODUCTION_TOP_MENU_SLOT_ID}`);
+    if (productionTopMenuSlot) return;
     let frame: number | null = null;
     const measure = () => {
       frame = null;
-      if (navigatingAwayRef.current || openMenu || moreMenuOpen) return;
+      if (navigatingAwayRef.current || toolbarOpenMenuRef.current) return;
       const available = el.clientWidth;
       const required = el.scrollWidth;
       if (toolbarMode === "full") {
@@ -6917,7 +7876,7 @@ export default function ScriptEditor({
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [toolbarMode, openMenu, moreMenuOpen, toolbarMeasureTick]);
+  }, [toolbarMode, toolbarMeasureTick]);
 
   useEffect(() => {
     resetToolbarMeasurement();
@@ -6925,29 +7884,6 @@ export default function ScriptEditor({
 
   // ── Display settings (cookie-persisted) ──────────────────────────────────────
   const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
-  useEffect(() => {
-    setPrintDividerPageMap(null);
-    setPrintPageMapMeasureEnabled(false);
-    if (!display.pageBreaks) return;
-    if (typeof window.requestIdleCallback === "function") {
-      const idleId = window.requestIdleCallback(
-        () => setPrintPageMapMeasureEnabled(true),
-        { timeout: 1000 },
-      );
-      return () => window.cancelIdleCallback(idleId);
-    }
-    const timer = window.setTimeout(() => setPrintPageMapMeasureEnabled(true), 250);
-    return () => window.clearTimeout(timer);
-  }, [
-    display.pageBreaks,
-    blocks,
-    characters,
-    scenes,
-    scriptConfig.pageLayout,
-    scriptConfig.textLayoutMode,
-    scriptConfig.stageDelimOpen,
-    scriptConfig.stageDelimClose,
-  ]);
   useLayoutEffect(() => {
     if (!display.lineNumbers) {
       setLineIndexWidth(0);
@@ -7153,7 +8089,7 @@ export default function ScriptEditor({
     setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmationRequest(null);
-    setMarkerDetailDeleteConfirmBlockId(null);
+    setMarkerDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
     setDragTarget(null);
     setIsScriptDragging(false);
@@ -7164,13 +8100,26 @@ export default function ScriptEditor({
   const toggleLockedMode = useCallback(() => {
     if (versionForcesLockedMode) return;
     setPendingLockedMode(!manualLockedMode);
-    setOpenMenu(null);
-  }, [manualLockedMode, versionForcesLockedMode]);
+    closeToolbarMenu();
+  }, [closeToolbarMenu, manualLockedMode, versionForcesLockedMode]);
 
   const confirmLockedModeChange = useCallback(() => {
     if (pendingLockedMode === null) return;
+    const container = blocksContainerRef.current;
+    if (container) {
+      const { viewTop, viewBottom } = getScrollMetrics();
+      const visibleBlock = Array.from(container.querySelectorAll<HTMLElement>("[data-vitem]"))
+        .find((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.bottom > viewTop && rect.top < viewBottom;
+        });
+      const id = visibleBlock?.dataset.vitem;
+      pendingModeScrollAnchorRef.current = id
+        ? { id, top: visibleBlock.getBoundingClientRect().top }
+        : null;
+    }
     resetScriptInteractions();
-    setOpenMenu(null);
+    closeToolbarMenu();
     setManualLockedMode(pendingLockedMode);
     setDisplay(prev => {
       const next = { ...prev, rehearsalMode: pendingLockedMode };
@@ -7178,7 +8127,7 @@ export default function ScriptEditor({
       return next;
     });
     setPendingLockedMode(null);
-  }, [pendingLockedMode, resetScriptInteractions]);
+  }, [closeToolbarMenu, pendingLockedMode, resetScriptInteractions]);
 
   const unlockReorder = useCallback(() => {
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
@@ -7359,11 +8308,11 @@ export default function ScriptEditor({
   const pendingVirtualWindowRefreshRef = useRef(false);
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
   const pendingNavigateRef = useRef<
-    { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
+    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
   >(null);
   // After the initial estimated scroll, store the target for a precise correction after measurement
   const postNavCorrectionRef = useRef<
-    { kind: 'block'; id: string; align: ScrollLogicalPosition } | { kind: 'scene'; id: string } | null
+    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
   >(null);
   // Incremented by the measurement effect to trigger the correction layout effect
   const [correctionTick, setCorrectionTick] = useState(0);
@@ -7403,6 +8352,56 @@ export default function ScriptEditor({
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
     scrollContainerBy({ top: delta, behavior: "instant" });
   }, []);
+
+  const updatePrintDividerPageMap = useCallback((nextPageMap: Record<string, number> | null) => {
+    const previousPageMap = printDividerPageMapRef.current;
+    if (previousPageMap === nextPageMap || (nextPageMap && samePageMap(previousPageMap, nextPageMap))) {
+      if (nextPageMap) pendingTextLayoutPageMapRef.current = false;
+      return;
+    }
+    if (pendingTextLayoutPageMapRef.current && nextPageMap) {
+      pendingPageMapScrollAnchorRef.current = captureVirtualScrollAnchor();
+      pendingTextLayoutPageMapRef.current = false;
+    }
+    printDividerPageMapRef.current = nextPageMap;
+    setPrintDividerPageMap(nextPageMap);
+  }, [captureVirtualScrollAnchor]);
+
+  useLayoutEffect(() => {
+    if (display.pageBreaks && printDividerPageMapRef.current) {
+      pendingTextLayoutPageMapRef.current = true;
+    }
+  }, [display.pageBreaks, scriptConfig.textLayoutMode]);
+
+  useEffect(() => {
+    if (pendingTextLayoutPageMapRef.current && display.pageBreaks) return;
+    pendingTextLayoutPageMapRef.current = false;
+    updatePrintDividerPageMap(null);
+  }, [
+    display.pageBreaks,
+    blocks,
+    characters,
+    scenes,
+    scriptConfig.pageLayout,
+    scriptConfig.textLayoutMode,
+    scriptConfig.stageDelimOpen,
+    scriptConfig.stageDelimClose,
+    updatePrintDividerPageMap,
+  ]);
+
+  useLayoutEffect(() => {
+    const anchor = pendingModeScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingModeScrollAnchorRef.current = null;
+    restoreVirtualScrollAnchor(anchor);
+  }, [isLockedMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
+
+  useLayoutEffect(() => {
+    const anchor = pendingPageMapScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingPageMapScrollAnchorRef.current = null;
+    restoreVirtualScrollAnchor(anchor);
+  }, [printDividerPageMap, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
     pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
@@ -7798,7 +8797,7 @@ export default function ScriptEditor({
     const container = blocksContainerRef.current;
     if (!container) return;
     measureVirtualItemElements(container.querySelectorAll<HTMLElement>('[data-vitem]'));
-  }, [blocks.length, windowRange.start, windowRange.end, measureVirtualItemElements]);
+  }, [blocks.length, scriptConfig.textLayoutMode, windowRange.start, windowRange.end, measureVirtualItemElements]);
 
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
@@ -7917,7 +8916,7 @@ export default function ScriptEditor({
     rebuildCumulative();
     syncSpacerHeights(windowRange);
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
+    scrollElementIntoView(el, nav.kind === 'block' ? nav.align : 'center', nav.kind === 'block' ? nav.viewportTopRatio : undefined);
     setScrollLocked(false);
     requestAnimationFrame(() => {
       updateActiveSceneFromScroll();
@@ -7943,7 +8942,7 @@ export default function ScriptEditor({
     syncSpacerHeights(windowRange);
 
     markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-    el.scrollIntoView({ behavior: 'instant', block: nav.kind === 'block' ? nav.align : 'center' });
+    scrollElementIntoView(el, nav.kind === 'block' ? nav.align : 'center', nav.kind === 'block' ? nav.viewportTopRatio : undefined);
 
     // Newly-rendered blocks haven't been measured yet so the cumulative heights are estimated.
     // Store the target so the measurement effect can trigger a precise correction pass.
@@ -7961,10 +8960,14 @@ export default function ScriptEditor({
   }, [windowRange, blocks.length, syncSpacerHeights]);
 
   // Teleport to a block: load target window, then instant-jump in the layout effect.
-  const scrollToBlockIdx = useCallback((idx: number, align: ScrollLogicalPosition = 'center') => {
+  const scrollToBlockIdx = useCallback((
+    idx: number,
+    align: ScrollLogicalPosition = 'center',
+    viewportTopRatio?: number,
+  ) => {
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
-    pendingNavigateRef.current = { kind: 'block', id: block.id, align };
+    pendingNavigateRef.current = { kind: 'block', id: block.id, align, viewportTopRatio };
     const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
     let start = Math.max(0, idx - Math.floor(windowSize / 2));
     const end = Math.min(blocksRef.current.length, start + windowSize);
@@ -7978,13 +8981,20 @@ export default function ScriptEditor({
       if (!el) return;
       pendingNavigateRef.current = null;
       markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
-      el.scrollIntoView({ behavior: 'instant', block: align });
+      scrollElementIntoView(el, align, viewportTopRatio);
       requestAnimationFrame(() => {
         updateActiveSceneFromScroll();
         window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
     }
   }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
+
+  const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number) => {
+    setMobileBatchAction(null);
+    setMobileInsertMenuOpen(false);
+    scrollToBlockIdx(blockIndex, "start", 0.2);
+    setMobileBlockMenuBlockId(blockId);
+  }, [scrollToBlockIdx]);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const markerIdx = findSceneMarkerBlockIndex(sceneId, blocksRef.current);
@@ -8170,7 +9180,7 @@ export default function ScriptEditor({
     measuredHeightTotalRef.current = 0;
     cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
     markOwnershipDirty("full");
-    markerLabelDirtyRef.current = true;
+    setRehearsalLabels(buildMarkerLabelIndex([placeholderBlock]));
     setBlocks([placeholderBlock]);
     applyWindowRange({ start: 0, end: 1 }, true);
     setCharacters([]);
@@ -8213,7 +9223,7 @@ export default function ScriptEditor({
             cumulativeHRef.current[i + 1] = cumulativeHRef.current[i] + DEFAULT_BLOCK_H;
           }
           markOwnershipDirty("full");
-          markerLabelDirtyRef.current = true;
+          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
           blocksRef.current = normalized.blocks;
           blockIndexByIdRef.current = new Map(normalized.blocks.map((block, index) => [block.id, index]));
           applyWindowRange({ start: 0, end: initialWindowEnd }, true);
@@ -8327,6 +9337,7 @@ export default function ScriptEditor({
       if (idx >= 0) { scrollToBlockIdx(idx, "center"); setHighlightedBlockId(blockId); }
       if (new URLSearchParams(query).get("open_comment") === "true") {
         setActiveCommentBlockId(blockId);
+        setTagEditorOnTop(false);
       }
       return () => clearTimeout(unlockTimer);
     }
@@ -8414,7 +9425,7 @@ export default function ScriptEditor({
           const mergedBlocks = expandLegacyMarkersToBlocks(mergeServerBlocks(blocksRef.current, serverState.blocks, oldSynced), serverState.scenes);
           const normalized = normalizeScriptMarkerInvariants(mergedBlocks, serverState.scenes, { ...scriptConfigRef.current, ...(serverState.config ?? {}) });
           markOwnershipDirty("full");
-          markerLabelDirtyRef.current = true;
+          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
           requestVirtualWindowRefresh();
           setBlocks(normalized.blocks);
           setCharacters(serverState.characters);
@@ -8575,29 +9586,35 @@ export default function ScriptEditor({
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
   const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [tagEditorOnTop, setTagEditorOnTop] = useState(false);
+  const commentDraftsRef = useRef(new Map<string, CommentDraft>());
+  const updateCommentDraft = useCallback((blockId: string, draft: CommentDraft) => {
+    if (draft.text.length > 0) commentDraftsRef.current.set(blockId, draft);
+    else commentDraftsRef.current.delete(blockId);
+  }, []);
+  const openBlockSidePanel = useCallback((panel: BlockSidePanelKind, blockId: string) => {
+    setActiveCommentBlockId(panel === "comment" ? blockId : null);
+    setActiveAssetBlockId(panel === "asset" ? blockId : null);
+    setTagEditorOnTop(false);
+  }, []);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
-  const [leftGutterWidth, setLeftGutterWidth] = useState(0);
-  const [rightGutterWidth, setRightGutterWidth] = useState(0);
-  const leftGutterRoRef = useRef<ResizeObserver | null>(null);
-  const rightGutterRoRef = useRef<ResizeObserver | null>(null);
-  const setLeftGutterRef = useCallback((el: HTMLDivElement | null) => {
-    if (leftGutterRoRef.current) { leftGutterRoRef.current.disconnect(); leftGutterRoRef.current = null; }
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const [productionSidebarReservedWidth, setProductionSidebarReservedWidth] = useState(0);
+  const workspaceMeasureRoRef = useRef<ResizeObserver | null>(null);
+  const setWorkspaceMeasureRef = useCallback((el: HTMLDivElement | null) => {
+    workspaceMeasureRoRef.current?.disconnect();
+    workspaceMeasureRoRef.current = null;
     if (!el) return;
-    const measure = () => setLeftGutterWidth(el.clientWidth);
+    const workspaceScrollEl = el.closest<HTMLElement>("#workspace-scroll") ?? el;
+    const measure = () => {
+      setWorkspaceWidth(workspaceScrollEl.clientWidth);
+      setProductionSidebarReservedWidth(Math.max(0, workspaceScrollEl.getBoundingClientRect().left));
+    };
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    leftGutterRoRef.current = ro;
-  }, []);
-  const setRightGutterRef = useCallback((el: HTMLDivElement | null) => {
-    if (rightGutterRoRef.current) { rightGutterRoRef.current.disconnect(); rightGutterRoRef.current = null; }
-    if (!el) return;
-    const measure = () => setRightGutterWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    rightGutterRoRef.current = ro;
+    ro.observe(workspaceScrollEl);
+    workspaceMeasureRoRef.current = ro;
   }, []);
 
   // Resolve Feishu display name and identity on mount
@@ -9243,7 +10260,7 @@ export default function ScriptEditor({
   }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
 
   const addRehearsalBeforeBlock = useCallback((blockId: string) => {
-    if (isLockedMode || !effectiveCanEditRehearsalMark) return;
+    if (isLockedMode || !effectiveCanEditRehearsalMark || !scriptConfigRef.current.useRehearsalMarks) return;
     const marker = makeMarkerBlock("rehearsal_marker");
     const previousBlocks = blocksRef.current;
     const index = previousBlocks.findIndex((block) => block.id === blockId);
@@ -9516,12 +10533,12 @@ export default function ScriptEditor({
     );
     if (!cleanupAnalysis.hasEmptyTextBlock && cleanupAnalysis.targets.length === 0) {
       showReorderNotice("没有可清除的空白内容。");
-      setOpenMenu(null);
+      closeToolbarMenu();
       return;
     }
     setEmptyScriptCleanupDialog(cleanupAnalysis.targets);
-    setOpenMenu(null);
-  }, [canEditText, isLockedMode, sceneDetailById, setEmptyScriptCleanupDialog, showReorderNotice]);
+    closeToolbarMenu();
+  }, [canEditText, closeToolbarMenu, isLockedMode, sceneDetailById, setEmptyScriptCleanupDialog, showReorderNotice]);
 
   const applyEmptyScriptCleanup = useCallback((selectedTargetKeys: Set<string>) => {
     if (isLockedMode || !canEditText) return;
@@ -9710,18 +10727,68 @@ export default function ScriptEditor({
     return true;
   }, [canPerformSelectedBlockAction, clearBlockSelection, isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
 
+  const requestMobileDelete = useCallback((id: string) => {
+    const index = blockIndexByIdRef.current.get(id);
+    const block = index === undefined ? null : blocksRef.current[index] ?? null;
+    if (!block) return;
+
+    if (isMarkerBlock(block)) {
+      if (!requestMarkerDelete(id)) return;
+      setMobileDeleteConfirmation({
+        kind: "marker",
+        markerId: id,
+        message: block.type === "chapter_marker"
+          ? "确认删除此章节标记？"
+          : block.type === "scene_marker"
+            ? "确认删除此段落标记？"
+            : "确认删除此排练记号？",
+      });
+      return;
+    }
+
+    const ids = selectedBlockIds.has(id) ? selectedBlockIdsArray : [id];
+    if (!canPerformSelectedBlockAction(ids)) return;
+    const blocked = ids.length === 1 && blockIdsRequireNonEmptySceneConfirm(ids);
+    const canDeleteWithoutConfirmation = blockIdsAreEmptyForDelete(ids) && !blocked;
+    if (canDeleteWithoutConfirmation) {
+      requestLargeSelectionOperation("delete", ids.length, () => deleteBlocks(ids));
+      return;
+    }
+    setDeleteConfirmingBlockIds(new Set(ids));
+    setMobileDeleteConfirmation({
+      kind: "blocks",
+      blockIds: ids,
+      message: blocked
+        ? "章节/段落/排练记号内容不可为空，至少需包含一个剧本块"
+        : ids.length > 1
+          ? `确认删除所选 ${ids.length} 行？`
+          : "确认删除此行？",
+      blocked,
+    });
+  }, [
+    blockIdsAreEmptyForDelete,
+    blockIdsRequireNonEmptySceneConfirm,
+    canPerformSelectedBlockAction,
+    deleteBlocks,
+    requestLargeSelectionOperation,
+    requestMarkerDelete,
+    selectedBlockIds,
+    selectedBlockIdsArray,
+  ]);
+
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
-    setMarkerDetailDeleteConfirmBlockId(null);
+    setMarkerDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
   }, []);
 
   useEffect(() => {
-    const hasDeleteConfirmationOpen = deleteConfirmingBlockIds.size > 0 || markerDetailDeleteConfirmBlockId !== null;
+    const hasDeleteConfirmationOpen = deleteConfirmingBlockIds.size > 0 || markerDeleteConfirmBlockId !== null;
     const handler = (e: PointerEvent) => {
       if (draggingBlockId.current || isReorderLockedRef.current) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      if (mobileBlockMenuBlockId !== null && !target.closest("[data-script-selection-action='true']")) return;
       if (target.closest("a[href]")) return;
       const docEl = document.documentElement;
       const isViewportScrollbar = e.clientX >= docEl.clientWidth || e.clientY >= docEl.clientHeight;
@@ -9745,7 +10812,7 @@ export default function ScriptEditor({
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDetailDeleteConfirmBlockId, selectedBlockIds.size]);
+  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -10168,19 +11235,14 @@ export default function ScriptEditor({
     const nextBlockId = direction === -1 ? targets.previousBlockId : targets.nextBlockId;
     if (!nextBlockId) return;
 
-    if (kind === "comment") {
-      setActiveAssetBlockId(null);
-      setActiveCommentBlockId(nextBlockId);
-    } else {
-      setActiveCommentBlockId(null);
-      setActiveAssetBlockId(nextBlockId);
-    }
+    openBlockSidePanel(kind, nextBlockId);
 
     const blockIndex = blocksRef.current.findIndex(block => block.id === nextBlockId);
     if (blockIndex >= 0) scrollToBlockIdx(blockIndex, "center");
   }, [
     assetPanelNavigationTargets,
     commentPanelNavigationTargets,
+    openBlockSidePanel,
     scrollToBlockIdx,
   ]);
 
@@ -10261,18 +11323,80 @@ export default function ScriptEditor({
   const rootFontSizePx = typeof window === "undefined"
     ? 16
     : parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
-  const scriptTocRailLayout = measureScriptTocRailLayout(tocScenes, rootFontSizePx);
+  const scriptTocNumberWidths = measureScriptTocNumberWidths(tocScenes, rootFontSizePx);
+  const scriptTocRailFullWidthPx = SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM * rootFontSizePx;
+  const scriptTocRailCompactWidthPx = Math.max(
+    scriptTocNumberWidths.chapterNumberSlotWidthPx,
+    scriptTocNumberWidths.sceneNumberSlotWidthPx,
+  ) + (SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
   const scriptSceneDetailRailMinWidthPx = SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM * rootFontSizePx;
-  const scriptTocRailMode: "full" | null = leftGutterWidth > 0 ? "full" : null;
-  const showSceneDetailRail = !!productionId && leftGutterWidth >= scriptSceneDetailRailMinWidthPx;
-  const asideTargetWidthPx = showSceneDetailRail
-    // scene detail 模式：gutter 宽度减去固定左边距 12px，但不低于组件最小宽度
-    ? Math.max(scriptSceneDetailRailMinWidthPx, leftGutterWidth - 12)
-    // TOC only 模式：恰好 TOC 内容宽 + pr-4，其余空间作为左边距实现右对齐
-    : scriptTocRailLayout.railWidthPx + 16;
-  const asideStyle: React.CSSProperties = {
-    width: `${asideTargetWidthPx}px`,
-    marginLeft: `${Math.max(0, leftGutterWidth - asideTargetWidthPx)}px`,
+  const canShowSceneDetail = productionSidebarReservedWidth > 0
+    && workspaceWidth >= (
+      SCRIPT_EDITOR_MAX_WIDTH_PX + scriptTocRailCompactWidthPx + scriptSceneDetailRailMinWidthPx
+    );
+  const isSceneDetailRequested = !!productionId && display.sceneDetail;
+  const isSceneDetailVisible = isSceneDetailRequested && canShowSceneDetail;
+  const centeredScriptWidthPx = Math.min(workspaceWidth, SCRIPT_EDITOR_MAX_WIDTH_PX);
+  const centeredLeftPanelWidthPx = Math.max(
+    0,
+    (workspaceWidth - centeredScriptWidthPx) / 2,
+  );
+  const detailReservedContentsWidthPx = Math.max(
+    0,
+    workspaceWidth - centeredScriptWidthPx - scriptSceneDetailRailMinWidthPx,
+  );
+  const fullContentsPanelAvailableWidthPx = isSceneDetailRequested
+    ? detailReservedContentsWidthPx
+    : centeredLeftPanelWidthPx;
+  const compactContentsPanelAvailableWidthPx = isSceneDetailVisible
+    ? detailReservedContentsWidthPx
+    : centeredLeftPanelWidthPx;
+  const scriptTocRailMode: "full" | "compact" | null =
+    productionSidebarReservedWidth >= SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX
+      || workspaceWidth === 0
+      || fullContentsPanelAvailableWidthPx >= scriptTocRailFullWidthPx
+      ? "full"
+      : compactContentsPanelAvailableWidthPx + SCRIPT_BODY_HORIZONTAL_PADDING_REM * rootFontSizePx
+          >= scriptTocRailCompactWidthPx
+        ? "compact"
+        : null;
+  const tocAsideWidthPx = scriptTocRailMode === "compact"
+    ? scriptTocRailCompactWidthPx
+    : scriptTocRailFullWidthPx;
+  const renderedLeftPanelWidthPx = isSceneDetailVisible
+    ? scriptTocRailMode ? tocAsideWidthPx : 0
+    : centeredLeftPanelWidthPx;
+  const availableRightGutterWidthPx = Math.max(
+    0,
+    workspaceWidth - renderedLeftPanelWidthPx - centeredScriptWidthPx,
+  );
+  const rightGutterWidthPx = isSceneDetailVisible
+    ? Math.min(
+        availableRightGutterWidthPx,
+        SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX + SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX,
+      )
+    : availableRightGutterWidthPx;
+  const scriptBodyWidthPx = Math.max(
+    0,
+    workspaceWidth - renderedLeftPanelWidthPx - rightGutterWidthPx,
+  );
+  const tocAsideStyle: React.CSSProperties = {
+    width: `${tocAsideWidthPx}px`,
+    marginLeft: `${Math.max(
+      0,
+      renderedLeftPanelWidthPx - tocAsideWidthPx + SCRIPT_BODY_HORIZONTAL_PADDING_REM * rootFontSizePx,
+    )}px`,
+  };
+  const sceneDetailAsideWidthPx = Math.min(
+    SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX,
+    Math.max(
+      scriptSceneDetailRailMinWidthPx,
+      rightGutterWidthPx - SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX,
+    ),
+  );
+  const sceneDetailAsideStyle: React.CSSProperties = {
+    width: `${sceneDetailAsideWidthPx}px`,
+    marginRight: `${Math.max(0, rightGutterWidthPx - sceneDetailAsideWidthPx)}px`,
   };
   const sceneIdForBlockAtIndex = (block: Block, index: number): string | null => {
     const markerId = isMarkerBlock(block) ? block.id : (ownedBlocks[index] ?? block).ownerMarkerId;
@@ -10286,52 +11410,196 @@ export default function ScriptEditor({
       : blocks.findIndex((block) => block.id === blockId);
     return blockIndex >= 0 ? sceneIdForBlockAtIndex(blocks[blockIndex], blockIndex) : null;
   };
-  const selectedDetailSceneId = selectedBlockIds.size === 1
-    ? (detailBlockVisibility.selected ? sceneIdForBlockId(selectedDetailBlockId) : null)
+  const markerDeleteConfirmBlockIndex = markerDeleteConfirmBlockId
+    ? blockIndexByIdRef.current.get(markerDeleteConfirmBlockId)
+    : undefined;
+  const markerDeleteConfirmBlock = markerDeleteConfirmBlockIndex === undefined
+    ? null
+    : blocks[markerDeleteConfirmBlockIndex] ?? null;
+  const markerDeleteConfirmDetailSceneId = isSceneDetailVisible
+    && markerDeleteConfirmBlockIndex !== undefined
+    && markerDeleteConfirmBlock && (
+    markerDeleteConfirmBlock.type === "chapter_marker" || markerDeleteConfirmBlock.type === "scene_marker"
+  )
+    ? sceneIdForBlockAtIndex(markerDeleteConfirmBlock, markerDeleteConfirmBlockIndex)
     : null;
-  const focusedDetailSceneId = detailBlockVisibility.focused ? sceneIdForBlockId(focusedId) : null;
-  const markerDeleteConfirmDetailSceneId = sceneIdForBlockId(markerDetailDeleteConfirmBlockId);
-  const detailSceneId = markerDeleteConfirmDetailSceneId ?? (
-    selectedBlockIds.size > 1
-      ? null
-      : selectedDetailSceneId ?? focusedDetailSceneId ?? activeSceneId
-  );
+  const detailSceneId = isSceneDetailVisible
+    ? markerDeleteConfirmDetailSceneId ?? (
+        selectedBlockIds.size > 1
+          ? null
+          : (selectedBlockIds.size === 1 && detailBlockVisibility.selected
+              ? sceneIdForBlockId(selectedDetailBlockId)
+              : null)
+            ?? (detailBlockVisibility.focused ? sceneIdForBlockId(focusedId) : null)
+            ?? activeSceneId
+      )
+    : null;
   const activeScene = detailSceneId ? sceneById.get(detailSceneId) ?? null : null;
   const activeSceneDetail = activeScene
     ? sceneDetailById.get(activeScene.id) ?? toSceneDetail(activeScene)
     : null;
-  const rightGutterCanShowComments = rightGutterWidth >= COMMENT_BUBBLE_MIN_GUTTER_PX;
-  const commentBubbleMaxWidth = Math.max(COMMENT_BUBBLE_MIN_WIDTH_PX, rightGutterWidth - 24);
+  const commentBubbleMode = workspaceWidth === 0
+    ? null
+    : isSceneDetailVisible ? "full" : scriptTocRailMode;
+  const blockSidePanelWidthPx = isSceneDetailVisible
+    ? sceneDetailAsideWidthPx
+    : SIDE_PANEL_FALLBACK_WIDTH_PX;
+  const commentBubbleWidthPx = commentBubbleMode === "compact"
+    ? scriptTocRailCompactWidthPx - COMMENT_BUBBLE_GAP_REM * rootFontSizePx
+    : Math.max(
+        COMMENT_BUBBLE_MIN_WIDTH_PX,
+        rightGutterWidthPx - COMMENT_BUBBLE_GAP_REM * rootFontSizePx,
+      );
   const activeCommentBlockIndex = activeCommentBlockId
     ? blocks.findIndex(block => block.id === activeCommentBlockId)
     : -1;
-  const activeCommentBlockCaption = activeCommentBlockIndex >= 0
-    ? buildCommentBlockCaption(blocks[activeCommentBlockIndex], characters, activeCommentBlockIndex)
+  const activeCommentBlockLineNumber = activeCommentBlockId
+    ? scriptLineNumberByBlockId.get(activeCommentBlockId)
+    : undefined;
+  const activeCommentBlockCaption = activeCommentBlockIndex >= 0 && activeCommentBlockLineNumber !== undefined
+    ? buildCommentBlockCaption(blocks[activeCommentBlockIndex], characters, activeCommentBlockLineNumber)
     : null;
   const activeAssetBlockIndex = activeAssetBlockId
     ? blocks.findIndex(block => block.id === activeAssetBlockId)
     : -1;
-  const activeAssetBlockCaption = activeAssetBlockIndex >= 0
-    ? buildCommentBlockCaption(blocks[activeAssetBlockIndex], characters, activeAssetBlockIndex)
+  const activeAssetBlockLineNumber = activeAssetBlockId
+    ? scriptLineNumberByBlockId.get(activeAssetBlockId)
+    : undefined;
+  const activeAssetBlockCaption = activeAssetBlockIndex >= 0 && activeAssetBlockLineNumber !== undefined
+    ? buildCommentBlockCaption(blocks[activeAssetBlockIndex], characters, activeAssetBlockLineNumber)
     : null;
   const dragInstructionNotice = !edgeDragNotice && (isScriptDragging || isReorderLocked)
       ? "拖拽当前剧本块至指定位置松开以调整位置"
       : "";
   const rightMenuClass = `${
     toolbarCompact
-      ? "fixed right-2 top-[7.5rem]"
+      ? ""
       : "absolute right-0 top-full"
-  } z-30 mt-1 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
-
+  } ${toolbarCompact ? "" : "mt-2.5"} z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
+  const selfPresence: RemotePresence | null = clientId
+    ? {
+        clientId,
+        userName: userName || "?",
+        color: presenceColor(clientId),
+        blockId: null,
+      }
+    : null;
+  const onlineUsers = [
+    ...Array.from(presenceMap.values()).filter((presence) => presence.clientId !== clientId),
+    ...(selfPresence ? [selfPresence] : []),
+  ];
+  const renderPresenceStack = (maxVisibleAvatars: number) => {
+    const overflowCount = onlineUsers.length > maxVisibleAvatars
+      ? onlineUsers.length - maxVisibleAvatars + 1
+      : 0;
+    const visibleUsers = overflowCount > 0
+      ? onlineUsers.slice(0, maxVisibleAvatars - 1)
+      : onlineUsers;
+    return (
+      <div className="flex flex-nowrap items-center">
+        {visibleUsers.map((presence) => (
+          <div key={presence.clientId} className={`-ml-1 first:ml-0 ${presence.clientId === clientId ? "opacity-40" : ""}`}>
+            <PresenceAvatar
+              name={presence.userName}
+              color={presence.color}
+              title={presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName}
+            />
+          </div>
+        ))}
+        {overflowCount > 0 && (
+          <div className="-ml-1 first:ml-0">
+            <div
+              title={`另有 ${overflowCount} 位在线人员`}
+              className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500"
+            >
+              +{overflowCount}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
   return (
-    <div className="bg-[var(--paper)]">
+    <div ref={setWorkspaceMeasureRef} className="bg-[var(--paper)]">
       {/* Toolbar */}
-      <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm">
-        <div
-          ref={setToolbarElement}
-          className="relative flex h-14 flex-nowrap items-center gap-3 px-6"
+      <header className={searchOpen || jumpTarget
+        ? "sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm"
+        : "contents"
+      }>
+        <ScriptToolbarMenuController
+          toolbarCompact={toolbarCompact}
+          characterCloseBlocked={pendingAggregateFocusPrompt !== null}
+          openMenuRef={toolbarOpenMenuRef}
+          closeMenuRef={toolbarMenuCloseRef}
         >
-          {productionName && !toolbarCompact && (
+          {({
+            openMenu,
+            setOpenMenu,
+            toggleMenu,
+            openNestedMenu,
+            handleCharacterPanelOpenChange,
+            scriptMenuPosition,
+            nestedMenuPosition,
+          }) => {
+            const toolbarOverflow = toolbarCompact ? (
+              <>
+                {presenceFolded && onlineUsers.length > 0 && (
+                  <div className="border-b border-zinc-100">
+                    <ProductionOverflowSubmenuButton
+                      menuId="presence"
+                      label={<span className="text-[10px] font-medium tracking-wide text-zinc-400">当前在线</span>}
+                      detail={renderPresenceStack(4)}
+                      expanded={openMenu === "presence"}
+                      onToggle={(anchor) => openNestedMenu("presence", anchor)}
+                    />
+                  </div>
+                )}
+                {canEditMetadata && (
+                  <ProductionOverflowSubmenuButton
+                    menuId="scene"
+                    label="章节"
+                    expanded={openMenu === "scene"}
+                    onToggle={(anchor) => openNestedMenu("scene", anchor)}
+                  />
+                )}
+                {(canEditMetadata || isLockedMode) && (
+                  <ProductionOverflowSubmenuButton
+                    menuId="char"
+                    label="角色"
+                    expanded={openMenu === "char"}
+                    onToggle={(anchor) => openNestedMenu("char", anchor)}
+                  />
+                )}
+                <ProductionOverflowSubmenuButton
+                  menuId="edit"
+                  label={isLockedMode ? "查找" : "编辑"}
+                  expanded={openMenu === "edit"}
+                  onToggle={(anchor) => openNestedMenu("edit", anchor)}
+                />
+                <ProductionOverflowSubmenuButton
+                  menuId="display"
+                  label="显示"
+                  expanded={openMenu === "display"}
+                  onToggle={(anchor) => openNestedMenu("display", anchor)}
+                />
+                <ProductionOverflowSubmenuButton
+                  menuId="export"
+                  label="导出"
+                  expanded={openMenu === "export"}
+                  onToggle={(anchor) => openNestedMenu("export", anchor)}
+                />
+              </>
+            ) : null;
+
+            return (
+        <ProductionTopMenu
+          barRef={setToolbarElement}
+          fallbackClassName="gap-0 px-6"
+          overflow={toolbarOverflow}
+        >
+          {(portaled) => (
+            <>
+          {productionName && (
             <>
               <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
                 <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -10339,24 +11607,28 @@ export default function ScriptEditor({
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>剧本</span>
               </div>
-              <div className="shrink-0" style={{ width: 1, height: 28, background: "var(--line)" }} />
+              <ProductionTopMenuDivider />
             </>
           )}
           {!isLockedMode && (
             <>
 
-              {/* 剧本▼ — 关于 + 元数据设置 */}
-              <div className="relative shrink-0">
+              {/* 剧本菜单 — 关于 + 元数据设置 */}
+              <div className="relative -ml-1 shrink-0">
                 <button
+                  ref={scriptMenuPosition.anchorRef}
+                  data-script-toolbar-menu-trigger="script"
                   onClick={() => toggleMenu("script")}
-                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                 >
-                  剧本 <Chevron />
+                  剧本 <ChevronIcon size={12} className="opacity-50" />
                 </button>
                 {openMenu === "script" && (
                   <div
-                    className={`${toolbarCompact ? "fixed left-2 top-[7.5rem]" : "absolute left-0 top-full"} z-30 mt-1 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`}
-                    onMouseLeave={() => setOpenMenu(null)}
+                    data-script-toolbar-menu-panel="script"
+                    ref={scriptMenuPosition.menuRef}
+                    style={scriptMenuPosition.style}
+                    className="z-40 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
                   >
                     <button
                       onClick={() => { setAboutOpen(true); setOpenMenu(null); }}
@@ -10364,19 +11636,58 @@ export default function ScriptEditor({
                     >
                       关于
                     </button>
-                    <button
-                      onClick={() => void saveScriptConfig({ showOpeningChapter: !scriptConfig.showOpeningChapter })}
-                      disabled={openingChapterMustBeVisible}
-                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
-                        openingChapterMustBeVisible ? "cursor-not-allowed text-zinc-300" : "text-zinc-600 hover:bg-zinc-50"
-                      }`}
-                      title={openingChapterMustBeVisible ? "开场下已有段落或排练记号，必须显示" : undefined}
-                    >
-                      <span>显示开场</span>
-                      <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
-                        openingChapterVisible ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
-                      }`}>✓</span>
-                    </button>
+                    <div className="group/display-option relative">
+                      <button
+                        onClick={() => {
+                          if (openingChapterMustBeVisible) return;
+                          void saveScriptConfig({ showOpeningChapter: !scriptConfig.showOpeningChapter });
+                        }}
+                        aria-disabled={openingChapterMustBeVisible}
+                        aria-describedby={openingChapterMustBeVisible ? "opening-chapter-in-use-notice" : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          openingChapterMustBeVisible ? DISABLED_CHECKBOX_OPTION_CLASS : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span>显示开场</span>
+                        <span className={checkboxOptionClass(openingChapterVisible)}>✓</span>
+                      </button>
+                      {openingChapterMustBeVisible && (
+                        <span
+                          id="opening-chapter-in-use-notice"
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          开场下已有段落或排练记号，必须显示
+                        </span>
+                      )}
+                    </div>
+                    <div className="group/display-option relative">
+                      <button
+                        onClick={() => {
+                          if (rehearsalMarksCannotBeDisabled) return;
+                          void saveScriptConfig({ useRehearsalMarks: !scriptConfig.useRehearsalMarks });
+                        }}
+                        aria-disabled={rehearsalMarksCannotBeDisabled}
+                        aria-describedby={rehearsalMarksCannotBeDisabled
+                          ? "rehearsal-marks-in-use-notice"
+                          : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          rehearsalMarksCannotBeDisabled ? DISABLED_CHECKBOX_OPTION_CLASS : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span>使用排练记号</span>
+                        <span className={checkboxOptionClass(scriptConfig.useRehearsalMarks)}>✓</span>
+                      </button>
+                      {rehearsalMarksCannotBeDisabled && (
+                        <span
+                          id="rehearsal-marks-in-use-notice"
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          无法禁用，当前剧本存在排练记号 {firstRehearsalMarkerLabel}
+                        </span>
+                      )}
+                    </div>
                     <div className="my-1 border-t border-zinc-50" />
                     <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">段内舞台提示</p>
                     {(
@@ -10417,7 +11728,7 @@ export default function ScriptEditor({
                       <>
                         <div className="my-1 border-t border-zinc-50" />
                         <button
-                          onClick={() => { setTagEditorOpen(true); setOpenMenu(null); }}
+                          onClick={() => { setTagEditorOpen(true); setTagEditorOnTop(true); setOpenMenu(null); }}
                           className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
                         >
                           标签设置…
@@ -10436,22 +11747,19 @@ export default function ScriptEditor({
               </div>
             </>
           )}
-          <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
+          <span className={`${canEdit ? "ml-[3px]" : "ml-0.5"} shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400`}>
             {canEdit ? "可编辑" : "只读"}
           </span>
-          {!baseCanEdit && (
-            <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400">
-              只读
-            </span>
-          )}
           {baseCanEdit && isLockedMode && (
             <div
               className="flex flex-1 justify-center"
             >
               <button
                 onClick={toggleLockedMode}
+                data-production-toolbar-flex-content="true"
                 aria-pressed={isLockedMode}
                 disabled={versionForcesLockedMode}
+                style={toolbarShort || toolbarCompact ? undefined : REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE}
                 title={versionForcesLockedMode ? "该版本仅可使用排练模式" : "退出排练模式"}
                 className={`flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors ${
                   versionForcesLockedMode
@@ -10464,7 +11772,8 @@ export default function ScriptEditor({
               </button>
             </div>
           )}
-          <div className="ml-auto h-4 w-px shrink-0 bg-zinc-100" />
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ${presenceFolded ? "absolute right-0 flex w-0 items-center" : "ml-auto flex shrink-0 items-center gap-1"}`}>
+          <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
           {(canEditMetadata || isLockedMode) && (
             <>
               {canEditMetadata && (
@@ -10479,11 +11788,13 @@ export default function ScriptEditor({
                     onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
                     canImport={canImport}
                     onNavigate={prepareForNavigation}
-                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
                     nestedFromMore={toolbarCompact}
+                    nestedMenuRef={nestedMenuPosition.menuRef}
+                    nestedMenuStyle={nestedMenuPosition.style}
                     label={toolbarShort ? "章" : "章节"}
                   />
-                  <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+                  <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
                 </>
               )}
               <CharacterPanel
@@ -10499,30 +11810,36 @@ export default function ScriptEditor({
                 onOpenChange={handleCharacterPanelOpenChange}
                 onNavigate={prepareForNavigation}
                 readOnly={isLockedMode}
-                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm transition-colors ${
+                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
                   openMenu === "char"
                     ? "bg-zinc-100 text-zinc-800"
                     : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
                 }`}
                 nestedFromMore={toolbarCompact}
+                nestedMenuRef={nestedMenuPosition.menuRef}
+                nestedMenuStyle={nestedMenuPosition.style}
                 label={toolbarShort ? "角" : "角色"}
               />
-              <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+              <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
             </>
           )}
 
-          {/* 编辑▼ — undo/redo + 格式 + 搜索/跳转 */}
+          {/* 编辑菜单 — undo/redo + 格式 + 搜索/跳转 */}
           <div className="relative shrink-0">
             <button
+              data-script-toolbar-menu-trigger="edit"
               onClick={() => toggleMenu("edit")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <Chevron />
+              {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "edit" && (
               <div
+                data-script-toolbar-menu-panel="edit"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-44`}
-                onMouseLeave={() => setOpenMenu(null)}
               >
                 {canEdit && (
                   <>
@@ -10593,53 +11910,70 @@ export default function ScriptEditor({
             )}
           </div>
 
-          {/* 显示▼ */}
+          {/* 显示菜单 */}
           <div className="relative shrink-0">
             <button
+              data-script-toolbar-menu-trigger="display"
               onClick={() => toggleMenu("display")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              {toolbarShort ? "显" : "显示"} <Chevron />
+              {toolbarShort ? "显" : "显示"} <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "display" && (
               <div
+                data-script-toolbar-menu-panel="display"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-44`}
-                onMouseLeave={() => setOpenMenu(null)}
               >
                 {(
                   [
                     ["pageBreaks",     "分页线"],
                     ["lineNumbers",    "行号"],
-                    ["rehearsalMarks", "排练记号"],
                     ["blockTags",      "Block 标签"],
-                  ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "rehearsalMarks" | "blockTags">, string][]
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => toggleDisplay(key)}
-                    className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    <span>{label}</span>
-                    <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${display[key] ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"}`}>✓</span>
-                  </button>
-                ))}
-                <button
-                  onClick={() => { if (isLockedMode) toggleDisplay("rehearsalBlockScenes"); }}
-                  disabled={!isLockedMode}
-                  className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
-                    isLockedMode ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
-                  }`}
-                  title="排练模式开启时显示每行所属章节"
-                >
-                  <span>逐行章节</span>
-                  <span className={`h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors ${
-                    display.rehearsalBlockScenes && isLockedMode ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-300 text-transparent"
-                  }`}>✓</span>
-                </button>
+                    ["rehearsalBlockScenes", "逐行章节"],
+                    ["sceneDetail",    "构作详情"],
+                  ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "blockTags" | "rehearsalBlockScenes" | "sceneDetail">, string][]
+                ).map(([key, label]) => {
+                  if (key === "blockTags" && tagGroups.length === 0) return null;
+                  if (key === "sceneDetail" && !productionId) return null;
+                  const isSceneDetail = key === "sceneDetail";
+                  const enabled = !isSceneDetail || canShowSceneDetail;
+                  const active = enabled && display[key];
+                  const disabledNotice = "当前窗口宽度过窄，无法显示构作详情";
+                  const disabledNoticeId = "scene-detail-width-notice";
+                  return (
+                    <div key={key} className="group/display-option relative">
+                      <button
+                        onClick={() => { if (enabled) toggleDisplay(key); }}
+                        aria-disabled={!enabled}
+                        aria-describedby={!enabled ? disabledNoticeId : undefined}
+                        title={key === "rehearsalBlockScenes" ? "显示每行所属章节" : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          enabled ? "text-zinc-600 hover:bg-zinc-50" : DISABLED_CHECKBOX_OPTION_CLASS
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <span className={checkboxOptionClass(active)}>✓</span>
+                      </button>
+                      {!enabled && (
+                        <span
+                          id={disabledNoticeId}
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          {disabledNotice}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
                 <div className="my-1 border-t border-zinc-50" />
                 <button
                   onClick={() => {
                     if (!baseCanEditMetadata) return;
+                    pendingModeScrollAnchorRef.current = captureVirtualScrollAnchor();
                     saveScriptConfig({
                       textLayoutMode: scriptConfig.textLayoutMode === "compact" ? "center" : "compact",
                     });
@@ -10684,107 +12018,72 @@ export default function ScriptEditor({
 
           {/* Online users: self (dimmed) + overflow menu */}
           <div className="relative shrink-0">
-            {(() => {
-              const selfPresence: RemotePresence | null = clientId
-                ? {
-                    clientId,
-                    userName: userName || "?",
-                    color: presenceColor(clientId),
-                    blockId: null,
-                  }
-                : null;
-              const onlineUsers = [
-                ...Array.from(presenceMap.values()).filter(p => p.clientId !== clientId),
-                ...(selfPresence ? [selfPresence] : []),
-              ];
-              const maxVisibleAvatars = (toolbarShort || toolbarCompact)
+            {!presenceFolded && onlineUsers.length > 0 && (() => {
+              const maxVisibleAvatars = toolbarShort || toolbarCompact
                 ? 2
                 : isLockedMode
                   ? REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS
                   : EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS;
-              const overflowCount = onlineUsers.length > maxVisibleAvatars
-                ? onlineUsers.length - maxVisibleAvatars + 1
-                : 0;
-              const visibleUsers = overflowCount > 0
-                ? onlineUsers.slice(0, maxVisibleAvatars - 1)
-                : onlineUsers;
-
-              if (onlineUsers.length === 0) return null;
-
-              const avatarStack = (
-                <div className="flex items-center">
-                  {visibleUsers.map(p => (
-                    <div key={p.clientId} className={`-ml-1 first:ml-0 ${p.clientId === clientId ? "opacity-40" : ""}`}>
-                      <PresenceAvatar
-                        name={p.userName}
-                        color={p.color}
-                        title={p.clientId === clientId ? `${p.userName}（你）` : p.userName}
-                      />
-                    </div>
-                  ))}
-                  {overflowCount > 0 && (
-                    <div className="-ml-1 first:ml-0">
-                      <div
-                        title={`展开 ${overflowCount} 位在线人员`}
-                        className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500"
-                      >
-                        +{overflowCount}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-
-              if (overflowCount === 0) return avatarStack;
-
+              const stack = renderPresenceStack(maxVisibleAvatars);
+              if (onlineUsers.length <= maxVisibleAvatars) return stack;
               return (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => toggleMenu("presence")}
-                    className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
-                    aria-label={`在线人员：${onlineUsers.length} 人`}
-                    title={`在线人员：${onlineUsers.map(p => p.clientId === clientId ? `${p.userName}（你）` : p.userName).join("、")}`}
-                  >
-                    {avatarStack}
-                  </button>
-                  {openMenu === "presence" && (
-                    <div
-                      className={`${rightMenuClass} w-44`}
-                      onMouseLeave={() => setOpenMenu(null)}
-                    >
-                      <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">在线人员</p>
-                      {onlineUsers.map(p => (
-                        <div key={p.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
-                          <span
-                            aria-hidden
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: p.color }}
-                          />
-                          <span className="min-w-0 flex-1 truncate">
-                            {p.userName}{p.clientId === clientId ? "（你）" : ""}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
+                <button
+                  type="button"
+                  ref={toolbarCompact ? nestedMenuPosition.anchorRef : undefined}
+                  data-script-toolbar-menu-trigger="presence"
+                  onClick={(event) => {
+                    if (toolbarCompact) openNestedMenu("presence", event.currentTarget);
+                    else toggleMenu("presence");
+                  }}
+                  className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
+                  aria-label={`当前在线：${onlineUsers.length} 人`}
+                  title={`当前在线：${onlineUsers.map((presence) => presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName).join("、")}`}
+                >
+                  {stack}
+                </button>
               );
             })()}
+            {openMenu === "presence" && (
+              <div
+                data-script-toolbar-menu-panel="presence"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                className={`${rightMenuClass} w-44`}
+              >
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">当前在线</p>
+                {onlineUsers.map((presence) => (
+                  <div key={presence.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: presence.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {presence.userName}{presence.clientId === clientId ? "（你）" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* 导出▼ */}
+          {/* 导出菜单 */}
           <div className="relative shrink-0">
             <button
+              data-script-toolbar-menu-trigger="export"
               onClick={() => toggleMenu("export")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-2.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              导出 <Chevron />
+              导出 <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "export" && (
               <div
+                data-script-toolbar-menu-panel="export"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-36`}
-                onMouseLeave={() => setOpenMenu(null)}
               >
                 <button
                   onClick={() => { setPrintPreview(true); setOpenMenu(null); }}
@@ -10795,68 +12094,13 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
-          <div className={`${toolbarCompact ? "relative shrink-0" : "hidden"}`}>
-            {(moreMenuOpen || openMenu !== null) && (
-              <div
-                className="fixed inset-0 z-20"
-                onClick={() => { setMoreMenuOpen(false); setOpenMenu(null); }}
-              />
-            )}
-            <button
-              type="button"
-              aria-label="更多工具"
-              onClick={toggleMoreMenu}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
-            >
-              ⋮
-            </button>
-            {moreMenuOpen && (
-              <div
-                className="fixed right-2 top-[7.5rem] z-40 mt-1 w-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-              >
-                {canEditMetadata && (
-                  <button
-                    onClick={() => openNestedMenu("scene")}
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    <span>章节</span>
-                    <Chevron />
-                  </button>
-                )}
-                {(canEditMetadata || isLockedMode) && (
-                  <button
-                    onClick={() => openNestedMenu("char")}
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                  >
-                    <span>角色</span>
-                    <Chevron />
-                  </button>
-                )}
-                <button
-                  onClick={() => openNestedMenu("edit")}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  <span>{isLockedMode ? "查找" : "编辑"}</span>
-                  <Chevron />
-                </button>
-                <button
-                  onClick={() => openNestedMenu("display")}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  <span>显示</span>
-                  <Chevron />
-                </button>
-                <button
-                  onClick={() => openNestedMenu("export")}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-                >
-                  <span>导出</span>
-                  <Chevron />
-                </button>
-              </div>
-            )}
           </div>
-        </div>
+            </>
+          )}
+        </ProductionTopMenu>
+            );
+          }}
+        </ScriptToolbarMenuController>
 
         {/* 搜索栏 */}
         {searchOpen && (
@@ -10882,12 +12126,12 @@ export default function ScriptEditor({
               onClick={() => setSearchIdx(i => i <= 0 ? searchMatches.length - 1 : i - 1)}
               disabled={searchMatches.length === 0}
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
-            >▲</button>
+            ><ChevronIcon direction="up" size={12} /></button>
             <button
               onClick={() => setSearchIdx(i => (i + 1) % searchMatches.length)}
               disabled={searchMatches.length === 0}
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
-            >▼</button>
+            ><ChevronIcon size={12} /></button>
             <div className="h-4 w-px bg-zinc-100" />
             <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
               <input type="checkbox" checked={searchExact} onChange={e => { setSearchExact(e.target.checked); setSearchIdx(0); }} className="h-3 w-3" />
@@ -10949,7 +12193,7 @@ export default function ScriptEditor({
       {edgeDragNotice && (
         <div
           className={`pointer-events-none fixed left-1/2 z-10 -translate-x-1/2 select-none text-center text-2xl font-semibold tracking-wide text-zinc-400/35 ${
-            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-[8.5rem]" : "bottom-12"
+            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-[5rem]" : "bottom-12"
           }`}
         >
           {edgeDragNotice}
@@ -10957,7 +12201,7 @@ export default function ScriptEditor({
       )}
 
       {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || largeSelectionNotice || selectionChangeNotice) && (
-        <div className="pointer-events-none fixed left-1/2 top-[7.5rem] z-50 flex -translate-x-1/2 flex-col items-center gap-1">
+        <div className="pointer-events-none fixed left-1/2 top-[4rem] z-50 flex -translate-x-1/2 flex-col items-center gap-1">
           {dragInstructionNotice ? (
             <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
               {dragInstructionNotice}
@@ -11042,38 +12286,9 @@ export default function ScriptEditor({
           animation: scriptTocMarkerGlow 1.5s ease-out;
         }
 
-        .script-toc-rail-scrollbar {
-          scrollbar-color: transparent transparent;
-          scrollbar-width: thin;
-        }
-
-        .script-toc-rail-scrollbar:hover {
-          scrollbar-color: rgba(161, 161, 170, 0.45) transparent;
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar {
-          width: 8px;
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar-thumb {
-          background: transparent;
-          border-radius: 9999px;
-        }
-
-        .script-toc-rail-scrollbar:hover::-webkit-scrollbar-thumb {
-          background: rgba(161, 161, 170, 0.45);
-        }
-
-        .script-toc-rail-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(113, 113, 122, 0.55);
-        }
       `}</style>
 
-      {printPageMapMeasureEnabled && display.pageBreaks && (
+      {display.pageBreaks && (
         <PrintPaginationMeasure
           blocks={legacyProjectedBlocks}
           characters={characters}
@@ -11082,56 +12297,40 @@ export default function ScriptEditor({
           stageDelimOpen={scriptConfig.stageDelimOpen}
           stageDelimClose={scriptConfig.stageDelimClose}
           textLayoutMode={scriptConfig.textLayoutMode}
-          onPageMapChange={handlePrintPageMapChange}
+          onPageMapChange={updatePrintDividerPageMap}
         />
       )}
 
       {/* Document: 3-column flex — left gutter | script content | right gutter */}
       <div className="flex items-start">
-        {/* Left gutter column (TOC + scene detail, sticky) */}
-        <div ref={setLeftGutterRef} className="hidden lg:flex flex-col flex-1 min-w-0 self-stretch">
+        {/* Offset the script only while the scene detail panel is actually visible. */}
+        <div
+          className="hidden md:flex min-w-0 flex-col self-stretch"
+          style={{ width: `${renderedLeftPanelWidthPx}px`, flexShrink: 0 }}
+        >
           {scriptTocRailMode && (
-            <aside style={asideStyle} className={`sticky top-14 pr-4 ${showSceneDetailRail ? "h-[calc(100vh-7.5rem)] flex min-h-0 flex-col" : "h-[calc((100vh-7.5rem)/3)] min-h-44 max-h-96"}`}>
-              <div className={`${showSceneDetailRail ? "h-[calc((100vh-7.5rem)/3)] min-h-44 max-h-96 shrink-0 flex justify-end" : "h-full"}`}>
-                <div
-                  className="h-full"
-                  style={showSceneDetailRail ? { width: `${scriptTocRailLayout.railWidthPx + 16}px` } : { width: "100%" }}
-                >
-                  <TableOfContents
-                    scenes={tocScenes}
-                    blocks={legacyProjectedBlocks}
-                    onScrollToScene={scrollToScene}
-                    activeSceneId={activeSceneId}
-                    placement="rail"
-                    chapterNumberSlotWidthPx={scriptTocRailLayout.chapterNumberSlotWidthPx}
-                    sceneNumberSlotWidthPx={scriptTocRailLayout.sceneNumberSlotWidthPx}
-                  />
-                </div>
-              </div>
-              {showSceneDetailRail && (
-                <div className="my-3 h-px w-full shrink-0 bg-zinc-300" />
-              )}
-              {showSceneDetailRail && productionId && (
-                <div className="flex-1 min-h-0 overflow-hidden pl-2">
-                  <ScriptSceneDetailRail
-                    scene={activeSceneDetail}
-                    scenes={sceneDetails}
-                    productionId={productionId}
-                    versionId={activeVersionId ?? null}
-                    canEdit={canEditMetadata}
-                    isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
-                    scrollbarOffsetPx={0}
-                    onUpdateIdentity={updateScene}
-                    onPatchMeta={patchSceneMeta}
-                  />
-                </div>
-              )}
+            <aside
+              style={tocAsideStyle}
+              className="sticky top-0 h-[calc(44.444vh_-_1.778rem)] min-h-[14.667rem] max-h-[32rem]"
+            >
+              <TableOfContents
+                scenes={tocScenes}
+                blocks={legacyProjectedBlocks}
+                onScrollToScene={scrollToScene}
+                activeSceneId={activeSceneId}
+                placement={scriptTocRailMode === "compact" ? "rail-compact" : "rail"}
+                chapterNumberSlotWidthPx={scriptTocNumberWidths.chapterNumberSlotWidthPx}
+                sceneNumberSlotWidthPx={scriptTocNumberWidths.sceneNumberSlotWidthPx}
+              />
             </aside>
           )}
         </div>
 
         {/* Center column (script content) */}
-        <main className="w-full flex-none min-w-0 px-4 py-8" style={{ maxWidth: SCRIPT_EDITOR_MAX_WIDTH_PX }}>
+        <main
+          className="w-full flex-none min-w-0 px-4 py-8"
+          style={{ maxWidth: scriptBodyWidthPx || SCRIPT_EDITOR_MAX_WIDTH_PX }}
+        >
         <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
           {display.lineNumbers && (
             <>
@@ -11193,25 +12392,28 @@ export default function ScriptEditor({
           >
           {(() => {
             const hasFocusedCharacters = focusedCharacterIds.size > 0;
-            const commentBubbleOffsets = new Map<string, number>();
-            let lastBubbleBottom = -Infinity;
-            for (let i = safeWindowStart; i < safeWindowEnd; i++) {
-              const windowBlock = blocks[i];
-              const commentCount = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
-              const assetCount = blockAssetsByBlockId.get(windowBlock.id)?.length ?? 0;
-              const count = commentCount + assetCount;
-              if (count === 0 || activeCommentBlockId === windowBlock.id || activeAssetBlockId === windowBlock.id) continue;
-              const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
-              const blockTop = cumulativeHRef.current[i] - spacerH.top;
-              const desiredCenter = blockTop + blockHeight / 2;
-              const visibleCommentCount = assetCount > 0 ? Math.min(3, commentCount) : Math.min(4, commentCount);
-              const visibleAssetCount = Math.min(assetCount, 4 - visibleCommentCount);
-              const hasDivider = commentCount > 0 && assetCount > 0;
-              const bubbleHeight = Math.min(160, 38 + (visibleCommentCount + visibleAssetCount) * 17 + (hasDivider ? 11 : 0));
-              const desiredTop = desiredCenter - bubbleHeight / 2;
-              const top = Math.max(desiredTop, lastBubbleBottom + 6);
-              lastBubbleBottom = top + bubbleHeight;
-              commentBubbleOffsets.set(windowBlock.id, top - desiredTop);
+            let commentBubbleOffsets: Map<string, number> | null = null;
+            if (commentBubbleMode === "full") {
+              commentBubbleOffsets = new Map<string, number>();
+              let lastBubbleBottom = -Infinity;
+              for (let i = safeWindowStart; i < safeWindowEnd; i++) {
+                const windowBlock = blocks[i];
+                const commentCount = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
+                const assetCount = blockAssetsByBlockId.get(windowBlock.id)?.length ?? 0;
+                const count = commentCount + assetCount;
+                if (count === 0 || activeCommentBlockId === windowBlock.id || activeAssetBlockId === windowBlock.id) continue;
+                const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
+                const blockTop = cumulativeHRef.current[i] - spacerH.top;
+                const desiredCenter = blockTop + blockHeight / 2;
+                const visibleCommentCount = assetCount > 0 ? Math.min(3, commentCount) : Math.min(4, commentCount);
+                const visibleAssetCount = Math.min(assetCount, 4 - visibleCommentCount);
+                const hasDivider = commentCount > 0 && assetCount > 0;
+                const bubbleHeight = Math.min(160, 38 + (visibleCommentCount + visibleAssetCount) * 17 + (hasDivider ? 11 : 0));
+                const desiredTop = desiredCenter - bubbleHeight / 2;
+                const top = Math.max(desiredTop, lastBubbleBottom + 6);
+                lastBubbleBottom = top + bubbleHeight;
+                commentBubbleOffsets.set(windowBlock.id, top - desiredTop);
+              }
             }
 
             return [
@@ -11226,13 +12428,7 @@ export default function ScriptEditor({
               ...blocks.slice(safeWindowStart, safeWindowEnd).flatMap((block, wIdx) => {
             const bIdx = safeWindowStart + wIdx;
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
-            const isProtectedChapterSceneGap = !!(
-              prev?.type === "chapter_marker" &&
-              block.type === "scene_marker" &&
-              prev.sceneId &&
-              block.sceneId &&
-              sceneById.get(block.sceneId)?.parentId === prev.sceneId
-            );
+            const hasInsertionGap = hasScriptInsertionGapBefore(blocks, bIdx, sceneParentIdById);
             const showSceneEndGap = isLockedMode && shouldShowSceneEndGap(prev, block);
             if (isMarkerBlock(block)) {
               if (!openingChapterVisible && block.id === scriptConfig.openingChapterMarkerId) return [];
@@ -11259,6 +12455,8 @@ export default function ScriptEditor({
                     canEdit={block.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata}
                     isSelected={selectedBlockIds.has(block.id)}
                     isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id) || invalidSelectionEndIds.has(block.id)}
+                    isDeleteConfirmationOpen={markerDeleteConfirmBlockId === block.id}
+                    isMobileMenuOpen={mobileBlockMenuBlockId === block.id}
                     isReorderLocked={isReorderLocked}
                     isScriptDragging={isScriptDragging}
                     dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
@@ -11267,20 +12465,25 @@ export default function ScriptEditor({
                     onRemove={() => deleteMarker(block.id)}
                     onRequestDelete={() => requestMarkerDelete(block.id)}
                     canAddChapterScene={canEditMetadata}
-                    canAddRehearsal={effectiveCanEditRehearsalMark}
+                    canAddRehearsal={canAddRehearsalMark}
                     onAddChapterBefore={() => addChapterBeforeBlock(block.id)}
                     onAddSceneBefore={() => addSceneBeforeBlock(block.id)}
                     onAddRehearsalBefore={() => addRehearsalBeforeBlock(block.id)}
                     onConvertToChapter={canEditMetadata ? () => convertMarkerBlockType(block.id, "chapter_marker") : undefined}
                     onConvertToScene={canEditMetadata ? () => convertMarkerBlockType(block.id, "scene_marker") : undefined}
+                    onOpenSceneDetail={productionId && block.sceneId && (block.type === "chapter_marker" || block.type === "scene_marker")
+                      ? () => openSceneDetailDialog(block.sceneId as string)
+                      : undefined}
                     onDeleteConfirmChange={(confirming) => {
                       if (confirming) {
-                        setMarkerDetailDeleteConfirmBlockId(block.id);
+                        setMarkerDeleteConfirmBlockId(block.id);
                         return;
                       }
                       dismissBlockConfirmations();
                     }}
-                    dismissToken={dismissActionToken}
+                    onMobileMenuOpen={() => {
+                      openMobileBlockMenu(block.id, bIdx);
+                    }}
                     onSelect={(e) => {
                       if (isReorderLockedRef.current) return;
                       const isAdditiveSelection = e.ctrlKey || e.metaKey;
@@ -11410,12 +12613,13 @@ export default function ScriptEditor({
                       if (!moved) unlockReorder();
                     }}
                     lineIndexWidth={markerLineIndexWidthStyle}
+                    reserveRehearsalGap={isLockedMode}
                   />
                 </div>
               ) : null;
               if (!markerEl) return [];
               const preBlockGap = bIdx > 0
-                ? canEditText && !isProtectedChapterSceneGap
+                ? canEditText && hasInsertionGap
                   ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} />
                   : showSceneEndGap
                     ? <BlockGap />
@@ -11455,7 +12659,12 @@ export default function ScriptEditor({
             );
             const isBlockFocused = !isLockedMode && focusedId === block.id;
             const hideCharSelector =
-              isBlockFocused || pageBreak ? false : shouldHideCharacterLabel(projectedOwnedPrev, projectedOwnedBlock);
+              isBlockFocused || pageBreak
+                ? false
+                : shouldHideCharacterLabel(
+                    projectedOwnedPrev,
+                    projectedOwnedBlock,
+                  );
             const showCharacterGap = isLockedMode && shouldShowCharacterGap(projectedOwnedPrev, projectedOwnedBlock, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
@@ -11467,6 +12676,7 @@ export default function ScriptEditor({
             const selectedCount = selectedDeleteIds.length;
             const blockComments = commentsByBlockId.get(block.id) ?? EMPTY_COMMENTS;
             const blockAssets = blockAssetsByBlockId.get(block.id) ?? EMPTY_BLOCK_ASSETS;
+            const blockLineNumber = scriptLineNumberByBlockId.get(block.id)!;
             const requiresNonEmptySceneConfirm = isSelected
               ? selectedBlocksRequireNonEmptySceneConfirm
               : blockIdsRequireNonEmptySceneConfirm(selectedDeleteIds);
@@ -11509,13 +12719,13 @@ export default function ScriptEditor({
                 )}
                 <ScriptBlock
                   block={displayBlock}
-                  index={bIdx}
-                  lineNum={display.lineNumbers ? scriptLineNumberByBlockId.get(block.id) : undefined}
+                  lineNum={display.lineNumbers ? blockLineNumber : undefined}
+                  captionLineNum={blockLineNumber}
                   lineIndexWidth={lineIndexWidthStyle}
                   isSearchHighlight={searchHighlight}
-                  showRehearsalMark={display.rehearsalMarks}
                   readOnlyRehearsalMode={isLockedMode}
                   readOnlyScene={isLockedMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
+                  showSceneLabel={display.rehearsalBlockScenes}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
                   textLayoutMode={scriptConfig.textLayoutMode}
@@ -11586,7 +12796,9 @@ export default function ScriptEditor({
                   onToggleSelected={(e) => {
                     if (isReorderLockedRef.current) return;
                     focusBlockContent(block.id);
-                    const isAdditiveSelection = e.ctrlKey || e.metaKey;
+                    const isAdditiveSelection = e.ctrlKey || e.metaKey || (
+                      window.matchMedia("(max-width: 639px)").matches && selectedBlockIds.size > 0
+                    );
                     if (e.shiftKey) {
                       const anchorId = selectionAnchorBlockIdRef.current;
                       const anchorIdx = anchorId ? blockIndexByIdRef.current.get(anchorId) ?? -1 : -1;
@@ -11727,14 +12939,14 @@ export default function ScriptEditor({
                   blockAssets={blockAssets}
                   isCommentPanelActive={activeCommentBlockId === block.id}
                   isAssetPanelActive={activeAssetBlockId === block.id}
-                  commentBubbleOffsetY={commentBubbleOffsets.get(block.id) ?? 0}
-                  rightGutterCanShowComments={rightGutterCanShowComments}
-                  commentBubbleMaxWidth={commentBubbleMaxWidth}
-                  onCommentClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(block.id); }}
-                  onAssetClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(block.id); }}
+                  commentBubbleOffsetY={commentBubbleOffsets?.get(block.id) ?? 0}
+                  commentBubbleMode={commentBubbleMode}
+                  commentBubbleWidth={commentBubbleWidthPx}
+                  onCommentClick={() => openBlockSidePanel("comment", block.id)}
+                  onAssetClick={() => openBlockSidePanel("asset", block.id)}
                   canEditText={canEditText}
                   canEditMetadata={canEditMetadata}
-                  canEditRehearsalMark={effectiveCanEditRehearsalMark}
+                  canEditRehearsalMark={canAddRehearsalMark}
                   canMergeWithPrevious={canMergeWithPrevious}
                   tagGroups={tagGroups}
                   blockTagValues={blockTagMap.get(block.id) ?? []}
@@ -11743,12 +12955,14 @@ export default function ScriptEditor({
                   onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
                   onTagCopyClick={() => handleTagCopy(block.id)}
                   onTagPasteClick={() => handleTagPaste(block.id)}
-                  onMobileMenuOpen={() => setMobileBlockMenuBlockId(block.id)}
+                  onMobileMenuOpen={() => {
+                    openMobileBlockMenu(block.id, bIdx);
+                  }}
                 />
               </div>
             );
             const preBlockGap = bIdx > 0
-              ? canEditText && !isProtectedChapterSceneGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
+              ? canEditText && hasInsertionGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
                 showSceneEndGap ? <BlockGap /> :
                 isLockedMode && showCharacterGap ? <BlockGap /> :
                 null
@@ -11783,14 +12997,40 @@ export default function ScriptEditor({
         )}
         </main>
 
-        {/* Right gutter column (comment bubbles overflow into here) */}
-        <div ref={setRightGutterRef} className="hidden lg:block flex-1 min-w-0 self-stretch" aria-hidden="true" />
+        {/* Right column: scene detail below the top third; overlays render above it. */}
+        <div className="hidden min-w-0 flex-1 self-stretch md:block">
+          {isSceneDetailVisible && productionId && (
+            <aside
+              style={sceneDetailAsideStyle}
+              className="pointer-events-none sticky top-0 z-10 flex h-[calc(100vh-4rem)] min-h-0 flex-col"
+            >
+              <div className="h-[calc((100vh-4rem)/3)] min-h-44 max-h-96 shrink-0" aria-hidden="true" />
+              <div className="pointer-events-auto mt-3 flex min-h-0 flex-1 flex-col border-t border-zinc-300 bg-[var(--paper)] pt-3 pr-2">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <ScriptSceneDetailRail
+                    scene={activeSceneDetail}
+                    scenes={sceneDetails}
+                    productionId={productionId}
+                    versionId={activeVersionId ?? null}
+                    canEdit={canEditMetadata}
+                    isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
+                    scrollbarOffsetPx={0}
+                    onUpdateIdentity={updateScene}
+                    onPatchMeta={patchSceneMeta}
+                  />
+                </div>
+              </div>
+            </aside>
+          )}
+        </div>
       </div>
 
       {tagEditorOpen && productionId && (
         <>
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setTagEditorOpen(false)} />
-        <div className="fixed right-0 top-[7.5rem] bottom-0 z-30 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full">
+        <div
+          className={`fixed right-0 top-[4rem] bottom-0 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full ${tagEditorOnTop ? "z-[31]" : "z-30"}`}
+        >
           <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-700">标签设置</span>
             <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
@@ -11812,10 +13052,10 @@ export default function ScriptEditor({
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveAssetBlockId(null)} />
         <SideBlockPanel
           blockId={activeAssetBlockId}
-          title="附件"
+          activePanel="asset"
+          onPanelChange={panel => openBlockSidePanel(panel, activeAssetBlockId)}
           blockCaption={activeAssetBlockCaption}
-          hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={rightGutterWidth}
+          width={blockSidePanelWidthPx}
           navigation={{
             hasPrevious: assetPanelNavigationTargets.previousBlockId !== null,
             hasNext: assetPanelNavigationTargets.nextBlockId !== null,
@@ -11844,6 +13084,7 @@ export default function ScriptEditor({
         <>
           <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveCommentBlockId(null)} />
         <CommentsPanel
+          key={activeCommentBlockId}
           blockId={activeCommentBlockId}
           productionId={productionId}
           comments={commentsByBlockId.get(activeCommentBlockId) ?? EMPTY_COMMENTS}
@@ -11854,8 +13095,10 @@ export default function ScriptEditor({
           onDelete={id => setComments(prev => prev.filter(x => x.id !== id))}
           onClose={() => setActiveCommentBlockId(null)}
           onNavigate={prepareForNavigation}
-          hasGutterSpace={rightGutterCanShowComments}
-          gutterWidth={rightGutterWidth}
+          onPanelChange={panel => openBlockSidePanel(panel, activeCommentBlockId)}
+          draft={commentDraftsRef.current.get(activeCommentBlockId)}
+          onDraftChange={updateCommentDraft}
+          width={blockSidePanelWidthPx}
           blockCaption={activeCommentBlockCaption}
           navigation={{
             hasPrevious: commentPanelNavigationTargets.previousBlockId !== null,
@@ -12084,9 +13327,7 @@ export default function ScriptEditor({
                             className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-600"
                             aria-expanded={expanded}
                           >
-                            <svg className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${expanded ? "rotate-180" : ""}`} viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                              <polyline points="3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
-                            </svg>
+                            <ChevronIcon direction={expanded ? "up" : "down"} className="shrink-0 text-zinc-400 transition-transform" />
                             <span className="min-w-0 flex-1 truncate">
                               <span className="font-bold">【{marker.captionNumber}】</span>
                               <span>{marker.captionName}</span>
@@ -12370,22 +13611,125 @@ export default function ScriptEditor({
         </ScriptDialog>
       )}
 
+      {sceneDetailDialogSceneId && productionId && (() => {
+        const dialogScene = sceneById.get(sceneDetailDialogSceneId) ?? null;
+        if (!dialogScene) return null;
+        const dialogSceneDetail = sceneDetailById.get(dialogScene.id) ?? toSceneDetail(dialogScene);
+        const chapterDurationDisplay = dialogScene.parentId === null
+          ? getChapterDurationDisplay(sceneDetails.filter((scene) => scene.parentId === dialogScene.id))
+          : null;
+        const durationText = chapterDurationDisplay
+          ? chapterDurationDisplay.hasMissingDuration ? "—" : chapterDurationDisplay.text || "—"
+          : formatDuration(parseDuration(dialogSceneDetail.expectedDuration)) || "—";
+        const sceneCaption = `【${dialogScene.number.trim() || "—"}】${dialogScene.name.trim() || "未命名"}`;
+        return (
+          <ScriptDialog
+            onClose={closeSceneDetailDialog}
+            overlayClassName="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+            panelClassName="flex h-[28rem] max-h-[calc(100vh-2rem)] w-[560px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-xl"
+          >
+            <div className="flex h-6 shrink-0 items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold text-zinc-800">
+                {sceneDetailDialogEditing ? (
+                  <h2 className="truncate">编辑构作详情</h2>
+                ) : (
+                  <>
+                    <p className="min-w-0 flex-1 truncate" title={sceneCaption}>{sceneCaption}</p>
+                    <div className="h-4 w-px shrink-0 bg-zinc-200" />
+                    <p className="shrink-0 whitespace-nowrap">预期时长：{durationText}</p>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={closeSceneDetailDialog}
+                className="flex h-6 w-6 items-center justify-center rounded text-lg leading-none text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-zinc-500"
+                title="关闭"
+                aria-label="关闭构作详情"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-4 min-h-0 flex-1 overflow-hidden">
+              <ScriptSceneDetailRail
+                scene={dialogSceneDetail}
+                scenes={sceneDetails}
+                productionId={productionId}
+                versionId={activeVersionId ?? null}
+                canEdit={canEditMetadata}
+                controlledEditMode={sceneDetailDialogEditing}
+                showHeader={false}
+                scrollbarOffsetPx={0}
+                onUpdateIdentity={updateScene}
+                onPatchMeta={patchSceneMeta}
+              />
+            </div>
+            {canEditMetadata && (
+              <div className="mt-5 flex shrink-0 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSceneDetailDialogEditing((editing) => !editing)}
+                  className={`rounded px-3 py-1.5 text-sm font-medium text-white transition-colors ${
+                    sceneDetailDialogEditing
+                      ? "bg-zinc-800 hover:bg-zinc-700"
+                      : "bg-[#637ca1] hover:bg-[#536b8e]"
+                  }`}
+                >
+                  {sceneDetailDialogEditing ? SCRIPT_SCENE_DETAIL_MODE_LABEL.edit : SCRIPT_SCENE_DETAIL_MODE_LABEL.view}
+                </button>
+              </div>
+            )}
+          </ScriptDialog>
+        );
+      })()}
+
       {/* Mobile block action bottom sheet */}
       {mobileBlockMenuBlockId !== null && (() => {
         const menuBlock = blocks.find(b => b.id === mobileBlockMenuBlockId);
         if (!menuBlock) return null;
-        const isStageBlock = menuBlock.type === "stage";
-        const hasLyricBlock = !!menuBlock.lyric;
+        const isMarker = isMarkerBlock(menuBlock);
+        const isBatchMode = !isMarker && selectedBlockIds.size > 1;
+        const actionBlock = isBatchMode
+          ? blocks.find(block => selectedBlockIds.has(block.id) && !isMarkerBlock(block)) ?? menuBlock
+          : menuBlock;
+        const isStageBlock = actionBlock.type === "stage";
+        const hasLyricBlock = !!actionBlock.lyric;
         const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
         const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
-        const isBatchMode = selectedBlockIds.has(mobileBlockMenuBlockId) && selectedBlockIds.size > 1;
         const batchCount = selectedBlockIds.size;
-        const close = () => setMobileBlockMenuBlockId(null);
+        const insertActions: Array<[string, () => void]> = [
+          ...(canEditMetadata ? [
+            ["添加新章", () => addChapterBeforeBlock(menuBlock.id)] as [string, () => void],
+            ["添加新段", () => addSceneBeforeBlock(menuBlock.id)] as [string, () => void],
+          ] : []),
+          ...(canAddRehearsalMark ? [
+            ["添加新排练记号", () => addRehearsalBeforeBlock(menuBlock.id)] as [string, () => void],
+          ] : []),
+        ];
+        const conversionActions: Array<[string, () => void]> = isMarker && canEditMetadata ? [
+          ...(menuBlock.type !== "chapter_marker"
+            ? [["转为章节", () => convertMarkerBlockType(menuBlock.id, "chapter_marker")] as [string, () => void]]
+            : []),
+          ...(menuBlock.type !== "scene_marker"
+            ? [["转为段落", () => convertMarkerBlockType(menuBlock.id, "scene_marker")] as [string, () => void]]
+            : []),
+        ] : [];
+        const detailSceneId = productionId && menuBlock.sceneId && (
+          menuBlock.type === "chapter_marker" || menuBlock.type === "scene_marker"
+        ) ? menuBlock.sceneId : null;
+        const canDeleteMenuBlock = isMarker
+          ? menuBlock.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata
+          : canEditText;
+        const runAndClose = (action: () => void) => {
+          closeMobileBlockMenu();
+          action();
+        };
         return (
-          <div className="sm:hidden fixed inset-0 z-50 flex items-end" onClick={close}>
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-end sm:hidden">
             <div
-              className="w-full rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
-              onClick={e => e.stopPropagation()}
+              data-script-selection-action="true"
+              data-script-mobile-block-menu="true"
+              className="pointer-events-auto max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
             >
               <div className="flex justify-center pt-3 pb-1">
                 <div className="w-10 h-1 rounded-full bg-zinc-200" />
@@ -12394,56 +13738,193 @@ export default function ScriptEditor({
                 <p className="px-5 py-2 text-xs text-zinc-400">已选中 {batchCount} 行</p>
               )}
               <div className="flex flex-col">
-                {canEditText && !isStageBlock && !hasLyricCfg && (
+                {mobileBatchAction && (
+                  <div className="flex items-center justify-between gap-3 border-t border-zinc-100 px-5 py-3.5">
+                    <span className="min-w-0 text-sm leading-5 text-zinc-500">
+                      确认修改所选 {batchCount} 行{mobileBatchAction === "type" ? "类型" : "文本状态"}？
+                    </span>
+                    <span className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const action = mobileBatchAction;
+                          setMobileBatchAction(null);
+                          if (!canPerformSelectedBlockAction(selectedBlockIdsArray)) return;
+                          closeMobileBlockMenu();
+                          requestLargeSelectionOperation(action, batchCount, () => {
+                            if (action === "type") {
+                              setBlocksType(selectedBlockIdsArray, isStageBlock ? "dialogue" : "stage");
+                            } else {
+                              setBlocksLyric(selectedBlockIdsArray, !hasLyricBlock);
+                            }
+                          });
+                        }}
+                        className="text-sm text-red-500 hover:text-red-700"
+                      >
+                        确认
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMobileBatchAction(null)}
+                        className="text-sm text-zinc-400 hover:text-zinc-600"
+                      >
+                        取消
+                      </button>
+                    </span>
+                  </div>
+                )}
+                {!isBatchMode && insertActions.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => setMobileInsertMenuOpen((open) => !open)}
+                      className="flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] text-zinc-700"
+                      aria-expanded={mobileInsertMenuOpen}
+                    >
+                      <span>在块前添加</span>
+                      <ChevronIcon size={16} className={`text-zinc-400 transition-transform ${mobileInsertMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {mobileInsertMenuOpen && insertActions.map(([label, action]) => (
+                      <button
+                        key={label}
+                        onClick={() => runAndClose(action)}
+                        className="w-full border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] text-zinc-600"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {conversionActions.map(([label, action]) => (
                   <button
-                    onClick={() => { toggleBlockLyric(mobileBlockMenuBlockId); close(); }}
+                    key={label}
+                    onClick={() => runAndClose(action)}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {label}
+                  </button>
+                ))}
+                {detailSceneId && (
+                  <>
+                    <p className="border-t border-zinc-100 px-5 pt-3 pb-1 text-xs font-medium text-zinc-400">详情</p>
+                    <button
+                      onClick={() => runAndClose(() => openSceneDetailDialog(detailSceneId))}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700"
+                    >
+                      查看构作详情
+                    </button>
+                  </>
+                )}
+                {!isMarker && canEditText && !isStageBlock && !hasLyricCfg && (
+                  <button
+                    onClick={() => {
+                      if (isBatchMode) {
+                        setMobileBatchAction("lyric");
+                      } else {
+                        toggleBlockLyric(mobileBlockMenuBlockId);
+                        closeMobileBlockMenu();
+                      }
+                    }}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                   >
                     {hasLyricBlock ? "转为台词" : "转为歌词"}
                   </button>
                 )}
-                {canEditText && (
+                {!isMarker && canEditText && (
                   <button
                     onClick={() => {
                       if (isBatchMode) {
-                        setBlocksType(Array.from(selectedBlockIds), isStageBlock ? "dialogue" : "stage");
+                        setMobileBatchAction("type");
                       } else {
                         toggleBlockType(mobileBlockMenuBlockId);
+                        closeMobileBlockMenu();
                       }
-                      close();
                     }}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                   >
                     {isStageBlock ? "转为台词" : "转为舞台提示"}
                   </button>
                 )}
-                <button
-                  onClick={() => { setActiveCommentBlockId(null); setActiveAssetBlockId(mobileBlockMenuBlockId); close(); }}
-                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
-                >
-                  附件
-                </button>
-                <button
-                  onClick={() => { setActiveAssetBlockId(null); setActiveCommentBlockId(mobileBlockMenuBlockId); close(); }}
-                  className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
-                >
-                  {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
-                </button>
-                {canEdit && (
+                {!isMarker && !isBatchMode && (
+                  <>
+                    <button
+                      onClick={() => { openBlockSidePanel("asset", mobileBlockMenuBlockId); closeMobileBlockMenu(); }}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                    >
+                      附件
+                    </button>
+                    <button
+                      onClick={() => { openBlockSidePanel("comment", mobileBlockMenuBlockId); closeMobileBlockMenu(); }}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                    >
+                      {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
+                    </button>
+                  </>
+                )}
+                {canDeleteMenuBlock && (
                   <button
                     onClick={() => {
-                      deleteBlocks(isBatchMode ? Array.from(selectedBlockIds) : [mobileBlockMenuBlockId]);
-                      close();
+                      closeMobileBlockMenu();
+                      requestMobileDelete(actionBlock.id);
                     }}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-red-500 border-t border-zinc-100"
                   >
-                    {isBatchMode ? `删除所选 ${batchCount} 行` : "删除此行"}
+                    {isBatchMode ? `删除所选 ${batchCount} 行` : isMarker ? "删除此标记" : "删除此行"}
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={closeMobileBlockMenu}
+                  className="w-full border-t border-zinc-100 px-5 py-3.5 text-center text-[15px] font-medium text-zinc-600"
+                >
+                  取消
+                </button>
               </div>
               <div className="h-6" />
             </div>
           </div>
+        );
+      })()}
+
+      {mobileDeleteConfirmation && (() => {
+        const blocked = mobileDeleteConfirmation.kind === "blocks" && mobileDeleteConfirmation.blocked;
+        const cancel = () => {
+          setMobileDeleteConfirmation(null);
+          dismissBlockConfirmations();
+        };
+        const confirm = () => {
+          const request = mobileDeleteConfirmation;
+          setMobileDeleteConfirmation(null);
+          dismissBlockConfirmations();
+          if (request.kind === "marker") {
+            deleteMarker(request.markerId);
+            return;
+          }
+          if (request.blocked) return;
+          requestLargeSelectionOperation("delete", request.blockIds.length, () => {
+            deleteBlocks(request.blockIds);
+          });
+        };
+        return (
+          <ScriptDialog
+            onClose={cancel}
+            overlayClassName="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+            panelClassName="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl"
+          >
+            <h2 className="text-base font-semibold text-zinc-800">
+              {blocked ? "无法删除" : "确认删除？"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              {mobileDeleteConfirmation.message}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={cancel} className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}>
+                取消
+              </button>
+              <button onClick={confirm} className={SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}>
+                确认
+              </button>
+            </div>
+          </ScriptDialog>
         );
       })()}
 

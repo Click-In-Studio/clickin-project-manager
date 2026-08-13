@@ -3,13 +3,25 @@
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import SheetPicker from "./SheetPicker";
-import ColumnMapper from "./ColumnMapper";
-import type { SheetMeta, SheetData, SceneColMap, ScriptColMap, ImportScriptPreview, TypeAction, TypeTagMapping, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportPreview, JointImportMappingRow, JointImportMarker } from "@/lib/import/types";
+import ColumnMapper, { columnLetter } from "./ColumnMapper";
+import TagFormatOptionList, { TagFormatGuide } from "@/components/TagFormatOptionList";
+import { buildImportFormatOptionIds, mergeVisibleTagOptionOrder } from "@/lib/import/tag-format";
+import { shouldImportFirstChapterAsOpening } from "@/lib/import/opening-chapter";
+import { buildFinalImportMarkers } from "@/lib/import/final-markers";
+import type { SheetMeta, SheetData, SceneColMap, ScriptColMap, ImportScriptPreview, TypeAction, TypeTagMapping, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportPreview, JointImportMappingRow, JointImportMarker, ImportTagChanges } from "@/lib/import/types";
 
-type Step = "choose-dramaturgy" | "choose-script" | "scene-columns" | "script-columns" | "types" | "characters" | "aggregates" | "preview" | "done";
+type Step = "choose-dramaturgy" | "choose-script" | "scene-columns" | "script-columns" | "cue-mapping" | "types" | "format-mapping" | "characters" | "aggregates" | "preview" | "done";
 type Props = { productionId: string; versionId?: string | null; onDone?: () => void; };
 type CharEntry = { raw: string; parsedBase: string; parsedSuffix: string | null; mergeAsNote: boolean; kind: "normal" | "aggregate" };
-type TagGroupInfo = { id: string; name: string; options: { id: string; label: string; color: string }[] };
+type TagGroupInfo = {
+  id: string;
+  name: string;
+  type: "exclusive" | "range";
+  sortOrder: number;
+  defaultOptionId: string | null;
+  lyricSplitAfterOptionId: string | null;
+  options: { id: string; label: string; color: string; sortOrder: number; sourceRawValue?: string }[];
+};
 type Workbook = { token: string; sheets: SheetMeta[] };
 type SheetPickerPreset = { url: string; token: string; sheets: SheetMeta[]; nonce: number };
 type ApiResult<T> = Partial<T> & { error?: string };
@@ -45,6 +57,29 @@ const BLOCK_TYPE_LABELS: Record<string, string> = { dialogue: "台词", stage: "
 const MAPPING_BUTTON_CLASS = "px-2 py-0.5 rounded border text-xs disabled:opacity-25 disabled:cursor-not-allowed";
 const MAPPING_CURRENT_BUTTON_CLASS = "px-2 py-0.5 rounded border text-xs cursor-not-allowed";
 const DEFAULT_TYPE_ACTION: Extract<TypeAction, { action: "mapType" }> = { action: "mapType", blockType: "dialogue" };
+const EMPTY_TAG_CHANGES: ImportTagChanges = { createGroups: [], createOptions: [], updateGroups: [], updateOptions: [], deleteGroupIds: [], deleteOptionIds: [] };
+
+function mergeTagGroupUpdate(
+  updates: ImportTagChanges["updateGroups"],
+  groupId: string,
+  patch: Omit<ImportTagChanges["updateGroups"][number], "groupId">,
+) {
+  const current = updates.find(update => update.groupId === groupId);
+  return [...updates.filter(update => update.groupId !== groupId), { ...current, ...patch, groupId }];
+}
+
+function mergeTagOptionUpdate(
+  updates: ImportTagChanges["updateOptions"],
+  groupId: string,
+  optionId: string,
+  patch: Omit<ImportTagChanges["updateOptions"][number], "groupId" | "optionId">,
+) {
+  const current = updates.find(update => update.groupId === groupId && update.optionId === optionId);
+  return [
+    ...updates.filter(update => update.groupId !== groupId || update.optionId !== optionId),
+    { ...current, ...patch, groupId, optionId },
+  ];
+}
 
 function normalizeTypeActions(action: TypeTagMapping[string] | undefined): TypeAction[] {
   if (!action) return [DEFAULT_TYPE_ACTION];
@@ -58,6 +93,11 @@ function primaryTypeAction(action: TypeTagMapping[string] | undefined): TypeActi
 function tagActions(action: TypeTagMapping[string] | undefined): TagTypeAction[] {
   return normalizeTypeActions(action).filter((item): item is TagTypeAction => item.action === "mapTag");
 }
+
+function hasTagMappings(mapping: TypeTagMapping, values: string[]): boolean {
+  return values.some(value => tagActions(mapping[value]).length > 0);
+}
+
 export default function ImportJointWizard({ productionId, versionId, onDone }: Props) {
   const [step, setStep] = useState<Step>("choose-dramaturgy");
   const [dramWorkbook, setDramWorkbook] = useState<Workbook | null>(null);
@@ -75,14 +115,18 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const [loadingScriptOption, setLoadingScriptOption] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [sceneMapping, setSceneMapping] = useState<Record<string, number | null>>({ sceneNum: null, sceneName: null, intro: null, actionLine: null, music: null, stagePres: null, duration: null });
-  const [scriptMapping, setScriptMapping] = useState<Record<string, number | number[] | null>>({ sceneNum: null, rehearsalMark: null, typeTag: null, character: null, stageComment: null, bodyColumns: [], stageInlineColumns: [] });
+  const [scriptMapping, setScriptMapping] = useState<Record<string, number | number[] | null>>({ sceneNum: null, rehearsalMark: null, typeTag: null, character: null, stageComment: null, bodyColumns: [], cueColumns: [], stageInlineColumns: [] });
+  const [cueColumnNames, setCueColumnNames] = useState<Record<number, string>>({});
   const [stageInlinePatterns, setStageInlinePatterns] = useState<StageDelimiterPattern[]>(STAGE_DELIMITER_PATTERNS);
   const [stageDelimiterPattern, setStageDelimiterPattern] = useState<ScriptConfigStageDelimiterPattern>("（）");
   const [typeValues, setTypeValues] = useState<string[]>([]);
   const [typeTagMapping, setTypeTagMapping] = useState<TypeTagMapping>({});
+  const [tagModeByRawValue, setTagModeByRawValue] = useState<Record<string, boolean>>({});
   const [tagGroups, setTagGroups] = useState<TagGroupInfo[]>([]);
   const [tagGroupsLoading, setTagGroupsLoading] = useState(false);
+  const [tagGroupsLoaded, setTagGroupsLoaded] = useState(false);
   const [tagGroupsError, setTagGroupsError] = useState<string | null>(null);
+  const [tagChanges, setTagChanges] = useState<ImportTagChanges>(EMPTY_TAG_CHANGES);
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [confirmDeleteOptionId, setConfirmDeleteOptionId] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
@@ -92,20 +136,29 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const [jointPreview, setJointPreview] = useState<JointImportPreview | null>(null);
   const [mappingRows, setMappingRows] = useState<JointImportMappingRow[]>([]);
   const [scriptPreview, setScriptPreview] = useState<ImportScriptPreview | null>(null);
+  const [previewScriptRows, setPreviewScriptRows] = useState<(string | null)[][] | null>(null);
+  const [firstChapterAsOpening, setFirstChapterAsOpening] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [commitLoading, setCommitLoading] = useState(false);
   const [pendingCommitConfirmation, setPendingCommitConfirmation] = useState(false);
   const [commitResult, setCommitResult] = useState<{ importedScenes: number; blocksImported: number; charsAdded: number; sceneSummary: SceneSummaryItem[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  function cueSourceCaption(column: number): string {
+    const caption = hasScriptHeader ? (scriptData?.headers[column] ?? columnLetter(column)) : columnLetter(column);
+    return caption.replace(/\s+/g, " ").trim();
+  }
+
   function goBack() {
     if (step === "scene-columns") setStep("choose-dramaturgy");
     else if (step === "choose-script") setStep(skipDramaturgy ? "choose-dramaturgy" : "scene-columns");
     else if (step === "script-columns") setStep("choose-script");
     else if (step === "types") setStep("script-columns");
-    else if (step === "characters") setStep(typeValues.length > 0 ? "types" : "script-columns");
+    else if (step === "format-mapping") setStep("types");
+    else if (step === "characters") setStep(typeValues.length > 0 ? (hasTagMappings(typeTagMapping, typeValues) ? "format-mapping" : "types") : "script-columns");
     else if (step === "aggregates") setStep("characters");
-    else if (step === "preview") setStep(aggEntries.length > 0 ? "aggregates" : charEntries.length > 0 ? "characters" : typeValues.length > 0 ? "types" : "script-columns");
+    else if (step === "cue-mapping") setStep(aggEntries.length > 0 ? "aggregates" : charEntries.length > 0 ? "characters" : typeValues.length > 0 ? (hasTagMappings(typeTagMapping, typeValues) ? "format-mapping" : "types") : "script-columns");
+    else if (step === "preview") setStep(((scriptMapping.cueColumns as number[] | null) ?? []).length > 0 ? "cue-mapping" : aggEntries.length > 0 ? "aggregates" : charEntries.length > 0 ? "characters" : typeValues.length > 0 ? (hasTagMappings(typeTagMapping, typeValues) ? "format-mapping" : "types") : "script-columns");
   }
 
   function autoSceneMapping(headers: string[]): Record<string, number | null> {
@@ -132,12 +185,12 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   function autoScriptMapping(headers: string[]): Record<string, number | number[] | null> {
     const hints: Record<string, string[]> = {
       sceneNum: ["段落", "场次", "编号", "段落号"],
-      rehearsalMark: ["排练记号", "记号", "提示"],
+      rehearsalMark: ["排练记号", "记号"],
       typeTag: ["类型", "tag", "标签"],
       character: ["角色", "演员"],
       stageComment: ["演员提示", "补充舞台提示", "舞台提示"],
     };
-    const next: Record<string, number | number[] | null> = { sceneNum: null, rehearsalMark: null, typeTag: null, character: null, stageComment: null, bodyColumns: [], stageInlineColumns: [] };
+    const next: Record<string, number | number[] | null> = { sceneNum: null, rehearsalMark: null, typeTag: null, character: null, stageComment: null, bodyColumns: [], cueColumns: [], stageInlineColumns: [] };
     for (const [field, candidates] of Object.entries(hints)) {
       const idx = headers.findIndex(h => {
         const normalized = h.toLowerCase();
@@ -150,7 +203,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       return ["剧本", "内容", "台词", "文本"].some(c => normalized.includes(c.toLowerCase()));
     });
     if (bodyIdx >= 0) next.bodyColumns = [bodyIdx];
-    next.stageInlineColumns = headers.flatMap((header, index) => header.toLowerCase().includes("cue") ? [index] : []);
+    next.cueColumns = headers.flatMap((header, index) => header.toLowerCase().includes("cue") ? [index] : []);
     return next;
   }
 
@@ -158,7 +211,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     setLoadingData(true);
     setDataError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}?rowCount=${sheet.rowCount}`);
+      const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}?rowCount=${sheet.rowCount}&columnCount=${sheet.columnCount}`);
       const data = await res.json() as { data?: SheetData; error?: string };
       if (!res.ok || data.error) { setDataError(data.error ?? "加载失败"); return; }
       const payload = data.data!;
@@ -178,13 +231,18 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
         setScriptMapping(autoScriptMapping(payload.headers));
         setTypeValues([]);
         setTypeTagMapping({});
+        setTagModeByRawValue({});
         setTagGroups([]);
+        setTagGroupsLoaded(false);
         setTagGroupsError(null);
+        setTagChanges(EMPTY_TAG_CHANGES);
         setConfirmDeleteGroupId(null);
         setConfirmDeleteOptionId(null);
         setCharEntries([]);
+        setCueColumnNames({});
         setAggregateMembers({});
         setScriptPreview(null);
+        setPreviewScriptRows(null);
         setCommitResult(null);
         setStep("script-columns");
       }
@@ -210,7 +268,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   }
   function buildScriptColMap(): ScriptColMap | null {
     if (scriptMapping.sceneNum == null) return null;
-    const bodyColumns = (scriptMapping.bodyColumns as number[] | null) ?? [];
+    const cueColumns = (scriptMapping.cueColumns as number[] | null) ?? [];
+    const bodyColumns = ((scriptMapping.bodyColumns as number[] | null) ?? [])
+      .filter((column) => !cueColumns.includes(column));
     if (bodyColumns.length === 0) return null;
     return {
       sceneNum: scriptMapping.sceneNum as number,
@@ -219,6 +279,11 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       character: (scriptMapping.character as number | null) ?? undefined,
       stageComment: (scriptMapping.stageComment as number | null) ?? undefined,
       bodyColumns,
+      cueColumns,
+      cueColumnNames: Object.fromEntries(cueColumns.map(column => [
+        column,
+        cueColumnNames[column]?.trim() || cueSourceCaption(column),
+      ])),
       stageInlineColumns: (scriptMapping.stageInlineColumns as number[] | null) ?? undefined,
       stageInlinePatterns: stageInlinePatterns.length > 0 ? stageInlinePatterns : undefined,
     };
@@ -232,6 +297,24 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       for (const col of selected) projected[col] = row[col] ?? null;
       return projected;
     });
+  }
+
+  function dataRowsForHeaderMode(data: SheetData, headerRowIncluded: boolean) {
+    return headerRowIncluded ? data.rows : [data.rawHeaders, ...data.rows];
+  }
+
+  function characterImportConfig(entries = charEntries) {
+    const characterKinds: Record<string, "normal" | "aggregate"> = {};
+    const characterMappings: Record<string, { name: string; note: string | null }> = {};
+    for (const entry of entries) {
+      const name = effectiveName(entry);
+      characterKinds[name] = entry.kind;
+      characterMappings[entry.raw] = {
+        name,
+        note: entry.parsedSuffix !== null && entry.mergeAsNote ? entry.parsedSuffix : null,
+      };
+    }
+    return { characterKinds, characterMappings };
   }
 
   function applyMappingAction(index: number, action: JointImportMappingAction) {
@@ -449,48 +532,12 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     }
   }
 
-  function buildFinalImportMarkers(rows: JointImportMappingRow[]): Array<{ rowIndex: number; marker: JointImportMarker }> {
-    const finalRows: Array<{ rowIndex: number; marker: JointImportMarker }> = [];
-    const compactRows = rows.filter(row => row?.extracted || row?.imported);
-    const seen = new Set<string>();
-    let nextGeneratedChapterIndex = 0;
-    const generatedNumBySourceNum = new Map<string, string>();
-    const nextSceneIndexByGeneratedParent = new Map<string, number>();
-    for (let rowIndex = 0; rowIndex < compactRows.length; rowIndex++) {
-      const row = compactRows[rowIndex];
-      if (!row) continue;
-      const source = row.imported ?? row.extracted;
-      if (!source) continue;
-      const isScene = !!source.parentNum;
-      const sourceNums = [row.extracted?.num, row.imported?.num].filter((num): num is string => !!num);
-      const generatedParentNum = isScene
-        ? (source.parentNum ? generatedNumBySourceNum.get(source.parentNum) ?? null : null)
-        : null;
-      const generatedNum = isScene
-        ? `${generatedParentNum ?? "0"}-${nextSceneIndexByGeneratedParent.get(generatedParentNum ?? "0") ?? 1}`
-        : String(nextGeneratedChapterIndex);
-      const marker: JointImportMarker = {
-        ...source,
-        num: generatedNum,
-        parentNum: generatedParentNum,
-        name: row.imported?.name || row.extracted?.name || source.name,
-        sourceNums,
-      };
-      if (!marker.parentNum) {
-        for (const sourceNum of sourceNums) generatedNumBySourceNum.set(sourceNum, marker.num);
-        generatedNumBySourceNum.set(source.num, marker.num);
-        nextSceneIndexByGeneratedParent.set(marker.num, 1);
-        nextGeneratedChapterIndex++;
-      } else {
-        for (const sourceNum of sourceNums) generatedNumBySourceNum.set(sourceNum, marker.num);
-        generatedNumBySourceNum.set(source.num, marker.num);
-        nextSceneIndexByGeneratedParent.set(marker.parentNum, (nextSceneIndexByGeneratedParent.get(marker.parentNum) ?? 1) + 1);
-      }
-      if (seen.has(marker.num)) continue;
-      seen.add(marker.num);
-      finalRows.push({ rowIndex, marker });
-    }
-    return finalRows;
+  function shouldDefaultFirstChapterAsOpening(rows: JointImportMappingRow[]): boolean {
+    const firstChapter = rows
+      .map(row => row.imported ?? row.extracted)
+      .find((marker): marker is JointImportMarker => !!marker && !marker.parentNum);
+    if (!firstChapter) return false;
+    return shouldImportFirstChapterAsOpening(firstChapter.num, firstChapter.name);
   }
 
   function markerLabel(marker: JointImportMarker | null) {
@@ -522,23 +569,84 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     return marker?.parentNum ? "段落详情将更新" : "章节详情将更新";
   }
 
+  async function fetchLatestSheetData(token: string, sheet: SheetMeta): Promise<SheetData> {
+    const res = await fetch(`${BASE_PATH}/api/feishu-sheet/${encodeURIComponent(token)}/${encodeURIComponent(sheet.sheetId)}?rowCount=${sheet.rowCount}&columnCount=${sheet.columnCount}`);
+    const data = await readApiResult<{ data?: SheetData }>(res, "刷新表格失败");
+    if (!res.ok || data.error || !data.data) throw new Error(data.error ?? "刷新表格失败");
+    return data.data;
+  }
+
   async function runPreview() {
     const sceneColMap = buildSceneColMap();
     const scriptColMap = buildScriptColMap();
     if (!scriptColMap || !scriptSheet || !scriptWorkbook || !scriptData) return;
     if (!skipDramaturgy && (!sceneColMap || !dramSheet || !dramWorkbook || !dramData)) return;
+    setStep("preview");
     setPreviewLoading(true);
     setError(null);
-    const characterKinds: Record<string, "normal" | "aggregate"> = {};
-    for (const e of charEntries) characterKinds[effectiveName(e)] = e.kind;
+    setJointPreview(null);
+    setScriptPreview(null);
     try {
-      const scriptPreviewRows = sheetRowsForColumns(scriptData, [
+      const [latestScriptData, latestDramData] = await Promise.all([
+        fetchLatestSheetData(scriptWorkbook.token, scriptSheet),
+        !skipDramaturgy && dramWorkbook && dramSheet
+          ? fetchLatestSheetData(dramWorkbook.token, dramSheet)
+          : Promise.resolve(null),
+      ]);
+      setScriptData(latestScriptData);
+      if (latestDramData) setDramData(latestDramData);
+      const latestTypeValues = new Set<string>([""]);
+      const typeColumn = scriptColMap.typeTag;
+      if (typeColumn != null) {
+        for (const row of dataRowsForHeaderMode(latestScriptData, hasScriptHeader)) {
+          for (const value of splitCellValues(String(row[typeColumn] ?? ""))) latestTypeValues.add(value);
+        }
+      }
+      const previewTypeTagMapping: TypeTagMapping = { ...typeTagMapping };
+      for (const value of latestTypeValues) {
+        previewTypeTagMapping[value] ??= { action: "mapType", blockType: "dialogue" };
+      }
+      setTypeValues([...latestTypeValues]);
+      setTypeTagMapping(previewTypeTagMapping);
+
+      const previousCharEntries = new Map(charEntries.map(entry => [entry.raw, entry]));
+      const latestCharEntries = new Map<string, CharEntry>();
+      const characterColumn = scriptColMap.character;
+      if (characterColumn != null) {
+        for (const row of dataRowsForHeaderMode(latestScriptData, hasScriptHeader)) {
+          const rawCell = row[characterColumn];
+          if (!rawCell?.trim()) continue;
+          for (const part of rawCell.split(/[,，\n]+/)) {
+            const raw = part.trim();
+            if (!raw || latestCharEntries.has(raw)) continue;
+            const previous = previousCharEntries.get(raw);
+            if (previous) {
+              latestCharEntries.set(raw, previous);
+              continue;
+            }
+            const { name: parsedBase, note: parsedSuffix } = parseCharName(raw);
+            latestCharEntries.set(raw, { raw, parsedBase, parsedSuffix, mergeAsNote: parsedSuffix !== null, kind: guessAgg(parsedBase) ? "aggregate" : "normal" });
+          }
+        }
+      }
+      const refreshedCharEntries = [...latestCharEntries.values()];
+      setCharEntries(refreshedCharEntries);
+      setAggregateMembers(previous => {
+        const next: AggregateMembers = {};
+        for (const entry of refreshedCharEntries) {
+          if (entry.kind === "aggregate") next[effectiveName(entry)] = previous[effectiveName(entry)] ?? [];
+        }
+        return next;
+      });
+      const { characterKinds, characterMappings } = characterImportConfig(refreshedCharEntries);
+      const scriptPreviewRows = sheetRowsForColumns(latestScriptData, [
         scriptColMap.sceneNum,
         scriptColMap.rehearsalMark,
         scriptColMap.typeTag,
         scriptColMap.character,
         scriptColMap.stageComment,
         ...scriptColMap.bodyColumns,
+        ...(scriptColMap.cueColumns ?? []),
         ...(scriptColMap.stageInlineColumns ?? []),
       ]);
       const versionQuery = versionId ? `?v=${encodeURIComponent(versionId)}` : "";
@@ -552,7 +660,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               rowCount: dramSheet!.rowCount,
               colMap: sceneColMap,
               headerRowIncluded: hasSceneHeader,
-              rows: sheetRowsForColumns(dramData!, Object.values(sceneColMap!)),
+              rows: sheetRowsForColumns(latestDramData!, Object.values(sceneColMap!)),
             },
             script: {
               spreadsheetToken: scriptWorkbook.token,
@@ -560,7 +668,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               rowCount: scriptSheet.rowCount,
               colMap: scriptColMap,
               headerRowIncluded: hasScriptHeader,
-              rows: sheetRowsForColumns(scriptData, [scriptColMap.sceneNum]),
+              rows: sheetRowsForColumns(latestScriptData, [scriptColMap.sceneNum]),
             },
           }),
         });
@@ -575,8 +683,10 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             rowCount: scriptSheet.rowCount,
             colMap: scriptColMap,
             stageDelimiterPattern,
-            typeTagMapping,
+            typeTagMapping: previewTypeTagMapping,
+            tagChanges,
             characterKinds,
+            characterMappings,
             headerRowIncluded: hasScriptHeader,
             rows: scriptPreviewRows,
           }),
@@ -588,8 +698,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       if (!scriptRes.ok || scriptPreviewData.error) { setError(scriptPreviewData.error ?? "剧本预览失败"); return; }
       setJointPreview(jointData.preview!);
       setMappingRows(jointData.preview!.mappingRows);
+      setFirstChapterAsOpening(shouldDefaultFirstChapterAsOpening(jointData.preview!.mappingRows));
       setScriptPreview(scriptPreviewData.preview!);
-      setStep("preview");
+      setPreviewScriptRows(scriptPreviewRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "网络错误");
     } finally {
@@ -597,7 +708,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     }
   }
 
-  async function handleCommit() {
+  function handleCommit() {
     const sceneColMap = buildSceneColMap();
     const scriptColMap = buildScriptColMap();
     if (!scriptColMap || !scriptSheet || !scriptWorkbook) return;
@@ -610,10 +721,13 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     if (!scriptColMap || !scriptSheet || !scriptWorkbook) return;
     setCommitLoading(true);
     setError(null);
-    const characterKinds: Record<string, "normal" | "aggregate"> = {};
-    for (const e of charEntries) characterKinds[effectiveName(e)] = e.kind;
+    const { characterKinds, characterMappings } = characterImportConfig();
     try {
-      const sceneOverrides = buildFinalImportMarkers(mappingRows).map(item => item.marker);
+      if (!previewScriptRows) {
+        setError("预览数据已失效，请返回上一步重新进入确认页。");
+        return;
+      }
+      const sceneOverrides = buildFinalImportMarkers(mappingRows, firstChapterAsOpening).map(item => item.marker);
       if (sceneOverrides.length === 0) {
         setError("没有可导入的构作");
         return;
@@ -630,9 +744,13 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           stageDelimiterPattern,
           typeTagMapping,
           characterKinds,
+          characterMappings,
           aggregateMembers,
+          tagChanges,
+          firstChapterAsOpening,
           headerRowIncluded: hasScriptHeader,
           sceneOverrides,
+          rows: previewScriptRows,
         }),
       });
       const scriptData = await readApiResult<{ blocksImported?: number; charsAdded?: number; sceneSummary?: SceneSummaryItem[] }>(scriptRes, "剧本导入失败");
@@ -652,7 +770,9 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   }
 
   function gotoScriptTypes() {
-    const bodyColumns = (scriptMapping.bodyColumns as number[] | null) ?? [];
+    const cueColumns = (scriptMapping.cueColumns as number[] | null) ?? [];
+    const bodyColumns = ((scriptMapping.bodyColumns as number[] | null) ?? [])
+      .filter((column) => !cueColumns.includes(column));
     if (bodyColumns.length === 0) {
       setError("“剧本内容”不可为空，请选择作为剧本内容导入的字段（表格列）。");
       return;
@@ -660,11 +780,14 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     setError(null);
     const typeCol = scriptMapping.typeTag as number | null;
     if (typeCol == null || !scriptData) {
+      setTypeValues([]);
+      setTypeTagMapping({});
+      setTagModeByRawValue({});
       gotoCharacters();
       return;
     }
     const vals = new Set<string>([""]);
-    for (const row of scriptData.rows) {
+    for (const row of dataRowsForHeaderMode(scriptData, hasScriptHeader)) {
       const v = String(row[typeCol] ?? "").trim();
       if (!v) continue;
       for (const part of splitCellValues(v)) vals.add(part);
@@ -676,41 +799,59 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       for (const v of next) if (!out[v]) out[v] = { action: "mapType", blockType: "dialogue" };
       return out;
     });
-    setTagGroupsLoading(true);
-    fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`)
-      .then(async r => {
-        const data = await readApiResult<{ groups?: TagGroupInfo[] }>(r, "加载 Tag 组失败");
-        if (!r.ok || data.error) throw new Error(data.error ?? "加载 Tag 组失败");
-        setTagGroups(data.groups ?? []);
-        setTagGroupsError(null);
-      })
-      .catch(err => {
-        setTagGroups([]);
-        setTagGroupsError(err instanceof Error ? err.message : "加载 Tag 组失败");
-      })
-      .finally(() => setTagGroupsLoading(false));
+    if (!tagGroupsLoaded) {
+      setTagGroupsLoading(true);
+      fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`)
+        .then(async r => {
+          const data = await readApiResult<{ groups?: TagGroupInfo[] }>(r, "加载 Tag 组失败");
+          if (!r.ok || data.error) throw new Error(data.error ?? "加载 Tag 组失败");
+          setTagGroups(data.groups ?? []);
+          setTagGroupsLoaded(true);
+          setTagGroupsError(null);
+        })
+        .catch(err => {
+          setTagGroups([]);
+          setTagGroupsError(err instanceof Error ? err.message : "加载 Tag 组失败");
+        })
+        .finally(() => setTagGroupsLoading(false));
+    }
     setStep("types");
   }
 
-  async function createTagGroup() {
+  function gotoCueMapping() {
+    const cueColumns = (scriptMapping.cueColumns as number[] | null) ?? [];
+    setError(null);
+    if (cueColumns.length === 0 || !scriptData) {
+      void runPreview();
+      return;
+    }
+    setCueColumnNames(previous => Object.fromEntries(cueColumns.map(column => [
+      column,
+      previous[column] ?? cueSourceCaption(column),
+    ])));
+    setStep("cue-mapping");
+  }
+
+  function pendingId(prefix: string) {
+    return `${prefix}:${crypto.randomUUID()}`;
+  }
+
+  function createTagGroup() {
     const name = newGroupName.trim();
     if (!name) return;
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, type: "exclusive" }),
-      });
-      const data = await readApiResult<{ group?: TagGroupInfo }>(res, "创建 Tag 组失败");
-      if (!res.ok || data.error) throw new Error(data.error ?? "创建 Tag 组失败");
-      if (data.group) {
-        setTagGroups(groups => [...groups, { ...data.group!, options: [] }]);
-        setNewGroupName("");
-        setTagGroupsError(null);
-      }
-    } catch (err) {
-      setTagGroupsError(err instanceof Error ? err.message : "创建 Tag 组失败");
-    }
+    const clientId = pendingId("new-tag-group");
+    setTagGroups(groups => [...groups, {
+      id: clientId,
+      name,
+      type: "exclusive",
+      sortOrder: groups.length,
+      defaultOptionId: null,
+      lyricSplitAfterOptionId: null,
+      options: [],
+    }]);
+    setTagChanges(changes => ({ ...changes, createGroups: [...changes.createGroups, { clientId, name }] }));
+    setNewGroupName("");
+    setTagGroupsError(null);
   }
 
   async function addTagOption(groupId: string) {
@@ -720,26 +861,19 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     if (option) setNewOptionLabel(labels => ({ ...labels, [groupId]: "" }));
   }
 
-  async function createTagOption(groupId: string, label: string): Promise<TagGroupInfo["options"][number] | null> {
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${groupId}/options`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label, color: "#a1a1aa", sortOrder: 0 }),
-      });
-      const data = await readApiResult<{ option?: TagGroupInfo["options"][number] }>(res, "创建 Tag 选项失败");
-      if (!res.ok || data.error) throw new Error(data.error ?? "创建 Tag 选项失败");
-      if (data.option) {
-        setTagGroups(groups => groups.map(group => (
-          group.id === groupId ? { ...group, options: [...group.options, data.option!] } : group
-        )));
-        setTagGroupsError(null);
-        return data.option;
-      }
-    } catch (err) {
-      setTagGroupsError(err instanceof Error ? err.message : "创建 Tag 选项失败");
-    }
-    return null;
+  async function createTagOption(groupId: string, label: string, sourceRawValue?: string): Promise<TagGroupInfo["options"][number] | null> {
+    const group = tagGroups.find(item => item.id === groupId);
+    if (!group) return null;
+    const option = { id: pendingId("new-tag-option"), label, color: "#a1a1aa", sortOrder: group.options.length, sourceRawValue };
+    setTagGroups(groups => groups.map(group => (
+      group.id === groupId ? { ...group, options: [...group.options, option] } : group
+    )));
+    setTagChanges(changes => ({
+      ...changes,
+      createOptions: [...changes.createOptions, { clientId: option.id, groupId, label, color: option.color, sortOrder: option.sortOrder }],
+    }));
+    setTagGroupsError(null);
+    return option;
   }
 
   function setRawPrimaryAction(rawValue: string, nextPrimary: TypeAction) {
@@ -750,7 +884,13 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   }
 
   async function toggleRawTagInGroup(rawValue: string, group: TagGroupInfo) {
-    if (tagActions(typeTagMapping[rawValue]).some(action => action.groupId === group.id)) {
+    const currentTag = tagActions(typeTagMapping[rawValue]).find(action => action.groupId === group.id);
+    if (currentTag) {
+      const option = group.options.find(item => item.id === currentTag.optionId);
+      if (option?.sourceRawValue === rawValue) {
+        deleteTagOptionFromImport(group.id, option.id);
+        return;
+      }
       setTypeTagMapping(mapping => {
         const primary = primaryTypeAction(mapping[rawValue]);
         const tags = tagActions(mapping[rawValue]).filter(action => action.groupId !== group.id);
@@ -758,7 +898,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
       });
       return;
     }
-    const option = group.options.find(item => item.label === rawValue) ?? await createTagOption(group.id, rawValue);
+    const option = group.options.find(item => item.label === rawValue) ?? await createTagOption(group.id, rawValue, rawValue);
     if (!option) return;
     setTypeTagMapping(mapping => {
       const primary = primaryTypeAction(mapping[rawValue]);
@@ -767,63 +907,165 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
     });
   }
 
-  async function deleteTagGroupFromImport(groupId: string) {
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${groupId}`, { method: "DELETE" });
-      const data = await readApiResult<{ ok?: boolean }>(res, "删除 Tag 组失败");
-      if (!res.ok || data.error) throw new Error(data.error ?? "删除 Tag 组失败");
-      setTagGroups(groups => groups.filter(group => group.id !== groupId));
-      setTypeTagMapping(mapping => {
-        const next: TypeTagMapping = {};
-        for (const [rawValue, action] of Object.entries(mapping)) {
-          const primary = primaryTypeAction(action);
-          const tags = tagActions(action).filter(item => item.groupId !== groupId);
-          next[rawValue] = [primary, ...tags];
-        }
-        return next;
-      });
-      setConfirmDeleteGroupId(null);
-      setConfirmDeleteOptionId(null);
-      setTagGroupsError(null);
-    } catch (err) {
-      setTagGroupsError(err instanceof Error ? err.message : "删除 Tag 组失败");
-    }
+  function deleteTagGroupFromImport(groupId: string) {
+    setTagGroups(groups => groups.filter(group => group.id !== groupId));
+    setTagChanges(changes => {
+      const isPending = changes.createGroups.some(group => group.clientId === groupId);
+      return {
+        ...changes,
+        createGroups: changes.createGroups.filter(group => group.clientId !== groupId),
+        createOptions: changes.createOptions.filter(option => option.groupId !== groupId),
+        updateGroups: changes.updateGroups.filter(group => group.groupId !== groupId),
+        updateOptions: changes.updateOptions.filter(option => option.groupId !== groupId),
+        deleteGroupIds: isPending ? changes.deleteGroupIds : [...new Set([...changes.deleteGroupIds, groupId])],
+      };
+    });
+    setTypeTagMapping(mapping => {
+      const next: TypeTagMapping = {};
+      for (const [rawValue, action] of Object.entries(mapping)) {
+        next[rawValue] = [primaryTypeAction(action), ...tagActions(action).filter(item => item.groupId !== groupId)];
+      }
+      return next;
+    });
+    setConfirmDeleteGroupId(null);
+    setConfirmDeleteOptionId(null);
+    setTagGroupsError(null);
   }
 
-  async function deleteTagOptionFromImport(groupId: string, optionId: string) {
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups/${groupId}/options/${optionId}`, { method: "DELETE" });
-      const data = await readApiResult<{ ok?: boolean }>(res, "删除 Tag 选项失败");
-      if (!res.ok || data.error) throw new Error(data.error ?? "删除 Tag 选项失败");
-      setTagGroups(groups => groups.map(group => (
-        group.id === groupId
-          ? { ...group, options: group.options.filter(option => option.id !== optionId) }
-          : group
-      )));
-      setTypeTagMapping(mapping => {
-        const next: TypeTagMapping = {};
-        for (const [rawValue, action] of Object.entries(mapping)) {
-          const primary = primaryTypeAction(action);
-          const tags = tagActions(action).filter(item => item.groupId !== groupId || item.optionId !== optionId);
-          next[rawValue] = [primary, ...tags];
+  function deleteTagOptionFromImport(groupId: string, optionId: string) {
+    const group = tagGroups.find(item => item.id === groupId);
+    const clearsFormatSplit = group?.lyricSplitAfterOptionId === optionId;
+    const clearsDefault = group?.defaultOptionId === optionId;
+    setTagGroups(groups => groups.map(group => (
+      group.id === groupId
+        ? {
+            ...group,
+            defaultOptionId: group.defaultOptionId === optionId ? null : group.defaultOptionId,
+            lyricSplitAfterOptionId: group.lyricSplitAfterOptionId === optionId ? null : group.lyricSplitAfterOptionId,
+            options: group.options.filter(option => option.id !== optionId),
+          }
+        : group
+    )));
+    setTagChanges(changes => {
+      const isPending = changes.createOptions.some(option => option.clientId === optionId);
+      const groupPatch = {
+        ...(clearsFormatSplit ? { lyricSplitAfterOptionId: null } : {}),
+        ...(clearsDefault ? { defaultOptionId: null } : {}),
+      };
+      return {
+        ...changes,
+        createOptions: changes.createOptions.filter(option => option.clientId !== optionId),
+        updateGroups: clearsFormatSplit || clearsDefault
+          ? mergeTagGroupUpdate(changes.updateGroups, groupId, groupPatch)
+          : changes.updateGroups,
+        updateOptions: changes.updateOptions.filter(option => option.optionId !== optionId),
+        deleteOptionIds: isPending ? changes.deleteOptionIds : [...new Set([...changes.deleteOptionIds, optionId])],
+      };
+    });
+    setTypeTagMapping(mapping => {
+      const next: TypeTagMapping = {};
+      for (const [rawValue, action] of Object.entries(mapping)) {
+        next[rawValue] = [primaryTypeAction(action), ...tagActions(action).filter(item => item.groupId !== groupId || item.optionId !== optionId)];
+      }
+      return next;
+    });
+    setConfirmDeleteOptionId(null);
+    setTagGroupsError(null);
+  }
+
+  function setDraftFormatSplit(groupId: string, afterOptionId: string) {
+    const group = tagGroups.find(item => item.id === groupId);
+    if (!group || group.type !== "exclusive") return;
+    const lyricSplitAfterOptionId = group.lyricSplitAfterOptionId === afterOptionId ? null : afterOptionId;
+    setTagGroups(groups => groups.map(item => (
+      item.id === groupId ? { ...item, lyricSplitAfterOptionId } : item
+    )));
+    setTagChanges(changes => ({
+      ...changes,
+      updateGroups: mergeTagGroupUpdate(changes.updateGroups, groupId, { lyricSplitAfterOptionId }),
+    }));
+  }
+
+  function setDraftDefaultOption(groupId: string, optionId: string) {
+    const group = tagGroups.find(item => item.id === groupId);
+    if (!group || group.type !== "exclusive") return;
+    const defaultOptionId = group.defaultOptionId === optionId ? null : optionId;
+    setTagGroups(groups => groups.map(item => (
+      item.id === groupId ? { ...item, defaultOptionId } : item
+    )));
+    setTagChanges(changes => ({
+      ...changes,
+      updateGroups: mergeTagGroupUpdate(changes.updateGroups, groupId, { defaultOptionId }),
+    }));
+  }
+
+  function setDraftOptionColor(groupId: string, optionId: string, color: string) {
+    setTagGroups(groups => groups.map(group => (
+      group.id === groupId
+        ? { ...group, options: group.options.map(option => option.id === optionId ? { ...option, color } : option) }
+        : group
+    )));
+    setTagChanges(changes => {
+      const isPending = changes.createOptions.some(option => option.clientId === optionId);
+      return {
+        ...changes,
+        createOptions: isPending
+          ? changes.createOptions.map(option => option.clientId === optionId ? { ...option, color } : option)
+          : changes.createOptions,
+        updateOptions: isPending
+          ? changes.updateOptions
+          : mergeTagOptionUpdate(changes.updateOptions, groupId, optionId, { color }),
+      };
+    });
+  }
+
+  function reorderDraftTagOptions(groupId: string, orderedOptions: TagGroupInfo["options"]) {
+    const group = tagGroups.find(item => item.id === groupId);
+    if (!group) return;
+    const mergedOptions = mergeVisibleTagOptionOrder(group.options, orderedOptions);
+    setTagGroups(groups => groups.map(group => (
+      group.id === groupId ? { ...group, options: mergedOptions } : group
+    )));
+    setTagChanges(changes => {
+      const sortOrderById = new Map(mergedOptions.map(option => [option.id, option.sortOrder]));
+      const pendingIds = new Set(changes.createOptions.map(option => option.clientId));
+      let updateOptions = changes.updateOptions;
+      for (const option of mergedOptions) {
+        if (!pendingIds.has(option.id)) {
+          updateOptions = mergeTagOptionUpdate(updateOptions, groupId, option.id, { sortOrder: option.sortOrder });
         }
-        return next;
-      });
-      setConfirmDeleteOptionId(null);
-      setTagGroupsError(null);
-    } catch (err) {
-      setTagGroupsError(err instanceof Error ? err.message : "删除 Tag 选项失败");
+      }
+      return {
+        ...changes,
+        createOptions: changes.createOptions.map(option => (
+          option.groupId === groupId && sortOrderById.has(option.clientId)
+            ? { ...option, sortOrder: sortOrderById.get(option.clientId)! }
+            : option
+        )),
+        updateOptions,
+      };
+    });
+  }
+
+  function gotoFormatMapping() {
+    setError(null);
+    if (!hasTagMappings(typeTagMapping, typeValues)) {
+      gotoCharacters();
+      return;
     }
+    setStep("format-mapping");
   }
 
   function gotoCharacters() {
     const charCol = scriptMapping.character as number | null;
     if (charCol == null || !scriptData) {
-      runPreview();
+      setCharEntries([]);
+      setAggregateMembers({});
+      gotoCueMapping();
       return;
     }
     const seen = new Map<string, CharEntry>();
-    for (const row of scriptData.rows) {
+    for (const row of dataRowsForHeaderMode(scriptData, hasScriptHeader)) {
       const v = row[charCol];
       if (!v?.trim()) continue;
       for (const part of v.split(/[,，\n]+/)) {
@@ -833,20 +1075,27 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
         seen.set(raw, { raw, parsedBase, parsedSuffix, mergeAsNote: parsedSuffix !== null, kind: guessAgg(parsedBase) ? "aggregate" : "normal" });
       }
     }
-    setCharEntries([...seen.values()]);
+    const nextEntries = [...seen.values()];
+    setCharEntries(nextEntries);
+    if (nextEntries.length === 0) {
+      setAggregateMembers({});
+      gotoCueMapping();
+      return;
+    }
     setStep("characters");
   }
 
   function gotoAggregates() {
     if (!charEntries.some(entry => entry.kind === "aggregate")) {
-      runPreview();
+      setAggregateMembers({});
+      gotoCueMapping();
       return;
     }
     setAggregateMembers(prev => {
-      const next = { ...prev };
+      const next: AggregateMembers = {};
       for (const entry of charEntries) {
         const name = effectiveName(entry);
-        if (entry.kind === "aggregate" && !next[name]) next[name] = [];
+        if (entry.kind === "aggregate") next[name] = prev[name] ?? [];
       }
       return next;
     });
@@ -863,22 +1112,50 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   const compactMappingRows = displayMappingRows.map(item => item.row);
   const hasMappedScenes = compactMappingRows.some(row => row.extracted?.parentNum || row.imported?.parentNum);
   const showMappingControls = !skipDramaturgy;
-  const finalImportMarkers = buildFinalImportMarkers(compactMappingRows);
+  const finalImportMarkers = buildFinalImportMarkers(compactMappingRows, firstChapterAsOpening);
+  const firstImportedChapter = compactMappingRows
+    .map(row => row.imported ?? row.extracted)
+    .find((marker): marker is JointImportMarker => !!marker && !marker.parentNum) ?? null;
   const preserveDisplayMarkers = showMappingControls ? new Map(finalImportMarkers.map(item => [item.rowIndex, item.marker])) : null;
+  const generatedDisplayMarkers = new Map(finalImportMarkers.map(item => [item.rowIndex, item.marker]));
   const rawTypeValues = typeValues.filter(Boolean);
   const selectedTagGroupIdsByRawValue = new Map(rawTypeValues.map(value => [
     value,
     new Set(tagActions(typeTagMapping[value]).map(action => action.groupId)),
   ]));
   const usedRawTypeValues = new Set(rawTypeValues.filter(value => (selectedTagGroupIdsByRawValue.get(value)?.size ?? 0) > 0));
+  const hasUsedTags = usedRawTypeValues.size > 0;
+  const formatTagOptionIdsByGroup = buildImportFormatOptionIds(
+    rawTypeValues.flatMap(value => tagActions(typeTagMapping[value]).map(action => ({
+      groupId: action.groupId,
+      optionId: action.optionId,
+    }))),
+    tagChanges.createOptions,
+  );
+  const formatMappingGroups = tagGroups
+    .filter(group => group.type === "exclusive" && (formatTagOptionIdsByGroup.get(group.id)?.size ?? 0) > 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const selectedCueColumns = (scriptMapping.cueColumns as number[] | null) ?? [];
+  const characterColumn = scriptMapping.character as number | null;
+  const hasCharacterValues = characterColumn != null && !!scriptData && dataRowsForHeaderMode(scriptData, hasScriptHeader)
+    .some(row => !!row[characterColumn]?.trim());
+  const nextAfterScriptColumns = scriptMapping.typeTag != null
+    ? "类型映射"
+    : hasCharacterValues
+      ? "角色配置"
+      : selectedCueColumns.length > 0
+        ? "Cue 映射"
+        : "确认";
 
   const stepLabels: Record<Step, string> = {
     "choose-dramaturgy": "导入构作",
     "choose-script": "导入剧本",
     "scene-columns": "构作配置",
     "script-columns": "剧本配置",
+    "cue-mapping": "Cue 映射",
     types: "类型映射",
-    characters: "角色类型",
+    "format-mapping": "格式映射",
+    characters: "角色配置",
     aggregates: "聚合角色",
     preview: "确认",
     done: "完成",
@@ -887,9 +1164,11 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
   return (
     <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <h1 className="text-xl font-bold">导入</h1>
-      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">本次导入将会覆盖既有的构作和剧本内容。</p>
+      <p className="text-sm leading-6 text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+        本次导入将会覆盖既有的构作、剧本内容，以及全部 cue。
+      </p>
       <div className="flex flex-wrap items-center gap-1 text-xs">
-        {(["choose-dramaturgy", "scene-columns", "choose-script", "script-columns", "types", "characters", "aggregates", "preview", "done"] as Step[]).map((s, i, arr) => (
+        {(["choose-dramaturgy", "scene-columns", "choose-script", "script-columns", "types", "format-mapping", "characters", "aggregates", "cue-mapping", "preview", "done"] as Step[]).map((s, i, arr) => (
           <span key={s} className={`${s === step ? "text-blue-600 font-semibold" : arr.indexOf(step) > i ? "text-green-600" : "text-gray-400"}`}>
             {i > 0 && <span className="text-gray-300 mx-0.5">→</span>}{stepLabels[s]}
           </span>
@@ -959,10 +1238,11 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                   disabled={loadingData || !dramWorkbook || !dramWorkbookUrl}
                   className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
                 >
-                  {loadingScriptOption === "reuse" ? "加载中..." : "沿用构作链接"}
+                  沿用构作链接
                 </button>
               )}
             />
+            {loadingScriptOption === "reuse" && <p className="text-sm text-gray-500">加载中...</p>}
           </div>
           {dataError && <p className="text-sm text-red-600">{dataError}</p>}
           <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">
@@ -986,7 +1266,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               onChange={e => setHasSceneHeader(e.target.checked)}
               className="rounded"
             />
-            <label htmlFor="hasSceneHeader" className="text-sm text-gray-700">第一行是表头（已自动跳过）</label>
+            <label htmlFor="hasSceneHeader" className="text-sm text-gray-700">第一行是表头{hasSceneHeader ? "（导入时跳过）" : "（作为数据导入）"}</label>
           </div>
 
           <ColumnMapper sheetData={dramData} columns={[
@@ -997,7 +1277,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             { key: "music", label: "音乐（可选）" },
             { key: "stagePres", label: "舞台呈现（可选）" },
             { key: "duration", label: "预期时长（可选）" },
-          ]} mapping={sceneMapping as Record<string, number | number[] | null>} onChange={(k, v) => setSceneMapping(m => ({ ...m, [k]: v as number | null }))} showPreview />
+          ]} mapping={sceneMapping as Record<string, number | number[] | null>} onChange={(k, v) => setSceneMapping(m => ({ ...m, [k]: v as number | null }))} showPreview headerRowIncluded={hasSceneHeader} />
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
@@ -1028,18 +1308,19 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               onChange={e => setHasScriptHeader(e.target.checked)}
               className="rounded"
             />
-            <label htmlFor="hasScriptHeader" className="text-sm text-gray-700">第一行是表头（已自动跳过）</label>
+            <label htmlFor="hasScriptHeader" className="text-sm text-gray-700">第一行是表头{hasScriptHeader ? "（导入时跳过）" : "（作为数据导入）"}</label>
           </div>
 
           <ColumnMapper sheetData={scriptData} columns={[
             { key: "sceneNum", label: "段落", required: true },
+            { key: "rehearsalMark", label: "排练记号" },
             { key: "character", label: "角色" },
             { key: "stageComment", label: "演员提示" },
             { key: "bodyColumns", label: "剧本内容", required: true, multi: true },
-            { key: "rehearsalMark", label: "排练记号" },
+            { key: "cueColumns", label: "Cue 列", multi: true },
             { key: "typeTag", label: "类型/Tag" },
             { key: "stageInlineColumns", label: "内嵌舞台提示列", multi: true },
-          ]} mapping={scriptMapping} onChange={(k, v) => setScriptMapping(m => ({ ...m, [k]: v }))} showPreview />
+          ]} mapping={scriptMapping} onChange={(k, v) => setScriptMapping(m => ({ ...m, [k]: v }))} showPreview headerRowIncluded={hasScriptHeader} />
           <div className="rounded border border-gray-200 p-3 space-y-2">
             <p className="text-sm font-medium text-gray-700">段内舞台提示识别</p>
             <div className="space-y-3 text-sm">
@@ -1095,9 +1376,42 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           </div>
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
-            <button onClick={gotoScriptTypes} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">下一步：类型映射</button>
+            <button onClick={gotoScriptTypes} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">下一步：{nextAfterScriptColumns}</button>
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+      )}
+
+      {step === "cue-mapping" && scriptData && (
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-gray-700">设置每个 Cue 字段导入后的名称。默认使用原始字段名。</p>
+          <div className="divide-y divide-gray-100 border-y border-gray-200">
+            {((scriptMapping.cueColumns as number[] | null) ?? []).map(column => {
+              const sourceName = cueSourceCaption(column);
+              return (
+                <label key={column} className="grid gap-1.5 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,1fr)] sm:items-center sm:gap-4">
+                  <span className="min-w-0 truncate text-sm text-gray-600" title={sourceName}>{sourceName}</span>
+                  <input
+                    type="text"
+                    value={cueColumnNames[column] ?? sourceName}
+                    aria-label={`${sourceName} Cue 名称`}
+                    onChange={event => setCueColumnNames(names => ({ ...names, [column]: event.target.value }))}
+                    className="w-full rounded border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800 outline-none focus:border-gray-500"
+                  />
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex gap-3">
+            <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
+            <button
+              onClick={runPreview}
+              disabled={((scriptMapping.cueColumns as number[] | null) ?? []).some(column => !(cueColumnNames[column] ?? "").trim())}
+              className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              下一步：确认
+            </button>
+          </div>
         </div>
       )}
 
@@ -1244,20 +1558,25 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           {typeValues.map(val => {
             const action = primaryTypeAction(typeTagMapping[val]);
             const activeTags = tagActions(typeTagMapping[val]);
+            const mapsToTag = tagModeByRawValue[val] === true;
+            const availableTagGroups = tagGroups.filter(group => !activeTags.some(tag => tag.groupId === group.id));
             return (
               <div key={val} className="flex items-center gap-2 flex-wrap">
                 <span className="w-28 text-sm font-medium truncate">{val || <span className="text-gray-400 italic">空白</span>}</span>
                 <select className="border border-gray-300 rounded px-2 py-1 text-sm"
-                  value={activeTags.length > 0 ? "mapTag" : action.action}
+                  value={mapsToTag ? "mapTag" : action.action}
                   onChange={e => {
-                    const a = e.target.value as TypeAction["action"];
-                    if (a !== "mapTag") setRawPrimaryAction(val, a === "ignore" ? { action: "ignore" } : { action: "mapType", blockType: "dialogue" });
+                    const nextAction = e.target.value as TypeAction["action"];
+                    setTagModeByRawValue(current => ({ ...current, [val]: nextAction === "mapTag" }));
+                    if (nextAction !== "mapTag") {
+                      setRawPrimaryAction(val, nextAction === "ignore" ? { action: "ignore" } : { action: "mapType", blockType: "dialogue" });
+                    }
                   }}>
                   <option value="mapType">映射到类型</option>
                   <option value="mapTag">映射到 Tag</option>
                   <option value="ignore">忽略该行</option>
                 </select>
-                {action.action === "mapType" && activeTags.length === 0 && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={(action as { action: "mapType"; blockType: string }).blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
+                {action.action === "mapType" && !mapsToTag && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={action.blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
                 {activeTags.map(ta => {
                   const grp = tagGroups.find(g => g.id === ta.groupId);
                   const opt = grp?.options.find(o => o.id === ta.optionId);
@@ -1269,7 +1588,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                     </span>
                   );
                 })}
-                {val && tagGroups.filter(g => !activeTags.some(ta => ta.groupId === g.id)).length > 0 && (
+                {val && (
                   <select
                     className="rounded border border-dashed border-violet-300 bg-white px-1.5 py-0.5 text-xs text-violet-400"
                     value=""
@@ -1279,10 +1598,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                     }}
                   >
                     <option value="">+ Tag</option>
-                    {tagGroups
-                      .filter(g => !activeTags.some(ta => ta.groupId === g.id))
-                      .map(g => <option key={g.id} value={g.id}>{g.name}</option>)
-                    }
+                    {availableTagGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
                   </select>
                 )}
               </div>
@@ -1290,7 +1606,64 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           })}
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
-            <button onClick={gotoCharacters} disabled={previewLoading} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">{previewLoading ? "加载中..." : "下一步：角色类型"}</button>
+            <button onClick={gotoFormatMapping} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+              下一步：{hasUsedTags ? "格式映射" : hasCharacterValues ? "角色配置" : selectedCueColumns.length > 0 ? "Cue 映射" : "确认"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === "format-mapping" && (
+        <div className="space-y-4">
+          <TagFormatGuide />
+          {tagGroupsLoading && <p className="text-sm text-gray-500">加载中...</p>}
+          {tagGroupsError && <p className="text-sm text-red-600">{tagGroupsError}</p>}
+          {!tagGroupsLoading && formatMappingGroups.map(group => {
+            const formatOptionIds = formatTagOptionIdsByGroup.get(group.id) ?? new Set<string>();
+            return (
+              <div key={group.id} className="rounded-lg border border-zinc-200 bg-white p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium text-zinc-800">{group.name}</span>
+                    <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500">单选</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirmDeleteGroupId === group.id) deleteTagGroupFromImport(group.id);
+                      else setConfirmDeleteGroupId(group.id);
+                    }}
+                    onBlur={() => setConfirmDeleteGroupId(null)}
+                    className={`shrink-0 rounded px-2 py-0.5 text-xs transition-colors ${
+                      confirmDeleteGroupId === group.id
+                        ? "bg-red-500 text-white hover:bg-red-600"
+                        : "text-zinc-400 hover:bg-red-50 hover:text-red-500"
+                    }`}
+                  >
+                    {confirmDeleteGroupId === group.id ? "确认删除?" : "删除"}
+                  </button>
+                </div>
+                <TagFormatOptionList
+                  options={group.options.filter(option => formatOptionIds.has(option.id))}
+                  splitAfterOptionId={group.lyricSplitAfterOptionId}
+                  onSplitAfterOption={optionId => setDraftFormatSplit(group.id, optionId)}
+                  defaultOptionId={group.defaultOptionId}
+                  onColorChange={(optionId, color) => setDraftOptionColor(group.id, optionId, color)}
+                  onDefaultOption={optionId => setDraftDefaultOption(group.id, optionId)}
+                  onDeleteOption={optionId => deleteTagOptionFromImport(group.id, optionId)}
+                  onReorder={options => reorderDraftTagOptions(group.id, options)}
+                />
+              </div>
+            );
+          })}
+          {!tagGroupsLoading && !tagGroupsError && formatMappingGroups.length === 0 && (
+            <p className="text-sm text-gray-500">暂无可设置的 Tag 组。</p>
+          )}
+          <div className="flex gap-3">
+            <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
+            <button onClick={gotoCharacters} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+              下一步：{hasCharacterValues ? "角色配置" : selectedCueColumns.length > 0 ? "Cue 映射" : "确认"}
+            </button>
           </div>
         </div>
       )}
@@ -1313,7 +1686,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           </div>
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
-            <button onClick={gotoAggregates} disabled={previewLoading} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">{previewLoading ? "加载中..." : aggEntries.length > 0 ? "下一步：聚合角色" : "下一步：确认"}</button>
+            <button onClick={gotoAggregates} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">{aggEntries.length > 0 ? "下一步：聚合角色" : selectedCueColumns.length > 0 ? "下一步：Cue 映射" : "下一步：确认"}</button>
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
@@ -1327,12 +1700,25 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           })}
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
-            <button onClick={runPreview} disabled={previewLoading} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">{previewLoading ? "加载中..." : "下一步：确认"}</button>
+            <button onClick={gotoCueMapping} className="px-4 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">{selectedCueColumns.length > 0 ? "下一步：Cue 映射" : "下一步：确认"}</button>
           </div>
         </div>
       )}
 
-      {step === "preview" && scriptPreview && (
+      {step === "preview" && previewLoading && (
+        <div className="rounded border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">
+          加载中...
+        </div>
+      )}
+
+      {step === "preview" && !previewLoading && !scriptPreview && (
+        <div className="space-y-4">
+          <p className="text-sm text-red-600">{error ?? "无法生成确认预览，请返回上一步后重试。"}</p>
+          <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
+        </div>
+      )}
+
+      {step === "preview" && !previewLoading && scriptPreview && (
         <div className="space-y-4">
           <div className="grid grid-cols-4 gap-3 text-center text-sm">
             <div className="rounded border p-3">
@@ -1352,6 +1738,21 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               <div className="text-gray-500">角色冲突</div>
             </div>
           </div>
+          {firstImportedChapter && (
+            <fieldset className="rounded border border-gray-200 p-3 text-sm">
+              <legend className="px-1 font-medium text-gray-700">导入的首个章节作为</legend>
+              <div className="mt-1 flex flex-wrap gap-4">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="radio" name="first-imported-chapter" checked={firstChapterAsOpening} onChange={() => setFirstChapterAsOpening(true)} />
+                  <span>0 开场</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="radio" name="first-imported-chapter" checked={!firstChapterAsOpening} onChange={() => setFirstChapterAsOpening(false)} />
+                  <span>1 {firstImportedChapter.name || <span className="italic text-gray-400">(未命名)</span>}</span>
+                </label>
+              </div>
+            </fieldset>
+          )}
           {jointPreview && (
             <div className="rounded border border-gray-200 p-3 text-sm space-y-3">
               <div className="flex items-start justify-between gap-3">
@@ -1392,11 +1793,12 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                   <tbody className="divide-y divide-gray-100">
                     {displayMappingRows.map(({ row, sourceIndex }, index) => {
                       const finalMarker = row.imported ?? row.extracted;
+                      const generatedMarker = generatedDisplayMarkers.get(index) ?? finalMarker;
                       const isChapter = !!(hasMappedScenes && finalMarker && !finalMarker.parentNum);
                       if (!showMappingControls) {
                         return (
                           <tr key={row.id} className={isChapter ? "bg-gray-50" : ""}>
-                            <td className="px-3 py-2 text-gray-700">{markerLabel(finalMarker)}</td>
+                            <td className="px-3 py-2 text-gray-700">{markerLabel(generatedMarker)}</td>
                             <td className="px-3 py-2">
                               {hasMarkerDetails(finalMarker) && (
                                 <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 border border-emerald-100">
@@ -1525,6 +1927,16 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
               ))}
             </div>
           )}
+          {scriptPreview.typeConflicts.length > 0 && (
+            <div className="rounded border border-amber-200 p-3 text-sm">
+              <p className="font-medium text-amber-700 mb-1">同一行包含多个不同类型</p>
+              {scriptPreview.typeConflicts.map(conflict => (
+                <p key={`${conflict.sourceIndex}:${conflict.rawType}`} className="text-amber-700">
+                  第 {conflict.sourceIndex + (hasScriptHeader ? 2 : 1)} 行：{conflict.blockTypes.map(type => BLOCK_TYPE_LABELS[type]).join("、")} → {BLOCK_TYPE_LABELS[conflict.resolvedBlockType]}
+                </p>
+              ))}
+            </div>
+          )}
           {scriptPreview.warningRehearsalMarks.length > 0 && (
             <div className="rounded border border-amber-200 p-3 text-sm">
               <p className="font-medium text-amber-700 mb-1">格式异常的排练记号</p>
@@ -1536,16 +1948,19 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             </div>
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
+          <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
+            ⚠️ 点击页面底部的确认按钮、导入过程开始后，请勿修改作为导入来源的飞书文档，否则可能导致导入失败或与源文件不一致。
+          </p>
           <div className="flex gap-3">
             <button onClick={goBack} className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm rounded hover:bg-gray-50">上一步</button>
-            <button onClick={handleCommit} disabled={commitLoading} className="px-4 py-2 border border-red-600 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50">{commitLoading ? "导入中…" : "确认导入"}</button>
+            <button onClick={handleCommit} disabled={commitLoading} className="px-4 py-2 border border-red-600 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50">确认导入</button>
           </div>
         </div>
       )}
 
       {pendingCommitConfirmation && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-100/85"
           onClick={() => setPendingCommitConfirmation(false)}
           role="dialog"
           aria-modal="true"
@@ -1556,9 +1971,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
           >
             <h2 className="text-base font-semibold text-zinc-800">确认继续操作？</h2>
             <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-500">
-              {skipDramaturgy
-                ? "将从剧本中推断章节信息，并覆盖当前版本。\n所有在当前剧本和构作中未保存的更新将会丢失。\n确认继续？"
-                : "将同时导入章节信息和剧本内容，并覆盖当前版本。\n所有在当前剧本和构作中未保存的更新将会丢失。\n确认继续？"}
+              {"本次导入将会覆盖既有的构作、剧本内容，\n以及全部 cue。确认继续？"}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button

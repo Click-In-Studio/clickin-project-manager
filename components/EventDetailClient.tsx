@@ -4,6 +4,7 @@ import React, { useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 import type {
   ProductionEvent, EventScheduleItemWithParticipants, ScheduleItemParticipant,
   EventCallTime, EventTechReq, EventReport, EventReportNote, EventDepartment,
@@ -1907,7 +1908,7 @@ function TechReqCard({
         <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${TECH_STATUS_COLORS[req.status] ?? "bg-zinc-100 text-zinc-500"}`}>
           {TECH_STATUS_LABELS[req.status] ?? req.status}
         </span>
-        <span className="text-zinc-300 text-sm">{expanded ? "▲" : "▼"}</span>
+        <ChevronIcon direction={expanded ? "up" : "down"} size={14} className="shrink-0 text-zinc-300" />
       </div>
       {expanded && (
         <div className="px-4 pb-4 flex flex-col gap-3 border-t border-zinc-100">
@@ -2265,8 +2266,9 @@ function AssigneeEditor({
 
   return (
     <div>
-      <button onClick={() => setEditing(!editing)} className="text-xs text-zinc-500 hover:text-zinc-700 mb-2">
-        {editing ? "▲ 收起" : "▼ 编辑负责人"}
+      <button onClick={() => setEditing(!editing)} className="mb-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700">
+        <ChevronIcon direction={editing ? "up" : "down"} size={12} />
+        {editing ? "收起" : "编辑负责人"}
       </button>
       {editing && (
         <div className="flex flex-col gap-2">
@@ -2416,7 +2418,7 @@ function ReportsTab({
             >
               查看
             </Link>
-            <span className="text-zinc-300 text-sm">{expandedId === report.id ? "▲" : "▼"}</span>
+            <ChevronIcon direction={expandedId === report.id ? "up" : "down"} size={14} className="shrink-0 text-zinc-300" />
           </div>
 
           {expandedId === report.id && (
@@ -2634,8 +2636,9 @@ function DeptNotesList({
 
   if (!loaded) {
     return (
-      <button onClick={load} className="text-xs text-zinc-400 hover:text-zinc-600">
-        ▼ 查看部门 Notes
+      <button onClick={load} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600">
+        <ChevronIcon size={12} />
+        查看部门 Notes
       </button>
     );
   }

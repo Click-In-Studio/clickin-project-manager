@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { ProductionRole } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 
 // ─── Permission groups (excludes ROLE_TEMPLATE_EXCLUDED perms) ────────────────
 
@@ -151,7 +152,7 @@ function PermissionGroup({
               {activeCount}/{group.perms.length}
             </span>
           )}
-          <span style={{ fontSize: 9, color: "var(--muted)", opacity: 0.6 }}>{open ? "▲" : "▼"}</span>
+          <ChevronIcon direction={open ? "up" : "down"} size={9} className="opacity-60 text-[var(--muted)]" />
         </span>
       </button>
 

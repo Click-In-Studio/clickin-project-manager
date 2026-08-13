@@ -237,6 +237,173 @@ describe("A: importScriptToVersion DB integration", () => {
     const isoVersionId = (await getActiveVersionId(PROD_A_ISO))!;
     expect(await countScriptVersion(isoVersionId)).toBe(0);
   });
+
+  it("A6: creates scene identity anchors for imported marker blocks", async () => {
+    const [markerKey] = initialKeys(1);
+    await importScriptToVersion(PROD_A, versionId, {
+      upsertBlocks: [{
+        id: "imp-marker-snapshot",
+        blockId: "imp-marker-scene",
+        type: "chapter_marker",
+        content: "",
+        lyric: false,
+        characterIds: [],
+        characterAnnotations: {},
+        sceneId: "imp-marker-scene",
+        rehearsalMark: null,
+        markerMeta: { name: "导入章节", parentMarkerId: null },
+        lexKey: markerKey,
+      }],
+      upsertChars: [],
+      upsertScenes: [],
+    });
+
+    expect(await sceneIdentityExists("imp-marker-scene")).toBe(true);
+    const markerSnapshot = await getPool().query<{ scene_id: string | null }>(
+      "SELECT scene_id FROM script WHERE id = $1",
+      ["imp-marker-snapshot"],
+    );
+    expect(markerSnapshot.rows[0]?.scene_id).toBe("imp-marker-scene");
+    const sceneVersion = await getPool().query<{ name: string }>(
+      "SELECT name FROM scene_version WHERE scene_id = $1 AND version_id = $2",
+      ["imp-marker-scene", versionId],
+    );
+    expect(sceneVersion.rows[0]?.name).toBe("导入章节");
+  });
+
+  it("A7: imports Cue columns as separate gap-anchored Cues", async () => {
+    const existingLightListId = "imp-cue-list-light";
+    await createCueList({
+      id: existingLightListId,
+      productionId: PROD_A,
+      name: "Light",
+      notes: "",
+      abbr: null,
+      template: "灯光",
+      createdBy: TEST_USER,
+    });
+
+    const [markerKey, firstKey, rehearsalKey, secondKey] = initialKeys(4);
+    await importScriptToVersion(PROD_A, versionId, {
+      upsertBlocks: [
+        {
+          id: "imp-cue-marker-snapshot", blockId: "imp-cue-marker",
+          type: "chapter_marker", content: "", lyric: false,
+          characterIds: [], characterAnnotations: {}, sceneId: "imp-cue-marker",
+          rehearsalMark: null, markerMeta: { name: "Cue 测试章", parentMarkerId: null }, lexKey: markerKey,
+        },
+        {
+          id: "imp-cue-snapshot-1", blockId: "imp-cue-block-1",
+          type: "dialogue", content: "第一句台词", lyric: false,
+          characterIds: [], characterAnnotations: {}, sceneId: null,
+          rehearsalMark: null, lexKey: firstKey,
+        },
+        {
+          id: "imp-cue-rehearsal-snapshot", blockId: "imp-cue-rehearsal",
+          type: "rehearsal_marker", content: "", lyric: false,
+          characterIds: [], characterAnnotations: {}, sceneId: null,
+          rehearsalMark: null, lexKey: rehearsalKey,
+        },
+        {
+          id: "imp-cue-snapshot-2", blockId: "imp-cue-block-2",
+          type: "dialogue", content: "第二句台词", lyric: false,
+          characterIds: [], characterAnnotations: {}, sceneId: null,
+          rehearsalMark: null, lexKey: secondKey,
+        },
+      ],
+      upsertChars: [],
+      upsertScenes: [],
+      upsertCueColumns: [
+        {
+          name: "Light",
+          cues: [
+            { afterBlockId: null, content: "灯光起" },
+            { afterBlockId: "imp-cue-block-1", content: "灯光切换" },
+          ],
+        },
+        {
+          name: "Sound",
+          cues: [{ afterBlockId: "imp-cue-block-1", content: "音效进入" }],
+        },
+      ],
+      cueListCreatedBy: TEST_USER,
+    });
+
+    const cueRows = await getPool().query<{
+      cue_list_id: string;
+      list_name: string;
+      content: string;
+      start_kind: string;
+      end_kind: string;
+      after_block_id: string | null;
+    }>(
+      `SELECT c.cue_list_id, cl.name AS list_name, c.content,
+              c.start_kind, c.end_kind, anchor.block_id AS after_block_id
+       FROM cue_version cv
+       JOIN cue c ON c.id = cv.revision_id
+       JOIN cue_list cl ON cl.id = c.cue_list_id
+       LEFT JOIN script anchor ON anchor.id = c.start_snapshot_id
+       WHERE cv.version_id = $1
+       ORDER BY cl.name, c.number`,
+      [versionId],
+    );
+
+    expect(cueRows.rows).toEqual([
+      {
+        cue_list_id: existingLightListId,
+        list_name: "Light",
+        content: "灯光起",
+        start_kind: "gap",
+        end_kind: "gap",
+        after_block_id: null,
+      },
+      {
+        cue_list_id: existingLightListId,
+        list_name: "Light",
+        content: "灯光切换",
+        start_kind: "gap",
+        end_kind: "gap",
+        after_block_id: "imp-cue-block-1",
+      },
+      {
+        cue_list_id: expect.any(String),
+        list_name: "Sound",
+        content: "音效进入",
+        start_kind: "gap",
+        end_kind: "gap",
+        after_block_id: "imp-cue-block-1",
+      },
+    ]);
+    expect(cueRows.rows[2].cue_list_id).not.toBe(existingLightListId);
+
+    const importedListId = cueRows.rows[2].cue_list_id;
+    const creatorGrants = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM production_member_grant
+       WHERE production_id = $1 AND user_id = $2
+         AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
+      [PROD_A, TEST_USER, importedListId],
+    );
+    expect(creatorGrants.rows.map(row => `${row.resource_sub}@${row.permission_level}`).sort()).toEqual(
+      ["*@view", "*@edit", "*@delete", "cues@create", "cues@delete", "grants@edit"].sort(),
+    );
+    const personOwnership = await getPool().query(
+      `SELECT 1 FROM resource_person_manage
+       WHERE production_id = $1 AND user_id = $2
+         AND resource_type = 'cue_list' AND resource_id = $3`,
+      [PROD_A, TEST_USER, importedListId],
+    );
+    expect(personOwnership.rows).toHaveLength(1);
+
+    const scriptContents = await getPool().query<{ content: string }>(
+      `SELECT s.content
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1 AND s.type IN ('dialogue', 'stage')
+       ORDER BY sv.sort_key`,
+      [versionId],
+    );
+    expect(scriptContents.rows.map(row => row.content)).toEqual(["第一句台词", "第二句台词"]);
+  });
 });
 
 // ── Group B: flushToDBVersioned scene-only path ───────────────────────────────

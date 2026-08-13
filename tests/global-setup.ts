@@ -87,6 +87,13 @@ import {
   type CueDomainRestSnapshot,
 } from "./cue-domain-rest-snapshot";
 
+import {
+  isLocalScriptDataPreMigrationSchema,
+  createLocalScriptDataPreMigrationData,
+  LOCAL_SCRIPT_DATA_SNAPSHOT_PATH,
+  type LocalScriptDataSnapshot,
+} from "./local-script-data-snapshot";
+
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
 
@@ -326,15 +333,54 @@ export async function setup() {
       await pool.query(migrationSql);
     }
   }
+
+  if (await isLocalScriptDataPreMigrationSchema(pool)) {
+    const snapshot = await createLocalScriptDataPreMigrationData(pool);
+    await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-script-comment-rehearsal-defaults.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  const legacyCueNumberConstraint = await pool.query(
+    `SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'cue'::regclass
+       AND conname = 'cue_cue_list_id_number_key'`,
+  );
+  if (legacyCueNumberConstraint.rows.length > 0) {
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-revision-number-uniqueness.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
   const pool = getPool();
 
-  // Tables with no ON DELETE CASCADE from app_user:
-  // cue_list.created_by and production_event.created_by need explicit deletes first.
+  let localScriptDataSnapshot: LocalScriptDataSnapshot | null = null;
+  try {
+    localScriptDataSnapshot = JSON.parse(
+      await readFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, "utf8"),
+    ) as LocalScriptDataSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (localScriptDataSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = ANY($1::text[])",
+      [Object.values(localScriptDataSnapshot.productionIds)],
+    ).catch(() => {});
+    await unlink(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Tables with no ON DELETE CASCADE from app_user need explicit cleanup first.
   await pool.query("DELETE FROM cue_list WHERE created_by = $1", [TEST_USER]);
   await pool.query("DELETE FROM production_event WHERE created_by = $1", [TEST_USER]);
+  await pool.query("DELETE FROM wiki WHERE created_by = $1", [TEST_USER]);
 
   // Clean up cue-list-grant migration factory data (migration path only; no-op otherwise).
   let cueListGrantSnapshot: CueListGrantSnapshot | null = null;

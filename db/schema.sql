@@ -1182,6 +1182,10 @@ CREATE TABLE IF NOT EXISTS grant_template (
 CREATE UNIQUE INDEX IF NOT EXISTS grant_template_unique_idx
   ON grant_template (COALESCE(production_type, ''), role_name, permission_key);
 
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'script:comment')
+ON CONFLICT DO NOTHING;
+
 -- 全局通用模板种子（批A cue 域，保真迁移；见 add-grant-template.sql）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:cue_list/*/meta@view'),

@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Version, VersionStatus } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 
 const STATUS_LABELS: Record<VersionStatus, string> = {
   editing: "编辑中",
@@ -77,9 +78,7 @@ export default function VersionSelector({
             {STATUS_LABELS[current.status]}
           </span>
         )}
-        <svg className="h-3 w-3 shrink-0 opacity-40" viewBox="0 0 12 12" fill="none">
-          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <ChevronIcon size={12} className="shrink-0 opacity-40" />
       </button>
 
       {open && (

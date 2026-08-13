@@ -85,10 +85,11 @@ export default function SheetPicker({ onSelect, onLoaded, disabled = false, init
             disabled={effectiveDisabled || !url.trim()}
             className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? "加载中…" : "加载"}
+            加载
           </button>
           {beforeLoadButton}
         </div>
+        {loading && <p className="mt-1 text-sm text-gray-500">加载中...</p>}
         {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
       </div>
 

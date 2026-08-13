@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, getVersion, saveScriptConfig } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, getFirstRehearsalMarkerLabel, getVersion, saveScriptConfig } from "@/lib/db";
 import { hasGrant } from "@/lib/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
 import type { ScriptConfig } from "@/lib/script-types";
@@ -28,6 +28,15 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   }
   const body = (await req.json()) as Partial<ScriptConfig>;
   const config: ScriptConfig = { ...DEFAULT_SCRIPT_CONFIG, ...body };
+  if (!config.useRehearsalMarks && versionId) {
+    const rehearsalMarkerLabel = await getFirstRehearsalMarkerLabel(versionId);
+    if (rehearsalMarkerLabel) {
+      return Response.json({
+        error: `无法禁用，当前剧本存在排练记号 ${rehearsalMarkerLabel}`,
+        rehearsalMarkerLabel,
+      }, { status: 409 });
+    }
+  }
 
   await saveScriptConfig(id, versionId || null, config);
   // Broadcast config change to all connected SSE clients for this version

@@ -1,12 +1,23 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
 import PageActivationGate from "./PageActivationGate";
+import {
+  PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
+  PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID,
+  PRODUCTION_TOP_MENU_SLOT_ID,
+  PRODUCTION_TOOLBAR_STAGE,
+  ProductionToolbarContext,
+  ProductionToolbarStageContext,
+  type ProductionToolbarStage,
+  useAnchoredMenu,
+} from "./ProductionTopMenu";
 
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
@@ -22,21 +33,21 @@ interface AppShellProps {
 }
 
 const CREATION_NAV = [
-  { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script" },
-  { label: "构作", hint: "章节 · 行动线", path: "dramaturgy" },
-  { label: "角色", hint: "角色 · 人物关系 · 聚合", path: "characters" },
-  { label: "Cue", hint: "部门执行设计", path: "cues" },
+  { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script", symbol: "剧" },
+  { label: "构作", hint: "章节 · 行动线", path: "dramaturgy", symbol: "构" },
+  { label: "角色", hint: "角色 · 人物关系 · 聚合", path: "characters", symbol: "角" },
+  { label: "Cue", hint: "部门执行设计", path: "cues", symbol: "Q" },
 ] as const;
 
 const PRODUCTION_NAV = [
-  { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts" },
-  { label: "日程", hint: "围读 · 排练 · 演出", path: "events" },
-  { label: "任务", hint: "技术需求 · 跟进", path: "tasks" },
-  { label: "报告", hint: "演出报告 · 归档", path: "reports" },
-  { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications" },
-  { label: "财务", hint: "预算 · 支出 · 关联", path: "finance" },
-  { label: "物料", hint: "道具 · 服装 · 设备", path: "materials" },
-  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets" },
+  { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts", symbol: "人" },
+  { label: "日程", hint: "围读 · 排练 · 演出", path: "events", symbol: "日" },
+  { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
+  { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },
+  { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications", symbol: "通" },
+  { label: "财务", hint: "预算 · 支出 · 关联", path: "finance", symbol: "财" },
+  { label: "物料", hint: "道具 · 服装 · 设备", path: "materials", symbol: "物" },
+  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },
 ] as const;
 
 const ADMIN_NAV_GROUPS = [
@@ -63,6 +74,101 @@ const OVERVIEW_NAV = [
   { label: "通知提醒", hint: "确认与告知", path: "/my/notifications", symbol: "◉" },
   { label: "报告", hint: "所有演出报告", path: "/my/reports", symbol: "≡" },
 ] as const;
+
+const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
+  script: "剧本",
+  dramaturgy: "构作",
+  characters: "角色",
+  cues: "Cue",
+  cuelists: "Cue 表设置",
+};
+
+const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
+const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [
+  PRODUCTION_TOOLBAR_STAGE.full,
+  PRODUCTION_TOOLBAR_STAGE.searchCollapsed,
+  PRODUCTION_TOOLBAR_STAGE.secondaryStored,
+  PRODUCTION_TOOLBAR_STAGE.primaryShort,
+  PRODUCTION_TOOLBAR_STAGE.primaryStored,
+  PRODUCTION_TOOLBAR_STAGE.lowPriorityStored,
+];
+const PRODUCTION_SIDEBAR_TRANSITION_MS = 150;
+const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
+// Below this width the full production sidebar no longer fits the script layout.
+const SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX = 1496;
+
+type ProductionHeaderStage = 0 | 1 | 2;
+
+function productionHeaderStageForWidth(width: number): ProductionHeaderStage {
+  if (width >= 1280) return 0;
+  if (width >= 1024) return 1;
+  return 2;
+}
+
+function adjacentProductionToolbarStage(
+  stage: ProductionToolbarStage,
+  direction: -1 | 1,
+): ProductionToolbarStage {
+  const index = PRODUCTION_TOOLBAR_STAGES.indexOf(stage);
+  return PRODUCTION_TOOLBAR_STAGES[index + direction] ?? stage;
+}
+
+function horizontalMargins(element: HTMLElement): number {
+  const style = window.getComputedStyle(element);
+  return (Number.parseFloat(style.marginLeft) || 0) + (Number.parseFloat(style.marginRight) || 0);
+}
+
+function outerWidth(element: HTMLElement): number {
+  return element.getBoundingClientRect().width + horizontalMargins(element);
+}
+
+function productionToolbarContentWidth(slot: HTMLElement): number {
+  const root = slot.querySelector<HTMLElement>("[data-production-top-menu-root]");
+  if (!root) return outerWidth(slot);
+
+  const rootStyle = window.getComputedStyle(root);
+  const gap = Number.parseFloat(rootStyle.columnGap) || 0;
+  const padding = (Number.parseFloat(rootStyle.paddingLeft) || 0)
+    + (Number.parseFloat(rootStyle.paddingRight) || 0);
+  let width = padding;
+  let visibleCount = 0;
+
+  for (const child of root.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    const style = window.getComputedStyle(child);
+    if (style.display === "none" || style.position === "absolute" || style.position === "fixed") continue;
+
+    const isFlexible = Number.parseFloat(style.flexGrow) > 0;
+    const flexContent = isFlexible
+      ? child.querySelector<HTMLElement>("[data-production-toolbar-flex-content]")
+      : null;
+
+    width += flexContent ? outerWidth(flexContent) : isFlexible ? horizontalMargins(child) : outerWidth(child);
+    visibleCount += 1;
+  }
+
+  return width + Math.max(0, visibleCount - 1) * gap;
+}
+
+function productionTopbarContentWidth(topbar: HTMLElement): number {
+  const style = window.getComputedStyle(topbar);
+  const gap = Number.parseFloat(style.columnGap) || 0;
+  const padding = (Number.parseFloat(style.paddingLeft) || 0)
+    + (Number.parseFloat(style.paddingRight) || 0);
+  let width = padding;
+  let visibleCount = 0;
+
+  for (const child of topbar.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (window.getComputedStyle(child).display === "none") continue;
+    width += child.id === PRODUCTION_TOP_MENU_SLOT_ID
+      ? productionToolbarContentWidth(child)
+      : outerWidth(child);
+    visibleCount += 1;
+  }
+
+  return width + Math.max(0, visibleCount - 1) * gap;
+}
 
 const PUNCTUATION_RE = /^[\s《》「」【】『』〈〉（）()"'""''・·—–…、。，。！？]+/u;
 
@@ -124,6 +230,7 @@ function NavItem({
   badge,
   warningBadge,
   onClick,
+  folded,
 }: {
   href: string;
   symbol: string;
@@ -133,36 +240,53 @@ function NavItem({
   badge?: number;
   warningBadge?: number;
   onClick?: () => void;
+  folded?: boolean;
 }) {
+  const foldedBadge = folded ? Math.max(badge ?? 0, warningBadge ?? 0) : 0;
+
   return (
     <Link
       href={href}
       onClick={onClick}
-      className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors ${
+      aria-label={folded ? `${label}${foldedBadge > 0 ? ` ${foldedBadge}` : ""}` : undefined}
+      title={folded ? label : undefined}
+      className={`flex min-h-[46px] items-center rounded-[9px] px-2.5 py-1.5 transition-colors ${
+        folded ? "relative justify-center" : "gap-2.5 overflow-hidden"
+      } ${
         active
           ? "bg-[var(--surface)] shadow-[inset_3px_0_0_#182a2a]"
           : "hover:bg-white/50"
       }`}
     >
-      <span className="w-[27px] h-[27px] rounded-[7px] border border-[#cbd2cf] flex items-center justify-center text-[11px] text-[#667676] shrink-0 leading-none">
+      <span className="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[7px] border border-[#cbd2cf] text-[11px] leading-none text-[#667676]">
         {symbol}
       </span>
-      <span className="flex flex-col min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="text-[12px] font-bold text-[#182a2a] leading-tight">{label}</span>
-          {badge != null && badge > 0 && (
-            <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
-              {badge > 99 ? "99+" : badge}
-            </span>
-          )}
-          {warningBadge != null && warningBadge > 0 && (
-            <span className="min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none shrink-0">
-              {warningBadge > 99 ? "99+" : warningBadge}
-            </span>
-          )}
+      {folded ? (
+        foldedBadge > 0 && (
+          <span className={`absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white ${
+            (warningBadge ?? 0) >= foldedBadge ? "bg-amber-500" : "bg-[#c0392b]"
+          }`}>
+            {foldedBadge > 99 ? "99+" : foldedBadge}
+          </span>
+        )
+      ) : (
+        <span className="flex min-w-0 flex-1 flex-col overflow-hidden whitespace-nowrap">
+          <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+            <span className="min-w-0 truncate text-[12px] font-bold leading-tight text-[#182a2a]">{label}</span>
+            {badge != null && badge > 0 && (
+              <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-[#c0392b] px-1 text-[9px] font-bold leading-none text-white">
+                {badge > 99 ? "99+" : badge}
+              </span>
+            )}
+            {warningBadge != null && warningBadge > 0 && (
+              <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
+                {warningBadge > 99 ? "99+" : warningBadge}
+              </span>
+            )}
+          </span>
+          <span className="mt-0.5 truncate text-[9px] text-[#667676]">{hint}</span>
         </span>
-        <span className="text-[9px] text-[#667676] mt-0.5 truncate">{hint}</span>
-      </span>
+      )}
     </Link>
   );
 }
@@ -175,7 +299,7 @@ function NavGroup({ label, color }: { label: string; color: "script" | "stage" }
           color === "script" ? "bg-[#2f6670]" : "bg-[#a55c32]"
         }`}
       />
-      <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">
+      <span className="whitespace-nowrap text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">
         {label}
       </span>
     </div>
@@ -300,7 +424,7 @@ function ProjectSwitcher({
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
       {/* Switcher button */}
       <button
         onClick={toggle}
@@ -348,9 +472,11 @@ function ProjectSwitcher({
             <b style={{ fontSize: 13, color: "var(--muted)", fontWeight: 400 }}>选择项目</b>
           )}
         </span>
-        <span style={{ color: "var(--muted)", fontSize: 11, flexShrink: 0 }}>
-          {open ? "⌃" : "⌄"}
-        </span>
+        <ChevronIcon
+          direction={open ? "up" : "down"}
+          size={12}
+          className="shrink-0 text-[var(--muted)]"
+        />
       </button>
 
       {/* Popover dropdown */}
@@ -511,6 +637,152 @@ export default function AppShell({ session, productions, children, initialUnread
   const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
   const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
   const [cueWarnings, setCueWarnings] = useState(0);
+  const [productionHeaderStage, setProductionHeaderStage] = useState<ProductionHeaderStage>(0);
+  const [productionToolbarStage, setProductionToolbarStage] = useState<ProductionToolbarStage>(0);
+  const [productionToolbarHasStoredControls, setProductionToolbarHasStoredControls] = useState(false);
+  const [scriptProductionSidebarAutoFolded, setScriptProductionSidebarAutoFolded] = useState(false);
+  const [scriptProductionSidebarManuallyFolded, setScriptProductionSidebarManuallyFolded] = useState(false);
+  const [scriptProductionSidebarOverlayOpen, setScriptProductionSidebarOverlayOpen] = useState(false);
+  const [scriptProductionSidebarContentFolded, setScriptProductionSidebarContentFolded] = useState(false);
+  const [topOverflowOpen, setTopOverflowOpen] = useState(false);
+  const [productionSearchPath, setProductionSearchPath] = useState<string | null>(null);
+  const topbarRef = useRef<HTMLElement>(null);
+  const topOverflowRef = useRef<HTMLDivElement>(null);
+  const productionSearchOpenRef = useRef(false);
+  const productionToolbarStageRef = useRef<ProductionToolbarStage>(productionToolbarStage);
+  const productionToolbarHasStoredControlsRef = useRef(productionToolbarHasStoredControls);
+  const productionToolbarRequiredWidthRef = useRef<Partial<Record<ProductionToolbarStage, number>>>({});
+  productionToolbarStageRef.current = productionToolbarStage;
+  productionToolbarHasStoredControlsRef.current = productionToolbarHasStoredControls;
+  const closeTopOverflow = useCallback(() => setTopOverflowOpen(false), []);
+  const topOverflowMenu = useAnchoredMenu<HTMLButtonElement>(topOverflowOpen, "bottom");
+  const handleProductionSearchOpenChange = useCallback((open: boolean, stored: boolean) => {
+    productionSearchOpenRef.current = open;
+    if (open && !stored) closeTopOverflow();
+    setProductionSearchPath(open && !stored ? pathname : null);
+  }, [pathname, closeTopOverflow]);
+  const productionToolbarContext = useMemo(() => ({
+    stage: productionToolbarStage,
+    closeOverflow: closeTopOverflow,
+    overflowOpen: topOverflowOpen,
+    hasStoredControls: productionToolbarHasStoredControls,
+    setHasStoredControls: setProductionToolbarHasStoredControls,
+  }), [productionToolbarStage, productionToolbarHasStoredControls, topOverflowOpen, closeTopOverflow]);
+
+  useLayoutEffect(() => {
+    const syncHeaderStage = () => setProductionHeaderStage(productionHeaderStageForWidth(window.innerWidth));
+    syncHeaderStage();
+    window.addEventListener("resize", syncHeaderStage);
+    return () => window.removeEventListener("resize", syncHeaderStage);
+  }, []);
+
+  const measureProductionToolbar = useCallback(() => {
+    const topbar = topbarRef.current;
+    if (!topbar) return;
+    if (productionSearchOpenRef.current) return;
+
+    const current = productionToolbarStageRef.current;
+    if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
+    const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
+    if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
+
+    const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
+    if (overflow > 1 && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
+      productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
+      setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
+      return;
+    }
+
+    if (current > 0) {
+      const previous = adjacentProductionToolbarStage(current, -1);
+      const previousRequiredWidth = productionToolbarRequiredWidthRef.current[previous];
+      if (previousRequiredWidth && topbar.clientWidth >= previousRequiredWidth + PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX) {
+        setProductionToolbarStage(previous);
+      }
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    measureProductionToolbar();
+  }, [productionSearchPath, productionHeaderStage, productionToolbarStage, productionToolbarHasStoredControls, measureProductionToolbar]);
+
+  useEffect(() => {
+    const topbar = topbarRef.current;
+    if (!topbar) return;
+    let frame: number | null = null;
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measureProductionToolbar();
+      });
+    };
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    const mutationObserver = new MutationObserver(scheduleMeasure);
+    resizeObserver.observe(topbar);
+    mutationObserver.observe(topbar, { childList: true, characterData: true, subtree: true });
+    window.addEventListener("resize", scheduleMeasure);
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [measureProductionToolbar]);
+
+  useLayoutEffect(() => {
+    productionToolbarRequiredWidthRef.current = {};
+    productionToolbarStageRef.current = 0;
+    setProductionToolbarStage(0);
+  }, [pathname]);
+
+  useEffect(() => {
+    const hideTimers = new Map<HTMLElement, number>();
+    const scrollbarForArea = (area: HTMLElement) => area.matches(".panel-scrollbar")
+      ? area
+      : area.querySelector<HTMLElement>(".panel-scrollbar");
+    const hideActiveScrollbar = (scrollbar: HTMLElement) => {
+      const timer = hideTimers.get(scrollbar);
+      if (timer !== undefined) window.clearTimeout(timer);
+      hideTimers.delete(scrollbar);
+      scrollbar.classList.remove("is-scroll-active");
+    };
+    const revealActiveScrollbar = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const scrollbar = target.closest<HTMLElement>(".panel-scrollbar");
+      if (!scrollbar) return;
+
+      scrollbar.classList.add("is-scroll-active");
+      const previousTimer = hideTimers.get(scrollbar);
+      if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+      hideTimers.set(scrollbar, window.setTimeout(() => {
+        hideActiveScrollbar(scrollbar);
+      }, SCROLLBAR_ACTIVITY_HIDE_DELAY_MS));
+    };
+    const hideScrollbarOnPanelExit = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const area = target.closest<HTMLElement>(".panel-scrollbar-area");
+      const relatedTarget = event.relatedTarget;
+      if (!area || (relatedTarget instanceof Node && area.contains(relatedTarget))) return;
+      const scrollbar = scrollbarForArea(area);
+      if (!scrollbar) return;
+      hideActiveScrollbar(scrollbar);
+    };
+
+    document.addEventListener("scroll", revealActiveScrollbar, { passive: true, capture: true });
+    document.addEventListener("pointerout", hideScrollbarOnPanelExit, true);
+    return () => {
+      document.removeEventListener("scroll", revealActiveScrollbar, { capture: true });
+      document.removeEventListener("pointerout", hideScrollbarOnPanelExit, true);
+      for (const scrollbar of hideTimers.keys()) hideActiveScrollbar(scrollbar);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    closeTopOverflow();
+  }, [productionToolbarStage, productionToolbarHasStoredControls, closeTopOverflow]);
 
   // Track current productionId via ref so fetchCounts always uses the latest value
   // without needing to be in the effect dependency array.
@@ -522,6 +794,9 @@ export default function AppShell({ session, productions, children, initialUnread
 
   useEffect(() => {
     setDrawerOpen(null);
+    setProductionSearchPath(null);
+    productionSearchOpenRef.current = false;
+    setTopOverflowOpen(false);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
 
@@ -603,6 +878,62 @@ export default function AppShell({ session, productions, children, initialUnread
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
 
+  useEffect(() => {
+    if (!topOverflowOpen) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target;
+      if (topOverflowRef.current?.contains(target as Node)) return;
+      if (target instanceof Element && target.closest("[data-production-overflow-menu-child]")) return;
+      closeTopOverflow();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [topOverflowOpen, closeTopOverflow]);
+
+  const isScriptPage = /^\/production\/[^/]+\/script(?:\/|$)/.test(pathname);
+  useLayoutEffect(() => {
+    if (!isScriptPage) {
+      setScriptProductionSidebarAutoFolded(false);
+      setScriptProductionSidebarManuallyFolded(false);
+      setScriptProductionSidebarOverlayOpen(false);
+      setScriptProductionSidebarContentFolded(false);
+      return;
+    }
+
+    const foldQuery = window.matchMedia(`(max-width: ${SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX - 1}px)`);
+    const hiddenQuery = window.matchMedia("(max-width: 1023px)");
+    const syncSidebarState = () => {
+      const autoFolded = foldQuery.matches;
+      setScriptProductionSidebarAutoFolded(autoFolded);
+      if (!autoFolded || hiddenQuery.matches) setScriptProductionSidebarOverlayOpen(false);
+    };
+    syncSidebarState();
+    foldQuery.addEventListener("change", syncSidebarState);
+    hiddenQuery.addEventListener("change", syncSidebarState);
+    return () => {
+      foldQuery.removeEventListener("change", syncSidebarState);
+      hiddenQuery.removeEventListener("change", syncSidebarState);
+    };
+  }, [isScriptPage]);
+
+  const productionSidebarOverlayOpen = isScriptPage
+    && scriptProductionSidebarAutoFolded
+    && scriptProductionSidebarOverlayOpen;
+  const productionSidebarFolded = isScriptPage && (
+    scriptProductionSidebarAutoFolded
+      ? !productionSidebarOverlayOpen
+      : scriptProductionSidebarManuallyFolded
+  );
+  const productionSidebarContentFolded = isScriptPage && scriptProductionSidebarContentFolded;
+  useEffect(() => {
+    if (!isScriptPage) return;
+    const timer = window.setTimeout(
+      () => setScriptProductionSidebarContentFolded(productionSidebarFolded),
+      PRODUCTION_SIDEBAR_TRANSITION_MS + 20,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isScriptPage, productionSidebarFolded]);
+
   if (!session || pathname.startsWith("/login")) {
     return <>{children}</>;
   }
@@ -612,6 +943,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const activeModule = productionId && pathname.startsWith(`/production/${productionId}`)
     ? extractModule(pathname, productionId)
     : null;
+  const hasProductionTopMenu = !!activeModule && ["script", "dramaturgy", "characters", "cues", "cuelists"].includes(activeModule);
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -619,6 +951,13 @@ export default function AppShell({ session, productions, children, initialUnread
   const activeProductions = productions.filter((p) => !p.archivedAt);
   const isAdminMode = !!(productionId && pathname.startsWith(`/production/${productionId}/admin`));
   const activeAdminModule = isAdminMode ? extractAdminModule(pathname, productionId!) : null;
+  const toggleScriptProductionSidebar = () => {
+    if (scriptProductionSidebarAutoFolded) {
+      setScriptProductionSidebarOverlayOpen((open) => !open);
+      return;
+    }
+    setScriptProductionSidebarManuallyFolded((folded) => !folded);
+  };
 
   function navHref(path: string) {
     return productionId ? `/production/${productionId}/${path}` : "#";
@@ -666,9 +1005,11 @@ export default function AppShell({ session, productions, children, initialUnread
   );
 
   return (
+    <ProductionToolbarStageContext.Provider value={productionToolbarStage}>
+    <ProductionToolbarContext.Provider value={productionToolbarContext}>
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
-      <header className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-40">
+      <header ref={topbarRef} className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-50">
         {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
@@ -682,7 +1023,7 @@ export default function AppShell({ session, productions, children, initialUnread
               <span className="text-white text-[10px] font-bold select-none">BS</span>
             )}
           </span>
-          <span className="text-[13px] font-bold tracking-[0.12em] text-[#182a2a] hidden md:block">
+          <span className={`${productionHeaderStage >= 1 ? "hidden" : "block"} text-[13px] font-bold tracking-[0.12em] text-[#182a2a]`}>
             Backstage
           </span>
         </Link>
@@ -695,15 +1036,41 @@ export default function AppShell({ session, productions, children, initialUnread
           onOpen={() => setDropdownOpen(false)}
         />
 
+        {hasProductionTopMenu && (
+          <div
+            id={PRODUCTION_TOP_MENU_SLOT_ID}
+            data-search-open={productionSearchPath === pathname ? "true" : undefined}
+            className="flex h-full min-w-0 flex-1 items-center"
+          >
+            <div
+              data-production-top-menu-placeholder
+              aria-hidden="true"
+              className="flex shrink-0 flex-col"
+              style={{ lineHeight: 1.2 }}
+            >
+              <span className="max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--script)]">
+                {currentProduction?.name ?? ""}
+              </span>
+              <span className="text-xs font-semibold text-[var(--ink)]">
+                {PRODUCTION_TOP_MENU_LABELS[activeModule ?? ""]}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Right actions */}
-        <div className="ml-auto flex items-center gap-3">
+        <div className={`${hasProductionTopMenu ? "-ml-2" : "ml-auto"} flex shrink-0 items-center gap-3`}>
           {/* Search bar: only when inside a production */}
-          <SearchBar productionId={productionId} />
+          <SearchBar
+            key={pathname}
+            productionId={productionId}
+            onOpenChange={hasProductionTopMenu ? handleProductionSearchOpenChange : undefined}
+          />
 
           {/* Notification bell: sm+ only */}
           <Link
             href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className="relative hidden sm:flex w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0"
+            className={`relative ${productionHeaderStage >= 2 ? "hidden" : "flex"} w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0`}
             title="通知"
             onClick={() => setUnreadCount(0)}
           >
@@ -716,7 +1083,7 @@ export default function AppShell({ session, productions, children, initialUnread
           </Link>
 
           {/* User avatar + dropdown: sm+ only */}
-          <div className="relative hidden sm:block" ref={dropdownRef}>
+          <div className={`relative shrink-0 ${productionHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
               aria-label="个人中心"
@@ -781,13 +1148,57 @@ export default function AppShell({ session, productions, children, initialUnread
               </div>
             )}
           </div>
+
+          {hasProductionTopMenu && (
+            <div
+              ref={topOverflowRef}
+              id="production-top-toolbar-overflow"
+              data-search-open={productionSearchPath === pathname ? "true" : undefined}
+              className="relative shrink-0"
+            >
+              {productionToolbarHasStoredControls && (
+                <button
+                  ref={topOverflowMenu.anchorRef}
+                  type="button"
+                  aria-label="更多工具"
+                  aria-expanded={topOverflowOpen}
+                  onClick={() => setTopOverflowOpen((open) => !open)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
+                >
+                  ⋮
+                </button>
+              )}
+              <div
+                ref={topOverflowMenu.menuRef}
+                style={topOverflowMenu.style}
+                data-production-overflow-menu="true"
+                className={productionToolbarHasStoredControls && topOverflowOpen
+                  ? "z-40 flex w-52 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
+                  : "hidden"
+                }
+              >
+                <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />
+                <div id={PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID} className="order-last shrink-0" />
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
       {/* Body: sidebar + workspace */}
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
         {/* Sidebar (desktop only) */}
-        <aside className="hidden lg:flex w-[240px] shrink-0 flex-col overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] px-3.5 py-5">
+        <aside
+          className={`panel-scrollbar-area panel-scrollbar hidden lg:flex shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] transition-[width,padding,margin] duration-150 ${
+            isScriptPage
+              ? productionSidebarOverlayOpen
+                ? "z-30 -mr-[168px] w-[240px] px-3.5 pt-9 pb-5 shadow-lg"
+                : productionSidebarFolded
+                ? "w-[72px] px-2 pt-9 pb-5"
+                : "w-[240px] px-3.5 pt-9 pb-5"
+              : "w-[240px] px-3.5 py-5"
+          }`}
+        >
           {isAdminMode ? (
             /* ── Admin sidebar ── */
             <nav className="flex flex-col gap-0.5 flex-1">
@@ -847,29 +1258,30 @@ export default function AppShell({ session, productions, children, initialUnread
 
               {productionId ? (
                 <>
-                  <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} />
-                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} />
-                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} />
+                  <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} folded={productionSidebarContentFolded} />
+                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} folded={productionSidebarContentFolded} />
+                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} folded={productionSidebarContentFolded} />
 
-                  <NavGroup label="创作侧" color="script" />
+                  <NavGroup label={productionSidebarContentFolded ? "创作" : "创作侧"} color="script" />
                   {CREATION_NAV.map((item) => (
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.label.charAt(0)}
+                      symbol={item.symbol}
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
                       warningBadge={item.path === "cues" ? cueWarnings : undefined}
+                      folded={productionSidebarContentFolded}
                     />
                   ))}
 
-                  <NavGroup label="制作侧" color="stage" />
+                  <NavGroup label={productionSidebarContentFolded ? "制作" : "制作侧"} color="stage" />
                   {PRODUCTION_NAV.map((item) => (
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.label.charAt(0)}
+                      symbol={item.symbol}
                       label={item.label}
                       hint={item.hint}
                       active={isModuleActive(item.path)}
@@ -879,6 +1291,7 @@ export default function AppShell({ session, productions, children, initialUnread
                         item.path === "reports" ? unreadReports :
                         undefined
                       }
+                      folded={productionSidebarContentFolded}
                     />
                   ))}
                 </>
@@ -886,6 +1299,24 @@ export default function AppShell({ session, productions, children, initialUnread
             </nav>
           )}
         </aside>
+
+        {isScriptPage && (
+          <div
+            className={`pointer-events-none absolute left-0 top-0 z-40 hidden h-8 items-start justify-end bg-white/20 pr-2 pt-1 backdrop-blur-[1px] transition-[width] duration-150 lg:flex ${
+              productionSidebarFolded ? "w-[72px]" : "w-[240px]"
+            }`}
+          >
+            <button
+              type="button"
+              aria-label={productionSidebarFolded ? "展开制作栏" : "折叠制作栏"}
+              title={productionSidebarFolded ? "展开制作栏" : "折叠制作栏"}
+              onClick={toggleScriptProductionSidebar}
+              className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full border border-transparent bg-transparent text-[#667676]/60 transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-[var(--line)] hover:bg-[var(--surface)] hover:text-[var(--ink)] hover:shadow-sm"
+            >
+              <ChevronIcon direction={productionSidebarFolded ? "right" : "left"} size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Workspace */}
         <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
@@ -1008,7 +1439,7 @@ export default function AppShell({ session, productions, children, initialUnread
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.label.charAt(0)}
+              symbol={item.symbol}
               label={item.label}
               hint={item.hint}
               active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
@@ -1029,7 +1460,7 @@ export default function AppShell({ session, productions, children, initialUnread
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.label.charAt(0)}
+              symbol={item.symbol}
               label={item.label}
               hint={item.hint}
               active={isModuleActive(item.path)}
@@ -1145,5 +1576,7 @@ export default function AppShell({ session, productions, children, initialUnread
         </div>
       </BottomDrawer>
     </div>
+    </ProductionToolbarContext.Provider>
+    </ProductionToolbarStageContext.Provider>
   );
 }

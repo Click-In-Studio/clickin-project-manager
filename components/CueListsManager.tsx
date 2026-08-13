@@ -1,12 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import Link from "next/link";
 import styles from "./my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CueList, CueListTemplate, CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
 import { TEMPLATE_ABBR_HINTS } from "@/lib/cue-list-types";
 import type { MemberWithRoles } from "@/lib/db";
 import CueListDetail from "./CueListDetail";
+import ChevronIcon from "./ChevronIcon";
+import ProductionTopMenu, {
+  PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
+  PRODUCTION_TOOLBAR_STAGE,
+  ProductionTopMenuDivider,
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  useProductionToolbar,
+} from "./ProductionTopMenu";
 
 type Filter = "all" | "created" | "editable" | "readonly";
 
@@ -198,6 +207,7 @@ export default function CueListsManager({
   editableIds,
   members,
 }: Props) {
+  const { stage: toolbarStage } = useProductionToolbar();
   const [lists, setLists] = useState(initialCueLists);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
@@ -206,6 +216,26 @@ export default function CueListsManager({
   const [drawerListId, setDrawerListId] = useState<string | null>(null);
   const [drawerData, setDrawerData] = useState<DrawerData | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
+  const createButton = canCreate ? (
+    <button
+      type="button"
+      onClick={() => setCreating(true)}
+      className="shrink-0"
+      style={{
+        border: 0,
+        borderRadius: 9,
+        padding: "7px 16px",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        background: "var(--ink)",
+        color: "#fff",
+        whiteSpace: "nowrap",
+      }}
+    >
+      + 新建
+    </button>
+  ) : null;
 
   const editableSet = useMemo(() => new Set(editableIds), [editableIds]);
 
@@ -239,36 +269,43 @@ export default function CueListsManager({
   }, [drawerListId, creating]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[var(--paper)]">
+    <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
-      <div className="flex items-center gap-3 px-4 h-14 bg-[var(--surface)] border-b border-[var(--line)] shadow-sm shrink-0">
-        <div className="flex shrink-0 flex-col mr-1" style={{ lineHeight: 1.2 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+      <ProductionTopMenu>
+        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
             {productionName}
           </span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue 表</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue</span>
         </div>
-        <div className="ml-auto">
-          {canCreate && (
-            <button
-              onClick={() => setCreating(true)}
-              style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
-            >
-              + 新建
-            </button>
-          )}
-        </div>
-      </div>
+        <ProductionTopMenuDivider />
+        <Link
+          href={`/production/${productionId}/cues`}
+          className="flex shrink-0 items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+        >
+          <ChevronIcon direction="left" size={12} className="opacity-50" />
+          返回
+        </Link>
+        {toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryShort && createButton && (
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto`}>{createButton}</div>
+        )}
+      </ProductionTopMenu>
 
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "20px 24px", minHeight: "calc(100vh - 280px)" }}>
+      <h1 className="mb-4 text-lg font-semibold text-zinc-800">设置</h1>
       {/* Filter tab bar */}
-      <div className={styles.tabBar} style={{ marginBottom: 20 }}>
-        {(Object.keys(FILTER_LABELS) as Filter[]).map(f => (
-          <button key={f} aria-selected={filter === f} onClick={() => setFilter(f)}>
-            {FILTER_LABELS[f]}
-          </button>
-        ))}
+      <div className="mb-5 flex items-start gap-3">
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div className={styles.tabBar} style={{ marginBottom: 0 }}>
+            {(Object.keys(FILTER_LABELS) as Filter[]).map(f => (
+              <button key={f} aria-selected={filter === f} onClick={() => setFilter(f)}>
+                {FILTER_LABELS[f]}
+              </button>
+            ))}
+          </div>
+        </div>
+        {toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort && createButton}
       </div>
 
       {/* Card grid */}
