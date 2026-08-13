@@ -27,17 +27,17 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   const isArchived = access?.isArchived ?? false;
 
   const perms = {
-    canRename: !!permCtx && hasPermission("production:rename", permCtx),
-    canChangeAvatar: !!permCtx && hasPermission("production:change_avatar", permCtx),
-    canEditDescription: !!permCtx && hasPermission("production:edit_description", permCtx),
-    canChangeType: !!permCtx && hasPermission("production:change_type", permCtx),
-    canChangeLanguage: !!permCtx && hasPermission("production:change_language", permCtx),
-    canArchive: !!permCtx && hasPermission("production:archive", permCtx),
-    canDelete: !!permCtx && hasPermission("production:delete", permCtx),
-    canImportContacts: !!permCtx && hasPermission("contacts:import", permCtx),
+    canRename: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/name", "edit")),
+    canChangeAvatar: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/avatar", "edit")),
+    canEditDescription: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/description", "edit")),
+    canChangeType: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/type", "edit")),
+    canChangeLanguage: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/language", "edit")),
+    canArchive: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "archival", "create")),
+    canDelete: !!permCtx && (permCtx.isAdmin || permCtx.isOwner),
+    canImportContacts: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "member", "*", "imports", "create")),
     canImportScript: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "imports", "create")),
     canImportScenes: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
-    canManageTags: !!permCtx && hasPermission("members:change_role", permCtx),
+    canManageTags: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
   };
 
   return (

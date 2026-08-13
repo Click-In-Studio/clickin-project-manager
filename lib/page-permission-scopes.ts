@@ -19,7 +19,6 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:event/*/meta@view",
     "node:event/*/details@view",
     "node:event/*/followers@create",
-    "contacts:view",
   ]),
   script: new Set<Permission>([
   ]),

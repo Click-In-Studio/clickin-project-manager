@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getMilestone, updateMilestone, deleteMilestone } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
@@ -11,7 +12,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, milestoneId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !hasPermission("milestone:manage", access.permCtx)) {
+  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "edit"))) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 
@@ -44,7 +45,7 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, milestoneId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !hasPermission("milestone:delete", access.permCtx)) {
+  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "delete"))) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 

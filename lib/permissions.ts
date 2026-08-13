@@ -2,42 +2,10 @@
 
 export type Permission =
   // ─── Root (owner only; not overridable; deferred to #137) ────────────────────
-  | "production:delete"
-  | "production:transfer_owner"
-  | "production:restore_checkpoint"
   // ─── 敏感管理 (owner default; producer needs explicit grant) ──────────────────
-  | "production:archive"
-  | "production:rename"
-  | "production:change_avatar"
-  | "production:edit_description"
-  | "production:change_type"
-  | "production:change_language"
-  | "production:manage_integrations"
-  | "production:import_members"
-  | "production:producer_invite"
-  | "production:producer_promote"
-  | "production:producer_demote"
-  | "production:producer_kick"
-  | "contacts:import"
   // ─── 普通管理 - 用户类 ────────────────────────────────────────────────────────
-  | "members:invite"
-  | "members:kick"
-  | "members:change_role"
-  | "members:manage_overrides"
   // ─── 普通管理 - 职位模版类 ────────────────────────────────────────────────────
-  | "role:create"
-  | "role:rename"
-  | "role:delete"
-  | "role:assign_permission"
   // ─── 普通管理 - 部门/用户组类 ─────────────────────────────────────────────────
-  | "dept:create"
-  | "dept:dismiss"
-  | "dept:rename"
-  | "dept:change_type"
-  | "dept:add_member"
-  | "dept:delete_member"
-  | "dept:set_poc"
-  | "dept:unset_poc"
   // ─── 普通管理 - 导入类 ────────────────────────────────────────────────────────
   // ─── 普通管理 - 附件隐私类 ────────────────────────────────────────────────────
   // ─── 普通管理 - 构作视图公开类 ───────────────────────────────────────────────
@@ -46,15 +14,8 @@ export type Permission =
   // ─── 普通管理 - 标注体系管理 ──────────────────────────────────────────────────
   // ─── 普通管理 - 评论管理 ──────────────────────────────────────────────────────
   // ─── 普通管理 - 里程碑 ────────────────────────────────────────────────────────
-  | "milestone:create"
-  | "milestone:manage"
-  | "milestone:delete"
   // ─── 普通管理 - 公告 ──────────────────────────────────────────────────────────
-  | "announcement:create"
-  | "announcement:edit"
-  | "announcement:delete"
   // ─── 普通管理 - 其他 ──────────────────────────────────────────────────────────
-  | "production:manage_config"
   // ─── 写权限 - 剧本操作权限（bundle，含 implication 层级）────────────────────
   // ─── 写权限 - 剧本领域权限（由操作权限隐含）─────────────────────────────────
   // ─── 写权限 - 场次/章节 ───────────────────────────────────────────────────────
@@ -63,11 +24,8 @@ export type Permission =
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
   // ─── 写权限 - 项目挂载点 ──────────────────────────────────────────────────────
-  | "production:mount"
-  | "production:unmount"
   // ─── 写权限 - 附件基础操作 ────────────────────────────────────────────────────
   // ─── 读权限 ───────────────────────────────────────────────────────────────────
-  | "contacts:view"
   // ─── 组织特殊权限（由 org_admin_production_grant 授予，见 #136）────────────
   | "org:assign_member"
   | "org:recall_member";
@@ -99,68 +57,26 @@ export type PermissionContext = {
 
 // Root: owner-only, not overridable. Enforcement deferred to #137.
 export const ROOT_PERMISSIONS = new Set<Permission>([
-  "production:delete",
-  "production:transfer_owner",
-  "production:restore_checkpoint",
 ]);
 
 // Sensitive admin: no adminBypass; producer needs explicit owner grant via override.
 export const SENSITIVE_ADMIN_PERMISSIONS = new Set<Permission>([
-  "production:archive",
-  "production:rename",
-  "production:change_avatar",
-  "production:edit_description",
-  "production:change_type",
-  "production:change_language",
-  "production:manage_integrations",
-  "production:import_members",
-  "production:producer_invite",
-  "production:producer_promote",
-  "production:producer_demote",
-  "production:producer_kick",
-  "contacts:import",
 ]);
 
 // Permissions excluded from role templates (cannot be granted via role:assign_permission).
 export const ROLE_TEMPLATE_EXCLUDED = new Set<Permission>([
   ...ROOT_PERMISSIONS,
   ...SENSITIVE_ADMIN_PERMISSIONS,
-  "role:create",
-  "role:rename",
-  "role:delete",
-  "role:assign_permission",
 ]);
 
 // Permissions that appear in the admin panel (non-SENSITIVE, non-ROOT).
 // Gate: if memberPermissions contains ANY of these → user can enter admin panel.
 export const ADMIN_PANEL_PERMISSIONS = new Set<Permission>([
   // 成员管理
-  "members:invite",
-  "members:kick",
-  "members:change_role",
-  "members:manage_overrides",
   // 职位管理
-  "role:create",
-  "role:rename",
-  "role:delete",
-  "role:assign_permission",
   // 部门管理
-  "dept:create",
-  "dept:rename",
-  "dept:dismiss",
-  "dept:change_type",
-  "dept:add_member",
-  "dept:delete_member",
-  "dept:set_poc",
-  "dept:unset_poc",
   // 公告
-  "announcement:create",
-  "announcement:edit",
-  "announcement:delete",
   // 里程碑
-  "milestone:create",
-  "milestone:manage",
-  "milestone:delete",
 ]);
 
 // ─── Script Operation Implication ─────────────────────────────────────────────
@@ -213,7 +129,6 @@ export function hasScopedPermission(
 // notification on first production entry (see AppShell ViewGrantNotification).
 
 export const MEMBER_BASE_PERMISSIONS: readonly Permission[] = [
-  "contacts:view",
 ];
 
 // ─── Dramaturgy Full Set ───────────────────────────────────────────────────────
@@ -226,38 +141,10 @@ const DRAMATURGY_FULL_SET: readonly Permission[] = [
 // ─── 制作人 Full Set ───────────────────────────────────────────────────────────
 // Producer gets all 普通管理 + 写权限 + 读权限 by default.
 const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
-  "members:invite",
-  "members:kick",
-  "members:change_role",
-  "members:manage_overrides",
-  "role:create",
-  "role:rename",
-  "role:delete",
-  "role:assign_permission",
-  "dept:create",
-  "dept:dismiss",
-  "dept:rename",
-  "dept:change_type",
-  "dept:add_member",
-  "dept:delete_member",
-  "dept:set_poc",
-  "dept:unset_poc",
-  "milestone:create",
-  "milestone:manage",
-  "milestone:delete",
-  "announcement:create",
-  "announcement:edit",
-  "announcement:delete",
-  
-  
-  "production:manage_config",
 ];
 
 const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   ...DRAMATURGY_FULL_SET,
-  
-  "production:mount",
-  "production:unmount",
 ];
 
 const PRODUCER_READ_PERMS: readonly Permission[] = [
@@ -292,42 +179,34 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "音乐导演": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "作曲": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "编曲": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
   // 设计组
   "舞美设计": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "灯光设计": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "多媒体设计": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "服化设计": [
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "音响设计": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
   // 执行组
   "音响执行": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "灯光编程": [...MEMBER_BASE_PERMISSIONS],
@@ -341,11 +220,9 @@ export const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly Permission[]> = 
 
   // 宣发/外围
   "新媒体": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
   "侧写": [
-    "production:mount",
     ...MEMBER_BASE_PERMISSIONS,
   ],
 
@@ -382,25 +259,7 @@ export const ASSISTANT_ROLE_MIGRATION: Record<string, readonly Permission[]> = {
 
 // ─── All permission keys as a runtime constant ─────────────────────────────────
 export const ALL_PERMISSIONS: readonly Permission[] = [
-  "production:delete", "production:transfer_owner", "production:restore_checkpoint",
-  "production:archive", "production:rename", "production:change_avatar",
-  "production:edit_description", "production:change_type", "production:change_language",
-  "production:manage_integrations", "production:import_members",
-  "production:producer_invite", "production:producer_promote",
-  "production:producer_demote", "production:producer_kick",
-  "contacts:import",
-  "members:invite", "members:kick", "members:change_role", "members:manage_overrides",
-  "role:create", "role:rename", "role:delete", "role:assign_permission",
-  "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
-  "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
   
-  "production:manage_config",
-  "milestone:create", "milestone:manage", "milestone:delete",
-  "announcement:create", "announcement:edit", "announcement:delete",
-  
-  
-  "production:mount", "production:unmount",
-  "contacts:view", 
   
   "org:assign_member", "org:recall_member",
 ];

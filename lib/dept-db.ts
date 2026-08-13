@@ -525,7 +525,8 @@ export async function computeUserDeptFreeApprovalZone(
 
   const result = new Set<Permission>();
   for (const p of [...inherited, ...pocZone]) {
-    if (validPerms.has(p)) result.add(p as Permission);
+    // node: 节点串直通（REST 化后 zone 的一等公民）；原子键仍过白名单
+    if (validPerms.has(p) || p.startsWith("node:")) result.add(p as Permission);
   }
   return result;
 }
