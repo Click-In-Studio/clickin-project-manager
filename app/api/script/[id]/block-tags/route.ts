@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getBlockTagsForProduction, upsertBlockTag, deleteBlockTag } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import type { ProductionAccess } from "@/lib/db";
 
 async function guard(req: NextRequest, productionId: string) {
@@ -10,7 +10,7 @@ async function guard(req: NextRequest, productionId: string) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { session, access: null as ProductionAccess | null, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx } = access;
-  if (!hasPermission("script:view", permCtx)) {
+  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view"))) {
     return { session, access, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
   return { session, access, deny: null };
@@ -29,7 +29,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { session, access, deny } = await guard(req, productionId);
   if (!session || deny) return deny!;
   const { permCtx } = access!;
-  if (!hasPermission("script:edit_block", permCtx)) {
+  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "edit")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

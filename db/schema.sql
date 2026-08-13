@@ -1033,7 +1033,16 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('tag_group',   'view',           0),
   ('tag_group',   'create',         0),
   ('tag_group',   'edit',           0),
-  ('tag_group',   'delete',         0)
+  ('tag_group',   'delete',         0),
+  -- script（单例，id 恒 '*'）/ dramaturgy（批E PR-E2）：imports 是保留段（批量破坏性）
+  ('script',      'view',           0),
+  ('script',      'create',         0),
+  ('script',      'edit',           0),
+  ('script',      'delete',         0),
+  ('dramaturgy',  'view',           0),
+  ('dramaturgy',  'create',         0),
+  ('dramaturgy',  'edit',           0),
+  ('dramaturgy',  'delete',         0)
 ON CONFLICT DO NOTHING;
 
 -- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
@@ -1261,6 +1270,12 @@ SELECT '制作人', k FROM (VALUES
   ('node:asset/*/meta@edit'), ('node:asset/*/file@create'),
   ('node:asset/*/publication@create'), ('node:asset/*/publication@delete')
 ) AS t(k)
+ON CONFLICT DO NOTHING;
+
+-- 批E PR-E2：script 成员默认（MEMBER_BASE 保真：script:view / script:comment）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:script/*/blocks@view'),
+  ('*', 'node:script/*/comments@create')
 ON CONFLICT DO NOTHING;
 
 -- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）

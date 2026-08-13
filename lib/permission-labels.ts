@@ -63,32 +63,11 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   "dept:set_poc": "设置部门负责人",
   "dept:unset_poc": "取消部门负责人",
   // 剧本
-  "script:import": "导入剧本",
-  "script:manage": "剧本管理",
-  "script:edit": "编辑剧本文本",
-  "script:annotate": "添加剧本批注",
-  "script:view": "查看剧本",
-  "script:comment": "剧本评论",
-  "script:edit_comment_any": "编辑他人剧本评论",
-  "script:delete_comment_any": "删除他人剧本评论",
-  "rehearsal_mark:create": "创建排练记号",
-  "rehearsal_mark:edit": "编辑排练记号",
-  "rehearsal_mark:delete": "删除排练记号",
-  "rehearsal_mark:move": "移动排练记号",
-  "script:create_block": "创建剧本块",
-  "script:delete_block": "删除剧本块",
-  "script:edit_block": "编辑剧本块",
-  "script:set_character": "设置台词角色",
-  "script:set_type": "设置块类型",
-  "script:set_tag": "设置块标签",
-  "script:reorder": "调整剧本顺序",
-  "script:mount": "挂载剧本附件",
   // 章节/段落
   // 角色
   // 剧本标签
   // Cue表
   // 构作
-  "dramaturgy:import": "导入构作数据",
   "dramaturgy_view:create_public": "创建公开构作视图",
   "dramaturgy_view:delete_public": "删除公开构作视图",
   "dramaturgy_view:overwrite_public": "覆盖公开构作视图",

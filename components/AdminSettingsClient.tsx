@@ -604,8 +604,8 @@ function DataCard({ productionId, perms }: { productionId: string; perms: Settin
   };
 
   const importLinks = [
-    { label: "导入剧本", desc: "从飞书表格导入台词、角色、场景号", href: `/production/${productionId}/import-script`, can: perms.canImportScript, lock: "script:import" },
-    { label: "导入构作", desc: "从飞书表格导入场次、梗概、时长", href: `/production/${productionId}/import-scenes`, can: perms.canImportScenes, lock: "dramaturgy:import" },
+    { label: "导入剧本", desc: "从飞书表格导入台词、角色、场景号", href: `/production/${productionId}/import-script`, can: perms.canImportScript, lock: "" },
+    { label: "导入构作", desc: "从飞书表格导入场次、梗概、时长", href: `/production/${productionId}/import-scenes`, can: perms.canImportScenes, lock: "" },
   ];
 
   const inputFocus = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--ink)"; };

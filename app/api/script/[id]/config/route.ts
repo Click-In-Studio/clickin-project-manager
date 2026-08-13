@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getActiveVersionId, getVersion, saveScriptConfig } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
 import type { ScriptConfig } from "@/lib/script-types";

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getPool } from "@/lib/pg";
-import { hasPermission } from "@/lib/permissions";
 import { getCtx } from "../../ctx";
 
 export async function PATCH(
@@ -10,7 +10,7 @@ export async function PATCH(
   const { id, viewId } = await ctx.params;
   const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!permCtx || !hasPermission("script:view", permCtx)) {
+  if (!permCtx || !(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 

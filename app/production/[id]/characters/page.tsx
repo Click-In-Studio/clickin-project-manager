@@ -6,7 +6,6 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import CharactersManager from "@/components/CharactersManager";
 import PageActivationGate from "@/components/PageActivationGate";
 

@@ -692,9 +692,11 @@ export async function recomputeAndRevokeGrants(
                || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
                || '@' || rg.permission_level
            ] || CASE WHEN rg.resource_sub = '*'
-                       OR rg.resource_sub IN ('grants', 'publication')
+                       OR rg.resource_sub IN ('grants', 'publication', 'assignees', 'imports')
                        OR rg.resource_sub LIKE 'grants/%'
                        OR rg.resource_sub LIKE 'publication/%'
+                       OR rg.resource_sub LIKE 'assignees/%'
+                       OR rg.resource_sub LIKE 'imports/%'
                 THEN ARRAY[]::text[]
                 ELSE ARRAY[
                   'node:' || rg.resource_type || '/' || rg.resource_id || '@' || rg.permission_level,

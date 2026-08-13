@@ -4,7 +4,6 @@ import {
   getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 import { diffState } from "@/lib/script-ops";
 import {
@@ -94,10 +93,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   const operation: MarkerDeleteOperation = plan.status === "ready"
     ? plan.operation
     : { type: body.operation === "whole" ? "whole" : "marker-only", markerId: sceneId };
-  if (operation.type === "whole" && !hasPermission(
-    "script:edit",
-    current.permCtx,
-  )) {
+  if (operation.type === "whole" && !current.permCtx.isAdmin
+      && !await hasGrant(current.permCtx.userId, id, "script", "*", "blocks", "edit")) {
     return Response.json({ error: "删除整段内容需要剧本编辑权限" }, { status: 403 });
   }
   const next = executeMarkerDeletion(current.result.state, operation, createId);

@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, updateTagOption, deleteTagOption } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 
 async function getCtx(req: NextRequest, productionId: string) {
