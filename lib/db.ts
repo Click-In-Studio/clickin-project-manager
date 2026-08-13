@@ -4174,6 +4174,11 @@ export async function createProductionRole(productionId: string, name: string): 
 }
 
 export async function renameProductionRole(roleId: string, productionId: string, name: string): Promise<void> {
+  // 批G：制作人 role 身份不可变（改名后"防止移除"即名存实亡）
+  const cur = await getPool().query<{ name: string }>(
+    "SELECT name FROM production_role WHERE id = $1 AND production_id = $2", [roleId, productionId]);
+  if (cur.rows[0]?.name === "制作人") throw new Error("制作人角色不可改名");
+
   await getPool().query(
     `UPDATE production_role SET name = $1 WHERE id = $2 AND production_id = $3`,
     [name, roleId, productionId],
@@ -4181,10 +4186,17 @@ export async function renameProductionRole(roleId: string, productionId: string,
 }
 
 export async function deleteProductionRole(roleId: string, productionId: string): Promise<void> {
-  await getPool().query(
-    `DELETE FROM production_role WHERE id = $1 AND production_id = $2`,
+  // 批G：制作人 role 是结构性角色（通配区间宿主、seed/迁移按名匹配）——不可删除
+  const res = await getPool().query(
+    `DELETE FROM production_role WHERE id = $1 AND production_id = $2 AND name != '制作人'
+     RETURNING id`,
     [roleId, productionId],
   );
+  if (res.rows.length === 0) {
+    const exists = await getPool().query(
+      "SELECT 1 FROM production_role WHERE id = $1 AND production_id = $2", [roleId, productionId]);
+    if (exists.rows.length > 0) throw new Error("制作人角色不可删除");
+  }
 }
 
 export async function setRolePermissions(roleId: string, permissions: string[]): Promise<void> {
