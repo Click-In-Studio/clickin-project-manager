@@ -23,7 +23,7 @@ async function guard(req: NextRequest, productionId: string) {
   const { permCtx, isArchived } = access;
   if (isArchived) return { session, deny: Response.json({ error: "已归档" }, { status: 403 }) };
   if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "script", "*", "imports", "create"))) {
-    return { session, deny: Response.json({ error: "仅制作人可导入数据" }, { status: 403 }) };
+    return { session, deny: Response.json({ error: "需要剧本导入权限（imports）" }, { status: 403 }) };
   }
   return { session, deny: null };
 }
