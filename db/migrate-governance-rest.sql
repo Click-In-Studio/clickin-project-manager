@@ -79,15 +79,19 @@ INSERT INTO f_map VALUES
   ('announcement:edit',              'announcement', '*',              'edit'),
   ('announcement:delete',            'announcement', '*',              'delete');
 
--- SENSITIVE/ROOT 键的 atomic 行=无效名义行（老判定只认 owner/override，不看 atomic）：
--- 删除不转换，防止经行判定绕过 owner 审批流
+-- SENSITIVE 键的 atomic 行按来源分流：approval/direct（owner 审批流产物）转换保真；
+-- self_confirmed（自确认对 sensitive 本不该发生，老判定也不认）删除
 DELETE FROM atomic_permission_grant
-WHERE permission_key IN (SELECT key FROM (VALUES ('production:delete'),('production:transfer_owner'),('production:restore_checkpoint'),
-       ('production:archive'),('production:rename'),('production:change_avatar'),
+WHERE grant_source = 'self_confirmed'
+  AND permission_key IN (SELECT key FROM (VALUES ('production:archive'),('production:rename'),('production:change_avatar'),
        ('production:edit_description'),('production:change_type'),('production:change_language'),
        ('production:manage_integrations'),('production:import_members'),
        ('production:producer_invite'),('production:producer_promote'),
        ('production:producer_demote'),('production:producer_kick'),('contacts:import')) AS sr(key));
+
+-- ROOT 三键任何行都删（owner-only，连审批通道都没有）
+DELETE FROM atomic_permission_grant
+WHERE permission_key IN ('production:delete', 'production:transfer_owner', 'production:restore_checkpoint');
 
 INSERT INTO resource_grant
   (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -115,15 +119,8 @@ SELECT DISTINCT key, 'node:' || rtype || '/*'
        || CASE WHEN sub = '*' THEN '' ELSE '/' || sub END || '@' || verb
 FROM f_map;
 
--- SENSITIVE/ROOT 键的 role 区间行=无效名义（老 SENSITIVE 判定不看 zone）：删除不转换
-DELETE FROM production_role_permission
-WHERE permission_key IN (SELECT key FROM (VALUES ('production:delete'),('production:transfer_owner'),('production:restore_checkpoint'),
-       ('production:archive'),('production:rename'),('production:change_avatar'),
-       ('production:edit_description'),('production:change_type'),('production:change_language'),
-       ('production:manage_integrations'),('production:import_members'),
-       ('production:producer_invite'),('production:producer_promote'),
-       ('production:producer_demote'),('production:producer_kick'),('contacts:import')) AS sr(key));
-
+-- SENSITIVE 键的区间行=审批流入口资格（用户定谳：有区间可申请、无区间连入口都没有、
+-- 区间命中也不自确认）：照常转换为节点串。自确认禁用在代码层（isSensitiveNode）。
 INSERT INTO production_role_permission (role_id, permission_key)
 SELECT DISTINCT prp.role_id, m.node_key
 FROM production_role_permission prp JOIN f_key_map m ON m.key = prp.permission_key
@@ -143,14 +140,6 @@ WHERE permission LIKE 'production:%' OR permission LIKE 'contacts:%'
    OR permission LIKE 'members:%' OR permission LIKE 'role:%'
    OR permission LIKE 'dept:%' OR permission LIKE 'milestone:%'
    OR permission LIKE 'announcement:%';
-
-DELETE FROM production_dept_permission
-WHERE permission_key IN (SELECT key FROM (VALUES ('production:delete'),('production:transfer_owner'),('production:restore_checkpoint'),
-       ('production:archive'),('production:rename'),('production:change_avatar'),
-       ('production:edit_description'),('production:change_type'),('production:change_language'),
-       ('production:manage_integrations'),('production:import_members'),
-       ('production:producer_invite'),('production:producer_promote'),
-       ('production:producer_demote'),('production:producer_kick'),('contacts:import')) AS sr(key));
 
 INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
 SELECT DISTINCT pdp.production_id, pdp.dept_id, m.node_key

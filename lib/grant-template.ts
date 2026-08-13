@@ -124,7 +124,29 @@ async function memberOverrideHit(
 export type NodeAccessResult =
   | { allowed: true }
   | { allowed: false; reason: "needs_self_confirm"; source: "dept" | "role" | "personal" }
-  | { allowed: false; reason: "needs_approval" };
+  | { allowed: false; reason: "needs_approval" }
+  // no_entry：SENSITIVE 无区间（连审批入口都没有）/ ROOT 非 owner
+  | { allowed: false; reason: "no_entry" };
+
+
+// ─── SENSITIVE / ROOT 节点（批F，用户定谳的三态语义）────────────────────────────
+// SENSITIVE：区间行 = 审批流入口资格（有区间可申请、无区间连入口都没有），
+// 区间命中也**永不自确认**——必须经 owner 审批流发行。
+// ROOT：owner-only，连审批通道都没有。
+export function isRootNode(resourceType: string, resourceSub: string, verb: string): boolean {
+  return resourceType === "production"
+    && ((resourceSub === "*" && verb === "delete")
+      || resourceSub === "owner" || resourceSub === "restores");
+}
+
+export function isSensitiveNode(resourceType: string, resourceSub: string, verb: string): boolean {
+  if (isRootNode(resourceType, resourceSub, verb)) return false;
+  if (resourceType === "producer") return true;
+  if (resourceType === "production")
+    return resourceSub.startsWith("meta") || resourceSub === "archival" || resourceSub === "integrations";
+  if (resourceType === "member" && resourceSub.startsWith("imports")) return true;
+  return false;
+}
 
 export async function canAccessNode(
   ctx: { userId: string; isAdmin: boolean; isOwner: boolean },
@@ -139,25 +161,38 @@ export async function canAccessNode(
   if (await hasGrant(ctx.userId, productionId, resourceType, resourceId, resourceSub, verb)) {
     return { allowed: true };
   }
+  // ROOT：owner-only（第 1 步旁路已处理 owner），此处一律无入口
+  if (isRootNode(resourceType, resourceSub, verb)) {
+    return { allowed: false, reason: "no_entry" };
+  }
   const node: NodeKeyParts = { resourceType, resourceId, resourceSub, verb };
   const candidates = nodeKeyCandidates(node);
+  const sensitive = isSensitiveNode(resourceType, resourceSub, verb);
   // 2/5. 个人 override（deny 短路一切区间）
   const override = await memberOverrideHit(ctx.userId, productionId, candidates);
   if (override === "deny") return { allowed: false, reason: "needs_approval" };
-  // 3. dept 区间
+  // 3. dept 区间（sensitive：区间=审批入口资格，不自确认）
   if (await deptZoneHit(ctx.userId, productionId, candidates)) {
-    return { allowed: false, reason: "needs_self_confirm", source: "dept" };
+    return sensitive
+      ? { allowed: false, reason: "needs_approval" }
+      : { allowed: false, reason: "needs_self_confirm", source: "dept" };
   }
   // 4. role 区间
   if (await roleZoneHit(ctx.userId, productionId, candidates)) {
-    return { allowed: false, reason: "needs_self_confirm", source: "role" };
+    return sensitive
+      ? { allowed: false, reason: "needs_approval" }
+      : { allowed: false, reason: "needs_self_confirm", source: "role" };
   }
   // 5. 个人允许区间
   if (override === "allow") {
-    return { allowed: false, reason: "needs_self_confirm", source: "personal" };
+    return sensitive
+      ? { allowed: false, reason: "needs_approval" }
+      : { allowed: false, reason: "needs_self_confirm", source: "personal" };
   }
-  // 6. 申请流
-  return { allowed: false, reason: "needs_approval" };
+  // 6. sensitive 无区间=连申请入口都没有；普通节点=申请流
+  return sensitive
+    ? { allowed: false, reason: "no_entry" }
+    : { allowed: false, reason: "needs_approval" };
 }
 
 /** 节点是否在用户免审批区间内（deny 生效；不含已有 grant）。 */
@@ -182,6 +217,9 @@ export async function selfConfirmTemplateNodes(
 ): Promise<number> {
   let written = 0;
   for (const n of nodes) {
+    // SENSITIVE 节点永不自确认（区间只是审批入口资格）
+    if (isSensitiveNode(n.resourceType, n.resourceSub, n.verb)) continue;
+    if (isRootNode(n.resourceType, n.resourceSub, n.verb)) continue;
     if (!(await hasZoneEligibility(userId, productionId, n))) continue;
     const res = await getPool().query(
       `INSERT INTO resource_grant
