@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     // 新建对话选择器需要的制作列表（未归档）——与页面同一套查询
     const profile = await getUserProfile(auth.userId);
     const productions = (
-      await listMyProductionsWithRoles(auth.userId, profile?.isAdmin ?? auth.isAdmin, [...ADMIN_PANEL_NODE_PREFIXES])
+      await listMyProductionsWithRoles(auth.userId, profile?.isAdmin ?? auth.isAdmin, [...ADMIN_PANEL_NODE_PREFIXES] /* listMyProductionsWithRoles 内部为前缀 LIKE ANY 匹配（批G G-2 同步改造） */)
     )
       .filter((p) => !p.archivedAt)
       .map((p) => ({ id: p.id, name: p.name }));

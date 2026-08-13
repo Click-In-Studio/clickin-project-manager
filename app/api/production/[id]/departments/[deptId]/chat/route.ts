@@ -18,7 +18,6 @@ import {
   batchGetFeishuOpenIds,
   getFeishuOpenId,
 } from "@/lib/db";
-import { } from "@/lib/permissions";
 import { getProductionDept, setDeptChatId } from "@/lib/dept-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 

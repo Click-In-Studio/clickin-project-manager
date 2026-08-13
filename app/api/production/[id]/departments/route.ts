@@ -3,7 +3,6 @@ import { hasEventDomainView } from "@/lib/event-permissions";
 import { toActor, hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, getBossOpenIds } from "@/lib/db";
-import { } from "@/lib/permissions";
 import {
   listProductionDepts,
   createProductionDept,

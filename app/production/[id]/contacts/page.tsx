@@ -10,7 +10,6 @@ import {
   getProductionName,
   listProductionMembersWithRoles,
 } from "@/lib/db";
-import { } from "@/lib/permissions";
 import ContactsClient from "@/components/ContactsClient";
 
 export default async function ContactsPage({

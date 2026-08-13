@@ -4,7 +4,6 @@ export const metadata: Metadata = { title: "通知公告" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
 import { getProductionPermissionContext, listAnnouncements } from "@/lib/db";
-import { } from "@/lib/permissions";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminAnnouncementsClient from "@/components/AdminAnnouncementsClient";

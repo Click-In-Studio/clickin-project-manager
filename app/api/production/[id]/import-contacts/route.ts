@@ -20,7 +20,6 @@ import {
   updateUserContact,
 } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { } from "@/lib/permissions";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
