@@ -52,7 +52,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const isAssignee = req.assignees.some(a => a.userId === session.userId);
 
   if (!canViewFull && !isPocOfDept && !isAssignee)
-    redirect(`/unauthorized?resource=task%3Aview&id=${productionId}&taskId=${taskId}`);
+    redirect(`/unauthorized?resource=node%3Atask%2F*%2Fmeta%40view&id=${productionId}&taskId=${taskId}`);
 
   const dept = departments.find(d => d.id === req.departmentId);
   const deptPeople = dept

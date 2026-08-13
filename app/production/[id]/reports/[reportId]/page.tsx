@@ -85,7 +85,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
   if (!report) notFound();

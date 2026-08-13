@@ -19,7 +19,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
   if (!access) redirect(`/unauthorized?id=${id}`);
   // 批D：能力票（meta@view 实例或通配）
   if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
-    redirect(`/unauthorized?resource=asset%3Aview&id=${id}`);
+    redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
   const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 

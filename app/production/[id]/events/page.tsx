@@ -20,7 +20,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!(await hasEventDomainView(toActor(session, access.permCtx), id))) redirect(`/unauthorized?resource=event%3Afollow&id=${id}`);
+  if (!(await hasEventDomainView(toActor(session, access.permCtx), id))) redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
 
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), id, "event", "*", "call_sheet", "view");
   const canCreate = (await canAccessNode(access.permCtx, id, "event", "*", "*", "create")).allowed;

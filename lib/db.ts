@@ -7574,7 +7574,8 @@ export async function approveAccessRequest(
     // 终局（批G G-2）：atomic_permission 类型申请已随原子键退役（表已 DROP）——
     // 历史 pending 申请（若有）按无效处理，不再发行
     if (req.type === "atomic_permission") {
-      // no-op：原子键机制已退役
+      // 原子键机制已退役；生成端已节点化（403 redirect+modal），此处仅防历史 pending。
+      console.warn(`[approval] 跳过旧格式 atomic_permission 申请 ${requestId}（不发行）`);
     } else {
       // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
       // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。

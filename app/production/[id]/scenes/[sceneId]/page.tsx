@@ -34,7 +34,7 @@ export default async function SceneDetailPage({
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
   if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
-    redirect(`/unauthorized?resource=scene%3Aview&id=${id}`);
+    redirect(`/unauthorized?resource=node%3Ascene%2F*%2Fmeta%40view&id=${id}`);
 
   const canEdit = access.permCtx.isAdmin
     || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
