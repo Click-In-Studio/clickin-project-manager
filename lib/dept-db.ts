@@ -14,6 +14,7 @@ import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
 import type { Permission } from "./permissions";
 import { DEPT_ASSIGNABLE_PERMISSIONS } from "./permissions";
+import { RESERVED_TYPES } from "./grant-template";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -708,7 +709,7 @@ export async function recomputeAndRevokeGrants(
          -- 批G 通配区间：type 通配（RESERVED_TYPES 治理域除外）× verb 通配
          CROSS JOIN LATERAL (VALUES
            (base.base_key),
-           (CASE WHEN rg.resource_type NOT IN ('production', 'producer')
+           (CASE WHEN rg.resource_type <> ALL($4::text[])
                  THEN regexp_replace(base.base_key, '^node:[^/]+/[^/@]+', 'node:*/*') END)
          ) AS t(k1)
          CROSS JOIN LATERAL (VALUES
@@ -743,7 +744,7 @@ export async function recomputeAndRevokeGrants(
              AND pmp.granted = true
          )
        )`,
-    [productionId, userId, reason],
+    [productionId, userId, reason, [...RESERVED_TYPES]],
   );
 }
 
