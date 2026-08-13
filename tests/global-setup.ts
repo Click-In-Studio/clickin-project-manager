@@ -348,6 +348,20 @@ export async function setup() {
     }
   }
 
+  {
+    // Cue 模版声明表（§3.5）：CI 迁移路径重放。PRE 判据：表不存在。
+    const ctPre = await pool.query(
+      `SELECT 1 FROM information_schema.tables WHERE table_name = 'dept_cue_list_template'`,
+    );
+    if (ctPre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-dept-cue-template.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
   if (await isLocalScriptDataPreMigrationSchema(pool)) {
     const snapshot = await createLocalScriptDataPreMigrationData(pool);
     await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));

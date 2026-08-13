@@ -65,6 +65,15 @@ async function createDept(prodId: string, name: string, permissions: string[] = 
      VALUES ($1, $2, 1, $3, $4) RETURNING id`,
     [prodId, name, permissions, allowedCueTypes],
   );
+  // §3.5：数组语义已迁移到声明表（can_create + 设计全档）——工厂同步写声明行
+  for (const t of allowedCueTypes) {
+    await getPool().query(
+      `INSERT INTO dept_cue_list_template (production_id, dept_id, template, can_create, permissions)
+       VALUES ($1, $2, $3, true, ARRAY['@view','@edit','cues@create','cues@delete','grants@edit'])
+       ON CONFLICT (dept_id, template) DO NOTHING`,
+      [prodId, res.rows[0].id, t],
+    );
+  }
   return res.rows[0].id;
 }
 

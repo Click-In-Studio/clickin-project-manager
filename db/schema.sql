@@ -1214,6 +1214,23 @@ CREATE TABLE IF NOT EXISTS production_dept_permission (
 CREATE INDEX IF NOT EXISTS production_dept_permission_prod_idx
   ON production_dept_permission (production_id, dept_id);
 
+-- ── Cue 表权限模版声明（§3.5，2026-08-13）───────────────────────────────────
+-- 类型 × 权限声明：can_create=建表资格；permissions=纯相对键数组（'@view'/'cues@create'…）
+-- 建表定式：∀声明部门按数组发实例区间键（production_dept_permission）
+
+CREATE TABLE IF NOT EXISTS dept_cue_list_template (
+  production_id  TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id        UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  template       TEXT NOT NULL,
+  can_create     BOOLEAN NOT NULL DEFAULT false,
+  permissions    TEXT[] NOT NULL DEFAULT '{}',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (dept_id, template)
+);
+
+CREATE INDEX IF NOT EXISTS dept_cue_list_template_prod_idx
+  ON dept_cue_list_template (production_id, template);
+
 -- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:event/*/meta@view'),

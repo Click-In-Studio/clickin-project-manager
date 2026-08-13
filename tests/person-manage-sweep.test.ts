@@ -67,6 +67,13 @@ describe("dept 归属（dept 来源创建）", () => {
        VALUES ($1, $2, '{SQ}') RETURNING id`,
       [prodId, `音响部${shortId()}`],
     )).rows[0].id;
+    // §3.5：归属匹配已改读声明表
+    await getPool().query(
+      `INSERT INTO dept_cue_list_template (production_id, dept_id, template, can_create, permissions)
+       VALUES ($1, $2, 'SQ', true, ARRAY['@view','@edit','cues@create','cues@delete','grants@edit'])
+       ON CONFLICT (dept_id, template) DO NOTHING`,
+      [prodId, deptId],
+    );
     await getPool().query(
       `INSERT INTO production_dept_member (production_id, user_id, dept_id) VALUES ($1, $2, $3)`,
       [prodId, userId, deptId],

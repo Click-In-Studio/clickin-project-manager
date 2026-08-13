@@ -1774,12 +1774,14 @@ async function seedCueListCreatorAccessInTx(
          WHERE is_revoked = false
        DO NOTHING
      ), eligible_depts AS (
+       -- §3.5：归属匹配改读声明表（can_create 部门）；数组列已迁移退役中
        SELECT pdm.dept_id
        FROM production_dept_member pdm
-       JOIN production_dept pd ON pd.id = pdm.dept_id
+       JOIN dept_cue_list_template t
+         ON t.dept_id = pdm.dept_id AND t.production_id = pdm.production_id
        WHERE pdm.user_id = $3
          AND pdm.production_id = $1
-         AND $4::text = ANY(pd.allowed_cue_types)
+         AND t.template = $4::text AND t.can_create
      ), dept_manage AS (
        INSERT INTO resource_dept_manage
          (production_id, dept_id, resource_type, resource_id, established_by)
@@ -1840,6 +1842,10 @@ async function importCueColumnsInTx(
         [id, productionId, column.name, template, createdBy],
       );
       await seedCueListCreatorAccessInTx(client, { id, productionId, template, createdBy });
+      if (template) {
+        const { applyCueTemplateGrants } = await import("./cue-template-db");
+        await applyCueTemplateGrants(client, productionId, id, template);
+      }
       list = { id, name: column.name, template };
       listByKey.set(key, list);
     }
@@ -2517,14 +2523,9 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
 
 /** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
 export async function getUserAllowedCueTypes(userId: string, productionId: string): Promise<string[]> {
-  const res = await getPool().query<{ cue_type: string }>(
-    `SELECT DISTINCT unnest(pd.allowed_cue_types) AS cue_type
-     FROM production_dept_member pdm
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
-    [userId, productionId],
-  );
-  return res.rows.map((r) => r.cue_type);
+  // §3.5：改读声明表 can_create 路径（原 production_dept.allowed_cue_types 数组已迁移）
+  const { listCreatableTemplates } = await import("./cue-template-db");
+  return listCreatableTemplates(userId, productionId);
 }
 
 export async function deleteProduction(id: string): Promise<void> {
@@ -4410,6 +4411,11 @@ export async function createCueList(data: {
       [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy],
     );
     await seedCueListCreatorAccessInTx(client, data);
+    // §3.5 受益发键定式：∀ (dept, template) 声明行 → 实例区间键
+    if (data.template) {
+      const { applyCueTemplateGrants } = await import("./cue-template-db");
+      await applyCueTemplateGrants(client, data.productionId, data.id, data.template);
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
