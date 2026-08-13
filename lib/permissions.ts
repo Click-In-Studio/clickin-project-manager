@@ -41,9 +41,6 @@ export type Permission =
   // ─── 普通管理 - 导入类 ────────────────────────────────────────────────────────
   // ─── 普通管理 - 附件隐私类 ────────────────────────────────────────────────────
   // ─── 普通管理 - 构作视图公开类 ───────────────────────────────────────────────
-  | "dramaturgy_view:create_public"
-  | "dramaturgy_view:delete_public"
-  | "dramaturgy_view:overwrite_public"
   // ─── 普通管理 - Task 删除 ────────────────────────────────────────────────────
   // ─── 普通管理 - 角色管理 ──────────────────────────────────────────────────────
   // ─── 普通管理 - 标注体系管理 ──────────────────────────────────────────────────
@@ -62,9 +59,6 @@ export type Permission =
   // ─── 写权限 - 剧本领域权限（由操作权限隐含）─────────────────────────────────
   // ─── 写权限 - 场次/章节 ───────────────────────────────────────────────────────
   // ─── 写权限 - 构作视图（个人）────────────────────────────────────────────────
-  | "dramaturgy_view:create"
-  | "dramaturgy_view:delete"
-  | "dramaturgy_view:overwrite"
   // ─── 写权限 - 角色 ────────────────────────────────────────────────────────────
   // ─── 写权限 - 事件（per-event 写操作已迁移至 resource_grant，保留生产级原子权限）──
   // ─── 写权限 - 报告（Report，per-report 写操作已迁移至 resource_grant）──────
@@ -248,9 +242,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
   "dept:delete_member",
   "dept:set_poc",
   "dept:unset_poc",
-  "dramaturgy_view:create_public",
-  "dramaturgy_view:delete_public",
-  "dramaturgy_view:overwrite_public",
   "milestone:create",
   "milestone:manage",
   "milestone:delete",
@@ -264,9 +255,6 @@ const PRODUCER_ADMIN_PERMS: readonly Permission[] = [
 
 const PRODUCER_WRITE_PERMS: readonly Permission[] = [
   ...DRAMATURGY_FULL_SET,
-  "dramaturgy_view:create",
-  "dramaturgy_view:delete",
-  "dramaturgy_view:overwrite",
   
   "production:mount",
   "production:unmount",
@@ -405,12 +393,10 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "role:create", "role:rename", "role:delete", "role:assign_permission",
   "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
   "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
-  "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
   
   "production:manage_config",
   "milestone:create", "milestone:manage", "milestone:delete",
   "announcement:create", "announcement:edit", "announcement:delete",
-  "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
   
   
   "production:mount", "production:unmount",

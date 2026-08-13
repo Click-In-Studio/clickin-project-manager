@@ -40,8 +40,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "场次 & 构作",
     perms: [
-      "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
-      "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
     ],
   },
   {

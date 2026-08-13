@@ -59,9 +59,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // dramaturgy → 批E
   // asset → 批D
   // dramaturgy_view → 批E
-  "dramaturgy_view:create_public": "E",
-  "dramaturgy_view:delete_public": "E",
-  "dramaturgy_view:overwrite_public": "E",
   // character → 批E
   // tag_group → 批E
   // tag_option → 批E
@@ -81,9 +78,6 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // script → 批E
   // scene → 批E
   // dramaturgy_view → 批E
-  "dramaturgy_view:create": "E",
-  "dramaturgy_view:delete": "E",
-  "dramaturgy_view:overwrite": "E",
   // character → 批E
   // production → 批F
   "production:mount": "F",
@@ -103,6 +97,14 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批E PR-E3（dramaturgy_view 个人视图，2026-08-13）
+  "dramaturgy_view:create",
+  "dramaturgy_view:create_public",
+  "dramaturgy_view:delete",
+  "dramaturgy_view:delete_public",
+  "dramaturgy_view:overwrite",
+  "dramaturgy_view:overwrite_public",
+
   // 批E PR-E2（script/rehearsal_mark/dramaturgy:import，2026-08-12）
   "dramaturgy:import",
   "rehearsal_mark:create",

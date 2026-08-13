@@ -200,8 +200,8 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
       `SELECT permission_level FROM resource_permission_level
        WHERE resource_type = 'script_view' ORDER BY sort_order, permission_level`,
     );
-    // 批0 起含 REST 动词行 create/delete（sort_order=0）
-    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "view", "edit", "manage"]);
+    // 批0 起含 REST 动词行 create/delete（sort_order=0）；批E PR-E3 manage 退役
+    expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "view", "edit"]);
   });
 
   it("has entries for all expected resource types", async () => {
