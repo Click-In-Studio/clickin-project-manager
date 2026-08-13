@@ -20,7 +20,9 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!(await hasEventDomainView(toActor(session, access.permCtx), id))) redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
+  if (!(await hasEventDomainView(toActor(session, access.permCtx), id))) // event:follow 批B 两职拆分：订阅=followers@create、读取=meta/details@view——
+  // 此门是 hasEventDomainView（域 view），申请节点=meta@view 才与门一致（非 verb swap）
+  redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
 
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), id, "event", "*", "call_sheet", "view");
   const canCreate = (await canAccessNode(access.permCtx, id, "event", "*", "*", "create")).allowed;
