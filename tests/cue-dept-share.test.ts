@@ -21,7 +21,7 @@ let listId: string;
 
 async function activeRows(userId: string, resourceId: string): Promise<string[]> {
   const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-    `SELECT resource_sub, permission_level FROM resource_grant
+    `SELECT resource_sub, permission_level FROM production_member_grant
      WHERE production_id = $1 AND user_id = $2
        AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
     [prodId, userId, resourceId],
@@ -99,7 +99,7 @@ describe("四路覆盖之③：zone 键保护成员基础行", () => {
     );
     // 成员基础通配行（激活面自确认的产物）
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'cue_list', '*', 'meta', 'view', 'self_confirmed', $2),
               ($1, $2, 'cue_list', '*', 'cues', 'view', 'self_confirmed', $2)`,

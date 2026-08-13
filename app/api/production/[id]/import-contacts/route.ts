@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getAppAccessToken, searchUsersByName, getUserContactInfo } from "@/lib/platform/feishu/feishu-auth";
 import {
   parseWikiUrl,
@@ -19,7 +20,6 @@ import {
   updateUserContact,
 } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { hasPermission } from "@/lib/permissions";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id: productionId } = await ctx.params;
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("contacts:import", permCtx)) {
+  if (!(permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, productionId, "member", "*", "imports", "create"))) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

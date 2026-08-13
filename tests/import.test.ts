@@ -378,7 +378,7 @@ describe("A: importScriptToVersion DB integration", () => {
 
     const importedListId = cueRows.rows[2].cue_list_id;
     const creatorGrants = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
       [PROD_A, TEST_USER, importedListId],

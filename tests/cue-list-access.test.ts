@@ -1,5 +1,5 @@
 /**
- * Unit tests for Phase 4 cue list resource_grant access control.
+ * Unit tests for Phase 4 cue list production_member_grant access control.
  *
  * Tests cover:
  *   - createCueList writes manage grant for creator
@@ -114,7 +114,7 @@ beforeAll(async () => {
   );
   // Manually give EDITOR_USER an edit grant（批A：行集——授权时发多行，edit 必伴 view）
   await getPool().query(
-    `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+    `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
      VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'direct'),
             ($1, $2, 'cue_list', $3, '*', 'view', 'direct')
      ON CONFLICT DO NOTHING`,
@@ -124,7 +124,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await getPool().query(
-    "DELETE FROM resource_grant WHERE production_id = $1",
+    "DELETE FROM production_member_grant WHERE production_id = $1",
     [prodId],
   ).catch(() => {});
   await getPool().query(
@@ -150,7 +150,7 @@ describe("createCueList", () => {
       notes: "", abbr: null, template: null, createdBy: CREATOR_USER,
     });
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
       [prodId, CREATOR_USER, listId],
@@ -361,7 +361,7 @@ describe("selfConfirmCueListGrant", () => {
   it("writes self_confirmed grant for user in free-approval zone", async () => {
     await selfConfirmCueListGrant(EDITOR_USER, prodId, selfConfirmListId, "edit");
     const { rows } = await getPool().query(
-      `SELECT grant_source FROM resource_grant
+      `SELECT grant_source FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3
          AND permission_level = 'edit' AND NOT is_revoked`,
@@ -374,7 +374,7 @@ describe("selfConfirmCueListGrant", () => {
   it("is idempotent on repeat call", async () => {
     await selfConfirmCueListGrant(EDITOR_USER, prodId, selfConfirmListId, "edit");
     const { rows } = await getPool().query(
-      `SELECT COUNT(*)::int AS cnt FROM resource_grant
+      `SELECT COUNT(*)::int AS cnt FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3
          AND permission_level = 'edit' AND NOT is_revoked`,
@@ -425,7 +425,7 @@ describe("setCueListGrant and listCueListGrants", () => {
 // ── 8. listCueListsWithAccess ─────────────────────────────────────────────────
 
 describe("listCueListsWithAccess", () => {
-  it("marks editable lists correctly via resource_grant", async () => {
+  it("marks editable lists correctly via production_member_grant", async () => {
     const lists = await listCueListsWithAccess(prodId, EDITOR_USER);
     const target = lists.find((l) => l.id === cueListId);
     expect(target).toBeDefined();

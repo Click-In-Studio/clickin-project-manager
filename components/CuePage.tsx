@@ -925,7 +925,7 @@ export default function CuePage({
     () => new Set(editableListIds),
   );
   const [localManageIds, setLocalManageIds] = useState<Set<string>>(
-    // creator always has implicit manage permission regardless of resource_grant state
+    // creator always has implicit manage permission regardless of production_member_grant state
     () => new Set([...manageListIds, ...cueLists.filter(cl => cl.createdBy === myUserId).map(cl => cl.id)]),
   );
   const [shareModalListId, setShareModalListId] = useState<string | null>(null);

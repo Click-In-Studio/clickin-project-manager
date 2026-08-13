@@ -24,7 +24,7 @@ export async function isLocalScriptDataPreMigrationSchema(pool: Pool): Promise<b
          SELECT 1 FROM grant_template
          WHERE production_type IS NULL
            AND role_name = '*'
-           AND permission_key = 'script:comment'
+           AND permission_key = 'node:script/*/comments@create'
        )
        AS pending`,
   );

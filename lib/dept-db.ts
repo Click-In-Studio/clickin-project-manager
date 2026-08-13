@@ -12,8 +12,9 @@
 
 import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
-import type { Permission } from "./permissions";
-import { DEPT_ASSIGNABLE_PERMISSIONS } from "./permissions";
+type Permission = string;
+
+import { RESERVED_TYPES } from "./grant-template";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -470,65 +471,6 @@ export function collectAncestors(deptId: string, tree: DeptPermRow[]): string[] 
   return ancestors;
 }
 
-/**
- * Compute the full atomic-permission free-approval zone for a user in a production.
- * Returns a Set<Permission> (filtered to valid Permission values only).
- *
- * Zone = inherited dept permissions (from direct depts + their ancestors)
- *        ∪ POC zones (for each dept where user is POC)
- */
-export async function computeUserDeptFreeApprovalZone(
-  userId: string,
-  productionId: string,
-  pool: Pool | PoolClient = getPool(),
-): Promise<Set<Permission>> {
-  type UserDeptRow = {
-    dept_id: string;
-    is_poc: boolean;
-    poc_extra_permissions: string[];
-    poc_blocked_permissions: string[];
-  };
-
-  const [memberRes, treeRes] = await Promise.all([
-    pool.query<UserDeptRow>(
-      `SELECT pdm.dept_id, pdm.is_poc, pdm.poc_extra_permissions, pdm.poc_blocked_permissions
-       FROM production_dept_member pdm
-       WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
-      [userId, productionId],
-    ),
-    pool.query<DeptPermRow>(
-      "SELECT id, parent_id, permissions FROM production_dept WHERE production_id = $1",
-      [productionId],
-    ),
-  ]);
-
-  const tree = treeRes.rows;
-  const userDeptIds = memberRes.rows.map((r) => r.dept_id);
-  const validPerms = new Set<string>(DEPT_ASSIGNABLE_PERMISSIONS);
-
-  // Inherited permissions (member zone: direct depts + ancestors)
-  const inherited = computeInheritedPermissions(userDeptIds, tree);
-
-  // POC zones
-  const pocZone = new Set<string>();
-  for (const row of memberRes.rows) {
-    if (row.is_poc) {
-      const zone = computePocPermissions(
-        row.dept_id,
-        row.poc_extra_permissions,
-        row.poc_blocked_permissions,
-        tree,
-      );
-      for (const p of zone) pocZone.add(p);
-    }
-  }
-
-  const result = new Set<Permission>();
-  for (const p of [...inherited, ...pocZone]) {
-    if (validPerms.has(p)) result.add(p as Permission);
-  }
-  return result;
-}
 
 // ─── POC conflict resolution ──────────────────────────────────────────────────
 
@@ -589,38 +531,13 @@ export async function resolvePocConflict(
 
 // ─── Grant cascade revocation ─────────────────────────────────────────────────
 
-/**
- * Compute the combined atomic free-approval zone for a user:
- * dept zone (computeUserDeptFreeApprovalZone) ∪ role permissions.
- * Used for revocation checks — we must not revoke grants that are still
- * covered by either dept OR role membership.
- */
-async function computeUserCombinedAtomicZone(
-  userId: string,
-  productionId: string,
-  pool: Pool | PoolClient,
-): Promise<Set<string>> {
-  const [deptZone, rolePermsRes] = await Promise.all([
-    computeUserDeptFreeApprovalZone(userId, productionId, pool),
-    pool.query<{ permission_key: string }>(
-      `SELECT prp.permission_key
-       FROM production_member_role pmr
-       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
-       WHERE pmr.production_id = $1 AND pmr.user_id = $2`,
-      [productionId, userId],
-    ),
-  ]);
-  const combined = new Set<string>(deptZone);
-  for (const row of rolePermsRes.rows) combined.add(row.permission_key);
-  return combined;
-}
 
 /**
  * Recompute a user's free-approval zone after a role/dept/POC change and
  * soft-revoke any self_confirmed grants that are no longer covered.
  *
  * - atomic_permission_grant: revoke keys not in the combined (dept ∪ role) zone.
- * - resource_grant: revoke rows where the user's remaining depts no longer
+ * - production_member_grant: revoke rows where the user's remaining depts no longer
  *   cover the resource via resource_dept_manage AND the user is not a person
  *   manager of the resource (resource_person_manage).
  *
@@ -639,21 +556,9 @@ export async function recomputeAndRevokeGrants(
   reason: "role_change" | "dept_change" | "poc_change",
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  const newZone = await computeUserCombinedAtomicZone(userId, productionId, pool);
-
+  // 终局（批G G-2）：atomic 表已 DROP，撤销面只余 production_member_grant 行
   await pool.query(
-    `UPDATE atomic_permission_grant
-     SET is_revoked = true, revoked_reason = $3
-     WHERE production_id = $1
-       AND user_id = $2
-       AND grant_source = 'self_confirmed'
-       AND is_revoked = false
-       AND NOT (permission_key = ANY($4))`,
-    [productionId, userId, reason, [...newZone]],
-  );
-
-  await pool.query(
-    `UPDATE resource_grant rg
+    `UPDATE production_member_grant rg
      SET is_revoked = true, revoked_reason = $3
      WHERE rg.production_id = $1
        AND rg.user_id = $2
@@ -684,6 +589,7 @@ export async function recomputeAndRevokeGrants(
        --    保留段 grants/publication 不被 sub 通配覆盖）
        AND NOT EXISTS (
          SELECT 1 FROM (
+           -- base 候选（id 通配 × sub 通配，保留段 sub 不被 '*' 覆盖）
            SELECT unnest(ARRAY[
              'node:' || rg.resource_type || '/' || rg.resource_id
                || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
@@ -692,16 +598,28 @@ export async function recomputeAndRevokeGrants(
                || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
                || '@' || rg.permission_level
            ] || CASE WHEN rg.resource_sub = '*'
-                       OR rg.resource_sub IN ('grants', 'publication')
+                       OR rg.resource_sub IN ('grants', 'publication', 'assignees', 'imports')
                        OR rg.resource_sub LIKE 'grants/%'
                        OR rg.resource_sub LIKE 'publication/%'
+                       OR rg.resource_sub LIKE 'assignees/%'
+                       OR rg.resource_sub LIKE 'imports/%'
                 THEN ARRAY[]::text[]
                 ELSE ARRAY[
                   'node:' || rg.resource_type || '/' || rg.resource_id || '@' || rg.permission_level,
                   'node:' || rg.resource_type || '/*@' || rg.permission_level
-                ] END) AS key
-         ) cand
-         WHERE cand.key IN (
+                ] END) AS base_key
+         ) base
+         -- 批G 通配区间：type 通配（RESERVED_TYPES 治理域除外）× verb 通配
+         CROSS JOIN LATERAL (VALUES
+           (base.base_key),
+           (CASE WHEN rg.resource_type <> ALL($4::text[])
+                 THEN regexp_replace(base.base_key, '^node:[^/]+/[^/@]+', 'node:*/*') END)
+         ) AS t(k1)
+         CROSS JOIN LATERAL (VALUES
+           (t.k1),
+           (regexp_replace(t.k1, '@[a-z]+$', '@*'))
+         ) AS cand(key)
+         WHERE cand.key IS NOT NULL AND cand.key IN (
            SELECT prp.permission_key
            FROM production_member_role pmr
            JOIN production_role_permission prp ON prp.role_id = pmr.role_id
@@ -729,7 +647,7 @@ export async function recomputeAndRevokeGrants(
              AND pmp.granted = true
          )
        )`,
-    [productionId, userId, reason],
+    [productionId, userId, reason, [...RESERVED_TYPES]],
   );
 }
 
@@ -744,12 +662,7 @@ export async function revokeAllGrantsForMember(
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
   await pool.query(
-    `UPDATE resource_grant SET is_revoked = true, revoked_reason = 'member_removed'
-     WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
-    [productionId, userId],
-  );
-  await pool.query(
-    `UPDATE atomic_permission_grant SET is_revoked = true, revoked_reason = 'member_removed'
+    `UPDATE production_member_grant SET is_revoked = true, revoked_reason = 'member_removed'
      WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
     [productionId, userId],
   );
@@ -786,7 +699,7 @@ export async function revokeGrantsForDeptRemoval(
 /**
  * When a user loses POC status in a dept, revoke self_confirmed grants that
  * were exclusively in the POC zone (not covered by remaining membership zone).
- * Also revokes resource_grant rows no longer covered by any dept membership.
+ * Also revokes production_member_grant rows no longer covered by any dept membership.
  */
 export async function revokeGrantsForPocLoss(
   deptId: string,
@@ -947,7 +860,7 @@ export async function computeApprovalRoutingChain(
 
   // Tier 1: personal manage grant holders
   const { rows: manageGrantors } = await pool.query<{ user_id: string }>(
-    `SELECT DISTINCT user_id FROM resource_grant
+    `SELECT DISTINCT user_id FROM production_member_grant
      WHERE production_id = $1
        AND resource_type = $2
        AND resource_id   = ANY($3)

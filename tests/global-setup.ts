@@ -48,6 +48,11 @@ import {
   type CueListGrantSnapshot,
 } from "./cue-list-grant-snapshot";
 import {
+  isScriptRestPreMigrationSchema,
+  createScriptRestPreMigrationData,
+  SCRIPT_REST_SNAPSHOT_PATH,
+} from "./script-rest-snapshot";
+import {
   isSceneCharTagRestPreMigrationSchema,
   createSceneCharTagRestPreMigrationData,
   SCENE_CHAR_TAG_REST_SNAPSHOT_PATH,
@@ -257,6 +262,74 @@ export async function setup() {
     await writeFile(SCENE_CHAR_TAG_REST_SNAPSHOT_PATH, JSON.stringify(sctSnapshot));
     for (const file of ["db/add-scene-char-tag-verbs.sql", "db/migrate-scene-char-tag-rest.sql"]) {
       const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isScriptRestPreMigrationSchema(pool)) {
+    // Migration path（批E PR-E2）: script 词汇行尚不存在。
+    const srSnapshot = await createScriptRestPreMigrationData(pool, TEST_USER);
+    await writeFile(SCRIPT_REST_SNAPSHOT_PATH, JSON.stringify(srSnapshot));
+    for (const file of ["db/add-script-dramaturgy-verbs.sql", "db/migrate-script-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 批E PR-E3（个人视图）：零消费键无 invariance，但 CI 迁移路径仍须重放迁移
+    // （否则词汇断言对 pre 态失败）。PRE 判据：script_view manage 词汇行仍在。
+    const e3Pre = await pool.query(
+      `SELECT 1 FROM resource_permission_level
+       WHERE resource_type = 'script_view' AND permission_level = 'manage'`,
+    );
+    if (e3Pre.rows.length > 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-personal-view-rest.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 批F（治理域）：CI 迁移路径重放。PRE 判据：production 词汇行尚不存在。
+    const fPre = await pool.query(
+      `SELECT 1 FROM resource_permission_level
+       WHERE resource_type = 'production' AND permission_level = 'view'`,
+    );
+    if (fPre.rows.length === 0) {
+      for (const file of ["db/add-governance-verbs.sql", "db/migrate-governance-rest.sql"]) {
+        const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+        await pool.query(migrationSql);
+      }
+    }
+  }
+
+  {
+    // 批G G-1（制作人通配区间）：CI 迁移路径重放。PRE 判据：模板尚无通配主行。
+    const g1Pre = await pool.query(
+      `SELECT 1 FROM grant_template WHERE role_name = '制作人' AND permission_key = 'node:*/*@*'`,
+    );
+    if (g1Pre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-producer-wildcard.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 批G G-2（终局清理）：CI 迁移路径重放。PRE 判据：atomic 表仍存在。
+    const g2Pre = await pool.query(
+      `SELECT 1 FROM information_schema.tables WHERE table_name = 'atomic_permission_grant'`,
+    );
+    if (g2Pre.rows.length > 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-terminal-cleanup.sql"),
+        "utf8",
+      );
       await pool.query(migrationSql);
     }
   }

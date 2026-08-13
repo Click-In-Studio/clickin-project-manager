@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { ALL_PERMISSIONS } from "@/lib/permissions";
 import {
   PERMISSION_MIGRATION_LEDGER,
   RETIRED_PERMISSION_KEYS,
@@ -28,9 +27,9 @@ function* walkSources(dir: string): Generator<string> {
 }
 
 describe("棘轮不变量", () => {
-  it("账本键集合 === ALL_PERMISSIONS 集合（漏记或忘删都算红）", () => {
+  it("账本键集合 === ([] as readonly string[]) /* 终局：原子键全集为空 */ 集合（漏记或忘删都算红）", () => {
     const ledger = new Set(Object.keys(PERMISSION_MIGRATION_LEDGER));
-    const all = new Set<string>(ALL_PERMISSIONS);
+    const all = new Set<string>(([] as readonly string[]) /* 终局：原子键全集为空 */);
     const missingFromLedger = [...all].filter((k) => !ledger.has(k));
     const staleInLedger = [...ledger].filter((k) => !all.has(k));
     expect(missingFromLedger, "存在未入账的原子键（新增键必须记入账本或不引入）").toEqual([]);

@@ -21,7 +21,7 @@ describe("local script data migration", () => {
       `SELECT 1 FROM grant_template
        WHERE production_type IS NULL
          AND role_name = '*'
-         AND permission_key = 'script:comment'`,
+         AND permission_key = 'node:script/*/comments@create'`,
     );
     expect(rows).toHaveLength(1);
   });
@@ -29,7 +29,7 @@ describe("local script data migration", () => {
   it.skipIf(!snapshot)("backfills comment eligibility", async () => {
     const { rows } = await getPool().query(
       `SELECT 1 FROM production_role_permission
-       WHERE role_id = $1 AND permission_key = 'script:comment'`,
+       WHERE role_id = $1 AND permission_key = 'node:script/*/comments@create'`,
       [snapshot!.roleId],
     );
     expect(rows).toHaveLength(1);
@@ -38,7 +38,7 @@ describe("local script data migration", () => {
   it.skipIf(!snapshot)("does not create active comment grants", async () => {
     const { rows } = await getPool().query(
       `SELECT 1 FROM atomic_permission_grant
-       WHERE production_id = $1 AND permission_key = 'script:comment'`,
+       WHERE production_id = $1 AND permission_key = 'node:script/*/comments@create'`,
       [snapshot!.productionIds.stagePlay],
     );
     expect(rows).toHaveLength(0);

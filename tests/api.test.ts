@@ -821,13 +821,14 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
     await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
     await addProductionMember(SCRIPT_PERM_PROD, TEST_USER);
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
-    // Grant the two permissions exercised below so each request reaches its target gate.
+    // 批E2 行化：blocks@view 穿读门；comments@create 供下方评论测试（原 script:comment）
     await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source, confirmed_by)
-       VALUES ($1, $2, 'script:view', 'direct', $2),
-              ($1, $2, 'script:comment', 'direct', $2)
-       ON CONFLICT DO NOTHING`,
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'script', '*', 'blocks', 'view', 'direct'),
+              ($1, $2, 'script', '*', 'comments', 'create', 'direct')
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false DO NOTHING`,
       [SCRIPT_PERM_PROD, TEST_USER],
     );
   });
@@ -855,7 +856,7 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/script:edit/);
+    expect(body.error).toMatch(/node:script/);
   });
 
   it("member without a script-editing role can publish a comment", async () => {

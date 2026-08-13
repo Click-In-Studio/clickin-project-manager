@@ -6,12 +6,12 @@
 BEGIN;
 
 INSERT INTO production_role_permission (role_id, permission_key)
-SELECT id, 'script:comment'
+SELECT id, 'node:script/*/comments@create'
 FROM production_role
 ON CONFLICT DO NOTHING;
 
 INSERT INTO grant_template (role_name, permission_key)
-VALUES ('*', 'script:comment')
+VALUES ('*', 'node:script/*/comments@create')
 ON CONFLICT DO NOTHING;
 
 UPDATE production

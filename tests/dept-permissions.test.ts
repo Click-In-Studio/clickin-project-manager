@@ -19,7 +19,6 @@ import {
   computePocPermissions,
   collectDescendants,
   collectAncestors,
-  computeUserDeptFreeApprovalZone,
   createProductionDept,
   listProductionDepts,
   getProductionDept,
@@ -39,8 +38,11 @@ import {
   setRolePermissions,
   deleteProductionRole,
 } from "@/lib/db";
-import { canAccess } from "@/lib/permissions";
 import type { PermissionContext } from "@/lib/permissions";
+
+// 批F 后原子键仅剩 org 域 2 枚；本文件测试 zone/recompute 机制本身（键无关），
+// 用已退役键作为载荷（RETIRED 棘轮 grep 仅扫 app/lib/components，tests 不在其列）。
+const asPerm = (k: string) => k;
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -85,34 +87,34 @@ describe("computeInheritedPermissions", () => {
   //      └── grandchild (p: [script:view])
 
   const tree = [
-    { id: "root", parent_id: null, permissions: ["script:import", "script:comment"] },
-    { id: "child", parent_id: "root", permissions: ["script:create_block"] },
-    { id: "grandchild", parent_id: "child", permissions: ["script:view"] },
-    { id: "sibling", parent_id: "root", permissions: ["script:view"] },
+    { id: "root", parent_id: null, permissions: [asPerm("node:announcement/*@edit"), asPerm("node:milestone/*@create")] },
+    { id: "child", parent_id: "root", permissions: [asPerm("node:announcement/*@delete")] },
+    { id: "grandchild", parent_id: "child", permissions: [asPerm("node:member/*/meta@view")] },
+    { id: "sibling", parent_id: "root", permissions: [asPerm("node:member/*/meta@view")] },
   ];
 
   it("user in leaf dept inherits its own + all ancestor permissions", () => {
     const result = computeInheritedPermissions(["grandchild"], tree);
-    expect(result.has("script:view")).toBe(true);       // own
-    expect(result.has("script:create_block")).toBe(true);  // parent
-    expect(result.has("script:import")).toBe(true);      // grandparent
-    expect(result.has("script:comment")).toBe(true);        // grandparent
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);       // own
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);  // parent
+    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);      // grandparent
+    expect(result.has(asPerm("node:milestone/*@create"))).toBe(true);        // grandparent
   });
 
   it("user in root dept only gets root permissions", () => {
     const result = computeInheritedPermissions(["root"], tree);
-    expect(result.has("script:import")).toBe(true);
-    expect(result.has("script:comment")).toBe(true);
-    expect(result.has("script:create_block")).toBe(false); // child — not inherited upward
+    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
+    expect(result.has(asPerm("node:milestone/*@create"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false); // child — not inherited upward
   });
 
   it("user in multiple depts gets union of all ancestor chains", () => {
     // member of both grandchild AND sibling
     const result = computeInheritedPermissions(["grandchild", "sibling"], tree);
-    expect(result.has("script:view")).toBe(true);
-    expect(result.has("script:create_block")).toBe(true);
-    expect(result.has("script:import")).toBe(true);
-    expect(result.has("script:view")).toBe(true); // from sibling
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true); // from sibling
   });
 
   it("empty dept list returns empty set", () => {
@@ -128,47 +130,47 @@ describe("computeInheritedPermissions", () => {
 
 describe("computePocPermissions", () => {
   const tree = [
-    { id: "root", parent_id: null, permissions: ["script:import"] },
-    { id: "child", parent_id: "root", permissions: ["script:create_block"] },
-    { id: "grandchild", parent_id: "child", permissions: ["script:view"] },
+    { id: "root", parent_id: null, permissions: [asPerm("node:announcement/*@edit")] },
+    { id: "child", parent_id: "root", permissions: [asPerm("node:announcement/*@delete")] },
+    { id: "grandchild", parent_id: "child", permissions: [asPerm("node:member/*/meta@view")] },
   ];
 
   it("POC of root gets permissions from all descendants (union)", () => {
     const result = computePocPermissions("root", [], [], tree);
-    expect(result.has("script:import")).toBe(true);
-    expect(result.has("script:create_block")).toBe(true);
-    expect(result.has("script:view")).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
   });
 
   it("POC of child gets only child + grandchild permissions", () => {
     const result = computePocPermissions("child", [], [], tree);
-    expect(result.has("script:create_block")).toBe(true);
-    expect(result.has("script:view")).toBe(true);
-    expect(result.has("script:import")).toBe(false); // root — not in child's subtree
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(false); // root — not in child's subtree
   });
 
   it("poc_extra_permissions are added to the zone", () => {
-    const result = computePocPermissions("child", ["script:view"], [], tree);
-    expect(result.has("script:view")).toBe(true);
-    expect(result.has("script:create_block")).toBe(true);
+    const result = computePocPermissions("child", [asPerm("node:member/*/meta@view")], [], tree);
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
   });
 
   it("poc_blocked_permissions are excluded from the zone", () => {
-    const result = computePocPermissions("root", [], ["script:create_block"], tree);
-    expect(result.has("script:import")).toBe(true);
-    expect(result.has("script:create_block")).toBe(false); // blocked
-    expect(result.has("script:view")).toBe(true);
+    const result = computePocPermissions("root", [], [asPerm("node:announcement/*@delete")], tree);
+    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false); // blocked
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
   });
 
   it("blocked overrides extra (cannot re-add a blocked permission)", () => {
-    const result = computePocPermissions("root", ["script:create_block"], ["script:create_block"], tree);
-    expect(result.has("script:create_block")).toBe(false); // blocked wins
+    const result = computePocPermissions("root", [asPerm("node:announcement/*@delete")], [asPerm("node:announcement/*@delete")], tree);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false); // blocked wins
   });
 
   it("leaf dept POC gets only its own permissions", () => {
     const result = computePocPermissions("grandchild", [], [], tree);
-    expect(result.has("script:view")).toBe(true);
-    expect(result.has("script:create_block")).toBe(false);
+    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
+    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false);
   });
 });
 
@@ -234,7 +236,7 @@ describe("createProductionDept / listProductionDepts", () => {
       productionId: prodId,
       name: "测试部门A",
       displayOrder: 1,
-      permissions: ["script:comment", "script:view"],
+      permissions: [asPerm("node:milestone/*@create"), asPerm("node:member/*/meta@view")],
       allowedCueTypes: ["lights"],
     });
     deptId = dept.id;
@@ -245,7 +247,7 @@ describe("createProductionDept / listProductionDepts", () => {
     const found = depts.find((d) => d.id === deptId);
     expect(found).toBeDefined();
     expect(found!.name).toBe("测试部门A");
-    expect(found!.permissions).toContain("script:comment");
+    expect(found!.permissions).toContain(asPerm("node:milestone/*@create"));
     expect(found!.allowedCueTypes).toContain("lights");
   });
 
@@ -274,7 +276,7 @@ describe("updateProductionDept", () => {
     const dept = await createProductionDept({
       productionId: prodId,
       name: "待更新部门",
-      permissions: ["script:comment"],
+      permissions: [asPerm("node:milestone/*@create")],
     });
     deptId = dept.id;
   });
@@ -286,10 +288,10 @@ describe("updateProductionDept", () => {
   });
 
   it("can update permissions", async () => {
-    await updateProductionDept(deptId, prodId, { permissions: ["script:view", "script:edit_block"] });
+    await updateProductionDept(deptId, prodId, { permissions: [asPerm("node:member/*/meta@view"), asPerm("node:announcement/*@create")] });
     const dept = await getProductionDept(deptId, prodId);
-    expect(dept!.permissions).toContain("script:view");
-    expect(dept!.permissions).not.toContain("script:comment"); // replaced
+    expect(dept!.permissions).toContain(asPerm("node:member/*/meta@view"));
+    expect(dept!.permissions).not.toContain(asPerm("node:milestone/*@create")); // replaced
   });
 
   it("calling with empty fields is a no-op", async () => {
@@ -407,14 +409,14 @@ describe("setDeptMembers: basic add/remove", () => {
       {
         userId: TEST_USER,
         isPoc: true,
-        pocExtraPermissions: ["script:view"],
-        pocBlockedPermissions: ["script:comment"],
+        pocExtraPermissions: [asPerm("node:member/*/meta@view")],
+        pocBlockedPermissions: [asPerm("node:milestone/*@create")],
       },
     ]);
     const members = await getDeptMembers(deptId);
     const row = members.find((m) => m.userId === TEST_USER);
-    expect(row?.pocExtraPermissions).toContain("script:view");
-    expect(row?.pocBlockedPermissions).toContain("script:comment");
+    expect(row?.pocExtraPermissions).toContain(asPerm("node:member/*/meta@view"));
+    expect(row?.pocBlockedPermissions).toContain(asPerm("node:milestone/*@create"));
   });
 });
 
@@ -480,361 +482,6 @@ describe("setDeptMembers: POC conflict resolution", () => {
 
 // ── 4. Permission zone ─────────────────────────────────────────────────────────
 
-describe("computeUserDeptFreeApprovalZone", () => {
-  let parentDeptId: string;
-  let childDeptId: string;
-
-  beforeAll(async () => {
-    const parent = await createProductionDept({
-      productionId: prodId,
-      name: "权限继承父部门",
-      permissions: ["script:comment", "script:edit_block"],
-    });
-    parentDeptId = parent.id;
-
-    const child = await createProductionDept({
-      productionId: prodId,
-      name: "权限继承子部门",
-      parentId: parentDeptId,
-      permissions: ["script:view"],
-    });
-    childDeptId = child.id;
-
-    // TEST_USER is a member of child dept
-    await setDeptMembers(childDeptId, prodId, [{ userId: TEST_USER, isPoc: false }]);
-    // EXTRA_USER_1 is POC of parent dept with extra permissions
-    await setDeptMembers(parentDeptId, prodId, [
-      {
-        userId: EXTRA_USER_1,
-        isPoc: true,
-        pocExtraPermissions: ["script:view"],
-        pocBlockedPermissions: ["script:comment"],
-      },
-    ]);
-  });
-
-  it("member of child dept inherits child + parent permissions", async () => {
-    const zone = await computeUserDeptFreeApprovalZone(TEST_USER, prodId);
-    expect(zone.has("script:view")).toBe(true);  // child's own
-    expect(zone.has("script:comment")).toBe(true);      // inherited from parent
-    expect(zone.has("script:edit_block")).toBe(true);  // inherited from parent
-  });
-
-  it("non-member user gets empty zone", async () => {
-    const zone = await computeUserDeptFreeApprovalZone(EXTRA_USER_2, prodId);
-    expect(zone.size).toBe(0);
-  });
-
-  it("POC user gets descendant union + extra, minus blocked", async () => {
-    const zone = await computeUserDeptFreeApprovalZone(EXTRA_USER_1, prodId);
-    // parent permissions in zone (from membership)
-    expect(zone.has("script:edit_block")).toBe(true);
-    // POC zone includes child's permissions
-    expect(zone.has("script:view")).toBe(true);
-    // poc_extra_permissions added
-    expect(zone.has("script:view")).toBe(true);
-    // Note: scene:view IS in zone from membership (parent dept) even though blocked in POC zone.
-    // poc_blocked_permissions only removes from the POC zone, not from the membership zone.
-    // EXTRA_USER_1 is a member of parentDeptId which has scene:view, so it remains in zone.
-    expect(zone.has("script:comment")).toBe(true);
-  });
-});
-
-describe("canAccess() with deptFreeApprovalZone", () => {
-  // cue:create is a non-base permission suitable for testing the confirmation flow.
-
-  it("base permission without role or grant → needs_approval (bypass removed, #158)", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(), // member with no role permissions
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(),
-    };
-    // scene:view used to be granted via MEMBER_BASE_PERMISSIONS bypass.
-    // Now it requires the role to include it; with empty memberPermissions → needs_approval.
-    expect(canAccess(ctx, "script:comment")).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-
-  it("base permission with role but no active grant → needs_self_confirm", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(["script:comment"] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, "script:comment")).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("base permission with active grant → allowed", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(["script:comment"] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(["script:comment"] as const),
-    };
-    expect(canAccess(ctx, "script:comment")).toEqual({ allowed: true });
-  });
-
-  it("role permission without active grant → needs_self_confirm", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(["script:import"] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(), // not yet confirmed
-    };
-    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("role permission with active grant → allowed", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(["script:import"] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(["script:import"] as const),
-    };
-    expect(canAccess(ctx, "script:import")).toEqual({ allowed: true });
-  });
-
-  it("returns needs_self_confirm when perm is in deptFreeApprovalZone (no role)", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(), // no role-based permissions
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["script:import", "dramaturgy:import"]),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("returns needs_approval when perm is in neither role nor deptFreeApprovalZone", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["dramaturgy:import"]),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-
-  it("needs_self_confirm takes priority over needs_approval when zone matches", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(["dept:create"]),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, "dept:create")).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("empty zone and no role → needs_approval for non-base perms", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, "script:import")).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-});
-
-// ── 5. Grant cascade revocation ────────────────────────────────────────────────
-
-describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
-  let deptIdA: string;  // dept with scene:view + cue_list:view
-  let deptIdB: string;  // dept with character:view
-
-  beforeAll(async () => {
-    // Remove TEST_USER from all depts in this production to prevent cross-suite interference.
-    // Earlier describe blocks may have left TEST_USER in depts with scene:view or other perms.
-    await getPool().query(
-      "DELETE FROM production_dept_member WHERE production_id = $1 AND user_id = $2",
-      [prodId, TEST_USER],
-    );
-    // Clean up any prior atomic_permission_grant rows for TEST_USER in this production
-    await getPool().query(
-      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
-      [prodId, TEST_USER],
-    );
-
-    const deptA = await createProductionDept({
-      productionId: prodId,
-      name: "撤销测试部门A",
-      permissions: ["script:comment", "script:view"],
-    });
-    deptIdA = deptA.id;
-
-    const deptB = await createProductionDept({
-      productionId: prodId,
-      name: "撤销测试部门B",
-      permissions: ["script:edit_block"],
-    });
-    deptIdB = deptB.id;
-
-    // TEST_USER is in both depts (fresh start)
-    await setDeptMembers(deptIdA, prodId, [{ userId: TEST_USER, isPoc: false }]);
-    await setDeptMembers(deptIdB, prodId, [{ userId: TEST_USER, isPoc: false }]);
-
-    // Insert self_confirmed grants: one in A's zone, one in B's zone, one outside both
-    await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES
-         ($1, $2, 'script:comment',      'self_confirmed'),
-         ($1, $2, 'script:edit_block',  'self_confirmed'),
-         ($1, $2, 'script:manage',   'self_confirmed')
-       ON CONFLICT DO NOTHING`,
-      [prodId, TEST_USER],
-    );
-  });
-
-  it("removing from deptA revokes grants no longer in zone (script:manage)", async () => {
-    // Remove TEST_USER from deptA only (still in deptB with character:view)
-    await setDeptMembers(deptIdA, prodId, []);
-    // scene:view was in deptA's zone but not deptB's — should be revoked
-    // character:view is in deptB's zone — should be kept
-    // script:manage was never in any zone — should be revoked
-
-    const { rows } = await getPool().query<{
-      permission_key: string;
-      is_revoked: boolean;
-    }>(
-      `SELECT permission_key, is_revoked
-       FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2`,
-      [prodId, TEST_USER],
-    );
-
-    const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    expect(byKey["script:comment"]).toBe(true);      // was only in deptA's zone
-    expect(byKey["script:edit_block"]).toBe(false);  // still in deptB's zone
-    expect(byKey["script:manage"]).toBe(true);    // never in any zone
-  });
-
-  it("non-self_confirmed grants are not revoked on dept removal", async () => {
-    // Insert an 'approval' grant that should never be auto-revoked
-    await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES ($1, $2, 'script:import', 'approval')
-       ON CONFLICT DO NOTHING`,
-      [prodId, TEST_USER],
-    );
-
-    // Remove from deptB
-    await setDeptMembers(deptIdB, prodId, []);
-
-    const { rows } = await getPool().query<{ is_revoked: boolean }>(
-      "SELECT is_revoked FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND permission_key = 'script:import'",
-      [prodId, TEST_USER],
-    );
-    expect(rows[0]?.is_revoked).toBe(false); // approval grant not touched
-  });
-});
-
-describe("revokeGrantsForPocLoss: atomic_permission_grant", () => {
-  let pocDeptId: string;
-  let memberDeptId: string;
-
-  beforeAll(async () => {
-    const pocDept = await createProductionDept({
-      productionId: prodId,
-      name: "POC撤销测试部门",
-      permissions: ["script:view"],
-    });
-    pocDeptId = pocDept.id;
-
-    const memberDept = await createProductionDept({
-      productionId: prodId,
-      name: "POC撤销测试成员部门",
-      permissions: ["script:comment"],
-    });
-    memberDeptId = memberDept.id;
-
-    // EXTRA_USER_2: POC of pocDept, regular member of memberDept
-    await setDeptMembers(pocDeptId, prodId, [{ userId: EXTRA_USER_2, isPoc: true }]);
-    await setDeptMembers(memberDeptId, prodId, [{ userId: EXTRA_USER_2, isPoc: false }]);
-
-    // Self-confirmed grants: cue_list:view (only in POC zone), scene:view (in member zone)
-    await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES
-         ($1, $2, 'script:view', 'self_confirmed'),
-         ($1, $2, 'script:comment',    'self_confirmed')
-       ON CONFLICT DO NOTHING`,
-      [prodId, EXTRA_USER_2],
-    );
-  });
-
-  it("losing POC status revokes grants that were only in POC zone", async () => {
-    // Demote EXTRA_USER_2 from POC in pocDept (keep as regular member)
-    await setDeptMembers(pocDeptId, prodId, [{ userId: EXTRA_USER_2, isPoc: false }]);
-
-    const { rows } = await getPool().query<{
-      permission_key: string;
-      is_revoked: boolean;
-    }>(
-      `SELECT permission_key, is_revoked
-       FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2`,
-      [prodId, EXTRA_USER_2],
-    );
-
-    const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    // cue_list:view came from pocDept.permissions; member of pocDept still gets it via inheritance
-    // (user is still a regular member of pocDept, so cue_list:view is still in zone)
-    expect(byKey["script:comment"]).toBe(false);    // still in member zone (memberDept)
-    // cue_list:view: user is still in pocDept as regular member, so still in zone
-    expect(byKey["script:view"]).toBe(false);
-  });
-});
-
-// ── 6. production_approval_config ─────────────────────────────────────────────
-
 describe("production_approval_config", () => {
   it("createProduction creates approval config with default 24h TTL", async () => {
     const config = await getOrCreateApprovalConfig(prodId);
@@ -850,109 +497,6 @@ describe("production_approval_config", () => {
 
 // ── 7. recomputeAndRevokeGrants (role_change) ─────────────────────────────────
 
-describe("recomputeAndRevokeGrants: role_change via setMemberRoles", () => {
-  let roleAlphaId: string;
-  let roleAlphaName: string;
-  let roleBetaId: string;
-  let roleBetaName: string;
-
-  beforeAll(async () => {
-    const pool = getPool();
-    // Ensure EXTRA_USER_1 is a production member with a clean slate
-    await pool.query(
-      "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-      [prodId, EXTRA_USER_1, []],
-    );
-    await pool.query(
-      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
-      [prodId, EXTRA_USER_1],
-    );
-    await pool.query(
-      "DELETE FROM production_dept_member WHERE production_id = $1 AND user_id = $2",
-      [prodId, EXTRA_USER_1],
-    );
-    await pool.query(
-      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
-      [prodId, EXTRA_USER_1],
-    );
-
-    // Create two roles with distinct non-overlapping permissions
-    const alpha = await createProductionRole(prodId, `test-role-alpha-${shortId()}`);
-    roleAlphaId = alpha.id;
-    roleAlphaName = alpha.name;
-    await setRolePermissions(roleAlphaId, ["script:edit_block"]);
-
-    const beta = await createProductionRole(prodId, `test-role-beta-${shortId()}`);
-    roleBetaId = beta.id;
-    roleBetaName = beta.name;
-    await setRolePermissions(roleBetaId, ["script:comment"]);
-
-    // Assign EXTRA_USER_1 to both roles so both permissions are in their zone
-    await setMemberRoles(prodId, EXTRA_USER_1, [roleAlphaName, roleBetaName]);
-
-    // Grant self_confirmed atomics: one per role, plus one outside both zones
-    await pool.query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES
-         ($1, $2, 'script:edit_block', 'self_confirmed'),
-         ($1, $2, 'script:comment',     'self_confirmed'),
-         ($1, $2, 'script:view',  'self_confirmed')
-       ON CONFLICT DO NOTHING`,
-      [prodId, EXTRA_USER_1],
-    );
-  });
-
-  afterAll(async () => {
-    await deleteProductionRole(roleAlphaId, prodId).catch(() => {});
-    await deleteProductionRole(roleBetaId, prodId).catch(() => {});
-    await getPool().query(
-      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
-      [prodId, EXTRA_USER_1],
-    );
-  });
-
-  it("removing role-alpha revokes its exclusive grants but keeps role-beta grants", async () => {
-    // Narrow to role-beta only (remove role-alpha)
-    await setMemberRoles(prodId, EXTRA_USER_1, [roleBetaName]);
-
-    const { rows } = await getPool().query<{ permission_key: string; is_revoked: boolean }>(
-      `SELECT permission_key, is_revoked
-       FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2`,
-      [prodId, EXTRA_USER_1],
-    );
-
-    const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    expect(byKey["script:edit_block"]).toBe(true);  // was only in role-alpha zone
-    expect(byKey["script:comment"]).toBe(false);      // still in role-beta zone
-    expect(byKey["script:view"]).toBe(true);    // never in any role zone
-  });
-
-  it("non-self_confirmed grants are never revoked on role change", async () => {
-    // Insert an approval grant that role change must not touch
-    await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES ($1, $2, 'script:import', 'approval')
-       ON CONFLICT DO NOTHING`,
-      [prodId, EXTRA_USER_1],
-    );
-
-    // Remove all roles
-    await setMemberRoles(prodId, EXTRA_USER_1, []);
-
-    const { rows } = await getPool().query<{ is_revoked: boolean }>(
-      `SELECT is_revoked FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2 AND permission_key = 'script:import'`,
-      [prodId, EXTRA_USER_1],
-    );
-    expect(rows[0]?.is_revoked).toBe(false);
-  });
-});
-
-// ── 8. removeProductionMember: all grants revoked ─────────────────────────────
-
 describe("removeProductionMember: revokes all grants regardless of grant_source", () => {
   beforeAll(async () => {
     const pool = getPool();
@@ -962,9 +506,9 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
       [prodId, EXTRA_USER_1, []],
     );
 
-    // Insert resource_grant rows with three different grant sources (id is UUID DEFAULT)
+    // Insert production_member_grant rows with three different grant sources (id is UUID DEFAULT)
     await pool.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
        VALUES
          ($1, $2, 'scene', 'scene-rm-1', '*', 'view', 'self_confirmed'),
@@ -973,17 +517,6 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
       [prodId, EXTRA_USER_1],
     );
 
-    // Insert atomic_permission_grant rows with multiple sources
-    await pool.query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES
-         ($1, $2, 'script:comment',   'self_confirmed'),
-         ($1, $2, 'script:import', 'approval'),
-         ($1, $2, 'script:annotate', 'direct')
-       ON CONFLICT DO NOTHING`,
-      [prodId, EXTRA_USER_1],
-    );
   });
 
   it("removes member and revokes all active grants with reason member_removed", async () => {
@@ -992,23 +525,12 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
     const pool = getPool();
 
     const { rows: rgRows } = await pool.query<{ is_revoked: boolean; revoked_reason: string }>(
-      `SELECT is_revoked, revoked_reason FROM resource_grant
+      `SELECT is_revoked, revoked_reason FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2`,
       [prodId, EXTRA_USER_1],
     );
     expect(rgRows.length).toBeGreaterThan(0);
     for (const row of rgRows) {
-      expect(row.is_revoked).toBe(true);
-      expect(row.revoked_reason).toBe("member_removed");
-    }
-
-    const { rows: apgRows } = await pool.query<{ is_revoked: boolean; revoked_reason: string }>(
-      `SELECT is_revoked, revoked_reason FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2`,
-      [prodId, EXTRA_USER_1],
-    );
-    expect(apgRows.length).toBeGreaterThan(0);
-    for (const row of apgRows) {
       expect(row.is_revoked).toBe(true);
       expect(row.revoked_reason).toBe("member_removed");
     }
@@ -1023,65 +545,3 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
 
 // ── 9. updateProductionDept: permissions narrowing ────────────────────────────
 
-describe("updateProductionDept: permissions narrowing cascades to members", () => {
-  let narrowingDeptId: string;
-
-  beforeAll(async () => {
-    const pool = getPool();
-    // Isolate EXTRA_USER_2: remove any prior dept memberships and grants
-    await pool.query(
-      "DELETE FROM production_dept_member WHERE production_id = $1 AND user_id = $2",
-      [prodId, EXTRA_USER_2],
-    );
-    await pool.query(
-      "DELETE FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2",
-      [prodId, EXTRA_USER_2],
-    );
-    // Ensure EXTRA_USER_2 is a production member
-    await pool.query(
-      "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-      [prodId, EXTRA_USER_2, []],
-    );
-
-    // Dept starts with two permissions
-    const narrowingDept = await createProductionDept({
-      productionId: prodId,
-      name: `narrowing-test-${shortId()}`,
-      permissions: ["script:edit_block", "script:view"],
-    });
-    narrowingDeptId = narrowingDept.id;
-
-    await setDeptMembers(narrowingDeptId, prodId, [{ userId: EXTRA_USER_2, isPoc: false }]);
-
-    // Self_confirmed grants: both in dept zone, plus one outside
-    await pool.query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source)
-       VALUES
-         ($1, $2, 'script:edit_block', 'self_confirmed'),
-         ($1, $2, 'script:view',    'self_confirmed'),
-         ($1, $2, 'script:view',  'self_confirmed')
-       ON CONFLICT DO NOTHING`,
-      [prodId, EXTRA_USER_2],
-    );
-  });
-
-  it("narrowing dept permissions revokes grants no longer in any zone", async () => {
-    // Remove 'script:view' from the dept's permissions
-    await updateProductionDept(narrowingDeptId, prodId, {
-      permissions: ["script:edit_block"],
-    });
-
-    const { rows } = await getPool().query<{ permission_key: string; is_revoked: boolean }>(
-      `SELECT permission_key, is_revoked
-       FROM atomic_permission_grant
-       WHERE production_id = $1 AND user_id = $2`,
-      [prodId, EXTRA_USER_2],
-    );
-
-    const byKey = Object.fromEntries(rows.map((r) => [r.permission_key, r.is_revoked]));
-    expect(byKey["script:edit_block"]).toBe(false);  // still in narrowed dept zone
-    expect(byKey["script:view"]).toBe(true);       // dept no longer grants this
-    expect(byKey["script:view"]).toBe(true);     // was never in any dept zone
-  });
-});

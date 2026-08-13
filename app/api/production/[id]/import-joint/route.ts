@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import type { JointImportMarker, JointImportMappingRow, JointImportPreview, SceneColMap, ScriptColMap } from "@/lib/import/types";
 
 const SCENE_MARKER_COLLATOR = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });
@@ -35,7 +35,7 @@ async function guard(req: NextRequest, productionId: string) {
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
   if (isArchived) return { session, deny: Response.json({ error: "已归档" }, { status: 403 }) };
-  if (!hasPermission("script:import", permCtx)) {
+  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "script", "*", "imports", "create"))) {
     return { session, deny: Response.json({ error: "仅制作人可导入数据" }, { status: 403 }) };
   }
   return { session, deny: null };

@@ -5,7 +5,6 @@ import {
   loadProduction, applyPatchToDB, getVersion, listMarkerProjectionByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 import { diffState } from "@/lib/script-ops";
 import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";
@@ -35,7 +34,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("script:view", permCtx)) {
+  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const resolved = await resolveProductionVersion(id, req.nextUrl.searchParams.get("versionId") ?? undefined);

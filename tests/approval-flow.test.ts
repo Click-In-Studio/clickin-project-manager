@@ -5,7 +5,7 @@
  *  - 状态机转换（pending_supervisor → pending_resource → approved/rejected/cancelled）
  *  - first-action-wins（并发 approve 只有一个成功）
  *  - 权限门控（非授权用户无法 approve/reject）
- *  - resource_grant 在审批通过后正确写入
+ *  - production_member_grant 在审批通过后正确写入
  *  - notify 路径：各阶段通知写入正确的 user_id、kind、approvalRequestId
  *  - 通知过期（审批完成后旧 action 通知被 expired）
  *  - 无 supervisor 路径（直接 pending_resource）
@@ -329,9 +329,9 @@ describe("approveAccessRequest — resource phase → approved", () => {
     expect(result.request.grantedAt).not.toBeNull();
   });
 
-  it("resource_grant written with grant_source='approval' and correct approval_id", async () => {
+  it("production_member_grant written with grant_source='approval' and correct approval_id", async () => {
     const row = await getPool().query(
-      `SELECT * FROM resource_grant WHERE approval_id = $1`,
+      `SELECT * FROM production_member_grant WHERE approval_id = $1`,
       [reqId],
     );
     expect(row.rows).toHaveLength(1);
@@ -389,9 +389,9 @@ describe("first-action-wins", () => {
     expect(okCount).toBe(1);
     expect(conflictCount).toBe(1);
 
-    // Only one resource_grant should exist
+    // Only one production_member_grant should exist
     const grants = await getPool().query(
-      `SELECT COUNT(*) AS c FROM resource_grant WHERE approval_id = $1`,
+      `SELECT COUNT(*) AS c FROM production_member_grant WHERE approval_id = $1`,
       [req.id],
     );
     expect(parseInt(grants.rows[0].c, 10)).toBe(1);
@@ -738,7 +738,7 @@ describe("escalateExpiredApprovals", () => {
 // ─── 10. Full happy path (supervisor gate) ────────────────────────────────────
 
 describe("full happy path — supervisor gate", () => {
-  it("submit → supervisor approve → POC approve → resource_grant written, notifications correct", async () => {
+  it("submit → supervisor approve → POC approve → production_member_grant written, notifications correct", async () => {
     const req = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
       permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
@@ -763,9 +763,9 @@ describe("full happy path — supervisor gate", () => {
     if (!step2.ok) return;
     expect(step2.request.status).toBe("approved");
 
-    // resource_grant written
+    // production_member_grant written
     const grant = await getPool().query(
-      `SELECT * FROM resource_grant WHERE approval_id = $1`,
+      `SELECT * FROM production_member_grant WHERE approval_id = $1`,
       [req.id],
     );
     // 批A：mount 伪级别展开为 2 行动词行集（'*'@view + mounts@create）

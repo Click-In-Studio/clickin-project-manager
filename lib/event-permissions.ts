@@ -1,7 +1,7 @@
 /**
  * Contextual (Type B) permission checks for the event system.
  *
- * Phase 5: edit/write operations now gate on per-instance resource_grant rows.
+ * Phase 5: edit/write operations now gate on per-instance production_member_grant rows.
  * Contextual state (isInCall, isFollower) is retained for note writing and
  * read-level checks that remain role-based.
  *
@@ -9,7 +9,7 @@
  */
 
 import { getPool } from "./pg";
-import { hasPermission, type PermissionContext } from "./permissions";
+import { type PermissionContext } from "./permissions";
 import { hasGrant } from "./grant-check";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ export function hasEventContentEdit(
 
 /**
  * Can write / edit a specific report.
- * Primary: resource_grant(report, reportId, 'edit'+).
+ * Primary: production_member_grant(report, reportId, 'edit'+).
  * Fallback: isInCall still allows note writing (for tech dept staff in call).
  */
 export async function canWriteReport(
@@ -124,7 +124,7 @@ export async function canPublishReport(
 
 /**
  * Can add or edit a specific tech requirement.
- * Primary: resource_grant(tech_req, reqId, 'edit'+).
+ * Primary: production_member_grant(tech_req, reqId, 'edit'+).
  * Event-level edit also grants access (cascades down to all tech_reqs in the event).
  */
 export async function canEditTechReq(
@@ -259,8 +259,8 @@ export async function canModerateNotes(
 
 /**
  * Returns true if the user can view unpublished reports.
- * Phase 5a: event:edit/edit_schedule are now resource_grant levels; use event:create as a
- * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to resource_grant.
+ * Phase 5a: event:edit/edit_schedule are now production_member_grant levels; use event:create as a
+ * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to production_member_grant.
  */
 export async function isReportViewer(permCtx: PermissionContext, productionId: string): Promise<boolean> {
   if (permCtx.isAdmin) return true;

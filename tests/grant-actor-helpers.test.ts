@@ -35,7 +35,7 @@ describe("hasEventDomainView", () => {
     const actor = { userId, isAdmin: false, isOwner: false };
     expect(await hasEventDomainView(actor, prodId)).toBe(false);
     await getPool().query(
-      `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'event', '*', 'meta', 'view', 'self_confirmed', $2)`,
       [prodId, userId],
     );
@@ -49,7 +49,7 @@ describe("hasEventContentEdit（状态感知）", () => {
     const actor = { userId, isAdmin: false, isOwner: false };
     const evId = shortId();
     await getPool().query(
-      `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'event', $3, 'details', 'edit', 'direct', $2)`,
       [prodId, userId, evId],
     );
@@ -57,7 +57,7 @@ describe("hasEventContentEdit（状态感知）", () => {
     // 非线性：details@edit 不给 published 编辑权
     expect(await hasEventContentEdit(actor, prodId, evId, "published")).toBe(false);
     await getPool().query(
-      `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'event', $3, 'publication', 'edit', 'direct', $2)`,
       [prodId, userId, evId],
     );

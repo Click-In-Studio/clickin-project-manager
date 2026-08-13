@@ -1,4 +1,4 @@
-import type { Permission } from "./permissions";
+type Permission = string;
 
 /**
  * Per-page atomic permission scopes for the self-confirm gate.
@@ -11,7 +11,6 @@ import type { Permission } from "./permissions";
  */
 export const PAGE_PERMISSION_SCOPES = {
   base: new Set<string>([
-    "script:view",
     // 批A：cue 域读权限改为树节点键（node:<type>/<id>[/<sub>]@<verb>）
     "node:cue_list/*/meta@view",
     "node:cue_list/*/cues@view",
@@ -20,38 +19,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:event/*/meta@view",
     "node:event/*/details@view",
     "node:event/*/followers@create",
-    "contacts:view",
   ]),
   script: new Set<Permission>([
-    "script:import",
-    "script:manage",
-    "script:edit",
-    "script:annotate",
-    "script:comment",
-    "script:create_block",
-    "script:delete_block",
-    "script:edit_block",
-    "script:set_character",
-    "script:set_type",
-    "script:set_tag",
-    "script:reorder",
-    "script:mount",
-    "script:edit_comment_any",
-    "script:delete_comment_any",
-    "rehearsal_mark:create",
-    "rehearsal_mark:edit",
-    "rehearsal_mark:delete",
-    "rehearsal_mark:move",
   ]),
 
   dramaturgy: new Set<Permission>([
-    "dramaturgy:import",
-    "dramaturgy_view:create",
-    "dramaturgy_view:delete",
-    "dramaturgy_view:overwrite",
-    "dramaturgy_view:create_public",
-    "dramaturgy_view:delete_public",
-    "dramaturgy_view:overwrite_public",
   ]),
 
   characters: new Set<Permission>([

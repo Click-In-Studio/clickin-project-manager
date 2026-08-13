@@ -4,7 +4,6 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getCharacterById, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import CharacterDetailView from "@/components/CharacterDetail";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; charId: string }> }): Promise<Metadata> {

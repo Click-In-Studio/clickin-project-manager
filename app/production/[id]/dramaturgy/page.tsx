@@ -13,7 +13,6 @@ import {
   listMarkerProjectionByVersion,
   listCharactersByVersion,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import Dramaturgy from "@/components/Dramaturgy";
 import PageActivationGate from "@/components/PageActivationGate";
 

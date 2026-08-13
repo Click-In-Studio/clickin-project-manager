@@ -5,13 +5,6 @@ import { useState, useEffect } from "react";
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
 export const PERMISSION_LABELS: Record<string, string> = {
-  "script:view":         "查看剧本",
-  "script:import":       "导入剧本",
-  "script:manage":       "管理剧本",
-  "script:edit":         "编辑剧本",
-  "script:annotate":     "注释剧本",
-  "script:mount":        "挂载剧本",
-  "contacts:view":       "查看人员通讯录",
   "event:view":          "查看日程",
   "event:edit":          "编辑日程",
   "event:publish":       "发布日程",
@@ -105,7 +98,7 @@ type Props = {
   onClose: () => void;
   productionId: string;
   /**
-   * Atomic permission key that caused the 403 (e.g. "script:view", ).
+   * Atomic permission key that caused the 403 (e.g. ).
    * When set: the form is locked to this permission — user only fills in a reason.
    * When unset: free-form mode with resource type / level selectors.
    */

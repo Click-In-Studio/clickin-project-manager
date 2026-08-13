@@ -5,7 +5,6 @@ import {
   getActiveVersionId, listCharactersByVersion, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/permissions";
 import { hasGrant } from "@/lib/grant-check";
 
 async function getCtx(req: NextRequest, productionId: string) {

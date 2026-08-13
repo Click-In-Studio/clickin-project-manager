@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext,
@@ -7,7 +8,6 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { hasPermission, type Permission } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -15,7 +15,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
   if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !hasPermission("members:manage_overrides", access.permCtx)) {
+  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "member", "*", "overrides", "edit"))) {
     return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived: access?.isArchived ?? false };
   }
   return { session, deny: null, isArchived: access.isArchived };
@@ -52,7 +52,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "userId 和 permission 为必填" }, { status: 400 });
   }
 
-  await setPermissionOverride(productionId, userId, permission as Permission, granted ?? null);
+  await setPermissionOverride(productionId, userId, permission, granted ?? null);
   return Response.json({ ok: true });
 }
 

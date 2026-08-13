@@ -12,42 +12,33 @@ type PermGroup = { label: string; perms: string[] };
 const PERM_GROUPS: PermGroup[] = [
   {
     label: "成员管理",
-    perms: ["members:invite", "members:kick", "members:change_role", "members:manage_overrides"],
+    perms: [],
   },
   {
     label: "部门管理",
     perms: [
-      "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
-      "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
     ],
   },
   {
     label: "项目配置",
-    perms: ["production:manage_config", "production:mount", "production:unmount"],
+    perms: [],
   },
   {
     label: "里程碑",
-    perms: ["milestone:create", "milestone:manage", "milestone:delete"],
+    perms: [],
   },
   {
     label: "通知公告",
-    perms: ["announcement:create", "announcement:edit", "announcement:delete"],
+    perms: [],
   },
   {
     label: "剧本操作",
     perms: [
-      "script:import", "script:manage", "script:edit", "script:annotate",
-      "script:create_block", "script:delete_block", "script:edit_block",
-      "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount",
-      "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
     ],
   },
   {
     label: "场次 & 构作",
     perms: [
-      "dramaturgy:import",
-      "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
-      "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
     ],
   },
   {
@@ -78,15 +69,11 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "评论管理",
     perms: [
-      "script:edit_comment_any", "script:delete_comment_any",
     ],
   },
   {
     label: "读权限",
     perms: [
-      "contacts:view",
-      "script:view", "script:comment",
-      "org:assign_member", "org:recall_member",
     ],
   },
 ];

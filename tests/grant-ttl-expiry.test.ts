@@ -20,23 +20,7 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
-describe("atomic_permission_grant 过期过滤", () => {
-  it("expired atomic grant is absent from permCtx.activeGrants; valid one is present", async () => {
-    await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source, confirmed_by, expires_at)
-       VALUES ($1, $2, 'contacts:import', 'approval', $2, '2000-01-01T00:00:00Z'),
-              ($1, $2, 'milestone:create',    'approval', $2, '2099-01-01T00:00:00Z')`,
-      [prodId, userId],
-    );
-    const access = await getProductionPermissionContext(userId, false, prodId);
-    expect(access).not.toBeNull();
-    expect(access!.permCtx.activeGrants.has("contacts:import")).toBe(false);
-    expect(access!.permCtx.activeGrants.has("milestone:create")).toBe(true);
-  });
-});
-
-describe("resource_grant 过期过滤", () => {
+describe("production_member_grant 过期过滤", () => {
   it("expired edit grant fails hasListAccess; valid one passes", async () => {
     const expiredList = shortId();
     const validList = shortId();
@@ -46,7 +30,7 @@ describe("resource_grant 过期过滤", () => {
       [expiredList, validList, prodId, userId],
     );
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by, expires_at)
        VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'approval', $2, '2000-01-01T00:00:00Z'),

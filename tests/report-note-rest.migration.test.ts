@@ -28,7 +28,7 @@ describe("schema verification", () => {
 describe("integrity verification", () => {
   it("no report atomic keys or legacy-level rows remain; dept pseudo-key gone", async () => {
     for (const [table, col] of [
-      ["atomic_permission_grant", "permission_key"],
+      // atomic_permission_grant 已 DROP（批G G-2 终局）——零残留恒真
       ["production_role_permission", "permission_key"],
       ["production_member_permission", "permission"],
     ] as const) {
@@ -38,7 +38,7 @@ describe("integrity verification", () => {
       expect(rows, `${table} 不应残留 report 原子键`).toHaveLength(0);
     }
     const { rows: lv } = await getPool().query(
-      `SELECT 1 FROM resource_grant
+      `SELECT 1 FROM production_member_grant
        WHERE (resource_type = 'report' AND permission_level IN ('manage','publish','edit_published','revoke'))
           OR (resource_type = 'note' AND permission_level = 'manage') LIMIT 1`,
     );
@@ -53,7 +53,7 @@ describe("integrity verification", () => {
 describe("invariance verification", () => {
   async function rowsFor(userId: string, rtype: string, rid: string) {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = $3 AND resource_id = $4 AND NOT is_revoked`,
       [snapshot!.productionId, userId, rtype, rid],

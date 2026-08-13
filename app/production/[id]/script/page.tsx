@@ -6,7 +6,6 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import ScriptEditor from "@/components/ScriptEditor";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -28,10 +27,8 @@ export default async function ProductionScriptPage({
     getProductionName(id),
   ]);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!hasPermission("script:view", access.permCtx)) redirect(`/unauthorized?resource=script%3Aview&id=${id}`);
-
-  const p = (perm: Parameters<typeof hasPermission>[0]) =>
-    hasPermission(perm, access.permCtx);
+  if (!access.permCtx.isAdmin && !await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
+    redirect(`/unauthorized?resource=script%3Aview&id=${id}`);
 
   // Resolve initial version: URL param > cookie
   const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -41,10 +38,10 @@ export default async function ProductionScriptPage({
       <ScriptEditor
         productionId={id}
         productionName={name ?? undefined}
-        canEditText={p("script:edit")}
+        canEditText={access.permCtx.isAdmin || await hasGrant(session.userId, id, "script", "*", "blocks", "edit")}
         canEditMetadata={access.permCtx.isAdmin || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit")}
-        canEditRehearsalMark={p("rehearsal_mark:create")}
-        canImport={p("script:import")}
+        canEditRehearsalMark={access.permCtx.isAdmin || await hasGrant(session.userId, id, "script", "*", "rehearsal_marks", "create")}
+        canImport={access.permCtx.isAdmin || await hasGrant(session.userId, id, "script", "*", "imports", "create")}
         versionId={versionId}
         initialSearchQuery={q}
       />

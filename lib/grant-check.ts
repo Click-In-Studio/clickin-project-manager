@@ -7,7 +7,7 @@
  *   一行 grant 只命中它自己的 (节点, 动词)，蕴含由授权时发多行表达。
  *
  * 双入口契约：资源访问 = 行入口 ∪ 免审批区间入口，两边权限等级表达一致。
- *   - 行入口：本模块（resource_grant 表）
+ *   - 行入口：本模块（production_member_grant 表）
  *   - 区间入口：resource-grant-db.ts 的 checkResourceFreeApprovalZone（dept 面），
  *     其词汇（dept.permissions[] 键）随各批迁移与动词词汇同步更换
  *
@@ -23,7 +23,9 @@ export type GrantVerb = "view" | "create" | "edit" | "delete";
 /** 保留段：'*' 通配 sub 不覆盖，任何授权必须显式指到这些段（或其子路径）。
  *  grants=授权面；publication=发布面；assignees=指派面（批B：assign 是独立能力，
  *  持有 task 整树 edit 不自动获得指派权）。 */
-export const RESERVED_SUBS: readonly string[] = ["grants", "publication", "assignees"];
+// imports：本质普通节点，特殊性=一次动作批量行使 create/edit/delete（导入重建
+// 海量 blocks，安全隐患大）→ 保留段，'*' 通配不覆盖、必须显式授予（批E2 用户定谳）
+export const RESERVED_SUBS: readonly string[] = ["grants", "publication", "assignees", "imports"];
 
 export function isReservedSub(sub: string): boolean {
   return RESERVED_SUBS.some((r) => sub === r || sub.startsWith(`${r}/`));
@@ -49,7 +51,7 @@ export async function hasGrant(
     : "rg.resource_sub IN ($5, '*')";
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
+       SELECT 1 FROM production_member_grant rg
        WHERE rg.production_id = $1
          AND rg.user_id = $2
          AND rg.resource_type = $3
@@ -112,7 +114,7 @@ export async function hasAnyGrant(
 ): Promise<boolean> {
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
+       SELECT 1 FROM production_member_grant rg
        WHERE rg.production_id = $1
          AND rg.user_id = $2
          AND rg.resource_type = $3
@@ -142,7 +144,7 @@ export async function listGrantedResourceIds(
     ? "resource_sub = $4"
     : "resource_sub IN ($4, '*')";
   const { rows } = await getPool().query<{ resource_id: string }>(
-    `SELECT DISTINCT resource_id FROM resource_grant
+    `SELECT DISTINCT resource_id FROM production_member_grant
      WHERE production_id = $1
        AND user_id = $2
        AND resource_type = $3

@@ -1,9 +1,8 @@
 import { type NextRequest } from "next/server";
 import { hasEventDomainView } from "@/lib/event-permissions";
-import { toActor } from "@/lib/grant-check";
+import { toActor, hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getBossUserIds, batchGetFeishuOpenIds } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionDept, getDeptMembers, setDeptMembers } from "@/lib/dept-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 
@@ -17,7 +16,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   );
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
-  if (!hasPermission("dept:add_member", permCtx) && !hasPermission("dept:create", permCtx))
+  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "org_dept", "*", "members", "create")) && !(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "org_dept", "*", "*", "create")))
     return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };
   return { session, deny: null, isArchived };
 }

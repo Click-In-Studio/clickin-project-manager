@@ -6,7 +6,6 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import ScenesManager from "@/components/ScenesManager";
 
 export default async function ScenesPage({
@@ -26,7 +25,7 @@ export default async function ScenesPage({
 
   const canEdit = access.permCtx.isAdmin
     || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
-  const canImport = hasPermission("dramaturgy:import", access.permCtx);
+  const canImport = (access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "dramaturgy", "*", "imports", "create"));
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
   const [name, versions] = await Promise.all([getProductionName(id), listVersions(id)]);

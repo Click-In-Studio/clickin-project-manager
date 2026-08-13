@@ -354,7 +354,7 @@ CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, cr
 
 -- Per-user access override: can_edit=true grants, can_edit=false denies,
 -- cue_list_permission and cue_list_role dropped in Phase 4 (migrate-cue-list-to-resource-grant.sql)
--- Access is now managed via resource_grant (resource_type='cue_list').
+-- Access is now managed via production_member_grant (resource_type='cue_list').
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
 -- Each row is a revision of a cue. cue_id is the stable logical identity across
@@ -985,7 +985,7 @@ CREATE INDEX IF NOT EXISTS pmta_user_prod_idx
   ON production_member_tag_assignment (production_id, user_id);
 
 -- ── Resource Permission Level（Phase 2c）──────────────────────────────────────
--- resource_grant.permission_level 的合法值 lookup 表。
+-- production_member_grant.permission_level 的合法值 lookup 表。
 -- 引入新 resource_type 的 migration 必须先在此表插入对应行，再写 grant 数据。
 
 CREATE TABLE IF NOT EXISTS resource_permission_level (
@@ -1013,9 +1013,9 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   -- note 过渡类型（批C）：manage 退役，view/edit 沿用为动词
   ('note',        'view',           1),
   ('note',        'edit',           2),
+  -- script_view 已 REST 化（批E PR-E3）：view/edit 沿用（manage 退役拆 grants 行集）
   ('script_view', 'view',           1),
   ('script_view', 'edit',           2),
-  ('script_view', 'manage',         3),
   -- asset 已 REST 化（批D）：view/edit 沿用为动词（mount→publication 面、manage 退役），
   -- create/delete 在批0 INSERT
   ('asset',       'view',           1),
@@ -1033,7 +1033,31 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('tag_group',   'view',           0),
   ('tag_group',   'create',         0),
   ('tag_group',   'edit',           0),
-  ('tag_group',   'delete',         0)
+  ('tag_group',   'delete',         0),
+  -- script（单例，id 恒 '*'）/ dramaturgy（批E PR-E2）：imports 是保留段（批量破坏性）
+  ('script',      'view',           0),
+  ('script',      'create',         0),
+  ('script',      'edit',           0),
+  ('script',      'delete',         0),
+  ('dramaturgy',  'view',           0),
+  ('dramaturgy',  'create',         0),
+  ('dramaturgy',  'edit',           0),
+  ('dramaturgy',  'delete',         0),
+  -- dramaturgy_view 个人视图（批E PR-E3）：所有权=user_id 上下文，publication=公开面（预留）
+  ('dramaturgy_view', 'view',       0),
+  ('dramaturgy_view', 'create',     0),
+  ('dramaturgy_view', 'edit',       0),
+  ('dramaturgy_view', 'delete',     0),
+  -- 治理域（批F）：production 根实例（id 恒 '*'）；org_dept=production_dept 组织树
+  -- （与批C3 dept=event_department 区分）；SENSITIVE 键=owner∨行（无 admin 旁路）、
+  -- ROOT 三键=owner-only 代码判定（节点入树行不发）
+  ('production',   'view', 0), ('production',   'create', 0), ('production',   'edit', 0), ('production',   'delete', 0),
+  ('member',       'view', 0), ('member',       'create', 0), ('member',       'edit', 0), ('member',       'delete', 0),
+  ('producer',     'view', 0), ('producer',     'create', 0), ('producer',     'edit', 0), ('producer',     'delete', 0),
+  ('role',         'view', 0), ('role',         'create', 0), ('role',         'edit', 0), ('role',         'delete', 0),
+  ('org_dept',     'view', 0), ('org_dept',     'create', 0), ('org_dept',     'edit', 0), ('org_dept',     'delete', 0),
+  ('milestone',    'view', 0), ('milestone',    'create', 0), ('milestone',    'edit', 0), ('milestone',    'delete', 0),
+  ('announcement', 'view', 0), ('announcement', 'create', 0), ('announcement', 'edit', 0), ('announcement', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
@@ -1056,7 +1080,7 @@ ON CONFLICT DO NOTHING;
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 
-CREATE TABLE IF NOT EXISTS resource_grant (
+CREATE TABLE IF NOT EXISTS production_member_grant (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -1064,7 +1088,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
   resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
   permission_level TEXT       NOT NULL,
-  CONSTRAINT resource_grant_level_fk
+  CONSTRAINT production_member_grant_level_fk
     FOREIGN KEY (resource_type, permission_level)
     REFERENCES resource_permission_level (resource_type, permission_level)
     DEFERRABLE INITIALLY DEFERRED,
@@ -1083,42 +1107,16 @@ CREATE TABLE IF NOT EXISTS resource_grant (
 
 -- expires_at 条件不能用 NOW()（非 IMMUTABLE），唯一性保护依赖 is_revoked；
 -- 到期 grant 需由应用层在重发前先标记 is_revoked = true。
-CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
-  ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+CREATE UNIQUE INDEX IF NOT EXISTS production_member_grant_active_unique_idx
+  ON production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false;
 
-CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
-  ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)
+CREATE INDEX IF NOT EXISTS production_member_grant_lookup_idx
+  ON production_member_grant (production_id, resource_type, resource_id, resource_sub, user_id)
   WHERE is_revoked = false;
 
--- ── Atomic Permission Grant（Phase 2c）────────────────────────────────────────
--- 原子权限 key 的个人 grant 记录。
-
-CREATE TABLE IF NOT EXISTS atomic_permission_grant (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  permission_key  TEXT        NOT NULL,
-  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
-                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
-                  )),
-  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
-  approval_id     UUID        NULL REFERENCES approval_request(id),
-  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
-  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'poc_change', 'manual', 'member_removed'
-                  )),
-  expires_at      TIMESTAMPTZ NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS atomic_permission_grant_active_unique_idx
-  ON atomic_permission_grant (production_id, user_id, permission_key)
-  WHERE is_revoked = false;
-
-CREATE INDEX IF NOT EXISTS atomic_permission_grant_lookup_idx
-  ON atomic_permission_grant (production_id, user_id)
-  WHERE is_revoked = false;
+-- atomic_permission_grant：批G G-2 终局 DROP（168 原子键六批退役完毕，
+-- 见 lib/permission-migration-ledger.ts RETIRED 清单）
 
 -- ── Resource Dept Manage（Phase 3）────────────────────────────────────────────
 -- 部门-资源结构性管理权（信号表，非 grant 表）。
@@ -1243,8 +1241,14 @@ FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
 ON CONFLICT DO NOTHING;
 
 -- 批C：制作人的报告挂接资格（原 report:create）
+-- 批G G-1：制作人通配区间（收敛历史枚举 seed；主行+保留段四行=永久稳定全集；
+-- RESERVED_TYPES=production/producer 不被类型通配穿透）
 INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('制作人', 'node:event/*/reports@create')
+  ('制作人', 'node:*/*@*'),
+  ('制作人', 'node:*/*/grants@*'),
+  ('制作人', 'node:*/*/publication@*'),
+  ('制作人', 'node:*/*/assignees@*'),
+  ('制作人', 'node:*/*/imports@create')
 ON CONFLICT DO NOTHING;
 
 -- 批C C3：导演任意部门发 note（dept 锚通配）
@@ -1259,12 +1263,16 @@ INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:asset/*/shares@create')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO grant_template (role_name, permission_key)
-SELECT '制作人', k FROM (VALUES
-  ('node:asset/*@create'), ('node:asset/*@delete'),
-  ('node:asset/*/meta@edit'), ('node:asset/*/file@create'),
-  ('node:asset/*/publication@create'), ('node:asset/*/publication@delete')
-) AS t(k)
+-- 批F：通讯录并入 member 树（MEMBER_BASE 保真：contacts:view → meta+contact 两面）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:member/*/meta@view'),
+  ('*', 'node:member/*/contact@view')
+ON CONFLICT DO NOTHING;
+
+-- 批E PR-E2：script 成员默认（MEMBER_BASE 保真：script:view / script:comment）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:script/*/blocks@view'),
+  ('*', 'node:script/*/comments@create')
 ON CONFLICT DO NOTHING;
 
 -- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）

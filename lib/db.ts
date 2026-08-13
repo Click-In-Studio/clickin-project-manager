@@ -7,14 +7,15 @@ import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG, usesRehearsalMarksByDefault } from "./script-types";
-import type { Permission as AtomicPermission, PermissionContext } from "./permissions";
+import type { PermissionContext } from "./permissions";
+type AtomicPermission = string;
 
 export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
-import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
+import { ROLE_NAMES } from "./permissions";
+import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
@@ -1762,7 +1763,7 @@ async function seedCueListCreatorAccessInTx(
 ): Promise<void> {
   await client.query(
     `WITH creator_grants AS (
-       INSERT INTO resource_grant
+       INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $3, 'cue_list', $2, s.sub, s.verb, 'self_confirmed', $3
@@ -2496,8 +2497,9 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
     }
   }
 
-  const entries = Object.entries(ROLE_TEMPLATE_PERMISSIONS);
-  for (const [roleName, perms] of entries) {
+  // 终局（批G G-2）：角色行从 ROLE_NAMES 结构名单建；权限内容全部经
+  // seedRoleFromTemplate 从 grant_template 表灌入（代码模板已退役）
+  for (const roleName of ROLE_NAMES) {
     const roleId = `r_${productionId}_${encodeURIComponent(roleName)}`;
     await pool.query(
       `INSERT INTO production_role (id, production_id, name)
@@ -2505,23 +2507,11 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
        ON CONFLICT (production_id, name) DO NOTHING`,
       [roleId, productionId, roleName],
     );
-    // Re-fetch actual id in case of conflict (row existed, our roleId may differ)
     const roleRow = await pool.query<{ id: string }>(
       "SELECT id FROM production_role WHERE production_id = $1 AND name = $2",
       [productionId, roleName],
     );
-    const actualId = roleRow.rows[0].id;
-    if (perms.length > 0) {
-      await pool.query(
-        `INSERT INTO production_role_permission (role_id, permission_key)
-         SELECT $1, unnest($2::text[])
-         ON CONFLICT DO NOTHING`,
-        [actualId, perms],
-      );
-    }
-    // 批A：REST 化域的资格从全局模板 seed（node 键；按 production.type，运行时零读取）
-    await seedRoleFromTemplate(actualId, roleName, prodType);
-    // Phase 4: production_role_cue_type dropped; cue type auth moved to production_dept.allowed_cue_types
+    await seedRoleFromTemplate(roleRow.rows[0].id, roleName, prodType);
   }
 }
 
@@ -2607,12 +2597,12 @@ export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
   sortOrder: number; roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
-  hasAdminPerm: boolean; // true if FK-backed roles include any ADMIN_PANEL_PERMISSIONS key
+  hasAdminPerm: boolean; // true if FK-backed role 区间含治理域节点键（ADMIN_PANEL_NODE_PREFIXES）
 };
 
 export async function listMyProductionsWithRoles(
   userId: string, isAdmin: boolean,
-  adminPanelPerms: readonly string[],
+  adminPanelPrefixes: readonly string[],
 ): Promise<MyProductionEntry[]> {
   const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
   const res = await getPool().query<{
@@ -2637,13 +2627,13 @@ export async function listMyProductionsWithRoles(
               JOIN production_role_permission prp ON prp.role_id = pmr.role_id
               WHERE pmr.production_id = p.id
                 AND pmr.user_id = $1
-                AND prp.permission_key = ANY($3::text[])
+                AND prp.permission_key LIKE ANY($3::text[])
             ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
      WHERE ($2 OR pm.user_id IS NOT NULL)
      ORDER BY ${orderBy}`,
-    [userId, isAdmin, adminPanelPerms],
+    [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
   );
   return res.rows.map(r => ({
     id: r.id, name: r.name,
@@ -3037,14 +3027,14 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
-    // Transfer cue list resource_grant rows (cue_list_permission/role tables dropped in Phase 4)
+    // Transfer cue list production_member_grant rows (cue_list_permission/role tables dropped in Phase 4)
     await client.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at)
        SELECT production_id, $1, resource_type, resource_id, resource_sub,
               permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at
-       FROM resource_grant
+       FROM production_member_grant
        WHERE user_id = $2 AND resource_type = 'cue_list'
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
@@ -3052,7 +3042,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
       [keepUserId, deleteUserId],
     );
     await client.query(
-      `DELETE FROM resource_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
+      `DELETE FROM production_member_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
       [deleteUserId],
     );
 
@@ -3232,7 +3222,7 @@ export async function getProductionPermissionContext(
 ): Promise<ProductionAccess | null> {
   const pool = getPool();
 
-  const [memberRow, dbPermsRow, personalZoneRow, deptRow, productionRow, grantsRow] = await Promise.all([
+  const [memberRow, dbPermsRow, deptRow, productionRow] = await Promise.all([
     // Is user a member? And what are their role strings?
     pool.query<{ roles: string[] }>(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
@@ -3246,12 +3236,6 @@ export async function getProductionPermissionContext(
        WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
-    // Personal zone adjustments: granted=true expands free-approval zone, granted=false shrinks it.
-    // Sensitive admin permissions are ignored here (they require the Phase 7 owner-approval flow).
-    pool.query<{ permission: string; granted: boolean }>(
-      "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
-      [productionId, userId],
-    ),
     // Department memberships (Phase 3: use production_dept instead of event_department)
     pool.query<{ dept_id: string; is_poc: boolean }>(
       `SELECT pdm.dept_id, pdm.is_poc
@@ -3262,11 +3246,6 @@ export async function getProductionPermissionContext(
     pool.query<{ archived_at: Date | null; owner_id: string | null }>(
       "SELECT archived_at, owner_id FROM production WHERE id = $1",
       [productionId],
-    ),
-    // Active grants: permissions the user has explicitly confirmed or had approved.
-    pool.query<{ permission_key: string }>(
-      "SELECT permission_key FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND is_revoked = false AND (expires_at IS NULL OR expires_at > NOW())",
-      [productionId, userId],
     ),
   ]);
 
@@ -3287,18 +3266,8 @@ export async function getProductionPermissionContext(
         dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
       );
     } else {
-      // Fallback: no FK rows yet — derive from static templates via TEXT[] role strings.
-      // Templates now include MEMBER_BASE_PERMISSIONS, so empty roles → empty Set.
-      const roleStrings = memberRow.rows[0].roles;
-      const perms = new Set<AtomicPermission>();
-      for (const role of roleStrings) {
-        const templatePerms =
-          ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
-        if (templatePerms) {
-          for (const p of templatePerms) perms.add(p);
-        }
-      }
-      memberPermissions = perms;
+      // 终局：代码模板已退役，无 FK 行 = 空区间
+      memberPermissions = new Set();
     }
   }
 
@@ -3312,22 +3281,9 @@ export async function getProductionPermissionContext(
     if (row.is_poc) pocDeptIds.push(row.dept_id);
   }
 
-  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone),
-  // then apply personal zone adjustments from production_member_permission.
-  const deptFreeApprovalZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
-  for (const row of personalZoneRow.rows) {
-    const perm = row.permission as AtomicPermission;
-    if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) continue;
-    if (row.granted) {
-      deptFreeApprovalZone.add(perm);
-    } else {
-      deptFreeApprovalZone.delete(perm);
-    }
-  }
-
-  const activeGrants = new Set<AtomicPermission>(
-    grantsRow.rows.map((r) => r.permission_key as AtomicPermission),
-  );
+  // 终局（批G G-2）：区间三表经六步链消费、行经 hasGrant 消费——ctx 历史字段恒空
+  const deptFreeApprovalZone = new Set<string>();
+  const activeGrants = new Set<string>();
 
   return {
     permCtx: { userId, isAdmin, isOwner, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone, activeGrants },
@@ -4390,7 +4346,7 @@ export async function listCueListsWithAccess(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.created_by, fu.name AS created_by_name, cl.created_at,
             EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (cl.id, '*')
@@ -4401,7 +4357,7 @@ export async function listCueListsWithAccess(
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_edit,
             EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (cl.id, '*')
@@ -4415,7 +4371,7 @@ export async function listCueListsWithAccess(
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
        AND ($3 OR EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (cl.id, '*')
@@ -4556,6 +4512,11 @@ export async function createProductionRole(productionId: string, name: string): 
 }
 
 export async function renameProductionRole(roleId: string, productionId: string, name: string): Promise<void> {
+  // 批G：制作人 role 身份不可变（改名后"防止移除"即名存实亡）
+  const cur = await getPool().query<{ name: string }>(
+    "SELECT name FROM production_role WHERE id = $1 AND production_id = $2", [roleId, productionId]);
+  if (cur.rows[0]?.name === "制作人") throw new Error("制作人角色不可改名");
+
   await getPool().query(
     `UPDATE production_role SET name = $1 WHERE id = $2 AND production_id = $3`,
     [name, roleId, productionId],
@@ -4563,10 +4524,17 @@ export async function renameProductionRole(roleId: string, productionId: string,
 }
 
 export async function deleteProductionRole(roleId: string, productionId: string): Promise<void> {
-  await getPool().query(
-    `DELETE FROM production_role WHERE id = $1 AND production_id = $2`,
+  // 批G：制作人 role 是结构性角色（通配区间宿主、seed/迁移按名匹配）——不可删除
+  const res = await getPool().query(
+    `DELETE FROM production_role WHERE id = $1 AND production_id = $2 AND name != '制作人'
+     RETURNING id`,
     [roleId, productionId],
   );
+  if (res.rows.length === 0) {
+    const exists = await getPool().query(
+      "SELECT 1 FROM production_role WHERE id = $1 AND production_id = $2", [roleId, productionId]);
+    if (exists.rows.length > 0) throw new Error("制作人角色不可删除");
+  }
 }
 
 export async function setRolePermissions(roleId: string, permissions: string[]): Promise<void> {
@@ -4631,7 +4599,7 @@ export async function copyProductionRole(productionId: string, sourceRoleId: str
 export async function hasListAccess(cueListId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ has_access: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
+       SELECT 1 FROM production_member_grant rg
        JOIN cue_list cl ON cl.id = $1 AND cl.production_id = rg.production_id
        WHERE rg.resource_type = 'cue_list'
          AND rg.resource_id IN ($1, '*')
@@ -4653,7 +4621,7 @@ export async function hasListAccess(cueListId: string, userId: string): Promise<
 export async function listCueListRoleMembers(cueListId: string): Promise<string[]> {
   const res = await getPool().query<{ user_id: string }>(
     `SELECT DISTINCT rg.user_id
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND rg.resource_sub IN ('cues', '*')
@@ -4691,7 +4659,7 @@ export async function deleteCueList(id: string, productionId: string): Promise<v
 export async function listCueListPermissions(cueListId: string): Promise<CueListPermissionRow[]> {
   const res = await getPool().query<{ user_id: string; permission_level: string }>(
     `SELECT DISTINCT rg.user_id, rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND rg.resource_sub IN ('cues', '*')
@@ -4713,7 +4681,7 @@ export async function setCueListPermission(
   if (canEdit === true) {
     // 批A：编辑授权 = 动词行集（view + edit + cues create/delete）
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT cl.production_id, $2, 'cue_list', $1, s.sub, s.verb, 'direct', $3
@@ -4727,7 +4695,7 @@ export async function setCueListPermission(
     );
   } else {
     await getPool().query(
-      `UPDATE resource_grant
+      `UPDATE production_member_grant
        SET is_revoked = true, revoked_reason = 'manual'
        WHERE resource_type = 'cue_list'
          AND resource_id = $1
@@ -7603,24 +7571,10 @@ export async function approveAccessRequest(
     );
     const fresh = freshRes.rows[0];
 
-    // Write grant — atomic_permission type → atomic_permission_grant, otherwise → resource_grant
+    // 终局（批G G-2）：atomic_permission 类型申请已随原子键退役（表已 DROP）——
+    // 历史 pending 申请（若有）按无效处理，不再发行
     if (req.type === "atomic_permission") {
-      const permKey = `${req.resource_type}:${req.permission_level}`;
-      await getPool().query(
-        `INSERT INTO atomic_permission_grant
-           (production_id, user_id, permission_key, grant_source, confirmed_by, approval_id, expires_at)
-         VALUES ($1,$2,$3,'approval',$4,$5,$6)
-         ON CONFLICT (production_id, user_id, permission_key) WHERE is_revoked = false
-         DO NOTHING`,
-        [
-          req.production_id,
-          req.subject_id,
-          permKey,
-          actorId,
-          requestId,
-          fresh?.expires_at ?? null,
-        ],
-      );
+      // no-op：原子键机制已退役
     } else {
       // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
       // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
@@ -7636,7 +7590,7 @@ export async function approveAccessRequest(
           ?? [[req.resource_sub ?? "*", req.permission_level!] as const];
       for (const [sub, verb] of rows) {
         await getPool().query(
-          `INSERT INTO resource_grant
+          `INSERT INTO production_member_grant
              (production_id, user_id, resource_type, resource_id, resource_sub,
               permission_level, grant_source, confirmed_by, approval_id, expires_at)
            VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)

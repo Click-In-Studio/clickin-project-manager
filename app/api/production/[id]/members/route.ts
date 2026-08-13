@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import {
   listProductionMembers,
@@ -12,7 +13,6 @@ import {
   isProductionArchived,
   getProductionPermissionContext,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 function requireAdmin(req: NextRequest) {
   const session = getSession(req.cookies);
@@ -67,19 +67,19 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     : await getProductionPermissionContext(session.userId, false, id);
 
   if (roles !== undefined) {
-    if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
+    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberRoles(id, userId, roles);
   }
   if (tagIds !== undefined) {
-    if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
+    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberTags(id, userId, tagIds);
   }
   if (supervisorId !== undefined) {
-    if (!session.isAdmin && (!access || !hasPermission("members:change_role", access.permCtx))) {
+    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberSupervisor(id, userId, supervisorId);
@@ -104,7 +104,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
 
   if (!session.isAdmin) {
     const access = await getProductionPermissionContext(session.userId, false, id);
-    if (!access || !hasPermission("members:kick", access.permCtx)) {
+    if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete"))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
   }

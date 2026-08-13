@@ -6,7 +6,7 @@
 import { getUserProfile, listMyProductionsWithRoles, listUpcomingMilestonesForUser } from "@/lib/db";
 import { getProductionPermissionContext } from "@/lib/db";
 import { listProductionDepts } from "@/lib/dept-db";
-import { ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { isoToDateInput } from "@/lib/tz";
 
 export async function buildProductionContextMarkdown(userId: string, productionId: string): Promise<string | null> {
@@ -22,7 +22,7 @@ export async function buildProductionContextMarkdown(userId: string, productionI
   });
   if (!access) return null;
 
-  const productions = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_PERMISSIONS]);
+  const productions = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_NODE_PREFIXES]);
   const prod = productions.find((p) => p.id === productionId);
   if (!prod) return null;
 
