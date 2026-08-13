@@ -17,7 +17,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string;
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, id, "tag_group", groupId, "options/name", "edit")) {
+  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "tag_group", groupId, "options/name", "edit")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
@@ -39,7 +39,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, id, "tag_group", groupId, "options", "delete")) {
+  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "tag_group", groupId, "options", "delete")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

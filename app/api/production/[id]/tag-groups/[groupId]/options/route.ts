@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, id, "tag_group", groupId, "options", "create")) {
+  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "tag_group", groupId, "options", "create")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

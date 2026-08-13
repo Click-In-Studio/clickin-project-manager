@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "create"))) {
+  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "create"))) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 

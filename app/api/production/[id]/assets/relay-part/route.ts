@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   );
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view")))
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view")))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   // ── Params ─────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]"
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
   const versionId = await resolveVersion(req, id);
@@ -48,7 +48,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
 

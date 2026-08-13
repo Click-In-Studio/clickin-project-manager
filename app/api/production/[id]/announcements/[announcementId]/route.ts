@@ -11,7 +11,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, announcementId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "announcement", "*", "*", "edit"))) {
+  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "announcement", "*", "*", "edit"))) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 
@@ -40,7 +40,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, announcementId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "announcement", "*", "*", "delete"))) {
+  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "announcement", "*", "*", "delete"))) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 

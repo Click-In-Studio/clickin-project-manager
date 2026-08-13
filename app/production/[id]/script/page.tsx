@@ -27,7 +27,7 @@ export default async function ProductionScriptPage({
     getProductionName(id),
   ]);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!access.permCtx.isAdmin && !await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
+  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
     redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
 
   // Resolve initial version: URL param > cookie
@@ -38,10 +38,10 @@ export default async function ProductionScriptPage({
       <ScriptEditor
         productionId={id}
         productionName={name ?? undefined}
-        canEditText={access.permCtx.isAdmin || await hasGrant(session.userId, id, "script", "*", "blocks", "edit")}
-        canEditMetadata={access.permCtx.isAdmin || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit")}
-        canEditRehearsalMark={access.permCtx.isAdmin || await hasGrant(session.userId, id, "script", "*", "rehearsal_marks", "create")}
-        canImport={access.permCtx.isAdmin || await hasGrant(session.userId, id, "script", "*", "imports", "create")}
+        canEditText={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "blocks", "edit")}
+        canEditMetadata={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit")}
+        canEditRehearsalMark={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "rehearsal_marks", "create")}
+        canImport={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "imports", "create")}
         versionId={versionId}
         initialSearchQuery={q}
       />

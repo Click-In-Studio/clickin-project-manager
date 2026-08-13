@@ -35,9 +35,9 @@ export default async function AnnouncementsPage({ params }: { params: Promise<{ 
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
       }))}
-      canCreate={!!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "create"))}
-      canEdit={!!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "edit"))}
-      canDelete={!!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "delete"))}
+      canCreate={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "create"))}
+      canEdit={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "edit"))}
+      canDelete={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "delete"))}
     />
   );
 }
