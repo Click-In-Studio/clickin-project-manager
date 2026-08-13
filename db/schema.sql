@@ -1013,9 +1013,9 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   -- note 过渡类型（批C）：manage 退役，view/edit 沿用为动词
   ('note',        'view',           1),
   ('note',        'edit',           2),
+  -- script_view 已 REST 化（批E PR-E3）：view/edit 沿用（manage 退役拆 grants 行集）
   ('script_view', 'view',           1),
   ('script_view', 'edit',           2),
-  ('script_view', 'manage',         3),
   -- asset 已 REST 化（批D）：view/edit 沿用为动词（mount→publication 面、manage 退役），
   -- create/delete 在批0 INSERT
   ('asset',       'view',           1),
@@ -1042,7 +1042,12 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('dramaturgy',  'view',           0),
   ('dramaturgy',  'create',         0),
   ('dramaturgy',  'edit',           0),
-  ('dramaturgy',  'delete',         0)
+  ('dramaturgy',  'delete',         0),
+  -- dramaturgy_view 个人视图（批E PR-E3）：所有权=user_id 上下文，publication=公开面（预留）
+  ('dramaturgy_view', 'view',       0),
+  ('dramaturgy_view', 'create',     0),
+  ('dramaturgy_view', 'edit',       0),
+  ('dramaturgy_view', 'delete',     0)
 ON CONFLICT DO NOTHING;
 
 -- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。

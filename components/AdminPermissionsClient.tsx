@@ -16,7 +16,7 @@ const PERM_GROUPS: PermGroup[] = [
   { label: "里程碑", perms: ["milestone:create", "milestone:manage", "milestone:delete"] },
   { label: "通知公告", perms: ["announcement:create", "announcement:edit", "announcement:delete"] },
   { label: "剧本操作", perms: [] },
-  { label: "场次 & 构作", perms: ["dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite", "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public"] },
+  { label: "场次 & 构作", perms: [] },
   { label: "角色人物", perms: [] },
   { label: "事件 & 日程", perms: [] },
   { label: "任务", perms: [] },

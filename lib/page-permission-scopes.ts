@@ -25,12 +25,6 @@ export const PAGE_PERMISSION_SCOPES = {
   ]),
 
   dramaturgy: new Set<Permission>([
-    "dramaturgy_view:create",
-    "dramaturgy_view:delete",
-    "dramaturgy_view:overwrite",
-    "dramaturgy_view:create_public",
-    "dramaturgy_view:delete_public",
-    "dramaturgy_view:overwrite_public",
   ]),
 
   characters: new Set<Permission>([

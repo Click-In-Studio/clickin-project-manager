@@ -68,12 +68,6 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   // 剧本标签
   // Cue表
   // 构作
-  "dramaturgy_view:create_public": "创建公开构作视图",
-  "dramaturgy_view:delete_public": "删除公开构作视图",
-  "dramaturgy_view:overwrite_public": "覆盖公开构作视图",
-  "dramaturgy_view:create": "创建构作视图",
-  "dramaturgy_view:delete": "删除构作视图",
-  "dramaturgy_view:overwrite": "覆盖构作视图",
   // 事件（per-event 写操作已迁移至 resource_grant，原子权限只保留生产级和管理员绕过）
   // Task（技术需求，per-task 写操作已迁移至 resource_grant）
   // 报告（per-report 写操作已迁移至 resource_grant，保留生产级和管理员绕过）
