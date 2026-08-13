@@ -471,67 +471,6 @@ export function collectAncestors(deptId: string, tree: DeptPermRow[]): string[] 
   return ancestors;
 }
 
-/**
- * Compute the full atomic-permission free-approval zone for a user in a production.
- * Returns a Set<Permission> (filtered to valid Permission values only).
- *
- * Zone = inherited dept permissions (from direct depts + their ancestors)
- *        ∪ POC zones (for each dept where user is POC)
- */
-export async function computeUserDeptFreeApprovalZone(
-  userId: string,
-  productionId: string,
-  pool: Pool | PoolClient = getPool(),
-): Promise<Set<Permission>> {
-  type UserDeptRow = {
-    dept_id: string;
-    is_poc: boolean;
-    poc_extra_permissions: string[];
-    poc_blocked_permissions: string[];
-  };
-
-  const [memberRes, treeRes] = await Promise.all([
-    pool.query<UserDeptRow>(
-      `SELECT pdm.dept_id, pdm.is_poc, pdm.poc_extra_permissions, pdm.poc_blocked_permissions
-       FROM production_dept_member pdm
-       WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
-      [userId, productionId],
-    ),
-    pool.query<DeptPermRow>(
-      "SELECT id, parent_id, permissions FROM production_dept WHERE production_id = $1",
-      [productionId],
-    ),
-  ]);
-
-  const tree = treeRes.rows;
-  const userDeptIds = memberRes.rows.map((r) => r.dept_id);
-  // 终局：原子键白名单退役——数组 zone 只放行 node: 串（机制本身 Step2 拆除）
-  const validPerms = new Set<string>();
-
-  // Inherited permissions (member zone: direct depts + ancestors)
-  const inherited = computeInheritedPermissions(userDeptIds, tree);
-
-  // POC zones
-  const pocZone = new Set<string>();
-  for (const row of memberRes.rows) {
-    if (row.is_poc) {
-      const zone = computePocPermissions(
-        row.dept_id,
-        row.poc_extra_permissions,
-        row.poc_blocked_permissions,
-        tree,
-      );
-      for (const p of zone) pocZone.add(p);
-    }
-  }
-
-  const result = new Set<Permission>();
-  for (const p of [...inherited, ...pocZone]) {
-    // node: 节点串直通（REST 化后 zone 的一等公民）；原子键仍过白名单
-    if (validPerms.has(p) || p.startsWith("node:")) result.add(p as Permission);
-  }
-  return result;
-}
 
 // ─── POC conflict resolution ──────────────────────────────────────────────────
 
@@ -592,31 +531,6 @@ export async function resolvePocConflict(
 
 // ─── Grant cascade revocation ─────────────────────────────────────────────────
 
-/**
- * Compute the combined atomic free-approval zone for a user:
- * dept zone (computeUserDeptFreeApprovalZone) ∪ role permissions.
- * Used for revocation checks — we must not revoke grants that are still
- * covered by either dept OR role membership.
- */
-async function computeUserCombinedAtomicZone(
-  userId: string,
-  productionId: string,
-  pool: Pool | PoolClient,
-): Promise<Set<string>> {
-  const [deptZone, rolePermsRes] = await Promise.all([
-    computeUserDeptFreeApprovalZone(userId, productionId, pool),
-    pool.query<{ permission_key: string }>(
-      `SELECT prp.permission_key
-       FROM production_member_role pmr
-       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
-       WHERE pmr.production_id = $1 AND pmr.user_id = $2`,
-      [productionId, userId],
-    ),
-  ]);
-  const combined = new Set<string>(deptZone);
-  for (const row of rolePermsRes.rows) combined.add(row.permission_key);
-  return combined;
-}
 
 /**
  * Recompute a user's free-approval zone after a role/dept/POC change and
@@ -642,19 +556,7 @@ export async function recomputeAndRevokeGrants(
   reason: "role_change" | "dept_change" | "poc_change",
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  const newZone = await computeUserCombinedAtomicZone(userId, productionId, pool);
-
-  await pool.query(
-    `UPDATE atomic_permission_grant
-     SET is_revoked = true, revoked_reason = $3
-     WHERE production_id = $1
-       AND user_id = $2
-       AND grant_source = 'self_confirmed'
-       AND is_revoked = false
-       AND NOT (permission_key = ANY($4))`,
-    [productionId, userId, reason, [...newZone]],
-  );
-
+  // 终局（批G G-2）：atomic 表已 DROP，撤销面只余 resource_grant 行
   await pool.query(
     `UPDATE resource_grant rg
      SET is_revoked = true, revoked_reason = $3
@@ -761,11 +663,6 @@ export async function revokeAllGrantsForMember(
 ): Promise<void> {
   await pool.query(
     `UPDATE resource_grant SET is_revoked = true, revoked_reason = 'member_removed'
-     WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
-    [productionId, userId],
-  );
-  await pool.query(
-    `UPDATE atomic_permission_grant SET is_revoked = true, revoked_reason = 'member_removed'
      WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
     [productionId, userId],
   );

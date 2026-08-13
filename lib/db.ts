@@ -15,7 +15,7 @@ export type ProductionAccess = {
   isArchived: boolean;
 };
 import { ROLE_NAMES } from "./permissions";
-import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
+import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
@@ -2775,7 +2775,7 @@ export async function getProductionPermissionContext(
 ): Promise<ProductionAccess | null> {
   const pool = getPool();
 
-  const [memberRow, dbPermsRow, personalZoneRow, deptRow, productionRow, grantsRow] = await Promise.all([
+  const [memberRow, dbPermsRow, deptRow, productionRow] = await Promise.all([
     // Is user a member? And what are their role strings?
     pool.query<{ roles: string[] }>(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
@@ -2789,12 +2789,6 @@ export async function getProductionPermissionContext(
        WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
-    // Personal zone adjustments: granted=true expands free-approval zone, granted=false shrinks it.
-    // Sensitive admin permissions are ignored here (they require the Phase 7 owner-approval flow).
-    pool.query<{ permission: string; granted: boolean }>(
-      "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
-      [productionId, userId],
-    ),
     // Department memberships (Phase 3: use production_dept instead of event_department)
     pool.query<{ dept_id: string; is_poc: boolean }>(
       `SELECT pdm.dept_id, pdm.is_poc
@@ -2805,11 +2799,6 @@ export async function getProductionPermissionContext(
     pool.query<{ archived_at: Date | null; owner_id: string | null }>(
       "SELECT archived_at, owner_id FROM production WHERE id = $1",
       [productionId],
-    ),
-    // Active grants: permissions the user has explicitly confirmed or had approved.
-    pool.query<{ permission_key: string }>(
-      "SELECT permission_key FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND is_revoked = false AND (expires_at IS NULL OR expires_at > NOW())",
-      [productionId, userId],
     ),
   ]);
 
@@ -7200,24 +7189,10 @@ export async function approveAccessRequest(
     );
     const fresh = freshRes.rows[0];
 
-    // Write grant — atomic_permission type → atomic_permission_grant, otherwise → resource_grant
+    // 终局（批G G-2）：atomic_permission 类型申请已随原子键退役（表已 DROP）——
+    // 历史 pending 申请（若有）按无效处理，不再发行
     if (req.type === "atomic_permission") {
-      const permKey = `${req.resource_type}:${req.permission_level}`;
-      await getPool().query(
-        `INSERT INTO atomic_permission_grant
-           (production_id, user_id, permission_key, grant_source, confirmed_by, approval_id, expires_at)
-         VALUES ($1,$2,$3,'approval',$4,$5,$6)
-         ON CONFLICT (production_id, user_id, permission_key) WHERE is_revoked = false
-         DO NOTHING`,
-        [
-          req.production_id,
-          req.subject_id,
-          permKey,
-          actorId,
-          requestId,
-          fresh?.expires_at ?? null,
-        ],
-      );
+      // no-op：原子键机制已退役
     } else {
       // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
       // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
