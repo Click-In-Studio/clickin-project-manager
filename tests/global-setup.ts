@@ -268,6 +268,22 @@ export async function setup() {
       await pool.query(migrationSql);
     }
   }
+
+  {
+    // 批E PR-E3（个人视图）：零消费键无 invariance，但 CI 迁移路径仍须重放迁移
+    // （否则词汇断言对 pre 态失败）。PRE 判据：script_view manage 词汇行仍在。
+    const e3Pre = await pool.query(
+      `SELECT 1 FROM resource_permission_level
+       WHERE resource_type = 'script_view' AND permission_level = 'manage'`,
+    );
+    if (e3Pre.rows.length > 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-personal-view-rest.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
 }
 
 export async function teardown() {
