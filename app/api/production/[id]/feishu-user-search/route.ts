@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, searchFeishuUsers, listAllFeishuUsers } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = getSession(req.cookies);

@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getAnnouncement, updateAnnouncement, deleteAnnouncement } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string; announcementId: string }> };
 

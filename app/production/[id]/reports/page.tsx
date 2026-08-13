@@ -7,7 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionReports } from "@/lib/event-db";
 import { isReportViewer } from "@/lib/event-permissions";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 import ProductionReportsClient from "@/components/ProductionReportsClient";
 import PageActivationGate from "@/components/PageActivationGate";
 

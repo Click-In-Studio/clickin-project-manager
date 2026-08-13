@@ -3,7 +3,7 @@ import { hasEventDomainView } from "@/lib/event-permissions";
 import { toActor, hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getBossUserIds, batchGetFeishuOpenIds } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 import { getProductionDept, getDeptMembers, setDeptMembers } from "@/lib/dept-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 

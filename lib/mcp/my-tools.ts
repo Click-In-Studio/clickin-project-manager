@@ -10,7 +10,7 @@ import {
   listMyTechReqsFull,
   listMyFollowedUpcomingEvents,
 } from "@/lib/event-db";
-import { ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 
 const EMPTY = (what: string) => `（当前没有${what}）`;
 
@@ -73,7 +73,7 @@ export async function myMilestones(userId: string): Promise<string> {
 export async function myProductions(userId: string): Promise<string> {
   const profile = await getUserProfile(userId);
   if (!profile) return "没有找到你的用户档案。";
-  const rows = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_PERMISSIONS]);
+  const rows = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_NODE_PREFIXES]);
   if (rows.length === 0) return EMPTY("参与的制作");
   return rows
     .slice(0, 30)

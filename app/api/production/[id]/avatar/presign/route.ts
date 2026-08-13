@@ -3,7 +3,7 @@ import { hasGrant } from "@/lib/grant-check";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 import { presignedPut } from "@/lib/r2";
 
 type Ctx = { params: Promise<{ id: string }> };

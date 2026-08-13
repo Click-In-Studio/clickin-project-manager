@@ -12,12 +12,12 @@
 
 import { getPool } from "@/lib/pg";
 import { getUserProfile, listMyProductionsWithRoles } from "@/lib/db";
-import { ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 
 export async function buildUserContextMarkdown(userId: string): Promise<string | null> {
   const profile = await getUserProfile(userId);
   if (!profile) return null;
-  const productions = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_PERMISSIONS]);
+  const productions = await listMyProductionsWithRoles(userId, profile.isAdmin, [...ADMIN_PANEL_NODE_PREFIXES]);
 
   const lines: string[] = [
     `## 当前用户`,

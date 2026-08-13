@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { listMemberProductions, getProductionPermissionContext } from "@/lib/db";
-import { hasPermission, ALL_PERMISSIONS, type Permission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);
@@ -15,12 +14,10 @@ export async function GET(req: NextRequest) {
       if (!access) return null;
       const { permCtx } = access;
 
-      const permissions: Record<Permission, { granted: boolean; overridden: boolean }> = {} as never;
-      for (const perm of ALL_PERMISSIONS) {
-        permissions[perm] = {
-          granted: hasPermission(perm, permCtx),
-          overridden: permCtx.overrides.has(perm),
-        };
+      // 终局（批G G-2）：原子键退役——返回 role 区间节点串概览
+      const permissions: Record<string, { granted: boolean; overridden: boolean }> = {};
+      for (const key of permCtx.memberPermissions ?? []) {
+        permissions[key] = { granted: true, overridden: false };
       }
 
       return {

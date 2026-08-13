@@ -9,7 +9,7 @@
  */
 
 import { getPool } from "./pg";
-import { hasPermission, type PermissionContext } from "./permissions";
+import { type PermissionContext } from "./permissions";
 import { hasGrant } from "./grant-check";
 
 // ─── Context loader ───────────────────────────────────────────────────────────

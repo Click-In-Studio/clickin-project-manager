@@ -39,12 +39,11 @@ import {
   setRolePermissions,
   deleteProductionRole,
 } from "@/lib/db";
-import { canAccess } from "@/lib/permissions";
 import type { PermissionContext } from "@/lib/permissions";
 
 // 批F 后原子键仅剩 org 域 2 枚；本文件测试 zone/recompute 机制本身（键无关），
 // 用已退役键作为载荷（RETIRED 棘轮 grep 仅扫 app/lib/components，tests 不在其列）。
-const asPerm = (k: string) => k as unknown as import("@/lib/permissions").Permission;
+const asPerm = (k: string) => k;
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -543,149 +542,6 @@ describe("computeUserDeptFreeApprovalZone", () => {
     expect(zone.has(asPerm("node:milestone/*@create"))).toBe(true);
   });
 });
-
-describe("canAccess() with deptFreeApprovalZone", () => {
-  // cue:create is a non-base permission suitable for testing the confirmation flow.
-
-  it("base permission without role or grant → needs_approval (bypass removed, #158)", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(), // member with no role permissions
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(),
-    };
-    // scene:view used to be granted via MEMBER_BASE_PERMISSIONS bypass.
-    // Now it requires the role to include it; with empty memberPermissions → needs_approval.
-    expect(canAccess(ctx, asPerm("node:milestone/*@create"))).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-
-  it("base permission with role but no active grant → needs_self_confirm", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set([asPerm("node:milestone/*@create")] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, asPerm("node:milestone/*@create"))).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("base permission with active grant → allowed", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set([asPerm("node:milestone/*@create")] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set([asPerm("node:milestone/*@create")] as const),
-    };
-    expect(canAccess(ctx, asPerm("node:milestone/*@create"))).toEqual({ allowed: true });
-  });
-
-  it("role permission without active grant → needs_self_confirm", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set([asPerm("node:announcement/*@edit")] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(), // not yet confirmed
-    };
-    expect(canAccess(ctx, asPerm("node:announcement/*@edit"))).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("role permission with active grant → allowed", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set([asPerm("node:announcement/*@edit")] as const),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set([asPerm("node:announcement/*@edit")] as const),
-    };
-    expect(canAccess(ctx, asPerm("node:announcement/*@edit"))).toEqual({ allowed: true });
-  });
-
-  it("returns needs_self_confirm when perm is in deptFreeApprovalZone (no role)", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(), // no role-based permissions
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set([asPerm("node:announcement/*@edit"), asPerm("org:assign_member")]),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, asPerm("node:announcement/*@edit"))).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("returns needs_approval when perm is in neither role nor deptFreeApprovalZone", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set([asPerm("org:assign_member")]),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, asPerm("node:announcement/*@edit"))).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-
-  it("needs_self_confirm takes priority over needs_approval when zone matches", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set([asPerm("node:announcement/*@create")]),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, asPerm("node:announcement/*@create"))).toEqual({ allowed: false, reason: "needs_self_confirm" });
-  });
-
-  it("empty zone and no role → needs_approval for non-base perms", () => {
-    const ctx: PermissionContext = {
-      userId: TEST_USER,
-      isAdmin: false,
-      isOwner: false,
-      memberPermissions: new Set(),
-      overrides: new Map(),
-      deptIds: [],
-      pocDeptIds: [],
-      deptFreeApprovalZone: new Set(),
-      activeGrants: new Set(),
-    };
-    expect(canAccess(ctx, asPerm("node:announcement/*@edit"))).toEqual({ allowed: false, reason: "needs_approval" });
-  });
-});
-
-// ── 5. Grant cascade revocation ────────────────────────────────────────────────
 
 describe("revokeGrantsForDeptRemoval: atomic_permission_grant", () => {
   let deptIdA: string;  // dept with scene:view + cue_list:view

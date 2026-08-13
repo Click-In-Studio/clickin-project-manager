@@ -8,7 +8,7 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { hasPermission, type Permission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -53,7 +53,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "userId 和 permission 为必填" }, { status: 400 });
   }
 
-  await setPermissionOverride(productionId, userId, permission as Permission, granted ?? null);
+  await setPermissionOverride(productionId, userId, permission, granted ?? null);
   return Response.json({ ok: true });
 }
 

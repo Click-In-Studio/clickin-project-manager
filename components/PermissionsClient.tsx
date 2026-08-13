@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import { ALL_PERMISSIONS, type Permission } from "@/lib/permissions";
+type Permission = string;
+const ALL_PERMISSIONS: readonly Permission[] = [];
 
 const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   // 项目管理
@@ -21,8 +22,6 @@ const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   // 报告（per-report 写操作已迁移至 resource_grant）
   // 附件
   // 组织
-  "org:assign_member": "分配组织成员",
-  "org:recall_member": "收回组织成员",
 };
 
 // Group by permission-key prefix (before the colon). Falls back to the raw

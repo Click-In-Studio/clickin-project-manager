@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
   const session = getSession(req.cookies);

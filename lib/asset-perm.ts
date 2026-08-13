@@ -1,6 +1,6 @@
 import { getPool } from "./pg";
 import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
-import { hasPermission, type PermissionContext } from "./permissions";
+import { type PermissionContext } from "./permissions";
 import type { Asset } from "./asset-db";
 
 // ─── 批D：asset 可见性判定（隐私/公开模型）──────────────────────────────────

@@ -3,7 +3,7 @@ import { getPool } from "@/lib/pg";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission, ROLE_TEMPLATE_EXCLUDED } from "@/lib/permissions";
+
 import { setRolePermissions } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string; roleId: string }> };
@@ -32,7 +32,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as { permissions?: unknown };
   if (!Array.isArray(body.permissions) || body.permissions.some((p) => typeof p !== "string"))
     return Response.json({ error: "permissions 必须是字符串数组" }, { status: 400 });
-  const filtered = (body.permissions as string[]).filter((p) => !ROLE_TEMPLATE_EXCLUDED.has(p as never));
+  // 终局：治理域节点串（production/producer）不可经普通角色编辑写入——
+  // SENSITIVE 入口资格行的发放属 owner 域（与制作人权限集合同 ROOT 语义）
+  const filtered = (body.permissions as string[]).filter(
+    (p) => !p.startsWith("node:production/") && !p.startsWith("node:producer/"));
   await setRolePermissions(roleId, filtered);
   return Response.json({ ok: true, permissions: filtered });
 }

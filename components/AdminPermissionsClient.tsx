@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
-import { ROLE_TEMPLATE_PERMISSIONS } from "@/lib/permissions";
+// 终局：代码模板退役——角色模板内容在 grant_template 表（UI 展示走 role 区间 API）
+const ROLE_TEMPLATE_PERMISSIONS: Record<string, readonly string[]> = {};
 import type { MemberWithRoles } from "@/lib/db";
 
 // ─── Re-use same permission group definitions as AdminRolesClient ─────────────
@@ -25,7 +26,7 @@ const PERM_GROUPS: PermGroup[] = [
   { label: "附件（管理 _any）", perms: [] },
   { label: "标注体系", perms: [] },
   { label: "评论管理", perms: [] },
-  { label: "读权限", perms: ["org:assign_member", "org:recall_member"] },
+  { label: "读权限", perms: [] },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────

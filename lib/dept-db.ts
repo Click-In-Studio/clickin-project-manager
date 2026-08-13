@@ -12,8 +12,8 @@
 
 import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
-import type { Permission } from "./permissions";
-import { DEPT_ASSIGNABLE_PERMISSIONS } from "./permissions";
+type Permission = string;
+
 import { RESERVED_TYPES } from "./grant-template";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -505,7 +505,8 @@ export async function computeUserDeptFreeApprovalZone(
 
   const tree = treeRes.rows;
   const userDeptIds = memberRes.rows.map((r) => r.dept_id);
-  const validPerms = new Set<string>(DEPT_ASSIGNABLE_PERMISSIONS);
+  // 终局：原子键白名单退役——数组 zone 只放行 node: 串（机制本身 Step2 拆除）
+  const validPerms = new Set<string>();
 
   // Inherited permissions (member zone: direct depts + ancestors)
   const inherited = computeInheritedPermissions(userDeptIds, tree);

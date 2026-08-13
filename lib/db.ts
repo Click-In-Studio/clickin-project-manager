@@ -7,13 +7,14 @@ import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
-import type { Permission as AtomicPermission, PermissionContext } from "./permissions";
+import type { PermissionContext } from "./permissions";
+type AtomicPermission = string;
 
 export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
+import { ROLE_NAMES } from "./permissions";
 import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
@@ -2049,8 +2050,9 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
     }
   }
 
-  const entries = Object.entries(ROLE_TEMPLATE_PERMISSIONS);
-  for (const [roleName, perms] of entries) {
+  // 终局（批G G-2）：角色行从 ROLE_NAMES 结构名单建；权限内容全部经
+  // seedRoleFromTemplate 从 grant_template 表灌入（代码模板已退役）
+  for (const roleName of ROLE_NAMES) {
     const roleId = `r_${productionId}_${encodeURIComponent(roleName)}`;
     await pool.query(
       `INSERT INTO production_role (id, production_id, name)
@@ -2058,23 +2060,11 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
        ON CONFLICT (production_id, name) DO NOTHING`,
       [roleId, productionId, roleName],
     );
-    // Re-fetch actual id in case of conflict (row existed, our roleId may differ)
     const roleRow = await pool.query<{ id: string }>(
       "SELECT id FROM production_role WHERE production_id = $1 AND name = $2",
       [productionId, roleName],
     );
-    const actualId = roleRow.rows[0].id;
-    if (perms.length > 0) {
-      await pool.query(
-        `INSERT INTO production_role_permission (role_id, permission_key)
-         SELECT $1, unnest($2::text[])
-         ON CONFLICT DO NOTHING`,
-        [actualId, perms],
-      );
-    }
-    // 批A：REST 化域的资格从全局模板 seed（node 键；按 production.type，运行时零读取）
-    await seedRoleFromTemplate(actualId, roleName, prodType);
-    // Phase 4: production_role_cue_type dropped; cue type auth moved to production_dept.allowed_cue_types
+    await seedRoleFromTemplate(roleRow.rows[0].id, roleName, prodType);
   }
 }
 
@@ -2160,12 +2150,12 @@ export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
   sortOrder: number; roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
-  hasAdminPerm: boolean; // true if FK-backed roles include any ADMIN_PANEL_PERMISSIONS key
+  hasAdminPerm: boolean; // true if FK-backed role 区间含治理域节点键（ADMIN_PANEL_NODE_PREFIXES）
 };
 
 export async function listMyProductionsWithRoles(
   userId: string, isAdmin: boolean,
-  adminPanelPerms: readonly string[],
+  adminPanelPrefixes: readonly string[],
 ): Promise<MyProductionEntry[]> {
   const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
   const res = await getPool().query<{
@@ -2190,13 +2180,13 @@ export async function listMyProductionsWithRoles(
               JOIN production_role_permission prp ON prp.role_id = pmr.role_id
               WHERE pmr.production_id = p.id
                 AND pmr.user_id = $1
-                AND prp.permission_key = ANY($3::text[])
+                AND prp.permission_key LIKE ANY($3::text[])
             ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
      WHERE ($2 OR pm.user_id IS NOT NULL)
      ORDER BY ${orderBy}`,
-    [userId, isAdmin, adminPanelPerms],
+    [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
   );
   return res.rows.map(r => ({
     id: r.id, name: r.name,
@@ -2840,18 +2830,8 @@ export async function getProductionPermissionContext(
         dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
       );
     } else {
-      // Fallback: no FK rows yet — derive from static templates via TEXT[] role strings.
-      // Templates now include MEMBER_BASE_PERMISSIONS, so empty roles → empty Set.
-      const roleStrings = memberRow.rows[0].roles;
-      const perms = new Set<AtomicPermission>();
-      for (const role of roleStrings) {
-        const templatePerms =
-          ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
-        if (templatePerms) {
-          for (const p of templatePerms) perms.add(p);
-        }
-      }
-      memberPermissions = perms;
+      // 终局：代码模板已退役，无 FK 行 = 空区间
+      memberPermissions = new Set();
     }
   }
 
@@ -2865,22 +2845,9 @@ export async function getProductionPermissionContext(
     if (row.is_poc) pocDeptIds.push(row.dept_id);
   }
 
-  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone),
-  // then apply personal zone adjustments from production_member_permission.
-  const deptFreeApprovalZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
-  for (const row of personalZoneRow.rows) {
-    const perm = row.permission as AtomicPermission;
-    if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) continue;
-    if (row.granted) {
-      deptFreeApprovalZone.add(perm);
-    } else {
-      deptFreeApprovalZone.delete(perm);
-    }
-  }
-
-  const activeGrants = new Set<AtomicPermission>(
-    grantsRow.rows.map((r) => r.permission_key as AtomicPermission),
-  );
+  // 终局（批G G-2）：区间三表经六步链消费、行经 hasGrant 消费——ctx 历史字段恒空
+  const deptFreeApprovalZone = new Set<string>();
+  const activeGrants = new Set<string>();
 
   return {
     permCtx: { userId, isAdmin, isOwner, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone, activeGrants },

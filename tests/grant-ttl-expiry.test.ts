@@ -20,22 +20,6 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
-describe("atomic_permission_grant 过期过滤", () => {
-  it("expired atomic grant is absent from permCtx.activeGrants; valid one is present", async () => {
-    await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source, confirmed_by, expires_at)
-       VALUES ($1, $2, 'contacts:import', 'approval', $2, '2000-01-01T00:00:00Z'),
-              ($1, $2, 'milestone:create',    'approval', $2, '2099-01-01T00:00:00Z')`,
-      [prodId, userId],
-    );
-    const access = await getProductionPermissionContext(userId, false, prodId);
-    expect(access).not.toBeNull();
-    expect(access!.permCtx.activeGrants.has("contacts:import" as unknown as import("@/lib/permissions").Permission)).toBe(false);
-    expect(access!.permCtx.activeGrants.has("milestone:create" as unknown as import("@/lib/permissions").Permission)).toBe(true);
-  });
-});
-
 describe("resource_grant 过期过滤", () => {
   it("expired edit grant fails hasListAccess; valid one passes", async () => {
     const expiredList = shortId();

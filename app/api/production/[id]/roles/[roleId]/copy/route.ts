@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { } from "@/lib/permissions";
 import { copyProductionRole } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string; roleId: string }> };
