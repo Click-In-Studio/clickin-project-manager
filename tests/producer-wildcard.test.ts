@@ -132,3 +132,36 @@ describe("制作人 role 结构保护（批G，用户定谳）", () => {
     await expect(renameProductionRole(roleRes.rows[0].id, prodId, "别的名字")).rejects.toThrow("制作人角色不可改名");
   });
 });
+
+describe("两个指派面（2026-08-13 用户定稿）", () => {
+  it("EVENT manage 行集：含 assignees c/d + call_sheet@edit，不含 publication@create", async () => {
+    const { EVENT_LEVEL_ROW_SETS } = await import("@/lib/resource-grant-db");
+    const pairs = EVENT_LEVEL_ROW_SETS.manage.map(([s, v]) => `${s}@${v}`);
+    expect(pairs).toContain("assignees@create");
+    expect(pairs).toContain("assignees@delete");
+    expect(pairs).toContain("call_sheet@edit");
+    expect(pairs).not.toContain("publication@create");   // 发布归舞监 role
+    expect(pairs).toContain("publication@edit");          // organizer 保留修订
+    expect(pairs).toContain("publication@delete");        // 与撤回
+  });
+
+  it("跟组舞监十行集：含 call_sheet@edit，不含 assignees（排 call 不动名单）", async () => {
+    const { setEventStageManagers } = await import("@/lib/event-db");
+    const { getPool } = await import("@/lib/pg");
+    const u = (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
+    const ev = `ev_sm_${Date.now().toString(36)}`;
+    await getPool().query(
+      "INSERT INTO production_event (id, production_id, title, created_by, status) VALUES ($1, $2, 'SM测试', $3, 'draft')",
+      [ev, prodId, u]);
+    await setEventStageManagers(ev, [{ userId: u, name: "SM" }], prodId, u);
+    const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM production_member_grant
+       WHERE user_id = $1 AND resource_type = 'event' AND resource_id = $2 AND NOT is_revoked`,
+      [u, ev]);
+    const pairs = rows.map(r => `${r.resource_sub}@${r.permission_level}`);
+    expect(pairs).toContain("call_sheet@edit");
+    expect(pairs).toContain("call_sheet@view");
+    expect(pairs.some(p => p.startsWith("assignees"))).toBe(false);
+    await getPool().query("DELETE FROM production_event WHERE id = $1", [ev]);
+  });
+});

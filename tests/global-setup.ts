@@ -334,6 +334,20 @@ export async function setup() {
     }
   }
 
+  {
+    // 两个指派面（2026-08-13）：CI 迁移路径重放。PRE 判据：舞监模板尚无 event 通配 view。
+    const acPre = await pool.query(
+      `SELECT 1 FROM grant_template WHERE role_name = '舞台监督' AND permission_key = 'node:event/*@view'`,
+    );
+    if (acPre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-event-assignee-callsheet.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
   if (await isLocalScriptDataPreMigrationSchema(pool)) {
     const snapshot = await createLocalScriptDataPreMigrationData(pool);
     await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));

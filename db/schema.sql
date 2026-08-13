@@ -1241,6 +1241,16 @@ FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
 ON CONFLICT DO NOTHING;
 
 -- 批C：制作人的报告挂接资格（原 report:create）
+-- 两个指派面（2026-08-13）：舞监 role=全内容 view+发布/撤回；名单/call 面见行集
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('舞台监督', 'node:event/*@view'),
+  ('舞台监督', 'node:event/*/publication@create'),
+  ('舞台监督', 'node:event/*/publication@delete'),
+  ('助理舞台监督', 'node:event/*@view'),
+  ('助理舞台监督', 'node:event/*/publication@create'),
+  ('助理舞台监督', 'node:event/*/publication@delete')
+ON CONFLICT DO NOTHING;
+
 -- 批G G-1：制作人通配区间（收敛历史枚举 seed；主行+保留段四行=永久稳定全集；
 -- RESERVED_TYPES=production/producer 不被类型通配穿透）
 INSERT INTO grant_template (role_name, permission_key) VALUES

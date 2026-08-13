@@ -173,10 +173,14 @@ export const EVENT_LEVEL_ROW_SETS: Record<EventLevel, ReadonlyArray<readonly [st
   publish:        [["publication", "create"]],
   edit_published: [["publication", "edit"]],
   revoke:         [["publication", "delete"]],
+  // 2026-08-13 用户定稿（两个指派面）：organizer 默认含 assignees@c/d（名单）+
+  // call_sheet@edit（排 call），**不含 publication@create**——发布动作归舞监 role
+  // （模板 event/*/publication@c/d）；organizer 保留 publication@edit/delete（修订/撤回）
   manage:         [["meta", "view"], ["details", "view"], ["publication", "view"], ["*", "edit"],
+                   ["assignees", "create"], ["assignees", "delete"], ["call_sheet", "edit"],
                    ["tasks", "create"], ["tasks", "delete"],
                    ["reports", "create"], ["reports", "delete"],
-                   ["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+                   ["publication", "edit"], ["publication", "delete"],
                    ["grants", "edit"]],
 };
 
