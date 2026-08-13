@@ -6,8 +6,8 @@
  *
  * createCueDomainRestPreMigrationData: inserts, on the PRE schema:
  *   - a production + cue list
- *   - a user holding a legacy resource_grant 'manage' row on that list
- *   - a user holding a legacy resource_grant 'edit' row
+ *   - a user holding a legacy production_member_grant 'manage' row on that list
+ *   - a user holding a legacy production_member_grant 'edit' row
  *   - a user with active atomic grants: cue_list:view + cue:comment + cue_list:rename_any
  *   - a production role holding cue keys in production_role_permission
  *     (cue_list:view / cue_list:create / cue_list:delete[base,无转换])
@@ -74,9 +74,9 @@ export async function createCueDomainRestPreMigrationData(
   const editUserId = await makeUser(pool, "批A-edit持有者");
   const atomicUserId = await makeUser(pool, "批A-atomic持有者");
 
-  // 旧级别 resource_grant 行
+  // 旧级别 production_member_grant 行
   await pool.query(
-    `INSERT INTO resource_grant
+    `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
      VALUES ($1, $2, 'cue_list', $4, '*', 'manage', 'direct', $2),

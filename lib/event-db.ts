@@ -397,7 +397,7 @@ export async function setDepartmentMembers(
     const demoted = [...prevPoc].filter(u => !nowPoc.has(u));
     if (promoted.length > 0) {
       await client.query(
-        `INSERT INTO resource_grant
+        `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source)
          SELECT ed.production_id, u, 'dept', ed.id, 'notes', v.verb, 'auto'
@@ -413,7 +413,7 @@ export async function setDepartmentMembers(
     }
     if (demoted.length > 0) {
       await client.query(
-        `UPDATE resource_grant
+        `UPDATE production_member_grant
          SET is_revoked = true, revoked_reason = 'poc_change'
          WHERE resource_type = 'dept' AND resource_id = $1 AND resource_sub = 'notes'
            AND grant_source = 'auto' AND is_revoked = false
@@ -457,7 +457,7 @@ export async function setEventParticipants(
     // **不**自动撤行（撤销走 sweep/手动；模板只是模板）。
     if (unique.length > 0) {
       await client.query(
-        `INSERT INTO resource_grant
+        `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT $1, u, 'event', $3, s.sub, 'view', 'assigned', $4
@@ -474,7 +474,7 @@ export async function setEventParticipants(
     const deptIds = [...new Set(unique.map(p => p.departmentId).filter((d): d is string => d !== null))];
     if (deptIds.length > 0) {
       await client.query(
-        `INSERT INTO resource_grant
+        `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT DISTINCT $1, edm.user_id, 'event', $3, 'reports', 'view', 'assigned', $4::uuid
@@ -579,7 +579,7 @@ export async function setEventStageManagers(
     // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
     if (unique.length > 0) {
       await client.query(
-        `INSERT INTO resource_grant
+        `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
@@ -1266,7 +1266,7 @@ export async function writeTaskDeptEventVisibility(
   establishedBy: string,
 ): Promise<void> {
   await getPool().query(
-    `INSERT INTO resource_grant
+    `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
      SELECT $1, edm.user_id, 'event', $2, s.sub, 'view', 'assigned', $4
@@ -1310,7 +1310,7 @@ export async function setTechReqAssignees(
     // 移除 assignee 不撤行（行是独立事实）。
     if (assignees.length > 0) {
       await client.query(
-        `INSERT INTO resource_grant
+        `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
@@ -2022,7 +2022,7 @@ export async function listProductionReports(
        AND ($3 OR er.published_at IS NOT NULL
             -- draft 可见：publication@view（本报告）或 event reports@view（本 event；'*' 已由 $3 覆盖）
             OR EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.user_id = $2::uuid AND rg.production_id = $1
                 AND NOT rg.is_revoked
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())

@@ -18,8 +18,8 @@ const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   // 标注体系
   // Cue表
   // 构作
-  // 事件（per-event 写操作已迁移至 resource_grant）
-  // 报告（per-report 写操作已迁移至 resource_grant）
+  // 事件（per-event 写操作已迁移至 production_member_grant）
+  // 报告（per-report 写操作已迁移至 production_member_grant）
   // 附件
   // 组织
 };

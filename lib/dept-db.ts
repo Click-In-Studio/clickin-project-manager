@@ -537,7 +537,7 @@ export async function resolvePocConflict(
  * soft-revoke any self_confirmed grants that are no longer covered.
  *
  * - atomic_permission_grant: revoke keys not in the combined (dept ∪ role) zone.
- * - resource_grant: revoke rows where the user's remaining depts no longer
+ * - production_member_grant: revoke rows where the user's remaining depts no longer
  *   cover the resource via resource_dept_manage AND the user is not a person
  *   manager of the resource (resource_person_manage).
  *
@@ -556,9 +556,9 @@ export async function recomputeAndRevokeGrants(
   reason: "role_change" | "dept_change" | "poc_change",
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  // 终局（批G G-2）：atomic 表已 DROP，撤销面只余 resource_grant 行
+  // 终局（批G G-2）：atomic 表已 DROP，撤销面只余 production_member_grant 行
   await pool.query(
-    `UPDATE resource_grant rg
+    `UPDATE production_member_grant rg
      SET is_revoked = true, revoked_reason = $3
      WHERE rg.production_id = $1
        AND rg.user_id = $2
@@ -662,7 +662,7 @@ export async function revokeAllGrantsForMember(
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
   await pool.query(
-    `UPDATE resource_grant SET is_revoked = true, revoked_reason = 'member_removed'
+    `UPDATE production_member_grant SET is_revoked = true, revoked_reason = 'member_removed'
      WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
     [productionId, userId],
   );
@@ -699,7 +699,7 @@ export async function revokeGrantsForDeptRemoval(
 /**
  * When a user loses POC status in a dept, revoke self_confirmed grants that
  * were exclusively in the POC zone (not covered by remaining membership zone).
- * Also revokes resource_grant rows no longer covered by any dept membership.
+ * Also revokes production_member_grant rows no longer covered by any dept membership.
  */
 export async function revokeGrantsForPocLoss(
   deptId: string,
@@ -860,7 +860,7 @@ export async function computeApprovalRoutingChain(
 
   // Tier 1: personal manage grant holders
   const { rows: manageGrantors } = await pool.query<{ user_id: string }>(
-    `SELECT DISTINCT user_id FROM resource_grant
+    `SELECT DISTINCT user_id FROM production_member_grant
      WHERE production_id = $1
        AND resource_type = $2
        AND resource_id   = ANY($3)

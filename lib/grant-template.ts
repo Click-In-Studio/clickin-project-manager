@@ -6,7 +6,7 @@
  *   production_role_permission   role 区间（第 4 步）
  *   production_member_permission 个人 override（granted=false 第 2 步拒绝区间 /
  *                                granted=true 第 5 步个人区间）
- * grant = 访问权，单表 resource_grant（第 1 步；终局更名 production_member_grant）。
+ * grant = 访问权，单表 production_member_grant（第 1 步；终局更名 production_member_grant）。
  *
  * 六步判定链（canAccessNode）：
  *   1. 有 grant 行 → 操作（admin/owner 旁路视作恒有）
@@ -223,7 +223,7 @@ export async function hasZoneEligibility(
   return roleZoneHit(userId, productionId, candidates);
 }
 
-/** self-confirm 激活：把用户区间内的节点落成 resource_grant 个人行（防伪造，幂等）。 */
+/** self-confirm 激活：把用户区间内的节点落成 production_member_grant 个人行（防伪造，幂等）。 */
 export async function selfConfirmTemplateNodes(
   userId: string,
   productionId: string,
@@ -236,7 +236,7 @@ export async function selfConfirmTemplateNodes(
     if (isRootNode(n.resourceType, n.resourceSub, n.verb)) continue;
     if (!(await hasZoneEligibility(userId, productionId, n))) continue;
     const res = await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, $3, $4, $5, $6, 'self_confirmed', $2)

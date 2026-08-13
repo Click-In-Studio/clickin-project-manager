@@ -29,7 +29,7 @@ function ctxOf(userId: string): PermissionContext {
 
 async function grantRows(userId: string, deptId: string): Promise<{ verb: string; revoked: boolean }[]> {
   const res = await getPool().query<{ permission_level: string; is_revoked: boolean }>(
-    `SELECT permission_level, is_revoked FROM resource_grant
+    `SELECT permission_level, is_revoked FROM production_member_grant
      WHERE user_id = $1 AND resource_type = 'dept' AND resource_id = $2 AND resource_sub = 'notes'
      ORDER BY permission_level`,
     [userId, deptId],
@@ -61,7 +61,7 @@ beforeAll(async () => {
   );
 
   await getPool().query(
-    `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+    `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
      VALUES ($1, $2, 'dept', '*', 'notes', 'create', 'auto')`,
     [prodId, director],
   );
@@ -155,7 +155,7 @@ describe("canEditNote created_via filter", () => {
 describe("dept joins event → POC gets event reports@view", () => {
   async function hasReportsView(userId: string, evId: string): Promise<boolean> {
     const res = await getPool().query(
-      `SELECT 1 FROM resource_grant
+      `SELECT 1 FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'event' AND resource_id = $2
          AND resource_sub = 'reports' AND permission_level = 'view' AND NOT is_revoked`,
       [userId, evId],

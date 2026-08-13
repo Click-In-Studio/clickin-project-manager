@@ -312,6 +312,20 @@ export async function setup() {
       await pool.query(migrationSql);
     }
   }
+
+  {
+    // 批G G-2（终局清理）：CI 迁移路径重放。PRE 判据：atomic 表仍存在。
+    const g2Pre = await pool.query(
+      `SELECT 1 FROM information_schema.tables WHERE table_name = 'atomic_permission_grant'`,
+    );
+    if (g2Pre.rows.length > 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-terminal-cleanup.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
 }
 
 export async function teardown() {

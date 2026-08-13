@@ -34,7 +34,7 @@ describe("integrity verification", () => {
   it("atomic / 三张 permission 表零 E1 原子键", async () => {
     const like = "permission_key LIKE 'scene:%' OR permission_key LIKE 'character:%' OR permission_key LIKE 'tag_group:%' OR permission_key LIKE 'tag_option:%'";
     const [a, r, d] = await Promise.all([
-      getPool().query(`SELECT 1 FROM atomic_permission_grant WHERE ${like} LIMIT 1`),
+      getPool().query(`SELECT 1 FROM production_member_grant WHERE false`)  /* 终局：atomic 已 DROP */,
       getPool().query(`SELECT 1 FROM production_role_permission WHERE ${like} LIMIT 1`),
       getPool().query(`SELECT 1 FROM production_dept_permission WHERE ${like} LIMIT 1`),
     ]);
@@ -51,11 +51,11 @@ describe("integrity verification", () => {
 
   it("RG scene 零 mount/manage 老级别行；无 grants 段行（结构型判据）", async () => {
     const old = await getPool().query(
-      `SELECT 1 FROM resource_grant WHERE resource_type = 'scene'
+      `SELECT 1 FROM production_member_grant WHERE resource_type = 'scene'
        AND permission_level IN ('mount', 'manage') LIMIT 1`,
     );
     const grants = await getPool().query(
-      `SELECT 1 FROM resource_grant WHERE resource_type IN ('scene', 'character', 'tag_group')
+      `SELECT 1 FROM production_member_grant WHERE resource_type IN ('scene', 'character', 'tag_group')
        AND resource_sub LIKE 'grants%' LIMIT 1`,
     );
     expect(old.rows).toHaveLength(0);
@@ -66,7 +66,7 @@ describe("integrity verification", () => {
 describe("invariance verification", () => {
   it.skipIf(!snapshot)("scene:rename 万能代理 → 11 节点行集（结构域全写权保真）", async () => {
     const { rows } = await getPool().query<{ resource_type: string; resource_sub: string; permission_level: string }>(
-      `SELECT resource_type, resource_sub, permission_level FROM resource_grant
+      `SELECT resource_type, resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_id = '*' AND NOT is_revoked`,
       [snapshot!.renameUserId],
     );
@@ -83,7 +83,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("scene:view / character:view → 三态面行（meta + 内容面）", async () => {
     const { rows } = await getPool().query<{ resource_type: string; resource_sub: string }>(
-      `SELECT resource_type, resource_sub FROM resource_grant
+      `SELECT resource_type, resource_sub FROM production_member_grant
        WHERE user_id = $1 AND permission_level = 'view' AND NOT is_revoked`,
       [snapshot!.viewUserId],
     );
@@ -95,7 +95,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("RG scene manage → 内容行集（无 grants，持有者判据）", async () => {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'scene' AND resource_id = $2 AND NOT is_revoked`,
       [snapshot!.manageUserId, snapshot!.sceneId],
     );

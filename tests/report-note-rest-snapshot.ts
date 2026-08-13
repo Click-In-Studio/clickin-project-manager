@@ -67,7 +67,7 @@ export async function createReportNoteRestPreMigrationData(
   const atomicUserId = await makeUser(pool, "批C-atomic");
 
   await pool.query(
-    `INSERT INTO resource_grant
+    `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
      VALUES ($1, $2, 'report', $3, '*', 'manage', 'direct', $2)`,

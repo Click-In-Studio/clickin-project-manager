@@ -32,9 +32,9 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   // 剧本标签
   // Cue表
   // 构作
-  // 事件（per-event 写操作已迁移至 resource_grant，原子权限只保留生产级和管理员绕过）
-  // Task（技术需求，per-task 写操作已迁移至 resource_grant）
-  // 报告（per-report 写操作已迁移至 resource_grant，保留生产级和管理员绕过）
+  // 事件（per-event 写操作已迁移至 production_member_grant，原子权限只保留生产级和管理员绕过）
+  // Task（技术需求，per-task 写操作已迁移至 production_member_grant）
+  // 报告（per-report 写操作已迁移至 production_member_grant，保留生产级和管理员绕过）
   // 数字资产
   // 组织
   // 里程碑

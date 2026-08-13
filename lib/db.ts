@@ -2580,14 +2580,14 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
-    // Transfer cue list resource_grant rows (cue_list_permission/role tables dropped in Phase 4)
+    // Transfer cue list production_member_grant rows (cue_list_permission/role tables dropped in Phase 4)
     await client.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at)
        SELECT production_id, $1, resource_type, resource_id, resource_sub,
               permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at
-       FROM resource_grant
+       FROM production_member_grant
        WHERE user_id = $2 AND resource_type = 'cue_list'
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
@@ -2595,7 +2595,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
       [keepUserId, deleteUserId],
     );
     await client.query(
-      `DELETE FROM resource_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
+      `DELETE FROM production_member_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
       [deleteUserId],
     );
 
@@ -3899,7 +3899,7 @@ export async function listCueListsWithAccess(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.created_by, fu.name AS created_by_name, cl.created_at,
             EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (cl.id, '*')
@@ -3910,7 +3910,7 @@ export async function listCueListsWithAccess(
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_edit,
             EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (cl.id, '*')
@@ -3924,7 +3924,7 @@ export async function listCueListsWithAccess(
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
        AND ($3 OR EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (cl.id, '*')
@@ -3966,7 +3966,7 @@ export async function createCueList(data: {
     // '*' 整树通配不含保留段，grants 必须显式；cues 的 create/delete 是独立动词行。
     // 存续按归属二分（self_confirmed + resource_dept_manage/resource_person_manage 覆盖）。
     await client.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
@@ -4217,7 +4217,7 @@ export async function copyProductionRole(productionId: string, sourceRoleId: str
 export async function hasListAccess(cueListId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ has_access: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
+       SELECT 1 FROM production_member_grant rg
        JOIN cue_list cl ON cl.id = $1 AND cl.production_id = rg.production_id
        WHERE rg.resource_type = 'cue_list'
          AND rg.resource_id IN ($1, '*')
@@ -4239,7 +4239,7 @@ export async function hasListAccess(cueListId: string, userId: string): Promise<
 export async function listCueListRoleMembers(cueListId: string): Promise<string[]> {
   const res = await getPool().query<{ user_id: string }>(
     `SELECT DISTINCT rg.user_id
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND rg.resource_sub IN ('cues', '*')
@@ -4277,7 +4277,7 @@ export async function deleteCueList(id: string, productionId: string): Promise<v
 export async function listCueListPermissions(cueListId: string): Promise<CueListPermissionRow[]> {
   const res = await getPool().query<{ user_id: string; permission_level: string }>(
     `SELECT DISTINCT rg.user_id, rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND rg.resource_sub IN ('cues', '*')
@@ -4299,7 +4299,7 @@ export async function setCueListPermission(
   if (canEdit === true) {
     // 批A：编辑授权 = 动词行集（view + edit + cues create/delete）
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT cl.production_id, $2, 'cue_list', $1, s.sub, s.verb, 'direct', $3
@@ -4313,7 +4313,7 @@ export async function setCueListPermission(
     );
   } else {
     await getPool().query(
-      `UPDATE resource_grant
+      `UPDATE production_member_grant
        SET is_revoked = true, revoked_reason = 'manual'
        WHERE resource_type = 'cue_list'
          AND resource_id = $1
@@ -7208,7 +7208,7 @@ export async function approveAccessRequest(
           ?? [[req.resource_sub ?? "*", req.permission_level!] as const];
       for (const [sub, verb] of rows) {
         await getPool().query(
-          `INSERT INTO resource_grant
+          `INSERT INTO production_member_grant
              (production_id, user_id, resource_type, resource_id, resource_sub,
               permission_level, grant_source, confirmed_by, approval_id, expires_at)
            VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)

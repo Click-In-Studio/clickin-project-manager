@@ -506,9 +506,9 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
       [prodId, EXTRA_USER_1, []],
     );
 
-    // Insert resource_grant rows with three different grant sources (id is UUID DEFAULT)
+    // Insert production_member_grant rows with three different grant sources (id is UUID DEFAULT)
     await pool.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
        VALUES
          ($1, $2, 'scene', 'scene-rm-1', '*', 'view', 'self_confirmed'),
@@ -525,7 +525,7 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
     const pool = getPool();
 
     const { rows: rgRows } = await pool.query<{ is_revoked: boolean; revoked_reason: string }>(
-      `SELECT is_revoked, revoked_reason FROM resource_grant
+      `SELECT is_revoked, revoked_reason FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2`,
       [prodId, EXTRA_USER_1],
     );

@@ -75,7 +75,7 @@ describe("draft report visibility for dept participants", () => {
   it("per-event reports@view grant reveals the draft (跟组舞监行集)", async () => {
     const smUser = await newUser();
     await getPool().query(
-      `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
        VALUES ($1, $2, 'event', $3, 'reports', 'view', 'auto')`,
       [prodId, smUser, eventId],
     );

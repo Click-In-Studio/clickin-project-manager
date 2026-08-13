@@ -17,7 +17,7 @@ async function insertGrant(
   opts: { expiresAt?: string; revoked?: boolean } = {},
 ): Promise<void> {
   await getPool().query(
-    `INSERT INTO resource_grant
+    `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by, is_revoked, expires_at)
      VALUES ($1, $2, 'cue_list', $3, $4, $5, 'direct', $2, $6, $7)`,
@@ -104,7 +104,7 @@ describe("listGrantedResourceIds（目录行入口）", () => {
     const a = shortId();
     const b = shortId();
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'scene', $3, 'meta', 'view', 'direct', $2),
@@ -116,7 +116,7 @@ describe("listGrantedResourceIds（目录行入口）", () => {
     expect(res.ids.sort()).toEqual([a, b].sort());
 
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'scene', '*', 'meta', 'view', 'direct', $2)`,

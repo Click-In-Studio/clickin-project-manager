@@ -20,7 +20,7 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
-describe("resource_grant 过期过滤", () => {
+describe("production_member_grant 过期过滤", () => {
   it("expired edit grant fails hasListAccess; valid one passes", async () => {
     const expiredList = shortId();
     const validList = shortId();
@@ -30,7 +30,7 @@ describe("resource_grant 过期过滤", () => {
       [expiredList, validList, prodId, userId],
     );
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by, expires_at)
        VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'approval', $2, '2000-01-01T00:00:00Z'),

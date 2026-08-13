@@ -1,6 +1,6 @@
 /**
  * GET  — 查询当前用户对某个 cue list 的访问级别及自我确认可能性。
- * POST — 自我确认（写入 resource_grant(self_confirmed)）。
+ * POST — 自我确认（写入 production_member_grant(self_confirmed)）。
  *
  * GET 响应:
  *   { canAccess: true, level: 'manage'|'edit'|'view' }

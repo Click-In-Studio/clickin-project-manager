@@ -43,7 +43,7 @@ export default async function EventViewPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  // Per-instance resource_grant edit+ → full editor view on this page
+  // Per-instance production_member_grant edit+ → full editor view on this page
   const canViewFull = prodPermCtx.isAdmin
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
