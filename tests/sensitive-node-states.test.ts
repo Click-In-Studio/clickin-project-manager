@@ -52,6 +52,9 @@ describe("节点分类", () => {
     expect(isSensitiveNode("production", "meta/name", "view")).toBe(false);
     expect(isSensitiveNode("production", "mounts", "view")).toBe(false);
     expect(isSensitiveNode("production", "archival", "view")).toBe(false);
+    // 边界：integrations 整面 sensitive（含密钥，查看即敏感）——view 不豁免
+    expect(isSensitiveNode("production", "integrations", "view")).toBe(true);
+    expect(isSensitiveNode("production", "integrations", "edit")).toBe(true);
   });
 
   it("ROOT：production delete/owner/restores（owner-only）", () => {
