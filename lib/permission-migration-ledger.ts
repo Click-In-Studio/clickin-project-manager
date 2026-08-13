@@ -49,12 +49,14 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // asset → 批D
   // script → 批E
   // org → 批G
-  "org:assign_member": "G",
-  "org:recall_member": "G",
 };
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批G G-2（org 功能已移除，直接移除不转换；终局：原子键全集清零）
+  "org:assign_member",
+  "org:recall_member",
+
   // 批F（治理域，2026-08-13）
   "announcement:create",
   "announcement:delete",

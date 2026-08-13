@@ -3,7 +3,6 @@ import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getPool } from "@/lib/pg";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 // GET /api/production/:id/platform-channel         — get current production-level channel (org_id IS NULL)
 // PUT /api/production/:id/platform-channel         — upsert production-level channel (制作人 only)

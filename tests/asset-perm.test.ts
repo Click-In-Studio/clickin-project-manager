@@ -24,7 +24,7 @@ function ctxOf(userId: string): PermissionContext {
 
 async function giveTicket(userId: string, prodId: string, sub: string, verb: string, id = "*") {
   await getPool().query(
-    `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+    `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
      VALUES ($1, $2, 'asset', $3, $4, $5, 'auto')
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
        WHERE is_revoked = false DO NOTHING`,

@@ -73,7 +73,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "读权限",
     perms: [
-      "org:assign_member", "org:recall_member",
     ],
   },
 ];

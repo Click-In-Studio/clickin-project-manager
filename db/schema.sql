@@ -354,7 +354,7 @@ CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, cr
 
 -- Per-user access override: can_edit=true grants, can_edit=false denies,
 -- cue_list_permission and cue_list_role dropped in Phase 4 (migrate-cue-list-to-resource-grant.sql)
--- Access is now managed via resource_grant (resource_type='cue_list').
+-- Access is now managed via production_member_grant (resource_type='cue_list').
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
 -- Each row is a revision of a cue. cue_id is the stable logical identity across
@@ -985,7 +985,7 @@ CREATE INDEX IF NOT EXISTS pmta_user_prod_idx
   ON production_member_tag_assignment (production_id, user_id);
 
 -- ── Resource Permission Level（Phase 2c）──────────────────────────────────────
--- resource_grant.permission_level 的合法值 lookup 表。
+-- production_member_grant.permission_level 的合法值 lookup 表。
 -- 引入新 resource_type 的 migration 必须先在此表插入对应行，再写 grant 数据。
 
 CREATE TABLE IF NOT EXISTS resource_permission_level (
@@ -1080,7 +1080,7 @@ ON CONFLICT DO NOTHING;
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 
-CREATE TABLE IF NOT EXISTS resource_grant (
+CREATE TABLE IF NOT EXISTS production_member_grant (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -1088,7 +1088,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
   resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
   permission_level TEXT       NOT NULL,
-  CONSTRAINT resource_grant_level_fk
+  CONSTRAINT production_member_grant_level_fk
     FOREIGN KEY (resource_type, permission_level)
     REFERENCES resource_permission_level (resource_type, permission_level)
     DEFERRABLE INITIALLY DEFERRED,
@@ -1107,42 +1107,16 @@ CREATE TABLE IF NOT EXISTS resource_grant (
 
 -- expires_at 条件不能用 NOW()（非 IMMUTABLE），唯一性保护依赖 is_revoked；
 -- 到期 grant 需由应用层在重发前先标记 is_revoked = true。
-CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
-  ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+CREATE UNIQUE INDEX IF NOT EXISTS production_member_grant_active_unique_idx
+  ON production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false;
 
-CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
-  ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)
+CREATE INDEX IF NOT EXISTS production_member_grant_lookup_idx
+  ON production_member_grant (production_id, resource_type, resource_id, resource_sub, user_id)
   WHERE is_revoked = false;
 
--- ── Atomic Permission Grant（Phase 2c）────────────────────────────────────────
--- 原子权限 key 的个人 grant 记录。
-
-CREATE TABLE IF NOT EXISTS atomic_permission_grant (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  permission_key  TEXT        NOT NULL,
-  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
-                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
-                  )),
-  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
-  approval_id     UUID        NULL REFERENCES approval_request(id),
-  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
-  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'poc_change', 'manual', 'member_removed'
-                  )),
-  expires_at      TIMESTAMPTZ NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS atomic_permission_grant_active_unique_idx
-  ON atomic_permission_grant (production_id, user_id, permission_key)
-  WHERE is_revoked = false;
-
-CREATE INDEX IF NOT EXISTS atomic_permission_grant_lookup_idx
-  ON atomic_permission_grant (production_id, user_id)
-  WHERE is_revoked = false;
+-- atomic_permission_grant：批G G-2 终局 DROP（168 原子键六批退役完毕，
+-- 见 lib/permission-migration-ledger.ts RETIRED 清单）
 
 -- ── Resource Dept Manage（Phase 3）────────────────────────────────────────────
 -- 部门-资源结构性管理权（信号表，非 grant 表）。

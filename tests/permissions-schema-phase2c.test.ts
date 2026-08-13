@@ -2,7 +2,7 @@
  * Schema verification for Phase 2c permission infrastructure tables.
  *
  * Covers three tables introduced or corrected in Phase 2c:
- *   - resource_grant         (corrected in add-resource-grant.sql)
+ *   - production_member_grant         (corrected in add-resource-grant.sql)
  *   - resource_permission_level  (new, add-resource-permission-level.sql)
  *   - atomic_permission_grant    (new, add-atomic-permission-grant.sql)
  *
@@ -12,13 +12,13 @@
 import { describe, it, expect } from "vitest";
 import { getPool } from "@/lib/pg";
 
-// ── resource_grant ────────────────────────────────────────────────────────────
+// ── production_member_grant ────────────────────────────────────────────────────────────
 
-describe("resource_grant schema (Phase 2c)", () => {
+describe("production_member_grant schema (Phase 2c)", () => {
   it("table exists", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'resource_grant'
+      WHERE table_schema = 'public' AND table_name = 'production_member_grant'
     `);
     expect(rows).toHaveLength(1);
   });
@@ -26,7 +26,7 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("user_id column is UUID NOT NULL", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'resource_grant' AND column_name = 'user_id'
+      WHERE table_name = 'production_member_grant' AND column_name = 'user_id'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("uuid");
@@ -36,7 +36,7 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("grantee_type column does not exist", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.columns
-      WHERE table_name = 'resource_grant' AND column_name = 'grantee_type'
+      WHERE table_name = 'production_member_grant' AND column_name = 'grantee_type'
     `);
     expect(rows).toHaveLength(0);
   });
@@ -44,7 +44,7 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("grantee_id column does not exist", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.columns
-      WHERE table_name = 'resource_grant' AND column_name = 'grantee_id'
+      WHERE table_name = 'production_member_grant' AND column_name = 'grantee_id'
     `);
     expect(rows).toHaveLength(0);
   });
@@ -52,7 +52,7 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("resource_id is TEXT NOT NULL (default '*')", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable, column_default FROM information_schema.columns
-      WHERE table_name = 'resource_grant' AND column_name = 'resource_id'
+      WHERE table_name = 'production_member_grant' AND column_name = 'resource_id'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("text");
@@ -63,7 +63,7 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("resource_sub is TEXT NOT NULL (default '*')", async () => {
     const { rows } = await getPool().query(`
       SELECT data_type, is_nullable, column_default FROM information_schema.columns
-      WHERE table_name = 'resource_grant' AND column_name = 'resource_sub'
+      WHERE table_name = 'production_member_grant' AND column_name = 'resource_sub'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].data_type).toBe("text");
@@ -74,7 +74,7 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("confirmed_by is nullable (auto grant has no trigger user)", async () => {
     const { rows } = await getPool().query(`
       SELECT is_nullable FROM information_schema.columns
-      WHERE table_name = 'resource_grant' AND column_name = 'confirmed_by'
+      WHERE table_name = 'production_member_grant' AND column_name = 'confirmed_by'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].is_nullable).toBe("YES");
@@ -84,7 +84,7 @@ describe("resource_grant schema (Phase 2c)", () => {
     const { rows } = await getPool().query(`
       SELECT pg_get_constraintdef(oid) AS def
       FROM pg_constraint
-      WHERE conrelid = 'resource_grant'::regclass
+      WHERE conrelid = 'production_member_grant'::regclass
         AND contype = 'c'
         AND conname LIKE '%grant_source%'
     `);
@@ -97,7 +97,7 @@ describe("resource_grant schema (Phase 2c)", () => {
     const { rows } = await getPool().query(`
       SELECT pg_get_constraintdef(oid) AS def
       FROM pg_constraint
-      WHERE conrelid = 'resource_grant'::regclass
+      WHERE conrelid = 'production_member_grant'::regclass
         AND contype = 'c'
         AND conname LIKE '%revoked_reason%'
     `);
@@ -106,11 +106,11 @@ describe("resource_grant schema (Phase 2c)", () => {
     expect(rows[0].def).toContain("poc_change");
   });
 
-  it("resource_grant_active_unique_idx (partial) exists on correct columns", async () => {
+  it("production_member_grant_active_unique_idx (partial) exists on correct columns", async () => {
     const { rows } = await getPool().query(`
       SELECT indexdef FROM pg_indexes
-      WHERE tablename = 'resource_grant'
-        AND indexname = 'resource_grant_active_unique_idx'
+      WHERE tablename = 'production_member_grant'
+        AND indexname = 'production_member_grant_active_unique_idx'
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].indexdef).toContain("resource_id");
@@ -119,10 +119,10 @@ describe("resource_grant schema (Phase 2c)", () => {
     expect(rows[0].indexdef).toContain("is_revoked");
   });
 
-  it("resource_grant_lookup_idx exists", async () => {
+  it("production_member_grant_lookup_idx exists", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM pg_indexes
-      WHERE tablename = 'resource_grant' AND indexname = 'resource_grant_lookup_idx'
+      WHERE tablename = 'production_member_grant' AND indexname = 'production_member_grant_lookup_idx'
     `);
     expect(rows).toHaveLength(1);
   });
@@ -130,9 +130,9 @@ describe("resource_grant schema (Phase 2c)", () => {
   it("permission_level FK to resource_permission_level exists", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM pg_constraint
-      WHERE conrelid = 'resource_grant'::regclass
+      WHERE conrelid = 'production_member_grant'::regclass
         AND contype = 'f'
-        AND conname = 'resource_grant_level_fk'
+        AND conname = 'production_member_grant_level_fk'
     `);
     expect(rows).toHaveLength(1);
   });
@@ -219,76 +219,13 @@ describe("resource_permission_level schema + seed data (Phase 2c)", () => {
 
 // ── atomic_permission_grant ───────────────────────────────────────────────────
 
-describe("atomic_permission_grant schema (Phase 2c)", () => {
-  it("table exists", async () => {
+describe("atomic_permission_grant（批G G-2 终局）", () => {
+  it("表已 DROP（168 原子键六批退役完毕）", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name = 'atomic_permission_grant'
     `);
-    expect(rows).toHaveLength(1);
-  });
-
-  it("user_id is UUID NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'atomic_permission_grant' AND column_name = 'user_id'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("uuid");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
-
-  it("permission_key is TEXT NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'atomic_permission_grant' AND column_name = 'permission_key'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("text");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
-
-  it("grant_source CHECK includes 'auto' and 'assigned'", async () => {
-    const { rows } = await getPool().query(`
-      SELECT pg_get_constraintdef(oid) AS def
-      FROM pg_constraint
-      WHERE conrelid = 'atomic_permission_grant'::regclass
-        AND contype = 'c'
-        AND conname LIKE '%grant_source%'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].def).toContain("auto");
-    expect(rows[0].def).toContain("assigned");
-  });
-
-  it("revoked_reason CHECK includes 'poc_change'", async () => {
-    const { rows } = await getPool().query(`
-      SELECT pg_get_constraintdef(oid) AS def
-      FROM pg_constraint
-      WHERE conrelid = 'atomic_permission_grant'::regclass
-        AND contype = 'c'
-        AND conname LIKE '%revoked_reason%'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].def).toContain("poc_change");
-  });
-
-  it("atomic_permission_grant_active_unique_idx (partial) exists", async () => {
-    const { rows } = await getPool().query(`
-      SELECT indexdef FROM pg_indexes
-      WHERE tablename = 'atomic_permission_grant'
-        AND indexname = 'atomic_permission_grant_active_unique_idx'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].indexdef).toContain("is_revoked");
-  });
-
-  it("atomic_permission_grant_lookup_idx exists", async () => {
-    const { rows } = await getPool().query(`
-      SELECT 1 FROM pg_indexes
-      WHERE tablename = 'atomic_permission_grant'
-        AND indexname = 'atomic_permission_grant_lookup_idx'
-    `);
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(0);
   });
 });
+

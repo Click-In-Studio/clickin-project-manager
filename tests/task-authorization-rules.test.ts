@@ -87,7 +87,7 @@ describe("规则2：assignee 恒可见（不论路径/进度）", () => {
     expect(visible).toBe(true);
     // 被 assign 进 task ⇒ 自动获得 event meta+details@view（技术需求 call 同族）
     const { rows } = await getPool().query<{ resource_sub: string }>(
-      `SELECT resource_sub FROM resource_grant
+      `SELECT resource_sub FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2 AND resource_type = 'event'
          AND resource_id = $3 AND permission_level = 'view' AND NOT is_revoked`,
       [prodId, assigneeId, eventId],

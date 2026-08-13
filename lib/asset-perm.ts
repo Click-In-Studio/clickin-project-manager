@@ -1,6 +1,6 @@
 import { getPool } from "./pg";
 import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
-import { hasPermission, type PermissionContext } from "./permissions";
+import { type PermissionContext } from "./permissions";
 import type { Asset } from "./asset-db";
 
 // ─── 批D：asset 可见性判定（隐私/公开模型）──────────────────────────────────
@@ -91,7 +91,7 @@ async function structurallyVisibleAssetIds(
          OR (am.mount_type = ANY($6::text[]) AND EXISTS (
                SELECT 1
                FROM cue c
-               JOIN resource_grant rg
+               JOIN production_member_grant rg
                  ON rg.resource_type = 'cue_list'
                 AND rg.resource_id IN (c.cue_list_id, '*')
                 AND rg.resource_sub IN ('cues', '*')

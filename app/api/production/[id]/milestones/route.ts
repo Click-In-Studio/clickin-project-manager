@@ -2,7 +2,6 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listMilestones, createMilestone } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string }> };
 

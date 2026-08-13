@@ -1,4 +1,4 @@
-import type { Permission } from "./permissions";
+type Permission = string;
 
 // 批A 起同时容纳原子键与树节点键（node:<type>/<id>[/<sub>]@<verb>）
 export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<string, string> = {
@@ -32,13 +32,11 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   // 剧本标签
   // Cue表
   // 构作
-  // 事件（per-event 写操作已迁移至 resource_grant，原子权限只保留生产级和管理员绕过）
-  // Task（技术需求，per-task 写操作已迁移至 resource_grant）
-  // 报告（per-report 写操作已迁移至 resource_grant，保留生产级和管理员绕过）
+  // 事件（per-event 写操作已迁移至 production_member_grant，原子权限只保留生产级和管理员绕过）
+  // Task（技术需求，per-task 写操作已迁移至 production_member_grant）
+  // 报告（per-report 写操作已迁移至 production_member_grant，保留生产级和管理员绕过）
   // 数字资产
   // 组织
-  "org:assign_member": "分配组织成员",
-  "org:recall_member": "收回组织成员",
   // 里程碑
   // 公告
 };

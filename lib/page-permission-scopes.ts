@@ -1,4 +1,4 @@
-import type { Permission } from "./permissions";
+type Permission = string;
 
 /**
  * Per-page atomic permission scopes for the self-confirm gate.

@@ -24,7 +24,7 @@ export async function getResourceGrantLevel(
 ): Promise<string | null> {
   const { rows } = await getPool().query<{ permission_level: string }>(
     `SELECT rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      JOIN resource_permission_level rpl
        ON rpl.resource_type = rg.resource_type
        AND rpl.permission_level = rg.permission_level
@@ -55,7 +55,7 @@ export async function hasResourceGrantLevel(
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
        SELECT 1
-       FROM resource_grant rg
+       FROM production_member_grant rg
        JOIN resource_permission_level rpl
          ON rpl.resource_type = rg.resource_type
          AND rpl.permission_level = rg.permission_level
@@ -121,7 +121,7 @@ export async function checkResourceFreeApprovalZone(
 }
 
 /**
- * Writes a self_confirmed resource_grant for any resource type.
+ * Writes a self_confirmed production_member_grant for any resource type.
  * Idempotent: ON CONFLICT DO NOTHING.
  */
 export async function selfConfirmResourceGrant(
@@ -141,7 +141,7 @@ export async function selfConfirmResourceGrant(
   const rows = sets[resourceType]?.[level] ?? [["*", level] as const];
   for (const [sub, verb] of rows) {
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, $3, $4, $5, $6, 'self_confirmed', $2)
@@ -269,7 +269,7 @@ async function deriveNodePseudoLevel(
   editSubs: string[],
 ): Promise<"manage" | "edit" | "view" | null> {
   const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-    `SELECT resource_sub, permission_level FROM resource_grant
+    `SELECT resource_sub, permission_level FROM production_member_grant
      WHERE production_id = $1 AND user_id = $2
        AND resource_type = $3 AND resource_id IN ($4, '*')
        AND NOT is_revoked
@@ -355,7 +355,7 @@ export async function getTechReqAccess(
 }
 
 /**
- * Returns true if the user has any active resource_grant on any tech_req in the given event.
+ * Returns true if the user has any active production_member_grant on any tech_req in the given event.
  * Used to gate access to the reqs page and the reqs link in the follower view.
  */
 export async function hasUserAnyTechReqGrantInEvent(
@@ -365,7 +365,7 @@ export async function hasUserAnyTechReqGrantInEvent(
 ): Promise<boolean> {
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
+       SELECT 1 FROM production_member_grant rg
        JOIN event_tech_req etr ON etr.id = rg.resource_id
        WHERE rg.production_id = $1
          AND rg.user_id = $2
@@ -381,7 +381,7 @@ export async function hasUserAnyTechReqGrantInEvent(
 
 /**
  * Returns the resource_ids of all tech_reqs in the given event where the user
- * has an active resource_grant. Used to filter the reqs list for non-full viewers.
+ * has an active production_member_grant. Used to filter the reqs list for non-full viewers.
  */
 export async function getUserTechReqGrantIdsInEvent(
   userId: string,
@@ -390,7 +390,7 @@ export async function getUserTechReqGrantIdsInEvent(
 ): Promise<string[]> {
   const { rows } = await getPool().query<{ resource_id: string }>(
     `SELECT DISTINCT rg.resource_id
-     FROM resource_grant rg
+     FROM production_member_grant rg
      JOIN event_tech_req etr ON etr.id = rg.resource_id
      WHERE rg.production_id = $1
        AND rg.user_id = $2
@@ -406,7 +406,7 @@ export async function getUserTechReqGrantIdsInEvent(
 // ─── Grant-write helpers for new resource creation ────────────────────────────
 
 /**
- * Writes initial resource_grant + resource_dept_manage when a new event is created.
+ * Writes initial production_member_grant + resource_dept_manage when a new event is created.
  *   - creator gets manage grant
  *   - depts holding the event collection-create zone key get resource_dept_manage
  *   - if no such depts exist, creator is written to resource_person_manage as fallback
@@ -420,7 +420,7 @@ export async function writeEventGrants(
   // 批B：创建者获 EVENT manage 行集（动词行取代 manage 单行）
   for (const [sub, verb] of EVENT_LEVEL_ROW_SETS.manage) {
     await pool.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'event', $3, $4, $5, 'direct', $2)
@@ -472,7 +472,7 @@ export async function writeEventGrants(
 }
 
 /**
- * Writes initial resource_grant + resource_dept_manage when a new report is created.
+ * Writes initial production_member_grant + resource_dept_manage when a new report is created.
  * Inherits managing depts/persons from the parent event's resource_dept_manage /
  * resource_person_manage (not queried from dept permissions).
  */
@@ -486,7 +486,7 @@ export async function writeReportGrants(
   // 批C：创建者获 REPORT manage 行集（动词行取代 manage 单行）
   for (const [sub, verb] of REPORT_LEVEL_ROW_SETS.manage) {
     await pool.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        VALUES ($1, $2, 'report', $3, $4, $5, 'direct', $2)
@@ -519,7 +519,7 @@ export async function writeReportGrants(
 }
 
 /**
- * Writes initial resource_grant + resource_dept_manage when a new tech_req is created.
+ * Writes initial production_member_grant + resource_dept_manage when a new tech_req is created.
  *   - POC(s) of the assigned dept get manage grant
  *   - Assigned dept gets resource_dept_manage
  *   - Parent event's managing depts/persons get resource_dept_manage / resource_person_manage
@@ -537,7 +537,7 @@ export async function writeTechReqGrants(
   if (eventDeptId) {
     // Map event_department → production_dept by name, write grants for POCs
     await pool.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT DISTINCT $1, pdm.user_id, 'task', $2, s.sub, s.verb, 'direct', pdm.user_id
@@ -644,7 +644,7 @@ export async function getCueListGrantLevel(
   // edit；view=meta/cues view）。伪级别仅为前端展示兼容，检查本体是动词行。
   const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
     `SELECT rg.resource_sub, rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.production_id = $1
        AND rg.user_id = $2
        AND rg.resource_type = 'cue_list'
@@ -721,7 +721,7 @@ export async function checkCueListFreeApprovalZone(
 }
 
 /**
- * Writes a self_confirmed resource_grant for the user on a cue list.
+ * Writes a self_confirmed production_member_grant for the user on a cue list.
  * Idempotent: ON CONFLICT DO NOTHING (active-grant unique index).
  */
 export async function selfConfirmCueListGrant(
@@ -732,7 +732,7 @@ export async function selfConfirmCueListGrant(
 ): Promise<void> {
   // 批A：自我确认写动词行集（非线性——edit 集含 view；manage 集另含 delete+grants）
   await getPool().query(
-    `INSERT INTO resource_grant
+    `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
      SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
@@ -744,7 +744,7 @@ export async function selfConfirmCueListGrant(
   );
   if (level === "manage") {
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
@@ -782,7 +782,7 @@ export async function getCueListAccess(
 }
 
 /**
- * Returns all active resource_grant rows for a cue list, with user display name.
+ * Returns all active production_member_grant rows for a cue list, with user display name.
  * Used for the collaborator management panel.
  */
 export async function listCueListGrants(
@@ -792,7 +792,7 @@ export async function listCueListGrants(
   const { rows } = await getPool().query<{ user_id: string; user_name: string; resource_sub: string; permission_level: string }>(
     `SELECT rg.user_id, COALESCE(fu.name, rg.user_id::text) AS user_name,
             rg.resource_sub, rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      LEFT JOIN feishu_user fu ON fu.user_id = rg.user_id
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
@@ -899,7 +899,7 @@ export async function removeCueListDeptAccess(
 
 /**
  * Grants or revokes a user's direct access to a cue list at a specific level.
- * grant=true  → upsert resource_grant(level, direct)
+ * grant=true  → upsert production_member_grant(level, direct)
  * grant=false/null → revoke ALL active grants for this user on this cue list
  */
 export async function setCueListGrant(
@@ -915,7 +915,7 @@ export async function setCueListGrant(
     try {
       await client.query("BEGIN");
       await client.query(
-        `UPDATE resource_grant
+        `UPDATE production_member_grant
          SET is_revoked = true, revoked_reason = 'manual'
          WHERE production_id = $1 AND user_id = $2
            AND resource_type = 'cue_list' AND resource_id = $3
@@ -925,7 +925,7 @@ export async function setCueListGrant(
       // 批A：按伪级别写动词行集（direct 授权不受 dept/role sweep 影响）
       for (const [sub, verb] of CUE_LIST_LEVEL_ROW_SETS[level] ?? CUE_LIST_LEVEL_ROW_SETS.edit) {
         await client.query(
-          `INSERT INTO resource_grant
+          `INSERT INTO production_member_grant
              (production_id, user_id, resource_type, resource_id, resource_sub,
               permission_level, grant_source, confirmed_by)
            VALUES ($1, $2, 'cue_list', $3, $4, $5, 'direct', $6)`,
@@ -941,7 +941,7 @@ export async function setCueListGrant(
     }
   } else {
     await getPool().query(
-      `UPDATE resource_grant
+      `UPDATE production_member_grant
        SET is_revoked = true, revoked_reason = 'manual'
        WHERE production_id = $1
          AND user_id = $2

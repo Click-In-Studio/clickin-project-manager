@@ -88,7 +88,7 @@ describe("六步链三态", () => {
     ]);
     expect(written).toBe(0);
     const rows = await getPool().query(
-      `SELECT 1 FROM resource_grant WHERE user_id = $1 AND resource_type = 'production'`,
+      `SELECT 1 FROM production_member_grant WHERE user_id = $1 AND resource_type = 'production'`,
       [zoneUser],
     );
     expect(rows.rows).toHaveLength(0);

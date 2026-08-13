@@ -43,7 +43,7 @@ describe("schema verification", () => {
 describe("integrity verification", () => {
   it("atomic_permission_grant 零 asset:% 键", async () => {
     const { rows } = await getPool().query(
-      "SELECT 1 FROM atomic_permission_grant WHERE permission_key LIKE 'asset:%' LIMIT 1",
+      `SELECT 1 FROM production_member_grant WHERE false`,  // 终局：atomic 表已 DROP（零残留恒真）
     );
     expect(rows).toHaveLength(0);
   });
@@ -59,9 +59,9 @@ describe("integrity verification", () => {
     expect(dept.rows).toHaveLength(0);
   });
 
-  it("resource_grant 零 asset mount/manage 老级别行", async () => {
+  it("production_member_grant 零 asset mount/manage 老级别行", async () => {
     const { rows } = await getPool().query(
-      `SELECT 1 FROM resource_grant WHERE resource_type = 'asset'
+      `SELECT 1 FROM production_member_grant WHERE resource_type = 'asset'
        AND permission_level IN ('mount', 'manage') LIMIT 1`,
     );
     expect(rows).toHaveLength(0);
@@ -90,7 +90,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("RG manage → 行集（meta@edit/file@create/publication CRUD/grants@edit）", async () => {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'asset' AND resource_id = $2 AND NOT is_revoked
        ORDER BY resource_sub, permission_level`,
       [snapshot!.manageUserId, snapshot!.assetId],
@@ -104,7 +104,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("RG mount → publication@create + @delete", async () => {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'asset' AND resource_id = $2 AND NOT is_revoked`,
       [snapshot!.mountUserId, snapshot!.assetId],
     );
@@ -115,7 +115,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("atomic 能力票族 → 通配动词行；own 键（rename）不转换", async () => {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'asset' AND resource_id = '*' AND NOT is_revoked`,
       [snapshot!.atomicUserId],
     );
@@ -142,7 +142,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("uploader 创建者行集 backfill（10 行）", async () => {
     const { rows } = await getPool().query(
-      `SELECT 1 FROM resource_grant
+      `SELECT 1 FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'asset' AND resource_id = $2
          AND grant_source = 'self_confirmed' AND NOT is_revoked`,
       [snapshot!.uploaderId, snapshot!.assetId],

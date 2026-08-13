@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { usePendingPermissions } from "@/hooks/usePendingPermissions";
 import PermissionActivationModal from "@/components/PermissionActivationModal";
-import { ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
+
 
 type Props = {
   productionId: string;
@@ -16,7 +16,7 @@ type Props = {
  * Does not block page render — the modal overlays the already-rendered content.
  */
 export default function AdminActivationGate({ productionId, children }: Props) {
-  const { pending, confirming, confirm } = usePendingPermissions(productionId, ADMIN_PANEL_PERMISSIONS);
+  const { pending, confirming, confirm } = usePendingPermissions(productionId, new Set<string>());
   const [dismissed, setDismissed] = useState(false);
 
   const showModal = !dismissed && pending !== null && pending.length > 0;

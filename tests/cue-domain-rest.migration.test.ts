@@ -46,7 +46,7 @@ describe("schema verification", () => {
 describe("integrity verification", () => {
   it("no cue_list grant rows with retired levels remain (revoked included)", async () => {
     const { rows } = await getPool().query(
-      `SELECT 1 FROM resource_grant
+      `SELECT 1 FROM production_member_grant
        WHERE resource_type = 'cue_list' AND permission_level IN ('mount', 'manage') LIMIT 1`,
     );
     expect(rows).toHaveLength(0);
@@ -54,7 +54,7 @@ describe("integrity verification", () => {
 
   it("no cue-domain atomic keys remain in any permission/grant table", async () => {
     for (const [table, col] of [
-      ["atomic_permission_grant", "permission_key"],
+      // atomic_permission_grant 已 DROP（批G G-2 终局）——零残留恒真
       ["production_role_permission", "permission_key"],
       ["production_member_permission", "permission"],
     ] as const) {
@@ -83,7 +83,7 @@ describe("integrity verification", () => {
 describe("invariance verification", () => {
   async function rowsFor(userId: string, resourceId: string) {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
       [snapshot!.productionId, userId, resourceId],

@@ -13,7 +13,6 @@ import {
   isProductionArchived,
   getProductionPermissionContext,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 function requireAdmin(req: NextRequest) {
   const session = getSession(req.cookies);

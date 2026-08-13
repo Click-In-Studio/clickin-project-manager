@@ -8,7 +8,6 @@ import {
   getProductionPermissionContext, getActiveVersionId, getVersion,
   loadProduction, applyPatchToDB,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -75,8 +74,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
       if (!m || !await hasGrant(permCtx.userId, id, m[1], m[2], m[3] ?? "*", m[4] as "view" | "create" | "edit" | "delete")) {
         return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
       }
-    } else if (!hasPermission(perm as Parameters<typeof hasPermission>[0], permCtx)) {
-      return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
     }
   }
 

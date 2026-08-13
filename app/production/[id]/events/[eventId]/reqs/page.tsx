@@ -31,7 +31,7 @@ export default async function ReqsPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  // Admin role-level OR event resource_grant edit+ → full view
+  // Admin role-level OR event production_member_grant edit+ → full view
   // 批B：别人的技术需求是独立层（tasks@view / task 域通配），不与 call_sheet 合并
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view")
     || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
@@ -50,7 +50,7 @@ export default async function ReqsPage({
     canViewFull ? Promise.resolve([] as string[]) : getUserTechReqGrantIdsInEvent(session.userId, productionId, eventId),
   ]);
 
-  // POC of any dept (old system) OR resource_grant holder (new system)
+  // POC of any dept (old system) OR production_member_grant holder (new system)
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);
@@ -62,7 +62,7 @@ export default async function ReqsPage({
   const allReqs = await listEventTechReqs(eventId);
 
   // Non-full-viewers see: non-awaiting reqs, awaiting reqs for their POC depts,
-  // and any req they have a direct resource_grant on
+  // and any req they have a direct production_member_grant on
   const techReqs = canViewFull
     ? allReqs
     : allReqs.filter(req =>

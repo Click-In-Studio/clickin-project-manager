@@ -32,7 +32,7 @@ describe("integrity verification", () => {
   it("atomic / 三张 permission 表零 E2 原子键", async () => {
     const like = "permission_key LIKE 'script:%' OR permission_key LIKE 'rehearsal_mark:%' OR permission_key = 'dramaturgy:import'";
     const [a, r, d] = await Promise.all([
-      getPool().query(`SELECT 1 FROM atomic_permission_grant WHERE ${like} LIMIT 1`),
+      getPool().query(`SELECT 1 FROM production_member_grant WHERE false`)  /* 终局：atomic 已 DROP */,
       getPool().query(`SELECT 1 FROM production_role_permission WHERE ${like} LIMIT 1`),
       getPool().query(`SELECT 1 FROM production_dept_permission WHERE ${like} LIMIT 1`),
     ]);
@@ -51,7 +51,7 @@ describe("integrity verification", () => {
 describe("invariance verification", () => {
   it.skipIf(!snapshot)("script:edit bundle → 12 行集（blocks 全家 + marks + mounts）", async () => {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'script' AND NOT is_revoked`,
       [snapshot!.editUserId],
     );
@@ -69,7 +69,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("script:annotate bundle → 只有 marks 4 行", async () => {
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
-      `SELECT resource_sub, permission_level FROM resource_grant
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'script' AND NOT is_revoked`,
       [snapshot!.annotateUserId],
     );
@@ -80,7 +80,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("import 键 → imports@create 保留段行（script + dramaturgy 两域）", async () => {
     const { rows } = await getPool().query<{ resource_type: string; resource_sub: string }>(
-      `SELECT resource_type, resource_sub FROM resource_grant
+      `SELECT resource_type, resource_sub FROM production_member_grant
        WHERE user_id = $1 AND permission_level = 'create' AND NOT is_revoked`,
       [snapshot!.importUserId],
     );

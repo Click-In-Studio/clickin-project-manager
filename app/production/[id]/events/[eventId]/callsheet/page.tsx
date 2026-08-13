@@ -28,7 +28,7 @@ export default async function CallSheetPage({
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  // Full view: resource_grant edit+ on this event, OR event:view_call_sheet_any (admin bypass).
+  // Full view: production_member_grant edit+ on this event, OR event:view_call_sheet_any (admin bypass).
   // Fallback: isInCall (you can see your own call sheet).
   const [_prodAccess, eventPermCtx] = await Promise.all([
     getProductionPermissionContext(session.userId, session.isAdmin, productionId),

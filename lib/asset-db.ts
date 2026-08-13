@@ -137,7 +137,7 @@ export async function createAsset(params: {
     // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
     // own 键（rename/overwrite/mount/…）已退役，由此行集承担；存续按 §0.6 person 覆盖。
     await client.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $2, 'asset', $3, s.sub, s.verb, 'self_confirmed', $2

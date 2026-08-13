@@ -7,7 +7,6 @@ import {
   getUnreadMemberIds,
   getProductionName,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { notifyAnnouncementRemind } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; announcementId: string }> };

@@ -822,7 +822,7 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
     // 批E2：读门已行化——给 blocks@view 行让请求穿过读门、命中写门
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
        VALUES ($1, $2, 'script', '*', 'blocks', 'view', 'direct')
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)

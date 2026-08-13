@@ -105,7 +105,7 @@ describe("制作人五行区间 = 全集", () => {
   it("recompute 认通配区间覆盖（self_confirmed 行存续）", async () => {
     await recomputeAndRevokeGrants(producer, prodId, "role_change");
     const { rows } = await getPool().query(
-      `SELECT is_revoked FROM resource_grant
+      `SELECT is_revoked FROM production_member_grant
        WHERE user_id = $1 AND resource_type = 'cue_list' AND resource_sub = 'cues'`,
       [producer],
     );
