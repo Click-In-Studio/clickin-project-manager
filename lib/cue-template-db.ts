@@ -77,28 +77,29 @@ export async function propagateTemplateToExisting(
   template: string,
 ): Promise<number> {
   const pool = getPool();
-  const lists = await pool.query<{ id: string }>(
-    "SELECT id FROM cue_list WHERE production_id = $1 AND template = $2",
-    [productionId, template],
-  );
   const decl = await pool.query<{ permissions: string[] }>(
     "SELECT permissions FROM dept_cue_list_template WHERE dept_id = $1 AND template = $2",
     [deptId, template],
   );
   if (decl.rows.length === 0) return 0;
-  let written = 0;
-  for (const { id } of lists.rows) {
-    for (const rel of decl.rows[0].permissions) {
-      const res = await pool.query(
-        `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (dept_id, permission_key) DO NOTHING`,
-        [productionId, deptId, instantiateRelKey(id, rel)],
-      );
-      written += res.rowCount ?? 0;
-    }
-  }
-  return written;
+  // 单条 INSERT...SELECT：原子（review finding——循环逐行写入非原子）
+  const res = await pool.query(
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+     SELECT $1, $2,
+            CASE WHEN r.rel LIKE '@%'
+                 THEN 'node:cue_list/' || cl.id || r.rel
+                 ELSE 'node:cue_list/' || cl.id || '/' || r.rel
+            END
+     FROM cue_list cl
+     CROSS JOIN (
+       SELECT unnest(permissions) AS rel
+       FROM dept_cue_list_template WHERE dept_id = $2 AND template = $3
+     ) r
+     WHERE cl.production_id = $1 AND cl.template = $3
+     ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+    [productionId, deptId, template],
+  );
+  return res.rowCount ?? 0;
 }
 
 /** 撤销声明：收走该 (dept, template) 对存量表的实例区间键；
