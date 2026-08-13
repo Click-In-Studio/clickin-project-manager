@@ -36,13 +36,13 @@ export default async function AssetPreviewPage({
   if (!access) redirect(`/unauthorized?id=${id}`);
   // 批D：实例可见判定（能力票∧结构 ∨ publication@view），asset 加载后判
   if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
-    redirect(`/unauthorized?resource=asset%3Aview&id=${id}`);
+    redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) notFound();
   // 批D：实例级可见（能力票∧结构 ∨ publication@view）
   if (!(await canViewAsset(access.permCtx, id, asset, "meta")))
-    redirect(`/unauthorized?resource=asset%3Aview&id=${id}`);
+    redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
   return (
     <AssetPreviewClient

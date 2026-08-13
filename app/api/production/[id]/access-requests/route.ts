@@ -35,6 +35,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!body.resourceType || !body.permissionLevel) {
     return Response.json({ error: "缺少必填字段" }, { status: 400 });
   }
+  // 终局（批G）：atomic_permission 类型已随原子键退役——旧客户端缓存提交时提示刷新
+  if (body.type === "atomic_permission") {
+    return Response.json({ error: "申请格式已更新，请刷新页面后重试" }, { status: 400 });
+  }
 
   const request = await submitAccessRequest(id, session.userId, {
     type: body.type,

@@ -35,9 +35,7 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     label: "章节/段落",
     levels: [
       { value: "view",   label: "查看" },
-      { value: "mount",  label: "挂载" },
       { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
     ],
   },
   {
@@ -56,7 +54,6 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     levels: [
       { value: "view",   label: "查看" },
       { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
     ],
   },
   {
@@ -67,7 +64,7 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     ],
   },
   {
-    type: "contacts",
+    type: "member",
     label: "人员通讯录",
     levels: [
       { value: "view",   label: "查看" },
@@ -78,8 +75,7 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     label: "附件",
     levels: [
       { value: "view",     label: "查看" },
-      { value: "download", label: "下载" },
-      { value: "manage",   label: "管理" },
+      { value: "edit",     label: "编辑" },
     ],
   },
   {
@@ -156,12 +152,20 @@ export default function AccessRequestModal({
   if (!open) return null;
 
   // ── Resolve resource type + level for POST body ──────────────────────────
+  // 终局（批G）：预填一律为 node: 节点键（403 redirect 已节点化）——解析为
+  // resource_access + sub/verb 提交；atomic_permission 类型已随原子键退役。
   let postResourceType: string;
+  let postResourceId = "*";
+  let postResourceSub: string | undefined;
   let postPermissionLevel: string;
-  if (permission) {
-    const colonIdx = permission.indexOf(":");
-    postResourceType    = colonIdx >= 0 ? permission.slice(0, colonIdx)    : permission;
-    postPermissionLevel = colonIdx >= 0 ? permission.slice(colonIdx + 1)   : "view";
+  const nodeMatch = permission
+    ? /^node:([^/]+)\/([^/@]+)(?:\/(.+))?@(\w+)$/.exec(permission)
+    : null;
+  if (nodeMatch) {
+    postResourceType = nodeMatch[1];
+    postResourceId = nodeMatch[2];
+    postResourceSub = nodeMatch[3];
+    postPermissionLevel = nodeMatch[4];
   } else {
     postResourceType    = resourceType;
     postPermissionLevel = permissionLevel;
@@ -184,8 +188,10 @@ export default function AccessRequestModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: permission ? "atomic_permission" : "resource_access",
+          type: "resource_access",
           resourceType: postResourceType,
+          resourceId: postResourceId,
+          resourceSub: postResourceSub,
           permissionLevel: postPermissionLevel,
           grantType: ttlOption === "permanent" ? "permanent" : "ttl",
           ttlDuration: ({ "30m": "30 minutes", "1h": "1 hour", "1d": "1 day", "1w": "7 days" } as Record<string, string>)[ttlOption] ?? null,
@@ -205,8 +211,17 @@ export default function AccessRequestModal({
     }
   }
 
+  const NODE_LABELS: Record<string, string> = {
+    "node:scene/*/meta@view": "查看章节/段落",
+    "node:script/*/blocks@view": "查看剧本",
+    "node:character/*/meta@view": "查看角色",
+    "node:member/*/meta@view": "查看人员通讯录",
+    "node:asset/*/meta@view": "查看附件",
+    "node:task/*/meta@view": "查看任务",
+    "node:event/*/meta@view": "查看事件",
+  };
   const permLabel = permission
-    ? (PERMISSION_LABELS[permission] ?? permission)
+    ? (NODE_LABELS[permission] ?? PERMISSION_LABELS[permission] ?? permission)
     : null;
 
   return (

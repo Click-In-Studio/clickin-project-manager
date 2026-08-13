@@ -28,7 +28,7 @@ export default async function ProductionScriptPage({
   ]);
   if (!access) redirect(`/unauthorized?id=${id}`);
   if (!access.permCtx.isAdmin && !await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
-    redirect(`/unauthorized?resource=script%3Aview&id=${id}`);
+    redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
 
   // Resolve initial version: URL param > cookie
   const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;

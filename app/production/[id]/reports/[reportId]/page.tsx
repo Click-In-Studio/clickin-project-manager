@@ -85,7 +85,9 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) // event:follow 批B 两职拆分：订阅=followers@create、读取=meta/details@view——
+  // 此门是 hasEventDomainView（域 view），申请节点=meta@view 才与门一致（非 verb swap）
+  redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
 
   const report = await getReportByProduction(reportId, productionId);
   if (!report) notFound();
