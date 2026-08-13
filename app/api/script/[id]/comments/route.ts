@@ -13,7 +13,7 @@ async function guard(req: NextRequest, productionId: string) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "script", "*", "comments", "create"))) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "script", "*", "comments", "create"))) {
     return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
   return { session, deny: null };

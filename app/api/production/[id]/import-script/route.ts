@@ -22,7 +22,7 @@ async function guard(req: NextRequest, productionId: string) {
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
   if (isArchived) return { session, deny: Response.json({ error: "已归档" }, { status: 403 }) };
-  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "script", "*", "imports", "create"))) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "script", "*", "imports", "create"))) {
     return { session, deny: Response.json({ error: "需要剧本导入权限（imports）" }, { status: 403 }) };
   }
   return { session, deny: null };

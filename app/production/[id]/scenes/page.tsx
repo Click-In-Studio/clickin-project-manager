@@ -25,7 +25,7 @@ export default async function ScenesPage({
 
   const canEdit = access.permCtx.isAdmin
     || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
-  const canImport = (access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "dramaturgy", "*", "imports", "create"));
+  const canImport = (access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "dramaturgy", "*", "imports", "create"));
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
   const [name, versions] = await Promise.all([getProductionName(id), listVersions(id)]);

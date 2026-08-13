@@ -67,19 +67,19 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     : await getProductionPermissionContext(session.userId, false, id);
 
   if (roles !== undefined) {
-    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
+    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberRoles(id, userId, roles);
   }
   if (tagIds !== undefined) {
-    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
+    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberTags(id, userId, tagIds);
   }
   if (supervisorId !== undefined) {
-    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
+    if (!session.isAdmin && (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
     await setMemberSupervisor(id, userId, supervisorId);
@@ -104,7 +104,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
 
   if (!session.isAdmin) {
     const access = await getProductionPermissionContext(session.userId, false, id);
-    if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete"))) {
+    if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete"))) {
       return Response.json({ error: "权限不足" }, { status: 403 });
     }
   }

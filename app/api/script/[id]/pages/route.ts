@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const requestedVersionId = req.nextUrl.searchParams.get("v");

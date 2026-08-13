@@ -34,9 +34,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     canArchive: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "archival", "create")),
     canDelete: !!permCtx && (permCtx.isAdmin || permCtx.isOwner),
     canImportContacts: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "member", "*", "imports", "create")),
-    canImportScript: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "script", "*", "imports", "create")),
-    canImportScenes: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
-    canManageTags: !!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
+    canImportScript: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "imports", "create")),
+    canImportScenes: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
+    canManageTags: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
   };
 
   return (

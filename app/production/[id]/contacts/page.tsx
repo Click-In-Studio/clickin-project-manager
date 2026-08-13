@@ -24,9 +24,9 @@ export default async function ContactsPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "meta", "view"))) redirect(`/unauthorized?resource=node%3Amember%2F*%2Fmeta%40view&id=${id}`);
+  if (!(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "meta", "view"))) redirect(`/unauthorized?resource=node%3Amember%2F*%2Fmeta%40view&id=${id}`);
 
-  const canManage = (access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, id, "member", "*", "overrides", "edit"));
+  const canManage = (access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "overrides", "edit"));
   const canImport = (access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "member", "*", "imports", "create"));
 
   const [name, members] = await Promise.all([

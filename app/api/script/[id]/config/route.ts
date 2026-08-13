@@ -15,7 +15,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档" }, { status: 403 });
-  if (!permCtx.isAdmin && !await hasGrant(permCtx.userId, id, "scene", "*", "meta/name", "edit")) {
+  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "scene", "*", "meta/name", "edit")) {
     return Response.json({ error: "无权修改剧本设置" }, { status: 403 });
   }
 

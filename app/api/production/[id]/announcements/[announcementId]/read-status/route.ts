@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, announcementId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || await hasGrant(access.permCtx.userId, productionId, "announcement", "*", "*", "edit"))) {
+  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "announcement", "*", "*", "edit"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 

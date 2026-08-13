@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
   // 批D：上传 = asset/*@create（原为裸门，按名义键收紧，与批A GET 补门先例一致）
-  if (!session.isAdmin && !await hasGrant(session.userId, id, "asset", "*", "*", "create"))
+  if (!session.isAdmin && !access.permCtx.isOwner && !await hasGrant(session.userId, id, "asset", "*", "*", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const ct = req.headers.get("content-type") ?? "";
