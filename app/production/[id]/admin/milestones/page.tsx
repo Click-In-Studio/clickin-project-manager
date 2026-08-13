@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "里程碑" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
@@ -33,9 +34,9 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
         endDate: m.endDate,
         sortOrder: m.sortOrder,
       }))}
-      canCreate={!!permCtx && hasPermission("milestone:create", permCtx)}
-      canManage={!!permCtx && hasPermission("milestone:manage", permCtx)}
-      canDelete={!!permCtx && hasPermission("milestone:delete", permCtx)}
+      canCreate={!!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "create"))}
+      canManage={!!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "edit"))}
+      canDelete={!!permCtx && (permCtx.isAdmin || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "delete"))}
     />
   );
 }

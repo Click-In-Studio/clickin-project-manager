@@ -19,42 +19,10 @@ export type LedgerBatch = "A" | "B" | "C" | "D" | "E" | "F" | "G";
 /** 待迁移原子键 → 目标批次。做完一批删一批。 */
 export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // production → 批F
-  "production:delete": "F",
-  "production:transfer_owner": "F",
-  "production:restore_checkpoint": "F",
-  "production:archive": "F",
-  "production:rename": "F",
-  "production:change_avatar": "F",
-  "production:edit_description": "F",
-  "production:change_type": "F",
-  "production:change_language": "F",
-  "production:manage_integrations": "F",
-  "production:import_members": "F",
-  "production:producer_invite": "F",
-  "production:producer_promote": "F",
-  "production:producer_demote": "F",
-  "production:producer_kick": "F",
   // contacts → 批F
-  "contacts:import": "F",
   // members → 批F
-  "members:invite": "F",
-  "members:kick": "F",
-  "members:change_role": "F",
-  "members:manage_overrides": "F",
   // role → 批F
-  "role:create": "F",
-  "role:rename": "F",
-  "role:delete": "F",
-  "role:assign_permission": "F",
   // dept → 批F
-  "dept:create": "F",
-  "dept:dismiss": "F",
-  "dept:rename": "F",
-  "dept:change_type": "F",
-  "dept:add_member": "F",
-  "dept:delete_member": "F",
-  "dept:set_poc": "F",
-  "dept:unset_poc": "F",
   // script → 批E
   // dramaturgy → 批E
   // asset → 批D
@@ -64,15 +32,8 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // tag_option → 批E
   // script → 批E
   // milestone → 批F
-  "milestone:create": "F",
-  "milestone:manage": "F",
-  "milestone:delete": "F",
   // announcement → 批F
-  "announcement:create": "F",
-  "announcement:edit": "F",
-  "announcement:delete": "F",
   // production → 批F
-  "production:manage_config": "F",
   // script → 批E
   // rehearsal_mark → 批E
   // script → 批E
@@ -80,14 +41,11 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
   // dramaturgy_view → 批E
   // character → 批E
   // production → 批F
-  "production:mount": "F",
-  "production:unmount": "F",
   // asset → 批D
   // scene → 批E
   // character → 批E
   // script → 批E
   // contacts → 批F
-  "contacts:view": "F",
   // asset → 批D
   // script → 批E
   // org → 批G
@@ -97,6 +55,50 @@ export const PERMISSION_MIGRATION_LEDGER: Record<string, LedgerBatch> = {
 
 /** 已退役键：源码中不得再出现（棘轮测试逐文件扫描字符串）。每批完成时追加。 */
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
+  // 批F（治理域，2026-08-13）
+  "announcement:create",
+  "announcement:delete",
+  "announcement:edit",
+  "contacts:import",
+  "contacts:view",
+  "dept:add_member",
+  "dept:change_type",
+  "dept:create",
+  "dept:delete_member",
+  "dept:dismiss",
+  "dept:rename",
+  "dept:set_poc",
+  "dept:unset_poc",
+  "members:change_role",
+  "members:invite",
+  "members:kick",
+  "members:manage_overrides",
+  "milestone:create",
+  "milestone:delete",
+  "milestone:manage",
+  "production:archive",
+  "production:change_avatar",
+  "production:change_language",
+  "production:change_type",
+  "production:delete",
+  "production:edit_description",
+  "production:import_members",
+  "production:manage_config",
+  "production:manage_integrations",
+  "production:mount",
+  "production:producer_demote",
+  "production:producer_invite",
+  "production:producer_kick",
+  "production:producer_promote",
+  "production:rename",
+  "production:restore_checkpoint",
+  "production:transfer_owner",
+  "production:unmount",
+  "role:assign_permission",
+  "role:create",
+  "role:delete",
+  "role:rename",
+
   // 批E PR-E3（dramaturgy_view 个人视图，2026-08-13）
   "dramaturgy_view:create",
   "dramaturgy_view:create_public",

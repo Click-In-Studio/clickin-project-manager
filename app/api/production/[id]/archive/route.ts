@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, archiveProduction, unarchiveProduction } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
@@ -11,7 +12,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx } = access;
-  if (!hasPermission("production:archive", permCtx))
+  if (!(permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, productionId, "production", "*", "archival", "create")))
     return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { deny: null };
 }

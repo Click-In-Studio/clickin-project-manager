@@ -11,26 +11,24 @@ type PermGroup = { label: string; perms: string[] };
 const PERM_GROUPS: PermGroup[] = [
   {
     label: "成员管理",
-    perms: ["members:invite", "members:kick", "members:change_role", "members:manage_overrides"],
+    perms: [],
   },
   {
     label: "部门管理",
     perms: [
-      "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
-      "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
     ],
   },
   {
     label: "项目配置",
-    perms: ["production:manage_config", "production:mount", "production:unmount"],
+    perms: [],
   },
   {
     label: "里程碑",
-    perms: ["milestone:create", "milestone:manage", "milestone:delete"],
+    perms: [],
   },
   {
     label: "通知公告",
-    perms: ["announcement:create", "announcement:edit", "announcement:delete"],
+    perms: [],
   },
   {
     label: "剧本操作",
@@ -75,7 +73,6 @@ const PERM_GROUPS: PermGroup[] = [
   {
     label: "读权限",
     perms: [
-      "contacts:view",
       "org:assign_member", "org:recall_member",
     ],
   },

@@ -11,7 +11,6 @@ type Ctx = { searchParams: Promise<{ resource?: string; id?: string; taskId?: st
 // Maps atomic permission strings to human-readable descriptions
 const PERMISSION_LABELS: Record<string, string> = {
   // 读权限
-  "contacts:view": "查看人员",
   "event:view": "查看日程列表",
   "event:view_call_sheet": "查看 Call Sheet",
   // 写权限

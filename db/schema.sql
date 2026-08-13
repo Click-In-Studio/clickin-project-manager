@@ -1047,7 +1047,17 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('dramaturgy_view', 'view',       0),
   ('dramaturgy_view', 'create',     0),
   ('dramaturgy_view', 'edit',       0),
-  ('dramaturgy_view', 'delete',     0)
+  ('dramaturgy_view', 'delete',     0),
+  -- 治理域（批F）：production 根实例（id 恒 '*'）；org_dept=production_dept 组织树
+  -- （与批C3 dept=event_department 区分）；SENSITIVE 键=owner∨行（无 admin 旁路）、
+  -- ROOT 三键=owner-only 代码判定（节点入树行不发）
+  ('production',   'view', 0), ('production',   'create', 0), ('production',   'edit', 0), ('production',   'delete', 0),
+  ('member',       'view', 0), ('member',       'create', 0), ('member',       'edit', 0), ('member',       'delete', 0),
+  ('producer',     'view', 0), ('producer',     'create', 0), ('producer',     'edit', 0), ('producer',     'delete', 0),
+  ('role',         'view', 0), ('role',         'create', 0), ('role',         'edit', 0), ('role',         'delete', 0),
+  ('org_dept',     'view', 0), ('org_dept',     'create', 0), ('org_dept',     'edit', 0), ('org_dept',     'delete', 0),
+  ('milestone',    'view', 0), ('milestone',    'create', 0), ('milestone',    'edit', 0), ('milestone',    'delete', 0),
+  ('announcement', 'view', 0), ('announcement', 'create', 0), ('announcement', 'edit', 0), ('announcement', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
@@ -1275,6 +1285,12 @@ SELECT '制作人', k FROM (VALUES
   ('node:asset/*/meta@edit'), ('node:asset/*/file@create'),
   ('node:asset/*/publication@create'), ('node:asset/*/publication@delete')
 ) AS t(k)
+ON CONFLICT DO NOTHING;
+
+-- 批F：通讯录并入 member 树（MEMBER_BASE 保真：contacts:view → meta+contact 两面）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:member/*/meta@view'),
+  ('*', 'node:member/*/contact@view')
 ON CONFLICT DO NOTHING;
 
 -- 批E PR-E2：script 成员默认（MEMBER_BASE 保真：script:view / script:comment）

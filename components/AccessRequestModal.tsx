@@ -5,7 +5,6 @@ import { useState, useEffect } from "react";
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
 export const PERMISSION_LABELS: Record<string, string> = {
-  "contacts:view":       "查看人员通讯录",
   "event:view":          "查看日程",
   "event:edit":          "编辑日程",
   "event:publish":       "发布日程",

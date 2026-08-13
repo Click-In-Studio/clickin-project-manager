@@ -284,6 +284,20 @@ export async function setup() {
       await pool.query(migrationSql);
     }
   }
+
+  {
+    // 批F（治理域）：CI 迁移路径重放。PRE 判据：production 词汇行尚不存在。
+    const fPre = await pool.query(
+      `SELECT 1 FROM resource_permission_level
+       WHERE resource_type = 'production' AND permission_level = 'view'`,
+    );
+    if (fPre.rows.length === 0) {
+      for (const file of ["db/add-governance-verbs.sql", "db/migrate-governance-rest.sql"]) {
+        const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+        await pool.query(migrationSql);
+      }
+    }
+  }
 }
 
 export async function teardown() {

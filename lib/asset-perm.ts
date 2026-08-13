@@ -148,7 +148,7 @@ export async function mountHostSidePermitted(
   mountId: string,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
-  if (mountType === "production") return hasPermission("production:mount", permCtx);
+  if (mountType === "production") return (permCtx.isAdmin || await hasGrant(permCtx.userId, productionId, "production", "*", "mounts", "create"));
   if (SCENE_MOUNT_TYPES.includes(mountType))
     return hasGrant(permCtx.userId, productionId, "scene", mountId, "mounts", "create");
   // version/block/block_snapshot/comment/cue/cue_revision 均属剧本流

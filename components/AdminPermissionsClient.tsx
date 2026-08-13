@@ -10,11 +10,11 @@ import type { MemberWithRoles } from "@/lib/db";
 type PermGroup = { label: string; perms: string[] };
 
 const PERM_GROUPS: PermGroup[] = [
-  { label: "成员管理", perms: ["members:invite", "members:kick", "members:change_role", "members:manage_overrides"] },
-  { label: "部门管理", perms: ["dept:create", "dept:dismiss", "dept:rename", "dept:change_type", "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc"] },
-  { label: "项目配置", perms: ["production:rename", "production:archive", "production:manage_config", "production:mount", "production:unmount", "production:change_avatar", "production:edit_description", "production:change_type", "production:change_language"] },
-  { label: "里程碑", perms: ["milestone:create", "milestone:manage", "milestone:delete"] },
-  { label: "通知公告", perms: ["announcement:create", "announcement:edit", "announcement:delete"] },
+  { label: "成员管理", perms: [] },
+  { label: "部门管理", perms: [] },
+  { label: "项目配置", perms: [] },
+  { label: "里程碑", perms: [] },
+  { label: "通知公告", perms: [] },
   { label: "剧本操作", perms: [] },
   { label: "场次 & 构作", perms: [] },
   { label: "角色人物", perms: [] },
@@ -25,7 +25,7 @@ const PERM_GROUPS: PermGroup[] = [
   { label: "附件（管理 _any）", perms: [] },
   { label: "标注体系", perms: [] },
   { label: "评论管理", perms: [] },
-  { label: "读权限", perms: ["contacts:view", "org:assign_member", "org:recall_member"] },
+  { label: "读权限", perms: ["org:assign_member", "org:recall_member"] },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────

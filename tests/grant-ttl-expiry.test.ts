@@ -31,8 +31,8 @@ describe("atomic_permission_grant 过期过滤", () => {
     );
     const access = await getProductionPermissionContext(userId, false, prodId);
     expect(access).not.toBeNull();
-    expect(access!.permCtx.activeGrants.has("contacts:import")).toBe(false);
-    expect(access!.permCtx.activeGrants.has("milestone:create")).toBe(true);
+    expect(access!.permCtx.activeGrants.has("contacts:import" as unknown as import("@/lib/permissions").Permission)).toBe(false);
+    expect(access!.permCtx.activeGrants.has("milestone:create" as unknown as import("@/lib/permissions").Permission)).toBe(true);
   });
 });
 
