@@ -586,7 +586,8 @@ export async function setEventStageManagers(
          FROM unnest($2::uuid[]) AS u
          CROSS JOIN (VALUES
            ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
-           ('call_sheet', 'view'), ('tasks', 'view'), ('reports', 'view'),
+           ('call_sheet', 'view'), ('call_sheet', 'edit'),
+           ('tasks', 'view'), ('reports', 'view'),
            ('reports', 'create'), ('reports', 'edit'), ('reports', 'delete')
          ) AS s(sub, verb)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)

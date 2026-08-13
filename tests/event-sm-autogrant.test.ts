@@ -67,13 +67,14 @@ describe("跟组舞监自动行集", () => {
   it("SM gets details/call_sheet/tasks view + reports CRUD without publish", async () => {
     await setEventStageManagers(eventId, [{ userId: smId, name: "跟组舞监" }], prodId, ownerId);
     expect(await rowsFor(smId)).toEqual([
-      "meta@view", "details@view", "publication@view", "call_sheet@view", "tasks@view",
+      "meta@view", "details@view", "publication@view", "call_sheet@edit",
+      "call_sheet@view", "tasks@view",
       "reports@view", "reports@create", "reports@edit", "reports@delete",
     ].sort());
   });
 
   it("SM removal keeps grants", async () => {
     await setEventStageManagers(eventId, [], prodId, ownerId);
-    expect((await rowsFor(smId)).length).toBe(9);
+    expect((await rowsFor(smId)).length).toBe(10);
   });
 });

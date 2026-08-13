@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { hasEventContentEdit, hasEventDomainView } from "@/lib/event-permissions";
-import { toActor } from "@/lib/grant-check";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { toActor, hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, listEventParticipants, setEventParticipants } from "@/lib/event-db";
@@ -39,7 +39,14 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!await hasEventContentEdit(toActor(session, permCtx), productionId, eventId, event.status))
+  // 两个指派面（2026-08-13 用户定稿）：参与名单 = assignees 保留段（organizer 默认
+  // 持有 c/d；跟组舞监不持有——SM 排 call 不动名单）。全量替换要求 create+delete 双权。
+  const actor = toActor(session, permCtx);
+  const [canAdd, canRemove] = await Promise.all([
+    hasEffectiveGrant(actor, productionId, "event", eventId, "assignees", "create"),
+    hasEffectiveGrant(actor, productionId, "event", eventId, "assignees", "delete"),
+  ]);
+  if (!canAdd || !canRemove)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { participants?: unknown };

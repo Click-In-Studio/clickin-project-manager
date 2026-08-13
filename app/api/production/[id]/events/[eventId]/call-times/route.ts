@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { hasEventContentEdit, hasEventDomainView } from "@/lib/event-permissions";
-import { toActor } from "@/lib/grant-check";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { toActor, hasEffectiveGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
 import { getProductionEvent, listEventCallTimes, createEventCallTime } from "@/lib/event-db";
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!await hasEventContentEdit(toActor(session, permCtx), productionId, eventId, event.status))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "call_sheet", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
