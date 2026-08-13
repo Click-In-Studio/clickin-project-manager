@@ -55,4 +55,10 @@ CROSS JOIN (VALUES
 WHERE pr.name IN ('舞台监督', '助理舞台监督')
 ON CONFLICT DO NOTHING;
 
+-- ── 4. production 域基线（2026-08-13 用户定谳：view 面是基线非 sensitive）──────
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:production/*/meta@view'),
+  ('*', 'node:production/*/mounts@view')
+ON CONFLICT DO NOTHING;
+
 COMMIT;

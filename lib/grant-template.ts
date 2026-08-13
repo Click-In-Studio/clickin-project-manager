@@ -156,8 +156,13 @@ export function isRootNode(resourceType: string, resourceSub: string, verb: stri
 export function isSensitiveNode(resourceType: string, resourceSub: string, verb: string): boolean {
   if (isRootNode(resourceType, resourceSub, verb)) return false;
   if (resourceType === "producer") return true;
-  if (resourceType === "production")
+  if (resourceType === "production") {
+    // 基线原则（2026-08-13 用户定谳）：权限越基线，修改该权限越敏感——
+    // 查看面（meta@view/mounts@view/archival@view…）是基线不 sensitive；
+    // 修改动作（meta 字段 edit、archival c/d、integrations edit）才恒过 owner 审批
+    if (verb === "view") return false;
     return resourceSub.startsWith("meta") || resourceSub === "archival" || resourceSub === "integrations";
+  }
   if (resourceType === "member" && resourceSub.startsWith("imports")) return true;
   return false;
 }

@@ -1241,6 +1241,12 @@ FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
 ON CONFLICT DO NOTHING;
 
 -- 批C：制作人的报告挂接资格（原 report:create）
+-- production 域基线（2026-08-13）：view 面基线非 sensitive（越基线，改它越敏感）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:production/*/meta@view'),
+  ('*', 'node:production/*/mounts@view')
+ON CONFLICT DO NOTHING;
+
 -- 两个指派面（2026-08-13）：舞监 role=全内容 view+发布/撤回；名单/call 面见行集
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('舞台监督', 'node:event/*@view'),
