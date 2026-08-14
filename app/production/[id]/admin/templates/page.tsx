@@ -42,7 +42,7 @@ export default async function TemplatesPage({ params }: { params: Promise<{ id: 
     <AdminTemplatesClient
       productionId={id}
       productionName={name ?? ""}
-      depts={depts.map(d => ({ id: d.id, name: d.name, kind: d.kind }))}
+      depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind }))}
       initialRows={templates.map(t => ({
         deptId: t.deptId, template: t.template, canCreate: t.canCreate, permissions: t.permissions,
       }))}

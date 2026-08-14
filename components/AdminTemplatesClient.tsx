@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
+import TreePickerModal from "@/components/TreePickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
 type Row = { deptId: string; template: string; canCreate: boolean; permissions: string[] };
-type Dept = { id: string; name: string; kind: "dept" | "group" };
+type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group" };
 type TemplateType = { id: string; key: string; abbrHint: string | null };
 
 type Props = {
@@ -58,7 +59,7 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
   const [selectedTemplate, setSelectedTemplate] = useState<string>(initialTypes[0]?.key ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [addDeptId, setAddDeptId] = useState("");
+  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
   const [creatingType, setCreatingType] = useState(false);
   const [newTypeKey, setNewTypeKey] = useState("");
   const [newTypeAbbr, setNewTypeAbbr] = useState("");
@@ -296,27 +297,30 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
                 <p style={{ fontSize: 12, color: "var(--muted)" }}>该模版暂无声明行</p>
               )}
 
-              {canEdit && candidates.length > 0 && (
-                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <select
-                    value={addDeptId}
-                    onChange={e => setAddDeptId(e.target.value)}
-                    style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 160 }}
-                  >
-                    <option value="">选择部门…</option>
-                    {candidates.map(d => <option key={d.id} value={d.id}>{d.name}{d.kind === "group" ? "（组）" : ""}</option>)}
-                  </select>
-                  <button
-                    style={PRIMARY_BTN}
-                    disabled={busy || !addDeptId}
-                    onClick={async () => {
-                      await upsert({ deptId: addDeptId, template: selectedTemplate, canCreate: false, permissions: [] });
-                      setAddDeptId("");
-                    }}
-                  >
-                    ＋ 添加声明行
-                  </button>
-                </div>
+              {canEdit && candidates.length > 0 && selectedTemplate && (
+                <button style={{ ...SECONDARY_BTN, marginTop: 14 }} disabled={busy} onClick={() => setDeptPickerOpen(true)}>
+                  ＋ 添加声明行
+                </button>
+              )}
+              {deptPickerOpen && (
+                <TreePickerModal
+                  kicker="安全设置"
+                  title={`为「${selectedTemplate}」添加部门声明`}
+                  confirmLabel="添加声明行"
+                  items={candidates.map(d => ({
+                    id: d.id, label: d.name, parentId: d.parentId,
+                    badge: d.kind === "group" ? "组" : undefined,
+                  }))}
+                  preselected={[]}
+                  busy={busy}
+                  onClose={() => setDeptPickerOpen(false)}
+                  onConfirm={async (deptIds) => {
+                    for (const deptId of deptIds) {
+                      await upsert({ deptId, template: selectedTemplate, canCreate: false, permissions: [] });
+                    }
+                    setDeptPickerOpen(false);
+                  }}
+                />
               )}
             </div>
           </div>
