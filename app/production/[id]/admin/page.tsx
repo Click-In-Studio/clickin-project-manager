@@ -3,6 +3,7 @@ export const metadata: Metadata = { title: "项目概览" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
 import { getProductionMeta, getAdminOverviewStats } from "@/lib/db";
+import { getPool } from "@/lib/pg";
 import { notFound } from "next/navigation";
 import PageHeader from "@/components/PageHeader";
 
@@ -36,9 +37,15 @@ export default async function AdminOverviewPage({ params }: { params: Promise<{ 
   const { id } = await params;
   await requireAdminAccess(id);
 
-  const [meta, stats] = await Promise.all([
+  const [meta, stats, ownerRes] = await Promise.all([
     getProductionMeta(id),
     getAdminOverviewStats(id),
+    getPool().query<{ owner_name: string | null }>(
+      `SELECT up.name AS owner_name
+       FROM production p LEFT JOIN user_profile up ON up.user_id = p.owner_id
+       WHERE p.id = $1`,
+      [id],
+    ),
   ]);
   if (!meta) notFound();
 
@@ -60,7 +67,6 @@ export default async function AdminOverviewPage({ params }: { params: Promise<{ 
         <StatCard num={String(stats.memberCount)} label="项目成员" hint={stats.suspendedCount > 0 ? `含 ${stats.suspendedCount} 名已停用` : "全部在职"} />
         <StatCard num={String(stats.deptCount)} label="部门" hint={`另有 ${stats.groupCount} 个用户组`} />
         <StatCard num={String(stats.roleCount)} label="角色" hint="在用职称" />
-        <StatCard num={String(stats.activeGrantCount)} label="活跃授权" hint="有效权限行" />
         <StatCard num={String(stats.milestoneCount)} label="里程碑" hint="阶段节点" />
         <StatCard num={String(stats.announcementCount)} label="公告" hint="累计发布" />
       </div>
@@ -74,6 +80,7 @@ export default async function AdminOverviewPage({ params }: { params: Promise<{ 
           项目信息
         </h2>
         <InfoRow label="名称" value={meta.name} />
+        <InfoRow label="Owner" value={ownerRes.rows[0]?.owner_name ?? "（未设置）"} />
         <InfoRow label="类型" value={meta.typeLabel ?? meta.type ?? "未设置"} />
         <InfoRow label="语言" value={meta.language ?? "未设置"} />
         <InfoRow label="创建时间" value={fmtDate(stats.createdAt)} />
