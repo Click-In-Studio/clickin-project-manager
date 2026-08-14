@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
+import { hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "里程碑" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
 import { getProductionPermissionContext, listMilestones } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminMilestonesClient from "@/components/AdminMilestonesClient";
@@ -33,9 +33,9 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
         endDate: m.endDate,
         sortOrder: m.sortOrder,
       }))}
-      canCreate={!!permCtx && hasPermission("milestone:create", permCtx)}
-      canManage={!!permCtx && hasPermission("milestone:manage", permCtx)}
-      canDelete={!!permCtx && hasPermission("milestone:delete", permCtx)}
+      canCreate={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "create"))}
+      canManage={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "edit"))}
+      canDelete={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "delete"))}
     />
   );
 }

@@ -7,7 +7,6 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionReports } from "@/lib/event-db";
 import { isReportViewer } from "@/lib/event-permissions";
-import { hasPermission } from "@/lib/permissions";
 import ProductionReportsClient from "@/components/ProductionReportsClient";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -23,10 +22,10 @@ export default async function ProductionReportsPage({ params }: { params: Promis
     getProductionName(productionId),
   ]);
   if (!access) redirect(`/unauthorized?id=${productionId}`);
-  if (!hasPermission("event:follow", access.permCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  // 批B：event:follow 读取职责已拆入三态（成员即可进，内容由 view 行过滤）
   if (!productionName) notFound();
 
-  const canViewDrafts = isReportViewer(access.permCtx);
+  const canViewDrafts = await isReportViewer(access.permCtx, productionId);
   const reports = await listProductionReports(productionId, session.userId, canViewDrafts);
 
   return (

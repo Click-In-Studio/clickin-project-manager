@@ -1,8 +1,9 @@
 import { type NextRequest } from "next/server";
+import { hasEventContentEdit } from "@/lib/event-permissions";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, reorderScheduleItems } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEventContentEdit(toActor(session, permCtx), productionId, eventId, event.status))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { orderedIds?: unknown };

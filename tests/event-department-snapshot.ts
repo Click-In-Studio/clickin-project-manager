@@ -45,11 +45,16 @@ export type EventDeptSnapshot = {
  * pre-existing data in the DB.
  */
 export async function isEventDeptPreMigrationSchema(pool: Pool): Promise<boolean> {
-  // True when production_dept is empty — unambiguous indicator that migration hasn't run.
-  const { rows } = await pool.query(
-    "SELECT 1 FROM production_dept LIMIT 1",
-  );
-  return rows.length === 0;
+  // production_dept 空只说明"没数据"，新库恒空——必须同时确认老 schema 事实：
+  // 该迁移读取 event_report.created_by（wiki 拆分后此列不存在，迁移不可重放）。
+  const [{ rows: deptRows }, { rows: colRows }] = await Promise.all([
+    pool.query("SELECT 1 FROM production_dept LIMIT 1"),
+    pool.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'event_report' AND column_name = 'created_by'
+    `),
+  ]);
+  return deptRows.length === 0 && colRows.length > 0;
 }
 
 export async function createEventDeptPreMigrationData(

@@ -52,6 +52,19 @@ describe("agent gateway session keys", () => {
     expect(sessionKeyOwnedBy("", USER_A)).toBe(false);
   });
 
+  it("production session key embeds production id and stays owned", () => {
+    const key = createNewSessionKey(USER_A, "t3k9xa1b");
+    expect(key).toMatch(new RegExp(`^clickin:chat:${USER_A}:t3k9xa1b:[0-9a-f-]{36}$`));
+    expect(sessionKeyOwnedBy(key, USER_A)).toBe(true);
+    expect(sessionKeyOwnedBy(`agent:team:${key}`, USER_A)).toBe(true);
+    expect(sessionKeyOwnedBy(key, USER_B)).toBe(false);
+  });
+
+  it("invalid production id is rejected at issuance (key injection guard)", () => {
+    expect(() => createNewSessionKey(USER_A, "evil:inject")).toThrow();
+    expect(() => createNewSessionKey(USER_A, "")).toThrow();
+  });
+
   it("heartbeat child key still belongs to its owner", () => {
     // Ownership ≠ visibility: heartbeat keys are filtered out of listings
     // separately, but they must not be accessible to other users either.

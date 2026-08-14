@@ -8,9 +8,9 @@
  */
 
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/event-db";
 import { buildUrgeReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:create", permCtx))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", "*", "*", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

@@ -6,15 +6,18 @@ import type { UserInfo } from "./db-feishu";
 import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
-import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
-import type { Permission as AtomicPermission, PermissionContext } from "./permissions";
+import { DEFAULT_SCRIPT_CONFIG, usesRehearsalMarksByDefault } from "./script-types";
+import type { PermissionContext } from "./permissions";
+type AtomicPermission = string;
 
 export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-import { MEMBER_BASE_PERMISSIONS, ROLE_TEMPLATE_PERMISSIONS, ASSISTANT_ROLE_MIGRATION, SENSITIVE_ADMIN_PERMISSIONS } from "./permissions";
-import { computeUserDeptFreeApprovalZone, recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
+import { ROLE_NAMES } from "./permissions";
+import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
+import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
+import { seedRoleFromTemplate } from "./grant-template";
 import { CUE_LIST_TEMPLATES } from "./cue-list-types";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -25,6 +28,8 @@ import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, withMarkerSceneL
 import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
+import { randomUUID } from "node:crypto";
+import type { ImportTagChanges } from "./import/types";
 
 type MarkerLabelCacheEntry = { revision: string; index: MarkerLabelIndex };
 
@@ -103,6 +108,13 @@ export async function getMarkerLabelIndex(
   }).finally(() => markerLabelLoads.delete(versionId));
   markerLabelLoads.set(versionId, load);
   return (await load)?.index ?? buildMarkerLabelIndex([]);
+}
+
+export async function getFirstRehearsalMarkerLabel(versionId: string): Promise<string | null> {
+  const labels = await getMarkerLabelIndex(versionId);
+  const markerId = labels.rehearsalLabelByMarkerId.keys().next().value;
+  if (!markerId) return null;
+  return labels.labelByMarkerId.get(markerId) ?? "（未命名）";
 }
 
 // ─── Version types ────────────────────────────────────────────────────────────
@@ -1161,6 +1173,7 @@ export async function saveScriptConfig(productionId: string, versionId: string |
     stageDelimClose: config.stageDelimClose,
     pageLayout: config.pageLayout,
     textLayoutMode: config.textLayoutMode,
+    useRehearsalMarks: config.useRehearsalMarks,
   });
   const configUpdate = await pool.query<{ pagination_changed: boolean }>(
     `WITH previous AS (
@@ -1739,6 +1752,182 @@ export async function flushToDB(productionId: string, payload: FlushPayload): Pr
   }
 }
 
+type ImportedCueColumn = {
+  name: string;
+  cues: Array<{ afterBlockId: string | null; content: string }>;
+};
+
+async function seedCueListCreatorAccessInTx(
+  client: PoolClient,
+  data: { id: string; productionId: string; template: string | null; createdBy: string },
+): Promise<void> {
+  await client.query(
+    `WITH creator_grants AS (
+       INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT $1, $3, 'cue_list', $2, s.sub, s.verb, 'self_confirmed', $3
+       FROM (VALUES ('*', 'view'), ('*', 'edit'), ('*', 'delete'),
+                    ('cues', 'create'), ('cues', 'delete'),
+                    ('grants', 'edit')) AS s(sub, verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING
+     ), eligible_depts AS (
+       -- §3.5：归属匹配改读声明表（can_create 部门）；数组列已迁移退役中
+       SELECT pdm.dept_id
+       FROM production_dept_member pdm
+       JOIN dept_cue_list_template t
+         ON t.dept_id = pdm.dept_id AND t.production_id = pdm.production_id
+       WHERE pdm.user_id = $3
+         AND pdm.production_id = $1
+         AND t.template = $4::text AND t.can_create
+     ), dept_manage AS (
+       INSERT INTO resource_dept_manage
+         (production_id, dept_id, resource_type, resource_id, established_by)
+       SELECT $1, dept_id, 'cue_list', $2, $3 FROM eligible_depts
+       ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
+       DO NOTHING
+     ), dept_permissions AS (
+       INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+       SELECT $1, eligible_depts.dept_id, k.key
+       FROM eligible_depts
+       CROSS JOIN (VALUES
+         ('node:cue_list/' || $2 || '@view'),
+         ('node:cue_list/' || $2 || '@edit'),
+         ('node:cue_list/' || $2 || '/cues@create'),
+         ('node:cue_list/' || $2 || '/cues@delete')
+       ) AS k(key)
+       ON CONFLICT (dept_id, permission_key) DO NOTHING
+     )
+     INSERT INTO resource_person_manage
+       (production_id, user_id, resource_type, resource_id, established_by)
+     SELECT $1, $3, 'cue_list', $2, $3
+     WHERE NOT EXISTS (SELECT 1 FROM eligible_depts)
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+    [data.productionId, data.id, data.createdBy, data.template],
+  );
+}
+
+async function importCueColumnsInTx(
+  client: PoolClient,
+  productionId: string,
+  versionId: string,
+  createdBy: string,
+  columns: ImportedCueColumn[],
+): Promise<void> {
+  const existingLists = await client.query<{ id: string; name: string; template: string | null }>(
+    "SELECT id, name, template FROM cue_list WHERE production_id = $1 ORDER BY created_at",
+    [productionId],
+  );
+  const normalizedKey = (value: string) => value.trim().toLocaleLowerCase();
+  const listByKey = new Map<string, { id: string; name: string; template: string | null }>();
+  for (const list of existingLists.rows) {
+    listByKey.set(normalizedKey(list.name), list);
+    if (list.template) listByKey.set(normalizedKey(list.template), list);
+  }
+
+  const resolvedColumns: Array<ImportedCueColumn & { listId: string }> = [];
+  for (const column of columns) {
+    const key = normalizedKey(column.name);
+    let list = listByKey.get(key);
+    if (!list) {
+      const id = `cl${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      const template = CUE_LIST_TEMPLATES.find((candidate) => (
+        normalizedKey(candidate.key) === key || normalizedKey(candidate.label) === key
+      ))?.key ?? null;
+      await client.query(
+        `INSERT INTO cue_list (id, production_id, name, notes, abbr, template, created_by)
+         VALUES ($1, $2, $3, '', NULL, $4, $5)`,
+        [id, productionId, column.name, template, createdBy],
+      );
+      await seedCueListCreatorAccessInTx(client, { id, productionId, template, createdBy });
+      if (template) {
+        const { applyCueTemplateGrants } = await import("./cue-template-db");
+        await applyCueTemplateGrants(client, productionId, id, template);
+      }
+      list = { id, name: column.name, template };
+      listByKey.set(key, list);
+    }
+    resolvedColumns.push({ ...column, listId: list.id });
+  }
+
+  const afterBlockIds = [...new Set(resolvedColumns.flatMap((column) =>
+    column.cues.flatMap((cue) => cue.afterBlockId ? [cue.afterBlockId] : []),
+  ))];
+  const snapshotByBlockId = new Map<string, string>();
+  if (afterBlockIds.length > 0) {
+    const snapshots = await client.query<{ block_id: string; snapshot_id: string }>(
+      `SELECT block_id, snapshot_id
+       FROM script_version
+       WHERE version_id = $1 AND block_id = ANY($2::text[])`,
+      [versionId, afterBlockIds],
+    );
+    for (const row of snapshots.rows) snapshotByBlockId.set(row.block_id, row.snapshot_id);
+    const missingBlockId = afterBlockIds.find((blockId) => !snapshotByBlockId.has(blockId));
+    if (missingBlockId) throw new Error(`Imported Cue anchor block is missing: ${missingBlockId}`);
+  }
+
+  const listIds = [...new Set(resolvedColumns.map((column) => column.listId))];
+  const existingNumbers = listIds.length > 0
+    ? await client.query<{ cue_list_id: string; number: string }>(
+        "SELECT cue_list_id, number FROM cue WHERE cue_list_id = ANY($1::text[])",
+        [listIds],
+      )
+    : { rows: [] as Array<{ cue_list_id: string; number: string }> };
+  const usedNumbersByList = new Map<string, Set<string>>();
+  for (const row of existingNumbers.rows) {
+    const used = usedNumbersByList.get(row.cue_list_id) ?? new Set<string>();
+    used.add(row.number);
+    usedNumbersByList.set(row.cue_list_id, used);
+  }
+
+  const cueRows: Array<{
+    id: string;
+    listId: string;
+    number: string;
+    content: string;
+    snapshotId: string | null;
+  }> = [];
+  for (const column of resolvedColumns) {
+    const usedNumbers = usedNumbersByList.get(column.listId) ?? new Set<string>();
+    usedNumbersByList.set(column.listId, usedNumbers);
+    let nextNumber = 1;
+    for (const cue of column.cues) {
+      while (usedNumbers.has(String(nextNumber))) nextNumber++;
+      const number = String(nextNumber++);
+      usedNumbers.add(number);
+      const id = `cue${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      const snapshotId = cue.afterBlockId ? snapshotByBlockId.get(cue.afterBlockId)! : null;
+      cueRows.push({ id, listId: column.listId, number, content: cue.content.trim(), snapshotId });
+    }
+  }
+  if (cueRows.length === 0) return;
+  await client.query(
+    `INSERT INTO cue (
+       id, cue_id, cue_list_id, number, name, content,
+       start_kind, start_snapshot_id, start_offset,
+       end_kind, end_snapshot_id, end_offset
+     )
+     SELECT imported.id, imported.id, imported.list_id, imported.number, '', imported.content,
+            'gap', imported.snapshot_id, NULL, 'gap', imported.snapshot_id, NULL
+     FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])
+       AS imported(id, list_id, number, content, snapshot_id)`,
+    [
+      cueRows.map(row => row.id),
+      cueRows.map(row => row.listId),
+      cueRows.map(row => row.number),
+      cueRows.map(row => row.content),
+      cueRows.map(row => row.snapshotId),
+    ],
+  );
+  await client.query(
+    `INSERT INTO cue_version (revision_id, version_id, cue_id)
+     SELECT cue_id, $2::text, cue_id FROM unnest($1::text[]) AS imported(cue_id)`,
+    [cueRows.map(row => row.id), versionId],
+  );
+}
+
 /**
  * Brute-force import: clears ALL blocks from a specific version and replaces them.
  * No copy-on-write, no cue drift — caller is responsible for choosing an editing version.
@@ -1765,10 +1954,28 @@ export async function importScriptToVersion(
     }>;
     upsertChars: Array<{ id: string; name: string; isAggregate: boolean; sortOrder: number }>;
     upsertScenes: Array<{ id: string; number: string; name: string; parentId: string | null; sortOrder: number }>;
+    upsertCueColumns?: Array<{
+      name: string;
+      cues: Array<{ afterBlockId: string | null; content: string }>;
+    }>;
+    cueListCreatedBy?: string;
     deleteSceneIds?: string[];
+    blockTagAssignments?: Array<{ blockId: string; groupId: string; optionId: string }>;
+    tagChanges?: ImportTagChanges;
+    aggregateMembers?: Array<{ aggregateId: string; memberIds: string[] }>;
+    openingChapter?: { markerId: string; show?: boolean };
+    stageDelimiters?: { open: string; close: string };
+    ensureEmptySceneBlocks?: boolean;
   },
 ): Promise<void> {
-  const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(payload.upsertBlocks));
+  // Marker projection operates on logical block IDs, while import IDs identify snapshots.
+  const projectedBlocks = withLegacyOwnershipProjection(withMarkerOwnership(
+    payload.upsertBlocks.map((block) => ({ ...block, id: block.blockId ?? block.id })),
+  ));
+  const upsertBlocks = projectedBlocks.map((block, index) => ({
+    ...block,
+    id: payload.upsertBlocks[index].id,
+  }));
   const { deleteSceneIds = [] } = payload;
   const seenCharIds = new Set<string>();
   const upsertChars = payload.upsertChars.filter((char) => {
@@ -1784,10 +1991,173 @@ export async function importScriptToVersion(
       return true;
     })
     .map((scene, sortOrder) => ({ ...scene, sortOrder }));
+  const sceneAnchorIds = [...new Set([
+    ...upsertScenes.map((scene) => scene.id),
+    ...upsertBlocks.flatMap((block) => block.sceneId ? [block.sceneId] : []),
+  ])];
+  const upsertCueColumns = (payload.upsertCueColumns ?? [])
+    .map((column) => ({
+      name: column.name.trim(),
+      cues: column.cues.filter((cue) => cue.content.trim()),
+    }))
+    .filter((column) => column.name && column.cues.length > 0);
+  if (upsertCueColumns.length > 0 && !payload.cueListCreatedBy) {
+    throw new Error("cueListCreatedBy is required when importing Cue columns");
+  }
+  const tagChanges = payload.tagChanges ?? { createGroups: [], createOptions: [], updateGroups: [], updateOptions: [], deleteGroupIds: [], deleteOptionIds: [] };
+  const tagGroupUpdates = tagChanges.updateGroups ?? [];
+  const aggregateMembers = payload.aggregateMembers ?? [];
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     const previousMarkerStructure = await markerStructureBlocksInTx(client, versionId);
+
+    const knownCharacterIds = new Set(upsertChars.map(character => character.id));
+    const aggregateCharacterIds = [...new Set(aggregateMembers.flatMap(item => [item.aggregateId, ...item.memberIds]))];
+    if (aggregateCharacterIds.length > 0) {
+      const existing = await client.query<{ id: string }>(
+        "SELECT id FROM character WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, aggregateCharacterIds],
+      );
+      for (const row of existing.rows) knownCharacterIds.add(row.id);
+      const missingCharacterId = aggregateCharacterIds.find(id => !knownCharacterIds.has(id));
+      if (missingCharacterId) throw new Error(`Imported aggregate character is missing: ${missingCharacterId}`);
+    }
+
+    const createdGroupIdByClientId = new Map<string, string>();
+    const createdOptionIdByClientId = new Map<string, string>();
+    if (tagChanges.deleteGroupIds.length > 0) {
+      const owned = await client.query<{ id: string }>(
+        "SELECT id FROM tag_group WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, tagChanges.deleteGroupIds],
+      );
+      if (owned.rows.length !== new Set(tagChanges.deleteGroupIds).size) throw new Error("Tag group does not belong to the production");
+    }
+    if (tagChanges.deleteOptionIds.length > 0) {
+      const owned = await client.query<{ id: string }>(
+        `SELECT tag_option.id FROM tag_option
+         JOIN tag_group ON tag_group.id = tag_option.group_id
+         WHERE tag_group.production_id = $1 AND tag_option.id = ANY($2::text[])`,
+        [productionId, tagChanges.deleteOptionIds],
+      );
+      if (owned.rows.length !== new Set(tagChanges.deleteOptionIds).size) throw new Error("Tag option does not belong to the production");
+    }
+    for (const group of tagChanges.createGroups) {
+      const id = `tg${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      createdGroupIdByClientId.set(group.clientId, id);
+      await client.query(
+        "INSERT INTO tag_group (id, production_id, name, type, sort_order) VALUES ($1, $2, $3, 'exclusive', 0)",
+        [id, productionId, group.name],
+      );
+    }
+    for (const option of tagChanges.createOptions) {
+      const groupId = createdGroupIdByClientId.get(option.groupId) ?? option.groupId;
+      const group = await client.query("SELECT 1 FROM tag_group WHERE id = $1 AND production_id = $2", [groupId, productionId]);
+      if (group.rowCount !== 1) throw new Error(`Tag option group is missing: ${option.groupId}`);
+      const id = `to${randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      createdOptionIdByClientId.set(option.clientId, id);
+      await client.query(
+        "INSERT INTO tag_option (id, group_id, label, color, sort_order) VALUES ($1, $2, $3, $4, $5)",
+        [id, groupId, option.label, option.color, option.sortOrder],
+      );
+    }
+    for (const update of tagChanges.updateOptions ?? []) {
+      const groupId = createdGroupIdByClientId.get(update.groupId) ?? update.groupId;
+      const optionId = createdOptionIdByClientId.get(update.optionId) ?? update.optionId;
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      if (update.color !== undefined) {
+        values.push(update.color);
+        sets.push(`color = $${values.length}`);
+      }
+      if (update.sortOrder !== undefined) {
+        values.push(update.sortOrder);
+        sets.push(`sort_order = $${values.length}`);
+      }
+      if (sets.length === 0) continue;
+      values.push(optionId, groupId, productionId);
+      const updated = await client.query(
+        `UPDATE tag_option
+         SET ${sets.join(", ")}
+         FROM tag_group
+         WHERE tag_option.id = $${values.length - 2}
+           AND tag_option.group_id = $${values.length - 1}
+           AND tag_group.id = tag_option.group_id
+           AND tag_group.production_id = $${values.length}`,
+        values,
+      );
+      if (updated.rowCount !== 1) throw new Error(`Tag option is missing: ${update.optionId}`);
+    }
+    for (const update of tagGroupUpdates) {
+      const groupId = createdGroupIdByClientId.get(update.groupId) ?? update.groupId;
+      const lyricSplitAfterOptionId = update.lyricSplitAfterOptionId == null
+        ? update.lyricSplitAfterOptionId
+        : createdOptionIdByClientId.get(update.lyricSplitAfterOptionId) ?? update.lyricSplitAfterOptionId;
+      const defaultOptionId = update.defaultOptionId == null
+        ? update.defaultOptionId
+        : createdOptionIdByClientId.get(update.defaultOptionId) ?? update.defaultOptionId;
+      const group = await client.query(
+        "SELECT 1 FROM tag_group WHERE id = $1 AND production_id = $2 AND type = 'exclusive'",
+        [groupId, productionId],
+      );
+      if (group.rowCount !== 1) throw new Error(`Tag format group is missing: ${update.groupId}`);
+      for (const [field, optionId] of [
+        ["format", lyricSplitAfterOptionId],
+        ["default", defaultOptionId],
+      ] as const) {
+        if (optionId === undefined || optionId === null) continue;
+        const option = await client.query(
+          "SELECT 1 FROM tag_option WHERE id = $1 AND group_id = $2",
+          [optionId, groupId],
+        );
+        if (option.rowCount !== 1) throw new Error(`Tag ${field} option is missing: ${optionId}`);
+      }
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      if (update.lyricSplitAfterOptionId !== undefined) {
+        values.push(lyricSplitAfterOptionId);
+        sets.push(`lyric_split_after_option_id = $${values.length}`);
+      }
+      if (update.defaultOptionId !== undefined) {
+        values.push(defaultOptionId);
+        sets.push(`default_option_id = $${values.length}`);
+      }
+      if (sets.length > 0) {
+        values.push(groupId);
+        await client.query(`UPDATE tag_group SET ${sets.join(", ")} WHERE id = $${values.length}`, values);
+      }
+    }
+    if (tagChanges.deleteOptionIds.length > 0) {
+      await client.query("DELETE FROM tag_option WHERE id = ANY($1::text[])", [tagChanges.deleteOptionIds]);
+    }
+    if (tagChanges.deleteGroupIds.length > 0) {
+      await client.query("DELETE FROM tag_group WHERE id = ANY($1::text[])", [tagChanges.deleteGroupIds]);
+    }
+    const resolvedBlockTags = (payload.blockTagAssignments ?? []).map(tag => ({
+      blockId: tag.blockId,
+      groupId: createdGroupIdByClientId.get(tag.groupId) ?? tag.groupId,
+      optionId: createdOptionIdByClientId.get(tag.optionId) ?? tag.optionId,
+    }));
+    const tagPairs = [...new Map(resolvedBlockTags.map(tag => [
+      `${tag.groupId}:${tag.optionId}`,
+      { groupId: tag.groupId, optionId: tag.optionId },
+    ])).values()];
+    if (tagPairs.length > 0) {
+      const valid = await client.query<{ group_id: string; option_id: string }>(
+        `SELECT requested.group_id, requested.option_id
+         FROM unnest($2::text[], $3::text[]) AS requested(group_id, option_id)
+         JOIN tag_group ON tag_group.id = requested.group_id AND tag_group.production_id = $1
+         JOIN tag_option ON tag_option.id = requested.option_id AND tag_option.group_id = requested.group_id`,
+        [
+          productionId,
+          tagPairs.map(tag => tag.groupId),
+          tagPairs.map(tag => tag.optionId),
+        ],
+      );
+      const validPairs = new Set(valid.rows.map(tag => `${tag.group_id}:${tag.option_id}`));
+      const invalid = tagPairs.find(tag => !validPairs.has(`${tag.groupId}:${tag.optionId}`));
+      if (invalid) throw new Error(`Imported Tag mapping is invalid: ${invalid.groupId}/${invalid.optionId}`);
+    }
 
     // Clear all blocks from this version; GC snapshots no longer referenced by any version.
     // Split into three separate statements to avoid PostgreSQL CTE snapshot isolation:
@@ -1833,13 +2203,15 @@ export async function importScriptToVersion(
     // scene_version is only a compatibility cache; rebuild it from markers below.
     await client.query("DELETE FROM scene_version WHERE version_id = $1", [versionId]);
 
-    if (upsertScenes.length > 0) {
+    if (sceneAnchorIds.length > 0) {
       await client.query(
         `INSERT INTO scene (id, production_id)
          SELECT unnest($1::text[]), $2::text
          ON CONFLICT (id) DO NOTHING`,
-        [upsertScenes.map(s => s.id), productionId]
+        [sceneAnchorIds, productionId]
       );
+    }
+    if (upsertScenes.length > 0) {
       await client.query(
         `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id)
          SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::text[])
@@ -1917,8 +2289,72 @@ export async function importScriptToVersion(
       }
     }
 
+    if (upsertCueColumns.length > 0) {
+      await importCueColumnsInTx(
+        client,
+        productionId,
+        versionId,
+        payload.cueListCreatedBy!,
+        upsertCueColumns,
+      );
+    }
+
+    if (aggregateMembers.length > 0) {
+      const aggregateIds = [...new Set(aggregateMembers.map((membership) => membership.aggregateId))];
+      await client.query("DELETE FROM character_aggregate WHERE aggregate_id = ANY($1::text[])", [aggregateIds]);
+      const membershipRows = aggregateMembers.flatMap((membership) => (
+        [...new Set(membership.memberIds)].map((memberId) => ({ aggregateId: membership.aggregateId, memberId }))
+      ));
+      if (membershipRows.length > 0) {
+        await client.query(
+          `INSERT INTO character_aggregate (aggregate_id, member_id)
+           SELECT unnest($1::text[]), unnest($2::text[])`,
+          [
+            membershipRows.map((membership) => membership.aggregateId),
+            membershipRows.map((membership) => membership.memberId),
+          ],
+        );
+      }
+    }
+
+    const dedupedBlockTags = [...new Map(
+      resolvedBlockTags.map(tag => [`${tag.blockId}:${tag.groupId}`, tag]),
+    ).values()];
+    if (dedupedBlockTags.length > 0) {
+      await client.query(
+        `INSERT INTO block_tag (block_id, group_id, option_id, updated_at)
+         SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), now()
+         ON CONFLICT (block_id, group_id) DO UPDATE
+           SET option_id = EXCLUDED.option_id, updated_at = now()`,
+        [
+          dedupedBlockTags.map(tag => tag.blockId),
+          dedupedBlockTags.map(tag => tag.groupId),
+          dedupedBlockTags.map(tag => tag.optionId),
+        ],
+      );
+    }
+
+    if (payload.openingChapter) {
+      const config = payload.openingChapter.show === undefined
+        ? { openingChapterMarkerId: payload.openingChapter.markerId }
+        : { openingChapterMarkerId: payload.openingChapter.markerId, showOpeningChapter: payload.openingChapter.show };
+      await client.query(
+        "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
+        [JSON.stringify(config), versionId, productionId],
+      );
+    }
+    if (payload.stageDelimiters) {
+      await client.query(
+        "UPDATE production SET script_config = script_config || $1::jsonb WHERE id = $2",
+        [JSON.stringify({ stageDelimOpen: payload.stageDelimiters.open, stageDelimClose: payload.stageDelimiters.close }), productionId],
+      );
+    }
+
     await normalizeRehearsalMarkOwnershipInTx(client, versionId);
     await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
+    if (payload.ensureEmptySceneBlocks) {
+      await ensureEmptyScriptBlocksForEmptyScenesInTx(client, productionId, versionId);
+    }
     const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
     if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
       await bumpMarkerStructureRevisionInTx(client, versionId);
@@ -1933,14 +2369,12 @@ export async function importScriptToVersion(
   }
 }
 
-export async function ensureEmptyScriptBlocksForEmptyScenes(
+async function ensureEmptyScriptBlocksForEmptyScenesInTx(
+  client: PoolClient,
   productionId: string,
   versionId: string,
 ): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const res = await client.query<{
+  const res = await client.query<{
       block_id: string;
       sort_key: string;
       type: string;
@@ -1952,74 +2386,96 @@ export async function ensureEmptyScriptBlocksForEmptyScenes(
        WHERE sv.version_id = $1
        ORDER BY sv.sort_key`,
       [versionId],
-    );
+  );
 
-    const childSceneParentIds = new Set(
+  const childSceneParentIds = new Set(
       res.rows
         .filter(row => row.type === "scene_marker" && row.marker_meta?.parentMarkerId)
         .map(row => row.marker_meta?.parentMarkerId)
         .filter((id): id is string => !!id),
-    );
-    const configRes = await client.query<{ opening_chapter_marker_id: string | null }>(
+  );
+  const configRes = await client.query<{ opening_chapter_marker_id: string | null }>(
       "SELECT script_config->>'openingChapterMarkerId' AS opening_chapter_marker_id FROM version WHERE id = $1",
       [versionId],
-    );
-    const configuredOpeningChapterMarkerId = configRes.rows[0]?.opening_chapter_marker_id ?? null;
-    const openingChapterMarkerId =
-      configuredOpeningChapterMarkerId && res.rows.some(row => row.block_id === configuredOpeningChapterMarkerId && row.type === "chapter_marker")
-        ? configuredOpeningChapterMarkerId
-        : res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
+  );
+  const configuredOpeningChapterMarkerId = configRes.rows[0]?.opening_chapter_marker_id ?? null;
+  const openingChapterMarkerId =
+    configuredOpeningChapterMarkerId && res.rows.some(row => row.block_id === configuredOpeningChapterMarkerId && row.type === "chapter_marker")
+      ? configuredOpeningChapterMarkerId
+      : res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
 
-    for (let index = 0; index < res.rows.length; index++) {
-      const row = res.rows[index];
-      if (row.type !== "scene_marker" && row.type !== "chapter_marker") continue;
-      if (row.block_id === openingChapterMarkerId) continue;
-      if (row.type === "chapter_marker" && childSceneParentIds.has(row.block_id)) continue;
+  const emptyBlocks: Array<{ snapshotId: string; blockId: string; sortKey: string; ownerMarkerId: string }> = [];
+  for (let index = 0; index < res.rows.length; index++) {
+    const row = res.rows[index];
+    if (row.type !== "scene_marker" && row.type !== "chapter_marker") continue;
+    if (row.block_id === openingChapterMarkerId) continue;
+    if (row.type === "chapter_marker" && childSceneParentIds.has(row.block_id)) continue;
 
-      let hasScriptBlock = false;
-      for (let cursor = index + 1; cursor < res.rows.length; cursor++) {
-        const next = res.rows[cursor];
-        if (next.type === "chapter_marker" || next.type === "scene_marker") {
-          break;
-        }
-        if (next.type === "dialogue" || next.type === "stage" || next.type === "lyric") {
-          hasScriptBlock = true;
-          break;
-        }
+    let hasScriptBlock = false;
+    for (let cursor = index + 1; cursor < res.rows.length; cursor++) {
+      const next = res.rows[cursor];
+      if (next.type === "chapter_marker" || next.type === "scene_marker") {
+        break;
       }
-      if (hasScriptBlock) continue;
-
-      const snapshotId = genSnapshotId();
-      const blockId = `blk_${snapshotId}`;
-      const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
-      const lexKey = keyBetween(row.sort_key, nextSortKey);
-      await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
-         VALUES ($1, $2, $3, $4, NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb, $5)`,
-        [snapshotId, blockId, productionId, lexKey, row.block_id],
-      );
-      await client.query(
-        "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
-        [snapshotId, versionId, blockId, lexKey],
-      );
+      if (next.type === "dialogue" || next.type === "stage" || next.type === "lyric") {
+        hasScriptBlock = true;
+        break;
+      }
     }
+    if (hasScriptBlock) continue;
 
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
+    const snapshotId = genSnapshotId();
+    const blockId = `blk_${snapshotId}`;
+    const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
+    const lexKey = keyBetween(row.sort_key, nextSortKey);
+    emptyBlocks.push({ snapshotId, blockId, sortKey: lexKey, ownerMarkerId: row.block_id });
+  }
+  if (emptyBlocks.length > 0) {
+    await client.query(
+      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
+       SELECT unnest($1::text[]), unnest($2::text[]), $3::text, unnest($4::text[]),
+              NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb, unnest($5::text[])`,
+      [
+        emptyBlocks.map((block) => block.snapshotId),
+        emptyBlocks.map((block) => block.blockId),
+        productionId,
+        emptyBlocks.map((block) => block.sortKey),
+        emptyBlocks.map((block) => block.ownerMarkerId),
+      ],
+    );
+    await client.query(
+      `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
+       SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[])`,
+      [
+        emptyBlocks.map((block) => block.snapshotId),
+        versionId,
+        emptyBlocks.map((block) => block.blockId),
+        emptyBlocks.map((block) => block.sortKey),
+      ],
+    );
   }
 }
 
 // ─── Production management ────────────────────────────────────────────────────
 
-export async function createProduction(id: string, name: string, ownerUserId?: string): Promise<void> {
+export async function createProduction(
+  id: string,
+  name: string,
+  ownerUserId?: string,
+  productionType?: string,
+  productionTypeLabel?: string | null,
+): Promise<void> {
   const pool = getPool();
   await pool.query(
-    "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)",
-    [id, name, ownerUserId ?? null],
+    "INSERT INTO production (id, name, owner_id, type, type_label, script_config) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+    [
+      id,
+      name,
+      ownerUserId ?? null,
+      productionType ?? null,
+      productionTypeLabel ?? null,
+      JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
+    ],
   );
   // Phase 3: ensure approval config row exists (default 24h TTL)
   await pool.query(
@@ -2033,6 +2489,9 @@ export async function createProduction(id: string, name: string, ownerUserId?: s
 /** Populate production_role + production_role_permission + production_role_cue_type from templates. */
 export async function seedProductionRoles(productionId: string): Promise<void> {
   const pool = getPool();
+  const prodType = (await pool.query<{ type: string | null }>(
+    "SELECT type FROM production WHERE id = $1", [productionId],
+  )).rows[0]?.type ?? null;
 
   // Build cue-type map: roleName → cue_type[]
   const roleCueTypes = new Map<string, string[]>();
@@ -2044,8 +2503,9 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
     }
   }
 
-  const entries = Object.entries(ROLE_TEMPLATE_PERMISSIONS);
-  for (const [roleName, perms] of entries) {
+  // 终局（批G G-2）：角色行从 ROLE_NAMES 结构名单建；权限内容全部经
+  // seedRoleFromTemplate 从 grant_template 表灌入（代码模板已退役）
+  for (const roleName of ROLE_NAMES) {
     const roleId = `r_${productionId}_${encodeURIComponent(roleName)}`;
     await pool.query(
       `INSERT INTO production_role (id, production_id, name)
@@ -2053,34 +2513,19 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
        ON CONFLICT (production_id, name) DO NOTHING`,
       [roleId, productionId, roleName],
     );
-    // Re-fetch actual id in case of conflict (row existed, our roleId may differ)
     const roleRow = await pool.query<{ id: string }>(
       "SELECT id FROM production_role WHERE production_id = $1 AND name = $2",
       [productionId, roleName],
     );
-    const actualId = roleRow.rows[0].id;
-    if (perms.length > 0) {
-      await pool.query(
-        `INSERT INTO production_role_permission (role_id, permission_key)
-         SELECT $1, unnest($2::text[])
-         ON CONFLICT DO NOTHING`,
-        [actualId, perms],
-      );
-    }
-    // Phase 4: production_role_cue_type dropped; cue type auth moved to production_dept.allowed_cue_types
+    await seedRoleFromTemplate(roleRow.rows[0].id, roleName, prodType);
   }
 }
 
 /** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
 export async function getUserAllowedCueTypes(userId: string, productionId: string): Promise<string[]> {
-  const res = await getPool().query<{ cue_type: string }>(
-    `SELECT DISTINCT unnest(pd.allowed_cue_types) AS cue_type
-     FROM production_dept_member pdm
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
-    [userId, productionId],
-  );
-  return res.rows.map((r) => r.cue_type);
+  // §3.5：改读声明表 can_create 路径（原 production_dept.allowed_cue_types 数组已迁移）
+  const { listCreatableTemplates } = await import("./cue-template-db");
+  return listCreatableTemplates(userId, productionId);
 }
 
 export async function deleteProduction(id: string): Promise<void> {
@@ -2153,12 +2598,12 @@ export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
   sortOrder: number; roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
-  hasAdminPerm: boolean; // true if FK-backed roles include any ADMIN_PANEL_PERMISSIONS key
+  hasAdminPerm: boolean; // true if FK-backed role 区间含治理域节点键（ADMIN_PANEL_NODE_PREFIXES）
 };
 
 export async function listMyProductionsWithRoles(
   userId: string, isAdmin: boolean,
-  adminPanelPerms: readonly string[],
+  adminPanelPrefixes: readonly string[],
 ): Promise<MyProductionEntry[]> {
   const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
   const res = await getPool().query<{
@@ -2183,13 +2628,13 @@ export async function listMyProductionsWithRoles(
               JOIN production_role_permission prp ON prp.role_id = pmr.role_id
               WHERE pmr.production_id = p.id
                 AND pmr.user_id = $1
-                AND prp.permission_key = ANY($3::text[])
+                AND prp.permission_key LIKE ANY($3::text[])
             ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
      WHERE ($2 OR pm.user_id IS NOT NULL)
      ORDER BY ${orderBy}`,
-    [userId, isAdmin, adminPanelPerms],
+    [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
   );
   return res.rows.map(r => ({
     id: r.id, name: r.name,
@@ -2304,6 +2749,21 @@ export async function syncGlobalNotificationPreference(
      ON CONFLICT (user_id, scope_type, scope_id) DO UPDATE SET platform_identity_id = EXCLUDED.platform_identity_id`,
     [userId, upiId],
   );
+}
+
+/** 用户邮箱：email identity 任一（primary 优先——未设 primary 也要尽量给出邮箱，
+ *  水印/溯源场景宁可有）→ feishu_user.email fallback。 */
+export async function getUserPrimaryEmail(userId: string): Promise<string | null> {
+  const res = await getPool().query<{ email: string | null }>(
+    `SELECT COALESCE(
+       (SELECT upi.platform_user_id FROM user_platform_identity upi
+        WHERE upi.user_id = $1 AND upi.platform_id = 'email'
+        ORDER BY upi.is_primary DESC LIMIT 1),
+       (SELECT fu.email FROM feishu_user fu WHERE fu.user_id = $1)
+     ) AS email`,
+    [userId],
+  );
+  return res.rows[0]?.email ?? null;
 }
 
 export async function getUserProfile(
@@ -2576,21 +3036,26 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
       [keepUserId, deleteUserId],
     );
     await client.query(`DELETE FROM event_participant WHERE user_id = $1`, [deleteUserId]);
-    await client.query(`UPDATE event_department_member SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(
+      `UPDATE production_dept_member pdm SET user_id = $1 WHERE user_id = $2
+       AND NOT EXISTS (SELECT 1 FROM production_dept_member p2 WHERE p2.user_id = $1 AND p2.dept_id = pdm.dept_id)`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM production_dept_member WHERE user_id = $1`, [deleteUserId]);
     await client.query(`UPDATE event_stage_manager SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE schedule_item_participant SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_tech_assignee SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
-    // Transfer cue list resource_grant rows (cue_list_permission/role tables dropped in Phase 4)
+    // Transfer cue list production_member_grant rows (cue_list_permission/role tables dropped in Phase 4)
     await client.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at)
        SELECT production_id, $1, resource_type, resource_id, resource_sub,
               permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at
-       FROM resource_grant
+       FROM production_member_grant
        WHERE user_id = $2 AND resource_type = 'cue_list'
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
@@ -2598,7 +3063,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
       [keepUserId, deleteUserId],
     );
     await client.query(
-      `DELETE FROM resource_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
+      `DELETE FROM production_member_grant WHERE user_id = $1 AND resource_type = 'cue_list'`,
       [deleteUserId],
     );
 
@@ -2778,7 +3243,7 @@ export async function getProductionPermissionContext(
 ): Promise<ProductionAccess | null> {
   const pool = getPool();
 
-  const [memberRow, dbPermsRow, personalZoneRow, deptRow, productionRow, grantsRow] = await Promise.all([
+  const [memberRow, dbPermsRow, deptRow, productionRow] = await Promise.all([
     // Is user a member? And what are their role strings?
     pool.query<{ roles: string[] }>(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
@@ -2792,13 +3257,7 @@ export async function getProductionPermissionContext(
        WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
-    // Personal zone adjustments: granted=true expands free-approval zone, granted=false shrinks it.
-    // Sensitive admin permissions are ignored here (they require the Phase 7 owner-approval flow).
-    pool.query<{ permission: string; granted: boolean }>(
-      "SELECT permission, granted FROM production_member_permission WHERE production_id = $1 AND user_id = $2",
-      [productionId, userId],
-    ),
-    // Department memberships (Phase 3: use production_dept instead of event_department)
+    // Department memberships（并表后单一 production_dept 数据源）
     pool.query<{ dept_id: string; is_poc: boolean }>(
       `SELECT pdm.dept_id, pdm.is_poc
        FROM production_dept_member pdm
@@ -2808,11 +3267,6 @@ export async function getProductionPermissionContext(
     pool.query<{ archived_at: Date | null; owner_id: string | null }>(
       "SELECT archived_at, owner_id FROM production WHERE id = $1",
       [productionId],
-    ),
-    // Active grants: permissions the user has explicitly confirmed or had approved.
-    pool.query<{ permission_key: string }>(
-      "SELECT permission_key FROM atomic_permission_grant WHERE production_id = $1 AND user_id = $2 AND is_revoked = false",
-      [productionId, userId],
     ),
   ]);
 
@@ -2833,18 +3287,8 @@ export async function getProductionPermissionContext(
         dbPermsRow.rows.map((r) => r.permission_key as AtomicPermission),
       );
     } else {
-      // Fallback: no FK rows yet — derive from static templates via TEXT[] role strings.
-      // Templates now include MEMBER_BASE_PERMISSIONS, so empty roles → empty Set.
-      const roleStrings = memberRow.rows[0].roles;
-      const perms = new Set<AtomicPermission>();
-      for (const role of roleStrings) {
-        const templatePerms =
-          ROLE_TEMPLATE_PERMISSIONS[role] ?? ASSISTANT_ROLE_MIGRATION[role];
-        if (templatePerms) {
-          for (const p of templatePerms) perms.add(p);
-        }
-      }
-      memberPermissions = perms;
+      // 终局：代码模板已退役，无 FK 行 = 空区间
+      memberPermissions = new Set();
     }
   }
 
@@ -2858,22 +3302,9 @@ export async function getProductionPermissionContext(
     if (row.is_poc) pocDeptIds.push(row.dept_id);
   }
 
-  // Phase 3: compute dept free-approval zone (inherited permissions + POC zone),
-  // then apply personal zone adjustments from production_member_permission.
-  const deptFreeApprovalZone = await computeUserDeptFreeApprovalZone(userId, productionId, pool);
-  for (const row of personalZoneRow.rows) {
-    const perm = row.permission as AtomicPermission;
-    if (SENSITIVE_ADMIN_PERMISSIONS.has(perm)) continue;
-    if (row.granted) {
-      deptFreeApprovalZone.add(perm);
-    } else {
-      deptFreeApprovalZone.delete(perm);
-    }
-  }
-
-  const activeGrants = new Set<AtomicPermission>(
-    grantsRow.rows.map((r) => r.permission_key as AtomicPermission),
-  );
+  // 终局（批G G-2）：区间三表经六步链消费、行经 hasGrant 消费——ctx 历史字段恒空
+  const deptFreeApprovalZone = new Set<string>();
+  const activeGrants = new Set<string>();
 
   return {
     permCtx: { userId, isAdmin, isOwner, memberPermissions, overrides, deptIds, pocDeptIds, deptFreeApprovalZone, activeGrants },
@@ -3180,6 +3611,7 @@ export type ProductionMeta = {
   type: string | null;
   typeLabel: string | null;
   language: string | null;
+  watermarkEnabled: boolean;
 };
 
 export async function getProductionMeta(id: string): Promise<ProductionMeta | null> {
@@ -3190,8 +3622,9 @@ export async function getProductionMeta(id: string): Promise<ProductionMeta | nu
     type: string | null;
     type_label: string | null;
     language: string | null;
+    watermark_enabled: boolean;
   }>(
-    "SELECT name, description, avatar_url, type, type_label, language FROM production WHERE id = $1",
+    "SELECT name, description, avatar_url, type, type_label, language, watermark_enabled FROM production WHERE id = $1",
     [id]
   );
   const r = res.rows[0];
@@ -3203,7 +3636,34 @@ export async function getProductionMeta(id: string): Promise<ProductionMeta | nu
     type: r.type,
     typeLabel: r.type_label,
     language: r.language,
+    watermarkEnabled: r.watermark_enabled,
   };
+}
+
+/** 水印渲染信息：开关 + 当前用户 [显示名 邮箱]。production layout SSR 消费。
+ *  注：productionId 仅取 watermark_enabled；身份两个 LEFT JOIN 直接按 $2 键连，
+ *  与 production 无关联（单行、无 fan-out）。 */
+export async function getWatermarkInfo(
+  productionId: string,
+  userId: string,
+): Promise<{ enabled: boolean; name: string; email: string | null }> {
+  const res = await getPool().query<{ enabled: boolean; name: string | null; email: string | null }>(
+    `SELECT p.watermark_enabled AS enabled,
+            COALESCE(up.display_name, up.name, fu.name) AS name,
+            COALESCE(
+              (SELECT upi.platform_user_id FROM user_platform_identity upi
+               WHERE upi.user_id = $2 AND upi.platform_id = 'email'
+               ORDER BY upi.is_primary DESC LIMIT 1),
+              fu.email
+            ) AS email
+     FROM production p
+     LEFT JOIN user_profile up ON up.user_id = $2
+     LEFT JOIN feishu_user fu ON fu.user_id = $2
+     WHERE p.id = $1`,
+    [productionId, userId],
+  );
+  const r = res.rows[0];
+  return { enabled: r?.enabled ?? false, name: r?.name ?? "", email: r?.email ?? null };
 }
 
 export async function updateProductionName(id: string, name: string): Promise<void> {
@@ -3922,40 +4382,57 @@ export async function listCueLists(productionId: string): Promise<CueList[]> {
 }
 
 /**
- * Returns all cue lists for a production together with whether the given user
- * has edit access to each one (personal grant OR role match, respecting denials).
- * Runs a single query instead of N×hasListAccess calls.
+ * Returns cue lists for a production with per-list canEdit/canManage（批A REST 语义）。
+ * 目录三态：seeAll=false 时只返回用户持有 meta/cues view 行（含通配）的表；
+ * seeAll=true（admin/owner）返回全量。
+ * canEdit = 覆盖 cues 的 edit 行；canManage = 显式 grants edit 行。
  */
 export async function listCueListsWithAccess(
   productionId: string,
   userId: string,
+  opts: { seeAll?: boolean } = {},
 ): Promise<(CueList & { canEdit: boolean; canManage: boolean })[]> {
   const res = await getPool().query<CueListRow & { can_edit: boolean; can_manage: boolean }>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
             cl.created_by, fu.name AS created_by_name, cl.created_at,
             EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
-                AND rg.resource_id = cl.id
+                AND rg.resource_id IN (cl.id, '*')
+                AND rg.resource_sub IN ('cues', '*')
+                AND rg.permission_level = 'edit'
                 AND rg.user_id = $2
-                AND rg.permission_level IN ('edit', 'manage')
                 AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_edit,
             EXISTS (
-              SELECT 1 FROM resource_grant rg
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
                 AND rg.resource_type = 'cue_list'
-                AND rg.resource_id = cl.id
+                AND rg.resource_id IN (cl.id, '*')
+                AND rg.resource_sub = 'grants'
+                AND rg.permission_level = 'edit'
                 AND rg.user_id = $2
-                AND rg.permission_level = 'manage'
                 AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_manage
      FROM cue_list cl
      JOIN feishu_user fu ON fu.user_id = cl.created_by
      WHERE cl.production_id = $1
+       AND ($3 OR EXISTS (
+              SELECT 1 FROM production_member_grant rg
+              WHERE rg.production_id = cl.production_id
+                AND rg.resource_type = 'cue_list'
+                AND rg.resource_id IN (cl.id, '*')
+                AND rg.resource_sub IN ('meta', 'cues', '*')
+                AND rg.permission_level = 'view'
+                AND rg.user_id = $2
+                AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
+            ))
      ORDER BY cl.created_at`,
-    [productionId, userId],
+    [productionId, userId, opts.seeAll === true],
   );
   return res.rows.map((r) => ({ ...rowToCueList(r), canEdit: r.can_edit, canManage: r.can_manage }));
 }
@@ -3982,47 +4459,11 @@ export async function createCueList(data: {
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [data.id, data.productionId, data.name, data.notes, data.abbr, data.template, data.createdBy],
     );
-    // Creator gets manage grant (Phase 4: resource_grant replaces cue_list_permission)
-    await client.query(
-      `INSERT INTO resource_grant
-         (production_id, user_id, resource_type, resource_id, resource_sub,
-          permission_level, grant_source, confirmed_by)
-       VALUES ($1, $2, 'cue_list', $3, '*', 'manage', 'self_confirmed', $2)
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-         WHERE is_revoked = false
-       DO NOTHING`,
-      [data.productionId, data.createdBy, data.id],
-    );
-    // Write resource_dept_manage for creator's depts where allowed_cue_types match template
+    await seedCueListCreatorAccessInTx(client, data);
+    // §3.5 受益发键定式：∀ (dept, template) 声明行 → 实例区间键
     if (data.template) {
-      await client.query(
-        `INSERT INTO resource_dept_manage
-           (production_id, dept_id, resource_type, resource_id, established_by)
-         SELECT $1, pdm.dept_id, 'cue_list', $2, $3
-         FROM production_dept_member pdm
-         JOIN production_dept pd ON pd.id = pdm.dept_id
-         WHERE pdm.user_id = $3
-           AND pdm.production_id = $1
-           AND $4 = ANY(pd.allowed_cue_types)
-         ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
-         DO NOTHING`,
-        [data.productionId, data.id, data.createdBy, data.template],
-      );
-    }
-    // Person fallback: no dept managers → creator manages this cue_list
-    const hasDept = await client.query(
-      `SELECT 1 FROM resource_dept_manage
-       WHERE production_id=$1 AND resource_type='cue_list' AND resource_id=$2 LIMIT 1`,
-      [data.productionId, data.id],
-    );
-    if (hasDept.rows.length === 0) {
-      await client.query(
-        `INSERT INTO resource_person_manage
-           (production_id, user_id, resource_type, resource_id, established_by)
-         VALUES ($1,$2,'cue_list',$3,$2)
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-        [data.productionId, data.createdBy, data.id],
-      );
+      const { applyCueTemplateGrants } = await import("./cue-template-db");
+      await applyCueTemplateGrants(client, data.productionId, data.id, data.template);
     }
     await client.query("COMMIT");
   } catch (err) {
@@ -4114,10 +4555,23 @@ export async function createProductionRole(productionId: string, name: string): 
     [id, productionId, name],
   );
   const row = res.rows[0];
-  return { id: row.id, name: row.name, permissions: [], createdAt: row.created_at.toISOString() };
+  // 批A：自定义角色也获得成员基础模板键（'*'；若名字命中模板角色则一并 seed）
+  const prodType = (await getPool().query<{ type: string | null }>(
+    "SELECT type FROM production WHERE id = $1", [productionId],
+  )).rows[0]?.type ?? null;
+  await seedRoleFromTemplate(row.id, name, prodType);
+  const seeded = await getPool().query<{ permission_key: string }>(
+    "SELECT permission_key FROM production_role_permission WHERE role_id = $1", [row.id],
+  );
+  return { id: row.id, name: row.name, permissions: seeded.rows.map((r) => r.permission_key), createdAt: row.created_at.toISOString() };
 }
 
 export async function renameProductionRole(roleId: string, productionId: string, name: string): Promise<void> {
+  // 批G：制作人 role 身份不可变（改名后"防止移除"即名存实亡）
+  const cur = await getPool().query<{ name: string }>(
+    "SELECT name FROM production_role WHERE id = $1 AND production_id = $2", [roleId, productionId]);
+  if (cur.rows[0]?.name === "制作人") throw new Error("制作人角色不可改名");
+
   await getPool().query(
     `UPDATE production_role SET name = $1 WHERE id = $2 AND production_id = $3`,
     [name, roleId, productionId],
@@ -4125,10 +4579,17 @@ export async function renameProductionRole(roleId: string, productionId: string,
 }
 
 export async function deleteProductionRole(roleId: string, productionId: string): Promise<void> {
-  await getPool().query(
-    `DELETE FROM production_role WHERE id = $1 AND production_id = $2`,
+  // 批G：制作人 role 是结构性角色（通配区间宿主、seed/迁移按名匹配）——不可删除
+  const res = await getPool().query(
+    `DELETE FROM production_role WHERE id = $1 AND production_id = $2 AND name != '制作人'
+     RETURNING id`,
     [roleId, productionId],
   );
+  if (res.rows.length === 0) {
+    const exists = await getPool().query(
+      "SELECT 1 FROM production_role WHERE id = $1 AND production_id = $2", [roleId, productionId]);
+    if (exists.rows.length > 0) throw new Error("制作人角色不可删除");
+  }
 }
 
 export async function setRolePermissions(roleId: string, permissions: string[]): Promise<void> {
@@ -4186,18 +4647,22 @@ export async function copyProductionRole(productionId: string, sourceRoleId: str
 }
 
 /**
- * Returns true if the user has edit (or manage) access to this cue list via resource_grant.
+ * Returns true if the user can edit this cue list（批A REST 语义）：
+ * 持有 (id|'*') 上覆盖 cues 的 edit 动词行（'*' 整树或显式 cues）。
+ * 存量 edit 行（sub='*' level='edit'）天然是合法树行；原 manage 行经迁移拆解。
  */
 export async function hasListAccess(cueListId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ has_access: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
-       JOIN cue_list cl ON cl.id = rg.resource_id AND cl.production_id = rg.production_id
+       SELECT 1 FROM production_member_grant rg
+       JOIN cue_list cl ON cl.id = $1 AND cl.production_id = rg.production_id
        WHERE rg.resource_type = 'cue_list'
-         AND rg.resource_id = $1
+         AND rg.resource_id IN ($1, '*')
+         AND rg.resource_sub IN ('cues', '*')
+         AND rg.permission_level = 'edit'
          AND rg.user_id = $2
-         AND rg.permission_level IN ('edit', 'manage')
          AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ) AS has_access`,
     [cueListId, userId],
   );
@@ -4211,11 +4676,13 @@ export async function hasListAccess(cueListId: string, userId: string): Promise<
 export async function listCueListRoleMembers(cueListId: string): Promise<string[]> {
   const res = await getPool().query<{ user_id: string }>(
     `SELECT DISTINCT rg.user_id
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
-       AND rg.permission_level IN ('edit', 'manage')
-       AND NOT rg.is_revoked`,
+       AND rg.resource_sub IN ('cues', '*')
+       AND rg.permission_level = 'edit'
+       AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [cueListId],
   );
   return res.rows.map((r) => r.user_id);
@@ -4247,11 +4714,13 @@ export async function deleteCueList(id: string, productionId: string): Promise<v
 export async function listCueListPermissions(cueListId: string): Promise<CueListPermissionRow[]> {
   const res = await getPool().query<{ user_id: string; permission_level: string }>(
     `SELECT DISTINCT rg.user_id, rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
-       AND rg.permission_level IN ('edit', 'manage')
+       AND rg.resource_sub IN ('cues', '*')
+       AND rg.permission_level = 'edit'
        AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ORDER BY rg.user_id`,
     [cueListId],
   );
@@ -4265,12 +4734,15 @@ export async function setCueListPermission(
   grantedBy?: string,
 ): Promise<void> {
   if (canEdit === true) {
+    // 批A：编辑授权 = 动词行集（view + edit + cues create/delete）
     await getPool().query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
-       SELECT cl.production_id, $2, 'cue_list', $1, '*', 'edit', 'direct', $3
-       FROM cue_list cl WHERE cl.id = $1
+       SELECT cl.production_id, $2, 'cue_list', $1, s.sub, s.verb, 'direct', $3
+       FROM cue_list cl,
+            (VALUES ('*', 'view'), ('*', 'edit'), ('cues', 'create'), ('cues', 'delete')) AS s(sub, verb)
+       WHERE cl.id = $1
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
@@ -4278,7 +4750,7 @@ export async function setCueListPermission(
     );
   } else {
     await getPool().query(
-      `UPDATE resource_grant
+      `UPDATE production_member_grant
        SET is_revoked = true, revoked_reason = 'manual'
        WHERE resource_type = 'cue_list'
          AND resource_id = $1
@@ -6240,13 +6712,14 @@ export async function applyPatchToDB(
 
 export async function updateProductionMeta(
   id: string,
-  fields: { description?: string; avatarUrl?: string | null; language?: string | null },
+  fields: { description?: string; avatarUrl?: string | null; language?: string | null; watermarkEnabled?: boolean },
 ): Promise<void> {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.description !== undefined) { sets.push(`description = $${vals.push(fields.description)}`); }
   if ("avatarUrl" in fields) { sets.push(`avatar_url = $${vals.push(fields.avatarUrl ?? null)}`); }
   if ("language" in fields) { sets.push(`language = $${vals.push(fields.language ?? null)}`); }
+  if (fields.watermarkEnabled !== undefined) { sets.push(`watermark_enabled = $${vals.push(fields.watermarkEnabled)}`); }
   if (!sets.length) return;
   vals.push(id);
   await getPool().query(`UPDATE production SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
@@ -7154,45 +7627,46 @@ export async function approveAccessRequest(
     );
     const fresh = freshRes.rows[0];
 
-    // Write grant — atomic_permission type → atomic_permission_grant, otherwise → resource_grant
+    // 终局（批G G-2）：atomic_permission 类型申请已随原子键退役（表已 DROP）——
+    // 历史 pending 申请（若有）按无效处理，不再发行
     if (req.type === "atomic_permission") {
-      const permKey = `${req.resource_type}:${req.permission_level}`;
-      await getPool().query(
-        `INSERT INTO atomic_permission_grant
-           (production_id, user_id, permission_key, grant_source, confirmed_by, approval_id, expires_at)
-         VALUES ($1,$2,$3,'approval',$4,$5,$6)
-         ON CONFLICT (production_id, user_id, permission_key) WHERE is_revoked = false
-         DO NOTHING`,
-        [
-          req.production_id,
-          req.subject_id,
-          permKey,
-          actorId,
-          requestId,
-          fresh?.expires_at ?? null,
-        ],
-      );
+      // 原子键机制已退役；生成端已节点化（403 redirect+modal），此处仅防历史 pending。
+      console.warn(`[approval] 跳过旧格式 atomic_permission 申请 ${requestId}（不发行）`);
     } else {
-      await getPool().query(
-        `INSERT INTO resource_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by, approval_id, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [
-          req.production_id,
-          req.subject_id,
-          req.resource_type,
-          req.resource_id ?? "*",
-          req.resource_sub ?? "*",
-          req.permission_level,
-          actorId,
-          requestId,
-          fresh?.expires_at ?? null,
-        ],
-      );
+      // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
+      // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
+      const setsByType: Record<string, Record<string, ReadonlyArray<readonly [string, string]>>> = {
+        cue_list: CUE_LIST_LEVEL_ROW_SETS,
+        event: EVENT_LEVEL_ROW_SETS,
+        task: TASK_LEVEL_ROW_SETS,
+        report: REPORT_LEVEL_ROW_SETS,
+        note: NOTE_LEVEL_ROW_SETS,
+      };
+      const rows: ReadonlyArray<readonly [string, string]> =
+        setsByType[req.resource_type ?? ""]?.[req.permission_level ?? ""]
+          ?? [[req.resource_sub ?? "*", req.permission_level!] as const];
+      for (const [sub, verb] of rows) {
+        await getPool().query(
+          `INSERT INTO production_member_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by, approval_id, expires_at)
+           VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
+           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+             WHERE is_revoked = false
+           DO NOTHING`,
+          [
+            req.production_id,
+            req.subject_id,
+            req.resource_type,
+            req.resource_id ?? "*",
+            sub,
+            verb,
+            actorId,
+            requestId,
+            fresh?.expires_at ?? null,
+          ],
+        );
+      }
     }
 
     // Expire any pending action notifications for this request

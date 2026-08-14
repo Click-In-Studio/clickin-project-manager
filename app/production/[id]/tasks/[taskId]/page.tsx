@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getTechReqByProduction,
   getProductionEvent,
@@ -44,7 +44,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   if (!event) notFound();
 
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
+  const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);
@@ -52,7 +52,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const isAssignee = req.assignees.some(a => a.userId === session.userId);
 
   if (!canViewFull && !isPocOfDept && !isAssignee)
-    redirect(`/unauthorized?resource=task%3Aview&id=${productionId}&taskId=${taskId}`);
+    redirect(`/unauthorized?resource=node%3Atask%2F*%2Fmeta%40view&id=${productionId}&taskId=${taskId}`);
 
   const dept = departments.find(d => d.id === req.departmentId);
   const deptPeople = dept

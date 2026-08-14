@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionMembers } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("script:comment", permCtx)) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "comments", "create"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const members = await listProductionMembers(id);

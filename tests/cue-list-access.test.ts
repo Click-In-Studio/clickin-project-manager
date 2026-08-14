@@ -1,5 +1,5 @@
 /**
- * Unit tests for Phase 4 cue list resource_grant access control.
+ * Unit tests for Phase 4 cue list production_member_grant access control.
  *
  * Tests cover:
  *   - createCueList writes manage grant for creator
@@ -59,19 +59,28 @@ async function addMember(prodId: string, userId: string, roles: string[] = []) {
   );
 }
 
-async function createDept(prodId: string, name: string, permissions: string[] = [], allowedCueTypes: string[] = []) {
+async function createDept(prodId: string, name: string, _permissions: string[] = [], allowedCueTypes: string[] = []) {
   const res = await getPool().query<{ id: string }>(
-    `INSERT INTO production_dept (production_id, name, display_order, permissions, allowed_cue_types)
-     VALUES ($1, $2, 1, $3, $4) RETURNING id`,
-    [prodId, name, permissions, allowedCueTypes],
+    `INSERT INTO production_dept (production_id, name, display_order)
+     VALUES ($1, $2, 1) RETURNING id`,
+    [prodId, name],
   );
+  // §3.5：数组语义已迁移到声明表（can_create + 设计全档）——工厂同步写声明行
+  for (const t of allowedCueTypes) {
+    await getPool().query(
+      `INSERT INTO dept_cue_list_template (production_id, dept_id, template, can_create, permissions)
+       VALUES ($1, $2, $3, true, ARRAY['@view','@edit','cues@create','cues@delete','grants@edit'])
+       ON CONFLICT (dept_id, template) DO NOTHING`,
+      [prodId, res.rows[0].id, t],
+    );
+  }
   return res.rows[0].id;
 }
 
 async function addDeptMember(deptId: string, prodId: string, userId: string, isPoc = false) {
   await getPool().query(
-    `INSERT INTO production_dept_member (dept_id, production_id, user_id, is_poc, poc_extra_permissions, poc_blocked_permissions)
-     VALUES ($1, $2, $3, $4, '{}', '{}') ON CONFLICT DO NOTHING`,
+    `INSERT INTO production_dept_member (dept_id, production_id, user_id, is_poc)
+     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
     [deptId, prodId, userId, isPoc],
   );
 }
@@ -100,8 +109,9 @@ beforeAll(async () => {
     addMember(prodId, POC_USER),
   ]);
 
-  // Create dept with 灯光 in allowed_cue_types and 'cue_list:edit' in permissions
-  deptId = await createDept(prodId, "灯光组", ["cue_list:edit"], ["灯光"]);
+  // Create dept with 灯光 in allowed_cue_types（批A：伪键退役，zone 资格走
+  // production_dept_permission 节点行——迁移后的真实形态）
+  deptId = await createDept(prodId, "灯光组", [], ["灯光"]);
   await addDeptMember(deptId, prodId, EDITOR_USER, false);
   await addDeptMember(deptId, prodId, POC_USER, true);
 
@@ -111,17 +121,19 @@ beforeAll(async () => {
     "INSERT INTO cue_list (id, production_id, name, notes, created_by) VALUES ($1, $2, $3, '', $4)",
     [cueListId, prodId, "测试灯光表", CREATOR_USER],
   );
-  // Manually give EDITOR_USER an edit grant
+  // Manually give EDITOR_USER an edit grant（批A：行集——授权时发多行，edit 必伴 view）
   await getPool().query(
-    `INSERT INTO resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
-     VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'direct') ON CONFLICT DO NOTHING`,
+    `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+     VALUES ($1, $2, 'cue_list', $3, '*', 'edit', 'direct'),
+            ($1, $2, 'cue_list', $3, '*', 'view', 'direct')
+     ON CONFLICT DO NOTHING`,
     [prodId, EDITOR_USER, cueListId],
   );
 });
 
 afterAll(async () => {
   await getPool().query(
-    "DELETE FROM resource_grant WHERE production_id = $1",
+    "DELETE FROM production_member_grant WHERE production_id = $1",
     [prodId],
   ).catch(() => {});
   await getPool().query(
@@ -140,20 +152,22 @@ afterAll(async () => {
 // ── 1. createCueList writes manage grant ──────────────────────────────────────
 
 describe("createCueList", () => {
-  it("writes manage grant for creator", async () => {
+  it("writes creator verb row-set (批A：manage 单行 → 六行动词行集)", async () => {
     const listId = nextListId();
     await createCueList({
       id: listId, productionId: prodId, name: "新建表",
       notes: "", abbr: null, template: null, createdBy: CREATOR_USER,
     });
-    const { rows } = await getPool().query(
-      `SELECT permission_level FROM resource_grant
+    const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
-         AND resource_type = 'cue_list' AND resource_id = $3
-         AND permission_level = 'manage' AND NOT is_revoked`,
+         AND resource_type = 'cue_list' AND resource_id = $3 AND NOT is_revoked`,
       [prodId, CREATOR_USER, listId],
     );
-    expect(rows).toHaveLength(1);
+    const got = rows.map((r) => `${r.resource_sub}@${r.permission_level}`).sort();
+    expect(got).toEqual(
+      ["*@view", "*@edit", "*@delete", "cues@create", "cues@delete", "grants@edit"].sort(),
+    );
   });
 
   it("writes resource_dept_manage when template matches dept.allowed_cue_types", async () => {
@@ -229,6 +243,17 @@ describe("checkCueListFreeApprovalZone", () => {
        VALUES ($1, $2, 'cue_list', $3, $4) ON CONFLICT DO NOTHING`,
       [prodId, deptId, managedListId, CREATOR_USER],
     );
+    // 批A：dept 管辖的表 → dept_permission 实例行集（zone 键与 grant 键同词汇）
+    await getPool().query(
+      `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+       SELECT $1, $2, unnest(ARRAY[
+         'node:cue_list/' || $3 || '@view',
+         'node:cue_list/' || $3 || '@edit',
+         'node:cue_list/' || $3 || '/cues@create',
+         'node:cue_list/' || $3 || '/cues@delete'
+       ]) ON CONFLICT DO NOTHING`,
+      [prodId, deptId, managedListId],
+    );
   });
 
   it("EDITOR_USER (dept member with cue_list:edit) can self-confirm edit", async () => {
@@ -251,7 +276,7 @@ describe("checkCueListFreeApprovalZone", () => {
     expect(await checkCueListFreeApprovalZone(OUTSIDER_USER, prodId, managedListId, "edit")).toBe(false);
   });
 
-  it("returns false for a cue list with no resource_dept_manage entry", async () => {
+  it("returns false for a cue list not covered by dept permission rows", async () => {
     expect(await checkCueListFreeApprovalZone(EDITOR_USER, prodId, cueListId, "edit")).toBe(false);
   });
 });
@@ -271,6 +296,17 @@ describe("getCueListAccess", () => {
       `INSERT INTO resource_dept_manage (production_id, dept_id, resource_type, resource_id, established_by)
        VALUES ($1, $2, 'cue_list', $3, $4) ON CONFLICT DO NOTHING`,
       [prodId, deptId, managedListId, CREATOR_USER],
+    );
+    // 批A：dept 管辖的表 → dept_permission 实例行集（zone 键与 grant 键同词汇）
+    await getPool().query(
+      `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+       SELECT $1, $2, unnest(ARRAY[
+         'node:cue_list/' || $3 || '@view',
+         'node:cue_list/' || $3 || '@edit',
+         'node:cue_list/' || $3 || '/cues@create',
+         'node:cue_list/' || $3 || '/cues@delete'
+       ]) ON CONFLICT DO NOTHING`,
+      [prodId, deptId, managedListId],
     );
   });
 
@@ -334,7 +370,7 @@ describe("selfConfirmCueListGrant", () => {
   it("writes self_confirmed grant for user in free-approval zone", async () => {
     await selfConfirmCueListGrant(EDITOR_USER, prodId, selfConfirmListId, "edit");
     const { rows } = await getPool().query(
-      `SELECT grant_source FROM resource_grant
+      `SELECT grant_source FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3
          AND permission_level = 'edit' AND NOT is_revoked`,
@@ -347,7 +383,7 @@ describe("selfConfirmCueListGrant", () => {
   it("is idempotent on repeat call", async () => {
     await selfConfirmCueListGrant(EDITOR_USER, prodId, selfConfirmListId, "edit");
     const { rows } = await getPool().query(
-      `SELECT COUNT(*)::int AS cnt FROM resource_grant
+      `SELECT COUNT(*)::int AS cnt FROM production_member_grant
        WHERE production_id = $1 AND user_id = $2
          AND resource_type = 'cue_list' AND resource_id = $3
          AND permission_level = 'edit' AND NOT is_revoked`,
@@ -398,16 +434,19 @@ describe("setCueListGrant and listCueListGrants", () => {
 // ── 8. listCueListsWithAccess ─────────────────────────────────────────────────
 
 describe("listCueListsWithAccess", () => {
-  it("marks editable lists correctly via resource_grant", async () => {
+  it("marks editable lists correctly via production_member_grant", async () => {
     const lists = await listCueListsWithAccess(prodId, EDITOR_USER);
     const target = lists.find((l) => l.id === cueListId);
     expect(target).toBeDefined();
     expect(target?.canEdit).toBe(true);
   });
 
-  it("marks non-granted lists as not editable", async () => {
+  it("hides non-granted lists entirely (批A 目录三态：无 view 行不可见)", async () => {
     const lists = await listCueListsWithAccess(prodId, OUTSIDER_USER);
-    const target = lists.find((l) => l.id === cueListId);
+    expect(lists.find((l) => l.id === cueListId)).toBeUndefined();
+    // seeAll（admin/owner）仍可见且 canEdit=false
+    const all = await listCueListsWithAccess(prodId, OUTSIDER_USER, { seeAll: true });
+    const target = all.find((l) => l.id === cueListId);
     expect(target?.canEdit).toBe(false);
   });
 });

@@ -89,6 +89,7 @@ export type EventTechReq = {
   assignees: EventTechReqAssignee[];
   chatId: string | null;
   createdAt: string;
+  createdVia: "explicit" | "dept_auto" | "poc";
 };
 
 export type Mention = { userId: string; name: string };
@@ -116,6 +117,7 @@ export type EventReportNote = {
   createdAt: string;
   updatedAt: string;
   mentions: Mention[];
+  createdVia: "dept" | "wildcard" | "moderator";
 };
 
 export type UnreadReportEntry = {
@@ -166,6 +168,7 @@ type TechReqRow = {
   id: string; event_id: string;
   title: string; description: string; preset_minutes: number | null;
   department_id: string | null; status: string; chat_id: string | null; created_at: Date;
+  created_via?: string | null;
 };
 
 type TechAssigneeRow = { req_id: string; user_id: string; name: string };
@@ -180,6 +183,7 @@ type ReportNoteRow = {
   id: string; report_id: string; department_id: string; content: string;
   author_user_id: string; author_name: string;
   created_at: Date; updated_at: Date; mentions: Mention[];
+  created_via: "dept" | "wildcard" | "moderator";
 };
 
 // ─── Row converters ───────────────────────────────────────────────────────────
@@ -241,6 +245,7 @@ function rowToTechReq(r: TechReqRow, assignees: EventTechReqAssignee[], schedule
     title: r.title, description: r.description,
     presetMinutes: r.preset_minutes, departmentId: r.department_id,
     status: r.status, assignees, chatId: r.chat_id ?? null,
+    createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto" | "poc",
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -260,27 +265,28 @@ function rowToReportNote(r: ReportNoteRow): EventReportNote {
     id: r.id, reportId: r.report_id, departmentId: r.department_id,
     content: r.content, authorUserId: r.author_user_id, authorName: r.author_name,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
-    mentions: r.mentions ?? [],
+    mentions: r.mentions ?? [], createdVia: r.created_via,
   };
 }
 
 // ─── Departments ──────────────────────────────────────────────────────────────
+// 并表后（migrate-merge-event-department）：单一数据源 production_dept /
+// production_dept_member。本文件仅保留事件业务侧的**读**函数（形状兼容旧
+// EventDepartment）；全部写路径归 lib/dept-db.ts（含 POC notes 三行 diff）。
 
-type MemberRow = { department_id: string; user_id: string; is_member: boolean; is_poc: boolean };
+type MemberRow = { department_id: string; user_id: string; is_poc: boolean };
 
 export async function listEventDepartments(productionId: string): Promise<EventDepartment[]> {
   const pool = getPool();
   const [deptRes, memberRes] = await Promise.all([
     pool.query<DeptRow>(
       `SELECT id, production_id, name, kind, display_order, chat_id, created_at
-       FROM event_department WHERE production_id = $1 ORDER BY display_order, name`,
+       FROM production_dept WHERE production_id = $1 ORDER BY display_order, name`,
       [productionId]
     ),
     pool.query<MemberRow>(
-      `SELECT edm.department_id, edm.user_id, edm.is_member, edm.is_poc
-       FROM event_department_member edm
-       JOIN event_department ed ON ed.id = edm.department_id
-       WHERE ed.production_id = $1`,
+      `SELECT dept_id AS department_id, user_id, is_poc
+       FROM production_dept_member WHERE production_id = $1`,
       [productionId]
     ),
   ]);
@@ -293,7 +299,7 @@ export async function listEventDepartments(productionId: string): Promise<EventD
     const rows = memberMap.get(r.id) ?? [];
     return rowToDept(
       r,
-      rows.filter(m => m.is_member).map(m => m.user_id),
+      rows.map(m => m.user_id),
       rows.filter(m => m.is_poc).map(m => m.user_id),
     );
   });
@@ -304,88 +310,20 @@ export async function getEventDepartment(id: string, productionId: string): Prom
   const [deptRes, memberRes] = await Promise.all([
     pool.query<DeptRow>(
       `SELECT id, production_id, name, kind, display_order, chat_id, created_at
-       FROM event_department WHERE id = $1 AND production_id = $2`,
+       FROM production_dept WHERE id = $1 AND production_id = $2`,
       [id, productionId]
     ),
-    pool.query<{ user_id: string; is_member: boolean; is_poc: boolean }>(
-      "SELECT user_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
+    pool.query<{ user_id: string; is_poc: boolean }>(
+      "SELECT user_id, is_poc FROM production_dept_member WHERE dept_id = $1",
       [id]
     ),
   ]);
   if (!deptRes.rows[0]) return null;
   return rowToDept(
     deptRes.rows[0],
-    memberRes.rows.filter(r => r.is_member).map(r => r.user_id),
+    memberRes.rows.map(r => r.user_id),
     memberRes.rows.filter(r => r.is_poc).map(r => r.user_id),
   );
-}
-
-export async function createEventDepartment(data: {
-  id: string; productionId: string; name: string;
-  kind: "dept" | "group"; displayOrder: number;
-}): Promise<EventDepartment> {
-  const res = await getPool().query<DeptRow>(
-    `INSERT INTO event_department (id, production_id, name, kind, display_order)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, production_id, name, kind, display_order, chat_id, created_at`,
-    [data.id, data.productionId, data.name, data.kind, data.displayOrder]
-  );
-  return rowToDept(res.rows[0], [], []);
-}
-
-export async function updateEventDepartment(
-  id: string, productionId: string,
-  fields: { name?: string; kind?: "dept" | "group"; displayOrder?: number }
-): Promise<void> {
-  const sets: string[] = [];
-  const vals: unknown[] = [id, productionId];
-  if (fields.name         !== undefined) sets.push(`name          = $${vals.push(fields.name)}`);
-  if (fields.kind         !== undefined) sets.push(`kind          = $${vals.push(fields.kind)}`);
-  if (fields.displayOrder !== undefined) sets.push(`display_order = $${vals.push(fields.displayOrder)}`);
-  if (!sets.length) return;
-  await getPool().query(
-    `UPDATE event_department SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
-    vals
-  );
-}
-
-export async function deleteEventDepartment(id: string, productionId: string): Promise<void> {
-  await getPool().query(
-    "DELETE FROM event_department WHERE id = $1 AND production_id = $2",
-    [id, productionId]
-  );
-}
-
-/** Replace the full member/POC list for a department in one transaction.
- *  Entries with both isMember=false and isPoc=false are silently dropped.
- */
-export async function setDepartmentMembers(
-  deptId: string,
-  members: { userId: string; isMember: boolean; isPoc: boolean }[],
-): Promise<void> {
-  const seen = new Set<string>();
-  const unique = members.filter(m => {
-    if (seen.has(m.userId)) return false;
-    seen.add(m.userId);
-    return m.isMember || m.isPoc;
-  });
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM event_department_member WHERE department_id = $1", [deptId]);
-    for (const m of unique) {
-      await client.query(
-        "INSERT INTO event_department_member (department_id, user_id, is_member, is_poc) VALUES ($1,$2,$3,$4)",
-        [deptId, m.userId, m.isMember, m.isPoc],
-      );
-    }
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 /** Replace the full participant list for an event in one transaction.
@@ -410,17 +348,38 @@ export async function setEventParticipants(
         [pid(), eventId, p.userId, p.name, p.departmentId, p.role],
       );
     }
-    // Write assigned view grants for all participants (idempotent).
+    // 被指派自动授权：meta+details view（五层模型第②层——不用 '*' 通配，
+    // 那会把 call_sheet/tasks/reports 层白送）。写入即独立事实：移除参与者
+    // **不**自动撤行（撤销走 sweep/手动；模板只是模板）。
     if (unique.length > 0) {
       await client.query(
-        `INSERT INTO resource_grant
+        `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
-         SELECT $1, unnest($2::uuid[]), 'event', $3, '*', 'view', 'assigned', $4
+         SELECT $1, u, 'event', $3, s.sub, 'view', 'assigned', $4
+         FROM unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
         [productionId, unique.map(p => p.userId), eventId, assignedBy],
+      );
+    }
+    // 部门加入 event（批C C3）：参与部门的 POC 获得 draft report 可见
+    // （event/<id>/reports@view）——发布前给本部门写 note 的前提，POC 本人无需在场。
+    const deptIds = [...new Set(unique.map(p => p.departmentId).filter((d): d is string => d !== null))];
+    if (deptIds.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT DISTINCT $1, edm.user_id, 'event', $3, 'reports', 'view', 'assigned', $4::uuid
+         FROM production_dept_member edm
+         WHERE edm.dept_id = ANY($2::uuid[]) AND edm.is_poc
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, deptIds, eventId, assignedBy],
       );
     }
     await client.query("COMMIT");
@@ -496,6 +455,8 @@ export async function getProductionEvent(id: string, productionId: string): Prom
 export async function setEventStageManagers(
   eventId: string,
   managers: { userId: string; name: string }[],
+  productionId: string,
+  assignedBy: string,
 ): Promise<void> {
   const seen = new Set<string>();
   const unique = managers.filter(m => { if (seen.has(m.userId)) return false; seen.add(m.userId); return true; });
@@ -507,6 +468,28 @@ export async function setEventStageManagers(
       await client.query(
         "INSERT INTO event_stage_manager (event_id, user_id, name) VALUES ($1,$2,$3)",
         [eventId, m.userId, m.name],
+      );
+    }
+    // 跟组舞监自动行集（用户规范，无需发布即生效）：
+    // details/call_sheet/tasks 可见 + 本 event 报告 CRUD。
+    // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
+    if (unique.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
+         FROM unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES
+           ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
+           ('call_sheet', 'view'), ('call_sheet', 'edit'),
+           ('tasks', 'view'), ('reports', 'view'),
+           ('reports', 'create'), ('reports', 'edit'), ('reports', 'delete')
+         ) AS s(sub, verb)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [productionId, unique.map(m => m.userId), eventId, assignedBy],
       );
     }
     await client.query("COMMIT");
@@ -906,7 +889,7 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
   const [reqRes, assigneeRes, itemRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_at
+              preset_minutes, department_id, status, chat_id, created_via, created_at
        FROM event_tech_req WHERE event_id = $1 ORDER BY created_at`,
       [eventId]
     ),
@@ -943,7 +926,7 @@ export async function getEventTechReq(id: string, eventId: string): Promise<Even
   const [reqRes, assigneeRes, itemRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_at
+              preset_minutes, department_id, status, chat_id, created_via, created_at
        FROM event_tech_req WHERE id = $1 AND event_id = $2`,
       [id, eventId]
     ),
@@ -1017,6 +1000,7 @@ export async function createEventTechReq(data: {
   id: string; eventId: string; scheduleItemIds: string[];
   title: string; description: string; presetMinutes: number | null;
   departmentId: string | null; assignees: EventTechReqAssignee[];
+  createdVia?: "explicit" | "poc";
   createdBy: string;
 }): Promise<EventTechReq> {
   const client = await getPool().connect();
@@ -1024,11 +1008,11 @@ export async function createEventTechReq(data: {
     await client.query("BEGIN");
     const res = await client.query<TechReqRow>(
       `INSERT INTO event_tech_req
-         (id, event_id, title, description, preset_minutes, department_id)
-       VALUES ($1,$2,$3,$4,$5,$6)
+         (id, event_id, title, description, preset_minutes, department_id, created_via)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, event_id, title, description,
-                 preset_minutes, department_id, status, chat_id, created_at`,
-      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId]
+                 preset_minutes, department_id, status, chat_id, created_via, created_at`,
+      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId, data.createdVia ?? "explicit"]
     );
     const unique = [...new Set(data.scheduleItemIds)];
     for (const itemId of unique) {
@@ -1050,6 +1034,9 @@ export async function createEventTechReq(data: {
     );
     if (prodRow.rows[0]) {
       await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy, data.eventId);
+      if (data.departmentId) {
+        await writeTaskDeptEventVisibility(data.eventId, data.departmentId, prodRow.rows[0].production_id, data.createdBy);
+      }
     }
     return rowToTechReq(res.rows[0], data.assignees, unique);
   } catch (err) {
@@ -1078,7 +1065,7 @@ export async function updateEventTechReq(
   const res = await getPool().query<TechReqRow>(
     `UPDATE event_tech_req SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
      RETURNING id, event_id, title, description,
-               preset_minutes, department_id, status, chat_id, created_at`,
+               preset_minutes, department_id, status, chat_id, created_via, created_at`,
     vals
   );
   if (!res.rows[0]) return null;
@@ -1137,8 +1124,8 @@ export async function upsertAwaitingTechReqs(
     } else {
       reqId = uid();
       await pool.query(
-        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status)
-         VALUES ($1, $2, '', '', $3, 'awaiting')`,
+        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status, created_via)
+         VALUES ($1, $2, '', '', $3, 'awaiting', 'dept_auto')`,
         [reqId, eventId, deptId],
       );
       if (scheduleItemId) {
@@ -1153,7 +1140,45 @@ export async function upsertAwaitingTechReqs(
     if (req) result.push(req);
   }
 
+  // 规则4：部门被 assign（dept_auto 路径）→ event 可见性行
+  const prodRow = await pool.query<{ production_id: string; created_by: string }>(
+    "SELECT production_id, created_by FROM production_event WHERE id = $1", [eventId],
+  );
+  if (prodRow.rows[0]) {
+    for (const deptId of departmentIds) {
+      await writeTaskDeptEventVisibility(eventId, deptId, prodRow.rows[0].production_id, prodRow.rows[0].created_by);
+    }
+  }
+
   return result;
+}
+
+/** 部门被 assign 进 tech req（任何路径）时的 event 可见性行（用户规则4）：
+ *  POC = meta+details+publication view（提前确认/组织）；成员 = meta+details view
+ *  （发布后可见）。物化当下成员（模板只是模板）；解绑不撤行。 */
+export async function writeTaskDeptEventVisibility(
+  eventId: string,
+  eventDeptId: string,
+  productionId: string,
+  establishedBy: string,
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO production_member_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub,
+        permission_level, grant_source, confirmed_by)
+     SELECT $1, edm.user_id, 'event', $2, s.sub, 'view', 'assigned', $4
+     FROM production_dept_member edm
+     CROSS JOIN LATERAL (
+       -- POC 追加 publication（提前确认/组织）+ reports（draft report 可见，批C C3）
+       SELECT sub FROM (VALUES ('meta'), ('details'), ('publication'), ('reports')) AS v(sub)
+       WHERE edm.is_poc OR v.sub NOT IN ('publication', 'reports')
+     ) AS s
+     WHERE edm.dept_id = $3
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+       WHERE is_revoked = false
+     DO NOTHING`,
+    [productionId, eventId, eventDeptId, establishedBy],
+  );
 }
 
 export async function completeAllEventTechReqs(eventId: string): Promise<void> {
@@ -1176,6 +1201,27 @@ export async function setTechReqAssignees(
         [reqId, a.userId, a.name]
       );
     }
+    // 被 assign 进绑定 event 的 task = 被叫来干活（技术需求 call，与 calltime 同族）
+    // → 自动获得该 event 的 meta+details@view assigned 行（严格剧组下也能看到
+    // 排练时间地点）。不写 event_participant（名单是 organizer 的产品面）；
+    // 移除 assignee 不撤行（行是独立事实）。
+    if (assignees.length > 0) {
+      await client.query(
+        `INSERT INTO production_member_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
+         FROM event_tech_req etr
+         JOIN production_event pe ON pe.id = etr.event_id
+         CROSS JOIN unnest($2::uuid[]) AS u
+         CROSS JOIN (VALUES ('meta'), ('details'), ('publication')) AS s(sub)
+         WHERE etr.id = $1
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [reqId, assignees.map(a => a.userId)],
+      );
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1189,9 +1235,10 @@ export async function setTechReqAssignees(
 
 export async function listEventReports(eventId: string): Promise<EventReport[]> {
   const res = await getPool().query<ReportRow>(
-    `SELECT id, event_id, report_type, title, body, created_by,
-            created_at, updated_at, published_at, mentions
-     FROM event_report WHERE event_id = $1 ORDER BY created_at`,
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions
+     FROM event_report er JOIN wiki w ON w.id = er.wiki_id
+     WHERE er.event_id = $1 ORDER BY er.created_at`,
     [eventId]
   );
   return res.rows.map(rowToReport);
@@ -1199,9 +1246,10 @@ export async function listEventReports(eventId: string): Promise<EventReport[]> 
 
 export async function getEventReport(id: string, eventId: string): Promise<EventReport | null> {
   const res = await getPool().query<ReportRow>(
-    `SELECT id, event_id, report_type, title, body, created_by,
-            created_at, updated_at, published_at, mentions
-     FROM event_report WHERE id = $1 AND event_id = $2`,
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions
+     FROM event_report er JOIN wiki w ON w.id = er.wiki_id
+     WHERE er.id = $1 AND er.event_id = $2`,
     [id, eventId]
   );
   return res.rows[0] ? rowToReport(res.rows[0]) : null;
@@ -1209,9 +1257,10 @@ export async function getEventReport(id: string, eventId: string): Promise<Event
 
 export async function getReportByProduction(id: string, productionId: string): Promise<EventReport | null> {
   const res = await getPool().query<ReportRow>(
-    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
-            er.created_at, er.updated_at, er.published_at, er.mentions
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE er.id = $1 AND pe.production_id = $2`,
     [id, productionId]
@@ -1223,20 +1272,36 @@ export async function createEventReport(data: {
   id: string; eventId: string; reportType: string;
   title: string; body: string; createdBy: string;
 }): Promise<EventReport> {
-  const res = await getPool().query<ReportRow>(
-    `INSERT INTO event_report (id, event_id, report_type, title, body, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     RETURNING id, event_id, report_type, title, body, created_by,
-               created_at, updated_at, published_at`,
-    [data.id, data.eventId, data.reportType, data.title, data.body, data.createdBy]
-  );
-  const prodRow = await getPool().query<{ production_id: string }>(
-    "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
-  );
-  if (prodRow.rows[0]) {
+  // 拆分模型：wiki=内容实体、event_report=挂载边（id 即边 id）
+  const client = await getPool().connect();
+  let row: ReportRow;
+  try {
+    await client.query("BEGIN");
+    const prodRow = await client.query<{ production_id: string }>(
+      "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
+    );
+    if (!prodRow.rows[0]) throw new Error(`event not found: ${data.eventId}`);
+    const wikiRow = await client.query<{ id: string }>(
+      `INSERT INTO wiki (production_id, title, body, created_by)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [prodRow.rows[0].production_id, data.title, data.body, data.createdBy]
+    );
+    const res = await client.query<ReportRow>(
+      `INSERT INTO event_report (id, event_id, report_type, wiki_id)
+       VALUES ($1,$2,$3,$4)
+       RETURNING id, event_id, report_type, created_at, updated_at, published_at`,
+      [data.id, data.eventId, data.reportType, wikiRow.rows[0].id]
+    );
+    await client.query("COMMIT");
+    row = { ...res.rows[0], title: data.title, body: data.body, created_by: data.createdBy, mentions: [] } as ReportRow;
     await writeReportGrants(data.id, prodRow.rows[0].production_id, data.createdBy, data.eventId);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
-  return rowToReport(res.rows[0]);
+  return rowToReport(row);
 }
 
 export async function updateEventReport(
@@ -1246,27 +1311,38 @@ export async function updateEventReport(
     publishedAt?: string | null; mentions?: Mention[];
   }
 ): Promise<EventReport | null> {
-  const sets: string[] = [];
-  const vals: unknown[] = [id, eventId];
-  if (fields.reportType  !== undefined) sets.push(`report_type  = $${vals.push(fields.reportType)}`);
-  if (fields.title       !== undefined) sets.push(`title        = $${vals.push(fields.title)}`);
-  if (fields.body        !== undefined) sets.push(`body         = $${vals.push(fields.body)}`);
-  if (fields.publishedAt !== undefined) sets.push(`published_at = $${vals.push(fields.publishedAt)}`);
-  if (fields.mentions    !== undefined) sets.push(`mentions     = $${vals.push(JSON.stringify(fields.mentions))}`);
-  if (!sets.length) return getEventReport(id, eventId);
-  sets.push(`updated_at = now()`);
-  const res = await getPool().query<ReportRow>(
-    `UPDATE event_report SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
-     RETURNING id, event_id, report_type, title, body, created_by,
-               created_at, updated_at, published_at, mentions`,
-    vals
-  );
-  return res.rows[0] ? rowToReport(res.rows[0]) : null;
+  // 拆分模型：title/body/mentions → wiki 实体；report_type/published_at → 边
+  const edgeSets: string[] = [];
+  const edgeVals: unknown[] = [id, eventId];
+  if (fields.reportType  !== undefined) edgeSets.push(`report_type  = $${edgeVals.push(fields.reportType)}`);
+  if (fields.publishedAt !== undefined) edgeSets.push(`published_at = $${edgeVals.push(fields.publishedAt)}`);
+  const wikiSets: string[] = [];
+  const wikiVals: unknown[] = [id, eventId];
+  if (fields.title    !== undefined) wikiSets.push(`title    = $${wikiVals.push(fields.title)}`);
+  if (fields.body     !== undefined) wikiSets.push(`body     = $${wikiVals.push(fields.body)}`);
+  if (fields.mentions !== undefined) wikiSets.push(`mentions = $${wikiVals.push(JSON.stringify(fields.mentions))}`);
+  if (!edgeSets.length && !wikiSets.length) return getEventReport(id, eventId);
+  if (edgeSets.length) {
+    edgeSets.push(`updated_at = now()`);
+    await getPool().query(
+      `UPDATE event_report SET ${edgeSets.join(", ")} WHERE id = $1 AND event_id = $2`, edgeVals,
+    );
+  }
+  if (wikiSets.length) {
+    wikiSets.push(`updated_at = now()`);
+    await getPool().query(
+      `UPDATE wiki SET ${wikiSets.join(", ")}
+       WHERE id = (SELECT wiki_id FROM event_report WHERE id = $1 AND event_id = $2)`, wikiVals,
+    );
+  }
+  return getEventReport(id, eventId);
 }
 
 export async function deleteEventReport(id: string, eventId: string): Promise<void> {
+  // 边删除 + 内容实体删除（wiki 独立文档库上线前，report 内容随边生灭）
   await getPool().query(
-    "DELETE FROM event_report WHERE id = $1 AND event_id = $2",
+    `WITH edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
+     DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge)`,
     [id, eventId]
   );
 }
@@ -1275,9 +1351,12 @@ export async function deleteEventReport(id: string, eventId: string): Promise<vo
 
 export async function listReportNotes(reportId: string): Promise<EventReportNote[]> {
   const res = await getPool().query<ReportNoteRow>(
-    `SELECT id, report_id, department_id, content, author_user_id, author_name,
-            created_at, updated_at, mentions
-     FROM event_report_note WHERE report_id = $1 ORDER BY created_at`,
+    `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
+            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
+     FROM event_report_note n
+     JOIN wiki w ON w.id = n.wiki_id
+     LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
+     WHERE n.report_id = $1 ORDER BY n.created_at`,
     [reportId]
   );
   return res.rows.map(rowToReportNote);
@@ -1286,48 +1365,72 @@ export async function listReportNotes(reportId: string): Promise<EventReportNote
 export async function createReportNote(data: {
   id: string; reportId: string; departmentId: string;
   content: string; authorUserId: string; authorName: string;
-  mentions?: Mention[];
+  mentions?: Mention[]; createdVia: "dept" | "wildcard" | "moderator";
 }): Promise<EventReportNote> {
-  const res = await getPool().query<ReportNoteRow>(
-    `INSERT INTO event_report_note
-       (id, report_id, department_id, content, author_user_id, author_name, mentions)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id, report_id, department_id, content, author_user_id, author_name,
-               created_at, updated_at, mentions`,
-    [data.id, data.reportId, data.departmentId, data.content, data.authorUserId, data.authorName,
-     JSON.stringify(data.mentions ?? [])]
-  );
-  return rowToReportNote(res.rows[0]);
+  // 拆分模型：note 内容进 wiki 实体，边表只存 (report, wiki, dept) 联合关系
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const wikiRow = await client.query<{ id: string }>(
+      `INSERT INTO wiki (production_id, body, mentions, created_by)
+       SELECT pe.production_id, $1, $2, $3
+       FROM event_report er JOIN production_event pe ON pe.id = er.event_id
+       WHERE er.id = $4
+       RETURNING id`,
+      [data.content, JSON.stringify(data.mentions ?? []), data.authorUserId, data.reportId]
+    );
+    await client.query(
+      `INSERT INTO event_report_note (id, report_id, department_id, wiki_id, created_via)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [data.id, data.reportId, data.departmentId, wikiRow.rows[0].id, data.createdVia]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+  return (await getReportNote(data.id, data.reportId))!;
 }
 
 export async function updateReportNote(
   id: string, reportId: string, content: string, mentions?: Mention[]
 ): Promise<EventReportNote | null> {
-  const sets = ["content = $1", "updated_at = now()"];
+  const sets = ["body = $1", "updated_at = now()"];
   const vals: unknown[] = [content, id, reportId];
   if (mentions !== undefined) {
     sets.push(`mentions = $${vals.push(JSON.stringify(mentions))}`);
   }
-  const res = await getPool().query<ReportNoteRow>(
-    `UPDATE event_report_note SET ${sets.join(", ")}
-     WHERE id = $2 AND report_id = $3
-     RETURNING id, report_id, department_id, content, author_user_id, author_name,
-               created_at, updated_at, mentions`,
+  await getPool().query(
+    `UPDATE wiki SET ${sets.join(", ")}
+     WHERE id = (SELECT wiki_id FROM event_report_note WHERE id = $2 AND report_id = $3)`,
     vals
   );
-  return res.rows[0] ? rowToReportNote(res.rows[0]) : null;
+  await getPool().query(
+    `UPDATE event_report_note SET updated_at = now() WHERE id = $1 AND report_id = $2`,
+    [id, reportId]
+  );
+  return getReportNote(id, reportId);
 }
 
 export async function deleteReportNote(
   id: string, reportId: string, userId: string, isAdmin: boolean
 ): Promise<boolean> {
+  // 作者判定在 wiki.created_by；边+内容一并删
   const res = isAdmin
     ? await getPool().query(
-        "DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 RETURNING id",
+        `WITH edge AS (DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 RETURNING wiki_id)
+         DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge) RETURNING id`,
         [id, reportId]
       )
     : await getPool().query(
-        "DELETE FROM event_report_note WHERE id = $1 AND report_id = $2 AND author_user_id = $3 RETURNING id",
+        `WITH edge AS (
+           DELETE FROM event_report_note n USING wiki w
+           WHERE n.id = $1 AND n.report_id = $2 AND n.wiki_id = w.id AND w.created_by = $3
+           RETURNING n.wiki_id
+         )
+         DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge) RETURNING id`,
         [id, reportId, userId]
       );
   return res.rows.length > 0;
@@ -1335,9 +1438,12 @@ export async function deleteReportNote(
 
 export async function getReportNote(id: string, reportId: string): Promise<EventReportNote | null> {
   const res = await getPool().query<ReportNoteRow>(
-    `SELECT id, report_id, department_id, content, author_user_id, author_name,
-            created_at, updated_at, mentions
-     FROM event_report_note WHERE id = $1 AND report_id = $2`,
+    `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
+            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
+     FROM event_report_note n
+     JOIN wiki w ON w.id = n.wiki_id
+     LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
+     WHERE n.id = $1 AND n.report_id = $2`,
     [id, reportId]
   );
   return res.rows[0] ? rowToReportNote(res.rows[0]) : null;
@@ -1348,11 +1454,11 @@ export async function listAllReportMentionedUserIds(reportId: string): Promise<s
   const pool = getPool();
   const [rptRes, noteRes] = await Promise.all([
     pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(mentions)->>'userId' AS user_id FROM event_report WHERE id = $1`,
+      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report er JOIN wiki w ON w.id = er.wiki_id WHERE er.id = $1`,
       [reportId],
     ),
     pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(mentions)->>'userId' AS user_id FROM event_report_note WHERE report_id = $1`,
+      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report_note n JOIN wiki w ON w.id = n.wiki_id WHERE n.report_id = $1`,
       [reportId],
     ),
   ]);
@@ -1380,10 +1486,11 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
     report_id: string; report_title: string; published_at: Date | null;
     event_id: string; event_title: string; production_id: string; production_name: string;
   }>(
-    `SELECT er.id AS report_id, er.title AS report_title, er.published_at,
+    `SELECT er.id AS report_id, w.title AS report_title, er.published_at,
             pe.id AS event_id, pe.title AS event_title,
             pe.production_id, p.name AS production_name
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE (
@@ -1395,7 +1502,7 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+         OR w.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
        ${prodFilter}
      ) OR (
@@ -1441,7 +1548,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
     event_id: string; event_title: string; production_id: string; production_name: string;
     is_read: boolean;
   }>(
-    `SELECT er.id AS report_id, er.title AS report_title, er.report_type,
+    `SELECT er.id AS report_id, w.title AS report_title, er.report_type,
             er.published_at,
             pe.id AS event_id, pe.title AS event_title,
             pe.production_id, p.name AS production_name,
@@ -1450,6 +1557,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
               WHERE err.report_id = er.id AND err.user_id = $1
             ) AS is_read
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE (
@@ -1457,7 +1565,7 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+         OR w.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
      ) OR (
        er.published_at IS NULL
@@ -1618,12 +1726,24 @@ export async function isUserReqAssignee(reqId: string, userId: string): Promise<
   return res.rows[0].exists;
 }
 
+/** True if the user is a member of a specific event department. */
+export async function isUserDeptMember(deptId: string, userId: string): Promise<boolean> {
+  const res = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM production_dept_member
+       WHERE dept_id = $1 AND user_id = $2
+     ) AS exists`,
+    [deptId, userId]
+  );
+  return res.rows[0].exists;
+}
+
 /** True if the user is a POC of a specific department. */
 export async function isUserDeptPoc(deptId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_department_member
-       WHERE department_id = $1 AND user_id = $2 AND is_poc = true
+       SELECT 1 FROM production_dept_member
+       WHERE dept_id = $1 AND user_id = $2 AND is_poc = true
      ) AS exists`,
     [deptId, userId]
   );
@@ -1672,17 +1792,16 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
        (
          SELECT json_agg(json_build_object('userId', edm2.user_id, 'name', fu3.name)
                 ORDER BY fu3.name)
-         FROM event_department_member edm2
+         FROM production_dept_member edm2
          JOIN feishu_user fu3 ON fu3.user_id = edm2.user_id
-         WHERE edm2.department_id = etr.department_id
-           AND (edm2.is_member OR edm2.is_poc)
+         WHERE edm2.dept_id = etr.department_id
        ) AS dept_people_json
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
      JOIN production p ON p.id = pe.production_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
-     LEFT JOIN event_department_member edm_poc
-       ON edm_poc.department_id = etr.department_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
+     LEFT JOIN production_dept_member edm_poc
+       ON edm_poc.dept_id = etr.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
      LEFT JOIN event_tech_assignee eta
        ON eta.req_id = etr.id AND eta.user_id = $1
@@ -1741,7 +1860,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
        ) AS assignees_json
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
      WHERE pe.production_id = $1 AND pe.status != 'cancelled'
      ORDER BY pe.start_time NULLS LAST, etr.created_at`,
     [productionId]
@@ -1780,10 +1899,10 @@ export async function listProductionReports(
     event_title: string; event_start_time: string | null; event_status: string;
     is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
   }>(
-    `SELECT er.id, er.event_id, er.report_type, er.title, er.body, er.created_by,
-            er.created_at, er.updated_at, er.published_at, er.mentions,
+    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+            er.created_at, er.updated_at, er.published_at, w.mentions,
             pe.title AS event_title, pe.start_time AS event_start_time, pe.status AS event_status,
-            (er.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
+            (w.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
             EXISTS (
               SELECT 1 FROM event_participant ep
               WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'follower'
@@ -1793,18 +1912,26 @@ export async function listProductionReports(
               WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'participant'
             ) AS is_participant
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE pe.production_id = $1
        AND ($3 OR er.published_at IS NOT NULL
+            -- draft 可见：publication@view（本报告）或 event reports@view（本 event；'*' 已由 $3 覆盖）
             OR EXISTS (
-              SELECT 1 FROM resource_grant rg
-              JOIN resource_permission_level rpl
-                ON rpl.resource_type = rg.resource_type AND rpl.permission_level = rg.permission_level
-              JOIN resource_permission_level rpl_view
-                ON rpl_view.resource_type = 'report' AND rpl_view.permission_level = 'view'
+              SELECT 1 FROM production_member_grant rg
               WHERE rg.user_id = $2::uuid AND rg.production_id = $1
-                AND rg.resource_type = 'report' AND rg.resource_id = er.id
-                AND NOT rg.is_revoked AND rpl.sort_order >= rpl_view.sort_order
+                AND NOT rg.is_revoked
+                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
+                AND ((rg.resource_type = 'report' AND rg.resource_id = er.id
+                      AND rg.resource_sub = 'publication' AND rg.permission_level = 'view')
+                  OR (rg.resource_type = 'event' AND rg.resource_id = er.event_id
+                      AND rg.resource_sub = 'reports' AND rg.permission_level = 'view'))
+            )
+            -- 部门参与者可见 draft（发布前写 note 的业务规则，与 participantDeptIds 同谓词）
+            OR EXISTS (
+              SELECT 1 FROM event_participant ep_dept
+              WHERE ep_dept.event_id = pe.id AND ep_dept.user_id = $2::uuid
+                AND ep_dept.department_id IS NOT NULL
             ))
      ORDER BY COALESCE(er.published_at, er.updated_at) DESC`,
     [productionId, userId, includeDrafts]
@@ -1877,9 +2004,9 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
     `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, pe.production_id, ed.name AS department_name
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
-     JOIN event_department_member edm_poc
-       ON edm_poc.department_id = etr.department_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
+     JOIN production_dept_member edm_poc
+       ON edm_poc.dept_id = etr.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
      WHERE etr.status = 'awaiting'
        AND pe.status != 'cancelled'
@@ -2042,9 +2169,18 @@ function rowToReply(r: ReplyRow): ReportReply {
 }
 
 export async function listReportReplies(reportId: string): Promise<ReportReply[]> {
+  // 拆分模型：评论存 wiki_comment（挂内容实体）；parentType/parentId 由关系投影反推
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at
-     FROM event_report_reply WHERE report_id = $1 ORDER BY created_at ASC`,
+    `SELECT wc.id, $1 AS report_id,
+            CASE WHEN wc.parent_comment_id IS NOT NULL THEN 'reply'
+                 WHEN n.id IS NOT NULL THEN 'note' ELSE 'report' END AS parent_type,
+            COALESCE(wc.parent_comment_id::text, n.id, $1) AS parent_id,
+            wc.user_id, wc.author_name, wc.content, wc.mentions, wc.created_at
+     FROM wiki_comment wc
+     LEFT JOIN event_report er ON er.wiki_id = wc.wiki_id AND er.id = $1
+     LEFT JOIN event_report_note n ON n.wiki_id = wc.wiki_id AND n.report_id = $1
+     WHERE er.id IS NOT NULL OR n.id IS NOT NULL
+     ORDER BY wc.created_at ASC`,
     [reportId]
   );
   return res.rows.map(rowToReply);
@@ -2054,21 +2190,53 @@ export async function createReportReply(params: {
   id: string; reportId: string; parentType: ReportReply["parentType"];
   parentId: string; userId: string; authorName: string; content: string; mentions?: Mention[];
 }): Promise<ReportReply> {
-  const res = await getPool().query<ReplyRow>(
-    `INSERT INTO event_report_reply
-       (id, report_id, parent_type, parent_id, user_id, author_name, content, mentions)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at`,
-    [params.id, params.reportId, params.parentType, params.parentId,
-     params.userId, params.authorName, params.content, JSON.stringify(params.mentions ?? [])]
+  // 拆分模型：目标 wiki 依 parentType 解析；id 由 wiki_comment 生成（UUID），
+  // 忽略调用方 params.id（API 消费方使用返回值 id）
+  const pool = getPool();
+  let wikiId: string | null = null;
+  let parentCommentId: string | null = null;
+  if (params.parentType === "note") {
+    const r = await pool.query<{ wiki_id: string }>(
+      "SELECT wiki_id FROM event_report_note WHERE id = $1 AND report_id = $2",
+      [params.parentId, params.reportId]);
+    wikiId = r.rows[0]?.wiki_id ?? null;
+  } else if (params.parentType === "reply") {
+    const r = await pool.query<{ wiki_id: string }>(
+      "SELECT wiki_id FROM wiki_comment WHERE id = $1::uuid", [params.parentId]);
+    wikiId = r.rows[0]?.wiki_id ?? null;
+    parentCommentId = params.parentId;
+  } else {
+    const r = await pool.query<{ wiki_id: string }>(
+      "SELECT wiki_id FROM event_report WHERE id = $1", [params.reportId]);
+    wikiId = r.rows[0]?.wiki_id ?? null;
+  }
+  if (!wikiId) throw new Error(`reply target not found: ${params.parentType}/${params.parentId}`);
+  const res = await pool.query<{ id: string; created_at: Date }>(
+    `INSERT INTO wiki_comment (wiki_id, parent_comment_id, user_id, author_name, content, mentions)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
+    [wikiId, parentCommentId, params.userId, params.authorName, params.content,
+     JSON.stringify(params.mentions ?? [])]
   );
-  return rowToReply(res.rows[0]);
+  return {
+    id: res.rows[0].id, reportId: params.reportId,
+    parentType: params.parentType, parentId: params.parentId,
+    userId: params.userId, authorName: params.authorName,
+    content: params.content, mentions: params.mentions ?? [],
+    createdAt: res.rows[0].created_at.toISOString(),
+  };
 }
 
 export async function getReportReply(id: string, reportId: string): Promise<ReportReply | null> {
   const res = await getPool().query<ReplyRow>(
-    `SELECT id, report_id, parent_type, parent_id, user_id, author_name, content, mentions, created_at
-     FROM event_report_reply WHERE id = $1 AND report_id = $2`,
+    `SELECT wc.id, $2 AS report_id,
+            CASE WHEN wc.parent_comment_id IS NOT NULL THEN 'reply'
+                 WHEN n.id IS NOT NULL THEN 'note' ELSE 'report' END AS parent_type,
+            COALESCE(wc.parent_comment_id::text, n.id, $2) AS parent_id,
+            wc.user_id, wc.author_name, wc.content, wc.mentions, wc.created_at
+     FROM wiki_comment wc
+     LEFT JOIN event_report er ON er.wiki_id = wc.wiki_id AND er.id = $2
+     LEFT JOIN event_report_note n ON n.wiki_id = wc.wiki_id AND n.report_id = $2
+     WHERE wc.id = $1::uuid AND (er.id IS NOT NULL OR n.id IS NOT NULL)`,
     [id, reportId]
   );
   return res.rows[0] ? rowToReply(res.rows[0]) : null;
@@ -2076,7 +2244,12 @@ export async function getReportReply(id: string, reportId: string): Promise<Repo
 
 export async function deleteReportReply(id: string, reportId: string): Promise<void> {
   await getPool().query(
-    "DELETE FROM event_report_reply WHERE id = $1 AND report_id = $2",
+    `DELETE FROM wiki_comment wc
+     USING wiki w
+     WHERE wc.id = $1::uuid AND wc.wiki_id = w.id
+       AND (EXISTS (SELECT 1 FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id WHERE er.wiki_id = w.id AND er.id = $2)
+         OR EXISTS (SELECT 1 FROM event_report_note n WHERE n.wiki_id = w.id AND n.report_id = $2))`,
     [id, reportId]
   );
 }
@@ -2093,7 +2266,7 @@ export async function clearTechReqChatId(reqId: string): Promise<void> {
 
 export async function setDepartmentChatId(deptId: string, chatId: string): Promise<void> {
   await getPool().query(
-    "UPDATE event_department SET chat_id = $1 WHERE id = $2",
+    "UPDATE production_dept SET chat_id = $1 WHERE id = $2",
     [chatId, deptId]
   );
 }
@@ -2115,7 +2288,7 @@ export async function setTechReqChatId(reqId: string, chatId: string): Promise<v
 /** Returns all dept chat_ids for a production (used to filter out dept groups when binding). */
 export async function getProductionDeptChatIds(productionId: string): Promise<Set<string>> {
   const res = await getPool().query<{ chat_id: string }>(
-    "SELECT chat_id FROM event_department WHERE production_id = $1 AND chat_id IS NOT NULL",
+    "SELECT chat_id FROM production_dept WHERE production_id = $1 AND chat_id IS NOT NULL",
     [productionId]
   );
   return new Set(res.rows.map(r => r.chat_id));
@@ -2125,11 +2298,11 @@ export async function getProductionDeptChatIds(productionId: string): Promise<Se
 export async function getDepartmentCurrentEntries(
   deptId: string
 ): Promise<{ userId: string; isMember: boolean; isPoc: boolean }[]> {
-  const res = await getPool().query<{ user_id: string; is_member: boolean; is_poc: boolean }>(
-    "SELECT user_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
+  const res = await getPool().query<{ user_id: string; is_poc: boolean }>(
+    "SELECT user_id, is_poc FROM production_dept_member WHERE dept_id = $1",
     [deptId]
   );
-  return res.rows.map(r => ({ userId: r.user_id, isMember: r.is_member, isPoc: r.is_poc }));
+  return res.rows.map(r => ({ userId: r.user_id, isMember: true, isPoc: r.is_poc }));
 }
 
 /** Returns all Feishu open_ids for an event's group chat (participants + call-time people). */
@@ -2159,7 +2332,7 @@ export async function getReqChatTargets(reqId: string): Promise<string[]> {
      UNION
      SELECT fu.open_id
      FROM event_tech_req etr
-     JOIN event_department_member edm ON edm.department_id = etr.department_id AND edm.is_poc = true
+     JOIN production_dept_member edm ON edm.dept_id = etr.department_id AND edm.is_poc = true
      JOIN feishu_user fu ON fu.user_id = edm.user_id
      WHERE etr.id = $1`,
     [reqId]
@@ -2191,6 +2364,7 @@ export async function countUnreadReportsForUser(userId: string, productionId?: s
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(DISTINCT er.id) AS count
      FROM event_report er
+     JOIN wiki w ON w.id = er.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE (
        er.published_at IS NOT NULL
@@ -2201,7 +2375,7 @@ export async function countUnreadReportsForUser(userId: string, productionId?: s
        AND (
          EXISTS (SELECT 1 FROM event_participant WHERE event_id = pe.id AND user_id = $1)
          OR EXISTS (SELECT 1 FROM event_call_time WHERE event_id = pe.id AND user_id = $1)
-         OR er.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
+         OR w.mentions @> jsonb_build_array(jsonb_build_object('userId', $1::text))
        )
        ${prodFilter}
      ) OR (
@@ -2230,8 +2404,8 @@ export async function countPendingTasksForUser(userId: string, productionId?: st
     `SELECT COUNT(DISTINCT etr.id) AS count
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN event_department_member edm_poc
-       ON edm_poc.department_id = etr.department_id
+     LEFT JOIN production_dept_member edm_poc
+       ON edm_poc.dept_id = etr.department_id
       AND edm_poc.user_id = $1
       AND edm_poc.is_poc = true
      LEFT JOIN event_tech_assignee eta

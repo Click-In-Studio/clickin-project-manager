@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS production (
   type              TEXT,
   type_label        TEXT,
   language          TEXT,
-  owner_id          UUID REFERENCES app_user(id)
+  owner_id          UUID REFERENCES app_user(id),
+  watermark_enabled BOOLEAN NOT NULL DEFAULT false
 );
 
 -- ── Versions ──────────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ CREATE TABLE IF NOT EXISTS production_role_permission (
 CREATE INDEX IF NOT EXISTS production_role_permission_role_idx ON production_role_permission(role_id);
 
 -- production_role_cue_type dropped in Phase 4 (migrate-role-cue-type-to-dept.sql)
--- cue type authorization now managed via production_dept.allowed_cue_types
+-- cue type authorization now managed via dept_cue_list_template（声明表，§3.5）
 
 -- ── Members & permission overrides ────────────────────────────────────────────
 
@@ -354,7 +355,7 @@ CREATE INDEX IF NOT EXISTS cue_list_production_idx ON cue_list(production_id, cr
 
 -- Per-user access override: can_edit=true grants, can_edit=false denies,
 -- cue_list_permission and cue_list_role dropped in Phase 4 (migrate-cue-list-to-resource-grant.sql)
--- Access is now managed via resource_grant (resource_type='cue_list').
+-- Access is now managed via production_member_grant (resource_type='cue_list').
 
 -- ── Cues ──────────────────────────────────────────────────────────────────────
 -- Each row is a revision of a cue. cue_id is the stable logical identity across
@@ -418,26 +419,44 @@ CREATE TABLE IF NOT EXISTS production_event (
 
 CREATE INDEX IF NOT EXISTS production_event_production_idx ON production_event(production_id, start_time);
 
--- Global departments for a production (shared across all events).
-CREATE TABLE IF NOT EXISTS event_department (
-  id            TEXT PRIMARY KEY,
-  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name          TEXT NOT NULL,
-  kind          TEXT NOT NULL DEFAULT 'dept',
-  display_order INTEGER NOT NULL DEFAULT 0,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  chat_id       TEXT
+-- ── Organization tree ─────────────────────────────────────────────────────────
+-- event_department / event_department_member dropped in
+-- migrate-merge-event-department.sql — 并入 production_dept（kind 列承接
+-- 'group' 用户组语义）/ production_dept_member，事件业务 FK 直指组织树。
+-- 部门权限行在 production_dept_permission；cue 声明在 dept_cue_list_template。
+
+CREATE TABLE IF NOT EXISTS production_dept (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name            TEXT        NOT NULL,
+  parent_id       UUID        REFERENCES production_dept(id) NULL,
+  kind            TEXT        NOT NULL DEFAULT 'dept',  -- 'dept'=部门（可提 notes）/'group'=用户组（仅选人）
+  display_order   INTEGER     NOT NULL DEFAULT 0,
+  chat_id         TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS event_department_production_idx ON event_department(production_id, display_order);
+CREATE UNIQUE INDEX IF NOT EXISTS production_dept_name_unique_idx
+  ON production_dept (production_id, name, COALESCE(parent_id::text, ''));
 
-CREATE TABLE IF NOT EXISTS event_department_member (
-  department_id TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
-  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  is_poc        BOOLEAN NOT NULL DEFAULT false,
-  is_member     BOOLEAN NOT NULL DEFAULT true,
-  PRIMARY KEY (department_id, user_id)
+CREATE INDEX IF NOT EXISTS production_dept_production_idx
+  ON production_dept (production_id, display_order);
+
+CREATE INDEX IF NOT EXISTS production_dept_parent_idx
+  ON production_dept (parent_id);
+
+CREATE TABLE IF NOT EXISTS production_dept_member (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  is_poc          BOOLEAN     NOT NULL DEFAULT false,
+  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, dept_id)
 );
+
+CREATE INDEX IF NOT EXISTS pdm_prod_user_idx ON production_dept_member (production_id, user_id);
+CREATE INDEX IF NOT EXISTS pdm_dept_idx      ON production_dept_member (dept_id);
 
 CREATE TABLE IF NOT EXISTS event_stage_manager (
   event_id TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
@@ -448,12 +467,13 @@ CREATE TABLE IF NOT EXISTS event_stage_manager (
 
 CREATE INDEX IF NOT EXISTS event_stage_manager_event_idx ON event_stage_manager(event_id);
 
+
 CREATE TABLE IF NOT EXISTS event_participant (
   id            TEXT PRIMARY KEY,
   event_id      TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
-  department_id TEXT REFERENCES event_department(id) ON DELETE SET NULL,
+  department_id UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   role          TEXT NOT NULL DEFAULT 'participant',
   UNIQUE (event_id, user_id)
 );
@@ -478,7 +498,7 @@ CREATE INDEX IF NOT EXISTS event_schedule_item_event_idx ON event_schedule_item(
 
 CREATE TABLE IF NOT EXISTS schedule_item_department (
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
-  dept_id TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
+  dept_id UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   PRIMARY KEY (item_id, dept_id)
 );
 
@@ -496,7 +516,7 @@ CREATE TABLE IF NOT EXISTS event_call_time (
   event_id         TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   user_id          UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name             TEXT NOT NULL,
-  department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
+  department_id    UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   call_at          TIMESTAMPTZ NOT NULL,
   schedule_item_id TEXT REFERENCES event_schedule_item(id) ON DELETE SET NULL,
   notes            TEXT NOT NULL DEFAULT '',
@@ -514,11 +534,17 @@ CREATE TABLE IF NOT EXISTS event_tech_req (
   title            TEXT NOT NULL,
   description      TEXT NOT NULL DEFAULT '',
   preset_minutes   INTEGER,
-  department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
+  department_id    UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   status           TEXT NOT NULL DEFAULT 'pending',
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  chat_id          TEXT
+  chat_id          TEXT,
+  created_via      TEXT NOT NULL DEFAULT 'explicit'
+                   CHECK (created_via IN ('explicit', 'dept_auto', 'poc'))
 );
+
+-- 存量库补列守卫（幂等；必须位于 CREATE TABLE 之后——语句顺序即执行顺序）
+ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
+  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
 
 CREATE INDEX IF NOT EXISTS event_tech_req_event_idx ON event_tech_req(event_id);
 
@@ -539,31 +565,60 @@ CREATE TABLE IF NOT EXISTS event_tech_assignee (
 
 -- ── Reports ───────────────────────────────────────────────────────────────────
 
+-- ── Wiki（批C PR-C1：内容实体——未来独立文档库；命名跟飞书）────────────────────
+-- report/note 的本体拆分产物：wiki=内容内禀（title/body/mentions/作者），
+-- event_report / event_report_note 退化为纯挂载边。
+
+CREATE TABLE IF NOT EXISTS wiki (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  title         TEXT        NULL,
+  body          TEXT        NOT NULL DEFAULT '',
+  mentions      JSONB       NOT NULL DEFAULT '[]',
+  created_by    UUID        NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wiki_production_idx ON wiki (production_id);
+
+CREATE TABLE IF NOT EXISTS wiki_comment (
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  wiki_id           UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  parent_comment_id UUID        NULL REFERENCES wiki_comment(id) ON DELETE CASCADE,
+  user_id           UUID        NULL REFERENCES app_user(id),
+  author_name       TEXT        NOT NULL,
+  content           TEXT        NOT NULL,
+  mentions          JSONB       NOT NULL DEFAULT '[]',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wiki_comment_wiki_idx ON wiki_comment (wiki_id, created_at);
+
+-- event_report = event↔wiki 挂载边（id 即边 id；发布是这次挂载的生命周期）
 CREATE TABLE IF NOT EXISTS event_report (
   id           TEXT PRIMARY KEY,
   event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   report_type  TEXT NOT NULL DEFAULT 'rehearsal',
-  title        TEXT NOT NULL,
-  body         TEXT NOT NULL DEFAULT '',
-  created_by   UUID NOT NULL REFERENCES app_user(id),
+  wiki_id      UUID NOT NULL REFERENCES wiki(id),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  published_at TIMESTAMPTZ,
-  mentions     JSONB NOT NULL DEFAULT '[]'
+  published_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS event_report_event_idx ON event_report(event_id);
 
+-- event_report_note = report边↔wiki×dept 挂载边（per-dept 联合关系）
 CREATE TABLE IF NOT EXISTS event_report_note (
   id             TEXT PRIMARY KEY,
   report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  department_id  TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
-  content        TEXT NOT NULL,
-  author_user_id UUID NOT NULL REFERENCES app_user(id),
-  author_name    TEXT NOT NULL,
+  department_id  UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  wiki_id        UUID NOT NULL REFERENCES wiki(id),
+  -- 创建通道（批C C3）：dept=本部门 / wildcard=通配权 / moderator=event 编辑者；
+  -- POC 的 ud 门 = dept/<D>/notes@edit|delete 行 ∧ created_via='dept'（导演提的不可被 POC 删）
+  created_via    TEXT NOT NULL DEFAULT 'dept' CHECK (created_via IN ('dept', 'wildcard', 'moderator')),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mentions       JSONB NOT NULL DEFAULT '[]'
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS event_report_note_report_idx ON event_report_note(report_id);
@@ -575,20 +630,7 @@ CREATE TABLE IF NOT EXISTS event_report_read (
   PRIMARY KEY (report_id, user_id)
 );
 
--- user_id and parent_id have no FK on user_id — replies may reference either a report or a note.
-CREATE TABLE IF NOT EXISTS event_report_reply (
-  id          TEXT PRIMARY KEY,
-  report_id   TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  parent_type TEXT NOT NULL,
-  parent_id   TEXT NOT NULL,
-  user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  author_name TEXT NOT NULL,
-  content     TEXT NOT NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mentions    JSONB NOT NULL DEFAULT '[]'
-);
-
-CREATE INDEX IF NOT EXISTS idx_event_report_reply_report_id ON event_report_reply(report_id);
+-- event_report_reply 已拆入 wiki_comment（migrate-report-note-wiki-split.sql）
 
 -- ── Platform identities ───────────────────────────────────────────────────────
 
@@ -744,6 +786,9 @@ CREATE TABLE IF NOT EXISTS asset (
   file_name         TEXT NOT NULL,
   mime_type         TEXT,
   is_universal      BOOLEAN NOT NULL DEFAULT true,
+  -- 批D 隐私/公开：可见 = 能力票 ∧ (is_public ∨ ∃挂载边:宿主可见) ∨ publication@view。
+  -- 存量迁移置 true（保真）；新建默认隐私
+  is_public         BOOLEAN NOT NULL DEFAULT false,
   storage_type      TEXT NOT NULL DEFAULT 'r2',
   feishu_url        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -891,43 +936,8 @@ CREATE TABLE IF NOT EXISTS production_member_role (
 
 CREATE INDEX IF NOT EXISTS pmr_user_prod_idx ON production_member_role (production_id, user_id);
 
--- production_dept：新部门表（替代 event_department，数据迁移在 Phase 3）
-CREATE TABLE IF NOT EXISTS production_dept (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name            TEXT        NOT NULL,
-  parent_id       UUID        REFERENCES production_dept(id) NULL,
-  permissions     TEXT[]      NOT NULL DEFAULT '{}',
-  allowed_cue_types TEXT[]    NOT NULL DEFAULT '{}',
-  display_order   INTEGER     NOT NULL DEFAULT 0,
-  chat_id         TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS production_dept_name_unique_idx
-  ON production_dept (production_id, name, COALESCE(parent_id::text, ''));
-
-CREATE INDEX IF NOT EXISTS production_dept_production_idx
-  ON production_dept (production_id, display_order);
-
-CREATE INDEX IF NOT EXISTS production_dept_parent_idx
-  ON production_dept (parent_id);
-
--- production_dept_member
-CREATE TABLE IF NOT EXISTS production_dept_member (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
-  is_poc          BOOLEAN     NOT NULL DEFAULT false,
-  poc_extra_permissions   TEXT[] NOT NULL DEFAULT '{}',
-  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',  -- 含原 poc_block_write_from_children 语义
-  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (user_id, dept_id)
-);
-
-CREATE INDEX IF NOT EXISTS pdm_prod_user_idx ON production_dept_member (production_id, user_id);
-CREATE INDEX IF NOT EXISTS pdm_dept_idx      ON production_dept_member (dept_id);
+-- production_dept 定义已上移（组织树是事件业务 FK 家族的引用目标，需先建）——
+-- 见 production_event 之前的 "Organization tree" 段。
 
 -- production_member_tag（系统预设 + 演出自定义标签定义）
 CREATE TABLE IF NOT EXISTS production_member_tag (
@@ -959,7 +969,7 @@ CREATE INDEX IF NOT EXISTS pmta_user_prod_idx
   ON production_member_tag_assignment (production_id, user_id);
 
 -- ── Resource Permission Level（Phase 2c）──────────────────────────────────────
--- resource_grant.permission_level 的合法值 lookup 表。
+-- production_member_grant.permission_level 的合法值 lookup 表。
 -- 引入新 resource_type 的 migration 必须先在此表插入对应行，再写 grant 数据。
 
 CREATE TABLE IF NOT EXISTS resource_permission_level (
@@ -970,46 +980,91 @@ CREATE TABLE IF NOT EXISTS resource_permission_level (
 );
 
 INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  -- cue_list 已 REST 化（批A）：只余四动词（view/edit 在此，create/delete 在下方批0 INSERT）
   ('cue_list',    'view',           1),
-  ('cue_list',    'mount',          2),
   ('cue_list',    'edit',           3),
-  ('cue_list',    'manage',         4),
+  -- scene 已 REST 化（批E PR-E1）：view/edit 沿用为动词（mount→mounts 面、manage 退役），
+  -- create/delete 在批0 INSERT；结构型资源无 grants 段（§0.10 持有者判据）
   ('scene',       'view',           1),
-  ('scene',       'mount',          2),
   ('scene',       'edit',           3),
-  ('scene',       'manage',         4),
+  -- event 已 REST 化（批B）：view/edit 沿用为动词，create/delete 在批0 INSERT
   ('event',       'view',           1),
   ('event',       'edit',           2),
-  ('event',       'publish',        3),
-  ('event',       'edit_published', 4),
-  ('event',       'revoke',         5),
-  ('event',       'manage',         6),
+  -- report 已 REST 化（批C）：view/edit 沿用为动词，create/delete 在批0 INSERT
   ('report',      'view',           1),
   ('report',      'edit',           2),
-  ('report',      'publish',        3),
-  ('report',      'edit_published', 4),
-  ('report',      'revoke',         5),
-  ('report',      'manage',         6),
-  ('tech_req',    'view',           1),
-  ('tech_req',    'edit',           2),
-  ('tech_req',    'assign',         3),
-  ('tech_req',    'manage',         4),
+  -- tech_req 已更名 task（批B），词汇见下方 task 四动词 INSERT
+  -- note 过渡类型（批C）：manage 退役，view/edit 沿用为动词
   ('note',        'view',           1),
   ('note',        'edit',           2),
-  ('note',        'manage',         3),
+  -- script_view 已 REST 化（批E PR-E3）：view/edit 沿用（manage 退役拆 grants 行集）
   ('script_view', 'view',           1),
   ('script_view', 'edit',           2),
-  ('script_view', 'manage',         3),
+  -- asset 已 REST 化（批D）：view/edit 沿用为动词（mount→publication 面、manage 退役），
+  -- create/delete 在批0 INSERT
   ('asset',       'view',           1),
-  ('asset',       'mount',          2),
   ('asset',       'edit',           3),
-  ('asset',       'manage',         4)
+  -- dept = production_dept（批C C3，并表后单一 id 空间）：notes 权限面锚点，四动词
+  ('dept',        'view',           0),
+  ('dept',        'create',         0),
+  ('dept',        'edit',           0),
+  ('dept',        'delete',         0),
+  -- character / tag_group（批E PR-E1）：结构型资源四动词；tag_option 并入 tag_group 树
+  ('character',   'view',           0),
+  ('character',   'create',         0),
+  ('character',   'edit',           0),
+  ('character',   'delete',         0),
+  ('tag_group',   'view',           0),
+  ('tag_group',   'create',         0),
+  ('tag_group',   'edit',           0),
+  ('tag_group',   'delete',         0),
+  -- script（单例，id 恒 '*'）/ dramaturgy（批E PR-E2）：imports 是保留段（批量破坏性）
+  ('script',      'view',           0),
+  ('script',      'create',         0),
+  ('script',      'edit',           0),
+  ('script',      'delete',         0),
+  ('dramaturgy',  'view',           0),
+  ('dramaturgy',  'create',         0),
+  ('dramaturgy',  'edit',           0),
+  ('dramaturgy',  'delete',         0),
+  -- dramaturgy_view 个人视图（批E PR-E3）：所有权=user_id 上下文，publication=公开面（预留）
+  ('dramaturgy_view', 'view',       0),
+  ('dramaturgy_view', 'create',     0),
+  ('dramaturgy_view', 'edit',       0),
+  ('dramaturgy_view', 'delete',     0),
+  -- 治理域（批F）：production 根实例（id 恒 '*'）；org_dept=production_dept 组织树
+  -- （与批C3 dept=production_dept notes 锚区分）；SENSITIVE 键=owner∨行（无 admin 旁路）、
+  -- ROOT 三键=owner-only 代码判定（节点入树行不发）
+  ('production',   'view', 0), ('production',   'create', 0), ('production',   'edit', 0), ('production',   'delete', 0),
+  ('member',       'view', 0), ('member',       'create', 0), ('member',       'edit', 0), ('member',       'delete', 0),
+  ('producer',     'view', 0), ('producer',     'create', 0), ('producer',     'edit', 0), ('producer',     'delete', 0),
+  ('role',         'view', 0), ('role',         'create', 0), ('role',         'edit', 0), ('role',         'delete', 0),
+  ('org_dept',     'view', 0), ('org_dept',     'create', 0), ('org_dept',     'edit', 0), ('org_dept',     'delete', 0),
+  ('milestone',    'view', 0), ('milestone',    'create', 0), ('milestone',    'edit', 0), ('milestone',    'delete', 0),
+  ('announcement', 'view', 0), ('announcement', 'create', 0), ('announcement', 'edit', 0), ('announcement', 'delete', 0)
+ON CONFLICT DO NOTHING;
+
+-- 权限REST化 批0（add-rest-verbs.sql）：四动词闭集的 create/delete 行。
+-- sort_order=0 保证旧线性 checker（sort_order >= 比较）不会误判命中新动词行。
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('cue_list',    'create', 0), ('cue_list',    'delete', 0),
+  ('scene',       'create', 0), ('scene',       'delete', 0),
+  ('event',       'create', 0), ('event',       'delete', 0),
+  ('report',      'create', 0), ('report',      'delete', 0),
+  ('note',        'create', 0), ('note',        'delete', 0),
+  ('script_view', 'create', 0), ('script_view', 'delete', 0),
+  ('asset',       'create', 0), ('asset',       'delete', 0)
+ON CONFLICT DO NOTHING;
+
+-- 批B（add-task-verbs.sql）：task 类型四动词（tech_req 更名承接）
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('task', 'view', 0), ('task', 'create', 0), ('task', 'edit', 0), ('task', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 
-CREATE TABLE IF NOT EXISTS resource_grant (
+CREATE TABLE IF NOT EXISTS production_member_grant (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -1017,7 +1072,7 @@ CREATE TABLE IF NOT EXISTS resource_grant (
   resource_id     TEXT        NOT NULL DEFAULT '*',   -- 实例 ID；'*' = 所有实例
   resource_sub    TEXT        NOT NULL DEFAULT '*',   -- 子类型/字段；'*' = 所有子类型
   permission_level TEXT       NOT NULL,
-  CONSTRAINT resource_grant_level_fk
+  CONSTRAINT production_member_grant_level_fk
     FOREIGN KEY (resource_type, permission_level)
     REFERENCES resource_permission_level (resource_type, permission_level)
     DEFERRABLE INITIALLY DEFERRED,
@@ -1036,42 +1091,16 @@ CREATE TABLE IF NOT EXISTS resource_grant (
 
 -- expires_at 条件不能用 NOW()（非 IMMUTABLE），唯一性保护依赖 is_revoked；
 -- 到期 grant 需由应用层在重发前先标记 is_revoked = true。
-CREATE UNIQUE INDEX IF NOT EXISTS resource_grant_active_unique_idx
-  ON resource_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+CREATE UNIQUE INDEX IF NOT EXISTS production_member_grant_active_unique_idx
+  ON production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false;
 
-CREATE INDEX IF NOT EXISTS resource_grant_lookup_idx
-  ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)
+CREATE INDEX IF NOT EXISTS production_member_grant_lookup_idx
+  ON production_member_grant (production_id, resource_type, resource_id, resource_sub, user_id)
   WHERE is_revoked = false;
 
--- ── Atomic Permission Grant（Phase 2c）────────────────────────────────────────
--- 原子权限 key 的个人 grant 记录。
-
-CREATE TABLE IF NOT EXISTS atomic_permission_grant (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  permission_key  TEXT        NOT NULL,
-  grant_source    TEXT        NOT NULL CHECK (grant_source IN (
-                    'self_confirmed', 'auto', 'approval', 'direct', 'assigned', 'migrated'
-                  )),
-  confirmed_by    UUID        NULL REFERENCES app_user(id),  -- auto/migrated grant 时为 NULL
-  approval_id     UUID        NULL REFERENCES approval_request(id),
-  is_revoked      BOOLEAN     NOT NULL DEFAULT false,
-  revoked_reason  TEXT        NULL CHECK (revoked_reason IN (
-                    'role_change', 'dept_change', 'poc_change', 'manual', 'member_removed'
-                  )),
-  expires_at      TIMESTAMPTZ NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS atomic_permission_grant_active_unique_idx
-  ON atomic_permission_grant (production_id, user_id, permission_key)
-  WHERE is_revoked = false;
-
-CREATE INDEX IF NOT EXISTS atomic_permission_grant_lookup_idx
-  ON atomic_permission_grant (production_id, user_id)
-  WHERE is_revoked = false;
+-- atomic_permission_grant：批G G-2 终局 DROP（168 原子键六批退役完毕，
+-- 见 lib/permission-migration-ledger.ts RETIRED 清单）
 
 -- ── Resource Dept Manage（Phase 3）────────────────────────────────────────────
 -- 部门-资源结构性管理权（信号表，非 grant 表）。
@@ -1119,3 +1148,160 @@ CREATE TABLE IF NOT EXISTS production_approval_config (
   updated_by    UUID        NULL REFERENCES app_user(id),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Grant Template（权限REST化 批A，总表 §0.7/§0.8）──────────────────────────
+-- 纯全局权限模板（ROLE_TEMPLATE_PERMISSIONS 的 DB 镜像）：production_type（NULL=通用）
+-- × 角色名（'*'=成员基础）→ permission_key。仅作 fallback/seed；演出内实际资格在
+-- production_role_permission / production_dept_permission / production_member_permission。
+-- permission_key 词汇：原子键（迁移期）或节点串 node:<type>/<id>[/<sub>]@<verb>。
+
+CREATE TABLE IF NOT EXISTS grant_template (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_type TEXT        NULL,
+  role_name       TEXT        NOT NULL,
+  permission_key  TEXT        NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS grant_template_unique_idx
+  ON grant_template (COALESCE(production_type, ''), role_name, permission_key);
+
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'script:comment')
+ON CONFLICT DO NOTHING;
+
+-- 全局通用模板种子（批A cue 域，保真迁移；见 add-grant-template.sql）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:cue_list/*/meta@view'),
+  ('*', 'node:cue_list/*/cues@view'),
+  ('*', 'node:cue_list/*/cues/comments@create')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, 'node:cue_list/*@create'
+FROM (VALUES ('音响设计'), ('灯光设计'), ('多媒体设计'), ('舞美设计'), ('服化设计'),
+             ('舞台监督'), ('作曲'), ('编曲'), ('音乐导演')) AS r(name)
+ON CONFLICT DO NOTHING;
+
+-- ── Production Dept Permission（批A，六步链第 3 步资格源）──────────────────────
+-- dept 免审批区间；取代 production_dept.permissions 数组的终局形态。
+
+CREATE TABLE IF NOT EXISTS production_dept_permission (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id        UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  permission_key TEXT        NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (dept_id, permission_key)
+);
+
+CREATE INDEX IF NOT EXISTS production_dept_permission_prod_idx
+  ON production_dept_permission (production_id, dept_id);
+
+-- ── Cue 表权限模版声明（§3.5，2026-08-13）───────────────────────────────────
+-- 类型 × 权限声明：can_create=建表资格；permissions=纯相对键数组（'@view'/'cues@create'…）
+-- 建表定式：∀声明部门按数组发实例区间键（production_dept_permission）
+
+CREATE TABLE IF NOT EXISTS dept_cue_list_template (
+  production_id  TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id        UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  template       TEXT NOT NULL,
+  can_create     BOOLEAN NOT NULL DEFAULT false,
+  permissions    TEXT[] NOT NULL DEFAULT '{}',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (dept_id, template)
+);
+
+CREATE INDEX IF NOT EXISTS dept_cue_list_template_prod_idx
+  ON dept_cue_list_template (production_id, template);
+
+-- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:event/*/meta@view'),
+  ('*', 'node:event/*/details@view'),
+  ('*', 'node:event/*/followers@create')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, k.key
+FROM (VALUES ('舞台监督'), ('制作人')) AS r(name)
+CROSS JOIN (VALUES
+  ('node:event/*@create'),
+  ('node:event/*/chat@create'),
+  ('node:event/*/call_sheet@view'),
+  ('node:event/*/reports@view'),
+  ('node:event/*/publication@view'),
+  ('node:task/*@view'),
+  ('node:task/*@delete')
+) AS k(key)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, 'node:task/*@view'
+FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
+ON CONFLICT DO NOTHING;
+
+-- 批C：制作人的报告挂接资格（原 report:create）
+-- production 域基线（2026-08-13）：view 面基线非 sensitive（越基线，改它越敏感）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:production/*/meta@view'),
+  ('*', 'node:production/*/mounts@view')
+ON CONFLICT DO NOTHING;
+
+-- 两个指派面（2026-08-13）：舞监 role=全内容 view+发布/撤回；名单/call 面见行集
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('舞台监督', 'node:event/*@view'),
+  ('舞台监督', 'node:event/*/publication@create'),
+  ('舞台监督', 'node:event/*/publication@delete'),
+  ('助理舞台监督', 'node:event/*@view'),
+  ('助理舞台监督', 'node:event/*/publication@create'),
+  ('助理舞台监督', 'node:event/*/publication@delete')
+ON CONFLICT DO NOTHING;
+
+-- 批G G-1：制作人通配区间（收敛历史枚举 seed；主行+保留段四行=永久稳定全集；
+-- RESERVED_TYPES=production/producer 不被类型通配穿透）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('制作人', 'node:*/*@*'),
+  ('制作人', 'node:*/*/grants@*'),
+  ('制作人', 'node:*/*/publication@*'),
+  ('制作人', 'node:*/*/assignees@*'),
+  ('制作人', 'node:*/*/imports@create')
+ON CONFLICT DO NOTHING;
+
+-- 批C C3：导演任意部门发 note（dept 锚通配）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('导演', 'node:dept/*/notes@create')
+ON CONFLICT DO NOTHING;
+
+-- 批D：asset 能力票（全员三枚，MEMBER_BASE 保真）+ 制作人 any 全系
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:asset/*/meta@view'),
+  ('*', 'node:asset/*/file@view'),
+  ('*', 'node:asset/*/shares@create')
+ON CONFLICT DO NOTHING;
+
+-- 批F：通讯录并入 member 树（MEMBER_BASE 保真：contacts:view → meta+contact 两面）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:member/*/meta@view'),
+  ('*', 'node:member/*/contact@view')
+ON CONFLICT DO NOTHING;
+
+-- 批E PR-E2：script 成员默认（MEMBER_BASE 保真：script:view / script:comment）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:script/*/blocks@view'),
+  ('*', 'node:script/*/comments@create')
+ON CONFLICT DO NOTHING;
+
+-- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:scene/*/meta@view'),
+  ('*', 'node:scene/*/synopsis@view'),
+  ('*', 'node:scene/*/action_line@view'),
+  ('*', 'node:scene/*/music@view'),
+  ('*', 'node:scene/*/stage_notes@view'),
+  ('*', 'node:character/*/meta@view'),
+  ('*', 'node:character/*/gender@view'),
+  ('*', 'node:character/*/biography@view'),
+  ('*', 'node:character/*/role_type@view'),
+  ('*', 'node:character/*/members@view')
+ON CONFLICT DO NOTHING;

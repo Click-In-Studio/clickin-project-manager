@@ -5,7 +5,7 @@ import AccessRequestModal from "./AccessRequestModal";
 
 type Props = {
   productionId: string;
-  /** Atomic permission string that caused the 403 (e.g. "script:view", "event:follow"). */
+  /** Atomic permission string that caused the 403 (e.g. ""). */
   resource?: string;
 };
 

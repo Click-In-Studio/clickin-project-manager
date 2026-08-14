@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { startChatRun, steerChatRun } from "@/lib/agent-gateway/client";
 import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
-import { requireOwnership, requireUser } from "@/lib/agent-gateway/http";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 
 export const runtime = "nodejs";
 
@@ -34,11 +34,23 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   // steer: the session already has a run in flight and this message should
-  // be injected into it (queue-aware on 2026.7.x) — the relay then waits for
-  // one extra final so the steered run's reply streams live too.
-  const run = steer === true ? steerChatRun : startChatRun;
+  // be injected into it (queue-aware on 2026.7.x). The reply rides the
+  // ALREADY-OPEN stream connection (steerChatRun marks one extra final for
+  // it to wait on) — so this returns plain JSON, NOT a second stream.
+  // Returning a stream here that no client reads leaked one zombie
+  // connection per steer until the browser's per-host pool starved and the
+  // whole page went silent (live-debugged in production).
+  if (steer === true) {
+    try {
+      const started = await steerChatRun(sessionKey, message);
+      return NextResponse.json({ ok: true, runId: started.runId });
+    } catch (err) {
+      return toErrorResponse(err);
+    }
+  }
+
   return createChatStreamResponse(req, sessionKey, {
-    startRun: () => run(sessionKey, message),
+    startRun: () => startChatRun(sessionKey, message),
   });
 }
 

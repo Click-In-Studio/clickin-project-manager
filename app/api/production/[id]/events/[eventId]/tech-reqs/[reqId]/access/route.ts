@@ -1,12 +1,13 @@
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getEventTechReq } from "@/lib/event-db";
 import {
   getTechReqAccess,
   selfConfirmResourceGrant,
-  checkResourceFreeApprovalZone,
+  checkNodeFreeApprovalZone,
 } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  if (!hasPermission("event:follow", access.permCtx))
+  if (!(await hasEventDomainView(toActor(session, access.permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -55,12 +56,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (level !== "edit" && level !== "manage")
     return Response.json({ error: "无效的权限级别" }, { status: 400 });
 
-  const inZone = await checkResourceFreeApprovalZone(
-    session.userId, productionId, "tech_req", reqId, "tech_req:edit", level,
+  const inZone = await checkNodeFreeApprovalZone(
+    session.userId, productionId, "task", reqId, level,
   );
   if (!inZone)
     return Response.json({ error: "不在免审批区间，无法自我确认" }, { status: 403 });
 
-  await selfConfirmResourceGrant(session.userId, productionId, "tech_req", reqId, level);
+  await selfConfirmResourceGrant(session.userId, productionId, "task", reqId, level);
   return Response.json({ ok: true });
 }

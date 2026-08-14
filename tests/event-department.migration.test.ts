@@ -42,25 +42,8 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("production_dept has allowed_cue_types TEXT[] NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_dept' AND column_name = 'allowed_cue_types'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("ARRAY");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
-
-  it("production_dept has permissions TEXT[] NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_dept' AND column_name = 'permissions'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("ARRAY");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
+  // allowed_cue_types / permissions 数组列断言已随 migrate-merge-event-department
+  // 退役（声明表/区间行接管，列 DROP）——见 merge-event-department.migration.test.ts。
 
   it("production_dept has parent_id nullable UUID", async () => {
     const { rows } = await getPool().query(`
@@ -81,16 +64,7 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("production_dept_member has poc_blocked_permissions TEXT[] NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_dept_member'
-        AND column_name = 'poc_blocked_permissions'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("ARRAY");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
+  // poc_blocked_permissions 断言已随 merge 迁移退役（列 DROP）。
 
   it("resource_dept_manage table exists", async () => {
     const { rows } = await getPool().query(`

@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, getEventReport, updateEventReport, deleteEventReport } from "@/lib/event-db";
 import { canWriteReport, canPublishReport } from "@/lib/event-permissions";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify";
 import type { Mention } from "@/lib/event-db";
 
@@ -64,7 +64,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "report", reportId, "manage"))
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "report", reportId, "grants", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);

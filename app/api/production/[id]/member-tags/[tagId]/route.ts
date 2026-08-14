@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, deleteMemberTag } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 
 export async function DELETE(
   req: NextRequest,
@@ -12,7 +12,7 @@ export async function DELETE(
   const { id: productionId, tagId } = await ctx.params;
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !hasPermission("members:change_role", access.permCtx)) {
+  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "member", "*", "roles", "edit"))) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

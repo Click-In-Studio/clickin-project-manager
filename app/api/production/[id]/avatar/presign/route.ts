@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { presignedPut } from "@/lib/r2";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "项目不存在" }, { status: 404 });
-  if (!hasPermission("production:change_avatar", access.permCtx)) {
+  if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/avatar", "edit"))) {
     return Response.json({ error: "无权限" }, { status: 403 });
   }
 

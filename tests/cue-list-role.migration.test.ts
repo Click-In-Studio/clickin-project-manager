@@ -9,7 +9,7 @@
  * Layer structure:
  *   1. Schema    — cue_list.default_edit_roles column is gone;
  *                  cue_list_role and cue_list_permission tables are also gone (Phase 4)
- *   2. Integrity — resource_grant table exists and has no orphan user/production FK refs
+ *   2. Integrity — production_member_grant table exists and has no orphan user/production FK refs
  *   3. Invariance — (skipped on already-migrated DBs; factory data verification)
  */
 import { describe, it, expect } from "vitest";
@@ -52,10 +52,10 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("resource_grant table exists", async () => {
+  it("production_member_grant table exists", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'resource_grant'
+      WHERE table_schema = 'public' AND table_name = 'production_member_grant'
     `);
     expect(rows).toHaveLength(1);
   });
@@ -63,35 +63,35 @@ describe("schema verification", () => {
 
 // ── 2. Integrity verification ─────────────────────────────────────────────────
 
-// Phase 4 removed cue_list_role and cue_list_permission; data migrated to resource_grant.
-// Integrity checks now verify resource_grant cue_list rows are consistent.
+// Phase 4 removed cue_list_role and cue_list_permission; data migrated to production_member_grant.
+// Integrity checks now verify production_member_grant cue_list rows are consistent.
 describe("integrity verification", () => {
-  it("resource_grant(cue_list): no orphan user_id references", async () => {
+  it("production_member_grant(cue_list): no orphan user_id references", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM resource_grant rg
+      FROM production_member_grant rg
       LEFT JOIN app_user au ON au.id = rg.user_id
       WHERE rg.resource_type = 'cue_list' AND au.id IS NULL
     `);
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("resource_grant(cue_list): no orphan production_id references", async () => {
+  it("production_member_grant(cue_list): no orphan production_id references", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM resource_grant rg
+      FROM production_member_grant rg
       LEFT JOIN production p ON p.id = rg.production_id
       WHERE rg.resource_type = 'cue_list' AND p.id IS NULL
     `);
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("resource_grant(cue_list): no duplicate active grants", async () => {
+  it("production_member_grant(cue_list): no duplicate active grants", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
       FROM (
         SELECT production_id, user_id, resource_type, resource_id, resource_sub, permission_level
-        FROM resource_grant
+        FROM production_member_grant
         WHERE resource_type = 'cue_list' AND NOT is_revoked
         GROUP BY production_id, user_id, resource_type, resource_id, resource_sub, permission_level
         HAVING COUNT(*) > 1
@@ -104,14 +104,14 @@ describe("integrity verification", () => {
 // ── 3. Invariance verification ────────────────────────────────────────────────
 
 describe("invariance verification", () => {
-  // Phase 4 subsequently migrated cue_list_role/cue_list_permission → resource_grant.
-  // Invariance now verified against resource_grant (the final destination).
+  // Phase 4 subsequently migrated cue_list_role/cue_list_permission → production_member_grant.
+  // Invariance now verified against production_member_grant (the final destination).
   it.skipIf(!snapshot)(
-    "resource_grant: creator has manage grant (via Phase 4 migration)",
+    "production_member_grant: creator has manage grant (via Phase 4 migration)",
     async () => {
       const { cueList } = snapshot!;
       const { rows } = await getPool().query(
-        `SELECT 1 FROM resource_grant
+        `SELECT 1 FROM production_member_grant
          WHERE resource_type = 'cue_list' AND resource_id = $1
            AND user_id = $2 AND permission_level = 'manage' AND NOT is_revoked`,
         [cueList.id, cueList.creatorId],
@@ -121,11 +121,11 @@ describe("invariance verification", () => {
   );
 
   it.skipIf(!snapshot)(
-    "resource_grant: cue list has at least one edit grant (defaultEditRoles migrated)",
+    "production_member_grant: cue list has at least one edit grant (defaultEditRoles migrated)",
     async () => {
       const { cueList } = snapshot!;
       const { rows } = await getPool().query(
-        `SELECT COUNT(*)::int AS cnt FROM resource_grant
+        `SELECT COUNT(*)::int AS cnt FROM production_member_grant
          WHERE resource_type = 'cue_list' AND resource_id = $1
            AND permission_level = 'edit' AND NOT is_revoked`,
         [cueList.id],

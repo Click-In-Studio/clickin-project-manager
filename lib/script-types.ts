@@ -36,6 +36,7 @@ export type ScriptConfig = {
   textLayoutMode: ScriptTextLayoutMode;
   openingChapterMarkerId: string | null;
   showOpeningChapter: boolean;
+  useRehearsalMarks: boolean;
 };
 
 export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
@@ -45,7 +46,19 @@ export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
   textLayoutMode: "center",
   openingChapterMarkerId: null,
   showOpeningChapter: false,
+  useRehearsalMarks: true,
 };
+
+const PRODUCTION_TYPES_WITHOUT_REHEARSAL_MARKS = new Set([
+  "stage_play",
+  "short_film",
+  "film",
+  "tv_drama",
+]);
+
+export function usesRehearsalMarksByDefault(productionType?: string | null): boolean {
+  return !productionType || !PRODUCTION_TYPES_WITHOUT_REHEARSAL_MARKS.has(productionType);
+}
 
 export type ScriptState = {
   blocks: Block[];

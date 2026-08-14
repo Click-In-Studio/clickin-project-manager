@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createNewSessionKey, listChatSessions, getStatus } from "@/lib/agent-gateway/client";
 import { requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProfile } from "@/lib/db";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
+import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 
 export const runtime = "nodejs";
 
@@ -13,7 +16,14 @@ export async function GET(req: NextRequest) {
     // after reflects the actual connection outcome — including the
     // unconfigured/pairing_required states the UI banner needs.
     const sessions = await listChatSessions(auth.userId);
-    return NextResponse.json({ sessions, gatewayStatus: getStatus() });
+    // 新建对话选择器需要的制作列表（未归档）——与页面同一套查询
+    const profile = await getUserProfile(auth.userId);
+    const productions = (
+      await listMyProductionsWithRoles(auth.userId, profile?.isAdmin ?? auth.isAdmin, [...ADMIN_PANEL_NODE_PREFIXES] /* listMyProductionsWithRoles 内部为前缀 LIKE ANY 匹配（批G G-2 同步改造） */)
+    )
+      .filter((p) => !p.archivedAt)
+      .map((p) => ({ id: p.id, name: p.name }));
+    return NextResponse.json({ sessions, productions, gatewayStatus: getStatus() });
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -21,9 +31,40 @@ export async function GET(req: NextRequest) {
 
 // Doesn't touch the Gateway — a session only springs into existence there on
 // its first actual message. This just hands back a fresh per-user key.
+// production 会话（可选 productionId）：签发前实时校验成员资格——
+// sessionKey 由后端签发是 production 隔离的根，用户无法自造。
 export async function POST(req: NextRequest) {
   const auth = requireUser(req.cookies);
   if (auth instanceof NextResponse) return auth;
 
-  return NextResponse.json({ key: createNewSessionKey(auth.userId) }, { status: 201 });
+  // 注意：不能在 req.json() 上挂 .catch(() => ({}))——那会把 malformed
+  // JSON 静默当成"无 productionId"签发个人会话（review #206 抓出的死代码
+  // + 行为偏差），必须真 400。
+  let productionId: string | undefined;
+  try {
+    const body = (await req.json()) as { productionId?: unknown };
+    if (body.productionId !== undefined) {
+      if (typeof body.productionId !== "string" || !PRODUCTION_ID_RE.test(body.productionId)) {
+        return NextResponse.json({ error: "productionId 格式非法" }, { status: 400 });
+      }
+      productionId = body.productionId;
+    }
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (productionId) {
+    // getProductionPermissionContext 对"非成员"本身返回 null（不抛）——
+    // 不吞异常：真实基础设施错误（DB 断连等）走 500，别伪装成 403
+    try {
+      const access = await getProductionPermissionContext(auth.userId, auth.isAdmin, productionId);
+      if (!access) {
+        return NextResponse.json({ error: "你不是该制作的成员" }, { status: 403 });
+      }
+    } catch (err) {
+      return toErrorResponse(err);
+    }
+  }
+
+  return NextResponse.json({ key: createNewSessionKey(auth.userId, productionId) }, { status: 201 });
 }

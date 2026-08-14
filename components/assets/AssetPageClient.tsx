@@ -8,6 +8,7 @@ import MountPointAssets from "./MountPointAssets";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset, AssetMount, AssetType } from "@/lib/asset-db";
+import ChevronIcon from "@/components/ChevronIcon";
 
 const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   drafting: "图纸", planogram: "平面图", demo: "Demo",
@@ -261,7 +262,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                     )}
                     <button onClick={() => toggleExpand(a.id)}
                       style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
-                      {isExp ? "▲" : "▼"}
+                      <ChevronIcon direction={isExp ? "up" : "down"} size={12} />
                     </button>
                   </div>
                 </div>

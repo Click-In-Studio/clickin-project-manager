@@ -3,183 +3,26 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import { ALL_PERMISSIONS, type Permission } from "@/lib/permissions";
+import ChevronIcon from "@/components/ChevronIcon";
+type Permission = string;
+const ALL_PERMISSIONS: readonly Permission[] = [];
 
 const PERMISSION_LABELS: Partial<Record<Permission, string>> = {
   // 项目管理
-  "production:delete": "删除项目",
-  "production:transfer_owner": "转让所有权",
-  "production:restore_checkpoint": "恢复检查点",
-  "production:archive": "归档/取消归档项目",
-  "production:rename": "重命名项目",
-  "production:change_type": "修改项目类型",
-  "production:manage_integrations": "管理第三方集成",
-  "production:import_members": "批量导入成员",
-  "production:producer_invite": "邀请制作人",
-  "production:producer_promote": "提升为制作人",
-  "production:producer_demote": "降级制作人",
-  "production:producer_kick": "移除制作人",
-  "production:manage_config": "管理项目配置",
-  "production:mount": "挂载附件到项目",
-  "production:unmount": "从项目移除挂载",
   // 通讯录
-  "contacts:import": "导入/更新通讯录",
-  "contacts:view": "查看通讯录",
   // 成员管理
-  "members:invite": "邀请成员",
-  "members:kick": "移除成员",
-  "members:change_role": "修改成员角色",
-  "members:manage_overrides": "管理权限覆盖",
   // 职位管理
-  "role:create": "创建职位",
-  "role:rename": "重命名职位",
-  "role:delete": "删除职位",
-  "role:assign_permission": "分配职位权限",
   // 部门管理
-  "dept:create": "创建部门",
-  "dept:dismiss": "解散部门",
-  "dept:rename": "重命名部门",
-  "dept:change_type": "修改部门类型",
-  "dept:add_member": "添加部门成员",
-  "dept:delete_member": "移除部门成员",
-  "dept:set_poc": "设置部门联系人",
-  "dept:unset_poc": "取消部门联系人",
   // 剧本
-  "script:import": "导入剧本",
-  "script:manage": "剧本高级编辑",
-  "script:edit": "剧本文本编辑",
-  "script:annotate": "剧本排练记号",
-  "script:view": "查看剧本",
-  "script:comment": "剧本评论",
-  "script:edit_comment_any": "编辑他人剧本评论",
-  "script:delete_comment_any": "删除他人剧本评论",
-  "rehearsal_mark:create": "创建排练记号",
-  "rehearsal_mark:edit": "编辑排练记号",
-  "rehearsal_mark:delete": "删除排练记号",
-  "rehearsal_mark:move": "移动排练记号",
-  "script:create_block": "创建剧本块",
-  "script:delete_block": "删除剧本块",
-  "script:edit_block": "编辑剧本块",
-  "script:set_character": "设置台词角色",
-  "script:set_type": "设置块类型",
-  "script:set_tag": "设置标注",
-  "script:reorder": "调整剧本顺序",
-  "script:mount": "挂载剧本附件",
   // 场次
-  "scene:create": "创建场次",
-  "scene:delete": "删除场次",
-  "scene:rename": "重命名场次",
-  "scene:renumber": "重新编号场次",
-  "scene:change_type": "修改场次类型",
-  "scene:edit_synopsis": "编辑场次概要",
-  "scene:edit_action_line": "编辑动作线",
-  "scene:edit_music": "编辑场次音乐",
-  "scene:edit_stage_notes": "编辑舞台提示",
-  "scene:edit_expected_duration": "编辑预计时长",
-  "scene:mount": "挂载场次附件",
-  "scene:view": "查看场次",
   // 角色
-  "character:delete": "删除角色",
-  "character:create": "创建角色",
-  "character:rename": "重命名角色",
-  "character:change_type": "修改角色类型",
-  "character:set_members": "设置角色扮演者",
-  "character:edit_gender": "编辑角色性别",
-  "character:edit_biography": "编辑角色小传",
-  "character:edit_role_type": "编辑角色定位",
-  "character:view": "查看角色",
   // 标注体系
-  "tag_group:create": "创建标注组",
-  "tag_group:delete": "删除标注组",
-  "tag_group:rename": "重命名标注组",
-  "tag_group:edit_range_config": "编辑标注范围配置",
-  "tag_group:set_default_option": "设置默认标注选项",
-  "tag_group:set_lyric_split": "设置歌词拆分",
-  "tag_group:reorder": "排序标注组",
-  "tag_option:create": "创建标注选项",
-  "tag_option:delete": "删除标注选项",
-  "tag_option:rename": "重命名标注选项",
-  "tag_option:edit_color": "编辑标注颜色",
-  "tag_option:reorder": "排序标注选项",
   // Cue表
-  "cue_list:create_any": "创建任意Cue表",
-  "cue_list:delete_any": "删除任意Cue表",
-  "cue_list:rename_any": "重命名任意Cue表",
-  "cue_list:reorder_any": "排序任意Cue表",
-  "cue_list:edit_abbr_any": "编辑任意Cue表缩写",
-  "cue_list:edit_description_any": "编辑任意Cue表说明",
-  "cue_list:manage_permissions_any": "管理任意Cue表权限",
-  "cue_list:create": "创建Cue表",
-  "cue_list:delete": "删除Cue表",
-  "cue_list:rename": "重命名Cue表",
-  "cue_list:reorder": "排序Cue表",
-  "cue_list:edit_abbr": "编辑Cue表缩写",
-  "cue_list:edit_description": "编辑Cue表说明",
-  "cue_list:manage_permissions": "管理Cue表权限",
-  "cue_list:view": "查看Cue表",
-  "cue:create_any": "创建任意Cue",
-  "cue:delete_any": "删除任意Cue",
-  "cue:renumber_any": "重新编号任意Cue",
-  "cue:rename_any": "重命名任意Cue",
-  "cue:edit_description_any": "编辑任意Cue说明",
-  "cue:move_any": "移动任意Cue",
-  "cue:mount_any": "挂载任意Cue附件",
-  "cue:create": "创建Cue",
-  "cue:delete": "删除Cue",
-  "cue:renumber": "重新编号Cue",
-  "cue:rename": "重命名Cue",
-  "cue:edit_description": "编辑Cue说明",
-  "cue:move": "移动Cue",
-  "cue:mount": "挂载Cue附件",
-  "cue:view": "查看Cue",
-  "cue:comment": "评论Cue",
-  "cue:edit_comment_any": "编辑他人Cue评论",
-  "cue:delete_comment_any": "删除他人Cue评论",
   // 构作
-  "dramaturgy:import": "导入构作数据",
-  "dramaturgy_view:create_public": "创建公开构作视图",
-  "dramaturgy_view:delete_public": "删除公开构作视图",
-  "dramaturgy_view:overwrite_public": "覆盖公开构作视图",
-  "dramaturgy_view:create": "创建构作视图",
-  "dramaturgy_view:delete": "删除构作视图",
-  "dramaturgy_view:overwrite": "覆盖构作视图",
-  // 事件（per-event 写操作已迁移至 resource_grant）
-  "event:create": "创建事件",
-  "event:view_call_sheet_any": "查看他人Call Sheet",
-  "event:follow": "关注事件",
-  "task:view": "查看任务",
-  "task:view_any": "查看他人任务",
-  "task:delete_any": "删除他人任务",
-  // 报告（per-report 写操作已迁移至 resource_grant）
-  "report:create": "创建报告",
-  "report:edit_comment_any": "编辑他人报告评论",
-  "report:delete_comment_any": "删除他人报告评论",
-  "report:reply": "回复报告",
+  // 事件（per-event 写操作已迁移至 production_member_grant）
+  // 报告（per-report 写操作已迁移至 production_member_grant）
   // 附件
-  "asset:view_any": "查看他人附件",
-  "asset:delete_any": "删除他人附件",
-  "asset:rename_any": "重命名他人附件",
-  "asset:change_type_any": "修改他人附件类型",
-  "asset:overwrite_any": "覆盖他人附件",
-  "asset:mount_any": "挂载他人附件",
-  "asset:unmount_any": "卸载他人附件",
-  "asset:create": "上传附件",
-  "asset:rename": "重命名附件",
-  "asset:overwrite": "覆盖附件",
-  "asset:change_type": "修改附件类型",
-  "asset:delete": "删除附件",
-  "asset:mount": "挂载附件",
-  "asset:unmount": "卸载附件",
-  "asset:view": "查看附件",
-  "asset:download": "下载附件",
-  "asset:download_any": "下载他人附件",
-  "asset:share": "分享附件",
-  "asset:share_downloadable": "分享附件（可下载）",
-  "asset:share_any": "分享他人附件",
-  "asset:share_any_downloadable": "分享他人附件（可下载）",
   // 组织
-  "org:assign_member": "分配组织成员",
-  "org:recall_member": "收回组织成员",
 };
 
 // Group by permission-key prefix (before the colon). Falls back to the raw
@@ -327,7 +170,7 @@ export default function PermissionsClient() {
                             ))}
                           </div>
                         </div>
-                        <span className="ml-3 text-[10px] text-zinc-300 shrink-0">{isExp ? "▲" : "▼"}</span>
+                        <ChevronIcon direction={isExp ? "up" : "down"} size={10} className="ml-3 shrink-0 text-zinc-300" />
                       </button>
 
                       {/* Expanded permission breakdown */}

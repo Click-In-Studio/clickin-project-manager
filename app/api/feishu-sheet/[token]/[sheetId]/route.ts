@@ -21,9 +21,17 @@ export async function GET(
 
   const rowCountParam = req.nextUrl.searchParams.get("rowCount");
   const maxRow = rowCountParam ? parseInt(rowCountParam, 10) : undefined;
+  const columnCountParam = req.nextUrl.searchParams.get("columnCount");
+  const maxColumn = columnCountParam ? parseInt(columnCountParam, 10) : undefined;
 
   try {
-    const rawRows = await getSheetValues(spreadsheetToken, sheetId, userToken, maxRow || undefined);
+    const rawRows = await getSheetValues(
+      spreadsheetToken,
+      sheetId,
+      userToken,
+      maxRow || undefined,
+      maxColumn || undefined,
+    );
     const data = parseSheetData(rawRows);
     return Response.json({ data });
   } catch (err: unknown) {

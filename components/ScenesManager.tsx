@@ -12,6 +12,7 @@ import { getChapterDurationDisplay } from "@/lib/scene-duration";
 import BoundaryActionMenu from "@/components/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
+import ChevronIcon from "@/components/ChevronIcon";
 
 type MetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
 
@@ -169,8 +170,8 @@ function SceneEditRow({
       >
         <td className={`py-3 w-16 sm:w-24${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
           <div className="flex items-center gap-1">
-            <span className="sm:hidden flex-shrink-0 text-xs text-zinc-400 w-4">
-              {expanded ? "▼" : "▶"}
+            <span className="flex w-4 flex-shrink-0 items-center text-zinc-400 sm:hidden">
+              <ChevronIcon direction={expanded ? "down" : "right"} size={12} />
             </span>
             <span className={`text-sm tabular-nums ${indent ? "text-zinc-400" : "font-semibold text-zinc-600"}`}>
               {scene.number || "—"}
@@ -226,15 +227,7 @@ function SceneEditRow({
               className={`inline-flex h-5 w-5 items-center justify-center transition-all ${expanded ? "text-zinc-500" : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-600"}`}
               title={expanded ? "收起" : "展开详情"}
             >
-              <svg className="h-4 w-4" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <polyline
-                  points={expanded ? "3 7.5 6 4.5 9 7.5" : "3 4.5 6 7.5 9 4.5"}
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="square"
-                  strokeLinejoin="miter"
-                />
-              </svg>
+              <ChevronIcon direction={expanded ? "up" : "down"} />
             </button>
           </div>
         </td>

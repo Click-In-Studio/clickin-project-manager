@@ -1,19 +1,21 @@
 /**
- * production_dept CRUD and permission helpers (Phase 3).
+ * production_dept CRUD and permission helpers.
  *
  * Design:
- * - All writes go through production_dept / production_dept_member.
- * - event_department is left untouched (other tables still FK into it).
- * - Permission inheritance: ancestor depts' permissions[] flow down to members.
- * - POC zone: union of all descendant depts' permissions[] + poc_extra − poc_blocked.
+ * - 单一数据源（migrate-merge-event-department 后）：event_department 已并入
+ *   production_dept（kind 列承接 'group' 用户组语义），成员/POC 只有本表一份。
+ * - 部门权限行在 production_dept_permission（区间；伞语义沿 parent_id 下传），
+ *   cue 声明在 dept_cue_list_template——本表不再携带数组权限列。
+ * - POC notes 三行（dept/<D>/notes@create|edit|delete）随任期在 setDeptMembers 发/收。
  * - Dissolution guard: dept cannot be deleted while resource_dept_manage has records.
  * - POC conflict: a user can be POC of parallel depts; ancestor/descendant conflicts are resolved.
  */
 
 import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
-import type { Permission } from "./permissions";
-import { DEPT_ASSIGNABLE_PERMISSIONS } from "./permissions";
+type Permission = string;
+
+import { RESERVED_TYPES } from "./grant-template";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,8 +24,8 @@ export type ProductionDept = {
   productionId: string;
   name: string;
   parentId: string | null;
-  permissions: string[];
-  allowedCueTypes: string[];
+  /** 'dept' = 部门（可被提 notes）；'group' = 用户组（仅选人） */
+  kind: "dept" | "group";
   displayOrder: number;
   chatId: string | null;
   createdAt: Date;
@@ -34,15 +36,11 @@ export type ProductionDept = {
 export type DeptMember = {
   userId: string;
   isPoc: boolean;
-  pocExtraPermissions: string[];
-  pocBlockedPermissions: string[];
 };
 
 export type DeptMemberInput = {
   userId: string;
   isPoc: boolean;
-  pocExtraPermissions?: string[];
-  pocBlockedPermissions?: string[];
 };
 
 /** Full dept tree row (no member lists). */
@@ -51,8 +49,7 @@ type DeptRow = {
   production_id: string;
   name: string;
   parent_id: string | null;
-  permissions: string[];
-  allowed_cue_types: string[];
+  kind: "dept" | "group";
   display_order: number;
   chat_id: string | null;
   created_at: Date;
@@ -62,8 +59,6 @@ type MemberRow = {
   dept_id: string;
   user_id: string;
   is_poc: boolean;
-  poc_extra_permissions: string[];
-  poc_blocked_permissions: string[];
 };
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -75,12 +70,11 @@ function toDept(row: DeptRow, members: MemberRow[]): ProductionDept {
     productionId: row.production_id,
     name: row.name,
     parentId: row.parent_id,
-    permissions: row.permissions,
-    allowedCueTypes: row.allowed_cue_types,
+    kind: row.kind,
     displayOrder: row.display_order,
     chatId: row.chat_id,
     createdAt: row.created_at,
-    memberUserIds: mine.filter((m) => !m.is_poc || m.is_poc).map((m) => m.user_id),
+    memberUserIds: mine.map((m) => m.user_id),
     pocUserIds: mine.filter((m) => m.is_poc).map((m) => m.user_id),
   };
 }
@@ -92,7 +86,7 @@ export async function listProductionDepts(productionId: string): Promise<Product
   const pool = getPool();
   const [deptRes, memberRes] = await Promise.all([
     pool.query<DeptRow>(
-      `SELECT id, production_id, name, parent_id, permissions, allowed_cue_types,
+      `SELECT id, production_id, name, parent_id, kind,
               display_order, chat_id, created_at
        FROM production_dept
        WHERE production_id = $1
@@ -100,11 +94,8 @@ export async function listProductionDepts(productionId: string): Promise<Product
       [productionId],
     ),
     pool.query<MemberRow>(
-      `SELECT pdm.dept_id, pdm.user_id, pdm.is_poc,
-              pdm.poc_extra_permissions, pdm.poc_blocked_permissions
-       FROM production_dept_member pdm
-       JOIN production_dept pd ON pd.id = pdm.dept_id
-       WHERE pd.production_id = $1`,
+      `SELECT dept_id, user_id, is_poc
+       FROM production_dept_member WHERE production_id = $1`,
       [productionId],
     ),
   ]);
@@ -119,13 +110,13 @@ export async function getProductionDept(
   const pool = getPool();
   const [deptRes, memberRes] = await Promise.all([
     pool.query<DeptRow>(
-      `SELECT id, production_id, name, parent_id, permissions, allowed_cue_types,
+      `SELECT id, production_id, name, parent_id, kind,
               display_order, chat_id, created_at
        FROM production_dept WHERE id = $1 AND production_id = $2`,
       [deptId, productionId],
     ),
     pool.query<MemberRow>(
-      `SELECT dept_id, user_id, is_poc, poc_extra_permissions, poc_blocked_permissions
+      `SELECT dept_id, user_id, is_poc
        FROM production_dept_member WHERE dept_id = $1`,
       [deptId],
     ),
@@ -138,26 +129,24 @@ export type CreateDeptParams = {
   productionId: string;
   name: string;
   parentId?: string | null;
+  kind?: "dept" | "group";
   displayOrder?: number;
-  permissions?: string[];
-  allowedCueTypes?: string[];
 };
 
 export async function createProductionDept(params: CreateDeptParams): Promise<ProductionDept> {
   const pool = getPool();
   const { rows } = await pool.query<DeptRow>(
     `INSERT INTO production_dept
-       (production_id, name, parent_id, display_order, permissions, allowed_cue_types)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, production_id, name, parent_id, permissions, allowed_cue_types,
+       (production_id, name, parent_id, kind, display_order)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, production_id, name, parent_id, kind,
                display_order, chat_id, created_at`,
     [
       params.productionId,
       params.name,
       params.parentId ?? null,
+      params.kind ?? "dept",
       params.displayOrder ?? 0,
-      params.permissions ?? [],
-      params.allowedCueTypes ?? [],
     ],
   );
   return toDept(rows[0], []);
@@ -166,9 +155,8 @@ export async function createProductionDept(params: CreateDeptParams): Promise<Pr
 export type UpdateDeptFields = Partial<{
   name: string;
   parentId: string | null;
+  kind: "dept" | "group";
   displayOrder: number;
-  permissions: string[];
-  allowedCueTypes: string[];
 }>;
 
 export async function updateProductionDept(
@@ -180,47 +168,14 @@ export async function updateProductionDept(
   const vals: unknown[] = [deptId, productionId];
   if (fields.name !== undefined) { sets.push(`name = $${vals.push(fields.name)}`); }
   if ("parentId" in fields) { sets.push(`parent_id = $${vals.push(fields.parentId ?? null)}`); }
+  if (fields.kind !== undefined) { sets.push(`kind = $${vals.push(fields.kind)}`); }
   if (fields.displayOrder !== undefined) { sets.push(`display_order = $${vals.push(fields.displayOrder)}`); }
-  if (fields.permissions !== undefined) { sets.push(`permissions = $${vals.push(fields.permissions)}`); }
-  if (fields.allowedCueTypes !== undefined) { sets.push(`allowed_cue_types = $${vals.push(fields.allowedCueTypes)}`); }
   if (sets.length === 0) return;
 
-  const pool = getPool();
-
-  if (fields.permissions === undefined) {
-    await pool.query(
-      `UPDATE production_dept SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
-      vals,
-    );
-    return;
-  }
-
-  // permissions changed: cascade-revoke self_confirmed grants for all members
-  // in this dept and all descendant depts whose grants are no longer in zone.
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      `UPDATE production_dept SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
-      vals,
-    );
-    const tree = await loadDeptTree(productionId, client);
-    const affectedDeptIds = collectDescendants(deptId, tree).map((d) => d.id);
-    const { rows: memberRows } = await client.query<{ user_id: string }>(
-      `SELECT DISTINCT user_id FROM production_dept_member
-       WHERE production_id = $1 AND dept_id = ANY($2)`,
-      [productionId, affectedDeptIds],
-    );
-    for (const { user_id } of memberRows) {
-      await recomputeAndRevokeGrants(user_id, productionId, "dept_change", client);
-    }
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
+  await getPool().query(
+    `UPDATE production_dept SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
+    vals,
+  );
 }
 
 export type DeleteDeptResult =
@@ -259,16 +214,10 @@ export async function deleteProductionDept(
 
 export async function getDeptMembers(deptId: string): Promise<DeptMember[]> {
   const { rows } = await getPool().query<MemberRow>(
-    `SELECT dept_id, user_id, is_poc, poc_extra_permissions, poc_blocked_permissions
-     FROM production_dept_member WHERE dept_id = $1`,
+    "SELECT dept_id, user_id, is_poc FROM production_dept_member WHERE dept_id = $1",
     [deptId],
   );
-  return rows.map((r) => ({
-    userId: r.user_id,
-    isPoc: r.is_poc,
-    pocExtraPermissions: r.poc_extra_permissions,
-    pocBlockedPermissions: r.poc_blocked_permissions,
-  }));
+  return rows.map((r) => ({ userId: r.user_id, isPoc: r.is_poc }));
 }
 
 /**
@@ -310,21 +259,12 @@ export async function setDeptMembers(
   for (const m of members) {
     await pool.query(
       `INSERT INTO production_dept_member
-         (production_id, user_id, dept_id, is_poc, poc_extra_permissions, poc_blocked_permissions)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (production_id, user_id, dept_id, is_poc)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, dept_id) DO UPDATE SET
-         is_poc                = EXCLUDED.is_poc,
-         poc_extra_permissions = EXCLUDED.poc_extra_permissions,
-         poc_blocked_permissions = EXCLUDED.poc_blocked_permissions,
-         production_id         = EXCLUDED.production_id`,
-      [
-        productionId,
-        m.userId,
-        deptId,
-        m.isPoc,
-        m.pocExtraPermissions ?? [],
-        m.pocBlockedPermissions ?? [],
-      ],
+         is_poc        = EXCLUDED.is_poc,
+         production_id = EXCLUDED.production_id`,
+      [productionId, m.userId, deptId, m.isPoc],
     );
   }
 
@@ -340,6 +280,37 @@ export async function setDeptMembers(
   const lostPocUserIds = [...beforePocSet].filter((id) => afterMemberSet.has(id) && !afterPocSet.has(id));
   if (lostPocUserIds.length > 0) {
     await revokeGrantsForPocLoss(deptId, productionId, lostPocUserIds, pool);
+  }
+
+  // POC 上任/卸任 diff（批C C3，原 event 侧写路径逻辑并入）：
+  // dept/<D>/notes@create|edit|delete 三行随任期发/收。行是 production 级
+  // （未参与 event 的部门也可被提 note）；卸任显式撤销，不走 sweep
+  // （auto 行不在 recompute 的 self_confirmed 扫描面内）。
+  const promoted = newPocUserIds;
+  const demoted = [...beforePocSet].filter((id) => !afterPocSet.has(id));
+  if (promoted.length > 0) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source)
+       SELECT $1, u, 'dept', $2, 'notes', v.verb, 'auto'
+       FROM unnest($3::uuid[]) AS u
+       CROSS JOIN (VALUES ('create'), ('edit'), ('delete')) AS v(verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, deptId, promoted],
+    );
+  }
+  if (demoted.length > 0) {
+    await pool.query(
+      `UPDATE production_member_grant
+       SET is_revoked = true, revoked_reason = 'poc_change'
+       WHERE resource_type = 'dept' AND resource_id = $1 AND resource_sub = 'notes'
+         AND grant_source = 'auto' AND is_revoked = false
+         AND user_id = ANY($2::uuid[])`,
+      [deptId, demoted],
+    );
   }
 
   return { pocConflictsResolved };
@@ -362,9 +333,11 @@ export async function getDeptChatIds(productionId: string): Promise<{ deptId: st
   return rows.map((r) => ({ deptId: r.id, chatId: r.chat_id }));
 }
 
-// ─── Permission inheritance ───────────────────────────────────────────────────
+// ─── Tree traversal ───────────────────────────────────────────────────────────
+// （数组权限机制已退役——permissions 列已 DROP；区间行/伞语义在
+//  production_dept_permission + recompute，本段仅保留结构遍历工具。）
 
-type DeptPermRow = { id: string; parent_id: string | null; permissions: string[] };
+type DeptPermRow = { id: string; parent_id: string | null };
 
 /**
  * Load the full dept tree for a production (all depts, no member data).
@@ -375,61 +348,10 @@ export async function loadDeptTree(
   pool: Pool | PoolClient = getPool(),
 ): Promise<DeptPermRow[]> {
   const { rows } = await pool.query<DeptPermRow>(
-    "SELECT id, parent_id, permissions FROM production_dept WHERE production_id = $1",
+    "SELECT id, parent_id FROM production_dept WHERE production_id = $1",
     [productionId],
   );
   return rows;
-}
-
-/**
- * Given a set of dept IDs the user directly belongs to, compute the union of
- * all ancestor depts' permissions[] (including the depts themselves).
- * Used for the atomic permission free-approval zone.
- */
-export function computeInheritedPermissions(
-  userDeptIds: string[],
-  tree: DeptPermRow[],
-): Set<string> {
-  const byId = new Map(tree.map((d) => [d.id, d]));
-  const result = new Set<string>();
-
-  for (const deptId of userDeptIds) {
-    let cur: DeptPermRow | undefined = byId.get(deptId);
-    while (cur) {
-      for (const p of cur.permissions) result.add(p);
-      cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
-    }
-  }
-  return result;
-}
-
-/**
- * Compute a POC's permission zone for a specific dept:
- *   union of all descendant depts' permissions[] (inclusive)
- *   + poc_extra_permissions
- *   − poc_blocked_permissions
- */
-export function computePocPermissions(
-  pocDeptId: string,
-  pocExtraPermissions: string[],
-  pocBlockedPermissions: string[],
-  tree: DeptPermRow[],
-): Set<string> {
-  const blocked = new Set(pocBlockedPermissions);
-  const result = new Set<string>();
-
-  // Collect all descendant depts (inclusive)
-  const descendants = collectDescendants(pocDeptId, tree);
-  for (const d of descendants) {
-    for (const p of d.permissions) {
-      if (!blocked.has(p)) result.add(p);
-    }
-  }
-
-  for (const p of pocExtraPermissions) {
-    if (!blocked.has(p)) result.add(p);
-  }
-  return result;
 }
 
 /** Return all depts in the subtree rooted at deptId (inclusive). */
@@ -470,65 +392,6 @@ export function collectAncestors(deptId: string, tree: DeptPermRow[]): string[] 
   return ancestors;
 }
 
-/**
- * Compute the full atomic-permission free-approval zone for a user in a production.
- * Returns a Set<Permission> (filtered to valid Permission values only).
- *
- * Zone = inherited dept permissions (from direct depts + their ancestors)
- *        ∪ POC zones (for each dept where user is POC)
- */
-export async function computeUserDeptFreeApprovalZone(
-  userId: string,
-  productionId: string,
-  pool: Pool | PoolClient = getPool(),
-): Promise<Set<Permission>> {
-  type UserDeptRow = {
-    dept_id: string;
-    is_poc: boolean;
-    poc_extra_permissions: string[];
-    poc_blocked_permissions: string[];
-  };
-
-  const [memberRes, treeRes] = await Promise.all([
-    pool.query<UserDeptRow>(
-      `SELECT pdm.dept_id, pdm.is_poc, pdm.poc_extra_permissions, pdm.poc_blocked_permissions
-       FROM production_dept_member pdm
-       WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
-      [userId, productionId],
-    ),
-    pool.query<DeptPermRow>(
-      "SELECT id, parent_id, permissions FROM production_dept WHERE production_id = $1",
-      [productionId],
-    ),
-  ]);
-
-  const tree = treeRes.rows;
-  const userDeptIds = memberRes.rows.map((r) => r.dept_id);
-  const validPerms = new Set<string>(DEPT_ASSIGNABLE_PERMISSIONS);
-
-  // Inherited permissions (member zone: direct depts + ancestors)
-  const inherited = computeInheritedPermissions(userDeptIds, tree);
-
-  // POC zones
-  const pocZone = new Set<string>();
-  for (const row of memberRes.rows) {
-    if (row.is_poc) {
-      const zone = computePocPermissions(
-        row.dept_id,
-        row.poc_extra_permissions,
-        row.poc_blocked_permissions,
-        tree,
-      );
-      for (const p of zone) pocZone.add(p);
-    }
-  }
-
-  const result = new Set<Permission>();
-  for (const p of [...inherited, ...pocZone]) {
-    if (validPerms.has(p)) result.add(p as Permission);
-  }
-  return result;
-}
 
 // ─── POC conflict resolution ──────────────────────────────────────────────────
 
@@ -589,39 +452,22 @@ export async function resolvePocConflict(
 
 // ─── Grant cascade revocation ─────────────────────────────────────────────────
 
-/**
- * Compute the combined atomic free-approval zone for a user:
- * dept zone (computeUserDeptFreeApprovalZone) ∪ role permissions.
- * Used for revocation checks — we must not revoke grants that are still
- * covered by either dept OR role membership.
- */
-async function computeUserCombinedAtomicZone(
-  userId: string,
-  productionId: string,
-  pool: Pool | PoolClient,
-): Promise<Set<string>> {
-  const [deptZone, rolePermsRes] = await Promise.all([
-    computeUserDeptFreeApprovalZone(userId, productionId, pool),
-    pool.query<{ permission_key: string }>(
-      `SELECT prp.permission_key
-       FROM production_member_role pmr
-       JOIN production_role_permission prp ON prp.role_id = pmr.role_id
-       WHERE pmr.production_id = $1 AND pmr.user_id = $2`,
-      [productionId, userId],
-    ),
-  ]);
-  const combined = new Set<string>(deptZone);
-  for (const row of rolePermsRes.rows) combined.add(row.permission_key);
-  return combined;
-}
 
 /**
  * Recompute a user's free-approval zone after a role/dept/POC change and
  * soft-revoke any self_confirmed grants that are no longer covered.
  *
  * - atomic_permission_grant: revoke keys not in the combined (dept ∪ role) zone.
- * - resource_grant: revoke rows where the user's remaining depts no longer
- *   cover the resource via resource_dept_manage.
+ * - production_member_grant: revoke rows where the user's remaining depts no longer
+ *   cover the resource via resource_dept_manage AND the user is not a person
+ *   manager of the resource (resource_person_manage).
+ *
+ * 存续规则：self_confirmed 行的存续 ⟺ 资格/归属覆盖仍在。四路覆盖任一成立即保留：
+ *   ① dept 归属（resource_dept_manage × 仍在该 dept）
+ *   ② person 归属（resource_person_manage 本人行）
+ *   ③ zone 资格（三张 permission 表的节点键仍命中该行——批A：成员基础通配行
+ *      由 role 区间键保护，dept/role 变动不误撤）
+ *   ④ 无 ①②③ → 收走
  *
  * Does NOT touch 'approval', 'direct', or 'assigned' grants (PRD spec).
  */
@@ -631,21 +477,9 @@ export async function recomputeAndRevokeGrants(
   reason: "role_change" | "dept_change" | "poc_change",
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  const newZone = await computeUserCombinedAtomicZone(userId, productionId, pool);
-
+  // 终局（批G G-2）：atomic 表已 DROP，撤销面只余 production_member_grant 行
   await pool.query(
-    `UPDATE atomic_permission_grant
-     SET is_revoked = true, revoked_reason = $3
-     WHERE production_id = $1
-       AND user_id = $2
-       AND grant_source = 'self_confirmed'
-       AND is_revoked = false
-       AND NOT (permission_key = ANY($4))`,
-    [productionId, userId, reason, [...newZone]],
-  );
-
-  await pool.query(
-    `UPDATE resource_grant rg
+    `UPDATE production_member_grant rg
      SET is_revoked = true, revoked_reason = $3
      WHERE rg.production_id = $1
        AND rg.user_id = $2
@@ -662,8 +496,79 @@ export async function recomputeAndRevokeGrants(
            AND rdm.resource_type = rg.resource_type
            AND rdm.resource_id IN (rg.resource_id, '*')
            AND rdm.resource_sub IN (rg.resource_sub, '*')
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM resource_person_manage rpm
+         WHERE rpm.production_id = rg.production_id
+           AND rpm.user_id = rg.user_id
+           AND rpm.resource_type = rg.resource_type
+           AND rpm.resource_id IN (rg.resource_id, '*')
+           AND rpm.resource_sub IN (rg.resource_sub, '*')
+       )
+       -- ③ zone 资格覆盖：三张 permission 表任一持有命中该行的节点键（含通配形态；
+       --    保留段 grants/publication 不被 sub 通配覆盖）
+       AND NOT EXISTS (
+         SELECT 1 FROM (
+           -- base 候选（id 通配 × sub 通配，保留段 sub 不被 '*' 覆盖）
+           SELECT unnest(ARRAY[
+             'node:' || rg.resource_type || '/' || rg.resource_id
+               || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
+               || '@' || rg.permission_level,
+             'node:' || rg.resource_type || '/*'
+               || CASE WHEN rg.resource_sub = '*' THEN '' ELSE '/' || rg.resource_sub END
+               || '@' || rg.permission_level
+           ] || CASE WHEN rg.resource_sub = '*'
+                       OR rg.resource_sub IN ('grants', 'publication', 'assignees', 'imports')
+                       OR rg.resource_sub LIKE 'grants/%'
+                       OR rg.resource_sub LIKE 'publication/%'
+                       OR rg.resource_sub LIKE 'assignees/%'
+                       OR rg.resource_sub LIKE 'imports/%'
+                THEN ARRAY[]::text[]
+                ELSE ARRAY[
+                  'node:' || rg.resource_type || '/' || rg.resource_id || '@' || rg.permission_level,
+                  'node:' || rg.resource_type || '/*@' || rg.permission_level
+                ] END) AS base_key
+         ) base
+         -- 批G 通配区间：type 通配（RESERVED_TYPES 治理域除外）× verb 通配
+         CROSS JOIN LATERAL (VALUES
+           (base.base_key),
+           (CASE WHEN rg.resource_type <> ALL($4::text[])
+                 THEN regexp_replace(base.base_key, '^node:[^/]+/[^/@]+', 'node:*/*') END)
+         ) AS t(k1)
+         CROSS JOIN LATERAL (VALUES
+           (t.k1),
+           (regexp_replace(t.k1, '@[a-z]+$', '@*'))
+         ) AS cand(key)
+         WHERE cand.key IS NOT NULL AND cand.key IN (
+           SELECT prp.permission_key
+           FROM production_member_role pmr
+           JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+           WHERE pmr.production_id = rg.production_id AND pmr.user_id = rg.user_id
+           UNION ALL
+           SELECT pdp.permission_key
+           FROM production_dept_permission pdp
+           WHERE pdp.production_id = rg.production_id
+             AND pdp.dept_id IN (
+               WITH RECURSIVE chain AS (
+                 SELECT pd.id, pd.parent_id
+                 FROM production_dept_member pdm
+                 JOIN production_dept pd ON pd.id = pdm.dept_id
+                 WHERE pdm.production_id = rg.production_id AND pdm.user_id = rg.user_id
+                 UNION
+                 SELECT pd2.id, pd2.parent_id
+                 FROM production_dept pd2 JOIN chain c ON pd2.id = c.parent_id
+               )
+               SELECT id FROM chain
+             )
+           UNION ALL
+           SELECT pmp.permission
+           FROM production_member_permission pmp
+           WHERE pmp.production_id = rg.production_id AND pmp.user_id = rg.user_id
+             AND pmp.granted = true
+         )
        )`,
-    [productionId, userId, reason],
+    [productionId, userId, reason, [...RESERVED_TYPES]],
   );
 }
 
@@ -678,12 +583,7 @@ export async function revokeAllGrantsForMember(
   pool: Pool | PoolClient = getPool(),
 ): Promise<void> {
   await pool.query(
-    `UPDATE resource_grant SET is_revoked = true, revoked_reason = 'member_removed'
-     WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
-    [productionId, userId],
-  );
-  await pool.query(
-    `UPDATE atomic_permission_grant SET is_revoked = true, revoked_reason = 'member_removed'
+    `UPDATE production_member_grant SET is_revoked = true, revoked_reason = 'member_removed'
      WHERE production_id = $1 AND user_id = $2 AND is_revoked = false`,
     [productionId, userId],
   );
@@ -720,7 +620,7 @@ export async function revokeGrantsForDeptRemoval(
 /**
  * When a user loses POC status in a dept, revoke self_confirmed grants that
  * were exclusively in the POC zone (not covered by remaining membership zone).
- * Also revokes resource_grant rows no longer covered by any dept membership.
+ * Also revokes production_member_grant rows no longer covered by any dept membership.
  */
 export async function revokeGrantsForPocLoss(
   deptId: string,
@@ -881,7 +781,7 @@ export async function computeApprovalRoutingChain(
 
   // Tier 1: personal manage grant holders
   const { rows: manageGrantors } = await pool.query<{ user_id: string }>(
-    `SELECT DISTINCT user_id FROM resource_grant
+    `SELECT DISTINCT user_id FROM production_member_grant
      WHERE production_id = $1
        AND resource_type = $2
        AND resource_id   = ANY($3)

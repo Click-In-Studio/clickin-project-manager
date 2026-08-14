@@ -194,7 +194,8 @@ describe("integrity verification", () => {
   });
 
   it("no JSONB mentions retain the legacy openId key", async () => {
-    for (const table of ["comment", "event_report", "event_report_note", "event_report_reply"]) {
+    // 批C 拆分后 mentions 集中在 wiki/wiki_comment（report/note/reply 内容已搬迁）
+    for (const table of ["comment", "wiki", "wiki_comment"]) {
       const { rows } = await getPool().query(`
         SELECT COUNT(*)::int AS cnt FROM "${table}"
         WHERE mentions IS NOT NULL

@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getProductionPermissionContext, listCues, loadProduction, getActiveVersionId } from "@/lib/db";
+import { canAccessNode } from "@/lib/grant-template";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/platform/feishu/feishu-sheet";
 import { formatCuePosition } from "@/lib/cue-export";
 import type { CueAnchor } from "@/lib/cue-types";
@@ -38,6 +39,13 @@ export async function POST(
   const body = (await req.json()) as { cueListIds?: string[]; wikiUrl?: string };
   if (!body.cueListIds?.length) return new Response("cueListIds 不能为空", { status: 400 });
   if (!body.wikiUrl) return new Response("wikiUrl 不能为空", { status: 400 });
+
+  // 批A 三态：导出=内容读取，逐表验 cues view 行（此前仅验成员资格，
+  // 成员可导出目录里不可见的表）
+  for (const listId of body.cueListIds) {
+    const contentAccess = await canAccessNode(access.permCtx, productionId, "cue_list", listId, "cues", "view");
+    if (!contentAccess.allowed) return new Response(`无权导出该 Cue 表（${listId}）`, { status: 403 });
+  }
 
   const cueListIds = body.cueListIds;
   const wikiUrl = body.wikiUrl;

@@ -402,6 +402,12 @@ redirect_uri 动态从 `Host`/`x-forwarded-host` 头构造，支持 `app.*` 和 
 
 Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容：`{ userId, name, avatarUrl, isAdmin }`（`userId` 为 `app_user.id` UUID）。
 
+### 联合导入的数据替换约定
+
+联合导入的确认请求是一次原子替换：确认前不得写入 Tag、构作、剧本、角色关系或 Cue；确认后，目标版本的构作、剧本内容和全部 Cue 以本次导入结果为准。聚合角色成员关系同样是全量替换，旧成员关系被删除是当前的预期行为。所有可预先验证的映射和引用必须在删除旧数据前验证，事务内任一步骤失败时必须整体回滚。
+
+**TBD（剧本历史功能）**：当前尚未实现剧本历史，因此被联合导入覆盖的旧构作、剧本、Cue 和聚合角色成员关系不会保留。实现剧本历史时，应把导入前状态纳入可恢复的历史快照，并允许恢复一次导入覆盖的完整状态；在此之前不要通过保留旧版本成员关系或旧 Cue 来模拟历史。
+
 ### Bot（飞书群消息）
 
 飞书群消息经 webhook 进入 `/api/feishu-webhook`，由 `agent/index.ts` 的 `processMessage()` 处理。

@@ -9,7 +9,6 @@ import {
   loadProduction, listCueLists, listCuesByProduction,
   getActiveVersionId, getVersion, listVersions, listCueListsWithAccess,
 } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { computePageMap } from "@/lib/script-page";
 import CuePage from "@/components/CuePage";
 
@@ -28,7 +27,8 @@ export default async function CuesPage({
 
   const _access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!_access) redirect(`/unauthorized?id=${id}`);
-  if (!hasPermission("cue_list:view", _access.permCtx)) redirect(`/unauthorized?resource=cue_list%3Aview&id=${id}`);
+  // 批A：成员即可进页面，可见 cue 表由 view 行过滤（admin/owner 全量）
+  const seeAllLists = _access.permCtx.isAdmin || _access.permCtx.isOwner;
 
   const versions = await listVersions(id);
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -48,7 +48,7 @@ export default async function CuesPage({
   const [name, production, cueListsWithAccess, allCues, version] = await Promise.all([
     getProductionName(id),
     resolvedVersionId ? loadProduction(id, resolvedVersionId) : Promise.resolve(null),
-    listCueListsWithAccess(id, session.userId),
+    listCueListsWithAccess(id, session.userId, { seeAll: seeAllLists }),
     listCuesByProduction(id, resolvedVersionId ?? undefined),
     resolvedVersionId ? getVersion(resolvedVersionId) : Promise.resolve(null),
   ]);

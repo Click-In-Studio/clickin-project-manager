@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "角色" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
+import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import CharactersManager from "@/components/CharactersManager";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -21,9 +21,11 @@ export default async function CharactersPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!hasPermission("character:view", access.permCtx)) redirect(`/unauthorized?resource=character%3Aview&id=${id}`);
+  if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "character", ["meta"], "view"))
+    redirect(`/unauthorized?resource=node%3Acharacter%2F*%2Fmeta%40view&id=${id}`);
 
-  const canEdit = hasPermission("scene:rename", access.permCtx);
+  const canEdit = access.permCtx.isAdmin
+    || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
 

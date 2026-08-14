@@ -6,6 +6,7 @@ import { GATEWAY_CLIENT_CAPS, GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "@
 import { GATEWAY_URL, getGatewayToken, isGatewayConfigured } from "./config";
 import * as device from "./device";
 import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./types";
+import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 
 /**
  * Server-only singleton Gateway connection (globalThis-cached so it survives
@@ -23,15 +24,28 @@ import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./t
 
 // operator.admin is required for sessions.patch (rename) and sessions.delete —
 // operator.read/write alone 403 on both (confirmed against a real gateway).
+// operator.approvals is required to receive plugin.approval.requested/resolved
+// broadcasts and to call approval.resolve — the /agent page is the ONLY
+// approval surface for the team gateway (dashboard is disabled), so without
+// it every gated write tool would fail closed.
 // Deliberately requested up front for the whole connection: scopes are fixed
 // per WS connection (a singleton here), so per-call scope narrowing isn't
 // possible, and adding a scope later forces a re-pairing round.
-const SCOPES = ["operator.read", "operator.write", "operator.admin"];
+const SCOPES = ["operator.read", "operator.write", "operator.admin", "operator.approvals"];
 
 const SESSION_NAMESPACE = "clickin:chat:";
 
-export function createNewSessionKey(userId: string): string {
-  return `${SESSION_NAMESPACE}${userId}:${crypto.randomUUID()}`;
+
+/** 个人会话：clickin:chat:<userId>:<uuid>
+ *  production 会话：clickin:chat:<userId>:<productionId>:<uuid>
+ * productionId 是后台 uid() 短字母数字串（无连字符，与末段 UUID 可判别）。
+ * 成员资格校验在签发路由做——这里只负责格式（非法 id 直接抛，防 key 注入）。 */
+export function createNewSessionKey(userId: string, productionId?: string): string {
+  if (productionId !== undefined && !PRODUCTION_ID_RE.test(productionId)) {
+    throw new Error(`invalid productionId for session key: ${productionId}`);
+  }
+  const mid = productionId ? `${productionId}:` : "";
+  return `${SESSION_NAMESPACE}${userId}:${mid}${crypto.randomUUID()}`;
 }
 
 /**
@@ -53,6 +67,15 @@ interface GatewayStore {
   // request is waiting on that session. Survives reconnects since it's
   // stored alongside the rest of the globalThis-cached state.
   events: EventEmitter;
+  // Pending plugin approvals by approval id → owning sessionKey. Populated
+  // from plugin.approval.requested broadcasts; consumed for the resolve API's
+  // ownership check and cleared on plugin.approval.resolved. Bounded by the
+  // gateway's own approval timeout (unresolved approvals always deny).
+  pendingApprovals: Map<string, { sessionKey?: string; toolCallId?: string; ts: number }>;
+  // 拒绝理由暂存（toolCallId → reason）：在 resolve RPC 之前写入，插件的
+  // clickin-memory 经 MCP 同进程端点取走（一次性），用于把理由重写进
+  // 被拒工具结果——与拒绝同帧到达模型，避免 steer 注入造成的双回复。
+  denyReasons: Map<string, { reason: string; ts: number }>;
   // Timestamps of steers whose extra "final" a session's relay connection
   // should still wait for before closing — appended by steerChatRun(),
   // consumed by the relay. A steered message is a genuinely separate run
@@ -82,6 +105,8 @@ function store(): GatewayStore {
       status: { state: isGatewayConfigured() ? "disconnected" : "unconfigured" },
       connecting: null,
       events,
+      pendingApprovals: new Map(),
+      denyReasons: new Map(),
       pendingSteers: new Map(),
     };
   }
@@ -166,6 +191,55 @@ interface AgentEventPayload {
   };
 }
 
+// plugin.approval.requested / plugin.approval.resolved broadcast payloads.
+// The docs pin the event names and scope (operator.approvals) but not the
+// exact field layout, so extraction below is defensive: id/title/etc. are
+// looked up both flat and under a nested `request` object. Live-validated
+// during Phase 4 rollout (AGENT_GATEWAY_DEBUG=1 shows the raw payload).
+export interface ApprovalRequest {
+  id: string;
+  title: string;
+  description: string;
+  severity: "info" | "warning" | "critical";
+  allowedDecisions: string[];
+  sessionKey?: string;
+  // 关联的工具调用 id——拒绝理由按它存取（gateway 的 resolve 协议不携带
+  // 理由，理由经 MCP 同进程端点交给插件在 tool_result_persist 里重写）
+  toolCallId?: string;
+}
+
+function extractApprovalRequest(payload: unknown): ApprovalRequest | null {
+  const p = payload as Record<string, unknown> | undefined;
+  if (!p) return null;
+  const nested = (p.request ?? {}) as Record<string, unknown>;
+  const pick = (key: string): unknown => p[key] ?? nested[key];
+  const id = pick("id") ?? pick("approvalId");
+  if (typeof id !== "string" || !id) return null;
+  const sessionKey = pick("sessionKey");
+  const severity = pick("severity");
+  const allowed = pick("allowedDecisions");
+  const toolCallId = pick("toolCallId");
+  return {
+    id,
+    title: String(pick("title") ?? "工具调用确认"),
+    description: String(pick("description") ?? ""),
+    severity: severity === "info" || severity === "critical" ? severity : "warning",
+    allowedDecisions: Array.isArray(allowed) && allowed.length > 0
+      ? allowed.map(String)
+      : ["allow-once", "allow-always", "deny"],
+    sessionKey: typeof sessionKey === "string" ? sessionKey : undefined,
+    toolCallId: typeof toolCallId === "string" ? toolCallId : undefined,
+  };
+}
+
+// Session-bus payloads for approval lifecycle, discriminated by marker keys.
+interface ApprovalRequestBusPayload {
+  approvalRequest: ApprovalRequest;
+}
+interface ApprovalResolvedBusPayload {
+  approvalResolved: { id: string; decision: string };
+}
+
 function attemptConnect(): Promise<GatewayStatus> {
   return new Promise((resolve) => {
     const s = store();
@@ -215,6 +289,44 @@ function attemptConnect(): Promise<GatewayStatus> {
             (payload.data?.phase === "start" || payload.data?.phase === "end");
           const isAssistantDelta = payload.stream === "assistant" && typeof payload.data?.delta === "string";
           if (isToolLifecycle || isAssistantDelta) s.events.emit(`session:${payload.sessionKey}`, payload);
+          return;
+        }
+        if (evt.event === "plugin.approval.requested") {
+          const approval = extractApprovalRequest(evt.payload);
+          if (!approval) return;
+          // Sweep on every insert: an approval whose `resolved` broadcast was
+          // lost (WS reconnect mid-approval, gateway restart) would otherwise
+          // sit in this globalThis-cached store forever.
+          prunePendingApprovals(s);
+          s.pendingApprovals.set(approval.id, {
+            sessionKey: approval.sessionKey,
+            toolCallId: approval.toolCallId,
+            ts: Date.now(),
+          });
+          if (approval.sessionKey) {
+            // 无条件日志（每个 approval 一行，量极低）：审批链路的关键
+            // 排障锚点——「广播到达且已路由」与「relay 是否转发」分属两行
+            const listeners = s.events.listenerCount(`session:${approval.sessionKey}`);
+            console.log(`[agent-gateway] approval ${approval.id} routed to ${approval.sessionKey} (listeners=${listeners})`);
+            s.events.emit(`session:${approval.sessionKey}`, { approvalRequest: approval } satisfies ApprovalRequestBusPayload);
+          } else {
+            // Without a sessionKey the request can't be routed to a chat —
+            // log loudly: an unrouted approval will time out and deny.
+            console.error(`[agent-gateway] plugin approval ${approval.id} has no sessionKey — cannot surface in webchat`);
+          }
+          return;
+        }
+        if (evt.event === "plugin.approval.resolved") {
+          const p = evt.payload as { id?: string; approvalId?: string; decision?: string } | undefined;
+          const id = p?.id ?? p?.approvalId;
+          if (!id) return;
+          const pending = s.pendingApprovals.get(id);
+          s.pendingApprovals.delete(id);
+          if (pending?.sessionKey) {
+            s.events.emit(`session:${pending.sessionKey}`, {
+              approvalResolved: { id, decision: String(p?.decision ?? "unknown") },
+            } satisfies ApprovalResolvedBusPayload);
+          }
         }
       },
       onHelloOk: () => {
@@ -306,11 +418,17 @@ export interface ChatStreamEvent {
   // "chat-delta": the "chat" stream's own delta (full text-so-far), used
   // only as fallback for plain replies with no tool calls.
   // "tool"/"tool-end": tool-call lifecycle, correlated by toolId.
-  type: "delta" | "replace" | "chat-delta" | "final" | "aborted" | "error" | "tool" | "tool-end";
+  // "approval"/"approval-resolved": plugin approval gate lifecycle for a
+  // write tool this session invoked — the /agent page is the team gateway's
+  // only approval surface.
+  type: "delta" | "replace" | "chat-delta" | "final" | "aborted" | "error" | "tool" | "tool-end" | "approval" | "approval-resolved";
   text: string;
   errorMessage?: string;
   toolName?: string;
   toolId?: string;
+  approval?: ApprovalRequest;
+  approvalId?: string;
+  decision?: string;
 }
 
 /**
@@ -324,11 +442,39 @@ export async function startChatRun(sessionKey: string, message: string): Promise
   const status = await connect();
   const client = requireConnectedClient(status);
 
-  return client.request<{ runId: string; sessionKey: string }>("agent", {
-    sessionKey,
-    message,
-    idempotencyKey: crypto.randomUUID(),
-  });
+  try {
+    // 30s acceptance timeout: without it, a request written into a
+    // half-open socket (gateway restarted, close event never fired) hangs
+    // forever with zero bytes on the stream — Cloudflare then serves the
+    // user a 524 after 100s (live-hit after a CD gateway restart).
+    return await client.request<{ runId: string; sessionKey: string }>("agent", {
+      sessionKey,
+      message,
+      idempotencyKey: crypto.randomUUID(),
+    }, { timeoutMs: 30_000 });
+  } catch (err) {
+    // A timed-out acceptance (normally <1s) means the socket is almost
+    // certainly dead-but-not-closed — tear it down explicitly (stop() closes
+    // the WS and its listeners; just nulling the reference would leak the FD
+    // until kernel reaping) so the NEXT attempt reconnects fresh. Guarded on
+    // instance identity: if a concurrent caller already reconnected, don't
+    // nuke the healthy new connection.
+    try {
+      client.stop();
+    } catch {
+      // already torn down
+    }
+    const s = store();
+    if (s.client === client) {
+      s.client = null;
+      s.status = { state: "disconnected" };
+      console.warn(
+        "[agent-gateway] agent RPC failed — dropped connection for fresh reconnect:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    throw err;
+  }
 }
 
 /**
@@ -377,7 +523,21 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
   // Scoped to this one subscription so the same tool call isn't
   // re-announced if its "start" event is ever redelivered.
   const seenToolCalls = new Set<string>();
-  const handler = (rawPayload: ChatEventPayload | AgentEventPayload) => {
+  const handler = (rawPayload: ChatEventPayload | AgentEventPayload | ApprovalRequestBusPayload | ApprovalResolvedBusPayload) => {
+    // Approval lifecycle payloads are discriminated by their marker keys.
+    if ("approvalRequest" in rawPayload) {
+      onEvent({ type: "approval", text: "", approval: rawPayload.approvalRequest });
+      return;
+    }
+    if ("approvalResolved" in rawPayload) {
+      onEvent({
+        type: "approval-resolved",
+        text: "",
+        approvalId: rawPayload.approvalResolved.id,
+        decision: rawPayload.approvalResolved.decision,
+      });
+      return;
+    }
     // "agent" events (tool start / assistant delta) vs "chat" events (state
     // machine) — "stream" only exists on the former, discriminating the union.
     if ("stream" in rawPayload) {
@@ -548,4 +708,70 @@ export async function deleteChatSession(sessionKey: string): Promise<void> {
   const status = await connect();
   const client = requireConnectedClient(status);
   await client.request("sessions.delete", { key: sessionKey });
+}
+
+// ─── Plugin approvals ────────────────────────────────────────────────────────
+
+const APPROVAL_TTL_MS = 600_000; // gateway hard-caps approval timeouts at 10min
+
+/** Evicts pending-approval entries past the gateway's own approval cap —
+ * called on every insert and every lookup, so lost `resolved` broadcasts
+ * (or unrouted entries with no sessionKey) can't accumulate. */
+function prunePendingApprovals(s: GatewayStore): void {
+  const now = Date.now();
+  for (const [id, entry] of s.pendingApprovals) {
+    if (now - entry.ts > APPROVAL_TTL_MS) s.pendingApprovals.delete(id);
+  }
+}
+
+/** Owning sessionKey for a pending approval (for the resolve API's ownership
+ * check). Expired entries are treated as unknown. */
+export function getPendingApprovalSession(approvalId: string): string | undefined {
+  const s = store();
+  prunePendingApprovals(s);
+  return s.pendingApprovals.get(approvalId)?.sessionKey;
+}
+
+const DENY_REASON_TTL_MS = 600_000; // 与 approval 生命周期上限一致
+
+/** 按 approval id 暂存拒绝理由（键转为 toolCallId）。必须在 resolve RPC
+ * **之前**调用——保证插件的 tool_result_persist 触发时理由已可取。
+ * 返回 false 表示该 approval 没有 toolCallId 可关联（理由无处安放）。 */
+export function storeDenyReason(approvalId: string, reason: string): boolean {
+  const s = store();
+  const toolCallId = s.pendingApprovals.get(approvalId)?.toolCallId;
+  if (!toolCallId) return false;
+  const now = Date.now();
+  for (const [k, v] of s.denyReasons) {
+    if (now - v.ts > DENY_REASON_TTL_MS) s.denyReasons.delete(k);
+  }
+  s.denyReasons.set(toolCallId, { reason, ts: now });
+  return true;
+}
+
+/** 一次性取走某个工具调用的拒绝理由（供 MCP 同进程端点转交插件）。
+ * 读侧同样全量清扫：某条理由若从未被取走（插件 fetch 失败 / persist
+ * 未触发），不能指望下一次 store 才回收——这是 globalThis 常驻 map。 */
+export function takeDenyReason(toolCallId: string): string | undefined {
+  const s = store();
+  const now = Date.now();
+  for (const [k, v] of s.denyReasons) {
+    if (now - v.ts > DENY_REASON_TTL_MS) s.denyReasons.delete(k);
+  }
+  const entry = s.denyReasons.get(toolCallId);
+  if (!entry) return undefined;
+  s.denyReasons.delete(toolCallId);
+  return entry.reason;
+}
+
+/**
+ * Resolves a pending plugin approval via `plugin.approval.resolve` —
+ * live-validated against the production gateway (2026.7.1-2): the protocol
+ * doc's kind-agnostic `approval.resolve` does NOT exist there ("unknown
+ * method"), while this one works with `{ id, decision }`.
+ */
+export async function resolveApproval(approvalId: string, decision: "allow-once" | "allow-always" | "deny"): Promise<void> {
+  const status = await connect();
+  const client = requireConnectedClient(status);
+  await client.request("plugin.approval.resolve", { id: approvalId, decision });
 }

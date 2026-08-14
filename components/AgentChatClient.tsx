@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "@/components/Markdown";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 
 type SessionSummary = {
   key: string;
@@ -19,20 +20,6 @@ type GatewayStatus =
   | { state: "pairing_required"; requestId?: string }
   | { state: "error"; error: string };
 
-type Bubble =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string; streaming?: boolean }
-  | { kind: "tool"; name: string; id?: string; done: boolean }
-  | { kind: "notice"; text: string };
-
-type StreamLine =
-  | { type: "delta"; text: string }
-  | { type: "final"; text: string }
-  | { type: "aborted"; text: string }
-  | { type: "error"; error: string }
-  | { type: "tool"; name?: string; id?: string }
-  | { type: "tool-end"; id?: string };
-
 export default function AgentChatClient() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
@@ -45,17 +32,40 @@ export default function AgentChatClient() {
   const activeKeyRef = useRef<string | null>(null);
   activeKeyRef.current = activeKey;
 
+  // 新建对话选择器（个人对话 / 关联制作）
+  const [productions, setProductions] = useState<{ id: string; name: string }[]>([]);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+
   const refreshSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/agent/sessions");
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: SessionSummary[]; gatewayStatus?: GatewayStatus };
+      const data = (await res.json()) as {
+        sessions: SessionSummary[];
+        productions?: { id: string; name: string }[];
+        gatewayStatus?: GatewayStatus;
+      };
       setSessions(data.sessions);
+      if (data.productions) setProductions(data.productions);
       if (data.gatewayStatus) setGatewayStatus(data.gatewayStatus);
     } catch {
       // network hiccup — sidebar just stays stale
     }
   }, []);
+
+  // 会话 key → 制作名（production 会话第 4 段是短字母数字 id，个人会话
+  // 该位置是会话 UUID——用 productions 映射命中判定，未命中即个人会话）
+  const productionOfKey = useCallback(
+    (key: string): string | null => {
+      const bare = key.replace(/^agent:[^:]+:/, "");
+      const parts = bare.split(":");
+      // clickin:chat:<userId>:<productionId>:<uuid>
+      if (parts.length < 5) return null;
+      const pid = parts[3];
+      return productions.find((p) => p.id === pid)?.name ?? null;
+    },
+    [productions],
+  );
 
   useEffect(() => {
     refreshSessions();
@@ -78,83 +88,71 @@ export default function AgentChatClient() {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // 静默看门狗：服务端每 15s 发 ping，60s 收不到任何字节视为连接已死
+    // （如 pm2 重启掐断流），cancel 让 read() 解除阻塞、finally 复位状态——
+    // 否则 streaming 永远卡 true，后续消息全走 steer 打进虚空。
+    let lastByteAt = Date.now();
+    let watchdogFired = false;
+    const watchdog = setInterval(() => {
+      if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
+        watchdogFired = true; // cancel 一次即可，read() 解除阻塞后 finally 收尾
+        reader.cancel().catch(() => {});
+      }
+    }, 5_000);
+
+    // 会话 key 可能在流中升级为 canonical 形式（服务端回显）——之后的
+    // 归属判断和 activeKey 都要跟着走，否则守卫会误杀自己的事件。
+    let streamKey = forKey;
+
     const apply = (line: StreamLine) => {
       // A stale stream for a session the user already switched away from
       // must not touch the current transcript.
-      if (activeKeyRef.current !== forKey) return;
-      setBubbles((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        switch (line.type) {
-          case "delta": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: line.text, streaming: true };
-            } else {
-              next.push({ kind: "assistant", text: line.text, streaming: true });
-            }
-            return next;
-          }
-          case "tool": {
-            // Current streaming segment (if any) is settled by this tool call.
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "tool", name: line.name || "工具", id: line.id, done: false });
-            return next;
-          }
-          case "tool-end": {
-            for (let i = next.length - 1; i >= 0; i--) {
-              const b = next[i];
-              if (b.kind === "tool" && !b.done && (!line.id || b.id === line.id)) {
-                next[i] = { ...b, done: true };
-                break;
-              }
-            }
-            return next;
-          }
-          case "final": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: line.text || last.text };
-            } else if (line.text) {
-              next.push({ kind: "assistant", text: line.text });
-            }
-            return next;
-          }
-          case "aborted": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "notice", text: "已中止" });
-            return next;
-          }
-          case "error": {
-            if (last?.kind === "assistant" && last.streaming) {
-              next[next.length - 1] = { kind: "assistant", text: last.text };
-            }
-            next.push({ kind: "notice", text: line.error || "出错了" });
-            return next;
-          }
-        }
-      });
+      if (activeKeyRef.current !== streamKey) return;
+      setBubbles((prev) => applyStreamLine(prev, line));
     };
 
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        lastByteAt = Date.now();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const raw of lines) {
-          if (!raw.trim()) continue;
+          // SSE 帧：data: <json>；空行是帧分隔符，其他前缀（注释等）忽略。
+          // 解析假设（与 relay.ts 的 send() 是配套契约）：一行 data: 即一个
+          // 完整 JSON 帧——JSON.stringify 永不输出裸换行，所以服务端不会产
+          // 生规范 SSE 允许的"多 data: 行拼一个事件"。若未来 relay 改变发帧
+          // 方式，这里必须同步改为按空行聚合再拼接 data: 行。
+          const trimmed = raw.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload) continue;
           try {
-            apply(JSON.parse(raw) as StreamLine);
+            const line = JSON.parse(payload) as StreamLine;
+            if (line.type === "ping") continue; // 心跳只喂看门狗
+            if (line.type === "session") {
+              // 采纳 canonical key：下一条消息直接用它订阅，消除
+              // 「先订裸 key、补订 canonical」窗口期丢事件的竞态。
+              // activeKeyRef 必须与 streamKey 同步更新——ref 平时靠渲染期
+              // 赋值刷新，setActiveKey 到下次渲染之间同一 chunk 里的后续
+              // 事件会被 stale 守卫误杀（review #198 抓到的窗口）。
+              if (typeof line.key === "string" && line.key && activeKeyRef.current === streamKey) {
+                streamKey = line.key;
+                activeKeyRef.current = line.key;
+                setActiveKey(line.key);
+              }
+              continue;
+            }
+            apply(line);
           } catch {
             // skip malformed line
           }
         }
       }
     } finally {
+      clearInterval(watchdog);
       setStreaming(false);
       // Settle any bubble still marked streaming (connection dropped).
       setBubbles((prev) =>
@@ -193,8 +191,13 @@ export default function AgentChatClient() {
     }
   }, [consumeStream]);
 
-  const newSession = useCallback(async () => {
-    const res = await fetch("/api/agent/sessions", { method: "POST" });
+  const newSession = useCallback(async (productionId?: string) => {
+    setShowNewMenu(false);
+    const res = await fetch("/api/agent/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productionId ? { productionId } : {}),
+    });
     if (!res.ok) return;
     const { key } = (await res.json()) as { key: string };
     setActiveKey(key);
@@ -215,14 +218,21 @@ export default function AgentChatClient() {
     setBubbles((prev) => [...prev, { kind: "user", text: message }]);
 
     // streaming === true → there's a run in flight; inject via steer instead
-    // of waiting (the same stream connection will carry the extra reply).
+    // of waiting (the already-open stream connection carries the extra reply).
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionKey: key, message, steer: streaming || undefined }),
     });
-    // A steer rides the existing stream; only a fresh send consumes its own.
-    if (!streaming) consumeStream(res, key);
+    if (streaming) {
+      // Steer returns plain JSON (no second stream) — only surface failures.
+      const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !out?.ok) {
+        setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
+      }
+    } else {
+      consumeStream(res, key);
+    }
   }, [input, activeKey, streaming, consumeStream]);
 
   const abort = useCallback(async () => {
@@ -233,6 +243,31 @@ export default function AgentChatClient() {
       body: JSON.stringify({ sessionKey: activeKey }),
     }).catch(() => {});
   }, [activeKey]);
+
+  // 拒绝理由的行内输入状态（哪张卡片展开了理由输入框 + 草稿内容）
+  const [denyingId, setDenyingId] = useState<string | null>(null);
+  const [denyReason, setDenyReason] = useState("");
+
+  const decideApproval = useCallback(async (approvalId: string, decision: string, reason?: string) => {
+    setDenyingId(null);
+    setDenyReason("");
+    setBubbles((prev) =>
+      prev.map((b) => (b.kind === "approval" && b.approval.id === approvalId ? { ...b, resolving: true } : b))
+    );
+    const res = await fetch("/api/agent/approval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: approvalId, decision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+      setBubbles((prev) =>
+        prev.map((b) => (b.kind === "approval" && b.approval.id === approvalId ? { ...b, resolving: false } : b))
+      );
+      setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "确认请求处理失败" }]);
+    }
+    // 成功路径不在这里改状态——等 approval-resolved 流事件（权威来源）更新卡片
+  }, []);
 
   const removeSession = useCallback(async (key: string) => {
     if (!confirm("删除这个对话？")) return;
@@ -276,14 +311,35 @@ export default function AgentChatClient() {
     <div className="mx-auto flex h-[calc(100dvh-6rem)] max-w-6xl gap-4 p-4">
       {/* 会话列表 */}
       <aside className="flex w-64 shrink-0 flex-col rounded-lg border border-zinc-200 bg-white">
-        <div className="flex items-center justify-between border-b border-zinc-200 p-3">
+        <div className="relative flex items-center justify-between border-b border-zinc-200 p-3">
           <span className="text-sm font-medium text-zinc-700">对话</span>
           <button
-            onClick={newSession}
+            onClick={() => (productions.length > 0 ? setShowNewMenu((v) => !v) : newSession())}
             className="rounded-md bg-zinc-900 px-2.5 py-1 text-xs text-white hover:bg-zinc-700"
           >
-            新对话
+            新对话{productions.length > 0 ? " ▾" : ""}
           </button>
+          {showNewMenu && (
+            <div className="absolute right-3 top-full z-10 mt-1 w-52 rounded-md border border-zinc-200 bg-white py-1 shadow-lg">
+              <button
+                onClick={() => newSession()}
+                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+              >
+                💬 个人对话
+              </button>
+              <div className="mx-3 my-1 border-t border-zinc-100" />
+              <p className="px-3 py-0.5 text-[10px] text-zinc-400">关联制作（对话将带入制作语境）</p>
+              {productions.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => newSession(p.id)}
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+                >
+                  🎭 {p.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {sessions.length === 0 && (
@@ -300,6 +356,12 @@ export default function AgentChatClient() {
               <div className="flex items-center justify-between gap-1">
                 <span className="truncate text-zinc-800">
                   {s.status === "running" && <span className="mr-1 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />}
+                  {(() => {
+                    const prod = productionOfKey(s.key);
+                    return prod ? (
+                      <span className="mr-1 rounded bg-violet-100 px-1 text-[10px] text-violet-700">{prod}</span>
+                    ) : null;
+                  })()}
                   {s.title}
                 </span>
                 <span className="hidden shrink-0 gap-1 group-hover:flex">
@@ -367,6 +429,85 @@ export default function AgentChatClient() {
                 </div>
               );
             }
+            if (b.kind === "approval") {
+              const severityStyle =
+                b.approval.severity === "critical"
+                  ? "border-red-300 bg-red-50"
+                  : b.approval.severity === "info"
+                    ? "border-sky-200 bg-sky-50"
+                    : "border-amber-300 bg-amber-50";
+              const decisionLabel: Record<string, string> = {
+                "allow-once": "允许一次",
+                "allow-always": "始终允许",
+                deny: "拒绝",
+              };
+              return (
+                <div key={i} className="flex justify-start">
+                  <div className={`max-w-[85%] rounded-xl border px-4 py-3 text-sm ${severityStyle}`}>
+                    <p className="font-medium text-zinc-800">⚠ 需要确认：{b.approval.title}</p>
+                    {b.approval.description && (
+                      <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">{b.approval.description}</p>
+                    )}
+                    {b.decision ? (
+                      <p className="mt-2 text-xs font-medium text-zinc-600">
+                        {b.decision.startsWith("allow") ? "✓ 已允许" : b.decision === "deny" ? "✕ 已拒绝" : `已处理（${b.decision}）`}
+                      </p>
+                    ) : denyingId === b.approval.id ? (
+                      <div className="mt-2 space-y-2">
+                        <textarea
+                          value={denyReason}
+                          onChange={(e) => setDenyReason(e.target.value)}
+                          maxLength={500}
+                          rows={2}
+                          autoFocus
+                          placeholder="拒绝理由（可选，会告知 AI 以便它调整方案）"
+                          className="w-full resize-none rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs focus:border-zinc-500 focus:outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            disabled={b.resolving}
+                            onClick={() => decideApproval(b.approval.id, "deny", denyReason)}
+                            className="rounded-md bg-red-600 px-3 py-1 text-xs text-white hover:bg-red-500 disabled:opacity-40"
+                          >
+                            确认拒绝
+                          </button>
+                          <button
+                            onClick={() => { setDenyingId(null); setDenyReason(""); }}
+                            className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex gap-2">
+                        {b.approval.allowedDecisions.map((d) => (
+                          <button
+                            key={d}
+                            disabled={b.resolving}
+                            onClick={() => {
+                              if (d === "deny") {
+                                setDenyingId(b.approval.id);
+                                setDenyReason("");
+                              } else {
+                                decideApproval(b.approval.id, d);
+                              }
+                            }}
+                            className={`rounded-md px-3 py-1 text-xs disabled:opacity-40 ${
+                              d === "deny"
+                                ? "border border-zinc-300 text-zinc-600 hover:bg-zinc-100"
+                                : "bg-zinc-900 text-white hover:bg-zinc-700"
+                            }`}
+                          >
+                            {decisionLabel[d] ?? d}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
             return (
               <p key={i} className="text-center text-xs text-zinc-400">
                 {b.text}
@@ -379,7 +520,9 @@ export default function AgentChatClient() {
             (() => {
               const last = bubbles[bubbles.length - 1];
               const activelyRendering =
-                (last?.kind === "assistant" && last.streaming) || (last?.kind === "tool" && !last.done);
+                (last?.kind === "assistant" && last.streaming) ||
+                (last?.kind === "tool" && !last.done) ||
+                (last?.kind === "approval" && !last.decision); // 等人确认，不是在思考
               if (activelyRendering) return null;
               return (
                 <div className="flex justify-start">

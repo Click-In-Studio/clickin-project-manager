@@ -41,7 +41,12 @@ export function createChatStreamResponse(
     async start(controller) {
       function send(obj: unknown) {
         if (closed) return;
-        controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
+        // SSE 帧格式（data: <json>\n\n）而非裸 NDJSON：Cloudflare 与 nginx
+        // 都对 text/event-stream 特殊豁免（不压缩、不缓冲）。裸 ndjson 会被
+        // CF 压缩器攒缓冲——小帧（tool/approval，几百字节）永远到不了浏览
+        // 器，实锤表现：relay 已写入 approval 帧而卡片不渲染、思考泡泡从未
+        // 出现（连响应头都被攒着）。剧本/cue 的 SSE 同链路一直实时，即证。
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       }
       function finish(obj?: unknown) {
         if (closed) return;
@@ -74,6 +79,13 @@ export function createChatStreamResponse(
       let chatText = "";
       const liveText = () => (usingAgentStream ? agentText : chatText);
       let sessionDone = false;
+      let deadline = Date.now() + overallTimeoutMs;
+      // An approval gate pauses the run gateway-side (up to its own timeout)
+      // and the continued run needs time of its own afterward — push this
+      // stream's deadline out so it doesn't cut the exchange short.
+      const extendDeadline = () => {
+        deadline = Date.now() + overallTimeoutMs;
+      };
       // steerChatRun() registers pending steers under the *canonical*
       // sessionKey the Gateway echoes back — for a brand-new session that
       // differs from the pre-canonical key this request arrived with, so
@@ -81,6 +93,24 @@ export function createChatStreamResponse(
       let canonicalSessionKey = sessionKey;
 
       function handleSessionEvent(evt: ChatStreamEvent) {
+        if (evt.type === "approval") {
+          // A write tool hit its confirmation gate — surface the card; the
+          // run stays paused gateway-side until resolved (or times out to
+          // deny), so extend this stream's own deadline to outlive the
+          // approval window plus the continued run.
+          extendDeadline();
+          // TODO(卡片排障): 临时探针，配合 client.ts 的 routed 行三段定位
+          // 断点（路由/转发/前端）；谜底揭晓后移除本行
+          console.log(`[agent-gateway] relay forwarding approval ${evt.approval?.id} (closed=${closed})`);
+          send({ type: "approval", approval: evt.approval });
+          return;
+        }
+        if (evt.type === "approval-resolved") {
+          // The continued (or denied) run needs fresh time after the gate.
+          extendDeadline();
+          send({ type: "approval-resolved", id: evt.approvalId, decision: evt.decision });
+          return;
+        }
         if (evt.type === "tool-end") {
           send({ type: "tool-end", id: evt.toolId });
           return;
@@ -150,6 +180,11 @@ export function createChatStreamResponse(
         // it already emitted to a listener that shows up late.
         unsubscribe = subscribeToSession(sessionKey, handleSessionEvent);
 
+        // First byte goes out BEFORE startRun: if the gateway RPC hangs
+        // (half-open socket), the client/watchdog/Cloudflare see a live
+        // stream instead of 100s of dead silence ending in a CF 524.
+        send({ type: "ping" });
+
         const started = startRun ? await startRun() : { runId: null as string | null, sessionKey };
 
         // Brand-new session: the canonical key echoed back can differ from
@@ -165,6 +200,14 @@ export function createChatStreamResponse(
           };
         }
 
+        // Tell the client the canonical key so its NEXT send passes it
+        // directly — when the client sends a bare key, this relay only
+        // subscribes to the canonical form after the RPC echo above, and
+        // any events emitted before that frame arrives are lost forever
+        // (EventEmitter has no replay). Live-hit: a fast tool call's
+        // start + approval events raced the echo and the card never showed.
+        if (started.runId) send({ type: "session", key: started.sessionKey });
+
         // Fire-and-forget: agent.wait only tracks the FIRST segment's runId,
         // and a tool-call turn spans multiple runIds — so its resolution
         // can't gate finishing the stream. The subscription is the sole
@@ -172,13 +215,24 @@ export function createChatStreamResponse(
         // otherwise-silent RPC failures.
         if (started.runId) waitForRunOutcome(started.runId).catch(() => {});
 
-        const deadline = Date.now() + overallTimeoutMs;
+        // Heartbeat lines let the client distinguish "quiet but alive" (long
+        // model call, approval gate waiting on a human) from a dead
+        // connection (server restarted mid-stream) — without one, a client
+        // watchdog can't exist and a severed stream hangs its reader forever.
+        let lastPing = Date.now();
         while (!sessionDone && !closed && Date.now() < deadline) {
           await sleep(POLL_INTERVAL_MS);
+          if (Date.now() - lastPing >= 15_000) {
+            lastPing = Date.now();
+            send({ type: "ping" });
+          }
         }
         if (!sessionDone && !closed) {
+          // fallback: true 让客户端知道这个 final 来自 chat.history 兜底
+          // （可能是上一轮已渲染的旧文本）——只有带此标记的 final 才做
+          // 与上一条气泡的去重，正常回复即使文本相同也不会被误吞。
           const text = await fetchLatestAssistantText(started.sessionKey);
-          finish({ type: "final", text: text || liveText() });
+          finish({ type: "final", text: text || liveText(), fallback: true });
         }
       } catch (err) {
         finish({ type: "error", error: err instanceof Error ? err.message : "Agent run failed" });
@@ -188,8 +242,9 @@ export function createChatStreamResponse(
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
     },
   });
 }

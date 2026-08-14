@@ -4,7 +4,7 @@ import {
   getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasPermission } from "@/lib/permissions";
+import { hasGrant } from "@/lib/grant-check";
 import { diffState } from "@/lib/script-ops";
 import {
   convertMarker, executeMarkerDeletion, planMarkerDeletion, projectMarkers, resolveMarkerId,
@@ -35,7 +35,7 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   if (!auth.access) return { error: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = auth.access;
   if (isArchived) return { error: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
-  if (!hasPermission("scene:rename", permCtx)) {
+  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, productionId, "scene", "*", "meta/name", "edit")) {
     return { error: Response.json({ error: "权限不足" }, { status: 403 }) };
   }
   const resolved = await resolveProductionVersion(productionId, requestedVersionId);
@@ -87,13 +87,13 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   if (plan.status === "blocked" || (plan.status === "choice" && !body.operation)) {
     return Response.json({ ok: false, plan }, { status: plan.status === "blocked" ? 409 : 300 });
   }
+  if (!current.permCtx.isAdmin && !current.permCtx.isOwner && !await hasGrant(current.permCtx.userId, id, "scene", sceneId, "*", "delete")) {
+    return Response.json({ error: "权限不足" }, { status: 403 });
+  }
   const operation: MarkerDeleteOperation = plan.status === "ready"
     ? plan.operation
     : { type: body.operation === "whole" ? "whole" : "marker-only", markerId: sceneId };
-  if (operation.type === "whole" && !hasPermission(
-    "script:edit",
-    current.permCtx,
-  )) {
+  if (operation.type === "whole" && !current.permCtx.isAdmin && !current.permCtx.isOwner && !await hasGrant(current.permCtx.userId, id, "script", "*", "blocks", "edit")) {
     return Response.json({ error: "删除整段内容需要剧本编辑权限" }, { status: 403 });
   }
   const next = executeMarkerDeletion(current.result.state, operation, createId);

@@ -35,9 +35,12 @@ jobs:
       # ── 4. Bundle ────────────────────────────────────────────────────────────
       - name: Bundle standalone output
         run: |
-          # Next standalone needs static/ and public/ copied in manually
-          cp -r .next/static .next/standalone/.next/static
-          cp -r public       .next/standalone/public
+          # Next standalone needs static/ and public/ copied in manually.
+          # 用 dir/. 语法拷内容——目标目录已存在时 `cp -r public target/public`
+          # 会嵌套成 public/public/（线上字体 404 的元凶之一）
+          mkdir -p .next/standalone/.next/static .next/standalone/public
+          cp -r .next/static/. .next/standalone/.next/static/
+          cp -r public/.       .next/standalone/public/
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
 
       # ── 5. Setup SSH ─────────────────────────────────────────────────────────
@@ -143,7 +146,12 @@ jobs:
               # `read -r FILEPATH` for the same fd and can silently swallow the next
               # line(s), dropping migrations from a run with 2+ pending files without
               # any error (this is exactly what happened to migrate-cue-list-role.sql).
-              ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null
+              # ON_ERROR_STOP：脚本错误即非零退出（此前 psql -f 出错仍退 0，失败被
+              # 静默记入 db-applied.txt——批A 部署事故）。显式 || exit 1 确保记账
+              # 语句不会在失败后执行，不依赖外层 shell 的 -e 隐式行为。
+              # 失败时 /tmp/migration.sql 留在服务器上供排查（有意为之）。
+              ssh prod "sudo -u postgres psql -v ON_ERROR_STOP=1 -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null \
+                || { echo "MIGRATION FAILED: $FILENAME — aborting deploy, NOT recorded in manifest"; exit 1; }
               # Record in manifest
               ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
               echo "$FILENAME" >> /tmp/db-applied.txt
@@ -156,6 +164,66 @@ jobs:
           ssh prod "
             ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current &&
             pm2 reload /var/www/production-manager/shared/ecosystem.config.js --update-env
+          " < /dev/null
+
+      # ── 9.5 Sync OpenClaw plugin (clickin-memory) ────────────────────────────
+      # 插件安装在 shared/（稳定路径，openclaw install --link 的 symlink 不能
+      # 指向会被轮换清理的 releases/）。用 git tree hash 判断变更：没变则完全
+      # 跳过（不重启 gateway，不打断进行中的 agent run）。
+      - name: Sync OpenClaw plugin
+        run: |
+          SHARED="/var/www/production-manager/shared"
+          PLUGIN_DIR="$SHARED/openclaw-plugins/clickin-memory"
+          TREE_HASH=$(git rev-parse HEAD:openclaw-plugins/clickin-memory)
+          REMOTE_HASH=$(ssh prod "cat $PLUGIN_DIR.tree-hash 2>/dev/null" < /dev/null || true)
+
+          if [ "$TREE_HASH" = "$REMOTE_HASH" ]; then
+            echo "Plugin unchanged ($TREE_HASH) — skipping sync and gateway restart."
+            exit 0
+          fi
+
+          echo "Plugin changed: ${REMOTE_HASH:-<none>} → $TREE_HASH"
+          ssh prod "mkdir -p $SHARED/openclaw-plugins && rm -rf $PLUGIN_DIR.new" < /dev/null
+          scp -r openclaw-plugins/clickin-memory prod:$PLUGIN_DIR.new
+          # OpenClaw 对 linked 插件源做所有权检查：必须属于运行用户（openclaw）
+          # 或 root，部署用户（ubuntu, uid 1000）会被 'blocked plugin candidate:
+          # suspicious ownership' 拦截（真机踩过）。因此插件目录 chown 给 root，
+          # 本目录的增删改一律走 sudo；tree-hash 哨兵留在 ubuntu 所有的父目录。
+          ssh prod "
+            sudo rm -rf $PLUGIN_DIR &&
+            sudo mv $PLUGIN_DIR.new $PLUGIN_DIR &&
+            sudo chown -R root:root $PLUGIN_DIR &&
+            sudo chmod -R a+rX $PLUGIN_DIR &&
+            chmod a+x $SHARED $SHARED/openclaw-plugins &&
+            echo '$TREE_HASH' > $PLUGIN_DIR.tree-hash
+          " < /dev/null
+
+          # 服务器上团队实例以专用 openclaw 用户跑默认 profile
+          # （/home/openclaw/.openclaw），binary 在 /opt/node/bin（不在部署
+          # 用户 PATH 里）。未装好时软失败：不阻塞主应用部署，留 warning。
+          # 注意：sudo -u openclaw 依赖部署用户的 NOPASSWD sudo（与上面
+          # sudo -u postgres 跑迁移同一前提）——如果 install 长期报 warning，
+          # 先排查 sudoers，别当成 openclaw 未安装。
+          ssh prod "
+            OC='sudo -u openclaw /opt/node/bin/openclaw'
+            if [ -x /opt/node/bin/openclaw ]; then
+              # 已安装判断用 inspect 的退出码（实测未安装 exit 1）。不能用
+              # plugins list | grep：配置里有 entry 但插件未装时，list 的
+              # 'plugin not found: clickin-memory' 警告文本会喂饱 grep，
+              # 导致 install 被永久跳过（真机踩过）。
+              if ! \$OC plugins inspect clickin-memory >/dev/null 2>&1; then
+                \$OC plugins install --link $PLUGIN_DIR ||
+                  echo '::warning::clickin-memory install failed — run install --link manually'
+              fi
+              # gateway 由 systemd（openclaw.service）管理——必须走 systemctl。
+              # CLI 的 gateway restart 会把它当 unmanaged process 直接杀掉，
+              # systemd 不会拉起，端口 18790 就此死掉（真机踩过：每次 CD 后
+              # webchat ECONNREFUSED，需人工 systemctl start）。
+              sudo systemctl restart openclaw ||
+                echo '::warning::systemctl restart openclaw failed — restart manually to load plugin changes'
+            else
+              echo '::warning::openclaw not found at /opt/node/bin — plugin synced but not installed'
+            fi
           " < /dev/null
 
       # ── 10. Clean up old releases (keep latest 5) ────────────────────────────

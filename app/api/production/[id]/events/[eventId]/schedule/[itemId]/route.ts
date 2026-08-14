@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { hasEventContentEdit } from "@/lib/event-permissions";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getScheduleItem, updateScheduleItem, deleteScheduleItem, setScheduleItemDepartments } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };
 
@@ -19,7 +19,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
   const existing = await getScheduleItem(itemId, eventId);
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEventContentEdit(toActor(session, permCtx), productionId, eventId, event.status))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (!existing) return Response.json({ error: "流程项不存在" }, { status: 404 });
 
@@ -60,7 +60,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  if (!await hasEventContentEdit(toActor(session, permCtx), productionId, eventId, event.status))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteScheduleItem(itemId, eventId);

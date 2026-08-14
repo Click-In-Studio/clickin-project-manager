@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionEvent, getEventReport, listReportNotes, createReportNote, type Mention } from "@/lib/event-db";
-import { loadEventPermContext, canWriteNote } from "@/lib/event-permissions";
+import { canWriteNote, hasEventDomainView, loadEventPermContext } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -50,7 +50,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "departmentId 和 content 不能为空" }, { status: 400 });
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!await canWriteNote(permCtx, productionId, eventId, body.departmentId, eventPermCtx.participantDeptIds))
+  const channel = await canWriteNote(permCtx, productionId, eventId, body.departmentId, eventPermCtx.participantDeptIds);
+  if (!channel)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const note = await createReportNote({
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     authorUserId: session.userId,
     authorName: session.name,
     mentions: body.mentions ?? [],
+    createdVia: channel,
   });
   return Response.json({ note }, { status: 201 });
 }

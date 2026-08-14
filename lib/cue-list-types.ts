@@ -1,7 +1,7 @@
 export type CueListTemplate = {
   key: string;
   label: string;
-  /** Role names that historically could create this type; informational only (Phase 4+: use dept.allowed_cue_types). */
+  /** Role names that historically could create this type; informational only (§3.5+: dept_cue_list_template 声明表). */
   creatorRoles: string[];
 };
 
