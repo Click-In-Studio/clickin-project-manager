@@ -1,0 +1,117 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { getPool } from "@/lib/pg";
+import {
+  createInvite,
+  listInvites,
+  revokeInvite,
+  getInviteInfo,
+  acceptInvite,
+} from "@/lib/invite-db";
+import { createProductionDept } from "@/lib/dept-db";
+import { makeProduction, cleanupProduction, shortId } from "./factories";
+
+// #156 邀请制：开放链接/定向邮件、状态派生、接受事务（入组+预配+计数）、防护
+
+let prodId: string;
+let inviterId: string;
+let deptId: string;
+
+async function newUser(email?: string): Promise<string> {
+  const { rows } = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
+  const id = rows[0].id;
+  await getPool().query("INSERT INTO user_profile (user_id, name) VALUES ($1, '受邀者')", [id]);
+  if (email) {
+    await getPool().query(
+      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+       VALUES ($1, 'email', $2, true, true)`,
+      [id, email],
+    );
+  }
+  return id;
+}
+
+beforeAll(async () => {
+  ({ prodId } = await makeProduction());
+  inviterId = await newUser();
+  const dept = await createProductionDept({ productionId: prodId, name: `邀部${shortId()}` });
+  deptId = dept.id;
+});
+
+afterAll(async () => {
+  await getPool().query("DELETE FROM app_user WHERE id = $1", [inviterId]).catch(() => {});
+  await cleanupProduction(prodId).catch(() => {});
+});
+
+describe("开放链接：接受入组+预配+计数", () => {
+  it("接受后成为成员并带预配角色/部门；重复接受幂等（计数仍增）", async () => {
+    const joiner = await newUser();
+    const { token } = await createInvite({
+      productionId: prodId, createdBy: inviterId,
+      presetRoles: ["导演"], presetDeptIds: [deptId],
+      expiresInDays: 7,
+    });
+    const res = await acceptInvite(token, joiner);
+    expect(res).toEqual({ ok: true, productionId: prodId, alreadyMember: false });
+
+    const pm = await getPool().query<{ roles: string[] }>(
+      "SELECT roles FROM production_member WHERE production_id = $1 AND user_id = $2",
+      [prodId, joiner],
+    );
+    expect(pm.rows[0]?.roles).toContain("导演");
+    const dm = await getPool().query(
+      "SELECT 1 FROM production_dept_member WHERE dept_id = $1 AND user_id = $2",
+      [deptId, joiner],
+    );
+    expect(dm.rows).toHaveLength(1);
+
+    const again = await acceptInvite(token, joiner);
+    expect(again).toMatchObject({ ok: true, alreadyMember: true });
+    const inv = (await listInvites(prodId)).find(i => i.token === token);
+    expect(inv?.usedCount).toBe(2);
+    await getPool().query("DELETE FROM app_user WHERE id = $1", [joiner]);
+  });
+
+  it("max_uses 用尽 → exhausted；撤销 → revoked；过期 → expired", async () => {
+    const a = await newUser();
+    const { token } = await createInvite({ productionId: prodId, createdBy: inviterId, maxUses: 1 });
+    expect((await acceptInvite(token, a)).ok).toBe(true);
+    const b = await newUser();
+    expect(await acceptInvite(token, b)).toEqual({ ok: false, reason: "exhausted" });
+
+    const { token: t2 } = await createInvite({ productionId: prodId, createdBy: inviterId });
+    expect(await revokeInvite(prodId, t2)).toBe(true);
+    expect(await acceptInvite(t2, b)).toEqual({ ok: false, reason: "revoked" });
+
+    const { token: t3 } = await createInvite({ productionId: prodId, createdBy: inviterId });
+    await getPool().query(
+      "UPDATE production_invite SET expires_at = NOW() - interval '1 hour' WHERE token = $1", [t3]);
+    expect(await acceptInvite(t3, b)).toEqual({ ok: false, reason: "expired" });
+    expect((await getInviteInfo(t3))?.status).toBe("expired");
+
+    for (const id of [a, b]) await getPool().query("DELETE FROM app_user WHERE id = $1", [id]);
+  });
+});
+
+describe("定向邮件邀请", () => {
+  it("email identity 匹配才能接受；不匹配拒绝", async () => {
+    const email = `invitee-${shortId()}@example.com`;
+    const right = await newUser(email);
+    const wrong = await newUser(`other-${shortId()}@example.com`);
+    const { token } = await createInvite({ productionId: prodId, createdBy: inviterId, email });
+
+    expect(await acceptInvite(token, wrong)).toEqual({ ok: false, reason: "email_mismatch" });
+    expect((await acceptInvite(token, right)).ok).toBe(true);
+
+    for (const id of [right, wrong]) await getPool().query("DELETE FROM app_user WHERE id = $1", [id]);
+  });
+
+  it("getInviteInfo 携带项目名与定向邮箱；未知 token = null", async () => {
+    const email = `info-${shortId()}@example.com`;
+    const { token } = await createInvite({ productionId: prodId, createdBy: inviterId, email });
+    const info = await getInviteInfo(token);
+    expect(info?.productionId).toBe(prodId);
+    expect(info?.email).toBe(email);
+    expect(info?.status).toBe("active");
+    expect(await getInviteInfo("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+});

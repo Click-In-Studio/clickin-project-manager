@@ -1232,6 +1232,25 @@ CREATE TABLE IF NOT EXISTS production_cue_template_type (
 CREATE INDEX IF NOT EXISTS production_cue_template_type_prod_idx
   ON production_cue_template_type (production_id, display_order);
 
+-- ── 项目邀请（#156：开放链接 + 定向邮件邀请；preset=接受时预配）──────────────
+
+CREATE TABLE IF NOT EXISTS production_invite (
+  token           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  email           TEXT,
+  preset_roles    TEXT[]      NOT NULL DEFAULT '{}',
+  preset_dept_ids UUID[]      NOT NULL DEFAULT '{}',
+  created_by      UUID        NOT NULL REFERENCES app_user(id),
+  expires_at      TIMESTAMPTZ,
+  max_uses        INTEGER,
+  used_count      INTEGER     NOT NULL DEFAULT 0,
+  revoked_at      TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS production_invite_prod_idx
+  ON production_invite (production_id, created_at DESC);
+
 -- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:event/*/meta@view'),

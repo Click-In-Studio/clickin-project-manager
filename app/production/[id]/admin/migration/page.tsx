@@ -9,6 +9,9 @@ import { hasGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import PageHeader from "@/components/PageHeader";
 import AdminMigrationSection from "@/components/AdminMigrationSection";
+import BulkInviteCard from "@/components/BulkInviteCard";
+import { listProductionRolesWithPermissions } from "@/lib/db";
+import { listProductionDepts } from "@/lib/dept-db";
 
 export default async function MigrationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -22,18 +25,30 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
   const { permCtx } = access;
   const bypass = permCtx.isAdmin || permCtx.isOwner;
 
-  const [canImportContacts, canImportScript, canImportScenes] = await Promise.all([
+  const [canImportContacts, canImportScript, canImportScenes, canInvite] = await Promise.all([
     bypass || hasGrant(permCtx.userId, id, "member", "*", "imports", "create"),
     bypass || hasGrant(permCtx.userId, id, "script", "*", "imports", "create"),
     bypass || hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create"),
+    bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "create"),
   ]);
-  if (!canImportContacts && !canImportScript && !canImportScenes) redirect(`/production/${id}/admin`);
+  if (!canImportContacts && !canImportScript && !canImportScenes && !canInvite) redirect(`/production/${id}/admin`);
 
-  const name = await getProductionName(id);
+  const [name, roles, depts] = await Promise.all([
+    getProductionName(id),
+    canInvite ? listProductionRolesWithPermissions(id) : Promise.resolve([]),
+    canInvite ? listProductionDepts(id) : Promise.resolve([]),
+  ]);
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow={name ?? ""} title="数据迁移" side="stage" />
+      {canInvite && (
+        <BulkInviteCard
+          productionId={id}
+          roleNames={roles.map(r => r.name)}
+          depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind }))}
+        />
+      )}
       <AdminMigrationSection
         productionId={id}
         canImportContacts={canImportContacts}

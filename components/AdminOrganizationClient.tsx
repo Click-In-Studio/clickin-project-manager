@@ -5,6 +5,7 @@ import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader"
 import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
 import MemberPickerModal from "@/components/MemberPickerModal";
+import InviteModal from "@/components/InviteModal";
 import TreePickerModal from "@/components/TreePickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
@@ -235,10 +236,7 @@ export default function AdminOrganizationClient({
         title="成员与部门"
         side="stage"
         actions={caps.invite ? (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button style={SECONDARY_BTN} onClick={() => setInviteOpen(true)}>批量邀请</button>
-            <button style={PRIMARY_BTN} onClick={() => setInviteOpen(true)}>＋ 邀请成员</button>
-          </div>
+          <button style={PRIMARY_BTN} onClick={() => setInviteOpen(true)}>＋ 邀请成员</button>
         ) : undefined}
       />
 
@@ -415,23 +413,14 @@ export default function AdminOrganizationClient({
         </div>
       </section>
 
-      {/* 邀请占位 */}
+      {/* 邀请（#156：邮件邀请 + 邀请链接；批量在数据迁移页） */}
       {inviteOpen && (
-        <div
-          onClick={() => setInviteOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(24,42,42,.4)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 13, padding: "28px 32px", width: 380, textAlign: "center" }}>
-            <p style={SECTION_LABEL}>Coming Soon</p>
-            <h3 style={{ margin: "0 0 8px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 19, fontWeight: 500, color: "var(--ink)" }}>
-              邀请 / 批量邀请
-            </h3>
-            <p style={{ margin: "0 0 18px", fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
-              成员加入将改为邀请制（替代原「添加成员 / 导入」），功能建设中。
-            </p>
-            <button style={PRIMARY_BTN} onClick={() => setInviteOpen(false)}>知道了</button>
-          </div>
-        </div>
+        <InviteModal
+          productionId={productionId}
+          roleNames={roleNames}
+          depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind }))}
+          onClose={() => setInviteOpen(false)}
+        />
       )}
     </div>
   );
