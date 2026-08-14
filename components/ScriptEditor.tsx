@@ -4201,11 +4201,8 @@ function PrintPreview({
     return () => { cancelled = true; };
   }, []);
 
-  // 打印时隐藏 app shell：portal 到 body + body class 标记（见 globals.css @media print）
-  useEffect(() => {
-    document.body.classList.add("script-printing");
-    return () => document.body.classList.remove("script-printing");
-  }, []);
+  // 打印时隐藏 app shell：portal 到 body，globals.css 以 body:has(.script-print-root)
+  // 判定（不能用 JS 挂 body class——body className 由 React 管理会被协调抹掉）
   const printToolbarRef = useRef<HTMLDivElement>(null);
   const printToolbarRequiredWidthRef = useRef<Partial<Record<PrintToolbarStage, number>>>({});
   const previewViewportRef = useRef<HTMLDivElement>(null);

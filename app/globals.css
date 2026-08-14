@@ -192,9 +192,10 @@ span[data-stage-inline] {
     margin: 0;
   }
 
-  /* 打印无 shell：打印预览打开时（PrintPreview portal 到 body 并挂 body class），
-     隐藏 body 下除打印树以外的全部兄弟子树 */
-  body.script-printing > *:not(.script-print-root) {
+  /* 打印无 shell：打印预览打开时（PrintPreview portal 到 body），隐藏 body 下
+     除打印树以外的全部兄弟子树。判据用 :has 而非 JS 挂 body class——
+     body className 由 React 管理（RootLayout JSX），协调时会抹掉外挂类 */
+  body:has(.script-print-root) > *:not(.script-print-root) {
     display: none !important;
   }
 
