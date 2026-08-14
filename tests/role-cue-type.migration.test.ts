@@ -38,15 +38,7 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("production_dept.allowed_cue_types column still exists as TEXT[] NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_dept' AND column_name = 'allowed_cue_types'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("ARRAY");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
+  // allowed_cue_types 列断言已随 migrate-merge-event-department 退役（声明表接管，列 DROP）。
 
   it("production_dept table still exists", async () => {
     const { rows } = await getPool().query(`
@@ -60,13 +52,7 @@ describe("schema verification", () => {
 // ── 2. Integrity verification ─────────────────────────────────────────────────
 
 describe("integrity verification", () => {
-  it("production_dept: no rows with NULL allowed_cue_types", async () => {
-    const { rows } = await getPool().query(`
-      SELECT COUNT(*)::int AS cnt FROM production_dept
-      WHERE allowed_cue_types IS NULL
-    `);
-    expect(rows[0].cnt).toBe(0);
-  });
+  // NULL allowed_cue_types 断言已随列 DROP 退役。
 
   it("production_dept_member: no orphan dept_id references", async () => {
     const { rows } = await getPool().query(`

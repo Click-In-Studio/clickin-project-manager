@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS production_role_permission (
 CREATE INDEX IF NOT EXISTS production_role_permission_role_idx ON production_role_permission(role_id);
 
 -- production_role_cue_type dropped in Phase 4 (migrate-role-cue-type-to-dept.sql)
--- cue type authorization now managed via production_dept.allowed_cue_types
+-- cue type authorization now managed via dept_cue_list_template（声明表，§3.5）
 
 -- ── Members & permission overrides ────────────────────────────────────────────
 
@@ -418,26 +418,44 @@ CREATE TABLE IF NOT EXISTS production_event (
 
 CREATE INDEX IF NOT EXISTS production_event_production_idx ON production_event(production_id, start_time);
 
--- Global departments for a production (shared across all events).
-CREATE TABLE IF NOT EXISTS event_department (
-  id            TEXT PRIMARY KEY,
-  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name          TEXT NOT NULL,
-  kind          TEXT NOT NULL DEFAULT 'dept',
-  display_order INTEGER NOT NULL DEFAULT 0,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  chat_id       TEXT
+-- ── Organization tree ─────────────────────────────────────────────────────────
+-- event_department / event_department_member dropped in
+-- migrate-merge-event-department.sql — 并入 production_dept（kind 列承接
+-- 'group' 用户组语义）/ production_dept_member，事件业务 FK 直指组织树。
+-- 部门权限行在 production_dept_permission；cue 声明在 dept_cue_list_template。
+
+CREATE TABLE IF NOT EXISTS production_dept (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name            TEXT        NOT NULL,
+  parent_id       UUID        REFERENCES production_dept(id) NULL,
+  kind            TEXT        NOT NULL DEFAULT 'dept',  -- 'dept'=部门（可提 notes）/'group'=用户组（仅选人）
+  display_order   INTEGER     NOT NULL DEFAULT 0,
+  chat_id         TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS event_department_production_idx ON event_department(production_id, display_order);
+CREATE UNIQUE INDEX IF NOT EXISTS production_dept_name_unique_idx
+  ON production_dept (production_id, name, COALESCE(parent_id::text, ''));
 
-CREATE TABLE IF NOT EXISTS event_department_member (
-  department_id TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
-  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  is_poc        BOOLEAN NOT NULL DEFAULT false,
-  is_member     BOOLEAN NOT NULL DEFAULT true,
-  PRIMARY KEY (department_id, user_id)
+CREATE INDEX IF NOT EXISTS production_dept_production_idx
+  ON production_dept (production_id, display_order);
+
+CREATE INDEX IF NOT EXISTS production_dept_parent_idx
+  ON production_dept (parent_id);
+
+CREATE TABLE IF NOT EXISTS production_dept_member (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  is_poc          BOOLEAN     NOT NULL DEFAULT false,
+  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, dept_id)
 );
+
+CREATE INDEX IF NOT EXISTS pdm_prod_user_idx ON production_dept_member (production_id, user_id);
+CREATE INDEX IF NOT EXISTS pdm_dept_idx      ON production_dept_member (dept_id);
 
 CREATE TABLE IF NOT EXISTS event_stage_manager (
   event_id TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
@@ -454,7 +472,7 @@ CREATE TABLE IF NOT EXISTS event_participant (
   event_id      TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
-  department_id TEXT REFERENCES event_department(id) ON DELETE SET NULL,
+  department_id UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   role          TEXT NOT NULL DEFAULT 'participant',
   UNIQUE (event_id, user_id)
 );
@@ -479,7 +497,7 @@ CREATE INDEX IF NOT EXISTS event_schedule_item_event_idx ON event_schedule_item(
 
 CREATE TABLE IF NOT EXISTS schedule_item_department (
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
-  dept_id TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
+  dept_id UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   PRIMARY KEY (item_id, dept_id)
 );
 
@@ -497,7 +515,7 @@ CREATE TABLE IF NOT EXISTS event_call_time (
   event_id         TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   user_id          UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name             TEXT NOT NULL,
-  department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
+  department_id    UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   call_at          TIMESTAMPTZ NOT NULL,
   schedule_item_id TEXT REFERENCES event_schedule_item(id) ON DELETE SET NULL,
   notes            TEXT NOT NULL DEFAULT '',
@@ -515,7 +533,7 @@ CREATE TABLE IF NOT EXISTS event_tech_req (
   title            TEXT NOT NULL,
   description      TEXT NOT NULL DEFAULT '',
   preset_minutes   INTEGER,
-  department_id    TEXT REFERENCES event_department(id) ON DELETE SET NULL,
+  department_id    UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   status           TEXT NOT NULL DEFAULT 'pending',
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   chat_id          TEXT,
@@ -593,7 +611,7 @@ CREATE INDEX IF NOT EXISTS event_report_event_idx ON event_report(event_id);
 CREATE TABLE IF NOT EXISTS event_report_note (
   id             TEXT PRIMARY KEY,
   report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  department_id  TEXT NOT NULL REFERENCES event_department(id) ON DELETE CASCADE,
+  department_id  UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   wiki_id        UUID NOT NULL REFERENCES wiki(id),
   -- 创建通道（批C C3）：dept=本部门 / wildcard=通配权 / moderator=event 编辑者；
   -- POC 的 ud 门 = dept/<D>/notes@edit|delete 行 ∧ created_via='dept'（导演提的不可被 POC 删）
@@ -917,43 +935,8 @@ CREATE TABLE IF NOT EXISTS production_member_role (
 
 CREATE INDEX IF NOT EXISTS pmr_user_prod_idx ON production_member_role (production_id, user_id);
 
--- production_dept：新部门表（替代 event_department，数据迁移在 Phase 3）
-CREATE TABLE IF NOT EXISTS production_dept (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name            TEXT        NOT NULL,
-  parent_id       UUID        REFERENCES production_dept(id) NULL,
-  permissions     TEXT[]      NOT NULL DEFAULT '{}',
-  allowed_cue_types TEXT[]    NOT NULL DEFAULT '{}',
-  display_order   INTEGER     NOT NULL DEFAULT 0,
-  chat_id         TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS production_dept_name_unique_idx
-  ON production_dept (production_id, name, COALESCE(parent_id::text, ''));
-
-CREATE INDEX IF NOT EXISTS production_dept_production_idx
-  ON production_dept (production_id, display_order);
-
-CREATE INDEX IF NOT EXISTS production_dept_parent_idx
-  ON production_dept (parent_id);
-
--- production_dept_member
-CREATE TABLE IF NOT EXISTS production_dept_member (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  dept_id         UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
-  is_poc          BOOLEAN     NOT NULL DEFAULT false,
-  poc_extra_permissions   TEXT[] NOT NULL DEFAULT '{}',
-  poc_blocked_permissions TEXT[] NOT NULL DEFAULT '{}',  -- 含原 poc_block_write_from_children 语义
-  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (user_id, dept_id)
-);
-
-CREATE INDEX IF NOT EXISTS pdm_prod_user_idx ON production_dept_member (production_id, user_id);
-CREATE INDEX IF NOT EXISTS pdm_dept_idx      ON production_dept_member (dept_id);
+-- production_dept 定义已上移（组织树是事件业务 FK 家族的引用目标，需先建）——
+-- 见 production_event 之前的 "Organization tree" 段。
 
 -- production_member_tag（系统预设 + 演出自定义标签定义）
 CREATE TABLE IF NOT EXISTS production_member_tag (
@@ -1020,7 +1003,7 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   -- create/delete 在批0 INSERT
   ('asset',       'view',           1),
   ('asset',       'edit',           3),
-  -- dept = event_department（批C C3）：notes 权限面锚点，四动词
+  -- dept = production_dept（批C C3，并表后单一 id 空间）：notes 权限面锚点，四动词
   ('dept',        'view',           0),
   ('dept',        'create',         0),
   ('dept',        'edit',           0),
@@ -1049,7 +1032,7 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('dramaturgy_view', 'edit',       0),
   ('dramaturgy_view', 'delete',     0),
   -- 治理域（批F）：production 根实例（id 恒 '*'）；org_dept=production_dept 组织树
-  -- （与批C3 dept=event_department 区分）；SENSITIVE 键=owner∨行（无 admin 旁路）、
+  -- （与批C3 dept=production_dept notes 锚区分）；SENSITIVE 键=owner∨行（无 admin 旁路）、
   -- ROOT 三键=owner-only 代码判定（节点入树行不发）
   ('production',   'view', 0), ('production',   'create', 0), ('production',   'edit', 0), ('production',   'delete', 0),
   ('member',       'view', 0), ('member',       'create', 0), ('member',       'edit', 0), ('member',       'delete', 0),

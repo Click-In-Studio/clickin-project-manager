@@ -50,9 +50,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     name?: string;
     parentId?: string | null;
+    kind?: "dept" | "group";
     displayOrder?: number;
-    permissions?: string[];
-    allowedCueTypes?: string[];
   };
 
   const name = body.name?.trim();
@@ -64,9 +63,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     productionId: id,
     name,
     parentId: body.parentId ?? null,
+    kind: body.kind === "group" ? "group" : "dept",
     displayOrder,
-    permissions: body.permissions ?? [],
-    allowedCueTypes: body.allowedCueTypes ?? [],
   });
 
   // Auto-create Feishu group for new dept

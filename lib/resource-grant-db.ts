@@ -528,7 +528,7 @@ export async function writeReportGrants(
  *   - Assigned dept gets resource_dept_manage
  *   - Parent event's managing depts/persons get resource_dept_manage / resource_person_manage
  *   - If neither assigned dept nor event depts exist, creator is written to resource_person_manage
- * eventDeptId is an event_department.id (TEXT); we map to production_dept by name.
+ * eventDeptId is a production_dept.id（并表后单一 id 空间，name 映射 hack 已退役）.
  */
 export async function writeTechReqGrants(
   reqId: string,
@@ -539,20 +539,15 @@ export async function writeTechReqGrants(
 ): Promise<void> {
   const pool = getPool();
   if (eventDeptId) {
-    // Map event_department → production_dept by name, write grants for POCs
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT DISTINCT $1, pdm.user_id, 'task', $2, s.sub, s.verb, 'direct', pdm.user_id
-       FROM event_department ed
-       JOIN production_dept pd_mapped
-         ON pd_mapped.production_id = $1 AND pd_mapped.name = ed.name
-       JOIN production_dept_member pdm
-         ON pdm.dept_id = pd_mapped.id AND pdm.is_poc = true
+       FROM production_dept_member pdm
        CROSS JOIN (VALUES ('*', 'view'), ('*', 'edit'), ('assignees', 'edit'),
                           ('*', 'delete'), ('grants', 'edit')) AS s(sub, verb)
-       WHERE ed.id = $3
+       WHERE pdm.dept_id = $3 AND pdm.is_poc = true
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
@@ -561,11 +556,7 @@ export async function writeTechReqGrants(
     await pool.query(
       `INSERT INTO resource_dept_manage
          (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-       SELECT DISTINCT $1, pd_mapped.id, 'task', $2, '*', $4::uuid
-       FROM event_department ed
-       JOIN production_dept pd_mapped
-         ON pd_mapped.production_id = $1 AND pd_mapped.name = ed.name
-       WHERE ed.id = $3
+       VALUES ($1, $3, 'task', $2, '*', $4::uuid)
        ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
       [productionId, reqId, eventDeptId, createdBy],
     );

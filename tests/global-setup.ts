@@ -93,6 +93,11 @@ import {
   LOCAL_SCRIPT_DATA_SNAPSHOT_PATH,
   type LocalScriptDataSnapshot,
 } from "./local-script-data-snapshot";
+import {
+  isMergeEventDeptPreMigrationSchema,
+  createMergeEventDeptPreMigrationData,
+  MERGE_EVENT_DEPT_SNAPSHOT_PATH,
+} from "./merge-event-department-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -384,10 +389,38 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // 并表迁移（event_department → production_dept）：必须最后跑——
+  // 前序旧迁移的工厂/重放仍然向 event_department 写行。
+  if (await isMergeEventDeptPreMigrationSchema(pool)) {
+    const mergeSnapshot = await createMergeEventDeptPreMigrationData(pool, TEST_USER);
+    await writeFile(MERGE_EVENT_DEPT_SNAPSHOT_PATH, JSON.stringify(mergeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-merge-event-department.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
   const pool = getPool();
+
+  // Clean up merge-event-department migration factory data (migration path only).
+  {
+    let mergeSnapshot: { prodId: string } | null = null;
+    try {
+      mergeSnapshot = JSON.parse(
+        await readFile(MERGE_EVENT_DEPT_SNAPSHOT_PATH, "utf8"),
+      ) as { prodId: string };
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (mergeSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [mergeSnapshot.prodId]).catch(() => {});
+      await unlink(MERGE_EVENT_DEPT_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   let localScriptDataSnapshot: LocalScriptDataSnapshot | null = null;
   try {

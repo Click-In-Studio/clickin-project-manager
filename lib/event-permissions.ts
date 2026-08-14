@@ -19,11 +19,11 @@ export type EventPermContext = {
   isInCall: boolean;
   /** True if the user has an event_participant row (is following this event). */
   isFollower: boolean;
-  /** dept IDs (event_department.id) the user is assigned to as a participant. */
+  /** dept IDs (production_dept.id) the user is assigned to as a participant. */
   participantDeptIds: string[];
-  /** event_department.id values where user is POC (used for tech_req dept filter in UI). */
+  /** production_dept.id values where user is POC (used for tech_req dept filter in UI). */
   pocDeptIds: string[];
-  /** All event_department.id values the user belongs to production-wide (for note reply check). */
+  /** All production_dept.id values the user belongs to production-wide (for note reply check). */
   memberDeptIds: string[];
 };
 
@@ -47,18 +47,16 @@ export async function loadEventPermContext(
       [eventId, userId]
     ),
     pool.query<{ department_id: string }>(
-      `SELECT edm.department_id
-       FROM event_department_member edm
-       JOIN event_department ed ON ed.id = edm.department_id
-       JOIN production_event pe ON pe.production_id = ed.production_id
+      `SELECT edm.dept_id AS department_id
+       FROM production_dept_member edm
+       JOIN production_event pe ON pe.production_id = edm.production_id
        WHERE pe.id = $1 AND edm.user_id = $2 AND edm.is_poc = true`,
       [eventId, userId]
     ),
     pool.query<{ department_id: string }>(
-      `SELECT edm.department_id
-       FROM event_department_member edm
-       JOIN event_department ed ON ed.id = edm.department_id
-       JOIN production_event pe ON pe.production_id = ed.production_id
+      `SELECT edm.dept_id AS department_id
+       FROM production_dept_member edm
+       JOIN production_event pe ON pe.production_id = edm.production_id
        WHERE pe.id = $1 AND edm.user_id = $2`,
       [eventId, userId]
     ),
@@ -212,8 +210,8 @@ export async function canWriteNote(
     // 边界情形标 wildcard 只是更保守（POC 删不了那条 note），不放大权限。
     const pocRes = await getPool().query<{ exists: boolean }>(
       `SELECT EXISTS(
-         SELECT 1 FROM event_department_member
-         WHERE department_id = $1 AND user_id = $2 AND is_poc = true
+         SELECT 1 FROM production_dept_member
+         WHERE dept_id = $1 AND user_id = $2 AND is_poc = true
        ) AS exists`,
       [departmentId, permCtx.userId],
     );

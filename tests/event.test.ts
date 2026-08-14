@@ -25,16 +25,17 @@ async function makeEv(prodId: string, createdBy: string, opts?: { status?: strin
   return id;
 }
 async function makeDept(prodId: string): Promise<string> {
-  const id = `d${shortId()}`;
-  await getPool().query(
-    `INSERT INTO event_department (id, production_id, name) VALUES ($1, $2, '测试部门')`,
-    [id, prodId],
+  const { rows } = await getPool().query<{ id: string }>(
+    `INSERT INTO production_dept (production_id, name) VALUES ($1, '测试部门') RETURNING id`,
+    [prodId],
   );
-  return id;
+  return rows[0].id;
 }
 async function makePocMember(deptId: string, userId: string): Promise<void> {
   await getPool().query(
-    `INSERT INTO event_department_member (department_id, user_id, is_poc) VALUES ($1, $2, true) ON CONFLICT DO NOTHING`,
+    `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc)
+     SELECT pd.production_id, $1, $2, true FROM production_dept pd WHERE pd.id = $1
+     ON CONFLICT DO NOTHING`,
     [deptId, userId],
   );
 }

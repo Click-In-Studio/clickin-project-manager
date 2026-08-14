@@ -43,10 +43,7 @@ describe("integrity verification", () => {
           OR (resource_type = 'note' AND permission_level = 'manage') LIMIT 1`,
     );
     expect(lv).toHaveLength(0);
-    const { rows: pd } = await getPool().query(
-      `SELECT 1 FROM production_dept WHERE 'report:edit' = ANY(permissions) LIMIT 1`,
-    );
-    expect(pd, "最后一枚 dept 伪键应已清除").toHaveLength(0);
+    // dept 数组伪键断言已随 migrate-merge-event-department 退役（permissions 列 DROP=恒零残留）。
   });
 });
 

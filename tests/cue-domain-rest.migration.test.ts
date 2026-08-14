@@ -64,11 +64,7 @@ describe("integrity verification", () => {
       );
       expect(rows, `${table} 不应残留 cue 原子键`).toHaveLength(0);
     }
-    // dept 数组伪键清除
-    const { rows: pd } = await getPool().query(
-      `SELECT 1 FROM production_dept WHERE 'cue_list:edit' = ANY(permissions) LIMIT 1`,
-    );
-    expect(pd).toHaveLength(0);
+    // dept 数组伪键断言已随 migrate-merge-event-department 退役（permissions 列 DROP=恒零残留）。
   });
 
   it("global template seeds exist (member base + collection create)", async () => {

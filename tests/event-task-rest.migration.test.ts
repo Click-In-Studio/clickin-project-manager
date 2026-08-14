@@ -66,12 +66,7 @@ describe("integrity verification", () => {
       );
       expect(rows, `${table} 不应残留 event/task 原子键`).toHaveLength(0);
     }
-    const { rows: pd } = await getPool().query(
-      `SELECT 1 FROM production_dept
-       WHERE 'event:edit' = ANY(permissions) OR 'event:create' = ANY(permissions)
-          OR 'tech_req:edit' = ANY(permissions) LIMIT 1`,
-    );
-    expect(pd).toHaveLength(0);
+    // dept 数组伪键断言已随 migrate-merge-event-department 退役（permissions 列 DROP=恒零残留）。
   });
 });
 
