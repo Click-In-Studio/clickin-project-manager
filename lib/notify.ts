@@ -703,7 +703,7 @@ export async function dispatchReportNotification(
     pool.query<{ dept_name: string; content: string }>(
       `SELECT ed.name AS dept_name, ern.content
        FROM event_report_note ern
-       JOIN event_department ed ON ed.id = ern.department_id
+       JOIN production_dept ed ON ed.id = ern.department_id
        WHERE ern.report_id = $1 ORDER BY ed.display_order, ern.created_at`,
       [reportId],
     ),

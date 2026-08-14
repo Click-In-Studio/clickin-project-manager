@@ -270,22 +270,23 @@ function rowToReportNote(r: ReportNoteRow): EventReportNote {
 }
 
 // ─── Departments ──────────────────────────────────────────────────────────────
+// 并表后（migrate-merge-event-department）：单一数据源 production_dept /
+// production_dept_member。本文件仅保留事件业务侧的**读**函数（形状兼容旧
+// EventDepartment）；全部写路径归 lib/dept-db.ts（含 POC notes 三行 diff）。
 
-type MemberRow = { department_id: string; user_id: string; is_member: boolean; is_poc: boolean };
+type MemberRow = { department_id: string; user_id: string; is_poc: boolean };
 
 export async function listEventDepartments(productionId: string): Promise<EventDepartment[]> {
   const pool = getPool();
   const [deptRes, memberRes] = await Promise.all([
     pool.query<DeptRow>(
       `SELECT id, production_id, name, kind, display_order, chat_id, created_at
-       FROM event_department WHERE production_id = $1 ORDER BY display_order, name`,
+       FROM production_dept WHERE production_id = $1 ORDER BY display_order, name`,
       [productionId]
     ),
     pool.query<MemberRow>(
-      `SELECT edm.department_id, edm.user_id, edm.is_member, edm.is_poc
-       FROM event_department_member edm
-       JOIN event_department ed ON ed.id = edm.department_id
-       WHERE ed.production_id = $1`,
+      `SELECT dept_id AS department_id, user_id, is_poc
+       FROM production_dept_member WHERE production_id = $1`,
       [productionId]
     ),
   ]);
@@ -298,7 +299,7 @@ export async function listEventDepartments(productionId: string): Promise<EventD
     const rows = memberMap.get(r.id) ?? [];
     return rowToDept(
       r,
-      rows.filter(m => m.is_member).map(m => m.user_id),
+      rows.map(m => m.user_id),
       rows.filter(m => m.is_poc).map(m => m.user_id),
     );
   });
@@ -309,125 +310,20 @@ export async function getEventDepartment(id: string, productionId: string): Prom
   const [deptRes, memberRes] = await Promise.all([
     pool.query<DeptRow>(
       `SELECT id, production_id, name, kind, display_order, chat_id, created_at
-       FROM event_department WHERE id = $1 AND production_id = $2`,
+       FROM production_dept WHERE id = $1 AND production_id = $2`,
       [id, productionId]
     ),
-    pool.query<{ user_id: string; is_member: boolean; is_poc: boolean }>(
-      "SELECT user_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
+    pool.query<{ user_id: string; is_poc: boolean }>(
+      "SELECT user_id, is_poc FROM production_dept_member WHERE dept_id = $1",
       [id]
     ),
   ]);
   if (!deptRes.rows[0]) return null;
   return rowToDept(
     deptRes.rows[0],
-    memberRes.rows.filter(r => r.is_member).map(r => r.user_id),
+    memberRes.rows.map(r => r.user_id),
     memberRes.rows.filter(r => r.is_poc).map(r => r.user_id),
   );
-}
-
-export async function createEventDepartment(data: {
-  id: string; productionId: string; name: string;
-  kind: "dept" | "group"; displayOrder: number;
-}): Promise<EventDepartment> {
-  const res = await getPool().query<DeptRow>(
-    `INSERT INTO event_department (id, production_id, name, kind, display_order)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, production_id, name, kind, display_order, chat_id, created_at`,
-    [data.id, data.productionId, data.name, data.kind, data.displayOrder]
-  );
-  return rowToDept(res.rows[0], [], []);
-}
-
-export async function updateEventDepartment(
-  id: string, productionId: string,
-  fields: { name?: string; kind?: "dept" | "group"; displayOrder?: number }
-): Promise<void> {
-  const sets: string[] = [];
-  const vals: unknown[] = [id, productionId];
-  if (fields.name         !== undefined) sets.push(`name          = $${vals.push(fields.name)}`);
-  if (fields.kind         !== undefined) sets.push(`kind          = $${vals.push(fields.kind)}`);
-  if (fields.displayOrder !== undefined) sets.push(`display_order = $${vals.push(fields.displayOrder)}`);
-  if (!sets.length) return;
-  await getPool().query(
-    `UPDATE event_department SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2`,
-    vals
-  );
-}
-
-export async function deleteEventDepartment(id: string, productionId: string): Promise<void> {
-  await getPool().query(
-    "DELETE FROM event_department WHERE id = $1 AND production_id = $2",
-    [id, productionId]
-  );
-}
-
-/** Replace the full member/POC list for a department in one transaction.
- *  Entries with both isMember=false and isPoc=false are silently dropped.
- */
-export async function setDepartmentMembers(
-  deptId: string,
-  members: { userId: string; isMember: boolean; isPoc: boolean }[],
-): Promise<void> {
-  const seen = new Set<string>();
-  const unique = members.filter(m => {
-    if (seen.has(m.userId)) return false;
-    seen.add(m.userId);
-    return m.isMember || m.isPoc;
-  });
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const prevPocRes = await client.query<{ user_id: string }>(
-      "SELECT user_id FROM event_department_member WHERE department_id = $1 AND is_poc",
-      [deptId],
-    );
-    await client.query("DELETE FROM event_department_member WHERE department_id = $1", [deptId]);
-    for (const m of unique) {
-      await client.query(
-        "INSERT INTO event_department_member (department_id, user_id, is_member, is_poc) VALUES ($1,$2,$3,$4)",
-        [deptId, m.userId, m.isMember, m.isPoc],
-      );
-    }
-    // POC 上任/卸任 diff（批C C3）：dept/<D>/notes@create|edit|delete 三行随任期发/收。
-    // 行是 production 级（未参与 event 的部门也可被提 note）；卸任显式撤销，不走 sweep
-    // （auto 行不在 recompute 的 self_confirmed 扫描面内）。
-    const prevPoc = new Set(prevPocRes.rows.map(r => r.user_id));
-    const nowPoc = new Set(unique.filter(m => m.isPoc).map(m => m.userId));
-    const promoted = [...nowPoc].filter(u => !prevPoc.has(u));
-    const demoted = [...prevPoc].filter(u => !nowPoc.has(u));
-    if (promoted.length > 0) {
-      await client.query(
-        `INSERT INTO production_member_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source)
-         SELECT ed.production_id, u, 'dept', ed.id, 'notes', v.verb, 'auto'
-         FROM event_department ed
-         CROSS JOIN unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES ('create'), ('edit'), ('delete')) AS v(verb)
-         WHERE ed.id = $1
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [deptId, promoted],
-      );
-    }
-    if (demoted.length > 0) {
-      await client.query(
-        `UPDATE production_member_grant
-         SET is_revoked = true, revoked_reason = 'poc_change'
-         WHERE resource_type = 'dept' AND resource_id = $1 AND resource_sub = 'notes'
-           AND grant_source = 'auto' AND is_revoked = false
-           AND user_id = ANY($2::uuid[])`,
-        [deptId, demoted],
-      );
-    }
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 /** Replace the full participant list for an event in one transaction.
@@ -478,8 +374,8 @@ export async function setEventParticipants(
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT DISTINCT $1, edm.user_id, 'event', $3, 'reports', 'view', 'assigned', $4::uuid
-         FROM event_department_member edm
-         WHERE edm.department_id = ANY($2::text[]) AND edm.is_poc
+         FROM production_dept_member edm
+         WHERE edm.dept_id = ANY($2::uuid[]) AND edm.is_poc
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
@@ -1271,13 +1167,13 @@ export async function writeTaskDeptEventVisibility(
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
      SELECT $1, edm.user_id, 'event', $2, s.sub, 'view', 'assigned', $4
-     FROM event_department_member edm
+     FROM production_dept_member edm
      CROSS JOIN LATERAL (
        -- POC 追加 publication（提前确认/组织）+ reports（draft report 可见，批C C3）
        SELECT sub FROM (VALUES ('meta'), ('details'), ('publication'), ('reports')) AS v(sub)
        WHERE edm.is_poc OR v.sub NOT IN ('publication', 'reports')
      ) AS s
-     WHERE edm.department_id = $3
+     WHERE edm.dept_id = $3
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
        WHERE is_revoked = false
      DO NOTHING`,
@@ -1834,8 +1730,8 @@ export async function isUserReqAssignee(reqId: string, userId: string): Promise<
 export async function isUserDeptMember(deptId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_department_member
-       WHERE department_id = $1 AND user_id = $2
+       SELECT 1 FROM production_dept_member
+       WHERE dept_id = $1 AND user_id = $2
      ) AS exists`,
     [deptId, userId]
   );
@@ -1846,8 +1742,8 @@ export async function isUserDeptMember(deptId: string, userId: string): Promise<
 export async function isUserDeptPoc(deptId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_department_member
-       WHERE department_id = $1 AND user_id = $2 AND is_poc = true
+       SELECT 1 FROM production_dept_member
+       WHERE dept_id = $1 AND user_id = $2 AND is_poc = true
      ) AS exists`,
     [deptId, userId]
   );
@@ -1896,17 +1792,16 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
        (
          SELECT json_agg(json_build_object('userId', edm2.user_id, 'name', fu3.name)
                 ORDER BY fu3.name)
-         FROM event_department_member edm2
+         FROM production_dept_member edm2
          JOIN feishu_user fu3 ON fu3.user_id = edm2.user_id
-         WHERE edm2.department_id = etr.department_id
-           AND (edm2.is_member OR edm2.is_poc)
+         WHERE edm2.dept_id = etr.department_id
        ) AS dept_people_json
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
      JOIN production p ON p.id = pe.production_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
-     LEFT JOIN event_department_member edm_poc
-       ON edm_poc.department_id = etr.department_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
+     LEFT JOIN production_dept_member edm_poc
+       ON edm_poc.dept_id = etr.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
      LEFT JOIN event_tech_assignee eta
        ON eta.req_id = etr.id AND eta.user_id = $1
@@ -1965,7 +1860,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
        ) AS assignees_json
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
      WHERE pe.production_id = $1 AND pe.status != 'cancelled'
      ORDER BY pe.start_time NULLS LAST, etr.created_at`,
     [productionId]
@@ -2109,9 +2004,9 @@ export async function listMyPocAwaitingReqs(userId: string, productionId?: strin
     `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, pe.production_id, ed.name AS department_name
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
-     JOIN event_department_member edm_poc
-       ON edm_poc.department_id = etr.department_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
+     JOIN production_dept_member edm_poc
+       ON edm_poc.dept_id = etr.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
      WHERE etr.status = 'awaiting'
        AND pe.status != 'cancelled'
@@ -2371,7 +2266,7 @@ export async function clearTechReqChatId(reqId: string): Promise<void> {
 
 export async function setDepartmentChatId(deptId: string, chatId: string): Promise<void> {
   await getPool().query(
-    "UPDATE event_department SET chat_id = $1 WHERE id = $2",
+    "UPDATE production_dept SET chat_id = $1 WHERE id = $2",
     [chatId, deptId]
   );
 }
@@ -2393,7 +2288,7 @@ export async function setTechReqChatId(reqId: string, chatId: string): Promise<v
 /** Returns all dept chat_ids for a production (used to filter out dept groups when binding). */
 export async function getProductionDeptChatIds(productionId: string): Promise<Set<string>> {
   const res = await getPool().query<{ chat_id: string }>(
-    "SELECT chat_id FROM event_department WHERE production_id = $1 AND chat_id IS NOT NULL",
+    "SELECT chat_id FROM production_dept WHERE production_id = $1 AND chat_id IS NOT NULL",
     [productionId]
   );
   return new Set(res.rows.map(r => r.chat_id));
@@ -2403,11 +2298,11 @@ export async function getProductionDeptChatIds(productionId: string): Promise<Se
 export async function getDepartmentCurrentEntries(
   deptId: string
 ): Promise<{ userId: string; isMember: boolean; isPoc: boolean }[]> {
-  const res = await getPool().query<{ user_id: string; is_member: boolean; is_poc: boolean }>(
-    "SELECT user_id, is_member, is_poc FROM event_department_member WHERE department_id = $1",
+  const res = await getPool().query<{ user_id: string; is_poc: boolean }>(
+    "SELECT user_id, is_poc FROM production_dept_member WHERE dept_id = $1",
     [deptId]
   );
-  return res.rows.map(r => ({ userId: r.user_id, isMember: r.is_member, isPoc: r.is_poc }));
+  return res.rows.map(r => ({ userId: r.user_id, isMember: true, isPoc: r.is_poc }));
 }
 
 /** Returns all Feishu open_ids for an event's group chat (participants + call-time people). */
@@ -2437,7 +2332,7 @@ export async function getReqChatTargets(reqId: string): Promise<string[]> {
      UNION
      SELECT fu.open_id
      FROM event_tech_req etr
-     JOIN event_department_member edm ON edm.department_id = etr.department_id AND edm.is_poc = true
+     JOIN production_dept_member edm ON edm.dept_id = etr.department_id AND edm.is_poc = true
      JOIN feishu_user fu ON fu.user_id = edm.user_id
      WHERE etr.id = $1`,
     [reqId]
@@ -2509,8 +2404,8 @@ export async function countPendingTasksForUser(userId: string, productionId?: st
     `SELECT COUNT(DISTINCT etr.id) AS count
      FROM event_tech_req etr
      JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN event_department_member edm_poc
-       ON edm_poc.department_id = etr.department_id
+     LEFT JOIN production_dept_member edm_poc
+       ON edm_poc.dept_id = etr.department_id
       AND edm_poc.user_id = $1
       AND edm_poc.is_poc = true
      LEFT JOIN event_tech_assignee eta

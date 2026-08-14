@@ -1,22 +1,20 @@
 /**
- * Comprehensive tests for Phase 3 dept permission system.
+ * Comprehensive tests for the dept permission system.
  *
  * Covers:
- *  - Pure functions: computeInheritedPermissions, computePocPermissions,
- *    collectDescendants, collectAncestors
+ *  - Tree traversal: collectDescendants, collectAncestors
  *  - CRUD: createProductionDept, listProductionDepts, updateProductionDept,
  *    deleteProductionDept (dissolution guard)
  *  - Member management: setDeptMembers (add/remove/POC conflict)
- *  - Permission zone: computeUserDeptFreeApprovalZone
- *  - canAccess() deptFreeApprovalZone integration
  *  - Grant cascade revocation: revokeGrantsForDeptRemoval, revokeGrantsForPocLoss
+ *
+ * （数组权限机制已退役——computeInheritedPermissions / computePocPermissions
+ *  随 permissions 列 DROP 一并删除，区间机制测试在 terminal-acceptance 等。）
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import {
-  computeInheritedPermissions,
-  computePocPermissions,
   collectDescendants,
   collectAncestors,
   createProductionDept,
@@ -78,108 +76,14 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
-// ── 1. Pure functions ──────────────────────────────────────────────────────────
-
-describe("computeInheritedPermissions", () => {
-  // Shared tree fixture for pure function tests:
-  //  root (p: [scene:create, scene:view])
-  //  └── child (p: [character:create])
-  //      └── grandchild (p: [script:view])
-
-  const tree = [
-    { id: "root", parent_id: null, permissions: [asPerm("node:announcement/*@edit"), asPerm("node:milestone/*@create")] },
-    { id: "child", parent_id: "root", permissions: [asPerm("node:announcement/*@delete")] },
-    { id: "grandchild", parent_id: "child", permissions: [asPerm("node:member/*/meta@view")] },
-    { id: "sibling", parent_id: "root", permissions: [asPerm("node:member/*/meta@view")] },
-  ];
-
-  it("user in leaf dept inherits its own + all ancestor permissions", () => {
-    const result = computeInheritedPermissions(["grandchild"], tree);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);       // own
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);  // parent
-    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);      // grandparent
-    expect(result.has(asPerm("node:milestone/*@create"))).toBe(true);        // grandparent
-  });
-
-  it("user in root dept only gets root permissions", () => {
-    const result = computeInheritedPermissions(["root"], tree);
-    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
-    expect(result.has(asPerm("node:milestone/*@create"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false); // child — not inherited upward
-  });
-
-  it("user in multiple depts gets union of all ancestor chains", () => {
-    // member of both grandchild AND sibling
-    const result = computeInheritedPermissions(["grandchild", "sibling"], tree);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true); // from sibling
-  });
-
-  it("empty dept list returns empty set", () => {
-    const result = computeInheritedPermissions([], tree);
-    expect(result.size).toBe(0);
-  });
-
-  it("dept not in tree returns empty set (unknown dept)", () => {
-    const result = computeInheritedPermissions(["nonexistent"], tree);
-    expect(result.size).toBe(0);
-  });
-});
-
-describe("computePocPermissions", () => {
-  const tree = [
-    { id: "root", parent_id: null, permissions: [asPerm("node:announcement/*@edit")] },
-    { id: "child", parent_id: "root", permissions: [asPerm("node:announcement/*@delete")] },
-    { id: "grandchild", parent_id: "child", permissions: [asPerm("node:member/*/meta@view")] },
-  ];
-
-  it("POC of root gets permissions from all descendants (union)", () => {
-    const result = computePocPermissions("root", [], [], tree);
-    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
-  });
-
-  it("POC of child gets only child + grandchild permissions", () => {
-    const result = computePocPermissions("child", [], [], tree);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(false); // root — not in child's subtree
-  });
-
-  it("poc_extra_permissions are added to the zone", () => {
-    const result = computePocPermissions("child", [asPerm("node:member/*/meta@view")], [], tree);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(true);
-  });
-
-  it("poc_blocked_permissions are excluded from the zone", () => {
-    const result = computePocPermissions("root", [], [asPerm("node:announcement/*@delete")], tree);
-    expect(result.has(asPerm("node:announcement/*@edit"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false); // blocked
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
-  });
-
-  it("blocked overrides extra (cannot re-add a blocked permission)", () => {
-    const result = computePocPermissions("root", [asPerm("node:announcement/*@delete")], [asPerm("node:announcement/*@delete")], tree);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false); // blocked wins
-  });
-
-  it("leaf dept POC gets only its own permissions", () => {
-    const result = computePocPermissions("grandchild", [], [], tree);
-    expect(result.has(asPerm("node:member/*/meta@view"))).toBe(true);
-    expect(result.has(asPerm("node:announcement/*@delete"))).toBe(false);
-  });
-});
+// ── 1. Tree traversal ──────────────────────────────────────────────────────────
 
 describe("collectDescendants", () => {
   const tree = [
-    { id: "root", parent_id: null, permissions: [] },
-    { id: "child", parent_id: "root", permissions: [] },
-    { id: "grandchild", parent_id: "child", permissions: [] },
-    { id: "other", parent_id: "root", permissions: [] },
+    { id: "root", parent_id: null },
+    { id: "child", parent_id: "root" },
+    { id: "grandchild", parent_id: "child" },
+    { id: "other", parent_id: "root" },
   ];
 
   it("root includes all depts", () => {
@@ -206,9 +110,9 @@ describe("collectDescendants", () => {
 
 describe("collectAncestors", () => {
   const tree = [
-    { id: "root", parent_id: null, permissions: [] },
-    { id: "child", parent_id: "root", permissions: [] },
-    { id: "grandchild", parent_id: "child", permissions: [] },
+    { id: "root", parent_id: null },
+    { id: "child", parent_id: "root" },
+    { id: "grandchild", parent_id: "child" },
   ];
 
   it("root has no ancestors", () => {
@@ -236,8 +140,6 @@ describe("createProductionDept / listProductionDepts", () => {
       productionId: prodId,
       name: "测试部门A",
       displayOrder: 1,
-      permissions: [asPerm("node:milestone/*@create"), asPerm("node:member/*/meta@view")],
-      allowedCueTypes: ["lights"],
     });
     deptId = dept.id;
   });
@@ -247,8 +149,7 @@ describe("createProductionDept / listProductionDepts", () => {
     const found = depts.find((d) => d.id === deptId);
     expect(found).toBeDefined();
     expect(found!.name).toBe("测试部门A");
-    expect(found!.permissions).toContain(asPerm("node:milestone/*@create"));
-    expect(found!.allowedCueTypes).toContain("lights");
+    expect(found!.kind).toBe("dept");
   });
 
   it("getProductionDept returns the dept", async () => {
@@ -276,7 +177,6 @@ describe("updateProductionDept", () => {
     const dept = await createProductionDept({
       productionId: prodId,
       name: "待更新部门",
-      permissions: [asPerm("node:milestone/*@create")],
     });
     deptId = dept.id;
   });
@@ -287,11 +187,11 @@ describe("updateProductionDept", () => {
     expect(dept!.name).toBe("更新后名称");
   });
 
-  it("can update permissions", async () => {
-    await updateProductionDept(deptId, prodId, { permissions: [asPerm("node:member/*/meta@view"), asPerm("node:announcement/*@create")] });
+  it("can update kind（dept ↔ group）", async () => {
+    await updateProductionDept(deptId, prodId, { kind: "group" });
     const dept = await getProductionDept(deptId, prodId);
-    expect(dept!.permissions).toContain(asPerm("node:member/*/meta@view"));
-    expect(dept!.permissions).not.toContain(asPerm("node:milestone/*@create")); // replaced
+    expect(dept!.kind).toBe("group");
+    await updateProductionDept(deptId, prodId, { kind: "dept" });
   });
 
   it("calling with empty fields is a no-op", async () => {
@@ -404,19 +304,24 @@ describe("setDeptMembers: basic add/remove", () => {
     expect(members).toHaveLength(0);
   });
 
-  it("sets poc_extra_permissions and poc_blocked_permissions", async () => {
-    await setDeptMembers(deptId, prodId, [
-      {
-        userId: TEST_USER,
-        isPoc: true,
-        pocExtraPermissions: [asPerm("node:member/*/meta@view")],
-        pocBlockedPermissions: [asPerm("node:milestone/*@create")],
-      },
-    ]);
-    const members = await getDeptMembers(deptId);
-    const row = members.find((m) => m.userId === TEST_USER);
-    expect(row?.pocExtraPermissions).toContain(asPerm("node:member/*/meta@view"));
-    expect(row?.pocBlockedPermissions).toContain(asPerm("node:milestone/*@create"));
+  it("POC 任期发/收 dept notes 三行（原 event 侧逻辑并入）", async () => {
+    await setDeptMembers(deptId, prodId, [{ userId: TEST_USER, isPoc: true }]);
+    const { rows } = await getPool().query<{ permission_level: string }>(
+      `SELECT permission_level FROM production_member_grant
+       WHERE user_id = $1 AND resource_type = 'dept' AND resource_id = $2
+         AND resource_sub = 'notes' AND grant_source = 'auto' AND is_revoked = false`,
+      [TEST_USER, deptId],
+    );
+    expect(rows.map((r) => r.permission_level).sort()).toEqual(["create", "delete", "edit"]);
+
+    await setDeptMembers(deptId, prodId, [{ userId: TEST_USER, isPoc: false }]);
+    const { rows: after } = await getPool().query(
+      `SELECT 1 FROM production_member_grant
+       WHERE user_id = $1 AND resource_type = 'dept' AND resource_id = $2
+         AND resource_sub = 'notes' AND grant_source = 'auto' AND is_revoked = false`,
+      [TEST_USER, deptId],
+    );
+    expect(after).toHaveLength(0);
   });
 });
 

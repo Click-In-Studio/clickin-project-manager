@@ -88,7 +88,6 @@ beforeAll(async () => {
   const dept = await createProductionDept({
     productionId: prodId,
     name: "走位科组",
-    permissions: [],
   });
   deptId = dept.id;
   await setDeptMembers(deptId, prodId, [{ userId: U_POC, isPoc: true }]);

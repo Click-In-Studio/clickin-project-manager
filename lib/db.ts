@@ -3021,7 +3021,12 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
       [keepUserId, deleteUserId],
     );
     await client.query(`DELETE FROM event_participant WHERE user_id = $1`, [deleteUserId]);
-    await client.query(`UPDATE event_department_member SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(
+      `UPDATE production_dept_member pdm SET user_id = $1 WHERE user_id = $2
+       AND NOT EXISTS (SELECT 1 FROM production_dept_member p2 WHERE p2.user_id = $1 AND p2.dept_id = pdm.dept_id)`,
+      [keepUserId, deleteUserId],
+    );
+    await client.query(`DELETE FROM production_dept_member WHERE user_id = $1`, [deleteUserId]);
     await client.query(`UPDATE event_stage_manager SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE schedule_item_participant SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_tech_assignee SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
@@ -3237,7 +3242,7 @@ export async function getProductionPermissionContext(
        WHERE pmr.user_id = $1 AND pmr.production_id = $2`,
       [userId, productionId],
     ),
-    // Department memberships (Phase 3: use production_dept instead of event_department)
+    // Department memberships（并表后单一 production_dept 数据源）
     pool.query<{ dept_id: string; is_poc: boolean }>(
       `SELECT pdm.dept_id, pdm.is_poc
        FROM production_dept_member pdm

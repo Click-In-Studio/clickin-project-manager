@@ -28,10 +28,9 @@ beforeAll(async () => {
     [eventId, prodId, deptUser],
   );
 
-  const deptId = `d${shortId()}`;
-  await getPool().query(
-    `INSERT INTO event_department (id, production_id, name) VALUES ($1, $2, '测试部门')`,
-    [deptId, prodId],
+  const { rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
+    `INSERT INTO production_dept (production_id, name) VALUES ($1, '测试部门') RETURNING id`,
+    [prodId],
   );
   await getPool().query(
     `INSERT INTO event_participant (id, event_id, user_id, name, department_id) VALUES ($1, $2, $3, '部门参与者', $4)`,

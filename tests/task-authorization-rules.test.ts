@@ -43,14 +43,13 @@ beforeAll(async () => {
   });
   eventId = ev.id;
 
-  deptId = `ed_${shortId()}`;
+  ({ rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
+    `INSERT INTO production_dept (production_id, name) VALUES ($1, $2) RETURNING id`,
+    [prodId, `技术部${shortId()}`],
+  ));
   await getPool().query(
-    `INSERT INTO event_department (id, production_id, name) VALUES ($1, $2, $3)`,
-    [deptId, prodId, `技术部${shortId()}`],
-  );
-  await getPool().query(
-    `INSERT INTO event_department_member (department_id, user_id, is_poc, is_member) VALUES ($1, $2, true, true), ($1, $3, false, true)`,
-    [deptId, pocId, memberId],
+    `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc) VALUES ($1, $2, $3, true), ($1, $2, $4, false)`,
+    [prodId, deptId, pocId, memberId],
   );
 });
 

@@ -131,7 +131,7 @@ export async function searchProduction(
               ed.name AS dept_name
        FROM event_tech_req etr
        JOIN production_event pe ON pe.id = etr.event_id
-       LEFT JOIN event_department ed ON ed.id = etr.department_id
+       LEFT JOIN production_dept ed ON ed.id = etr.department_id
        WHERE pe.production_id = $1
          AND (
            etr.title ILIKE $2
@@ -153,8 +153,8 @@ export async function searchProduction(
                 WHEN EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2) THEN NULL
                 ELSE (
                   SELECT '部门: ' || ed.name
-                  FROM event_department_member edm
-                  JOIN event_department ed ON ed.id = edm.department_id
+                  FROM production_dept_member edm
+                  JOIN production_dept ed ON ed.id = edm.dept_id
                   WHERE edm.user_id = pm.user_id
                     AND ed.production_id = $1
                     AND ed.name ILIKE $2
@@ -168,8 +168,8 @@ export async function searchProduction(
            fu.name ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2)
            OR EXISTS (
-             SELECT 1 FROM event_department_member edm
-             JOIN event_department ed ON ed.id = edm.department_id
+             SELECT 1 FROM production_dept_member edm
+             JOIN production_dept ed ON ed.id = edm.dept_id
              WHERE edm.user_id = pm.user_id
                AND ed.production_id = $1
                AND ed.name ILIKE $2

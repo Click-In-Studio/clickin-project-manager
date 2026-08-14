@@ -50,9 +50,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     name?: string;
     parentId?: string | null;
+    kind?: "dept" | "group";
     displayOrder?: number;
-    permissions?: string[];
-    allowedCueTypes?: string[];
   };
 
   const fields: Parameters<typeof updateProductionDept>[2] = {};
@@ -62,9 +61,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     fields.name = name;
   }
   if ("parentId" in body) fields.parentId = body.parentId ?? null;
+  if (body.kind === "dept" || body.kind === "group") fields.kind = body.kind;
   if (typeof body.displayOrder === "number") fields.displayOrder = body.displayOrder;
-  if (Array.isArray(body.permissions)) fields.permissions = body.permissions;
-  if (Array.isArray(body.allowedCueTypes)) fields.allowedCueTypes = body.allowedCueTypes;
 
   await updateProductionDept(deptId, productionId, fields);
 

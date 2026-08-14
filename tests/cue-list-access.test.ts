@@ -59,11 +59,11 @@ async function addMember(prodId: string, userId: string, roles: string[] = []) {
   );
 }
 
-async function createDept(prodId: string, name: string, permissions: string[] = [], allowedCueTypes: string[] = []) {
+async function createDept(prodId: string, name: string, _permissions: string[] = [], allowedCueTypes: string[] = []) {
   const res = await getPool().query<{ id: string }>(
-    `INSERT INTO production_dept (production_id, name, display_order, permissions, allowed_cue_types)
-     VALUES ($1, $2, 1, $3, $4) RETURNING id`,
-    [prodId, name, permissions, allowedCueTypes],
+    `INSERT INTO production_dept (production_id, name, display_order)
+     VALUES ($1, $2, 1) RETURNING id`,
+    [prodId, name],
   );
   // §3.5：数组语义已迁移到声明表（can_create + 设计全档）——工厂同步写声明行
   for (const t of allowedCueTypes) {
@@ -79,8 +79,8 @@ async function createDept(prodId: string, name: string, permissions: string[] = 
 
 async function addDeptMember(deptId: string, prodId: string, userId: string, isPoc = false) {
   await getPool().query(
-    `INSERT INTO production_dept_member (dept_id, production_id, user_id, is_poc, poc_extra_permissions, poc_blocked_permissions)
-     VALUES ($1, $2, $3, $4, '{}', '{}') ON CONFLICT DO NOTHING`,
+    `INSERT INTO production_dept_member (dept_id, production_id, user_id, is_poc)
+     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
     [deptId, prodId, userId, isPoc],
   );
 }

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  setDepartmentMembers, setEventParticipants, writeTaskDeptEventVisibility,
+  setEventParticipants, writeTaskDeptEventVisibility,
   createEventReport, createReportNote,
 } from "@/lib/event-db";
+import { setDeptMembers } from "@/lib/dept-db";
 import { canWriteNote, canEditNote } from "@/lib/event-permissions";
 import type { PermissionContext } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
@@ -48,11 +49,8 @@ beforeAll(async () => {
   ({ prodId } = await makeProduction());
   [poc, director, outsider] = await Promise.all([newUser(), newUser(), newUser()]);
 
-  deptId = `d${shortId()}`;
-  await getPool().query(
-    `INSERT INTO event_department (id, production_id, name) VALUES ($1, $2, '测试部门')`,
-    [deptId, prodId],
-  );
+  const { createProductionDept } = await import("@/lib/dept-db");
+  deptId = (await createProductionDept({ productionId: prodId, name: "测试部门" })).id;
 
   eventId = `ev${shortId()}`;
   await getPool().query(
@@ -74,16 +72,16 @@ afterAll(async () => {
 
 describe("POC term lifecycle → dept notes rows", () => {
   it("promotion writes create/edit/delete rows; demotion revokes them", async () => {
-    await setDepartmentMembers(deptId, [{ userId: poc, isMember: true, isPoc: true }]);
+    await setDeptMembers(deptId, prodId, [{ userId: poc, isPoc: true }]);
     const rows = await grantRows(poc, deptId);
     expect(rows.filter(r => !r.revoked).map(r => r.verb).sort()).toEqual(["create", "delete", "edit"]);
 
-    await setDepartmentMembers(deptId, [{ userId: poc, isMember: true, isPoc: false }]);
+    await setDeptMembers(deptId, prodId, [{ userId: poc, isPoc: false }]);
     const after = await grantRows(poc, deptId);
     expect(after.filter(r => !r.revoked)).toHaveLength(0);
 
     // 复任发新行
-    await setDepartmentMembers(deptId, [{ userId: poc, isMember: true, isPoc: true }]);
+    await setDeptMembers(deptId, prodId, [{ userId: poc, isPoc: true }]);
     const again = await grantRows(poc, deptId);
     expect(again.filter(r => !r.revoked).map(r => r.verb).sort()).toEqual(["create", "delete", "edit"]);
   });
@@ -140,9 +138,9 @@ describe("canEditNote created_via filter", () => {
 
     // 另一个 POC（非作者、不在 event）删本部门通道 note：可以
     const poc2 = await newUser();
-    await setDepartmentMembers(deptId, [
-      { userId: poc, isMember: true, isPoc: true },
-      { userId: poc2, isMember: true, isPoc: true },
+    await setDeptMembers(deptId, prodId, [
+      { userId: poc, isPoc: true },
+      { userId: poc2, isPoc: true },
     ]);
     expect(await canEditNote(ctxOf(poc2), prodId, eventId, deptNote, [], "delete")).toBe(true);
     // 导演通道提出的：POC 不可删

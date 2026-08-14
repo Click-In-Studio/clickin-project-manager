@@ -63,8 +63,8 @@ describe("person 归属（role 来源创建）", () => {
 describe("dept 归属（dept 来源创建）", () => {
   it("creator's manage row is swept after leaving the dept", async () => {
     const deptId = (await getPool().query<{ id: string }>(
-      `INSERT INTO production_dept (production_id, name, allowed_cue_types)
-       VALUES ($1, $2, '{SQ}') RETURNING id`,
+      `INSERT INTO production_dept (production_id, name)
+       VALUES ($1, $2) RETURNING id`,
       [prodId, `音响部${shortId()}`],
     )).rows[0].id;
     // §3.5：归属匹配已改读声明表
