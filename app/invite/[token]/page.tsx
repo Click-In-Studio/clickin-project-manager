@@ -22,6 +22,8 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
       productionId={info?.productionId ?? null}
       status={info?.status ?? "not_found"}
       targetedEmail={info?.email ?? null}
+      kind={info?.kind ?? "standard"}
+      unclaimed={info?.unclaimed ?? []}
     />
   );
 }

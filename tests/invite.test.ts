@@ -115,3 +115,45 @@ describe("定向邮件邀请", () => {
     expect(await getInviteInfo("00000000-0000-0000-0000-000000000000")).toBeNull();
   });
 });
+
+describe("定向三态与认领链接（表格分发批）", () => {
+  it("target_user_id 定向：他人接受被拒", async () => {
+    const target = await newUser();
+    const stranger = await newUser();
+    const { token } = await createInvite({ productionId: prodId, createdBy: inviterId, targetUserId: target });
+    expect(await acceptInvite(token, stranger)).toEqual({ ok: false, reason: "target_mismatch" });
+    expect((await acceptInvite(token, target)).ok).toBe(true);
+    for (const id of [target, stranger]) await getPool().query("DELETE FROM app_user WHERE id = $1", [id]);
+  });
+
+  it("claim 链接：普通接受被拒（needs_claim）；按名认领入组+行预配；名额不可重复认领", async () => {
+    const { createClaimInvite, claimInvite } = await import("@/lib/invite-db");
+    const { token } = await createClaimInvite({
+      productionId: prodId, createdBy: inviterId,
+      entries: [
+        { name: "张三", presetRoles: ["导演"], presetDeptIds: [deptId] },
+        { name: "李四", presetRoles: [], presetDeptIds: [] },
+      ],
+    });
+    const a = await newUser();
+    expect(await acceptInvite(token, a)).toEqual({ ok: false, reason: "needs_claim" });
+
+    const info = await getInviteInfo(token);
+    expect(info?.kind).toBe("claim");
+    const zhangsan = info!.unclaimed.find(c => c.name === "张三")!;
+    expect(info!.unclaimed).toHaveLength(2);
+
+    const res = await claimInvite(token, zhangsan.id, a);
+    expect(res).toMatchObject({ ok: true, productionId: prodId });
+    const pm = await getPool().query<{ roles: string[] }>(
+      "SELECT roles FROM production_member WHERE production_id = $1 AND user_id = $2", [prodId, a]);
+    expect(pm.rows[0]?.roles).toContain("导演");
+
+    const b = await newUser();
+    expect(await claimInvite(token, zhangsan.id, b)).toEqual({ ok: false, reason: "claim_taken" });
+    const info2 = await getInviteInfo(token);
+    expect(info2!.unclaimed.map(c => c.name)).toEqual(["李四"]);
+
+    for (const id of [a, b]) await getPool().query("DELETE FROM app_user WHERE id = $1", [id]);
+  });
+});

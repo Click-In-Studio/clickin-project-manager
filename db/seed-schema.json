@@ -1693,6 +1693,62 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false,
+      "default": "'standard'::text"
+    },
+    {
+      "column": "target_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "feishu_open_id",
+      "type": "text",
+      "nullable": true
+    }
+  ],
+  "production_invite_claim": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "token",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "preset_roles",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "preset_dept_ids",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::uuid[]"
+    },
+    {
+      "column": "claimed_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "claimed_at",
+      "type": "timestamp with time zone",
+      "nullable": true
     }
   ],
   "production_member": [

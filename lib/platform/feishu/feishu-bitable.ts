@@ -454,3 +454,92 @@ export function toContactRows(
 
   return { rows, errors };
 }
+
+// ─── 邀请表格（#156：批量邀请替代直接导入）────────────────────────────────────
+// 列约定：姓名(必)、职位(必,多选)、邮箱(选)、人员(选,飞书人员)、部门(选,多选或文本)
+
+export type InviteSheetRow = {
+  name: string;
+  roles: string[];
+  unknownRoles: string[];
+  deptNames: string[];
+  email: string | null;
+  feishuOpenId: string | null;
+};
+
+export type InviteFieldMap = {
+  姓名: FieldInfo;
+  职位: FieldInfo;
+  邮箱: FieldInfo | null;
+  人员: FieldInfo | null;
+  部门: FieldInfo | null;
+};
+
+export type InviteValidationResult =
+  | { ok: true; fieldMap: InviteFieldMap }
+  | { ok: false; errors: string[] };
+
+export function validateInviteSchema(fields: FieldInfo[]): InviteValidationResult {
+  const byName = new Map(fields.map((f) => [f.field_name, f]));
+  const errors: string[] = [];
+
+  const nameField = byName.get("姓名");
+  const rolesField = byName.get("职位");
+  if (!nameField) errors.push('缺少列 "姓名"');
+  if (!rolesField) errors.push('缺少列 "职位"');
+  else if (rolesField.type !== 4) errors.push('"职位" 列类型必须为多选');
+  if (errors.length > 0) return { ok: false, errors };
+
+  const personField = byName.get("人员");
+  return {
+    ok: true,
+    fieldMap: {
+      姓名: nameField!,
+      职位: rolesField!,
+      邮箱: byName.get("邮箱") ?? null,
+      人员: personField?.type === 11 ? personField : null,
+      部门: byName.get("部门") ?? null,
+    },
+  };
+}
+
+function extractDeptNames(field: FieldInfo, value: unknown): string[] {
+  if (field.type === 4) return extractMultiSelectNames(value);
+  return extractFeishuText(value)
+    .split(/[،,、;；\s]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+export function toInviteRows(
+  fieldMap: InviteFieldMap,
+  records: RawRecord[],
+  validRoles: Set<string>,
+): { rows: InviteSheetRow[]; errors: string[] } {
+  const rows: InviteSheetRow[] = [];
+  const errors: string[] = [];
+
+  for (const record of records) {
+    const f = record.fields;
+    const name = extractFeishuText(f[fieldMap.姓名.field_name]).trim();
+    if (!name) continue;
+
+    const rawRoles = extractMultiSelectNames(f[fieldMap.职位.field_name]);
+    const roles = rawRoles.filter((r) => validRoles.has(r));
+    const unknownRoles = rawRoles.filter((r) => !validRoles.has(r));
+    if (unknownRoles.length > 0) {
+      errors.push(`"${name}": 未知职位 ${unknownRoles.map((r) => `"${r}"`).join("、")}`);
+    }
+
+    const emailRaw = fieldMap.邮箱 ? extractFeishuText(f[fieldMap.邮箱.field_name]).trim().toLowerCase() : "";
+    rows.push({
+      name,
+      roles,
+      unknownRoles,
+      deptNames: fieldMap.部门 ? extractDeptNames(fieldMap.部门, f[fieldMap.部门.field_name]) : [],
+      email: emailRaw || null,
+      feishuOpenId: fieldMap.人员 ? extractPersonOpenId(f[fieldMap.人员.field_name]) : null,
+    });
+  }
+  return { rows, errors };
+}
