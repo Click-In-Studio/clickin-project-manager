@@ -184,11 +184,11 @@ export default function AdminSettingsClient({
         {/* Page header */}
         <div style={{ marginBottom: 24 }}>
           <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            Admin · Settings
+            Admin · 项目设置
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>
-              项目管理
+              项目信息
             </h1>
             {isArchived && (
               <span style={{ fontSize: 11, fontWeight: 600, color: "#f97316", background: "#ffedd5", borderRadius: 6, padding: "2px 8px" }}>
@@ -206,12 +206,6 @@ export default function AdminSettingsClient({
 
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
-
-        {/* ── 数据 ── */}
-        <DataCard productionId={productionId} perms={perms} />
-
-        {/* ── 危险区域 ── */}
-        <DangerCard productionId={productionId} productionName={initialMeta.name} isArchived={isArchived} perms={perms} />
 
       </div>
     </div>
@@ -619,7 +613,7 @@ function MemberTagsCard({ productionId, perms }: { productionId: string; perms: 
 // 数据 card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
+export function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -723,7 +717,7 @@ function DataCard({ productionId, perms }: { productionId: string; perms: Settin
 // 危险区域 card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DangerCard({ productionId, productionName, isArchived, perms }: {
+export function DangerCard({ productionId, productionName, isArchived, perms }: {
   productionId: string;
   productionName: string;
   isArchived: boolean;
