@@ -38,14 +38,21 @@ export default function ProductionTasksClient({
   productionId,
   initialTasks,
   initialEventFilter,
+  currentUserId,
 }: {
   productionId: string;
   initialTasks: ProductionTechReqEntry[];
   /** 事件页关联徽章链跳入时的初始筛选（?event=） */
   initialEventFilter?: string;
+  /** "我的"scope 判定（assignee 含本人） */
+  currentUserId?: string;
 }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [updating, setUpdating] = useState(false);
+  // 三 scope（原型）：我的 / 全部 / 按事件。
+  // "按事件"=仅看关联了事件的 Task——当前数据模型 event_id NOT NULL 恒为全集，
+  // 独立 Task 为未来目标（模型放开后此处零改动激活），见列表"独立 Task"分支。
+  const [scope, setScope] = useState<"mine" | "all" | "event">("all");
   const [selectedEvent, setSelectedEvent] = useState<string>(
     initialEventFilter && initialTasks.some(t => t.eventId === initialEventFilter) ? initialEventFilter : "all"
   );
@@ -77,11 +84,22 @@ export default function ProductionTasksClient({
   );
 
   const filtered = tasks.filter(t => {
+    if (scope === "mine" && !(currentUserId && t.assignees.some(a => a.userId === currentUserId))) return false;
+    if (scope === "event" && !t.eventId) return false;  // 独立 Task（未来模型）排除
     if (selectedEvent !== "all" && t.eventId !== selectedEvent) return false;
     if (selectedDept !== "all" && t.departmentId !== selectedDept) return false;
     if (statusFilter === "active") return t.status !== "done";
     return t.status === statusFilter;
   });
+
+  // 摘要统计（原型 taskSummary）
+  const summary = {
+    pending: tasks.filter(t => t.status === "pending" || t.status === "awaiting").length,
+    inProgress: tasks.filter(t => t.status === "in_progress").length,
+    done: tasks.filter(t => t.status === "done").length,
+  };
+  const summaryTotal = tasks.length || 1;
+  const donePct = Math.round((summary.done / summaryTotal) * 100);
 
   const visibleSelected = filtered.find(t => t.id === selected?.id) ?? null;
 
@@ -106,6 +124,44 @@ export default function ProductionTasksClient({
 
   return (
     <>
+      {/* ── 摘要统计条 + scope 切换（原型 taskSummary/taskToolbar）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12,
+        marginBottom: 16,
+      }}>
+        {[
+          [String(summary.pending), "待处理", "含待认领"],
+          [String(summary.inProgress), "进行中", "跨部门推进"],
+          [String(summary.done), "已完成", `共 ${tasks.length} 项`],
+          [`${donePct}%`, "完成度", "按任务状态统计"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12,
+            padding: "12px 16px", display: "flex", alignItems: "baseline", gap: 10,
+          }}>
+            <b style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 24, fontWeight: 500, color: "var(--ink)" }}>{num}</b>
+            <span style={{ minWidth: 0 }}>
+              <b style={{ display: "block", fontSize: 12, color: "var(--ink)" }}>{label}</b>
+              <small style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap" }}>{hint}</small>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+          {([["mine", "我的任务"], ["all", "全部"], ["event", "关联事件"]] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setScope(id)} style={{
+              padding: "6px 14px", fontSize: 12, fontWeight: 600, border: 0, cursor: "pointer",
+              background: scope === id ? "var(--ink)" : "var(--surface)",
+              color: scope === id ? "#fff" : "var(--muted)", transition: "all .1s",
+            }}>{label}</button>
+          ))}
+        </div>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          任务可关联事件协同推进；独立任务能力规划中
+        </span>
+      </div>
+
       {/* ── Mobile: filter chips + accordion ── */}
       <div className={styles.mobileOnly}>
         <div className={styles.mobileTaskFilterBar}>
@@ -355,9 +411,19 @@ export default function ProductionTasksClient({
             ) : (
               <div>
                 <div style={{ marginBottom: 18 }}>
-                  <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
-                    {visibleSelected.eventTitle}{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`}
-                  </p>
+                  {/* 关系行：关联事件直达；独立 Task 分支为未来模型预留（当前 event_id 恒非空） */}
+                  {visibleSelected.eventId ? (
+                    <Link
+                      href={`/production/${productionId}/events/${visibleSelected.eventId}`}
+                      style={{ display: "inline-block", margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage, var(--muted))", textDecoration: "none" }}
+                    >
+                      {visibleSelected.eventTitle}{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`} →
+                    </Link>
+                  ) : (
+                    <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
+                      独立任务{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`}
+                    </p>
+                  )}
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
                     <h2 style={{
                       margin: 0, flex: 1,

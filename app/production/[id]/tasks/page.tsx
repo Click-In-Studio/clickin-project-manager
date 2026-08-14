@@ -50,7 +50,7 @@ export default async function ProductionTasksPage({ params, searchParams }: {
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow="Tasks" title="任务" side="stage" />
-      <ProductionTasksClient productionId={productionId} initialTasks={tasks} initialEventFilter={eventFilter} />
+      <ProductionTasksClient productionId={productionId} initialTasks={tasks} initialEventFilter={eventFilter} currentUserId={session.userId} />
     </div>
   );
 }
