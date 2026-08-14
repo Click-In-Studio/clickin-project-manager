@@ -77,8 +77,42 @@ export default function ProductionReportsClient({
   const relFilters: RelFilter[] = ["all", "mentioned", "participant", "follower", "other"];
   const pubFilters: PubFilter[] = canViewDrafts ? ["all", "published", "draft"] : ["all", "published"];
 
+  const summaryStats = {
+    total: reports.length,
+    published: reports.filter(r => r.publishedAt).length,
+    draft: reports.filter(r => !r.publishedAt).length,
+    mentioned: reports.filter(r => r.isMentioned).length,
+  };
+
   return (
     <>
+      {/* ── 摘要统计（原型 taskSummary 语汇）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(summaryStats.total), "全部报告", "本项目累计"],
+          [String(summaryStats.published), "已发布", "全员可读"],
+          [String(summaryStats.draft), "草稿", canViewDrafts ? "待发布" : "对你不可见"],
+          [String(summaryStats.mentioned), "提到我", "报告中被 @ "],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Panel（原型排版）：内部维持现有分栏 ── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       {/* ── Mobile: filter chips + accordion ── */}
       <div className={styles.mobileOnly}>
         <div className={styles.mobileTaskFilterBar}>
@@ -183,8 +217,8 @@ export default function ProductionReportsClient({
       </div>
 
       {/* ── Desktop: 3-column layout ── */}
-      <div className={styles.desktopOnly}>
-        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 420px", gap: 0, height: "calc(100vh - 220px)", minHeight: 400 }}>
+      <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 420px", gap: 0, height: "100%", minHeight: 0 }}>
           {/* Left: filters */}
           <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
             <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>与我的关系</h3>
@@ -338,6 +372,7 @@ export default function ProductionReportsClient({
           </div>
         </div>
       </div>
+      </section>
     </>
   );
 }

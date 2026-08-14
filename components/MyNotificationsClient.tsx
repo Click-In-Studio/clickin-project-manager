@@ -444,6 +444,32 @@ export default function MyNotificationsClient({ productions = [], productionId }
         </div>
       )}
 
+      {/* ── 摘要统计（原型 notificationSummary；Action Bar 横幅省略——与页头重复）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(items.filter((n) => actMode(n) === "view" && !n.readAt).length), "未读", "仅告知或需要查看"],
+          [String(items.filter((n) => n.actionRequired && !n.actedAt).length), "待确认 / 处理", "关键变化与行动"],
+          [String(items.filter(isDone).length), "已处理", "确认与完成的记录"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Panel（原型排版）：内部维持现有 tab + 分栏 ── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       <div className={styles.tabBar} style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {(["all", "action", "info", "done"] as Tab[]).map((t) => (
           <button key={t} aria-selected={tab === t} onClick={() => handleTabChange(t)}>
@@ -573,8 +599,8 @@ export default function MyNotificationsClient({ productions = [], productionId }
       </div>
 
       {/* ── Desktop: master-detail split ── */}
-      <div className={styles.desktopOnly}>
-        <div className={styles.splitLayout}>
+      <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+        <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
           {/* Left: list */}
           <div className={`${styles.splitPane} ${styles.splitList}`}>
             {loading ? (
@@ -605,6 +631,7 @@ export default function MyNotificationsClient({ productions = [], productionId }
           </div>
         </div>
       </div>
+      </section>
     </div>
   );
 }

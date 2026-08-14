@@ -32,7 +32,9 @@
   --surface:      #fffefa; /* 暖白浮层，panel / toolbar */
   --surface-2:    #f1f1ec; /* 暖白次级，chip / toggle */
   --script:       #2f6670;
+  --script-soft:  #dce9e9;
   --stage:        #a55c32;
+  --stage-soft:   #f2e4d9;
   --danger:       #a94b4b;
   --danger-soft:  #f5dddd;
   --warn:         #8a5c1a;

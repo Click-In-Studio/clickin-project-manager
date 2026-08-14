@@ -41,7 +41,7 @@ const CREATION_NAV = [
 
 const PRODUCTION_NAV = [
   { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts", symbol: "人" },
-  { label: "日程", hint: "围读 · 排练 · 演出", path: "events", symbol: "日" },
+  { label: "事件", hint: "围读 · 排练 · 演出", path: "events", symbol: "事" },
   { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
   { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },
   { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications", symbol: "通" },
@@ -231,12 +231,15 @@ function NavItem({
   warningBadge,
   onClick,
   folded,
+  side,
 }: {
   href: string;
   symbol: string;
   label: string;
   hint: string;
   active: boolean;
+  /** 分侧配色（原型 scriptSymbol/stageSymbol）：创作侧青系、制作侧橙系 */
+  side?: "script" | "stage";
   badge?: number;
   warningBadge?: number;
   onClick?: () => void;
@@ -258,7 +261,13 @@ function NavItem({
           : "hover:bg-white/50"
       }`}
     >
-      <span className="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[7px] border border-[#cbd2cf] text-[11px] leading-none text-[#667676]">
+      <span className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[7px] border text-[11px] leading-none ${
+        side === "script"
+          ? "border-[#bfd4d6] bg-[#edf5f5] text-[#2f6670]"
+          : side === "stage"
+          ? "border-[#e3c9b9] bg-[#f8eee7] text-[#a55c32]"
+          : "border-[#cbd2cf] text-[#667676]"
+      }`}>
         {symbol}
       </span>
       {folded ? (
@@ -291,17 +300,25 @@ function NavItem({
   );
 }
 
-function NavGroup({ label, color }: { label: string; color: "script" | "stage" }) {
+function NavGroup({ label, color, folded }: { label: string; color: "script" | "stage"; folded?: boolean }) {
+  // v3：分组标题为深色填充条（原型 navGroupTitle）——创作侧 ink、制作侧深棕
   return (
-    <div className="flex items-center gap-1.5 px-2.5 pt-5 pb-1.5">
+    <div
+      className={`mt-[15px] mb-1 flex items-center gap-2 rounded-[8px] text-white ${
+        folded ? "min-h-[28px] justify-center px-0" : "min-h-[32px] px-[11px]"
+      } ${color === "script" ? "bg-[#182a2a]" : "bg-[#4d3328]"}`}
+      title={folded ? label : undefined}
+    >
       <span
         className={`w-[7px] h-[7px] rounded-full shrink-0 ${
-          color === "script" ? "bg-[#2f6670]" : "bg-[#a55c32]"
+          color === "script" ? "bg-[#7fc0c7]" : "bg-[#e9a578]"
         }`}
       />
-      <span className="whitespace-nowrap text-[10px] font-bold tracking-[0.12em] uppercase text-[#667676]">
-        {label}
-      </span>
+      {!folded && (
+        <span className="whitespace-nowrap text-[10px] font-bold tracking-[0.12em] uppercase text-[#f4f7f5]">
+          {label}
+        </span>
+      )}
     </div>
   );
 }
@@ -642,6 +659,8 @@ export default function AppShell({ session, productions, children, initialUnread
   const [productionToolbarHasStoredControls, setProductionToolbarHasStoredControls] = useState(false);
   const [scriptProductionSidebarAutoFolded, setScriptProductionSidebarAutoFolded] = useState(false);
   const [scriptProductionSidebarManuallyFolded, setScriptProductionSidebarManuallyFolded] = useState(false);
+  // v3：非剧本类页面的全局侧栏折叠（原型 sidebarControls toggle）
+  const [generalSidebarFolded, setGeneralSidebarFolded] = useState(false);
   const [scriptProductionSidebarOverlayOpen, setScriptProductionSidebarOverlayOpen] = useState(false);
   const [scriptProductionSidebarContentFolded, setScriptProductionSidebarContentFolded] = useState(false);
   const [topOverflowOpen, setTopOverflowOpen] = useState(false);
@@ -919,12 +938,12 @@ export default function AppShell({ session, productions, children, initialUnread
   const productionSidebarOverlayOpen = isScriptPage
     && scriptProductionSidebarAutoFolded
     && scriptProductionSidebarOverlayOpen;
-  const productionSidebarFolded = isScriptPage && (
-    scriptProductionSidebarAutoFolded
-      ? !productionSidebarOverlayOpen
-      : scriptProductionSidebarManuallyFolded
-  );
-  const productionSidebarContentFolded = isScriptPage && scriptProductionSidebarContentFolded;
+  const productionSidebarFolded = isScriptPage
+    ? (scriptProductionSidebarAutoFolded
+        ? !productionSidebarOverlayOpen
+        : scriptProductionSidebarManuallyFolded)
+    : generalSidebarFolded;
+  const productionSidebarContentFolded = isScriptPage ? scriptProductionSidebarContentFolded : generalSidebarFolded;
   useEffect(() => {
     if (!isScriptPage) return;
     const timer = window.setTimeout(
@@ -1192,13 +1211,34 @@ export default function AppShell({ session, productions, children, initialUnread
           className={`panel-scrollbar-area panel-scrollbar hidden lg:flex shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#e8e8e1] border-r border-[var(--line)] transition-[width,padding,margin] duration-150 ${
             isScriptPage
               ? productionSidebarOverlayOpen
-                ? "z-30 -mr-[168px] w-[240px] px-3.5 pt-9 pb-5 shadow-lg"
+                ? "z-30 -mr-[168px] w-[240px] px-3.5 py-5 shadow-lg"
                 : productionSidebarFolded
-                ? "w-[72px] px-2 pt-9 pb-5"
-                : "w-[240px] px-3.5 pt-9 pb-5"
+                ? "w-[72px] px-2 py-5"
+                : "w-[240px] px-3.5 py-5"
+              : generalSidebarFolded
+              ? "w-[72px] px-2 py-5"
               : "w-[240px] px-3.5 py-5"
           }`}
         >
+          {/* v3 sidebarControls：导航标签 + 全局折叠 toggle（原型样式） */}
+          <div className={`mb-2 flex min-h-[30px] items-center text-[9px] font-bold uppercase tracking-[0.12em] text-[#667676] ${
+            productionSidebarContentFolded ? "justify-center px-0" : "justify-between pl-2.5 pr-0.5"
+          }`}>
+            {!productionSidebarContentFolded && <span>导航</span>}
+            <button
+              type="button"
+              onClick={() => (isScriptPage ? toggleScriptProductionSidebar() : setGeneralSidebarFolded(f => !f))}
+              aria-label={productionSidebarFolded ? "展开左侧边栏" : "折叠左侧边栏"}
+              aria-expanded={!productionSidebarFolded}
+              title={productionSidebarFolded ? "展开左侧边栏" : "折叠左侧边栏"}
+              className="grid h-[30px] w-[30px] place-items-center rounded-[8px] text-[#667676] transition-colors hover:bg-white/60 hover:text-[var(--ink)]"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-[18px] w-[18px] fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5] ${productionSidebarFolded ? "-scale-x-100" : ""}`}>
+                <rect x="2.5" y="3" width="15" height="14" rx="2" />
+                <path d="M7 3v14M12.5 7.5 10 10l2.5 2.5" />
+              </svg>
+            </button>
+          </div>
           {isAdminMode ? (
             /* ── Admin sidebar ── */
             <nav className="flex flex-col gap-0.5 flex-1">
@@ -1246,13 +1286,13 @@ export default function AppShell({ session, productions, children, initialUnread
             <nav className="flex flex-col gap-0.5 flex-1">
               {!productionId && (
                 <div className="mt-1 flex flex-col gap-0.5">
-                  <NavItem href="/" symbol="⌂" label="我的工作" hint="今天与我有关" active={isHome} />
-                  <NavItem href="/my/projects" symbol="◈" label="我的项目" hint="管理与新建项目" active={pathname.startsWith("/my/projects")} />
-                  <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} />
-                  <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} />
-                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} />
-                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} />
-                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} />
+                  <NavItem href="/" symbol="⌂" label="我的工作" hint="今天与我有关" active={isHome} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/projects" symbol="◈" label="我的项目" hint="管理与新建项目" active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} folded={productionSidebarContentFolded} />
                 </div>
               )}
 
@@ -1262,7 +1302,7 @@ export default function AppShell({ session, productions, children, initialUnread
                   <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} folded={productionSidebarContentFolded} />
                   <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} folded={productionSidebarContentFolded} />
 
-                  <NavGroup label={productionSidebarContentFolded ? "创作" : "创作侧"} color="script" />
+                  <NavGroup label="创作侧" color="script" folded={productionSidebarContentFolded} />
                   {CREATION_NAV.map((item) => (
                     <NavItem
                       key={item.path}
@@ -1270,13 +1310,14 @@ export default function AppShell({ session, productions, children, initialUnread
                       symbol={item.symbol}
                       label={item.label}
                       hint={item.hint}
+                      side="script"
                       active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
                       warningBadge={item.path === "cues" ? cueWarnings : undefined}
                       folded={productionSidebarContentFolded}
                     />
                   ))}
 
-                  <NavGroup label={productionSidebarContentFolded ? "制作" : "制作侧"} color="stage" />
+                  <NavGroup label="制作侧" color="stage" folded={productionSidebarContentFolded} />
                   {PRODUCTION_NAV.map((item) => (
                     <NavItem
                       key={item.path}
@@ -1284,6 +1325,7 @@ export default function AppShell({ session, productions, children, initialUnread
                       symbol={item.symbol}
                       label={item.label}
                       hint={item.hint}
+                      side="stage"
                       active={isModuleActive(item.path)}
                       badge={
                         item.path === "notifications" ? unreadCount :
@@ -1300,23 +1342,7 @@ export default function AppShell({ session, productions, children, initialUnread
           )}
         </aside>
 
-        {isScriptPage && (
-          <div
-            className={`pointer-events-none absolute left-0 top-0 z-40 hidden h-8 items-start justify-end bg-white/20 pr-2 pt-1 backdrop-blur-[1px] transition-[width] duration-150 lg:flex ${
-              productionSidebarFolded ? "w-[72px]" : "w-[240px]"
-            }`}
-          >
-            <button
-              type="button"
-              aria-label={productionSidebarFolded ? "展开制作栏" : "折叠制作栏"}
-              title={productionSidebarFolded ? "展开制作栏" : "折叠制作栏"}
-              onClick={toggleScriptProductionSidebar}
-              className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full border border-transparent bg-transparent text-[#667676]/60 transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-[var(--line)] hover:bg-[var(--surface)] hover:text-[var(--ink)] hover:shadow-sm"
-            >
-              <ChevronIcon direction={productionSidebarFolded ? "right" : "left"} size={14} />
-            </button>
-          </div>
-        )}
+        {/* 剧本页原浮动折叠按钮已移除——统一走侧栏顶部 sidebarControls（v3） */}
 
         {/* Workspace */}
         <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
