@@ -5,6 +5,7 @@ import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader"
 import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
 import MemberPickerModal from "@/components/MemberPickerModal";
+import TreePickerModal from "@/components/TreePickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberTag } from "@/lib/db";
@@ -49,6 +50,7 @@ type Props = {
   initialMembers: Member[];
   initialDepts: Dept[];
   tags: MemberTag[];
+  roleNames: string[];
   caps: Caps;
   currentUserId: string;
 };
@@ -76,7 +78,7 @@ function Avatar({ m, size }: { m: Member; size: number }) {
 }
 
 export default function AdminOrganizationClient({
-  productionId, productionName, initialMembers, initialDepts, tags, caps, currentUserId,
+  productionId, productionName, initialMembers, initialDepts, tags, roleNames, caps, currentUserId,
 }: Props) {
   const [tab, setTab] = useState<"members" | "depts">("members");
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -380,11 +382,13 @@ export default function AdminOrganizationClient({
                     depts={depts}
                     allMembers={members}
                     tags={tags}
+                    roleNames={roleNames}
                     caps={caps}
                     busy={busy}
                     isSelf={selected.userId === currentUserId}
                     onPatch={patchMember}
                     onRemove={removeMember}
+                    onSaveDeptMembers={saveDeptMembers}
                   />
                 ) : (
                   <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧成员查看详情</p>
@@ -435,20 +439,36 @@ export default function AdminOrganizationClient({
 // ─── 成员详情 ─────────────────────────────────────────────────────────────────
 
 function MemberDetail({
-  member: m, depts, allMembers, tags, caps, busy, isSelf, onPatch, onRemove,
+  member: m, depts, allMembers, tags, roleNames, caps, busy, isSelf, onPatch, onRemove, onSaveDeptMembers,
 }: {
   member: Member;
   depts: Dept[];
   allMembers: Member[];
   tags: MemberTag[];
+  roleNames: string[];
   caps: Caps;
   busy: boolean;
   isSelf: boolean;
   onPatch: (userId: string, body: Record<string, unknown>, apply: (m: Member) => Member) => Promise<void>;
   onRemove: (userId: string) => Promise<void>;
+  onSaveDeptMembers: (dept: Dept, memberUserIds: string[], pocUserIds: string[]) => Promise<void>;
 }) {
   const myDepts = depts.filter(d => d.memberUserIds.includes(m.userId));
   const [supPickerOpen, setSupPickerOpen] = useState(false);
+  const [rolePickerOpen, setRolePickerOpen] = useState(false);
+  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
+
+  async function saveDeptMembership(selectedIds: string[]) {
+    const cur = new Set(myDepts.map(d => d.id));
+    const next = new Set(selectedIds);
+    for (const d of depts) {
+      if (next.has(d.id) && !cur.has(d.id)) {
+        await onSaveDeptMembers(d, [...d.memberUserIds, m.userId], d.pocUserIds);
+      } else if (!next.has(d.id) && cur.has(d.id)) {
+        await onSaveDeptMembers(d, d.memberUserIds.filter(id => id !== m.userId), d.pocUserIds.filter(id => id !== m.userId));
+      }
+    }
+  }
 
   function toggleTag(tag: MemberTag) {
     const has = m.tags.includes(tag.name);
@@ -472,12 +492,35 @@ function MemberDetail({
         </div>
       </div>
 
-      {/* 角色（只读，入口在角色管理） */}
+      {/* 角色 */}
       <div style={{ marginBottom: 16 }}>
-        <p style={SECTION_LABEL}>角色 <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>（在「角色管理」中调整）</span></p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <p style={SECTION_LABEL}>角色</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {m.roles.length ? m.roles.map(r => <Badge key={r} tone="blue">{r}</Badge>) : <span style={{ fontSize: 12, color: "var(--muted)" }}>未指派</span>}
+          {caps.editMember && (
+            <button style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }} disabled={busy} onClick={() => setRolePickerOpen(true)}>
+              编辑
+            </button>
+          )}
         </div>
+        {rolePickerOpen && (
+          <TreePickerModal
+            kicker="组织架构"
+            title={`编辑「${m.name}」的角色`}
+            items={roleNames.map(r => ({
+              id: r, label: r,
+              disabled: r === "制作人",
+              badge: r === "制作人" ? "系统" : undefined,
+            }))}
+            preselected={m.roles}
+            busy={busy}
+            onClose={() => setRolePickerOpen(false)}
+            onConfirm={async (selected) => {
+              await onPatch(m.userId, { roles: selected }, mm => ({ ...mm, roles: selected }));
+              setRolePickerOpen(false);
+            }}
+          />
+        )}
       </div>
 
       {/* 标签 */}
@@ -556,14 +599,36 @@ function MemberDetail({
 
       {/* 部门归属 */}
       <div style={{ marginBottom: 16 }}>
-        <p style={SECTION_LABEL}>部门归属 <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>（在「部门」子页调整）</span></p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <p style={SECTION_LABEL}>部门归属</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {myDepts.length ? myDepts.map(d => (
             <Badge key={d.id} tone={d.kind === "group" ? "amber" : "neutral"}>
               {d.name}{d.pocUserIds.includes(m.userId) ? " ★POC" : ""}
             </Badge>
           )) : <span style={{ fontSize: 12, color: "var(--muted)" }}>未分配</span>}
+          {caps.deptMembers && (
+            <button style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }} disabled={busy} onClick={() => setDeptPickerOpen(true)}>
+              编辑
+            </button>
+          )}
         </div>
+        {deptPickerOpen && (
+          <TreePickerModal
+            kicker="组织架构"
+            title={`编辑「${m.name}」的部门归属`}
+            items={depts.map(d => ({
+              id: d.id, label: d.name, parentId: d.parentId,
+              badge: d.kind === "group" ? "组" : undefined,
+            }))}
+            preselected={myDepts.map(d => d.id)}
+            busy={busy}
+            onClose={() => setDeptPickerOpen(false)}
+            onConfirm={async (selected) => {
+              await saveDeptMembership(selected);
+              setDeptPickerOpen(false);
+            }}
+          />
+        )}
       </div>
 
       {/* 联系方式（可见门裁剪：无权时 SSR 已置 null，此处整段隐藏） */}

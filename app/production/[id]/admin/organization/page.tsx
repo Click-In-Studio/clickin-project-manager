@@ -10,6 +10,7 @@ import {
   getProductionPermissionContext,
   getProductionName,
   listProductionMembersWithRoles,
+  listProductionRolesWithPermissions,
   listMemberTags,
 } from "@/lib/db";
 import { listProductionDepts } from "@/lib/dept-db";
@@ -40,11 +41,12 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
       bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "poc", "create"),
     ]);
 
-  const [name, membersRaw, depts, tags] = await Promise.all([
+  const [name, membersRaw, depts, tags, roles] = await Promise.all([
     getProductionName(id),
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
     listMemberTags(id),
+    listProductionRolesWithPermissions(id),
   ]);
 
   const members = membersRaw.map(m => ({
@@ -76,6 +78,7 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
         pocUserIds: d.pocUserIds,
       }))}
       tags={tags}
+      roleNames={roles.map(r => r.name)}
       caps={{
         viewContact: canViewContact,
         editMember: canEditMember,
