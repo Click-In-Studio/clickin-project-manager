@@ -301,18 +301,18 @@ function NavItem({
   );
 }
 
-function NavGroup({ label, color, folded }: { label: string; color: "script" | "stage"; folded?: boolean }) {
-  // v3：分组标题为深色填充条（原型 navGroupTitle）——创作侧 ink、制作侧深棕
+function NavGroup({ label, color, folded, first }: { label: string; color: "overview" | "script" | "stage"; folded?: boolean; first?: boolean }) {
+  // v3：分组标题为深色填充条（原型 navGroupTitle）——总览 #526461、创作侧 ink、制作侧深棕
   return (
     <div
-      className={`mt-[15px] mb-1 flex items-center gap-2 rounded-[8px] text-white ${
+      className={`${first ? "mt-0" : "mt-[15px]"} mb-1 flex items-center gap-2 rounded-[8px] text-white ${
         folded ? "min-h-[28px] justify-center px-0" : "min-h-[32px] px-[11px]"
-      } ${color === "script" ? "bg-[#182a2a]" : "bg-[#4d3328]"}`}
+      } ${color === "script" ? "bg-[#182a2a]" : color === "overview" ? "bg-[#526461]" : "bg-[#4d3328]"}`}
       title={folded ? label : undefined}
     >
       <span
         className={`w-[7px] h-[7px] rounded-full shrink-0 ${
-          color === "script" ? "bg-[#7fc0c7]" : "bg-[#e9a578]"
+          color === "script" ? "bg-[#7fc0c7]" : color === "overview" ? "bg-[#d8e3df]" : "bg-[#e9a578]"
         }`}
       />
       {!folded && (
@@ -1299,6 +1299,7 @@ export default function AppShell({ session, productions, children, initialUnread
 
               {productionId ? (
                 <>
+                  <NavGroup label="项目总览" color="overview" folded={productionSidebarContentFolded} first />
                   <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} folded={productionSidebarContentFolded} />
                   <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} folded={productionSidebarContentFolded} />
                   <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} folded={productionSidebarContentFolded} />
