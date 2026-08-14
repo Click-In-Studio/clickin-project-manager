@@ -3596,6 +3596,7 @@ export type ProductionMeta = {
   type: string | null;
   typeLabel: string | null;
   language: string | null;
+  watermarkEnabled: boolean;
 };
 
 export async function getProductionMeta(id: string): Promise<ProductionMeta | null> {
@@ -3606,8 +3607,9 @@ export async function getProductionMeta(id: string): Promise<ProductionMeta | nu
     type: string | null;
     type_label: string | null;
     language: string | null;
+    watermark_enabled: boolean;
   }>(
-    "SELECT name, description, avatar_url, type, type_label, language FROM production WHERE id = $1",
+    "SELECT name, description, avatar_url, type, type_label, language, watermark_enabled FROM production WHERE id = $1",
     [id]
   );
   const r = res.rows[0];
@@ -3619,7 +3621,32 @@ export async function getProductionMeta(id: string): Promise<ProductionMeta | nu
     type: r.type,
     typeLabel: r.type_label,
     language: r.language,
+    watermarkEnabled: r.watermark_enabled,
   };
+}
+
+/** 水印渲染信息：开关 + 当前用户 [显示名 邮箱]。production layout SSR 消费。 */
+export async function getWatermarkInfo(
+  productionId: string,
+  userId: string,
+): Promise<{ enabled: boolean; name: string; email: string | null }> {
+  const res = await getPool().query<{ enabled: boolean; name: string | null; email: string | null }>(
+    `SELECT p.watermark_enabled AS enabled,
+            COALESCE(up.display_name, up.name, fu.name) AS name,
+            COALESCE(
+              (SELECT upi.platform_user_id FROM user_platform_identity upi
+               WHERE upi.user_id = $2 AND upi.platform_id = 'email'
+               ORDER BY upi.is_primary DESC LIMIT 1),
+              fu.email
+            ) AS email
+     FROM production p
+     LEFT JOIN user_profile up ON up.user_id = $2
+     LEFT JOIN feishu_user fu ON fu.user_id = $2
+     WHERE p.id = $1`,
+    [productionId, userId],
+  );
+  const r = res.rows[0];
+  return { enabled: r?.enabled ?? false, name: r?.name ?? "", email: r?.email ?? null };
 }
 
 export async function updateProductionName(id: string, name: string): Promise<void> {
@@ -6668,13 +6695,14 @@ export async function applyPatchToDB(
 
 export async function updateProductionMeta(
   id: string,
-  fields: { description?: string; avatarUrl?: string | null; language?: string | null },
+  fields: { description?: string; avatarUrl?: string | null; language?: string | null; watermarkEnabled?: boolean },
 ): Promise<void> {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.description !== undefined) { sets.push(`description = $${vals.push(fields.description)}`); }
   if ("avatarUrl" in fields) { sets.push(`avatar_url = $${vals.push(fields.avatarUrl ?? null)}`); }
   if ("language" in fields) { sets.push(`language = $${vals.push(fields.language ?? null)}`); }
+  if (fields.watermarkEnabled !== undefined) { sets.push(`watermark_enabled = $${vals.push(fields.watermarkEnabled)}`); }
   if (!sets.length) return;
   vals.push(id);
   await getPool().query(`UPDATE production SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);

@@ -60,6 +60,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     language?: string | null;
     type?: string | null;
     typeLabel?: string | null;
+    watermarkEnabled?: boolean;
   };
 
   const jobs: Promise<void>[] = [];
@@ -91,6 +92,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
       return Response.json({ error: "无权修改项目语言" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { language: body.language }));
+  }
+
+  if (typeof body.watermarkEnabled === "boolean") {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "config", "edit"))) {
+      return Response.json({ error: "无权修改水印配置" }, { status: 403 });
+    }
+    jobs.push(updateProductionMeta(id, { watermarkEnabled: body.watermarkEnabled }));
   }
 
   if ("type" in body || "typeLabel" in body) {
