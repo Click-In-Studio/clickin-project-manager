@@ -3625,7 +3625,9 @@ export async function getProductionMeta(id: string): Promise<ProductionMeta | nu
   };
 }
 
-/** 水印渲染信息：开关 + 当前用户 [显示名 邮箱]。production layout SSR 消费。 */
+/** 水印渲染信息：开关 + 当前用户 [显示名 邮箱]。production layout SSR 消费。
+ *  注：productionId 仅取 watermark_enabled；身份两个 LEFT JOIN 直接按 $2 键连，
+ *  与 production 无关联（单行、无 fan-out）。 */
 export async function getWatermarkInfo(
   productionId: string,
   userId: string,
