@@ -18,7 +18,7 @@ import { ROLE_NAMES } from "./permissions";
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
-import { CUE_LIST_TEMPLATES } from "./cue-list-types";
+
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
@@ -1833,9 +1833,12 @@ async function importCueColumnsInTx(
     let list = listByKey.get(key);
     if (!list) {
       const id = `cl${randomUUID().replaceAll("-", "").slice(0, 18)}`;
-      const template = CUE_LIST_TEMPLATES.find((candidate) => (
-        normalizedKey(candidate.key) === key || normalizedKey(candidate.label) === key
-      ))?.key ?? null;
+      // #227：模版类型读 production 级注册表
+      const typeRows = await client.query<{ key: string }>(
+        "SELECT key FROM production_cue_template_type WHERE production_id = $1",
+        [productionId],
+      );
+      const template = typeRows.rows.find((t) => normalizedKey(t.key) === key)?.key ?? null;
       await client.query(
         `INSERT INTO cue_list (id, production_id, name, notes, abbr, template, created_by)
          VALUES ($1, $2, $3, '', NULL, $4, $5)`,
@@ -2493,15 +2496,9 @@ export async function seedProductionRoles(productionId: string): Promise<void> {
     "SELECT type FROM production WHERE id = $1", [productionId],
   )).rows[0]?.type ?? null;
 
-  // Build cue-type map: roleName → cue_type[]
-  const roleCueTypes = new Map<string, string[]>();
-  for (const tpl of CUE_LIST_TEMPLATES) {
-    for (const role of tpl.creatorRoles) {
-      const types = roleCueTypes.get(role) ?? [];
-      types.push(tpl.key);
-      roleCueTypes.set(role, types);
-    }
-  }
+  // #227：cue 模版类型注册表随项目 seed（声明行/建表资格另走 §3.5 声明表）
+  const { seedCueTemplateTypes } = await import("./cue-template-db");
+  await seedCueTemplateTypes(productionId);
 
   // 终局（批G G-2）：角色行从 ROLE_NAMES 结构名单建；权限内容全部经
   // seedRoleFromTemplate 从 grant_template 表灌入（代码模板已退役）

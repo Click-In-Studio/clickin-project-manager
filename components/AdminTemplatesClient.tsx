@@ -5,17 +5,19 @@ import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader"
 import Badge from "@/components/Badge";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
 
 type Row = { deptId: string; template: string; canCreate: boolean; permissions: string[] };
 type Dept = { id: string; name: string; kind: "dept" | "group" };
+type TemplateType = { id: string; key: string; abbrHint: string | null };
 
 type Props = {
   productionId: string;
   productionName: string;
   depts: Dept[];
   initialRows: Row[];
+  initialTypes: TemplateType[];
   canEdit: boolean;
+  canManageTypes: boolean;
 };
 
 const SECTION_LABEL: React.CSSProperties = {
@@ -49,30 +51,55 @@ function RelKeyAdder({ busy, onAdd }: { busy: boolean; onAdd: (rel: string) => v
   );
 }
 
-export default function AdminTemplatesClient({ productionId, productionName, depts, initialRows, canEdit }: Props) {
+export default function AdminTemplatesClient({ productionId, productionName, depts, initialRows, initialTypes, canEdit, canManageTypes }: Props) {
   const [rows, setRows] = useState<Row[]>(initialRows);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>(CUE_LIST_TEMPLATES[0]?.key ?? "");
+  const [types, setTypes] = useState<TemplateType[]>(initialTypes);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>(initialTypes[0]?.key ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [addDeptId, setAddDeptId] = useState("");
+  const [creatingType, setCreatingType] = useState(false);
+  const [newTypeKey, setNewTypeKey] = useState("");
+  const [newTypeAbbr, setNewTypeAbbr] = useState("");
 
   const deptMap = useMemo(() => new Map(depts.map(d => [d.id, d])), [depts]);
-  const knownKeys = CUE_LIST_TEMPLATES.map(t => t.key);
-  const customTemplates = [...new Set(rows.map(r => r.template).filter(t => !knownKeys.includes(t)))];
+  const typeKeys = types.map(t => t.key);
+  // 注册表之外仍被声明行引用的孤儿类型（类型被删/改名的残留）也要能看到
+  const orphanTemplates = [...new Set(rows.map(r => r.template).filter(t => !typeKeys.includes(t)))];
   const templateRows = rows.filter(r => r.template === selectedTemplate);
   const candidates = depts.filter(d => !templateRows.some(r => r.deptId === d.id));
 
-  async function api(init: RequestInit): Promise<boolean> {
+  async function api(init: RequestInit, path = "/cue-templates"): Promise<Record<string, unknown> | null> {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/cue-templates`, {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}${path}`, {
         headers: { "Content-Type": "application/json" }, ...init,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) { setError(data.error ?? "操作失败"); return false; }
-      return true;
-    } catch { setError("网络错误"); return false; }
+      if (!res.ok || data.error) { setError(data.error ?? "操作失败"); return null; }
+      return data;
+    } catch { setError("网络错误"); return null; }
     finally { setBusy(false); }
+  }
+
+  async function createType() {
+    const key = newTypeKey.trim();
+    if (!key) return;
+    const data = await api({ method: "POST", body: JSON.stringify({ key, abbrHint: newTypeAbbr.trim() || null }) }, "/cue-template-types");
+    if (data?.type) {
+      const t = data.type as TemplateType;
+      setTypes(prev => [...prev, { id: t.id, key: t.key, abbrHint: t.abbrHint }]);
+      setSelectedTemplate(t.key);
+      setNewTypeKey(""); setNewTypeAbbr(""); setCreatingType(false);
+    }
+  }
+
+  async function deleteType(t: TemplateType) {
+    if (!confirm(`确认删除模版类型「${t.key}」？（有存量表或声明行时将被拒绝）`)) return;
+    if (await api({ method: "DELETE", body: JSON.stringify({ typeId: t.id }) }, "/cue-template-types")) {
+      setTypes(prev => prev.filter(x => x.id !== t.id));
+      setSelectedTemplate(prev => (prev === t.key ? "" : prev));
+    }
   }
 
   async function upsert(row: Row) {
@@ -102,7 +129,7 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
         background: "var(--line)", marginBottom: 18,
       }}>
         {[
-          [String(knownKeys.length + customTemplates.length), "Cue 表模版", "类型总数"],
+          [String(types.length + orphanTemplates.length), "Cue 表模版", "类型总数"],
           [String(rows.length), "声明行", "部门 × 模版"],
           [String(rows.filter(r => r.canCreate).length), "可建声明", "can_create 行"],
         ].map(([num, label, hint]) => (
@@ -128,7 +155,39 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
             <div className={`${styles.splitPane} ${styles.splitList}`}>
               <div style={{ paddingRight: 16 }}>
                 <p style={{ ...SECTION_LABEL, marginTop: 2 }}>Cue 表模版</p>
-                {[...knownKeys, ...customTemplates].map(key => {
+                {types.map(t => {
+                  const active = selectedTemplate === t.key;
+                  const n = rows.filter(r => r.template === t.key).length;
+                  return (
+                    <div key={t.id} style={{ display: "flex", alignItems: "center" }}>
+                      <button
+                        onClick={() => setSelectedTemplate(t.key)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0,
+                          padding: "8px 10px", borderRadius: 9, border: "none", cursor: "pointer", textAlign: "left",
+                          background: active ? "var(--ink)" : "transparent",
+                        }}
+                      >
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: active ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t.key}
+                        </span>
+                        {t.abbrHint && <span style={{ fontSize: 9, color: active ? "rgba(255,255,255,.6)" : "var(--muted)" }}>{t.abbrHint}</span>}
+                        <span style={{ fontSize: 10, color: active ? "rgba(255,255,255,.6)" : "var(--muted)" }}>{n} 行</span>
+                      </button>
+                      {canManageTypes && (
+                        <button
+                          disabled={busy}
+                          onClick={() => deleteType(t)}
+                          title="删除类型"
+                          style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 12, padding: "2px 6px" }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {orphanTemplates.map(key => {
                   const active = selectedTemplate === key;
                   const n = rows.filter(r => r.template === key).length;
                   return (
@@ -142,11 +201,32 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
                       }}
                     >
                       <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: active ? "#fff" : "var(--ink)" }}>{key}</span>
-                      {!knownKeys.includes(key) && <Badge tone="amber">自定义</Badge>}
+                      <Badge tone="red">未注册</Badge>
                       <span style={{ fontSize: 10, color: active ? "rgba(255,255,255,.6)" : "var(--muted)" }}>{n} 行</span>
                     </button>
                   );
                 })}
+                {canManageTypes && !creatingType && (
+                  <button style={{ ...SECONDARY_BTN, width: "100%", marginTop: 10 }} onClick={() => setCreatingType(true)}>
+                    ＋ 新建模版类型
+                  </button>
+                )}
+                {creatingType && (
+                  <div style={{ marginTop: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 10, background: "var(--paper)", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <input
+                      value={newTypeKey} onChange={e => setNewTypeKey(e.target.value)} placeholder="类型名（如 服装）" autoFocus
+                      style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}
+                    />
+                    <input
+                      value={newTypeAbbr} onChange={e => setNewTypeAbbr(e.target.value)} placeholder="缩写提示（如 WQ，可空）"
+                      style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}
+                    />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={PRIMARY_BTN} disabled={busy || !newTypeKey.trim()} onClick={createType}>创建</button>
+                      <button style={SECONDARY_BTN} onClick={() => setCreatingType(false)}>取消</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
