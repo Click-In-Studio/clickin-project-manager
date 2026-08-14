@@ -365,12 +365,13 @@ function CalendarView({
 // ─── List view: EventCard ────────────────────────────────────────────────────
 
 function EventCard({
-  event, productionId, role, canViewFull, onFollow, onUnfollow,
+  event, productionId, role, canViewFull, taskCount = 0, onFollow, onUnfollow,
 }: {
   event: ProductionEvent;
   productionId: string;
   role: "participant" | "follower" | null;
   canViewFull: boolean;
+  taskCount?: number;
   onFollow: (eventId: string) => void;
   onUnfollow: (eventId: string) => void;
 }) {
@@ -414,6 +415,25 @@ function EventCard({
           {event.startTime && <span>{fmtDateTimeSmart(event.startTime)}</span>}
           {event.location && <span>{event.location}</span>}
         </div>
+        {/* 关联徽章链（原型 inlineActions）：跨模块直达，无需返回 */}
+        {(canViewFull || taskCount > 0) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+            {canViewFull && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--stage, var(--ink))" }}>
+                执行流程 →
+              </span>
+            )}
+            {taskCount > 0 && (
+              <span
+                role="link"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = `${BASE_PATH}/production/${productionId}/tasks?event=${event.id}`; }}
+                style={{ fontSize: 11, fontWeight: 700, color: "var(--stage, var(--ink))", cursor: "pointer" }}
+              >
+                {taskCount} 个任务 →
+              </span>
+            )}
+          </div>
+        )}
       </Link>
       <div style={{ position: "absolute", right: 12, bottom: 12 }}>
         {role === "participant" ? (
@@ -627,15 +647,17 @@ type Props = {
   myParticipations: { eventId: string; role: "participant" | "follower" }[];
   currentUserId: string;
   departments: EventDepartment[];
+  taskCounts?: Record<string, number>;
 };
 
 export default function EventsClient({
   productionId, productionName, initialEvents, canCreate, canViewFull,
-  myParticipations, departments,
+  myParticipations, departments, taskCounts = {},
 }: Props) {
-  const [events,     setEvents]     = useState(initialEvents);
-  const [showCreate, setShowCreate] = useState(false);
-  const [view,       setView]       = useState<"list" | "calendar">("list");
+  const [events,      setEvents]      = useState(initialEvents);
+  const [showCreate,  setShowCreate]  = useState(false);
+  const [view,        setView]        = useState<"list" | "calendar">("list");
+  const [justCreated, setJustCreated] = useState<ProductionEvent | null>(null);
   const [roles,      setRoles]      = useState<Map<string, "participant" | "follower">>(() =>
     new Map(myParticipations.map(p => [p.eventId, p.role]))
   );
@@ -652,6 +674,7 @@ export default function EventsClient({
       return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
     }));
     setShowCreate(false);
+    setJustCreated(ev);
   }
 
   function handleFollow(eventId: string) {
@@ -701,6 +724,53 @@ export default function EventsClient({
         />
       ) : (
         <>
+          {/* 三步流程说明条（原型 flowExplainer）：只对可创建者展示 */}
+          {canCreate && (
+            <section style={{
+              display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+              background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12,
+              padding: "12px 18px", marginBottom: 18,
+            }}>
+              {[["1", "定义事件", "类型 · 时间 · 地点 · 人员"],
+                ["2", "确认任务", "负责人 · 截止 · 通知对象"],
+                ["3", "发布与追踪", "站内通知 · 确认 · 执行"]].map(([n, t, s], i) => (
+                <div key={n} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {i > 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>→</span>}
+                  <span style={{
+                    width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
+                    background: "var(--stage, var(--ink))", color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0,
+                  }}>{n}</span>
+                  <span><b style={{ fontSize: 12, color: "var(--ink)" }}>{t}</b>
+                  <small style={{ display: "block", fontSize: 10, color: "var(--muted)" }}>{s}</small></span>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {/* 发布成功 banner */}
+          {justCreated && (
+            <section role="status" style={{
+              display: "flex", alignItems: "center", gap: 12,
+              background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12,
+              padding: "12px 18px", marginBottom: 18,
+            }}>
+              <span style={{ color: "#16a34a", fontWeight: 700 }}>✓</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <b style={{ fontSize: 13, color: "var(--ink)" }}>「{justCreated.title}」已创建</b>
+                <small style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>
+                  可继续补充日程条目、任务与参与人员。
+                </small>
+              </div>
+              <Link
+                href={`/production/${productionId}/events/${justCreated.id}`}
+                style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap" }}
+              >
+                进入事件 →
+              </Link>
+              <button onClick={() => setJustCreated(null)} style={{ border: 0, background: "none", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>×</button>
+            </section>
+          )}
+
           {events.length === 0 && (
             <p style={{ textAlign: "center", fontSize: 13, color: "var(--muted)", padding: "48px 0" }}>暂无事件</p>
           )}
@@ -713,6 +783,7 @@ export default function EventsClient({
                   <EventCard
                     key={ev.id} event={ev} productionId={productionId}
                     role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
+                    taskCount={taskCounts[ev.id] ?? 0}
                     onFollow={handleFollow} onUnfollow={handleUnfollow}
                   />
                 ))}
@@ -728,6 +799,7 @@ export default function EventsClient({
                   <EventCard
                     key={ev.id} event={ev} productionId={productionId}
                     role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
+                    taskCount={taskCounts[ev.id] ?? 0}
                     onFollow={handleFollow} onUnfollow={handleUnfollow}
                   />
                 ))}

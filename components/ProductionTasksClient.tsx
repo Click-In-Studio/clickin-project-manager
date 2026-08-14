@@ -37,13 +37,18 @@ const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;
 export default function ProductionTasksClient({
   productionId,
   initialTasks,
+  initialEventFilter,
 }: {
   productionId: string;
   initialTasks: ProductionTechReqEntry[];
+  /** 事件页关联徽章链跳入时的初始筛选（?event=） */
+  initialEventFilter?: string;
 }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [updating, setUpdating] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<string>("all");
+  const [selectedEvent, setSelectedEvent] = useState<string>(
+    initialEventFilter && initialTasks.some(t => t.eventId === initialEventFilter) ? initialEventFilter : "all"
+  );
   const [selectedDept, setSelectedDept] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [selected, setSelected] = useState<ProductionTechReqEntry | null>(

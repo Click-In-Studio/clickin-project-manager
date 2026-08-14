@@ -8,7 +8,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listProductionEvents, listUserEventParticipations, listEventDepartments } from "@/lib/event-db";
+import { listProductionEvents, listUserEventParticipations, listEventDepartments, listEventTaskCounts } from "@/lib/event-db";
 import EventsClient from "@/components/EventsClient";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -27,11 +27,12 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), id, "event", "*", "call_sheet", "view");
   const canCreate = (await canAccessNode(access.permCtx, id, "event", "*", "*", "create")).allowed;
 
-  const [name, allEvents, myParticipations, departments] = await Promise.all([
+  const [name, allEvents, myParticipations, departments, taskCounts] = await Promise.all([
     getProductionName(id),
     listProductionEvents(id),
     listUserEventParticipations(session.userId, id),
     listEventDepartments(id),
+    listEventTaskCounts(id),
   ]);
   if (!name) notFound();
 
@@ -55,6 +56,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
         myParticipations={myParticipations}
         currentUserId={session.userId}
         departments={canCreate ? departments : []}
+        taskCounts={taskCounts}
       />
       <PageActivationGate productionId={id} scope="events" />
     </>

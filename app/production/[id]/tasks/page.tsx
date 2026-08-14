@@ -11,8 +11,12 @@ import ProductionTasksClient from "@/components/ProductionTasksClient";
 import PageHeader from "@/components/PageHeader";
 
 
-export default async function ProductionTasksPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProductionTasksPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ event?: string }>;
+}) {
   const { id: productionId } = await params;
+  const { event: eventFilter } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -46,7 +50,7 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow="Tasks" title="任务" side="stage" />
-      <ProductionTasksClient productionId={productionId} initialTasks={tasks} />
+      <ProductionTasksClient productionId={productionId} initialTasks={tasks} initialEventFilter={eventFilter} />
     </div>
   );
 }
