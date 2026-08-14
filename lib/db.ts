@@ -2751,7 +2751,8 @@ export async function syncGlobalNotificationPreference(
   );
 }
 
-/** 用户主邮箱：user_platform_identity primary email → feishu_user.email fallback。 */
+/** 用户邮箱：email identity 任一（primary 优先——未设 primary 也要尽量给出邮箱，
+ *  水印/溯源场景宁可有）→ feishu_user.email fallback。 */
 export async function getUserPrimaryEmail(userId: string): Promise<string | null> {
   const res = await getPool().query<{ email: string | null }>(
     `SELECT COALESCE(
