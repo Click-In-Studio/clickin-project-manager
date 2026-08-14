@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
+import MemberPickerModal from "@/components/MemberPickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberTag } from "@/lib/db";
@@ -599,11 +600,10 @@ function DeptDetail({
 }) {
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(dept.name);
-  const [addUserId, setAddUserId] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const memberMap = new Map(members.map(m => [m.userId, m]));
   const blocked = descendants(dept.id);
-  const candidates = members.filter(m => !dept.memberUserIds.includes(m.userId));
 
   return (
     <div>
@@ -714,27 +714,25 @@ function DeptDetail({
             </div>
           );
         })}
-        {caps.deptMembers && candidates.length > 0 && (
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <select
-              value={addUserId}
-              onChange={e => setAddUserId(e.target.value)}
-              style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 160 }}
-            >
-              <option value="">选择成员…</option>
-              {candidates.map(m => <option key={m.userId} value={m.userId}>{m.name || m.userId.slice(0, 8)}</option>)}
-            </select>
-            <button
-              style={PRIMARY_BTN}
-              disabled={busy || !addUserId}
-              onClick={async () => {
-                await onSaveMembers(dept, [...dept.memberUserIds, addUserId], dept.pocUserIds);
-                setAddUserId("");
-              }}
-            >
-              加入部门
-            </button>
-          </div>
+        {caps.deptMembers && (
+          <button style={{ ...SECONDARY_BTN, marginTop: 10 }} onClick={() => setPickerOpen(true)}>
+            ＋ 添加成员
+          </button>
+        )}
+        {pickerOpen && (
+          <MemberPickerModal
+            kicker="组织架构"
+            title={`添加成员到「${dept.name}」`}
+            members={members}
+            depts={depts}
+            excludeUserIds={dept.memberUserIds}
+            busy={busy}
+            onClose={() => setPickerOpen(false)}
+            onConfirm={async (userIds) => {
+              await onSaveMembers(dept, [...dept.memberUserIds, ...userIds], dept.pocUserIds);
+              setPickerOpen(false);
+            }}
+          />
         )}
       </div>
 

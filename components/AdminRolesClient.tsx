@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
+import MemberPickerModal, { type PickerDept } from "@/components/MemberPickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -15,6 +16,9 @@ type Member = {
   avatarUrl: string | null;
   photoUrl: string | null;
   roles: string[];
+  tags: string[];
+  email: string | null;
+  phone: string | null;
   status: "active" | "suspended";
 };
 
@@ -25,6 +29,7 @@ type Props = {
   productionName: string;
   initialRoles: Role[];
   members: Member[];
+  depts: PickerDept[];
   owner: { userId: string | null; name: string | null };
   caps: Caps;
 };
@@ -54,7 +59,7 @@ function Avatar({ m, size }: { m: Member; size: number }) {
 }
 
 export default function AdminRolesClient({
-  productionId, productionName, initialRoles, members: initialMembers, owner, caps,
+  productionId, productionName, initialRoles, members: initialMembers, depts, owner, caps,
 }: Props) {
   const [roles, setRoles] = useState<Role[]>(initialRoles);
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -131,6 +136,14 @@ export default function AdminRolesClient({
     const nextRoles = has ? m.roles.filter(r => r !== role.name) : [...m.roles, role.name];
     if (await api(`/members`, { method: "PATCH", body: JSON.stringify({ userId: m.userId, roles: nextRoles }) })) {
       setMembers(prev => prev.map(x => (x.userId === m.userId ? { ...x, roles: nextRoles } : x)));
+    }
+  }
+
+  async function assignMembers(role: Role, userIds: string[]) {
+    for (const userId of userIds) {
+      const m = members.find(x => x.userId === userId);
+      if (!m || m.roles.includes(role.name)) continue;
+      await toggleMember(role, m);
     }
   }
 
@@ -235,12 +248,14 @@ export default function AdminRolesClient({
                   role={selectedRole}
                   isProducer={selectedRole.name === PRODUCER}
                   members={members}
+                  depts={depts}
                   roleMembers={roleMembers}
                   caps={caps}
                   busy={busy}
                   onRename={renameRole}
                   onDelete={deleteRole}
                   onToggleMember={toggleMember}
+                  onAssignMembers={assignMembers}
                 />
               ) : (
                 <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧角色查看详情</p>
@@ -296,22 +311,23 @@ function OwnerDetail({ owner, members }: { owner: { userId: string | null; name:
 }
 
 function RoleDetail({
-  role, isProducer, members, roleMembers, caps, busy, onRename, onDelete, onToggleMember,
+  role, isProducer, members, depts, roleMembers, caps, busy, onRename, onDelete, onToggleMember, onAssignMembers,
 }: {
   role: Role;
   isProducer: boolean;
   members: Member[];
+  depts: PickerDept[];
   roleMembers: Member[];
   caps: Caps;
   busy: boolean;
   onRename: (role: Role, name: string) => Promise<void>;
   onDelete: (role: Role) => Promise<void>;
   onToggleMember: (role: Role, m: Member) => Promise<void>;
+  onAssignMembers: (role: Role, userIds: string[]) => Promise<void>;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(role.name);
-  const [addUserId, setAddUserId] = useState("");
-  const candidates = members.filter(m => !m.roles.includes(role.name));
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <div>
@@ -365,28 +381,26 @@ function RoleDetail({
       ))}
       {roleMembers.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>暂无成员</p>}
 
-      {!isProducer && caps.assign && candidates.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <select
-            value={addUserId}
-            onChange={e => setAddUserId(e.target.value)}
-            style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 160 }}
-          >
-            <option value="">选择成员…</option>
-            {candidates.map(m => <option key={m.userId} value={m.userId}>{m.name || m.userId.slice(0, 8)}</option>)}
-          </select>
-          <button
-            style={PRIMARY_BTN}
-            disabled={busy || !addUserId}
-            onClick={async () => {
-              const m = members.find(x => x.userId === addUserId);
-              if (m) await onToggleMember(role, m);
-              setAddUserId("");
-            }}
-          >
-            指派角色
-          </button>
-        </div>
+      {!isProducer && caps.assign && (
+        <button style={{ ...SECONDARY_BTN, marginTop: 12 }} onClick={() => setPickerOpen(true)}>
+          ＋ 指派角色
+        </button>
+      )}
+      {pickerOpen && (
+        <MemberPickerModal
+          kicker="组织架构"
+          title={`指派「${role.name}」`}
+          confirmLabel="指派角色"
+          members={members}
+          depts={depts}
+          excludeUserIds={roleMembers.map(m => m.userId)}
+          busy={busy}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={async (userIds) => {
+            await onAssignMembers(role, userIds);
+            setPickerOpen(false);
+          }}
+        />
       )}
 
       {!isProducer && caps.remove && (
