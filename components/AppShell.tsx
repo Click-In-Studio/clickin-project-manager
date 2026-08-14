@@ -51,22 +51,52 @@ const PRODUCTION_NAV = [
   { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },
 ] as const;
 
-const ADMIN_NAV_GROUPS = [
+const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: string; path: string }[] }[] = [
   {
+    title: null,
     items: [
-      { label: "部门管理", hint: "部门 · 用户组", path: "departments" },
-      { label: "角色管理", hint: "职称 · 权限配置", path: "roles" },
-      { label: "人事权限", hint: "成员 · 个人授权", path: "permissions" },
+      { label: "项目概览", hint: "基础数据 · 一览", path: "" },
     ],
   },
   {
+    title: "项目发布",
     items: [
-      { label: "项目管理", hint: "基本信息 · 集成", path: "settings" },
       { label: "里程碑", hint: "阶段 · 节点", path: "milestones" },
-      { label: "通知公告", hint: "公告 · 群消息", path: "announcements" },
+      { label: "公告管理", hint: "发布 · 置顶 · 已读", path: "announcements" },
     ],
   },
-] as const;
+  {
+    title: "组织架构",
+    items: [
+      { label: "成员与部门", hint: "邀请 · 归属 · POC", path: "organization" },
+      { label: "角色管理", hint: "职称 · 系统角色", path: "roles" },
+    ],
+  },
+  {
+    title: "安全设置",
+    items: [
+      { label: "权限中心", hint: "部门 · 角色 · 人事", path: "permissions" },
+      { label: "权限模版", hint: "Cue 表模版", path: "templates" },
+      { label: "策略中心", hint: "Policy 配置", path: "policies" },
+    ],
+  },
+  {
+    title: "合规",
+    items: [
+      { label: "权限审计", hint: "授权流水 · 撤销", path: "audit" },
+      { label: "数字资产审查", hint: "越隐私管理", path: "asset-review" },
+    ],
+  },
+  {
+    title: "项目设置",
+    items: [
+      { label: "项目信息", hint: "名称 · 简介 · 外观", path: "settings" },
+      { label: "管理员设置", hint: "制作人权限 · 人事", path: "producer" },
+      { label: "数据迁移", hint: "剧本 · 构作 · 导入", path: "migration" },
+      { label: "危险操作", hint: "归档 · 转让 · 删除", path: "danger" },
+    ],
+  },
+];
 
 const OVERVIEW_NAV = [
   { label: "公告", hint: "演出公告与风险提醒", path: "/my/announcements", symbol: "⊟" },
@@ -984,7 +1014,8 @@ export default function AppShell({ session, productions, children, initialUnread
   }
 
   function adminHref(path: string) {
-    return productionId ? `/production/${productionId}/admin/${path}` : "#";
+    if (!productionId) return "#";
+    return path ? `/production/${productionId}/admin/${path}` : `/production/${productionId}/admin`;
   }
 
   function isModuleActive(path: string | readonly string[]) {
@@ -1250,9 +1281,11 @@ export default function AppShell({ session, productions, children, initialUnread
 
               {ADMIN_NAV_GROUPS.map((group, gi) => (
                 <div key={gi} className="flex flex-col gap-0.5">
-                  {gi > 0 && (
+                  {group.title ? (
+                    <p className="px-2.5 pt-3 pb-1 text-[9px] font-bold tracking-[0.14em] uppercase text-[#667676]">{group.title}</p>
+                  ) : gi > 0 ? (
                     <div className="mx-2.5 my-2 border-t border-[var(--line)]" />
-                  )}
+                  ) : null}
                   {group.items.map((item) => (
                     <NavItem
                       key={item.path}
@@ -1506,7 +1539,11 @@ export default function AppShell({ session, productions, children, initialUnread
           </p>
           {ADMIN_NAV_GROUPS.map((group, gi) => (
             <div key={gi} className="flex flex-col gap-0.5">
-              {gi > 0 && <div className="mx-2.5 my-2 border-t border-[var(--line)]" />}
+              {group.title ? (
+                <p className="px-2.5 pt-3 pb-1 text-[9px] font-bold tracking-[0.14em] uppercase text-[#667676]">{group.title}</p>
+              ) : gi > 0 ? (
+                <div className="mx-2.5 my-2 border-t border-[var(--line)]" />
+              ) : null}
               {group.items.map((item) => (
                 <NavItem
                   key={item.path}

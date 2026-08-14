@@ -3670,6 +3670,53 @@ export async function getProductionMeta(id: string): Promise<ProductionMeta | nu
   };
 }
 
+/** 管理后台·项目概览的基础统计（只读聚合，门=管理面资格）。 */
+export async function getAdminOverviewStats(productionId: string): Promise<{
+  memberCount: number;
+  suspendedCount: number;
+  deptCount: number;
+  groupCount: number;
+  roleCount: number;
+  activeGrantCount: number;
+  milestoneCount: number;
+  announcementCount: number;
+  createdAt: string;
+  archivedAt: string | null;
+}> {
+  const res = await getPool().query<{
+    member_count: string; suspended_count: string; dept_count: string; group_count: string;
+    role_count: string; active_grant_count: string; milestone_count: string; announcement_count: string;
+    created_at: Date; archived_at: Date | null;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM production_member pm WHERE pm.production_id = p.id) AS member_count,
+       (SELECT COUNT(*) FROM production_member pm WHERE pm.production_id = p.id AND pm.status = 'suspended') AS suspended_count,
+       (SELECT COUNT(*) FROM production_dept d WHERE d.production_id = p.id AND d.kind = 'dept') AS dept_count,
+       (SELECT COUNT(*) FROM production_dept d WHERE d.production_id = p.id AND d.kind = 'group') AS group_count,
+       (SELECT COUNT(*) FROM production_role r WHERE r.production_id = p.id AND NOT r.is_deprecated) AS role_count,
+       (SELECT COUNT(*) FROM production_member_grant g WHERE g.production_id = p.id
+          AND NOT g.is_revoked AND (g.expires_at IS NULL OR g.expires_at > NOW())) AS active_grant_count,
+       (SELECT COUNT(*) FROM milestone m WHERE m.production_id = p.id) AS milestone_count,
+       (SELECT COUNT(*) FROM production_announcement a WHERE a.production_id = p.id) AS announcement_count,
+       p.created_at, p.archived_at
+     FROM production p WHERE p.id = $1`,
+    [productionId],
+  );
+  const r = res.rows[0];
+  return {
+    memberCount: Number(r?.member_count ?? 0),
+    suspendedCount: Number(r?.suspended_count ?? 0),
+    deptCount: Number(r?.dept_count ?? 0),
+    groupCount: Number(r?.group_count ?? 0),
+    roleCount: Number(r?.role_count ?? 0),
+    activeGrantCount: Number(r?.active_grant_count ?? 0),
+    milestoneCount: Number(r?.milestone_count ?? 0),
+    announcementCount: Number(r?.announcement_count ?? 0),
+    createdAt: r?.created_at?.toISOString() ?? "",
+    archivedAt: r?.archived_at?.toISOString() ?? null,
+  };
+}
+
 /** 水印渲染信息：开关 + 当前用户 [显示名 邮箱]。production layout SSR 消费。
  *  注：productionId 仅取 watermark_enabled；身份两个 LEFT JOIN 直接按 $2 键连，
  *  与 production 无关联（单行、无 fan-out）。 */
