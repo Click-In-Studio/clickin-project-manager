@@ -2,16 +2,19 @@
 
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/MemberPickerModal";
 
 type Props = {
   productionId: string;
   currentOwnerName: string | null;
-  members: { userId: string; name: string }[];
+  members: PickerMember[];
+  depts: PickerDept[];
   ownerId: string | null;
 };
 
-export default function TransferOwnerCard({ productionId, currentOwnerName, members, ownerId }: Props) {
+export default function TransferOwnerCard({ productionId, currentOwnerName, members, depts, ownerId }: Props) {
   const [newOwnerId, setNewOwnerId] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -48,16 +51,36 @@ export default function TransferOwnerCard({ productionId, currentOwnerName, memb
         当前 Owner：{currentOwnerName ?? "（未设置）"}。转让后对方获得全部权限（代码旁路），你将失去 Owner 身份，此操作只能由新 Owner 逆转。
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <select
-          value={newOwnerId}
-          onChange={e => { setNewOwnerId(e.target.value); setConfirmText(""); }}
-          style={{ padding: "8px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 160 }}
+        {/* 伪 select：点开人员 picker（单选+二次确认） */}
+        <button
+          onClick={() => setPickerOpen(true)}
+          style={{
+            padding: "8px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8,
+            background: "var(--paper)", color: "var(--ink)", minWidth: 160, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+            fontWeight: newOwnerId ? 700 : 400,
+          }}
         >
-          <option value="">选择新 Owner…</option>
-          {members.filter(m => m.userId !== ownerId).map(m => (
-            <option key={m.userId} value={m.userId}>{m.name || m.userId.slice(0, 8)}</option>
-          ))}
-        </select>
+          <span>{target ? target.name : "选择新 Owner…"}</span>
+          <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
+        </button>
+        {pickerOpen && (
+          <MemberPickerModal
+            kicker="危险操作"
+            title="选择新 Owner"
+            singleConfirm
+            confirmLabel="选定"
+            members={members}
+            depts={depts}
+            excludeUserIds={ownerId ? [ownerId] : []}
+            onClose={() => setPickerOpen(false)}
+            onConfirm={([userId]) => {
+              setNewOwnerId(userId ?? "");
+              setConfirmText("");
+              setPickerOpen(false);
+            }}
+          />
+        )}
         {target && (
           <input
             value={confirmText}

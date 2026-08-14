@@ -13,6 +13,7 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import PageHeader from "@/components/PageHeader";
+import { listProductionDepts } from "@/lib/dept-db";
 import TransferOwnerCard from "@/components/TransferOwnerCard";
 import AdminDangerSection from "@/components/AdminDangerSection";
 
@@ -33,7 +34,8 @@ export default async function DangerPage({ params }: { params: Promise<{ id: str
   const canTransfer = permCtx.isAdmin || permCtx.isOwner;
   if (!canArchive && !canDelete && !canTransfer) redirect(`/production/${id}/admin`);
 
-  const [name, ownerRes, members] = await Promise.all([
+  const canViewContact = bypass || await hasGrant(permCtx.userId, id, "member", "*", "contact", "view");
+  const [name, ownerRes, members, depts] = await Promise.all([
     getProductionName(id),
     getPool().query<{ owner_id: string | null; owner_name: string | null }>(
       `SELECT p.owner_id, up.name AS owner_name
@@ -42,6 +44,7 @@ export default async function DangerPage({ params }: { params: Promise<{ id: str
       [id],
     ),
     canTransfer ? listProductionMembersWithRoles(id) : Promise.resolve([]),
+    canTransfer ? listProductionDepts(id) : Promise.resolve([]),
   ]);
 
   return (
@@ -52,7 +55,14 @@ export default async function DangerPage({ params }: { params: Promise<{ id: str
           productionId={id}
           currentOwnerName={ownerRes.rows[0]?.owner_name ?? null}
           ownerId={ownerRes.rows[0]?.owner_id ?? null}
-          members={members.map(m => ({ userId: m.userId, name: m.name }))}
+          members={members.map(m => ({
+            userId: m.userId, name: m.name, avatarUrl: m.avatarUrl, photoUrl: m.photoUrl,
+            roles: m.roles, tags: m.tags,
+            email: canViewContact ? m.email : null,
+            phone: canViewContact ? m.phone : null,
+            status: m.status,
+          }))}
+          depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind, memberUserIds: d.memberUserIds }))}
         />
       )}
       <AdminDangerSection

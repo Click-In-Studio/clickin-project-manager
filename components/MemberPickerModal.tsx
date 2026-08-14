@@ -37,6 +37,8 @@ type Props = {
   busy?: boolean;
   /** 单选模式：点击成员即确认（无 checkbox 与底部确认按钮） */
   single?: boolean;
+  /** 单选但需二次确认：radio 互斥选中，仍走底部确认按钮（危险操作用） */
+  singleConfirm?: boolean;
   onConfirm: (userIds: string[]) => void | Promise<void>;
   onClose: () => void;
 };
@@ -61,7 +63,7 @@ function Avatar({ m }: { m: PickerMember }) {
 }
 
 export default function MemberPickerModal({
-  kicker, title, members, depts, excludeUserIds = [], confirmLabel = "确认添加", busy, single, onConfirm, onClose,
+  kicker, title, members, depts, excludeUserIds = [], confirmLabel = "确认添加", busy, single, singleConfirm, onConfirm, onClose,
 }: Props) {
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState("");
@@ -119,6 +121,10 @@ export default function MemberPickerModal({
 
   function toggle(userId: string) {
     setPicked(prev => {
+      if (singleConfirm) {
+        // radio 互斥：重复点击取消选中
+        return prev.has(userId) ? new Set<string>() : new Set([userId]);
+      }
       const s = new Set(prev);
       if (s.has(userId)) s.delete(userId); else s.add(userId);
       return s;
@@ -154,7 +160,7 @@ export default function MemberPickerModal({
       >
         {!single && (
           <span style={{
-            width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+            width: 15, height: 15, borderRadius: singleConfirm ? 999 : 4, flexShrink: 0,
             border: "1.5px solid " + (on ? "var(--script)" : "var(--line)"),
             background: on ? "var(--script)" : "var(--paper)",
             display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -240,7 +246,7 @@ export default function MemberPickerModal({
       {/* footer */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
         <span style={{ flex: 1, fontSize: 11, color: !single && picked.size ? "var(--ink)" : "var(--muted)", fontWeight: 700 }}>
-          {single ? "点击成员即选定" : `已选 ${picked.size} 人`}
+          {single ? "点击成员即选定" : singleConfirm ? (picked.size ? "已选 1 人" : "请选择 1 人") : `已选 ${picked.size} 人`}
         </span>
         <button style={SECONDARY_BTN} onClick={onClose}>取消</button>
         {!single && (
