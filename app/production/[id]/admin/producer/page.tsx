@@ -11,9 +11,9 @@ import {
   getProductionName,
   listProductionRolesWithPermissions,
   listProductionMembersWithRoles,
-  getAllPermissionOverrides,
 } from "@/lib/db";
 import { getPermissionVocabulary } from "@/lib/perm-center-db";
+import { listGovernanceGrants } from "@/lib/grant-audit-db";
 import AdminProducerClient from "@/components/AdminProducerClient";
 
 export default async function ProducerPage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,25 +33,15 @@ export default async function ProducerPage({ params }: { params: Promise<{ id: s
   const canView = isRoot || await hasGrant(permCtx.userId, id, "producer", "*", "*", "view");
   if (!canView) redirect(`/production/${id}/admin`);
 
-  const [name, roles, members, overrides, vocabulary] = await Promise.all([
+  const [name, roles, members, governance, vocabulary] = await Promise.all([
     getProductionName(id),
     listProductionRolesWithPermissions(id),
     listProductionMembersWithRoles(id),
-    getAllPermissionOverrides(id),
+    isRoot ? listGovernanceGrants(id) : Promise.resolve([]),
     getPermissionVocabulary(id),
   ]);
 
   const producerRole = roles.find(r => r.name === "制作人") ?? null;
-
-  // 治理域 override（node:production/ 与 node:producer/ 前缀）
-  const governance: { userId: string; permission: string; granted: boolean }[] = [];
-  for (const [userId, perms] of Object.entries(overrides)) {
-    for (const [permission, granted] of Object.entries(perms)) {
-      if (permission.startsWith("node:production/") || permission.startsWith("node:producer/")) {
-        governance.push({ userId, permission, granted });
-      }
-    }
-  }
 
   return (
     <AdminProducerClient

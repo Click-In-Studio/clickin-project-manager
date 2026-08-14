@@ -116,3 +116,68 @@ export async function revokeGrantById(productionId: string, grantId: string): Pr
   );
   return (res.rowCount ?? 0) > 0;
 }
+
+// ─── 治理域授权（管理员设置页）：production/producer 域 grant 行直发 ─────────
+// SENSITIVE 节点的 override allow 只是审批入口资格（六步链第 5 步不自确认），
+// 真正的门票是 grant 行——owner 在管理面直发（grant_source='direct'）。
+
+export type GovernanceGrantRow = {
+  id: string;
+  userId: string;
+  userName: string;
+  resourceType: string;
+  resourceSub: string;
+  permissionLevel: string;
+  createdAt: string;
+};
+
+export async function listGovernanceGrants(productionId: string): Promise<GovernanceGrantRow[]> {
+  const { rows } = await getPool().query<{
+    id: string; user_id: string; user_name: string | null;
+    resource_type: string; resource_sub: string; permission_level: string; created_at: Date;
+  }>(
+    `SELECT g.id, g.user_id, up.name AS user_name,
+            g.resource_type, g.resource_sub, g.permission_level, g.created_at
+     FROM production_member_grant g
+     LEFT JOIN user_profile up ON up.user_id = g.user_id
+     WHERE g.production_id = $1 AND g.resource_type IN ('production', 'producer')
+       AND NOT g.is_revoked AND (g.expires_at IS NULL OR g.expires_at > NOW())
+     ORDER BY up.name NULLS LAST, g.created_at`,
+    [productionId],
+  );
+  return rows.map(r => ({
+    id: r.id,
+    userId: r.user_id,
+    userName: r.user_name ?? "",
+    resourceType: r.resource_type,
+    resourceSub: r.resource_sub,
+    permissionLevel: r.permission_level,
+    createdAt: r.created_at.toISOString(),
+  }));
+}
+
+/** owner 直发 grant 行。同键活跃行已存在则幂等返回该行 id。 */
+export async function createDirectGrant(
+  productionId: string,
+  userId: string,
+  node: { resourceType: string; resourceId: string; resourceSub: string; verb: string },
+  confirmedBy: string,
+): Promise<string> {
+  const { rows } = await getPool().query<{ id: string }>(
+    `INSERT INTO production_member_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+     VALUES ($1, $2, $3, $4, $5, $6, 'direct', $7)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [productionId, userId, node.resourceType, node.resourceId, node.resourceSub, node.verb, confirmedBy],
+  );
+  if (rows[0]) return rows[0].id;
+  const existing = await getPool().query<{ id: string }>(
+    `SELECT id FROM production_member_grant
+     WHERE production_id = $1 AND user_id = $2 AND resource_type = $3
+       AND resource_id = $4 AND resource_sub = $5 AND permission_level = $6
+       AND NOT is_revoked LIMIT 1`,
+    [productionId, userId, node.resourceType, node.resourceId, node.resourceSub, node.verb],
+  );
+  return existing.rows[0]?.id ?? "";
+}

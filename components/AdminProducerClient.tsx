@@ -6,15 +6,16 @@ import Badge from "@/components/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKeyPicker";
 import { BASE_PATH } from "@/lib/base-path";
 
+import type { GovernanceGrantRow } from "@/lib/grant-audit-db";
+
 type Member = { userId: string; name: string; roles: string[]; status: "active" | "suspended" };
-type GovRow = { userId: string; permission: string; granted: boolean };
 
 type Props = {
   productionId: string;
   productionName: string;
   producerRole: { id: string; permissions: string[] } | null;
   members: Member[];
-  initialGovernance: GovRow[];
+  initialGovernance: GovernanceGrantRow[];
   vocabulary: Vocabulary;
   isRoot: boolean;
 };
@@ -36,7 +37,7 @@ export default function AdminProducerClient({
 }: Props) {
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [rolePerms, setRolePerms] = useState<string[]>(producerRole?.permissions ?? []);
-  const [governance, setGovernance] = useState<GovRow[]>(initialGovernance);
+  const [governance, setGovernance] = useState<GovernanceGrantRow[]>(initialGovernance);
   const [addUserId, setAddUserId] = useState("");
   const [govUserId, setGovUserId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -79,12 +80,28 @@ export default function AdminProducerClient({
     if (data) setRolePerms((data.permissions as string[]) ?? keys);
   }
 
-  async function setGov(userId: string, permission: string, granted: boolean | null) {
-    if (await api(`/permissions`, { method: "PATCH", body: JSON.stringify({ userId, permission, granted }) })) {
-      setGovernance(prev => {
-        const rest = prev.filter(g => !(g.userId === userId && g.permission === permission));
-        return granted === null ? rest : [...rest, { userId, permission, granted }];
-      });
+  async function grantGov(userId: string, key: string) {
+    const data = await api(`/governance-grants`, { method: "POST", body: JSON.stringify({ userId, key }) });
+    if (data?.grantId) {
+      const parsed = /^node:([a-z_]+)\/[^/@]+(?:\/([^@]+))?@(view|create|edit|delete)$/.exec(key);
+      setGovernance(prev => [
+        ...prev.filter(g => g.id !== data.grantId),
+        {
+          id: data.grantId as string,
+          userId,
+          userName: memberName(userId),
+          resourceType: parsed?.[1] ?? "production",
+          resourceSub: parsed?.[2] ?? "*",
+          permissionLevel: parsed?.[3] ?? "view",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    }
+  }
+
+  async function revokeGov(grantId: string) {
+    if (await api(`/governance-grants`, { method: "DELETE", body: JSON.stringify({ grantId }) })) {
+      setGovernance(prev => prev.filter(g => g.id !== grantId));
     }
   }
 
@@ -184,20 +201,21 @@ export default function AdminProducerClient({
       <div style={{ ...CARD, borderColor: "var(--stage)" }}>
         <p style={SECTION_LABEL}>治理域授权（{governance.length}）</p>
         <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
-          production / producer 为保留类型（通配不穿透），其中 SENSITIVE/ROOT 键（授权账本、资产审查、集成配置等）只能在此显式发放（仅限所有者）。
+          production / producer 为保留类型（通配不穿透）。此处直发 grant 行（direct，立即生效）——权限审计、数字资产审查等管理面入口的门票只能在此发放（仅限所有者），收回=手动撤销并入审计流水。
         </p>
         {governance.map(g => (
-          <div key={`${g.userId}:${g.permission}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", minWidth: 80 }}>{memberName(g.userId)}</span>
-            <code style={{ flex: 1, fontSize: 11, color: g.granted ? "var(--success)" : "var(--danger)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {g.permission}
+          <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", minWidth: 80 }}>{g.userName || memberName(g.userId)}</span>
+            <code style={{ flex: 1, fontSize: 11, color: "var(--success)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {`node:${g.resourceType}/*${g.resourceSub !== "*" ? `/${g.resourceSub}` : ""}@${g.permissionLevel}`}
             </code>
-            <Badge tone={g.granted ? "green" : "red"}>{g.granted ? "allow" : "deny"}</Badge>
+            <Badge tone="green">生效中</Badge>
             {isRoot && (
               <button
                 disabled={busy}
-                onClick={() => setGov(g.userId, g.permission, null)}
+                onClick={() => revokeGov(g.id)}
                 style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 13, padding: "2px 6px" }}
+                title="收回（manual 撤销）"
               >
                 ×
               </button>
@@ -218,7 +236,7 @@ export default function AdminProducerClient({
               <PermissionKeyPicker
                           productionId={productionId}
                 vocabulary={govVocabulary} busy={busy}
-                onAdd={key => setGov(govUserId, key, true)}
+                onAdd={key => grantGov(govUserId, key)}
               />
             )}
           </div>
