@@ -3,7 +3,11 @@ import PageHeader from "@/components/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionName } from "@/lib/db";
+import { toActor, listGrantedResourceIds } from "@/lib/grant-check";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
+import { listProductionEvents } from "@/lib/event-db";
+import PlanningClient from "@/components/PlanningClient";
 
 export const metadata: Metadata = { title: "计划与日程" };
 
@@ -13,16 +17,35 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const name = await getProductionName(id);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!(await hasEventDomainView(toActor(session, access.permCtx), id)))
+    redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
+
+  const [name, allEvents, milestones] = await Promise.all([
+    getProductionName(id),
+    listProductionEvents(id),
+    listMilestones(id),
+  ]);
   if (!name) notFound();
 
+  // draft 可见性与事件页同门（publication@view 行）
+  const VISIBLE_STATUSES = new Set(["published", "completed"]);
+  const draftVis = (access.permCtx.isAdmin || access.permCtx.isOwner)
+    ? { wildcard: true, ids: [] as string[] }
+    : await listGrantedResourceIds(session.userId, id, "event", "publication", "view");
+  const events = draftVis.wildcard
+    ? allEvents
+    : allEvents.filter(e => VISIBLE_STATUSES.has(e.status) || draftVis.ids.includes(e.id));
+
   return (
-    <div className="px-8 py-10">
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow={`Planning · ${name}`} title="计划与日程" side="stage" />
-      <div className="rounded-2xl border border-[#dfe5e2] bg-white px-8 py-10 text-center max-w-sm">
-        <p className="text-sm font-medium text-[#182a2a] mb-1">功能即将上线</p>
-        <p className="text-xs text-[#667676]">日历 · 甘特 · 执行表 正在开发中</p>
-      </div>
+      <PlanningClient
+        productionId={id}
+        events={events}
+        milestones={milestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }))}
+      />
     </div>
   );
 }
