@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import PageHeader from "@/components/PageHeader";
 import Link from "next/link";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
@@ -435,12 +436,7 @@ export default function MyNotificationsClient({ productions = [], productionId }
   return (
     <div className={productionId ? undefined : styles.workspace} style={productionId ? { padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" } : undefined}>
       {productionId ? (
-        <div style={{ marginBottom: 20 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4, margin: "0 0 4px" }}>
-            Notifications
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>通知提醒</h1>
-        </div>
+        <PageHeader eyebrow="Notifications" title="通知提醒" side="stage" />
       ) : (
         <div className={styles.pageHeader}>
           <p className={styles.eyebrow}>Platform · 通知</p>

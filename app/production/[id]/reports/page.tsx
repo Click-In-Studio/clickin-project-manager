@@ -7,6 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionReports } from "@/lib/event-db";
 import { isReportViewer } from "@/lib/event-permissions";
+import PageHeader from "@/components/PageHeader";
 import ProductionReportsClient from "@/components/ProductionReportsClient";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -31,10 +32,7 @@ export default async function ProductionReportsPage({ params }: { params: Promis
   return (
     <>
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <div>
-          <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)" }}>Reports</p>
-          <h1 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>报告</h1>
-        </div>
+        <PageHeader eyebrow="Reports" title="报告" side="stage" />
         <ProductionReportsClient
           productionId={productionId}
           reports={reports}

@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import type React from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import type { ProductionEvent, EventDepartment } from "@/lib/event-db";
 import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso } from "@/lib/tz";
 
@@ -662,40 +663,34 @@ export default function EventsClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Page header */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            Schedule
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>日程</h1>
-        </div>
+      {/* Page header（v3 统一页头） */}
+      <PageHeader
+        eyebrow="Schedule"
+        title="日程"
+        side="stage"
+        actions={
+          <>
+            <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+              {(["list", "calendar"] as const).map(v => (
+                <button key={v} onClick={() => setView(v)} style={{
+                  padding: "5px 12px", fontSize: 12, fontWeight: 600, border: 0, cursor: "pointer",
+                  transition: "all .1s",
+                  background: view === v ? "var(--ink)" : "white",
+                  color:      view === v ? "#fff"        : "var(--muted)",
+                }}>
+                  {v === "list" ? "列表" : "日历"}
+                </button>
+              ))}
+            </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* View toggle */}
-          <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
-            {(["list", "calendar"] as const).map(v => (
-              <button key={v} onClick={() => setView(v)} style={{
-                padding: "5px 12px", fontSize: 12, fontWeight: 600, border: 0, cursor: "pointer",
-                transition: "all .1s",
-                background: view === v ? "var(--ink)" : "white",
-                color:      view === v ? "#fff"        : "var(--muted)",
-              }}>
-                {v === "list" ? "列表" : "日历"}
+            {canCreate && (
+              <button onClick={() => setShowCreate(true)} style={PRIMARY_BTN}>
+                ＋ 新建事件
               </button>
-            ))}
-          </div>
-
-          {canCreate && (
-            <button
-              onClick={() => setShowCreate(true)}
-              style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
-            >
-              + 新建事件
-            </button>
-          )}
-        </div>
-      </div>
+            )}
+          </>
+        }
+      />
 
       {/* Content */}
       {view === "calendar" ? (

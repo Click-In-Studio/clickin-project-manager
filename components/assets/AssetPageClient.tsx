@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import type { UploadResult } from "./AssetUploadPanel";
@@ -135,19 +136,17 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Page header */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            Assets
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>数字资产</h1>
-        </div>
-        <button onClick={() => setShowUploadModal(true)}
-          style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}>
-          + 上传新 Asset
-        </button>
-      </div>
+      {/* Page header（v3 统一页头） */}
+      <PageHeader
+        eyebrow="Assets"
+        title="数字资产"
+        side="script"
+        actions={
+          <button onClick={() => setShowUploadModal(true)} style={PRIMARY_BTN}>
+            ＋ 上传新 Asset
+          </button>
+        }
+      />
 
       {/* Production global mount */}
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>

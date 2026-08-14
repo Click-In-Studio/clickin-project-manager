@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import { match as pinyinMatch } from "pinyin-pro";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
@@ -779,23 +780,17 @@ export default function ContactsClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Page header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            People
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", marginBottom: 20 }}>人员</h1>
-        </div>
-        {canManage && (
-          <button
-            onClick={() => setShowAddPanel(true)}
-            style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
-          >
-            + 添加人员
+      {/* Page header（v3 统一页头） */}
+      <PageHeader
+        eyebrow="People"
+        title="人员"
+        side="stage"
+        actions={canManage && (
+          <button onClick={() => setShowAddPanel(true)} style={PRIMARY_BTN}>
+            ＋ 添加人员
           </button>
         )}
-      </div>
+      />
 
       {canImport && (
         <ImportPanel productionId={productionId} onImported={setMembers} />
