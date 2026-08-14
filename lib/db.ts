@@ -2695,13 +2695,6 @@ export async function batchGetFeishuOpenIds(userIds: string[]): Promise<Map<stri
   return new Map(res.rows.map(r => [r.user_id, r.open_id]));
 }
 
-export async function listAllUsers(): Promise<UserInfo[]> {
-  const res = await getPool().query<{ user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
-    "SELECT user_id, open_id, name, avatar_url, is_super_admin FROM feishu_user ORDER BY name",
-  );
-  return res.rows.map(r => ({ userId: r.user_id, openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
-}
-
 // ─── user_profile ──────────────────────────────────────────────────────────────
 
 export async function upsertUserProfile(
@@ -3334,14 +3327,18 @@ export async function unarchiveProduction(id: string): Promise<void> {
   );
 }
 
-export async function listProductionMembers(productionId: string): Promise<UserInfo[]> {
-  const res = await getPool().query<{ user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean }>(
-    `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin
-     FROM production_member pm JOIN feishu_user fu ON fu.user_id = pm.user_id
-     WHERE pm.production_id = $1 ORDER BY fu.name`,
+export async function listProductionMembers(
+  productionId: string,
+): Promise<{ userId: string; name: string; avatarUrl: string | null; isAdmin: boolean }[]> {
+  const res = await getPool().query<{ user_id: string; name: string | null; avatar_url: string | null; is_super_admin: boolean | null }>(
+    `SELECT pm.user_id, up.name, up.avatar_url, fu.is_super_admin
+     FROM production_member pm
+     LEFT JOIN user_profile up ON up.user_id = pm.user_id
+     LEFT JOIN feishu_user fu ON fu.user_id = pm.user_id
+     WHERE pm.production_id = $1 ORDER BY up.name NULLS LAST`,
     [productionId],
   );
-  return res.rows.map(r => ({ userId: r.user_id, openId: r.open_id, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin }));
+  return res.rows.map(r => ({ userId: r.user_id, name: r.name ?? "", avatarUrl: r.avatar_url, isAdmin: r.is_super_admin ?? false }));
 }
 
 export async function addProductionMember(productionId: string, userId: string): Promise<void> {
@@ -3370,21 +3367,13 @@ export async function removeProductionMember(productionId: string, userId: strin
   }
 }
 
-export async function searchFeishuUsers(query: string): Promise<{
-  userId: string; openId: string; name: string; avatarUrl: string | null;
-  email: string | null; phone: string | null; hint: string | null;
-}[]> {
-  const res = await getPool().query<{
-    user_id: string; open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
-  }>(
-    `SELECT user_id, open_id, name, avatar_url, email, phone FROM feishu_user
-     WHERE name ILIKE $1
-     ORDER BY name LIMIT 20`,
-    [`%${query}%`],
-  );
-  return res.rows.map((r) => ({
+type UserSearchRow = {
+  user_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
+};
+
+function rowToUserSearchResult(r: UserSearchRow) {
+  return {
     userId: r.user_id,
-    openId: r.open_id,
     name: r.name,
     avatarUrl: r.avatar_url,
     email: r.email,
@@ -3392,29 +3381,44 @@ export async function searchFeishuUsers(query: string): Promise<{
     hint: r.email ?? (r.phone && r.phone.length >= 4
       ? r.phone.replace(/(\d{3})\d+(\d{4})/, "$1****$2")
       : r.phone),
-  }));
+  };
 }
 
-export async function listAllFeishuUsers(): Promise<{
-  userId: string; openId: string; name: string; avatarUrl: string | null;
+// 全体已知用户目录（含纯邮箱用户）：档案层为正主，email/phone 以
+// identity/档案优先、飞书同步值回落。
+const USER_DIRECTORY_SQL = `
+  SELECT up.user_id, up.name, up.avatar_url,
+         COALESCE(
+           (SELECT upi.platform_user_id FROM user_platform_identity upi
+            WHERE upi.user_id = up.user_id AND upi.platform_id = 'email'
+            ORDER BY upi.is_primary DESC LIMIT 1),
+           fu.email
+         ) AS email,
+         COALESCE(up.phone, fu.phone) AS phone
+  FROM user_profile up
+  LEFT JOIN feishu_user fu ON fu.user_id = up.user_id`;
+
+export async function searchUsersByName(query: string): Promise<{
+  userId: string; name: string; avatarUrl: string | null;
   email: string | null; phone: string | null; hint: string | null;
 }[]> {
-  const res = await getPool().query<{
-    user_id: string; open_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
-  }>(
-    `SELECT user_id, open_id, name, avatar_url, email, phone FROM feishu_user ORDER BY name`,
+  const res = await getPool().query<UserSearchRow>(
+    `${USER_DIRECTORY_SQL}
+     WHERE up.name ILIKE $1
+     ORDER BY up.name LIMIT 20`,
+    [`%${query}%`],
   );
-  return res.rows.map((r) => ({
-    userId: r.user_id,
-    openId: r.open_id,
-    name: r.name,
-    avatarUrl: r.avatar_url,
-    email: r.email,
-    phone: r.phone,
-    hint: r.email ?? (r.phone && r.phone.length >= 4
-      ? r.phone.replace(/(\d{3})\d+(\d{4})/, "$1****$2")
-      : r.phone),
-  }));
+  return res.rows.map(rowToUserSearchResult);
+}
+
+export async function listAllUsersWithContact(): Promise<{
+  userId: string; name: string; avatarUrl: string | null;
+  email: string | null; phone: string | null; hint: string | null;
+}[]> {
+  const res = await getPool().query<UserSearchRow>(
+    `${USER_DIRECTORY_SQL} ORDER BY up.name`,
+  );
+  return res.rows.map(rowToUserSearchResult);
 }
 
 export async function setMemberRoles(
@@ -3466,14 +3470,22 @@ export async function updateUserContact(
   email: string | null,
   phone: string | null,
 ): Promise<void> {
-  await getPool().query(
-    `UPDATE feishu_user
-     SET email = COALESCE($2, email),
-         phone = COALESCE($3, phone),
-         updated_at = now()
-     WHERE user_id = $1`,
-    [userId, email, phone],
-  );
+  const pool = getPool();
+  if (phone) {
+    await pool.query(
+      `UPDATE user_profile SET phone = $2, updated_at = now() WHERE user_id = $1`,
+      [userId, phone],
+    );
+  }
+  if (email) {
+    // 联系邮箱落 identity 层（非登录、非 primary）；已被任何用户占用则跳过
+    await pool.query(
+      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+       VALUES ($1, 'email', $2, false, false)
+       ON CONFLICT (platform_id, platform_user_id) DO NOTHING`,
+      [userId, email],
+    );
+  }
 }
 
 export async function setMemberPhoto(
@@ -3672,7 +3684,6 @@ export async function updateProductionName(id: string, name: string): Promise<vo
 
 export type MemberWithRoles = {
   userId: string;
-  openId: string;
   name: string;
   avatarUrl: string | null;
   isAdmin: boolean;
@@ -3688,13 +3699,18 @@ export type MemberWithRoles = {
 
 export async function listProductionMembersWithRoles(productionId: string): Promise<MemberWithRoles[]> {
   const res = await getPool().query<{
-    user_id: string; open_id: string; name: string; avatar_url: string | null; is_super_admin: boolean;
+    user_id: string; name: string | null; avatar_url: string | null; is_super_admin: boolean | null;
     email: string | null; phone: string | null; roles: string[]; tags: string[]; photo_url: string | null;
     supervisor_id: string | null; supervisor_name: string | null; status: string;
   }>(
-    `SELECT fu.user_id, fu.open_id, fu.name, fu.avatar_url, fu.is_super_admin,
-            COALESCE(upi.platform_user_id, fu.email) AS email,
-            fu.phone, pm.roles, pm.photo_url,
+    `SELECT pm.user_id, up.name, up.avatar_url, fu.is_super_admin,
+            COALESCE(
+              (SELECT upi.platform_user_id FROM user_platform_identity upi
+               WHERE upi.user_id = pm.user_id AND upi.platform_id = 'email'
+               ORDER BY upi.is_primary DESC LIMIT 1),
+              fu.email
+            ) AS email,
+            COALESCE(up.phone, fu.phone) AS phone, pm.roles, pm.photo_url,
             pm.supervisor_id, sup.name AS supervisor_name,
             COALESCE(pm.status, 'active') AS status,
             COALESCE(
@@ -3708,22 +3724,18 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
               '{}'::text[]
             ) AS tags
      FROM production_member pm
-     JOIN feishu_user fu ON fu.user_id = pm.user_id
-     LEFT JOIN user_platform_identity upi
-       ON upi.user_id = pm.user_id
-      AND upi.platform_id = 'email'
-      AND upi.is_primary = true
-     LEFT JOIN feishu_user sup ON sup.user_id = pm.supervisor_id
+     LEFT JOIN user_profile up ON up.user_id = pm.user_id
+     LEFT JOIN feishu_user fu ON fu.user_id = pm.user_id
+     LEFT JOIN user_profile sup ON sup.user_id = pm.supervisor_id
      WHERE pm.production_id = $1
-     ORDER BY fu.name`,
+     ORDER BY up.name NULLS LAST`,
     [productionId],
   );
   return res.rows.map((r) => ({
     userId: r.user_id,
-    openId: r.open_id,
-    name: r.name,
+    name: r.name ?? "",
     avatarUrl: r.avatar_url,
-    isAdmin: r.is_super_admin,
+    isAdmin: r.is_super_admin ?? false,
     email: r.email,
     phone: r.phone,
     roles: r.roles,
@@ -3898,7 +3910,7 @@ export async function getBossUserIds(productionId: string): Promise<string[]> {
 
 export async function findUserByName(name: string): Promise<{ userId: string } | null> {
   const res = await getPool().query<{ user_id: string }>(
-    "SELECT user_id FROM feishu_user WHERE name = $1 LIMIT 1",
+    "SELECT user_id FROM user_profile WHERE name = $1 LIMIT 1",
     [name],
   );
   return res.rows[0] ? { userId: res.rows[0].user_id } : null;
@@ -4371,9 +4383,9 @@ function rowToCueList(r: CueListRow): CueList {
 export async function listCueLists(productionId: string): Promise<CueList[]> {
   const res = await getPool().query<CueListRow>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
-            cl.created_by, fu.name AS created_by_name, cl.created_at
+            cl.created_by, COALESCE(up.name, '') AS created_by_name, cl.created_at
      FROM cue_list cl
-     JOIN feishu_user fu ON fu.user_id = cl.created_by
+     LEFT JOIN user_profile up ON up.user_id = cl.created_by
      WHERE cl.production_id = $1
      ORDER BY cl.created_at`,
     [productionId]
@@ -4394,7 +4406,7 @@ export async function listCueListsWithAccess(
 ): Promise<(CueList & { canEdit: boolean; canManage: boolean })[]> {
   const res = await getPool().query<CueListRow & { can_edit: boolean; can_manage: boolean }>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
-            cl.created_by, fu.name AS created_by_name, cl.created_at,
+            cl.created_by, COALESCE(up.name, '') AS created_by_name, cl.created_at,
             EXISTS (
               SELECT 1 FROM production_member_grant rg
               WHERE rg.production_id = cl.production_id
@@ -4418,7 +4430,7 @@ export async function listCueListsWithAccess(
                 AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
             ) AS can_manage
      FROM cue_list cl
-     JOIN feishu_user fu ON fu.user_id = cl.created_by
+     LEFT JOIN user_profile up ON up.user_id = cl.created_by
      WHERE cl.production_id = $1
        AND ($3 OR EXISTS (
               SELECT 1 FROM production_member_grant rg
@@ -4477,9 +4489,9 @@ export async function createCueList(data: {
 export async function getCueList(id: string, productionId: string): Promise<CueList | null> {
   const res = await getPool().query<CueListRow>(
     `SELECT cl.id, cl.production_id, cl.name, cl.notes, cl.abbr, cl.template,
-            cl.created_by, fu.name AS created_by_name, cl.created_at
+            cl.created_by, COALESCE(up.name, '') AS created_by_name, cl.created_at
      FROM cue_list cl
-     JOIN feishu_user fu ON fu.user_id = cl.created_by
+     LEFT JOIN user_profile up ON up.user_id = cl.created_by
      WHERE cl.id = $1 AND cl.production_id = $2`,
     [id, productionId]
   );
@@ -6998,13 +7010,13 @@ export async function getAnnouncementReadStatus(
     avatar_url: string | null;
     read_at: Date | null;
   }>(
-    `SELECT fu.user_id, fu.name, fu.avatar_url, ar.read_at
+    `SELECT pm.user_id, COALESCE(up.name, '') AS name, up.avatar_url, ar.read_at
      FROM production_member pm
-     JOIN feishu_user fu ON fu.user_id = pm.user_id
+     LEFT JOIN user_profile up ON up.user_id = pm.user_id
      LEFT JOIN announcement_read ar
        ON ar.announcement_id = $1 AND ar.user_id = pm.user_id
      WHERE pm.production_id = $2
-     ORDER BY ar.read_at NULLS LAST, fu.name`,
+     ORDER BY ar.read_at NULLS LAST, up.name NULLS LAST`,
     [announcementId, productionId],
   );
   return res.rows.map(r => ({
@@ -7407,7 +7419,7 @@ export async function submitAccessRequest(
 
   // Get subject display name and resource description for notifications
   const nameRes = await getPool().query<{ name: string }>(
-    `SELECT name FROM feishu_user WHERE user_id = $1`,
+    `SELECT name FROM user_profile WHERE user_id = $1`,
     [userId],
   );
   const subjectName = nameRes.rows[0]?.name ?? "成员";
@@ -7557,7 +7569,7 @@ export async function approveAccessRequest(
 
     if (approverIds.length > 0) {
       const nameRes = await getPool().query<{ name: string }>(
-        `SELECT name FROM feishu_user WHERE user_id = $1`,
+        `SELECT name FROM user_profile WHERE user_id = $1`,
         [req.subject_id],
       );
       const subjectName = nameRes.rows[0]?.name ?? "成员";
@@ -7911,7 +7923,7 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
     if (approverIds.length === 0) continue;
 
     const nameRes = await pool.query<{ name: string }>(
-      `SELECT name FROM feishu_user WHERE user_id = $1`,
+      `SELECT name FROM user_profile WHERE user_id = $1`,
       [row.subject_id],
     );
     const subjectName = nameRes.rows[0]?.name ?? "成员";

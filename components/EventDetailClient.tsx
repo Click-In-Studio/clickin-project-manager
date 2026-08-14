@@ -3355,7 +3355,7 @@ export default function EventDetailClient({
         <ReportsTab
           eventId={event.id} productionId={productionId}
           reports={reports} departments={departments}
-          members={members.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
+          members={members.map(m => ({ userId: m.userId, name: m.name }))}
           canWrite={canWriteReport}
           currentUserId={currentUserId}
           versionId={event.versionId ?? null}
