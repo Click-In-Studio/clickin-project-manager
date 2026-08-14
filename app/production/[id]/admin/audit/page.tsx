@@ -33,7 +33,7 @@ export default async function AuditPage({ params }: { params: Promise<{ id: stri
 
   const [name, initial, members, depts] = await Promise.all([
     getProductionName(id),
-    listGrantLedger(id, { limit: 100 }),
+    listGrantLedger(id, { limit: 15 }),
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
   ]);

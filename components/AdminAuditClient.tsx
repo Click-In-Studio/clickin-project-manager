@@ -53,8 +53,10 @@ function nodeKey(r: GrantLedgerRow) {
 export default function AdminAuditClient({
   productionId, productionName, initialRows, initialTotal, members, depts, canRevoke,
 }: Props) {
+  const PAGE_SIZE = 15;
   const [rows, setRows] = useState<GrantLedgerRow[]>(initialRows);
   const [total, setTotal] = useState(initialTotal);
+  const [page, setPage] = useState(0);
   const [filters, setFilters] = useState({ user: "", type: "", source: "", status: "" });
   const [userPickerOpen, setUserPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,19 +76,20 @@ export default function AdminAuditClient({
     if (f.type) p.set("type", f.type);
     if (f.source) p.set("source", f.source);
     if (f.status) p.set("status", f.status);
-    p.set("limit", "100");
+    p.set("limit", String(PAGE_SIZE));
     if (offset) p.set("offset", String(offset));
     return p.toString();
   }
 
-  async function load(f: typeof filters, offset = 0) {
+  async function load(f: typeof filters, nextPage: number) {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/grants?${buildQuery(f, offset)}`);
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/grants?${buildQuery(f, nextPage * PAGE_SIZE)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) { setError(data.error ?? "加载失败"); return; }
       setTotal(data.total ?? 0);
-      setRows(prev => (offset ? [...prev, ...data.rows] : data.rows));
+      setRows(data.rows ?? []);
+      setPage(nextPage);
     } catch { setError("网络错误"); }
     finally { setBusy(false); }
   }
@@ -96,6 +99,8 @@ export default function AdminAuditClient({
     setFilters(next);
     load(next, 0);
   }
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   async function revoke(row: GrantLedgerRow) {
     if (!confirm(`确认强制撤销 ${row.userName || row.userId} 的授权？\n${nodeKey(row)}`)) return;
@@ -244,10 +249,24 @@ export default function AdminAuditClient({
         {rows.length === 0 && (
           <p style={{ padding: "30px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>无匹配流水</p>
         )}
-        {rows.length < total && (
-          <div style={{ textAlign: "center", marginTop: 14 }}>
-            <button style={SECONDARY_BTN} disabled={busy} onClick={() => load(filters, rows.length)}>
-              加载更多（{rows.length} / {total}）
+        {pageCount > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 14 }}>
+            <button
+              style={{ ...SECONDARY_BTN, padding: "5px 12px", fontSize: 11 }}
+              disabled={busy || page === 0}
+              onClick={() => load(filters, page - 1)}
+            >
+              ‹ 上一页
+            </button>
+            <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>
+              第 {page + 1} / {pageCount} 页 · 共 {total} 条
+            </span>
+            <button
+              style={{ ...SECONDARY_BTN, padding: "5px 12px", fontSize: 11 }}
+              disabled={busy || page >= pageCount - 1}
+              onClick={() => load(filters, page + 1)}
+            >
+              下一页 ›
             </button>
           </div>
         )}
