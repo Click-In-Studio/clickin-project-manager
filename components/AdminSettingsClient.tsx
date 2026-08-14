@@ -181,7 +181,7 @@ export default function AdminSettingsClient({
 }) {
   return (
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
-      <div style={{ padding: "24px clamp(20px, 3vw, 48px) 56px" }}>
+      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
 
         {/* Page header（v3 统一页头） */}
         <PageHeader
