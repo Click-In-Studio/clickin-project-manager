@@ -84,6 +84,25 @@ export async function listPrivateAssets(productionId: string): Promise<PrivateAs
   }));
 }
 
+export type AssetGrantRevokeResult = "ok" | "not_found" | "wrong_type";
+
+/** 审查处置：撤销资产类授权（本门不可越界撤销其他类型 grant）。 */
+export async function revokeAssetGrant(productionId: string, grantId: string): Promise<AssetGrantRevokeResult> {
+  const check = await getPool().query<{ resource_type: string; is_revoked: boolean }>(
+    "SELECT resource_type, is_revoked FROM production_member_grant WHERE id = $1 AND production_id = $2",
+    [grantId, productionId],
+  );
+  const row = check.rows[0];
+  if (!row || row.is_revoked) return "not_found";
+  if (row.resource_type !== "asset") return "wrong_type";
+  await getPool().query(
+    `UPDATE production_member_grant SET is_revoked = true, revoked_reason = 'manual'
+     WHERE id = $1 AND production_id = $2 AND NOT is_revoked`,
+    [grantId, productionId],
+  );
+  return "ok";
+}
+
 /** 审查处置：改公开性。返回 false = 资产不存在。 */
 export async function setAssetPublic(productionId: string, assetId: string, isPublic: boolean): Promise<boolean> {
   const res = await getPool().query(

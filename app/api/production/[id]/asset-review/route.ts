@@ -2,9 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { listPrivateAssets, setAssetPublic } from "@/lib/asset-review-db";
-import { revokeGrantById } from "@/lib/grant-audit-db";
-import { getPool } from "@/lib/pg";
+import { listPrivateAssets, setAssetPublic, revokeAssetGrant } from "@/lib/asset-review-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -52,15 +50,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (body.action === "revoke_grant") {
     if (!body.grantId) return Response.json({ error: "缺少 grantId" }, { status: 400 });
     // 本门只允许处置 asset 类授权（越界撤销走权限审计的 grants@delete 门）
-    const check = await getPool().query<{ resource_type: string }>(
-      "SELECT resource_type FROM production_member_grant WHERE id = $1 AND production_id = $2",
-      [body.grantId, id],
-    );
-    if (check.rows[0]?.resource_type !== "asset") {
-      return Response.json({ error: "该门仅可撤销资产类授权" }, { status: 403 });
-    }
-    const ok = await revokeGrantById(id, body.grantId);
-    if (!ok) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+    const result = await revokeAssetGrant(id, body.grantId);
+    if (result === "not_found") return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+    if (result === "wrong_type") return Response.json({ error: "该门仅可撤销资产类授权" }, { status: 403 });
     return Response.json({ ok: true });
   }
 

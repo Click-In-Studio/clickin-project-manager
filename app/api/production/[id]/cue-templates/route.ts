@@ -7,6 +7,7 @@ import {
   listDeptCueTemplates,
   upsertDeptCueTemplate,
   deleteDeptCueTemplate,
+  listCueTemplateTypes,
 } from "@/lib/cue-template-db";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -58,8 +59,15 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       return Response.json({ error: `非法相对键：${rel}（形如 @view 或 cues@create）` }, { status: 400 });
     }
   }
-  const dept = await getProductionDept(body.deptId, id);
+  const [dept, types] = await Promise.all([
+    getProductionDept(body.deptId, id),
+    listCueTemplateTypes(id),
+  ]);
   if (!dept) return Response.json({ error: "部门不存在" }, { status: 404 });
+  // #227 类型动态化后校验注册表，防 typo 造孤儿声明行
+  if (!types.some(t => t.key === template)) {
+    return Response.json({ error: `模版类型「${template}」未注册` }, { status: 400 });
+  }
 
   await upsertDeptCueTemplate(id, body.deptId, template, !!body.canCreate, perms);
   return Response.json({ ok: true });
