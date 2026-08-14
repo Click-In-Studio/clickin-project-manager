@@ -35,9 +35,12 @@ jobs:
       # ── 4. Bundle ────────────────────────────────────────────────────────────
       - name: Bundle standalone output
         run: |
-          # Next standalone needs static/ and public/ copied in manually
-          cp -r .next/static .next/standalone/.next/static
-          cp -r public       .next/standalone/public
+          # Next standalone needs static/ and public/ copied in manually.
+          # 用 dir/. 语法拷内容——目标目录已存在时 `cp -r public target/public`
+          # 会嵌套成 public/public/（线上字体 404 的元凶之一）
+          mkdir -p .next/standalone/.next/static .next/standalone/public
+          cp -r .next/static/. .next/standalone/.next/static/
+          cp -r public/.       .next/standalone/public/
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
 
       # ── 5. Setup SSH ─────────────────────────────────────────────────────────

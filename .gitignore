@@ -41,8 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# self-hosted fonts (large binaries, deployed via rsync)
-/public/fonts/
+# self-hosted fonts: woff2 tracked in git (build bundles them); otf retired
+/public/fonts/*.otf
 .r2-config
 
 # AI agent instruction files (not intended for human readers)
