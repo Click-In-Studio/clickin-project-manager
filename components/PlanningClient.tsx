@@ -206,12 +206,14 @@ const CHIP: React.CSSProperties = {
 
 // ─── 执行日程（原型 TimetableMock：部门泳道 × 15 分钟格 rundown）──────────────
 
+// 原型 rundown_* 类型配色（call 橙/run 青/task 草绿/break 斜纹/notes 紫；默认=run 青）
 const ITEM_TONE: Record<string, { bg: string; border: string }> = {
-  call:   { bg: "var(--stage-soft)", border: "var(--stage)" },
-  run:    { bg: "var(--script-soft)", border: "var(--script)" },
-  break:  { bg: "var(--surface-2)", border: "var(--line)" },
-  notes:  { bg: "var(--success-soft)", border: "var(--success)" },
-  custom: { bg: "#eef0f8", border: "#4a5088" },
+  call:   { bg: "#f2e3d6", border: "#d9ab8d" },
+  run:    { bg: "#dce9e9", border: "rgba(47,102,112,.28)" },
+  task:   { bg: "#edf0e5", border: "#c9d0b7" },
+  break:  { bg: "repeating-linear-gradient(135deg, #f1f0eb 0, #f1f0eb 8px, #e6e4dc 8px, #e6e4dc 16px)", border: "#d4d1c7" },
+  notes:  { bg: "#eee5f0", border: "#cdb9d3" },
+  custom: { bg: "#dce9e9", border: "rgba(47,102,112,.28)" },
 };
 
 function minutesOfIso(iso: string): number {
@@ -309,25 +311,35 @@ function TimetableView({ productionId, events, departments }: Props) {
         )}
       </div>
 
-      {/* rundownControls */}
-      <div style={{ display: "flex", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10, fontWeight: 700, color: "var(--muted)" }}>
-          <span>日期 / 事件</span>
-          <select value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} style={SELECT_STYLE}>
+      {/* rundownControls（原型：三格卡片行——事件选择 / 工作流筛选 / 当前人说明） */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(210px, 1.25fr) minmax(190px, 1fr) minmax(190px, .8fr)",
+        gap: 10, marginBottom: 14,
+      }}>
+        <label style={CONTROL_CARD}>
+          <span style={CONTROL_LABEL}>日期 / 事件</span>
+          <select value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} style={CONTROL_SELECT}>
             {timedEvents.map(e => (
               <option key={e.id} value={e.id}>
-                {e.startTime ? `${new Date(e.startTime).getMonth() + 1}/${new Date(e.startTime).getDate()} · ` : ""}{e.title}
+                {e.startTime ? `${new Date(e.startTime).getMonth() + 1} 月 ${new Date(e.startTime).getDate()} 日 · ` : ""}{e.title}
               </option>
             ))}
           </select>
         </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10, fontWeight: 700, color: "var(--muted)" }}>
-          <span>查看工作流</span>
-          <select value={personFilter} onChange={e => setPersonFilter(e.target.value)} style={SELECT_STYLE}>
+        <label style={CONTROL_CARD}>
+          <span style={CONTROL_LABEL}>查看工作流</span>
+          <select value={personFilter} onChange={e => setPersonFilter(e.target.value)} style={CONTROL_SELECT}>
             <option value="all">全部成员</option>
             {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
         </label>
+        <p style={{ ...CONTROL_CARD, display: "flex", flexDirection: "column", justifyContent: "center", margin: 0 }}>
+          <b style={{ fontSize: 11, color: "var(--ink)" }}>
+            {personFilter === "all" ? "全部成员" : people.find(([id]) => id === personFilter)?.[1] ?? "全部成员"}
+          </b>
+          <small style={{ marginTop: 4, color: "var(--muted)", fontSize: 8 }}>可查看其当前工作与工作地点</small>
+        </p>
       </div>
 
       {/* 泳道矩阵 */}
@@ -340,30 +352,47 @@ function TimetableView({ productionId, events, departments }: Props) {
           该事件暂无日程条目。在事件详情页添加日程后此处生成执行表。
         </p>
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        /* 原型 rundownMatrixWrap：690px 限高滚动容器 + 38px 横纹底 + sticky 表头/时间列 */
+        <div style={{ maxHeight: 690, overflow: "auto", border: "1px solid var(--line)", borderRadius: 11, background: "#f7f7f3" }}>
           <div style={{
             display: "grid",
-            gridTemplateColumns: `72px repeat(${lanes.length}, minmax(150px, 1fr))`,
-            gridTemplateRows: `40px repeat(${slots.length}, 30px)`,
-            gap: 2, minWidth: lanes.length * 160 + 80,
+            gridTemplateColumns: `86px repeat(${lanes.length}, minmax(145px, 1fr))`,
+            gridTemplateRows: `58px repeat(${slots.length}, 38px)`,
+            minWidth: 86 + lanes.length * 150,
+            position: "relative",
+            background: "repeating-linear-gradient(to bottom, transparent 0, transparent 37px, rgba(122,139,134,.18) 37px, rgba(122,139,134,.18) 38px)",
           }}>
-            <div style={{ gridColumn: 1, gridRow: 1, display: "flex", flexDirection: "column", justifyContent: "center", fontSize: 9, color: "var(--muted)" }}>
-              <b style={{ color: "var(--ink)", fontSize: 10 }}>时间</b>
-              <small>地点 / 时长</small>
+            {/* 角格（sticky 双向） */}
+            <div style={{
+              gridColumn: 1, gridRow: 1, position: "sticky", top: 0, left: 0, zIndex: 10,
+              padding: 10, borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
+              background: "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
+            }}>
+              <b style={{ fontSize: 10 }}>时间</b>
+              <small style={{ marginTop: 4, color: "#b9c8c4", fontSize: 8 }}>地点 / 时长</small>
             </div>
+            {/* 泳道表头（sticky top，ink 底白字） */}
             {lanes.map((lane, i) => (
               <div key={lane.id} style={{
-                gridColumn: i + 2, gridRow: 1, borderRadius: 8, padding: "6px 10px",
-                background: "var(--ink)", color: "#fff", display: "flex", flexDirection: "column", justifyContent: "center",
+                gridColumn: i + 2, gridRow: 1, position: "sticky", top: 0, zIndex: 8,
+                padding: 10, borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
+                background: "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
               }}>
-                <b style={{ fontSize: 11 }}>{lane.name}</b>
+                <b style={{ fontSize: 10 }}>{lane.name}</b>
               </div>
             ))}
+            {/* 时间列（sticky left，#f2f2ed 底，monospace） */}
             {slots.map((m, i) => (
-              <div key={m} style={{ gridColumn: 1, gridRow: i + 2, fontSize: 10, color: "var(--muted)", fontVariantNumeric: "tabular-nums", borderTop: "1px solid var(--line)", paddingTop: 2 }}>
-                {m % 30 === 0 ? <b style={{ color: "var(--ink)" }}>{fmtMin(m)}</b> : fmtMin(m)}
+              <div key={m} style={{
+                gridColumn: 1, gridRow: i + 2, position: "sticky", left: 0, zIndex: 5,
+                padding: "7px 8px", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
+                background: "#f2f2ed", display: "flex", flexDirection: "column",
+              }}>
+                <b style={{ fontFamily: "monospace", fontSize: 10, color: "var(--ink)" }}>{fmtMin(m)}</b>
+                <small style={{ marginTop: 2, color: "var(--muted)", fontSize: 7 }}>{i % 2 === 0 ? "15 min" : ""}</small>
               </div>
             ))}
+            {/* 条目 cell（原型 rundownCell：2px margin、类型底色、阴影） */}
             {visibleItems.flatMap(it => placements(it).map((pl, pi) => {
               const rowStart = Math.max(2, Math.floor((minutesOfIso(it.startTime!) - startMin) / SLOT) + 2);
               const rowSpan = Math.max(1, Math.ceil((minutesOfIso(it.endTime!) - minutesOfIso(it.startTime!)) / SLOT));
@@ -373,17 +402,18 @@ function TimetableView({ productionId, events, departments }: Props) {
                 <article key={`${it.id}-${pi}`} style={{
                   gridColumn: `${pl.start} / span ${pl.span}`,
                   gridRow: `${rowStart} / span ${rowSpan}`,
-                  background: tone.bg, borderLeft: `3px solid ${tone.border}`, borderRadius: 8,
-                  padding: "6px 10px", overflow: "hidden", minWidth: 0,
+                  zIndex: 3, minWidth: 0, margin: 2, padding: "7px 8px", overflow: "hidden",
+                  border: `1px solid ${tone.border}`, borderRadius: 7,
+                  background: tone.bg, boxShadow: "0 2px 6px rgba(24,42,42,.06)",
                 }}>
-                  <b style={{ display: "block", fontSize: 11, color: "var(--ink)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 9, whiteSpace: "nowrap", color: "var(--ink)" }}>
                     {it.title}
                   </b>
-                  <small style={{ display: "block", fontSize: 9, color: "var(--muted)" }}>
+                  <small style={{ display: "block", margin: "3px 0 0", overflow: "hidden", color: "var(--muted)", fontSize: 7, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {[it.location, `${dur} min`].filter(Boolean).join(" · ")}
                   </small>
                   {it.participants.length > 0 && rowSpan >= 2 && (
-                    <p style={{ margin: "3px 0 0", fontSize: 9, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <p style={{ display: "block", margin: "3px 0 0", overflow: "hidden", color: "var(--muted)", fontSize: 7, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {it.participants.map(p => p.name).join(" · ")}
                     </p>
                   )}
@@ -397,10 +427,15 @@ function TimetableView({ productionId, events, departments }: Props) {
   );
 }
 
-const SELECT_STYLE: React.CSSProperties = {
-  fontSize: 12, color: "var(--ink)", background: "var(--surface)",
-  border: "1px solid var(--line)", borderRadius: 8, padding: "7px 11px", outline: "none",
-  minWidth: 200,
+const CONTROL_CARD: React.CSSProperties = {
+  minWidth: 0, minHeight: 58, padding: "9px 11px",
+  border: "1px solid var(--line)", borderRadius: 9, background: "var(--paper)",
+  display: "flex", flexDirection: "column", gap: 5,
+};
+const CONTROL_LABEL: React.CSSProperties = { color: "var(--muted)", fontSize: 8, fontWeight: 700 };
+const CONTROL_SELECT: React.CSSProperties = {
+  width: "100%", border: 0, background: "transparent", color: "var(--ink)",
+  outline: 0, fontSize: 10, fontWeight: 700,
 };
 
 // ─── 主组件：三视图 tab ────────────────────────────────────────────────────────
