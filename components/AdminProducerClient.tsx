@@ -152,7 +152,7 @@ export default function AdminProducerClient({
       <div style={CARD}>
         <p style={SECTION_LABEL}>制作人权限集合（{rolePerms.length}）</p>
         <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
-          制作人角色的模版键集（通配区间宿主）。修改为 ROOT OPERATION；治理域键（node:production/、node:producer/）不经此处写入，保存时服务端过滤。
+          制作人角色的模版键集（通配区间宿主）。修改为 ROOT OPERATION；SENSITIVE/ROOT 治理键（手写三态清单）不经角色模版写入，保存时服务端过滤。
         </p>
         {rolePerms.map(k => (
           <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
@@ -172,6 +172,7 @@ export default function AdminProducerClient({
         {isRoot && producerRole && (
           <div style={{ marginTop: 12 }}>
             <PermissionKeyPicker
+                          productionId={productionId}
               vocabulary={vocabulary} busy={busy}
               onAdd={key => { if (!rolePerms.includes(key)) saveRolePerms([...rolePerms, key]); }}
             />
@@ -183,7 +184,7 @@ export default function AdminProducerClient({
       <div style={{ ...CARD, borderColor: "var(--stage)" }}>
         <p style={SECTION_LABEL}>治理域授权（{governance.length}）</p>
         <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
-          production / producer 域为保留治理域，通配不穿透——权限审计、数字资产审查等管理面入口的资格行只能在此显式发放（仅限所有者）。
+          production / producer 为保留类型（通配不穿透），其中 SENSITIVE/ROOT 键（授权账本、资产审查、集成配置等）只能在此显式发放（仅限所有者）。
         </p>
         {governance.map(g => (
           <div key={`${g.userId}:${g.permission}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
@@ -215,6 +216,7 @@ export default function AdminProducerClient({
             </select>
             {govUserId && (
               <PermissionKeyPicker
+                          productionId={productionId}
                 vocabulary={govVocabulary} busy={busy}
                 onAdd={key => setGov(govUserId, key, true)}
               />

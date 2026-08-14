@@ -1,5 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
+import { isGovernanceNodeKey } from "@/lib/grant-template";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
@@ -32,10 +33,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as { permissions?: unknown };
   if (!Array.isArray(body.permissions) || body.permissions.some((p) => typeof p !== "string"))
     return Response.json({ error: "permissions 必须是字符串数组" }, { status: 400 });
-  // 终局：治理域节点串（production/producer）不可经普通角色编辑写入——
-  // SENSITIVE 入口资格行的发放属 owner 域（与制作人权限集合同 ROOT 语义）
+  // 终局：SENSITIVE/ROOT 节点（手写三态清单）不可经普通角色编辑写入——
+  // 入口资格行的发放属 owner 域。production 普通基线面与通配区间键不受限。
   const filtered = (body.permissions as string[]).filter(
-    (p) => !p.startsWith("node:production/") && !p.startsWith("node:producer/"));
+    (p) => isGovernanceNodeKey(p) === false);
   await setRolePermissions(roleId, filtered);
   return Response.json({ ok: true, permissions: filtered });
 }

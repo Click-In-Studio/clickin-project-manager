@@ -60,3 +60,27 @@ describe("getPermissionVocabulary", () => {
     expect(vocab.subs.event).toEqual(expect.arrayContaining(["call_sheet"]));
   });
 });
+
+describe("isGovernanceNodeKey（治理键=SENSITIVE/ROOT 手写清单，非 type 前缀）", () => {
+  it("production 基线面不是治理键；grants/asset_review/integrations 整面是", async () => {
+    const { isGovernanceNodeKey } = await import("@/lib/grant-template");
+    expect(isGovernanceNodeKey("node:production/*/meta@view")).toBe(false);
+    expect(isGovernanceNodeKey("node:production/*/mounts@view")).toBe(false);
+    expect(isGovernanceNodeKey("node:production/*/config@edit")).toBe(false);
+    expect(isGovernanceNodeKey("node:production/*/meta/name@edit")).toBe(true);
+    expect(isGovernanceNodeKey("node:production/*/grants@view")).toBe(true);
+    expect(isGovernanceNodeKey("node:production/*/asset_review@view")).toBe(true);
+    expect(isGovernanceNodeKey("node:production/*/integrations@view")).toBe(true);
+    expect(isGovernanceNodeKey("node:production/*@delete")).toBe(true);
+    expect(isGovernanceNodeKey("node:producer/*@view")).toBe(true);
+  });
+
+  it("通配键不误杀（RESERVED_TYPES 不被通配覆盖）；非法键=null", async () => {
+    const { isGovernanceNodeKey } = await import("@/lib/grant-template");
+    expect(isGovernanceNodeKey("node:*/*@*")).toBe(false);
+    // 资源级 grants 段（如 cue 表协作者管理）非治理清单——治理性只看手写三态
+    expect(isGovernanceNodeKey("node:event/*/grants@*")).toBe(false);
+    expect(isGovernanceNodeKey("node:event/*/meta@*")).toBe(false);
+    expect(isGovernanceNodeKey("not-a-key")).toBe(null);
+  });
+});

@@ -269,6 +269,7 @@ export default function AdminPermissionCenterClient({
                     {caps.deptEdit && (
                       <div style={{ marginTop: 14 }}>
                         <PermissionKeyPicker
+                          productionId={productionId}
                           vocabulary={vocabulary} busy={busy}
                           onAdd={key => saveDeptKeys(selectedDept.id, [...(deptRows[selectedDept.id] ?? []), key])}
                         />
@@ -305,11 +306,12 @@ export default function AdminPermissionCenterClient({
                     {caps.roleEdit && (selectedRole.name !== PRODUCER || caps.rootOperation) && (
                       <div style={{ marginTop: 14 }}>
                         <PermissionKeyPicker
+                          productionId={productionId}
                           vocabulary={vocabulary} busy={busy}
                           onAdd={key => saveRoleKeys(selectedRole, [...selectedRole.permissions, key])}
                         />
                         <p style={{ margin: "8px 0 0", fontSize: 10, color: "var(--muted)" }}>
-                          治理域键（node:production/ 与 node:producer/）不可经角色编辑写入，保存时将被服务端过滤。
+                          SENSITIVE/ROOT 治理键（如授权账本、资产审查、项目敏感配置）不可经角色编辑写入，保存时将被服务端过滤。
                         </p>
                       </div>
                     )}
@@ -344,7 +346,7 @@ export default function AdminPermissionCenterClient({
                     {caps.overrideEdit && (
                       <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
                         <OverrideAdder
-                          vocabulary={vocabulary} busy={busy}
+                          vocabulary={vocabulary} productionId={productionId} busy={busy}
                           onAdd={(key, granted) => setOverride(selectedMember.userId, key, granted)}
                         />
                       </div>
@@ -360,8 +362,9 @@ export default function AdminPermissionCenterClient({
   );
 }
 
-function OverrideAdder({ vocabulary, busy, onAdd }: {
+function OverrideAdder({ vocabulary, productionId, busy, onAdd }: {
   vocabulary: Vocabulary;
+  productionId: string;
   busy: boolean;
   onAdd: (key: string, granted: boolean) => void;
 }) {
@@ -392,7 +395,7 @@ function OverrideAdder({ vocabulary, busy, onAdd }: {
           deny
         </button>
       </div>
-      <PermissionKeyPicker vocabulary={vocabulary} busy={busy} onAdd={key => onAdd(key, granted)} />
+      <PermissionKeyPicker productionId={productionId} vocabulary={vocabulary} busy={busy} onAdd={key => onAdd(key, granted)} />
     </div>
   );
 }

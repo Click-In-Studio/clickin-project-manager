@@ -8,6 +8,7 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
+import { isGovernanceNodeKey } from "@/lib/grant-template";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -22,10 +23,10 @@ async function requireManage(req: NextRequest, productionId: string) {
   return { session, deny: null, isArchived: access.isArchived, isRoot };
 }
 
-// 治理域键（production/producer 为 RESERVED_TYPES）只能由 owner/admin 经
-// override 写入——普通人事权限管理者不得发放/封禁治理域节点。
+// 治理键 = 手写三态清单命中 SENSITIVE/ROOT 的节点（非 type 前缀：
+// production 域存在普通基线面）。只能由 owner/admin 经 override 写入。
 function isGovernanceKey(permission: string): boolean {
-  return permission.startsWith("node:production/") || permission.startsWith("node:producer/");
+  return isGovernanceNodeKey(permission) !== false;
 }
 
 /** GET — returns all members + all their overrides for the management UI. */
