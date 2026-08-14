@@ -153,6 +153,7 @@ export type SettingsPerms = {
   canImportScript: boolean;
   canImportScenes: boolean;
   canManageTags: boolean;
+  canToggleWatermark: boolean;
 };
 
 export type InitialMeta = {
@@ -162,6 +163,7 @@ export type InitialMeta = {
   type: string | null;
   typeLabel: string | null;
   language: string | null;
+  watermarkEnabled: boolean;
 };
 
 export default function AdminSettingsClient({
@@ -198,6 +200,9 @@ export default function AdminSettingsClient({
 
         {/* ── 基本信息 ── */}
         <BasicInfoCard productionId={productionId} initialMeta={initialMeta} perms={perms} />
+
+        {/* ── 安全 ── */}
+        <SecurityCard productionId={productionId} initialMeta={initialMeta} perms={perms} />
 
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
@@ -441,6 +446,50 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type MemberTag = { id: string; name: string; isSystem: boolean };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 安全 card（水印开关）
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SecurityCard({ productionId, initialMeta, perms }: {
+  productionId: string;
+  initialMeta: InitialMeta;
+  perms: SettingsPerms;
+}) {
+  const [enabled, setEnabled] = useState(initialMeta.watermarkEnabled);
+  const { save, saving, saved } = useSave(productionId);
+
+  const toggle = async (next: boolean) => {
+    setEnabled(next);
+    await save({ watermarkEnabled: next });
+  };
+
+  return (
+    <Card title="安全">
+      <Row
+        title="页面水印"
+        hint="开启后项目内所有页面平铺显示访问者的 [用户名 邮箱] 水印，用于截图溯源。不影响页面操作；开关变更后刷新页面生效。"
+        last
+      >
+        {perms.canToggleWatermark ? (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: saving ? "wait" : "pointer", fontSize: 13, color: "var(--ink)" }}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={saving}
+              onChange={(e) => toggle(e.target.checked)}
+              style={{ width: 15, height: 15, accentColor: "var(--ink)", cursor: "inherit" }}
+            />
+            启用水印
+            {saved && <span style={{ fontSize: 12, color: "var(--stage)" }}>已保存</span>}
+          </label>
+        ) : (
+          <LockedNotice reason="需要项目配置编辑权限" />
+        )}
+      </Row>
+    </Card>
+  );
+}
 
 function MemberTagsCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
   const [tags, setTags] = useState<MemberTag[]>([]);

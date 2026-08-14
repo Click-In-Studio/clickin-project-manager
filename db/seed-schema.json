@@ -1326,6 +1326,12 @@
       "column": "owner_id",
       "type": "uuid",
       "nullable": true
+    },
+    {
+      "column": "watermark_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "production_announcement": [
@@ -1421,6 +1427,12 @@
       "nullable": true
     },
     {
+      "column": "kind",
+      "type": "text",
+      "nullable": false,
+      "default": "'dept'::text"
+    },
+    {
       "column": "display_order",
       "type": "integer",
       "nullable": false,
@@ -1436,12 +1448,6 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
-    },
-    {
-      "column": "kind",
-      "type": "text",
-      "nullable": false,
-      "default": "'dept'::text"
     }
   ],
   "production_dept_member": [
