@@ -87,6 +87,12 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  member_invite: {
+    label: "项目邀请",
+    description: "被邀请加入某个项目时通知",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
   // ── Approval requests ─────────────────────────────────────────────────────
   approval_request_pending: {
     label: "资源申请待审批",

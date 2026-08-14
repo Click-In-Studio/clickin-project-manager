@@ -1232,6 +1232,42 @@ CREATE TABLE IF NOT EXISTS production_cue_template_type (
 CREATE INDEX IF NOT EXISTS production_cue_template_type_prod_idx
   ON production_cue_template_type (production_id, display_order);
 
+-- ── 项目邀请（#156：开放链接 + 定向邀请 + 批量认领链接）──────────────────────
+
+CREATE TABLE IF NOT EXISTS production_invite (
+  token           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  kind            TEXT        NOT NULL DEFAULT 'standard' CHECK (kind IN ('standard', 'claim')),
+  email           TEXT,
+  target_user_id  UUID        REFERENCES app_user(id) ON DELETE CASCADE,
+  feishu_open_id  TEXT,
+  preset_roles    TEXT[]      NOT NULL DEFAULT '{}',
+  preset_dept_ids UUID[]      NOT NULL DEFAULT '{}',
+  created_by      UUID        NOT NULL REFERENCES app_user(id),
+  expires_at      TIMESTAMPTZ,
+  max_uses        INTEGER,
+  used_count      INTEGER     NOT NULL DEFAULT 0,
+  revoked_at      TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS production_invite_prod_idx
+  ON production_invite (production_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS production_invite_claim (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  token           UUID        NOT NULL REFERENCES production_invite(token) ON DELETE CASCADE,
+  name            TEXT        NOT NULL,
+  preset_roles    TEXT[]      NOT NULL DEFAULT '{}',
+  preset_dept_ids UUID[]      NOT NULL DEFAULT '{}',
+  claimed_by      UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  claimed_at      TIMESTAMPTZ,
+  UNIQUE (token, name)
+);
+
+CREATE INDEX IF NOT EXISTS production_invite_claim_token_idx
+  ON production_invite_claim (token);
+
 -- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:event/*/meta@view'),
