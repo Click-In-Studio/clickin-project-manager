@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PageHeader, { SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
+import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/MemberPickerModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { GrantLedgerRow } from "@/lib/grant-audit-db";
 
@@ -11,7 +12,8 @@ type Props = {
   productionName: string;
   initialRows: GrantLedgerRow[];
   initialTotal: number;
-  members: { userId: string; name: string }[];
+  members: PickerMember[];
+  depts: PickerDept[];
   canRevoke: boolean;
 };
 
@@ -49,11 +51,12 @@ function nodeKey(r: GrantLedgerRow) {
 }
 
 export default function AdminAuditClient({
-  productionId, productionName, initialRows, initialTotal, members, canRevoke,
+  productionId, productionName, initialRows, initialTotal, members, depts, canRevoke,
 }: Props) {
   const [rows, setRows] = useState<GrantLedgerRow[]>(initialRows);
   const [total, setTotal] = useState(initialTotal);
   const [filters, setFilters] = useState({ user: "", type: "", source: "", status: "" });
+  const [userPickerOpen, setUserPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -136,10 +139,31 @@ export default function AdminAuditClient({
 
       {/* 筛选条 */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        <select value={filters.user} onChange={e => applyFilter({ user: e.target.value })} style={FIELD}>
-          <option value="">全部成员</option>
-          {members.map(m => <option key={m.userId} value={m.userId}>{m.name || m.userId.slice(0, 8)}</option>)}
-        </select>
+        {/* 伪 select：外观同原生下拉，点开是人员 picker modal */}
+        <button
+          onClick={() => setUserPickerOpen(true)}
+          style={{
+            ...FIELD, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8,
+            fontWeight: filters.user ? 700 : 400, minWidth: 110, justifyContent: "space-between",
+          }}
+        >
+          <span>
+            {filters.user
+              ? (members.find(m => m.userId === filters.user)?.name || filters.user.slice(0, 8))
+              : "全部成员"}
+          </span>
+          {filters.user ? (
+            <span
+              onClick={e => { e.stopPropagation(); applyFilter({ user: "" }); }}
+              title="清除成员筛选"
+              style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1 }}
+            >
+              ×
+            </span>
+          ) : (
+            <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
+          )}
+        </button>
         <select value={filters.type} onChange={e => applyFilter({ type: e.target.value })} style={FIELD}>
           <option value="">全部资源类型</option>
           {resourceTypes.map(t => <option key={t} value={t}>{t}</option>)}
@@ -228,6 +252,22 @@ export default function AdminAuditClient({
           </div>
         )}
       </section>
+
+      {userPickerOpen && (
+        <MemberPickerModal
+          kicker="合规"
+          title="按成员筛选流水"
+          single
+          members={members}
+          depts={depts}
+          busy={busy}
+          onClose={() => setUserPickerOpen(false)}
+          onConfirm={([userId]) => {
+            applyFilter({ user: userId });
+            setUserPickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
