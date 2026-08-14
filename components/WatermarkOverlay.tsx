@@ -6,8 +6,8 @@
  * - aria-hidden：对辅助技术不可见
  */
 
-const TILE_W = 320;
-const TILE_H = 180;
+const TILE_W = 420;
+const TILE_H = 260;
 
 function buildTile(text: string): string {
   const esc = text
@@ -16,12 +16,12 @@ function buildTile(text: string): string {
   // 两行错位排布，-22° 旋转；fill 用中性灰、低不透明度，深浅色主题下都可读且不扎眼
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_W}" height="${TILE_H}">` +
-    `<text x="30" y="80" transform="rotate(-22 30 80)" ` +
-    `font-family="system-ui, -apple-system, sans-serif" font-size="13" ` +
-    `fill="#888888" fill-opacity="0.13">${esc}</text>` +
-    `<text x="${30 + TILE_W / 2}" y="${80 + TILE_H / 2}" transform="rotate(-22 ${30 + TILE_W / 2} ${80 + TILE_H / 2})" ` +
-    `font-family="system-ui, -apple-system, sans-serif" font-size="13" ` +
-    `fill="#888888" fill-opacity="0.13">${esc}</text>` +
+    `<text x="36" y="110" transform="rotate(-22 36 110)" ` +
+    `font-family="system-ui, -apple-system, sans-serif" font-size="17" ` +
+    `fill="#888888" fill-opacity="0.12">${esc}</text>` +
+    `<text x="${36 + TILE_W / 2}" y="${110 + TILE_H / 2}" transform="rotate(-22 ${36 + TILE_W / 2} ${110 + TILE_H / 2})" ` +
+    `font-family="system-ui, -apple-system, sans-serif" font-size="17" ` +
+    `fill="#888888" fill-opacity="0.12">${esc}</text>` +
     `</svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
