@@ -4,17 +4,19 @@ import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKeyPicker";
+import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/MemberPickerModal";
 import { BASE_PATH } from "@/lib/base-path";
 
 import type { GovernanceGrantRow } from "@/lib/grant-audit-db";
 
-type Member = { userId: string; name: string; roles: string[]; status: "active" | "suspended" };
+type Member = PickerMember;
 
 type Props = {
   productionId: string;
   productionName: string;
   producerRole: { id: string; permissions: string[] } | null;
   members: Member[];
+  depts: PickerDept[];
   initialGovernance: GovernanceGrantRow[];
   vocabulary: Vocabulary;
   isRoot: boolean;
@@ -33,13 +35,14 @@ const CARD: React.CSSProperties = {
 };
 
 export default function AdminProducerClient({
-  productionId, productionName, producerRole, members: initialMembers, initialGovernance, vocabulary, isRoot,
+  productionId, productionName, producerRole, members: initialMembers, depts, initialGovernance, vocabulary, isRoot,
 }: Props) {
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [rolePerms, setRolePerms] = useState<string[]>(producerRole?.permissions ?? []);
   const [governance, setGovernance] = useState<GovernanceGrantRow[]>(initialGovernance);
-  const [addUserId, setAddUserId] = useState("");
+  const [appointPickerOpen, setAppointPickerOpen] = useState(false);
   const [govUserId, setGovUserId] = useState("");
+  const [govPickerOpen, setGovPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -143,25 +146,28 @@ export default function AdminProducerClient({
         ))}
         {producers.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>暂无制作人</p>}
         {isRoot && candidates.length > 0 && (
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <select
-              value={addUserId} onChange={e => setAddUserId(e.target.value)}
-              style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 160 }}
-            >
-              <option value="">选择成员…</option>
-              {candidates.map(m => <option key={m.userId} value={m.userId}>{m.name || m.userId.slice(0, 8)}</option>)}
-            </select>
-            <button
-              style={PRIMARY_BTN} disabled={busy || !addUserId}
-              onClick={async () => {
-                const m = members.find(x => x.userId === addUserId);
-                if (m) await toggleProducer(m);
-                setAddUserId("");
-              }}
-            >
-              任命为制作人
-            </button>
-          </div>
+          <button style={{ ...SECONDARY_BTN, marginTop: 10 }} disabled={busy} onClick={() => setAppointPickerOpen(true)}>
+            ＋ 任命制作人
+          </button>
+        )}
+        {appointPickerOpen && (
+          <MemberPickerModal
+            kicker="项目设置"
+            title="任命制作人"
+            confirmLabel="任命为制作人"
+            members={members}
+            depts={depts}
+            excludeUserIds={producers.map(m => m.userId)}
+            busy={busy}
+            onClose={() => setAppointPickerOpen(false)}
+            onConfirm={async (userIds) => {
+              for (const userId of userIds) {
+                const m = members.find(x => x.userId === userId);
+                if (m && !m.roles.includes(PRODUCER)) await toggleProducer(m);
+              }
+              setAppointPickerOpen(false);
+            }}
+          />
         )}
       </div>
 
@@ -201,7 +207,7 @@ export default function AdminProducerClient({
       <div style={{ ...CARD, borderColor: "var(--stage)" }}>
         <p style={SECTION_LABEL}>治理域授权（{governance.length}）</p>
         <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
-          production / producer 为保留类型（通配不穿透）。此处直发 grant 行（direct，立即生效）——权限审计、数字资产审查等管理面入口的门票只能在此发放（仅限所有者），收回=手动撤销并入审计流水。
+          production / producer 为保留类型：通配区间不穿透这两域，授权必须显式发放。此处由所有者直发 grant 行（direct，立即生效）；其中 SENSITIVE 面（授权账本 grants、资产审查 asset_review、集成 integrations 等）不可自确认，仅能经审批流发行或在此直发。收回 = 手动撤销，入审计流水。
         </p>
         {governance.map(g => (
           <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
@@ -225,13 +231,34 @@ export default function AdminProducerClient({
         {governance.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>未发放任何治理域资格</p>}
         {isRoot && (
           <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-            <select
-              value={govUserId} onChange={e => setGovUserId(e.target.value)}
-              style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", width: 200 }}
+            {/* 伪 select：点开人员 picker */}
+            <button
+              onClick={() => setGovPickerOpen(true)}
+              style={{
+                padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8,
+                background: "var(--paper)", color: "var(--ink)", width: 200, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", justifyContent: "space-between",
+                fontWeight: govUserId ? 700 : 400,
+              }}
             >
-              <option value="">选择成员…</option>
-              {members.map(m => <option key={m.userId} value={m.userId}>{m.name || m.userId.slice(0, 8)}</option>)}
-            </select>
+              <span>{govUserId ? memberName(govUserId) : "选择成员…"}</span>
+              <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
+            </button>
+            {govPickerOpen && (
+              <MemberPickerModal
+                kicker="项目设置"
+                title="选择治理域授权对象"
+                single
+                members={members}
+                depts={depts}
+                busy={busy}
+                onClose={() => setGovPickerOpen(false)}
+                onConfirm={([userId]) => {
+                  setGovUserId(userId);
+                  setGovPickerOpen(false);
+                }}
+              />
+            )}
             {govUserId && (
               <PermissionKeyPicker
                           productionId={productionId}

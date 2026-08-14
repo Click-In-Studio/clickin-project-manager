@@ -50,10 +50,15 @@ export default function PermissionKeyPicker({
     return () => { cancelled = true; };
   }, [type, productionId]);
 
-  const verbs = (type ? vocabulary.verbs[type] ?? [] : []).filter(v => !verbFilter || verbFilter(v));
+  // 通配区间键（批G 语法）：type/verb 位可为 *。误删 node:*/*@* 等通配键后
+  // 需要能在 picker 里加回来，故类型/动词下拉都提供 * 选项。
+  const baseVerbs = type === "*"
+    ? ["view", "create", "edit", "delete"]
+    : (type ? vocabulary.verbs[type] ?? [] : []);
+  const verbs = [...baseVerbs.filter(v => !verbFilter || verbFilter(v)), "*"];
   const subOptions = useMemo(() => {
     const set = new Set<string>(COMMON_SUBS);
-    for (const s of (type ? vocabulary.subs[type] ?? [] : [])) set.add(s);
+    for (const s of (type && type !== "*" ? vocabulary.subs[type] ?? [] : [])) set.add(s);
     return [...set].sort((a, b) => (a === "*" ? -1 : b === "*" ? 1 : a.localeCompare(b)));
   }, [type, vocabulary]);
 
@@ -72,6 +77,7 @@ export default function PermissionKeyPicker({
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
       <select value={type} onChange={e => setType(e.target.value)} style={{ ...FIELD, minWidth: 130 }}>
         <option value="">资源类型…</option>
+        <option value="*">＊ 全部类型（通配）</option>
         {types.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
       </select>
 

@@ -4,7 +4,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionDept } from "@/lib/dept-db";
 import { listDeptPermissionRows, setDeptPermissionRows } from "@/lib/perm-center-db";
-import { parseNodeKey } from "@/lib/grant-template";
+import { isGovernanceNodeKey } from "@/lib/grant-template";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
@@ -50,7 +50,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   }
   const keys = body.keys as string[];
   for (const key of keys) {
-    if (!parseNodeKey(key)) {
+    // 宽松键形校验（含批G 通配区间键：type/verb 位可为 *）；null=非法
+    if (isGovernanceNodeKey(key) === null) {
       return Response.json({ error: `非法权限键：${key}` }, { status: 400 });
     }
   }

@@ -14,6 +14,7 @@ import {
 } from "@/lib/db";
 import { getPermissionVocabulary } from "@/lib/perm-center-db";
 import { listGovernanceGrants } from "@/lib/grant-audit-db";
+import { listProductionDepts } from "@/lib/dept-db";
 import AdminProducerClient from "@/components/AdminProducerClient";
 
 export default async function ProducerPage({ params }: { params: Promise<{ id: string }> }) {
@@ -32,11 +33,13 @@ export default async function ProducerPage({ params }: { params: Promise<{ id: s
   const isRoot = permCtx.isAdmin || permCtx.isOwner;
   const canView = isRoot || await hasGrant(permCtx.userId, id, "producer", "*", "*", "view");
   if (!canView) redirect(`/production/${id}/admin`);
+  const canViewContact = isRoot || await hasGrant(permCtx.userId, id, "member", "*", "contact", "view");
 
-  const [name, roles, members, governance, vocabulary] = await Promise.all([
+  const [name, roles, members, depts, governance, vocabulary] = await Promise.all([
     getProductionName(id),
     listProductionRolesWithPermissions(id),
     listProductionMembersWithRoles(id),
+    listProductionDepts(id),
     isRoot ? listGovernanceGrants(id) : Promise.resolve([]),
     getPermissionVocabulary(id),
   ]);
@@ -48,7 +51,14 @@ export default async function ProducerPage({ params }: { params: Promise<{ id: s
       productionId={id}
       productionName={name ?? ""}
       producerRole={producerRole ? { id: producerRole.id, permissions: producerRole.permissions } : null}
-      members={members.map(m => ({ userId: m.userId, name: m.name, roles: m.roles, status: m.status }))}
+      members={members.map(m => ({
+        userId: m.userId, name: m.name, avatarUrl: m.avatarUrl, photoUrl: m.photoUrl,
+        roles: m.roles, tags: m.tags,
+        email: canViewContact ? m.email : null,
+        phone: canViewContact ? m.phone : null,
+        status: m.status,
+      }))}
+      depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind, memberUserIds: d.memberUserIds }))}
       initialGovernance={governance}
       vocabulary={vocabulary}
       isRoot={isRoot}
