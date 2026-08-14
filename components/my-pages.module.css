@@ -1,5 +1,5 @@
 .workspace {
-  padding: 34px clamp(22px, 4vw, 62px) 72px;
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
 }
 
 /* Split panel (master-detail) */

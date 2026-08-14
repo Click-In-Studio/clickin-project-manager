@@ -182,7 +182,7 @@ export default function ProductionAnnouncementsClient({ productionId, production
   }
 
   return (
-    <div style={{ padding: "34px clamp(22px, 4vw, 62px) 72px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       {/* Header — 与「我的工作」统一 */}
       <div className={styles.pageHeader}>
         <p className={styles.eyebrow}>{productionName}</p>

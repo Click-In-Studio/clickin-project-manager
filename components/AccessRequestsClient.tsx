@@ -454,7 +454,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   }
 
   return (
-    <div style={{ padding: "34px clamp(22px, 4vw, 62px) 72px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       {/* Header（v3 统一页头） */}
       <PageHeader
         eyebrow={productionName}
