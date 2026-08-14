@@ -137,3 +137,58 @@ export async function listCreatableTemplates(
   );
   return rows.map(r => r.template);
 }
+
+// ─── 管理面：声明行 CRUD（权限模版页）────────────────────────────────────────
+
+/** 全项目声明行（管理面列表用）。 */
+export async function listDeptCueTemplates(productionId: string): Promise<DeptCueTemplate[]> {
+  const { rows } = await getPool().query<{
+    production_id: string; dept_id: string; template: string; can_create: boolean; permissions: string[];
+  }>(
+    `SELECT production_id, dept_id, template, can_create, permissions
+     FROM dept_cue_list_template WHERE production_id = $1
+     ORDER BY template, dept_id`,
+    [productionId],
+  );
+  return rows.map(r => ({
+    productionId: r.production_id,
+    deptId: r.dept_id,
+    template: r.template,
+    canCreate: r.can_create,
+    permissions: r.permissions,
+  }));
+}
+
+/** UPSERT 声明行并对存量同模版表重算实例区间键（先收旧键再按新键补发，
+ *  保证减键即时生效；已自确认 grant 由 recompute 存续判定处理）。 */
+export async function upsertDeptCueTemplate(
+  productionId: string,
+  deptId: string,
+  template: string,
+  canCreate: boolean,
+  permissions: string[],
+): Promise<void> {
+  const uniq = [...new Set(permissions)];
+  await getPool().query(
+    `INSERT INTO dept_cue_list_template (production_id, dept_id, template, can_create, permissions)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (dept_id, template)
+     DO UPDATE SET can_create = EXCLUDED.can_create, permissions = EXCLUDED.permissions`,
+    [productionId, deptId, template, canCreate, uniq],
+  );
+  await removeCueTemplateGrants(productionId, deptId, template);
+  await propagateTemplateToExisting(productionId, deptId, template);
+}
+
+/** 删除声明行并收走其对存量表的实例区间键。 */
+export async function deleteDeptCueTemplate(
+  productionId: string,
+  deptId: string,
+  template: string,
+): Promise<void> {
+  await getPool().query(
+    "DELETE FROM dept_cue_list_template WHERE production_id = $1 AND dept_id = $2 AND template = $3",
+    [productionId, deptId, template],
+  );
+  await removeCueTemplateGrants(productionId, deptId, template);
+}

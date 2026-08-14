@@ -1,11 +1,50 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "权限模版" };
 
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/admin-guard";
-import AdminPlaceholder from "../_placeholder";
+import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/grant-check";
+import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { listProductionDepts } from "@/lib/dept-db";
+import { listDeptCueTemplates } from "@/lib/cue-template-db";
+import AdminTemplatesClient from "@/components/AdminTemplatesClient";
 
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+export default async function TemplatesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   await requireAdminAccess(id);
-  return <AdminPlaceholder eyebrow="安全设置" title="权限模版" description="Cue 表模版等权限模版管理" />;
+
+  const cookieStore = await cookies();
+  const session = getSession(cookieStore);
+  if (!session) redirect("/login");
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect("/");
+  const { permCtx } = access;
+  const bypass = permCtx.isAdmin || permCtx.isOwner;
+
+  const [canEdit, canViewOnly] = await Promise.all([
+    bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "edit"),
+    bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "view"),
+  ]);
+  const canView = canEdit || canViewOnly;
+  if (!canView) redirect(`/production/${id}/admin`);
+
+  const [name, depts, templates] = await Promise.all([
+    getProductionName(id),
+    listProductionDepts(id),
+    listDeptCueTemplates(id),
+  ]);
+
+  return (
+    <AdminTemplatesClient
+      productionId={id}
+      productionName={name ?? ""}
+      depts={depts.map(d => ({ id: d.id, name: d.name, kind: d.kind }))}
+      initialRows={templates.map(t => ({
+        deptId: t.deptId, template: t.template, canCreate: t.canCreate, permissions: t.permissions,
+      }))}
+      canEdit={canEdit}
+    />
+  );
 }
