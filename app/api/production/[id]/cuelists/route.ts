@@ -7,7 +7,7 @@ import {
 } from "@/lib/db";
 import { canAccessNode } from "@/lib/grant-template";
 import { type PermissionContext } from "@/lib/permissions";
-import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
+import { listCueTemplateTypes } from "@/lib/cue-template-db";
 
 let _seq = 0;
 const uid = () => `cl${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -54,8 +54,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const abbr = body.abbr?.trim().toUpperCase() || null;
 
   if (body.template) {
-    const tpl = CUE_LIST_TEMPLATES.find((t) => t.key === body.template);
-    if (!tpl) return Response.json({ error: "未知模板" }, { status: 400 });
+    const types = await listCueTemplateTypes(id);
+    if (!types.some((t) => t.key === body.template)) return Response.json({ error: "未知模板" }, { status: 400 });
     // create_any 已并入 create：admin/owner 越过模板类型限制，其余按 dept 类型过滤
     if (!(permCtx.isAdmin || permCtx.isOwner)) {
       const allowedTypes = await getUserAllowedCueTypes(session!.userId, id);

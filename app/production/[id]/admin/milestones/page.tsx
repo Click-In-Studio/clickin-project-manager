@@ -3,7 +3,7 @@ import { hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "里程碑" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
-import { getProductionPermissionContext, listMilestones } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminMilestonesClient from "@/components/AdminMilestonesClient";
@@ -15,8 +15,9 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [milestones, access] = await Promise.all([
+  const [milestones, name, access] = await Promise.all([
     listMilestones(id),
+    getProductionName(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
@@ -27,6 +28,7 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
   return (
     <AdminMilestonesClient
       productionId={id}
+      productionName={name ?? ""}
       initialMilestones={milestones.map(m => ({
         id: m.id,
         name: m.name,

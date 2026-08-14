@@ -8,17 +8,25 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
+import { isGovernanceNodeKey } from "@/lib/grant-template";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 async function requireManage(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
-  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false };
+  if (!session) return { session: null, deny: Response.json({ error: "未登录" }, { status: 401 }), isArchived: false, isRoot: false };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "member", "*", "overrides", "edit"))) {
-    return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived: access?.isArchived ?? false };
+  const isRoot = !!access && (access.permCtx.isAdmin || access.permCtx.isOwner || session.isAdmin);
+  if (!access || !(isRoot || await hasGrant(access.permCtx.userId, productionId, "member", "*", "overrides", "edit"))) {
+    return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived: access?.isArchived ?? false, isRoot };
   }
-  return { session, deny: null, isArchived: access.isArchived };
+  return { session, deny: null, isArchived: access.isArchived, isRoot };
+}
+
+// 治理键 = 手写三态清单命中 SENSITIVE/ROOT 的节点（非 type 前缀：
+// production 域存在普通基线面）。只能由 owner/admin 经 override 写入。
+function isGovernanceKey(permission: string): boolean {
+  return isGovernanceNodeKey(permission) !== false;
 }
 
 /** GET — returns all members + all their overrides for the management UI. */
@@ -38,7 +46,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /** PATCH — set or clear a single override for one member. */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
-  const { deny, isArchived } = await requireManage(req, productionId);
+  const { deny, isArchived, isRoot } = await requireManage(req, productionId);
   if (deny) return deny;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
@@ -51,6 +59,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!userId || !permission) {
     return Response.json({ error: "userId 和 permission 为必填" }, { status: 400 });
   }
+  if (isGovernanceKey(permission) && !isRoot) {
+    return Response.json({ error: "治理域键仅限所有者发放" }, { status: 403 });
+  }
 
   await setPermissionOverride(productionId, userId, permission, granted ?? null);
   return Response.json({ ok: true });
@@ -59,7 +70,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 /** POST — bulk-apply the same override to multiple members at once. */
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
-  const { deny, isArchived } = await requireManage(req, productionId);
+  const { deny, isArchived, isRoot } = await requireManage(req, productionId);
   if (deny) return deny;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
@@ -71,6 +82,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (!Array.isArray(userIds) || !userIds.length || !permission) {
     return Response.json({ error: "userIds（数组）和 permission 为必填" }, { status: 400 });
+  }
+  if (isGovernanceKey(permission) && !isRoot) {
+    return Response.json({ error: "治理域键仅限所有者发放" }, { status: 403 });
   }
 
   const pool = getPool();

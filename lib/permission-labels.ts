@@ -86,3 +86,96 @@ export function permissionCategories(perms: string[]): string[] {
   }
   return result;
 }
+
+// ─── 权限键选择器展示层（管理后台 v3）：type/sub/verb 中文翻译 ───────────────
+
+export const TYPE_LABELS: Record<string, string> = {
+  announcement: "公告",
+  asset: "数字资产",
+  character: "角色（剧本）",
+  cue_list: "Cue 表",
+  dept: "部门（提及）",
+  dramaturgy: "构作",
+  dramaturgy_view: "构作视图",
+  event: "事件",
+  member: "成员",
+  milestone: "里程碑",
+  note: "备注",
+  org_dept: "组织部门",
+  producer: "制作人域",
+  production: "项目",
+  report: "报告",
+  role: "角色（职称）",
+  scene: "场景",
+  script: "剧本",
+  script_view: "剧本视图",
+  tag_group: "标签组",
+  task: "任务",
+};
+
+export const SUB_LABELS: Record<string, string> = {
+  "*": "（主面）",
+  meta: "基本信息",
+  "meta/name": "名称",
+  "meta/avatar": "头像",
+  "meta/description": "简介",
+  "meta/type": "类型",
+  "meta/language": "语言",
+  grants: "授权管理",
+  publication: "发布可见",
+  assignees: "指派",
+  imports: "导入",
+  mounts: "挂载",
+  archival: "归档",
+  restores: "恢复",
+  owner: "所有权",
+  config: "配置",
+  integrations: "集成",
+  asset_review: "资产审查",
+  overrides: "人事裁决",
+  roles: "角色指派",
+  members: "成员",
+  poc: "POC",
+  contact: "联系方式",
+  cues: "Cue 行",
+  "cues/comments": "Cue 评论",
+  comments: "评论",
+  blocks: "文本块",
+  details: "详情",
+  call_sheet: "通告",
+  chat: "群聊",
+  followers: "关注",
+  reports: "报告",
+  tasks: "任务",
+  notes: "备注",
+  replies: "回复",
+  shares: "分享",
+  file: "文件",
+  biography: "人物小传",
+  gender: "性别",
+  role_type: "角色类型",
+  synopsis: "梗概",
+  action_line: "行动线",
+  music: "音乐",
+  stage_notes: "舞台呈现",
+};
+
+export const VERB_LABELS: Record<string, string> = {
+  view: "查看",
+  create: "创建",
+  edit: "编辑",
+  delete: "删除",
+  "*": "全部动词",
+};
+
+export function typeLabel(type: string): string {
+  return TYPE_LABELS[type] ? `${TYPE_LABELS[type]}（${type}）` : type;
+}
+
+export function subLabel(sub: string): string {
+  return SUB_LABELS[sub] ? `${SUB_LABELS[sub]}（${sub}）` : sub;
+}
+
+export function verbLabel(verb: string): string {
+  return VERB_LABELS[verb] ? `${VERB_LABELS[verb]}（${verb}）` : verb;
+}

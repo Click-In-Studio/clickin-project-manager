@@ -1215,6 +1215,23 @@ CREATE TABLE IF NOT EXISTS dept_cue_list_template (
 CREATE INDEX IF NOT EXISTS dept_cue_list_template_prod_idx
   ON dept_cue_list_template (production_id, template);
 
+-- ── Cue 表模版类型注册表（#227：production 级可配置，替代代码常量）────────────
+-- creator_roles 仅信息展示；建表资格走 dept_cue_list_template.can_create。
+
+CREATE TABLE IF NOT EXISTS production_cue_template_type (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  key           TEXT        NOT NULL,
+  abbr_hint     TEXT,
+  creator_roles TEXT[]      NOT NULL DEFAULT '{}',
+  display_order INTEGER     NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (production_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS production_cue_template_type_prod_idx
+  ON production_cue_template_type (production_id, display_order);
+
 -- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:event/*/meta@view'),

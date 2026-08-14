@@ -1,5 +1,7 @@
 "use client";
 
+import PageHeader from "@/components/PageHeader";
+
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -179,24 +181,23 @@ export default function AdminSettingsClient({
 }) {
   return (
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
-      <div style={{ padding: "24px clamp(20px, 3vw, 48px) 56px" }}>
+      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
 
-        {/* Page header */}
-        <div style={{ marginBottom: 24 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            Admin · Settings
-          </p>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>
-              项目管理
-            </h1>
-            {isArchived && (
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#f97316", background: "#ffedd5", borderRadius: 6, padding: "2px 8px" }}>
-                已归档
-              </span>
-            )}
-          </div>
-        </div>
+        {/* Page header（v3 统一页头） */}
+        <PageHeader
+          eyebrow={initialMeta.name}
+          title={
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 12 }}>
+              项目信息
+              {isArchived && (
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "var(--stage-soft)", color: "var(--stage)", fontFamily: "system-ui, sans-serif" }}>
+                  已归档
+                </span>
+              )}
+            </span>
+          }
+          side="stage"
+        />
 
         {/* ── 基本信息 ── */}
         <BasicInfoCard productionId={productionId} initialMeta={initialMeta} perms={perms} />
@@ -206,12 +207,6 @@ export default function AdminSettingsClient({
 
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
-
-        {/* ── 数据 ── */}
-        <DataCard productionId={productionId} perms={perms} />
-
-        {/* ── 危险区域 ── */}
-        <DangerCard productionId={productionId} productionName={initialMeta.name} isArchived={isArchived} perms={perms} />
 
       </div>
     </div>
@@ -619,7 +614,7 @@ function MemberTagsCard({ productionId, perms }: { productionId: string; perms: 
 // 数据 card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
+export function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -723,7 +718,7 @@ function DataCard({ productionId, perms }: { productionId: string; perms: Settin
 // 危险区域 card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DangerCard({ productionId, productionName, isArchived, perms }: {
+export function DangerCard({ productionId, productionName, isArchived, perms }: {
   productionId: string;
   productionName: string;
   isArchived: boolean;

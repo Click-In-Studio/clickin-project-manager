@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { hasGrant } from "@/lib/grant-check";
-export const metadata: Metadata = { title: "项目管理" };
+export const metadata: Metadata = { title: "项目信息" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
 import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";

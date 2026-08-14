@@ -137,3 +137,141 @@ export async function listCreatableTemplates(
   );
   return rows.map(r => r.template);
 }
+
+// ─── 管理面：声明行 CRUD（权限模版页）────────────────────────────────────────
+
+/** 全项目声明行（管理面列表用）。 */
+export async function listDeptCueTemplates(productionId: string): Promise<DeptCueTemplate[]> {
+  const { rows } = await getPool().query<{
+    production_id: string; dept_id: string; template: string; can_create: boolean; permissions: string[];
+  }>(
+    `SELECT production_id, dept_id, template, can_create, permissions
+     FROM dept_cue_list_template WHERE production_id = $1
+     ORDER BY template, dept_id`,
+    [productionId],
+  );
+  return rows.map(r => ({
+    productionId: r.production_id,
+    deptId: r.dept_id,
+    template: r.template,
+    canCreate: r.can_create,
+    permissions: r.permissions,
+  }));
+}
+
+/** UPSERT 声明行并对存量同模版表重算实例区间键（先收旧键再按新键补发，
+ *  保证减键即时生效；已自确认 grant 由 recompute 存续判定处理）。 */
+export async function upsertDeptCueTemplate(
+  productionId: string,
+  deptId: string,
+  template: string,
+  canCreate: boolean,
+  permissions: string[],
+): Promise<void> {
+  const uniq = [...new Set(permissions)];
+  await getPool().query(
+    `INSERT INTO dept_cue_list_template (production_id, dept_id, template, can_create, permissions)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (dept_id, template)
+     DO UPDATE SET can_create = EXCLUDED.can_create, permissions = EXCLUDED.permissions`,
+    [productionId, deptId, template, canCreate, uniq],
+  );
+  await removeCueTemplateGrants(productionId, deptId, template);
+  await propagateTemplateToExisting(productionId, deptId, template);
+}
+
+/** 删除声明行并收走其对存量表的实例区间键。 */
+export async function deleteDeptCueTemplate(
+  productionId: string,
+  deptId: string,
+  template: string,
+): Promise<void> {
+  await getPool().query(
+    "DELETE FROM dept_cue_list_template WHERE production_id = $1 AND dept_id = $2 AND template = $3",
+    [productionId, deptId, template],
+  );
+  await removeCueTemplateGrants(productionId, deptId, template);
+}
+
+// ─── 模版类型注册表（#227：production 级可配置，替代代码常量）────────────────
+
+export type CueTemplateType = {
+  id: string;
+  key: string;
+  abbrHint: string | null;
+  creatorRoles: string[];
+  displayOrder: number;
+};
+
+export async function listCueTemplateTypes(productionId: string): Promise<CueTemplateType[]> {
+  const { rows } = await getPool().query<{
+    id: string; key: string; abbr_hint: string | null; creator_roles: string[]; display_order: number;
+  }>(
+    `SELECT id, key, abbr_hint, creator_roles, display_order
+     FROM production_cue_template_type
+     WHERE production_id = $1 ORDER BY display_order, key`,
+    [productionId],
+  );
+  return rows.map(r => ({
+    id: r.id, key: r.key, abbrHint: r.abbr_hint,
+    creatorRoles: r.creator_roles, displayOrder: r.display_order,
+  }));
+}
+
+export async function createCueTemplateType(
+  productionId: string,
+  key: string,
+  abbrHint: string | null,
+): Promise<CueTemplateType> {
+  const { rows } = await getPool().query<{ id: string; display_order: number }>(
+    `INSERT INTO production_cue_template_type (production_id, key, abbr_hint, display_order)
+     VALUES ($1, $2, $3,
+       (SELECT COALESCE(MAX(display_order), 0) + 1 FROM production_cue_template_type WHERE production_id = $1))
+     RETURNING id, display_order`,
+    [productionId, key, abbrHint],
+  );
+  return { id: rows[0].id, key, abbrHint, creatorRoles: [], displayOrder: rows[0].display_order };
+}
+
+export type DeleteTypeResult = { ok: true } | { ok: false; reason: "in_use" | "has_declarations" | "not_found" };
+
+/** 删除类型：有存量同模版 cue 表或声明行时拒绝（先清声明/改表模版）。 */
+export async function deleteCueTemplateType(productionId: string, typeId: string): Promise<DeleteTypeResult> {
+  const pool = getPool();
+  const t = await pool.query<{ key: string }>(
+    "SELECT key FROM production_cue_template_type WHERE id = $1 AND production_id = $2",
+    [typeId, productionId],
+  );
+  const key = t.rows[0]?.key;
+  if (!key) return { ok: false, reason: "not_found" };
+  const inUse = await pool.query(
+    "SELECT 1 FROM cue_list WHERE production_id = $1 AND template = $2 LIMIT 1",
+    [productionId, key],
+  );
+  if (inUse.rows.length) return { ok: false, reason: "in_use" };
+  const decl = await pool.query(
+    "SELECT 1 FROM dept_cue_list_template WHERE production_id = $1 AND template = $2 LIMIT 1",
+    [productionId, key],
+  );
+  if (decl.rows.length) return { ok: false, reason: "has_declarations" };
+  await pool.query(
+    "DELETE FROM production_cue_template_type WHERE id = $1 AND production_id = $2",
+    [typeId, productionId],
+  );
+  return { ok: true };
+}
+
+/** 新项目 seed 内置类型（与 add-cue-template-type.sql 同源）。 */
+export async function seedCueTemplateTypes(productionId: string): Promise<void> {
+  const { DEFAULT_CUE_TEMPLATE_TYPES } = await import("./cue-list-types");
+  const pool = getPool();
+  for (let i = 0; i < DEFAULT_CUE_TEMPLATE_TYPES.length; i++) {
+    const t = DEFAULT_CUE_TEMPLATE_TYPES[i];
+    await pool.query(
+      `INSERT INTO production_cue_template_type (production_id, key, abbr_hint, creator_roles, display_order)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (production_id, key) DO NOTHING`,
+      [productionId, t.key, t.abbrHint, t.creatorRoles, i + 1],
+    );
+  }
+}

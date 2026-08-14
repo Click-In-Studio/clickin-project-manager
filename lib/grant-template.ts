@@ -40,6 +40,22 @@ export function parseNodeKey(key: string): NodeKeyParts | null {
   return { resourceType: m[1], resourceId: m[2], resourceSub: m[3] ?? "*", verb: m[4] as GrantVerb };
 }
 
+// 含通配位（type/verb 可为 *）的宽松键形——区间键语法（批G）
+const WILDCARD_KEY_RE = /^node:([a-z_]+|\*)\/([^/@]+)(?:\/([^@]+))?@(view|create|edit|delete|\*)$/;
+
+/** 键串是否命中治理键（SENSITIVE/ROOT 手写三态清单）。
+ *  返回 null = 键非法。通配 type（node:*）不判治理——RESERVED_TYPES 保证
+ *  通配候选不生成 production/producer，不穿透治理域；通配 verb 按四动词逐一判。 */
+export function isGovernanceNodeKey(key: string): boolean | null {
+  const m = WILDCARD_KEY_RE.exec(key);
+  if (!m) return null;
+  const [, type, , subRaw, verb] = m;
+  const sub = subRaw ?? "*";
+  if (type === "*") return false;
+  const verbs = verb === "*" ? ["view", "create", "edit", "delete"] : [verb];
+  return verbs.some(v => isRootNode(type, sub, v) || isSensitiveNode(type, sub, v));
+}
+
 export function formatNodeKey(n: NodeKeyParts): string {
   const sub = n.resourceSub === "*" ? "" : `/${n.resourceSub}`;
   return `node:${n.resourceType}/${n.resourceId}${sub}@${n.verb}`;
@@ -162,6 +178,8 @@ export function isSensitiveNode(resourceType: string, resourceSub: string, verb:
     //   meta/mounts/archival 的 view=基线（项目信息成员可见），修改动作 sensitive；
     //   integrations **整面** sensitive（配置含密钥，查看即敏感）。
     if (resourceSub === "integrations") return true;
+    // 治理账本与越隐私审查（管理后台 v3 追加批）：整面 sensitive（查看即敏感）
+    if (resourceSub === "grants" || resourceSub === "asset_review") return true;
     if (verb === "view") return false;
     return resourceSub.startsWith("meta") || resourceSub === "archival";
   }

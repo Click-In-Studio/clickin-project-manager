@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listCueListsWithAccess, getUserAllowedCueTypes, listProductionMembersWithRoles } from "@/lib/db";
 import { canAccessNode } from "@/lib/grant-template";
-import { CUE_LIST_TEMPLATES } from "@/lib/cue-list-types";
+import { listCueTemplateTypes } from "@/lib/cue-template-db";
 import CueListsManager from "@/components/CueListsManager";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -39,9 +39,11 @@ export default async function CueListsPage({
     : null;
   if (!name) notFound();
 
-  const availableTemplates = canCreateAny
-    ? CUE_LIST_TEMPLATES
-    : CUE_LIST_TEMPLATES.filter((t) => allowedCueTypes?.includes(t.key));
+  const allTypes = await listCueTemplateTypes(id);
+  const availableTemplates = (canCreateAny
+    ? allTypes
+    : allTypes.filter((t) => allowedCueTypes?.includes(t.key))
+  ).map((t) => ({ key: t.key, abbrHint: t.abbrHint }));
 
   const editableIds = cueListsWithAccess.filter(cl => cl.canEdit).map(cl => cl.id);
 

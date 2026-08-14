@@ -4,8 +4,8 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import styles from "./my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import type { CueList, CueListTemplate, CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
-import { TEMPLATE_ABBR_HINTS } from "@/lib/cue-list-types";
+import type { CueList, CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
+
 import type { MemberWithRoles } from "@/lib/db";
 import CueListDetail from "./CueListDetail";
 import ChevronIcon from "./ChevronIcon";
@@ -40,7 +40,7 @@ type Props = {
   productionName: string;
   initialCueLists: CueList[];
   canCreate: boolean;
-  availableTemplates: CueListTemplate[];
+  availableTemplates: { key: string; abbrHint: string | null }[];
   myUserId: string;
   editableIds: string[];
   members: MemberWithRoles[];
@@ -53,22 +53,23 @@ function CreateModal({
   onCancel,
 }: {
   productionId: string;
-  availableTemplates: CueListTemplate[];
+  availableTemplates: { key: string; abbrHint: string | null }[];
   onCreated: (lists: CueList[]) => void;
   onCancel: () => void;
 }) {
   const initTemplate = availableTemplates[0]?.key ?? "";
+  const abbrHintOf = (key: string) => availableTemplates.find((t) => t.key === key)?.abbrHint ?? "";
   const [name, setName] = useState("");
   const [template, setTemplate] = useState(initTemplate);
-  const [abbr, setAbbrState] = useState(TEMPLATE_ABBR_HINTS[initTemplate] ?? "");
+  const [abbr, setAbbrState] = useState(abbrHintOf(initTemplate));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const prevTemplateRef = useRef(initTemplate);
   useEffect(() => {
-    const prevHint = TEMPLATE_ABBR_HINTS[prevTemplateRef.current] ?? "";
-    const newHint = TEMPLATE_ABBR_HINTS[template] ?? "";
+    const prevHint = abbrHintOf(prevTemplateRef.current);
+    const newHint = abbrHintOf(template);
     if (abbr === "" || abbr === prevHint) setAbbrState(newHint);
     prevTemplateRef.current = template;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,7 +142,7 @@ function CreateModal({
                     transition: "background .1s, color .1s",
                   }}
                 >
-                  {t.label}
+                  {t.key}
                 </button>
               ))}
               <button
@@ -166,7 +167,7 @@ function CreateModal({
             </label>
             <input
               value={abbr} onChange={(e) => handleAbbrChange(e.target.value)}
-              disabled={saving} placeholder={template ? (TEMPLATE_ABBR_HINTS[template] ?? "如 XQ") : "如 XQ"}
+              disabled={saving} placeholder={template ? (abbrHintOf(template) || "如 XQ") : "如 XQ"}
               maxLength={8} style={{ ...inputStyle, fontFamily: "monospace" }}
             />
           </div>
