@@ -7,9 +7,9 @@ import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKey
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
-type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group"; displayOrder: number };
+type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group"; displayOrder: number; memberUserIds: string[] };
 type Role = { id: string; name: string; permissions: string[] };
-type Member = { userId: string; name: string; roles: string[]; status: "active" | "suspended" };
+type Member = { userId: string; name: string; roles: string[]; tags: string[]; email: string | null; phone: string | null; status: "active" | "suspended" };
 
 type Caps = {
   deptView: boolean; deptEdit: boolean;
@@ -79,6 +79,8 @@ export default function AdminPermissionCenterClient({
   const [roles, setRoles] = useState(initialRoles);
   const [overrides, setOverrides] = useState(initialOverrides);
 
+  const [query, setQuery] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(depts[0]?.id ?? null);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(initialRoles[0]?.id ?? null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -101,6 +103,59 @@ export default function AdminPermissionCenterClient({
     walk(null, 0);
     return out;
   }, [depts]);
+
+  // ── 左列搜索（picker 同标准）──
+  const NO_TAG = "__none__";
+  const q = query.trim().toLowerCase();
+  const allTags = useMemo(() => [...new Set(members.flatMap(m => m.tags))].sort(), [members]);
+
+  // 部门树过滤：命中项保留祖先链
+  const visibleDeptIds = useMemo(() => {
+    if (!q) return new Set(depts.map(d => d.id));
+    const hit = new Set(depts.filter(d => d.name.toLowerCase().includes(q)).map(d => d.id));
+    const byId = new Map(depts.map(d => [d.id, d]));
+    for (const id of [...hit]) {
+      let cur = byId.get(id)?.parentId ?? null;
+      while (cur && byId.has(cur) && !hit.has(cur)) { hit.add(cur); cur = byId.get(cur)?.parentId ?? null; }
+    }
+    return hit;
+  }, [depts, q]);
+
+  const visibleRoles = useMemo(
+    () => roles.filter(r => !q || r.name.toLowerCase().includes(q)),
+    [roles, q],
+  );
+
+  // 成员过滤（姓名/角色/联系方式 + tag 筛选）与按部门分组
+  const visibleMemberIds = useMemo(() => {
+    return new Set(members.filter(m => {
+      if (tagFilter === NO_TAG) { if (m.tags.length > 0) return false; }
+      else if (tagFilter) { if (!m.tags.includes(tagFilter)) return false; }
+      if (!q) return true;
+      return (
+        m.name.toLowerCase().includes(q) ||
+        m.roles.some(r => r.toLowerCase().includes(q)) ||
+        (m.email ?? "").toLowerCase().includes(q) ||
+        (m.phone ?? "").includes(q)
+      );
+    }).map(m => m.userId));
+  }, [members, q, tagFilter]);
+
+  const memberMap = useMemo(() => new Map(members.map(m => [m.userId, m])), [members]);
+  const memberGroups = useMemo(() => {
+    const assigned = new Set<string>();
+    const groups: { label: string; kind: "dept" | "group" | null; members: Member[]; depth: number }[] = [];
+    for (const { dept, depth } of deptTree) {
+      const ms = dept.memberUserIds
+        .map(id => memberMap.get(id))
+        .filter((m): m is Member => !!m && visibleMemberIds.has(m.userId));
+      dept.memberUserIds.forEach(id => assigned.add(id));
+      if (ms.length) groups.push({ label: dept.name, kind: dept.kind, members: ms, depth });
+    }
+    const rest = members.filter(m => !assigned.has(m.userId) && visibleMemberIds.has(m.userId));
+    if (rest.length) groups.push({ label: "未分配部门", kind: null, members: rest, depth: 0 });
+    return groups;
+  }, [deptTree, memberMap, members, visibleMemberIds]);
 
   async function api(path: string, init: RequestInit): Promise<Record<string, unknown> | null> {
     setBusy(true); setError(null);
@@ -208,7 +263,26 @@ export default function AdminPermissionCenterClient({
             {/* ── 左栏 ── */}
             <div className={`${styles.splitPane} ${styles.splitList}`}>
               <div style={{ paddingRight: 16 }}>
-                {tab === "dept" && deptTree.map(({ dept, depth }) => (
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <input
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder={tab === "override" ? "搜索姓名 / 角色 / 联系方式" : "搜索名称"}
+                    style={{ flex: 1, padding: "8px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+                  />
+                  {tab === "override" && (
+                    <select
+                      value={tagFilter}
+                      onChange={e => setTagFilter(e.target.value)}
+                      style={{ padding: "8px 8px", fontSize: 11, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", maxWidth: 110 }}
+                    >
+                      <option value="">全部标签</option>
+                      <option value={NO_TAG}>无标签</option>
+                      {allTags.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  )}
+                </div>
+                {tab === "dept" && deptTree.filter(({ dept }) => visibleDeptIds.has(dept.id)).map(({ dept, depth }) => (
                   <button key={dept.id} onClick={() => setSelectedDeptId(dept.id)} style={{ ...listBtn(selectedDeptId === dept.id), paddingLeft: 10 + depth * 16 }}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: selectedDeptId === dept.id ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {dept.name}
@@ -219,7 +293,7 @@ export default function AdminPermissionCenterClient({
                     </span>
                   </button>
                 ))}
-                {tab === "role" && roles.map(r => (
+                {tab === "role" && visibleRoles.map(r => (
                   <button key={r.id} onClick={() => setSelectedRoleId(r.id)} style={listBtn(selectedRoleId === r.id)}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: selectedRoleId === r.id ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.name}
@@ -230,17 +304,33 @@ export default function AdminPermissionCenterClient({
                     </span>
                   </button>
                 ))}
-                {tab === "override" && members.map(m => {
-                  const n = Object.keys(overrides[m.userId] ?? {}).length;
-                  return (
-                    <button key={m.userId} onClick={() => setSelectedUserId(m.userId)} style={listBtn(selectedUserId === m.userId)}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: selectedUserId === m.userId ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {m.name || "（未命名）"}
-                      </span>
-                      {n > 0 && <Badge tone={selectedUserId === m.userId ? "neutral" : "blue"}>{n}</Badge>}
-                    </button>
-                  );
-                })}
+                {tab === "override" && memberGroups.map(g => (
+                  <div key={`${g.label}:${g.depth}`} style={{ marginBottom: 6 }}>
+                    <p style={{ margin: "0 0 2px", paddingLeft: g.depth * 12, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: "var(--muted)", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+                      {g.label}
+                      {g.kind === "group" && <Badge tone="amber">组</Badge>}
+                    </p>
+                    {g.members.map(m => {
+                      const n = Object.keys(overrides[m.userId] ?? {}).length;
+                      return (
+                        <button key={m.userId} onClick={() => setSelectedUserId(m.userId)} style={{ ...listBtn(selectedUserId === m.userId), paddingLeft: 10 + g.depth * 12 }}>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: selectedUserId === m.userId ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {m.name || "（未命名）"}
+                            </span>
+                            <span style={{ display: "block", fontSize: 9.5, color: selectedUserId === m.userId ? "rgba(255,255,255,.6)" : "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {m.roles.join(" · ") || "无角色"}
+                            </span>
+                          </span>
+                          {n > 0 && <Badge tone={selectedUserId === m.userId ? "neutral" : "blue"}>{n}</Badge>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+                {tab === "override" && memberGroups.length === 0 && (
+                  <p style={{ fontSize: 12, color: "var(--muted)", paddingTop: 20, textAlign: "center" }}>无匹配成员</p>
+                )}
               </div>
             </div>
 

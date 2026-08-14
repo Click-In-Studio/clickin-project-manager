@@ -30,11 +30,12 @@ export default async function PermissionCenterPage({ params }: { params: Promise
   const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   // 三 tab 各自 view/edit 双门；无 view 门的 tab 数据不出服务端。
-  const [deptEdit, deptViewOnly, roleEdit, overrideEdit] = await Promise.all([
+  const [deptEdit, deptViewOnly, roleEdit, overrideEdit, canViewContact] = await Promise.all([
     bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "edit"),
     bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "view"),
     bypass || hasGrant(permCtx.userId, id, "role", "*", "grants", "edit"),
     bypass || hasGrant(permCtx.userId, id, "member", "*", "overrides", "edit"),
+    bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),
   ]);
   const deptView = deptEdit || deptViewOnly;
   // 角色/override 现无独立 view 节点：读随写门（宁严勿松）。
@@ -57,10 +58,15 @@ export default async function PermissionCenterPage({ params }: { params: Promise
     <AdminPermissionCenterClient
       productionId={id}
       productionName={name ?? ""}
-      depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind, displayOrder: d.displayOrder }))}
+      depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind, displayOrder: d.displayOrder, memberUserIds: d.memberUserIds }))}
       initialDeptRows={deptRows}
       initialRoles={roles.map(r => ({ id: r.id, name: r.name, permissions: r.permissions }))}
-      members={membersRaw.map(m => ({ userId: m.userId, name: m.name, roles: m.roles, status: m.status }))}
+      members={membersRaw.map(m => ({
+        userId: m.userId, name: m.name, roles: m.roles, tags: m.tags,
+        email: canViewContact ? m.email : null,
+        phone: canViewContact ? m.phone : null,
+        status: m.status,
+      }))}
       initialOverrides={overrides}
       vocabulary={vocabulary}
       caps={{
