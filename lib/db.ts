@@ -2751,6 +2751,21 @@ export async function syncGlobalNotificationPreference(
   );
 }
 
+/** 用户邮箱：email identity 任一（primary 优先——未设 primary 也要尽量给出邮箱，
+ *  水印/溯源场景宁可有）→ feishu_user.email fallback。 */
+export async function getUserPrimaryEmail(userId: string): Promise<string | null> {
+  const res = await getPool().query<{ email: string | null }>(
+    `SELECT COALESCE(
+       (SELECT upi.platform_user_id FROM user_platform_identity upi
+        WHERE upi.user_id = $1 AND upi.platform_id = 'email'
+        ORDER BY upi.is_primary DESC LIMIT 1),
+       (SELECT fu.email FROM feishu_user fu WHERE fu.user_id = $1)
+     ) AS email`,
+    [userId],
+  );
+  return res.rows[0]?.email ?? null;
+}
+
 export async function getUserProfile(
   userId: string,
 ): Promise<{ name: string; displayName: string | null; bio: string | null; preferredPlatform: string | null; avatarUrl: string | null; isAdmin: boolean } | null> {

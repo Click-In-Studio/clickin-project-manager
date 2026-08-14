@@ -11,7 +11,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { flushSync } from "react-dom";
+import { flushSync, createPortal } from "react-dom";
+import { buildWatermarkTile } from "@/components/watermark-tile";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ChevronIcon";
@@ -3571,6 +3572,7 @@ function PrintPage({
   headerAlign = "left",
   pageNum,
   isToc,
+  watermarkTile,
   children,
 }: {
   cfg: PageConfig;
@@ -3578,6 +3580,7 @@ function PrintPage({
   headerAlign?: "left" | "right";
   pageNum: number | null;
   isToc?: boolean;
+  watermarkTile?: string | null;
   children: React.ReactNode;
 }) {
   return (
@@ -3585,6 +3588,14 @@ function PrintPage({
       className="print-page relative bg-white shadow-lg print:shadow-none"
       style={{ width: cfg.width, height: cfg.height }}
     >
+      {/* 打印水印：每页一份（fixed overlay 在分页打印下不可靠，逐页内嵌才稳） */}
+      {watermarkTile && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-10 select-none"
+          style={{ backgroundImage: watermarkTile, backgroundRepeat: "repeat" }}
+        />
+      )}
       {/* Header band */}
       <div
         className={`absolute flex items-center border-b border-zinc-100 ${
@@ -4175,6 +4186,23 @@ function PrintPreview({
   const [layoutMeasureTick, setLayoutMeasureTick] = useState(0);
   const [headerMode, setHeaderMode] = useState<PrintHeaderMode>("first-right");
   const [printToolbarStage, setPrintToolbarStage] = useState<PrintToolbarStage>(0);
+
+  // 打印强制水印：访问者 [用户名 邮箱]（无视项目屏幕水印开关）
+  const [watermarkTile, setWatermarkTile] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE_PATH}/api/me`)
+      .then((r) => r.json())
+      .then((me: { name: string | null; email: string | null }) => {
+        if (cancelled || !me.name) return;
+        setWatermarkTile(buildWatermarkTile(me.email ? `${me.name} ${me.email}` : me.name));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // 打印时隐藏 app shell：portal 到 body，globals.css 以 body:has(.script-print-root)
+  // 判定（不能用 JS 挂 body class——body className 由 React 管理会被协调抹掉）
   const printToolbarRef = useRef<HTMLDivElement>(null);
   const printToolbarRequiredWidthRef = useRef<Partial<Record<PrintToolbarStage, number>>>({});
   const previewViewportRef = useRef<HTMLDivElement>(null);
@@ -4453,8 +4481,9 @@ function PrintPreview({
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-300 print:static print:block print:bg-white">
+  // portal 到 body：@media print 下按 body class 隐藏 shell 兄弟子树（globals.css）
+  return createPortal(
+    <div className="script-print-root fixed inset-0 z-50 flex flex-col bg-zinc-300 print:static print:block print:bg-white">
       {/* Preview toolbar */}
       <div ref={printToolbarRef} className="flex shrink-0 flex-nowrap items-center overflow-visible border-b border-zinc-200 bg-white px-2 py-3 sm:px-6 print:hidden">
         <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-zinc-700">打印预览</span>
@@ -4564,7 +4593,7 @@ function PrintPreview({
 
           {/* TOC page */}
           {tocScenes.length > 0 && (
-            <PrintPage cfg={cfg} header="" pageNum={null} isToc>
+            <PrintPage cfg={cfg} header="" pageNum={null} isToc watermarkTile={watermarkTile}>
               <div className="pt-6">
                 <h1 className="mb-10 text-center text-base font-bold tracking-[0.25em] text-zinc-700">
                   目录
@@ -4608,6 +4637,7 @@ function PrintPreview({
                 header={page.sceneLabel}
                 headerAlign={getHeaderAlign(page.pageNum)}
                 pageNum={page.pageNum}
+                watermarkTile={watermarkTile}
               >
                 {page.items.map((item, iIdx) =>
                   item.kind === "sceneHeader"
@@ -4626,7 +4656,8 @@ function PrintPreview({
           })}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
