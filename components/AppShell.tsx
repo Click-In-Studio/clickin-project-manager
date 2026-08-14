@@ -41,6 +41,7 @@ const CREATION_NAV = [
 
 const PRODUCTION_NAV = [
   { label: "人员", hint: "演员 · 部门 · 团队", path: "contacts", symbol: "人" },
+  { label: "计划与日程", hint: "日历 · 甘特 · 执行表", path: "planning", symbol: "计" },
   { label: "事件", hint: "围读 · 排练 · 演出", path: "events", symbol: "事" },
   { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
   { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },

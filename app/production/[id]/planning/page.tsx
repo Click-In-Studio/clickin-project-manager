@@ -6,7 +6,7 @@ import { getSession } from "@/lib/session";
 import { toActor, listGrantedResourceIds } from "@/lib/grant-check";
 import { hasEventDomainView } from "@/lib/event-permissions";
 import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
-import { listProductionEvents } from "@/lib/event-db";
+import { listProductionEvents, listEventDepartments } from "@/lib/event-db";
 import PlanningClient from "@/components/PlanningClient";
 
 export const metadata: Metadata = { title: "计划与日程" };
@@ -22,10 +22,11 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
   if (!(await hasEventDomainView(toActor(session, access.permCtx), id)))
     redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
 
-  const [name, allEvents, milestones] = await Promise.all([
+  const [name, allEvents, milestones, departments] = await Promise.all([
     getProductionName(id),
     listProductionEvents(id),
     listMilestones(id),
+    listEventDepartments(id),
   ]);
   if (!name) notFound();
 
@@ -45,6 +46,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
         productionId={id}
         events={events}
         milestones={milestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }))}
+        departments={departments.map(d => ({ id: d.id, name: d.name }))}
       />
     </div>
   );

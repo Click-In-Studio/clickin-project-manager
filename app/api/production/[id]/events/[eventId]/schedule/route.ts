@@ -3,7 +3,8 @@ import { hasEventContentEdit, hasEventDomainView } from "@/lib/event-permissions
 import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, listScheduleItems, createScheduleItem, setScheduleItemDepartments } from "@/lib/event-db";
+import { getProductionEvent,
+  listScheduleItemsWithParticipants, createScheduleItem, setScheduleItemDepartments } from "@/lib/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -23,7 +24,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  const items = await listScheduleItems(eventId);
+  // timetable 泳道视图需要 participants + departmentIds（形状向后兼容）
+  const items = await listScheduleItemsWithParticipants(eventId);
   return Response.json({ items });
 }
 
