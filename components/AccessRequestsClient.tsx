@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
 import type { ApprovalRequest } from "@/lib/db";
 
@@ -192,10 +193,10 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
       {error && <p style={{ margin: 0, fontSize: 12, color: "var(--danger, #ef4444)" }}>{error}</p>}
 
       <div style={{ display: "flex", gap: 8 }}>
-        <button type="submit" className="primary-btn" style={{ fontSize: 13 }} disabled={submitting}>
+        <button type="submit" style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={submitting}>
           {submitting ? "提交中…" : "提交申请"}
         </button>
-        <button type="button" className="secondary-btn" style={{ fontSize: 13 }} onClick={onClose}>
+        <button type="button" style={{ ...SECONDARY_BTN, fontSize: 13 }} onClick={onClose}>
           取消
         </button>
       </div>
@@ -261,11 +262,11 @@ function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "flex", gap: 8 }}>
           {canAct ? (
             <>
-              <button className="primary-btn" style={{ fontSize: 13 }} disabled={acting} onClick={onApprove}>批准</button>
-              <button className="secondary-btn" style={{ fontSize: 13 }} disabled={acting} onClick={onReject}>拒绝</button>
+              <button style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={acting} onClick={onApprove}>批准</button>
+              <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onReject}>拒绝</button>
             </>
           ) : (
-            <button className="secondary-btn" style={{ fontSize: 13 }} disabled={acting} onClick={onCancel}>撤回申请</button>
+            <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onCancel}>撤回申请</button>
           )}
         </div>
       )}
@@ -438,11 +439,11 @@ export default function AccessRequestsClient({ productionId, productionName }: P
               <div style={{ display: "flex", gap: 8 }}>
                 {canAct ? (
                   <>
-                    <button className="primary-btn" style={{ fontSize: 12 }} disabled={acting === req.id} onClick={() => void handleApprove(req.id)}>批准</button>
-                    <button className="secondary-btn" style={{ fontSize: 12 }} disabled={acting === req.id} onClick={() => void handleReject(req.id)}>拒绝</button>
+                    <button style={{ ...PRIMARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleApprove(req.id)}>批准</button>
+                    <button style={{ ...SECONDARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleReject(req.id)}>拒绝</button>
                   </>
                 ) : (
-                  <button className="secondary-btn" style={{ fontSize: 12 }} disabled={acting === req.id} onClick={() => void handleCancel(req.id)}>撤回申请</button>
+                  <button style={{ ...SECONDARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleCancel(req.id)}>撤回申请</button>
                 )}
               </div>
             )}
@@ -453,23 +454,52 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   }
 
   return (
-    <div style={{ padding: "34px clamp(22px, 4vw, 62px) 72px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Header */}
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>{productionName}</p>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-          <h1 className={styles.pageTitle}>资源申请</h1>
-          {pendingCount > 0 && (
-            <span style={{
-              fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-              background: "var(--stage)", color: "#fff",
-            }}>
-              {pendingCount} 条待审批
-            </span>
-          )}
-        </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      {/* Header（v3 统一页头） */}
+      <PageHeader
+        eyebrow={productionName}
+        title={
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 12 }}>
+            资源申请
+            {pendingCount > 0 && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                background: "var(--stage)", color: "#fff", fontFamily: "system-ui, sans-serif",
+              }}>
+                {pendingCount} 条待审批
+              </span>
+            )}
+          </span>
+        }
+        side="stage"
+      />
+
+      {/* ── 摘要统计（通知页同款语汇）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(pendingCount), "待我审批", "需要你的决定"],
+          [String(myRequests.filter(r => r.status === "pending_supervisor" || r.status === "pending_resource").length), "我的进行中", "等待审批人处理"],
+          [String(myRequests.filter(r => r.status === "approved").length), "已批准", "我的申请获准记录"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
       </div>
 
+      {/* ── Panel（通知页同款）：tab + 分栏 ── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       {/* Tab strip */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
         {([
@@ -497,7 +527,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
       <div className={styles.mobileOnly}>
         {tab === "mine" && (
           <div style={{ marginBottom: 12 }}>
-            <button className="primary-btn" style={{ fontSize: 13 }} onClick={() => setMobileExpanded("__form__")}>
+            <button style={{ ...PRIMARY_BTN, fontSize: 13 }} onClick={() => setMobileExpanded("__form__")}>
               申请资源权限
             </button>
           </div>
@@ -529,8 +559,8 @@ export default function AccessRequestsClient({ productionId, productionName }: P
       </div>
 
       {/* ── Desktop ── */}
-      <div className={styles.desktopOnly}>
-        <div className={styles.splitLayout}>
+      <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+        <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
           {/* Left: list */}
           <div className={`${styles.splitPane} ${styles.splitList}`}>
             {tab === "mine" && (
@@ -588,6 +618,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
           </div>
         </div>
       </div>
+      </section>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment, type CSSProperties } from "react";
 import Link from "next/link";
 import type React from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
+import Badge, { type BadgeTone } from "@/components/Badge";
 import type { ProductionEvent, EventDepartment } from "@/lib/event-db";
 import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso } from "@/lib/tz";
 
@@ -30,346 +32,17 @@ const STATUS_COLORS: Record<string, { background: string; color: string }> = {
   cancelled: { background: "#fff1f2",       color: "#e11d48" },
 };
 
-// Calendar: chip colors by event type
-const TYPE_CHIP: Record<string, { bg: string; fg: string }> = {
-  rehearsal:   { bg: "#ddeef0", fg: "#2f6670" },
-  performance: { bg: "#f5e6dc", fg: "#a55c32" },
-  meeting:     { bg: "#eef0f8", fg: "#4a5088" },
-  custom:      { bg: "var(--paper)", fg: "var(--muted)" },
-};
-
-const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
-const DAY_NAMES   = ["周一","周二","周三","周四","周五","周六","周日"];
-
-// ─── Calendar helpers ────────────────────────────────────────────────────────
-
-interface CalEventSlot {
-  event: ProductionEvent;
-  colStart: number;          // 0–6 (Mon–Sun) within this week
-  colEnd: number;            // 0–6, inclusive
-  row: number;               // stacking row (0 = topmost)
-  continuesBefore: boolean;  // event started before this week
-  continuesAfter: boolean;   // event ends after this week
-}
-
-/** Build 2-D array of calendar dates (Monday-first) for the given month. */
-function buildWeeks(year: number, month: number): Date[][] {
-  const first = new Date(year, month, 1);
-  const last  = new Date(year, month + 1, 0);
-  const startOffset = (first.getDay() + 6) % 7; // Mon=0 … Sun=6
-  const daysInGrid  = Math.ceil((startOffset + last.getDate()) / 7) * 7;
-  const weeks: Date[][] = [];
-  for (let i = 0; i < daysInGrid; i += 7) {
-    const week: Date[] = [];
-    for (let j = 0; j < 7; j++) {
-      week.push(new Date(year, month, 1 - startOffset + i + j));
-    }
-    weeks.push(week);
-  }
-  return weeks;
-}
-
-/** Local-midnight timestamp for a date (for same-day comparison). */
-function dayTs(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
-/** Return the [start, end] day timestamps for an event, in local time. */
-function eventDayRange(event: ProductionEvent): { start: number; end: number } | null {
-  if (!event.startTime) return null;
-  const s = new Date(event.startTime);
-  const start = new Date(s.getFullYear(), s.getMonth(), s.getDate()).getTime();
-  const end = event.endTime
-    ? (() => { const e = new Date(event.endTime!); return new Date(e.getFullYear(), e.getMonth(), e.getDate()).getTime(); })()
-    : start;
-  return { start, end: Math.max(start, end) };
-}
-
-/**
- * For a given week, return all CalEventSlots with stacking rows assigned.
- * Uses a greedy interval-scheduling approach to minimise wasted rows.
- */
-function computeWeekSlots(week: Date[], events: ProductionEvent[]): CalEventSlot[] {
-  const wsTs = dayTs(week[0]);
-  const weTs = dayTs(week[6]);
-  const DAY_MS = 86_400_000;
-
-  const overlapping: Array<Omit<CalEventSlot, "row">> = [];
-  for (const event of events) {
-    const range = eventDayRange(event);
-    if (!range) continue;
-    if (range.end < wsTs || range.start > weTs) continue;
-    overlapping.push({
-      event,
-      colStart: Math.max(0, Math.round((range.start - wsTs) / DAY_MS)),
-      colEnd:   Math.min(6, Math.round((range.end   - wsTs) / DAY_MS)),
-      continuesBefore: range.start < wsTs,
-      continuesAfter:  range.end   > weTs,
-    });
-  }
-
-  // Sort: earlier start first; on tie, wider span first (gets priority row)
-  overlapping.sort((a, b) =>
-    a.colStart - b.colStart || (b.colEnd - b.colStart) - (a.colEnd - a.colStart)
-  );
-
-  // Greedy row assignment
-  const rowEndCols: number[] = [];
-  const slots: CalEventSlot[] = [];
-  for (const item of overlapping) {
-    let r = 0;
-    while (r < rowEndCols.length && rowEndCols[r] >= item.colStart) r++;
-    if (r >= rowEndCols.length) rowEndCols.push(item.colEnd);
-    else rowEndCols[r] = item.colEnd;
-    slots.push({ ...item, row: r });
-  }
-  return slots;
-}
-
-// ─── Calendar: week row ──────────────────────────────────────────────────────
-
-const DAY_H    = 26;   // px — date-number header area
-const EVT_H    = 22;   // px — height per event row
-const MAX_ROWS = 3;    // max visible event rows before overflow
-const GAP      = 2;    // px — gap between chip edge and cell border
-
-function CalWeekRow({
-  week, month, slots, overflowByCol, productionId, canViewFull, todayTs,
-}: {
-  week: Date[];
-  month: number;
-  slots: CalEventSlot[];
-  overflowByCol: number[];
-  productionId: string;
-  canViewFull: boolean;
-  todayTs: number;
-}) {
-  const visibleSlots = slots.filter(s => s.row < MAX_ROWS);
-  const maxRow       = visibleSlots.reduce((m, s) => Math.max(m, s.row), -1);
-  const hasOverflow  = overflowByCol.some(n => n > 0);
-  const evtAreaH     = (maxRow + 1) * EVT_H + (hasOverflow ? 20 : 0) + 4;
-  const totalH       = DAY_H + Math.max(evtAreaH, 4);
-
-  return (
-    <div style={{
-      position: "relative",
-      display: "grid",
-      gridTemplateColumns: "repeat(7, 1fr)",
-      minHeight: totalH,
-    }}>
-      {/* Date number cells */}
-      {week.map((day, col) => {
-        const isToday    = dayTs(day) === todayTs;
-        const isCurMonth = day.getMonth() === month;
-        return (
-          <div key={col} style={{
-            borderRight: "1px solid var(--line)",
-            borderBottom: "1px solid var(--line)",
-            padding: 7,
-            height: Math.max(totalH, 93),
-            boxSizing: "border-box",
-            background: isToday ? "#f8f0e7" : undefined,
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-          }}>
-            <b style={{
-              fontSize: 9,
-              fontWeight: 700,
-              color: isCurMonth ? "var(--muted)" : "var(--line)",
-            }}>
-              {day.getDate()}
-            </b>
-          </div>
-        );
-      })}
-
-      {/* Event bar layer (absolutely positioned below date numbers) */}
-      <div style={{ position: "absolute", top: DAY_H, left: 0, right: 0, bottom: 0 }}>
-        {visibleSlots.map((s, i) => {
-          const chip  = TYPE_CHIP[s.event.eventType] ?? TYPE_CHIP.custom;
-          const lPct  = (s.colStart / 7) * 100;
-          const wPct  = ((s.colEnd - s.colStart + 1) / 7) * 100;
-          const lOff  = s.continuesBefore ? 0 : GAP;
-          const rOff  = s.continuesAfter  ? 0 : GAP;
-          const href  = canViewFull
-            ? `/production/${productionId}/events/${s.event.id}`
-            : `/production/${productionId}/events/${s.event.id}/view`;
-          return (
-            <Link key={i} href={href} style={{
-              position: "absolute",
-              top: s.row * EVT_H + GAP,
-              left: `calc(${lPct}% + ${lOff}px)`,
-              width: `calc(${wPct}% - ${lOff + rOff}px)`,
-              height: EVT_H - GAP * 2,
-              background: chip.bg,
-              color: chip.fg,
-              borderTopLeftRadius:     s.continuesBefore ? 0 : 4,
-              borderBottomLeftRadius:  s.continuesBefore ? 0 : 4,
-              borderTopRightRadius:    s.continuesAfter  ? 0 : 4,
-              borderBottomRightRadius: s.continuesAfter  ? 0 : 4,
-              fontSize: 11,
-              fontWeight: 600,
-              display: "flex",
-              alignItems: "center",
-              paddingLeft:  s.continuesBefore ? 4 : 7,
-              paddingRight: s.continuesAfter  ? 2 : 7,
-              textDecoration: "none",
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-              lineHeight: 1,
-            }}>
-              {s.continuesBefore && (
-                <span style={{ flexShrink: 0, fontSize: 9, marginRight: 3, opacity: 0.6 }}>◀</span>
-              )}
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{s.event.title}</span>
-              {s.continuesAfter && (
-                <span style={{ flexShrink: 0, fontSize: 9, marginLeft: 3, opacity: 0.6 }}>▶</span>
-              )}
-            </Link>
-          );
-        })}
-
-        {/* Per-column overflow count */}
-        {hasOverflow && overflowByCol.map((n, col) => n > 0 ? (
-          <div key={`ov-${col}`} style={{
-            position: "absolute",
-            bottom: 2,
-            left: `${(col / 7) * 100}%`,
-            width: `${100 / 7}%`,
-            paddingLeft: 8,
-            fontSize: 10,
-            color: "var(--muted)",
-            lineHeight: "18px",
-          }}>
-            +{n}
-          </div>
-        ) : null)}
-      </div>
-    </div>
-  );
-}
-
-// ─── Calendar view ───────────────────────────────────────────────────────────
-
-function CalendarView({
-  events, productionId, canViewFull,
-}: {
-  events: ProductionEvent[];
-  productionId: string;
-  canViewFull: boolean;
-}) {
-  const now = new Date();
-  const todayTs = useMemo(() => dayTs(new Date()), []);
-  const [year,  setYear]  = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
-
-  const weeks = useMemo(() => buildWeeks(year, month), [year, month]);
-
-  const weekData = useMemo(() =>
-    weeks.map(week => {
-      const slots = computeWeekSlots(week, events);
-      const overflowByCol = new Array(7).fill(0);
-      for (const s of slots) {
-        if (s.row >= MAX_ROWS) {
-          for (let c = s.colStart; c <= s.colEnd; c++) overflowByCol[c]++;
-        }
-      }
-      return { slots, overflowByCol };
-    }),
-    [weeks, events]
-  );
-
-  function prevMonth() {
-    if (month === 0) { setYear(y => y - 1); setMonth(11); }
-    else setMonth(m => m - 1);
-  }
-  function nextMonth() {
-    if (month === 11) { setYear(y => y + 1); setMonth(0); }
-    else setMonth(m => m + 1);
-  }
-  function goToday() {
-    const d = new Date();
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
-  }
-
-  const navBtn: React.CSSProperties = {
-    width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 14, lineHeight: 1, background: "none", border: "1px solid var(--line)",
-    borderRadius: 5, cursor: "pointer", color: "var(--ink)", flexShrink: 0,
-  };
-
-  return (
-    <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>
-      {/* Panel heading */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-            <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
-              {year}年{MONTH_NAMES[month]}
-            </p>
-            <button onClick={prevMonth} style={navBtn}>‹</button>
-            <button onClick={nextMonth} style={navBtn}>›</button>
-            <button onClick={goToday} style={{
-              padding: "2px 8px", fontSize: 9, fontWeight: 700,
-              background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 5,
-              cursor: "pointer", color: "var(--muted)",
-            }}>今天</button>
-          </div>
-          <h2 style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, margin: "5px 0 0" }}>项目日历</h2>
-        </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 12, color: "var(--muted)", fontSize: 9, alignItems: "center", paddingTop: 4 }}>
-          {(["rehearsal", "performance", "meeting"] as const).map(type => {
-            const chip = TYPE_CHIP[type];
-            const label = type === "rehearsal" ? "排练" : type === "performance" ? "演出" : "会议";
-            return (
-              <span key={type} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <i style={{ width: 7, height: 7, borderRadius: 2, background: chip.fg, flexShrink: 0, display: "inline-block" }} />
-                {label}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Day-of-week header */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
-        {DAY_NAMES.map((d, i) => (
-          <span key={i} style={{ padding: 7, color: "var(--muted)", fontSize: 9, textAlign: "center", display: "block" }}>
-            {d}
-          </span>
-        ))}
-      </div>
-
-      {/* Calendar grid */}
-      <div style={{ borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)" }}>
-        {weeks.map((week, wi) => (
-          <CalWeekRow
-            key={wi}
-            week={week}
-            month={month}
-            slots={weekData[wi].slots}
-            overflowByCol={weekData[wi].overflowByCol}
-            productionId={productionId}
-            canViewFull={canViewFull}
-            todayTs={todayTs}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
 // ─── List view: EventCard ────────────────────────────────────────────────────
 
 function EventCard({
-  event, productionId, role, canViewFull, onFollow, onUnfollow,
+  event, productionId, role, canViewFull, taskCount = 0, first = false, onFollow, onUnfollow,
 }: {
   event: ProductionEvent;
   productionId: string;
   role: "participant" | "follower" | null;
   canViewFull: boolean;
+  taskCount?: number;
+  first?: boolean;
   onFollow: (eventId: string) => void;
   onUnfollow: (eventId: string) => void;
 }) {
@@ -391,50 +64,106 @@ function EventCard({
     }
   }
 
-  const statusStyle = STATUS_COLORS[event.status] ?? STATUS_COLORS.draft;
+  const detailHref = canViewFull
+    ? `/production/${productionId}/events/${event.id}`
+    : `/production/${productionId}/events/${event.id}/view`;
+  const typeTone: BadgeTone =
+    event.eventType === "performance" ? "red" :
+    event.eventType === "rehearsal" ? "blue" : "neutral";
+  const statusText = STATUS_LABELS[event.status] ?? event.status;
+
+  const go = (href: string) => { window.location.href = `${BASE_PATH}${href}`; };
+
+  // 原型 eventList article：grid 58px / 1fr / auto
   return (
-    <div style={{ position: "relative", background: "white", borderRadius: 12, border: "1px solid var(--line)" }}>
-      <Link
-        href={canViewFull
-          ? `/production/${productionId}/events/${event.id}`
-          : `/production/${productionId}/events/${event.id}/view`}
-        style={{ display: "block", padding: "14px 16px", paddingRight: 80, textDecoration: "none" }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", lineHeight: 1.4, margin: 0 }}>{event.title}</h3>
-          <span style={{ flexShrink: 0, borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 600, ...statusStyle }}>
-            {STATUS_LABELS[event.status] ?? event.status}
-          </span>
+    <article style={{
+      display: "grid", gridTemplateColumns: "58px 1fr auto", gap: 16,
+      padding: "18px 0", borderTop: first ? 0 : "1px solid var(--line)",
+    }}>
+      {/* 日期盒（54×59 边框盒 + serif 22px） */}
+      <time style={{
+        width: 54, height: 59, border: "1px solid var(--line)", borderRadius: 9,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      }}>
+        {event.startTime ? (
+          <>
+            <b style={{ fontFamily: "Georgia, serif", fontSize: 22, fontWeight: 500, color: "var(--ink)" }}>
+              {new Date(event.startTime).getDate()}
+            </b>
+            <small style={{ color: "var(--muted)", fontSize: 9 }}>
+              {new Date(event.startTime).getMonth() + 1} 月
+            </small>
+          </>
+        ) : (
+          <small style={{ color: "var(--muted)", fontSize: 9 }}>待定</small>
+        )}
+      </time>
+
+      {/* 中列：Badge 行 → serif 标题 → 时间地点 → inlineActions */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <Badge tone={typeTone}>{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</Badge>
+          {event.status === "draft" && <Badge>草稿</Badge>}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 12px", fontSize: 12, color: "var(--muted)" }}>
-          <span style={{ borderRadius: 4, background: "var(--paper)", padding: "1px 6px", fontSize: 11, color: "var(--muted)" }}>
-            {EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}
-          </span>
-          {event.startTime && <span>{fmtDateTimeSmart(event.startTime)}</span>}
-          {event.location && <span>{event.location}</span>}
+        <h3 style={{ margin: "8px 0 3px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, lineHeight: 1.3 }}>
+          <Link href={detailHref} style={{ color: "inherit", textDecoration: "none" }}>
+            {event.title}
+          </Link>
+        </h3>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 10 }}>
+          {[event.startTime && fmtDateTimeSmart(event.startTime), event.location].filter(Boolean).join(" · ")}
+        </p>
+        {/* inlineActions（原型：paper 底 script 色边框小按钮） */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <button onClick={() => go(detailHref)} style={INLINE_ACTION_BTN}>
+            事件详情 <span style={{ marginLeft: 3 }}>→</span>
+          </button>
+          {canViewFull && (
+            <button onClick={() => go(`/production/${productionId}/events/${event.id}/callsheet`)} style={INLINE_ACTION_BTN}>
+              执行流程 <span style={{ marginLeft: 3 }}>→</span>
+            </button>
+          )}
+          {taskCount > 0 && (
+            <button onClick={() => go(`/production/${productionId}/tasks?event=${event.id}`)} style={INLINE_ACTION_BTN}>
+              {taskCount} 个任务 <span style={{ marginLeft: 3 }}>→</span>
+            </button>
+          )}
         </div>
-      </Link>
-      <div style={{ position: "absolute", right: 12, bottom: 12 }}>
+      </div>
+
+      {/* 右列：eventStatus 丸 + 关注 */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        <span style={{
+          width: "fit-content", padding: "5px 8px", borderRadius: 999,
+          background: "var(--stage-soft)", color: "var(--stage)", fontSize: 9, fontWeight: 700,
+        }}>
+          {statusText}
+        </span>
         {role === "participant" ? (
-          <span style={{ fontSize: 11, color: "var(--muted)", padding: "3px 8px" }}>已参与</span>
+          <span style={{ fontSize: 10, color: "var(--muted)" }}>已参与</span>
         ) : (
           <button
             onClick={toggle}
             disabled={busy}
             style={{
-              fontSize: 11, padding: "3px 8px", borderRadius: 6, border: 0, cursor: "pointer",
+              fontSize: 10, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--line)", cursor: "pointer",
               opacity: busy ? 0.5 : 1, transition: "all .1s",
-              background: role === "follower" ? "#eff6ff" : "var(--paper)",
-              color: role === "follower" ? "#2563eb" : "var(--muted)",
+              background: role === "follower" ? "var(--script-soft)" : "var(--paper)",
+              color: role === "follower" ? "var(--script)" : "var(--muted)",
             }}
           >
             {role === "follower" ? "已关注" : "关注"}
           </button>
         )}
       </div>
-    </div>
+    </article>
   );
 }
+
+const INLINE_ACTION_BTN: CSSProperties = {
+  minHeight: 28, padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 7,
+  background: "var(--paper)", color: "var(--script)", fontSize: 9, cursor: "pointer",
+};
 
 // ─── Create event modal ──────────────────────────────────────────────────────
 
@@ -626,15 +355,16 @@ type Props = {
   myParticipations: { eventId: string; role: "participant" | "follower" }[];
   currentUserId: string;
   departments: EventDepartment[];
+  taskCounts?: Record<string, number>;
 };
 
 export default function EventsClient({
   productionId, productionName, initialEvents, canCreate, canViewFull,
-  myParticipations, departments,
+  myParticipations, departments, taskCounts = {},
 }: Props) {
-  const [events,     setEvents]     = useState(initialEvents);
-  const [showCreate, setShowCreate] = useState(false);
-  const [view,       setView]       = useState<"list" | "calendar">("list");
+  const [events,      setEvents]      = useState(initialEvents);
+  const [showCreate,  setShowCreate]  = useState(false);
+  const [justCreated, setJustCreated] = useState<ProductionEvent | null>(null);
   const [roles,      setRoles]      = useState<Map<string, "participant" | "follower">>(() =>
     new Map(myParticipations.map(p => [p.eventId, p.role]))
   );
@@ -651,6 +381,7 @@ export default function EventsClient({
       return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
     }));
     setShowCreate(false);
+    setJustCreated(ev);
   }
 
   function handleFollow(eventId: string) {
@@ -662,83 +393,125 @@ export default function EventsClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Page header */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            Schedule
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>日程</h1>
-        </div>
+      {/* Page header（v3 统一页头） */}
+      <PageHeader
+        eyebrow="Events"
+        title="事件"
+        side="stage"
+        actions={canCreate && (
+          <button onClick={() => setShowCreate(true)} style={PRIMARY_BTN}>
+            ＋ 新建事件
+          </button>
+        )}
+      />
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* View toggle */}
-          <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
-            {(["list", "calendar"] as const).map(v => (
-              <button key={v} onClick={() => setView(v)} style={{
-                padding: "5px 12px", fontSize: 12, fontWeight: 600, border: 0, cursor: "pointer",
-                transition: "all .1s",
-                background: view === v ? "var(--ink)" : "white",
-                color:      view === v ? "#fff"        : "var(--muted)",
-              }}>
-                {v === "list" ? "列表" : "日历"}
-              </button>
-            ))}
-          </div>
-
-          {canCreate && (
-            <button
-              onClick={() => setShowCreate(true)}
-              style={{ border: 0, borderRadius: 9, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--ink)", color: "#fff" }}
-            >
-              + 新建事件
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Content */}
-      {view === "calendar" ? (
-        <CalendarView
-          events={events}
-          productionId={productionId}
-          canViewFull={canViewFull}
-        />
-      ) : (
+      {/* Content（日历模式已移除——项目日历归"计划与日程"面板） */}
+      {(
         <>
-          {events.length === 0 && (
-            <p style={{ textAlign: "center", fontSize: 13, color: "var(--muted)", padding: "48px 0" }}>暂无事件</p>
-          )}
-
-          {upcoming.length > 0 && (
-            <section style={{ marginBottom: 28 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 12 }}>即将进行</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {upcoming.map(ev => (
-                  <EventCard
-                    key={ev.id} event={ev} productionId={productionId}
-                    role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
-                    onFollow={handleFollow} onUnfollow={handleUnfollow}
-                  />
-                ))}
-              </div>
+          {/* 三步流程说明条（原型 flowExplainer：三卡 + 箭头——设计语言保留；
+              高度对齐各页摘要卡 92px 体系） */}
+          {canCreate && (
+            <section style={{
+              display: "grid", gridTemplateColumns: "1fr auto 1fr auto 1fr",
+              alignItems: "center", gap: 13, marginBottom: 18,
+            }}>
+              {[["1", "定义事件", "类型、时间、地点、人员"],
+                ["2", "确认任务", "负责人、截止、通知对象"],
+                ["3", "发布与追踪", "站内通知、确认、执行"]].map(([n, t, s], i) => (
+                <Fragment key={n}>
+                  {i > 0 && <i style={{ fontStyle: "normal", color: "var(--muted)" }}>→</i>}
+                  <div style={{
+                    minHeight: 92, padding: "17px 19px", border: "1px solid var(--line)", borderRadius: 14,
+                    background: "var(--surface)", display: "grid",
+                    gridTemplateColumns: "32px 1fr", gridTemplateRows: "1fr 1fr",
+                    alignItems: "center", columnGap: 13,
+                  }}>
+                    <span style={{
+                      width: 32, height: 32, borderRadius: "50%", gridRow: "1 / 3",
+                      display: "grid", placeItems: "center",
+                      background: "var(--ink)", color: "#fff", fontSize: 10,
+                    }}>{n}</span>
+                    <b style={{ fontSize: 11, alignSelf: "end", color: "var(--ink)" }}>{t}</b>
+                    <small style={{ color: "var(--muted)", fontSize: 9, alignSelf: "start", marginTop: 3 }}>{s}</small>
+                  </div>
+                </Fragment>
+              ))}
             </section>
           )}
 
-          {past.length > 0 && (
-            <section>
-              <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 12 }}>已过去</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {past.map(ev => (
-                  <EventCard
-                    key={ev.id} event={ev} productionId={productionId}
-                    role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
-                    onFollow={handleFollow} onUnfollow={handleUnfollow}
-                  />
-                ))}
+          {/* 发布成功 banner（原型 successBanner） */}
+          {justCreated && (
+            <section role="status" style={{
+              display: "flex", alignItems: "center", gap: 13,
+              background: "var(--success-soft)", border: "1px solid #c8dfd2", borderRadius: 12,
+              padding: "14px 18px", marginBottom: 18,
+            }}>
+              <span style={{
+                width: 32, height: 32, borderRadius: "50%", background: "var(--success)",
+                color: "#fff", display: "grid", placeItems: "center", flexShrink: 0,
+              }}>✓</span>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <b style={{ fontSize: 12, color: "var(--ink)" }}>「{justCreated.title}」已创建</b>
+                <small style={{ color: "var(--muted)", fontSize: 10, marginTop: 3 }}>
+                  可继续补充日程条目、任务与参与人员。
+                </small>
               </div>
+              <Link
+                href={`/production/${productionId}/events/${justCreated.id}`}
+                style={{ marginLeft: "auto", border: 0, background: "transparent", color: "var(--success)", fontWeight: 700, fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
+              >
+                进入事件 →
+              </Link>
+              <button onClick={() => setJustCreated(null)} style={{ border: 0, background: "none", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>×</button>
             </section>
           )}
+
+          {/* 定高 panel（与任务/报告/通知统一）：内部分组滚动 */}
+          <section style={{
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
+            padding: 22, height: "calc(100vh - 320px)", minHeight: 460,
+            display: "flex", flexDirection: "column",
+          }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+              {events.length === 0 && (
+                <p style={{ textAlign: "center", fontSize: 13, color: "var(--muted)", padding: "48px 0" }}>暂无事件</p>
+              )}
+
+              {upcoming.length > 0 && (
+                <>
+                  <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>Upcoming</p>
+                  <h2 style={{ margin: "0 0 6px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>即将发生</h2>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {upcoming.map((ev, i) => (
+                      <EventCard
+                        key={ev.id} event={ev} productionId={productionId} first={i === 0}
+                        role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
+                        taskCount={taskCounts[ev.id] ?? 0}
+                        onFollow={handleFollow} onUnfollow={handleUnfollow}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {past.length > 0 && (
+                <>
+                  <p style={{ margin: `${upcoming.length > 0 ? 26 : 0}px 0 4px`, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>Past</p>
+                  <h2 style={{ margin: "0 0 6px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>已过去</h2>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {past.map((ev, i) => (
+                      <EventCard
+                        key={ev.id} event={ev} productionId={productionId} first={i === 0}
+                        role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
+                        taskCount={taskCounts[ev.id] ?? 0}
+                        onFollow={handleFollow} onUnfollow={handleUnfollow}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
         </>
       )}
 

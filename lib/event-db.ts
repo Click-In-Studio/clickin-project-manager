@@ -1843,6 +1843,19 @@ export type ProductionTechReqEntry = {
   assignees: { userId: string; name: string }[];
 };
 
+/** 每个 event 的关联任务数（事件列表关联徽章用）。 */
+export async function listEventTaskCounts(productionId: string): Promise<Record<string, number>> {
+  const res = await getPool().query<{ event_id: string; count: string }>(
+    `SELECT etr.event_id, COUNT(*) AS count
+     FROM event_tech_req etr
+     JOIN production_event pe ON pe.id = etr.event_id
+     WHERE pe.production_id = $1
+     GROUP BY etr.event_id`,
+    [productionId],
+  );
+  return Object.fromEntries(res.rows.map(r => [r.event_id, Number(r.count)]));
+}
+
 export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;

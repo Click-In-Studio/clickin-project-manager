@@ -77,6 +77,32 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
         <h1 className={styles.pageTitle}>公告与风险提醒</h1>
       </div>
 
+      {/* ── 摘要统计（通知提醒同款语汇）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(announcements.length), "项目公告", "各项目汇总"],
+          [String(announcements.filter(a => a.isPinned).length), "置顶", "重点公告"],
+          [String(cueWarnings.length), "风险提示", "Cue 锚定异常"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Panel（统一定高）── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div className={styles.tabBar}>
         <button aria-selected={tab === "announcements"} onClick={() => setTab("announcements")}>
           项目公告{announcements.length > 0 ? ` (${announcements.length})` : ""}
@@ -137,7 +163,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
           </div>
 
           {/* Desktop: master-detail split */}
-          <div className={styles.splitLayout}>
+          <div className={styles.splitLayout} style={{ flex: 1, minHeight: 0, height: "auto" }}>
             <div className={`${styles.splitPane} ${styles.splitList}`}>
               {announcements.length === 0 ? (
                 <div className={styles.emptyState}>
@@ -238,7 +264,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
 
       {/* ── 风险提示 tab ── */}
       {tab === "risks" && (
-        <div className={styles.contentStack}>
+        <div className={styles.contentStack} style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           {cueWarnings.length === 0 ? (
             <div className={styles.emptyState}>
               当前没有风险提示
@@ -281,6 +307,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
           )}
         </div>
       )}
+      </section>
     </div>
   );
 }

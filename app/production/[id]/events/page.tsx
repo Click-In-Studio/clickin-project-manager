@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/event-permissions";
 import { canAccessNode } from "@/lib/grant-template";
-import { hasEffectiveGrant, listGrantedResourceIds, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "事件" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listProductionEvents, listUserEventParticipations, listEventDepartments } from "@/lib/event-db";
+import { listProductionEvents, listUserEventParticipations, listEventDepartments, listEventTaskCounts } from "@/lib/event-db";
 import EventsClient from "@/components/EventsClient";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -27,22 +27,16 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), id, "event", "*", "call_sheet", "view");
   const canCreate = (await canAccessNode(access.permCtx, id, "event", "*", "*", "create")).allowed;
 
-  const [name, allEvents, myParticipations, departments] = await Promise.all([
+  const [name, allEvents, myParticipations, departments, taskCounts] = await Promise.all([
     getProductionName(id),
     listProductionEvents(id),
     listUserEventParticipations(session.userId, id),
     listEventDepartments(id),
+    listEventTaskCounts(id),
   ]);
   if (!name) notFound();
 
-  const VISIBLE_STATUSES = new Set(["published", "completed"]);
-  // draft 可见 = publication@view 行（通配全见或实例集）
-  const draftVis = (access.permCtx.isAdmin || access.permCtx.isOwner)
-    ? { wildcard: true, ids: [] as string[] }
-    : await listGrantedResourceIds(session.userId, id, "event", "publication", "view");
-  const events = draftVis.wildcard
-    ? allEvents
-    : allEvents.filter(e => VISIBLE_STATUSES.has(e.status) || draftVis.ids.includes(e.id));
+  const events = await filterDraftVisibleEvents(access.permCtx, id, allEvents);
 
   return (
     <>
@@ -55,6 +49,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
         myParticipations={myParticipations}
         currentUserId={session.userId}
         departments={canCreate ? departments : []}
+        taskCounts={taskCounts}
       />
       <PageActivationGate productionId={id} scope="events" />
     </>
