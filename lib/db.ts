@@ -2751,7 +2751,7 @@ export async function getUserPrimaryEmail(userId: string): Promise<string | null
     `SELECT COALESCE(
        (SELECT upi.platform_user_id FROM user_platform_identity upi
         WHERE upi.user_id = $1 AND upi.platform_id = 'email'
-        ORDER BY upi.is_primary DESC LIMIT 1),
+        ORDER BY upi.is_primary DESC, upi.created_at DESC LIMIT 1),
        (SELECT fu.email FROM feishu_user fu WHERE fu.user_id = $1)
      ) AS email`,
     [userId],
@@ -3391,7 +3391,7 @@ const USER_DIRECTORY_SQL = `
          COALESCE(
            (SELECT upi.platform_user_id FROM user_platform_identity upi
             WHERE upi.user_id = up.user_id AND upi.platform_id = 'email'
-            ORDER BY upi.is_primary DESC LIMIT 1),
+            ORDER BY upi.is_primary DESC, upi.created_at DESC LIMIT 1),
            fu.email
          ) AS email,
          COALESCE(up.phone, fu.phone) AS phone
@@ -3470,21 +3470,39 @@ export async function updateUserContact(
   email: string | null,
   phone: string | null,
 ): Promise<void> {
-  const pool = getPool();
-  if (phone) {
-    await pool.query(
-      `UPDATE user_profile SET phone = $2, updated_at = now() WHERE user_id = $1`,
-      [userId, phone],
-    );
-  }
-  if (email) {
-    // 联系邮箱落 identity 层（非登录、非 primary）；已被任何用户占用则跳过
-    await pool.query(
-      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
-       VALUES ($1, 'email', $2, false, false)
-       ON CONFLICT (platform_id, platform_user_id) DO NOTHING`,
-      [userId, email],
-    );
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (phone) {
+      await client.query(
+        `INSERT INTO user_profile (user_id, name, phone) VALUES ($1, '', $2)
+         ON CONFLICT (user_id) DO UPDATE SET phone = EXCLUDED.phone, updated_at = now()`,
+        [userId, phone],
+      );
+    }
+    if (email) {
+      // 联系邮箱落 identity 层（非登录、非 primary）；先退役旧联系邮箱行，
+      // 避免多行累积导致读取不确定。登录/primary 行不动；已被占用则跳过
+      await client.query(
+        `DELETE FROM user_platform_identity
+         WHERE user_id = $1 AND platform_id = 'email'
+           AND is_login_method = false AND is_primary = false
+           AND platform_user_id <> $2`,
+        [userId, email],
+      );
+      await client.query(
+        `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+         VALUES ($1, 'email', $2, false, false)
+         ON CONFLICT (platform_id, platform_user_id) DO NOTHING`,
+        [userId, email],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
 }
 
@@ -3665,7 +3683,7 @@ export async function getWatermarkInfo(
             COALESCE(
               (SELECT upi.platform_user_id FROM user_platform_identity upi
                WHERE upi.user_id = $2 AND upi.platform_id = 'email'
-               ORDER BY upi.is_primary DESC LIMIT 1),
+               ORDER BY upi.is_primary DESC, upi.created_at DESC LIMIT 1),
               fu.email
             ) AS email
      FROM production p
@@ -3707,7 +3725,7 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
             COALESCE(
               (SELECT upi.platform_user_id FROM user_platform_identity upi
                WHERE upi.user_id = pm.user_id AND upi.platform_id = 'email'
-               ORDER BY upi.is_primary DESC LIMIT 1),
+               ORDER BY upi.is_primary DESC, upi.created_at DESC LIMIT 1),
               fu.email
             ) AS email,
             COALESCE(up.phone, fu.phone) AS phone, pm.roles, pm.photo_url,

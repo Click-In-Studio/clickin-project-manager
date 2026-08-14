@@ -91,6 +91,21 @@ describe("updateUserContact 写档案层", () => {
     expect(me.email).toBe(email);
   });
 
+  it("再次更新 email：旧联系邮箱行退役，读回最新值", async () => {
+    const email2 = `debt2-${shortId()}@example.com`;
+    await updateUserContact(userId, email2, null);
+    const members = await listProductionMembersWithRoles(prodId);
+    const me = members.find(m => m.userId === userId)!;
+    expect(me.email).toBe(email2);
+    const { rows } = await getPool().query<{ platform_user_id: string }>(
+      `SELECT platform_user_id FROM user_platform_identity
+       WHERE user_id = $1 AND platform_id = 'email'`,
+      [userId],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].platform_user_id).toBe(email2);
+  });
+
   it("email 已被他人占用时静默跳过，不抢占身份", async () => {
     const other = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
     const otherId = other.rows[0].id;
