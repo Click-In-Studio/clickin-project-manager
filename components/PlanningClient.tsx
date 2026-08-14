@@ -43,7 +43,6 @@ function CalendarView({ productionId, events, milestones }: Props) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());  // 0-based
-  const [selectedDate, setSelectedDate] = useState<string>(ymd(today));
 
   const byDate = useMemo(() => {
     const map = new Map<string, { events: ProductionEvent[]; milestones: PlanningMilestone[] }>();
@@ -61,10 +60,10 @@ function CalendarView({ productionId, events, milestones }: Props) {
     return map;
   }, [events, milestones]);
 
-  // 周一起始的月网格
+  // 周一起始月网格（原型为 4 周静态；实装整月 6 周）
   const cells = useMemo(() => {
     const first = new Date(year, month, 1);
-    const lead = (first.getDay() + 6) % 7;  // 周一=0
+    const lead = (first.getDay() + 6) % 7;
     const start = new Date(year, month, 1 - lead);
     return Array.from({ length: 42 }, (_, i) => {
       const d = new Date(start);
@@ -80,130 +79,111 @@ function CalendarView({ productionId, events, milestones }: Props) {
   };
 
   const todayStr = ymd(today);
-  const selected = byDate.get(selectedDate);
 
+  // 原型 CalendarMock：panel + panelHeading(kicker/h2/legend) + calendarWeek + calendarGrid + hint
   return (
     <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button onClick={() => move(-1)} aria-label="上一月" style={NAV_BTN}>‹</button>
-          <b style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 18, fontWeight: 500, color: "var(--ink)", minWidth: 120, textAlign: "center" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
             {year} 年 {month + 1} 月
-          </b>
-          <button onClick={() => move(1)} aria-label="下一月" style={NAV_BTN}>›</button>
+          </p>
+          <h2 style={{ margin: "5px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>
+            项目日历
+          </h2>
+          <small style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+            月历统一展示事件与里程碑；点击条目直接打开。
+          </small>
         </div>
-        <button
-          onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); setSelectedDate(todayStr); }}
-          style={{ fontSize: 11, fontWeight: 700, border: "1px solid var(--line)", background: "var(--surface)", borderRadius: 7, padding: "4px 10px", cursor: "pointer", color: "var(--muted)" }}
-        >
-          今天
-        </button>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 14, fontSize: 11, color: "var(--muted)" }}>
-          <span><i style={{ ...LEGEND_DOT, background: "var(--stage, #b45309)" }} />事件</span>
-          <span><i style={{ ...LEGEND_DOT, background: "var(--ink)" }} />里程碑</span>
+        {/* 月导航 + legend（原型 legend 右上） */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button onClick={() => move(-1)} aria-label="上一月" style={CAL_NAV_BTN}>‹</button>
+            <button
+              onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); }}
+              style={{ ...CAL_NAV_BTN, width: "auto", padding: "0 8px", fontSize: 10, fontWeight: 700 }}
+            >
+              今天
+            </button>
+            <button onClick={() => move(1)} aria-label="下一月" style={CAL_NAV_BTN}>›</button>
+          </div>
+          <div style={{ display: "flex", gap: 12, color: "var(--muted)", fontSize: 9 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <i style={{ width: 7, height: 7, borderRadius: 2, background: "var(--script)" }} />事件
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <i style={{ width: 7, height: 7, borderRadius: 2, background: "var(--stage)" }} />任务
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <i style={{ width: 7, height: 7, borderRadius: 2, background: "var(--ink)", transform: "rotate(45deg)" }} />里程碑
+            </span>
+          </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+      {/* calendarWeek */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
         {["一", "二", "三", "四", "五", "六", "日"].map(d => (
-          <span key={d} style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textAlign: "center", padding: "4px 0" }}>周{d}</span>
+          <span key={d} style={{ padding: 7, color: "var(--muted)", fontSize: 9, textAlign: "center" }}>周{d}</span>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      {/* calendarGrid（93px 格、1px 网格线、todayCell #f8f0e7） */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)" }}>
         {cells.map((d) => {
           const date = ymd(d);
           const inMonth = d.getMonth() === month;
           const day = byDate.get(date);
           const isToday = date === todayStr;
-          const isSelected = date === selectedDate;
           return (
             <div
               key={date}
-              role="button"
-              tabIndex={0}
-              onClick={() => setSelectedDate(date)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedDate(date); } }}
               style={{
-                minHeight: 84, borderRadius: 9, padding: "6px 7px", cursor: "pointer",
-                border: `1px solid ${isSelected ? "var(--ink)" : isToday ? "var(--stage, var(--ink))" : "var(--line)"}`,
-                background: inMonth ? "white" : "var(--paper)",
-                opacity: inMonth ? 1 : 0.55,
-                display: "flex", flexDirection: "column", gap: 3, overflow: "hidden",
+                minWidth: 0, minHeight: 93, padding: 7,
+                borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
+                display: "flex", flexDirection: "column", gap: 4,
+                background: isToday ? "#f8f0e7" : undefined,
+                opacity: inMonth ? 1 : 0.45,
               }}
             >
-              <span style={{ fontSize: 11, fontWeight: isToday ? 800 : 600, color: isToday ? "var(--stage, var(--ink))" : "var(--muted)" }}>
-                {d.getDate()}
-              </span>
+              <b style={{ fontSize: 9, color: "var(--muted)" }}>{d.getDate()}</b>
               {day?.milestones.map(m => (
-                <span key={m.id} title={m.name} style={{ ...CHIP, background: "var(--ink)", color: "#fff" }}>◆ {m.name}</span>
+                <span key={m.id} title={m.name} style={{ ...CAL_CHIP, background: "var(--ink)", color: "#fff" }}>
+                  ◆ {m.name}
+                </span>
               ))}
               {day?.events.slice(0, 3).map(ev => (
                 <Link
                   key={ev.id}
                   href={`/production/${productionId}/events/${ev.id}`}
-                  onClick={(e) => e.stopPropagation()}
                   title={`${ev.title}${ev.startTime ? ` · ${hhmm(ev.startTime)}` : ""}`}
-                  style={{ ...CHIP, background: "var(--stage-soft, #fef3c7)", color: "var(--ink)", textDecoration: "none", display: "block" }}
+                  style={{ ...CAL_CHIP, background: "var(--script-soft)", color: "var(--script)", textDecoration: "none", display: "block" }}
                 >
-                  {ev.startTime && <b style={{ fontWeight: 700, marginRight: 3 }}>{hhmm(ev.startTime)}</b>}
-                  {ev.title}
+                  事件 · {ev.title}
                 </Link>
               ))}
               {day && day.events.length > 3 && (
-                <span style={{ fontSize: 9, color: "var(--muted)" }}>+{day.events.length - 3} 项</span>
+                <span style={{ fontSize: 8, color: "var(--muted)" }}>+{day.events.length - 3} 项</span>
               )}
             </div>
           );
         })}
       </div>
-
-      {/* 选中日面板（原型 mobile day panel 的桌面通用版） */}
-      <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-        <p style={{ margin: "0 0 10px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
-          {Number(selectedDate.slice(5, 7))} 月 {Number(selectedDate.slice(8))} 日安排
-        </p>
-        {!selected || (selected.events.length === 0 && selected.milestones.length === 0) ? (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>当天暂无安排。</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {selected.milestones.map(m => (
-              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--ink)" }}>
-                <span style={{ fontWeight: 700 }}>◆</span><b>{m.name}</b>
-                <small style={{ color: "var(--muted)" }}>里程碑</small>
-              </div>
-            ))}
-            {selected.events.map(ev => (
-              <Link key={ev.id} href={`/production/${productionId}/events/${ev.id}`} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--ink)", textDecoration: "none" }}>
-                <time style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, fontSize: 12 }}>
-                  {ev.startTime ? hhmm(ev.startTime) : "--:--"}
-                </time>
-                <b>{ev.title}</b>
-                <small style={{ color: "var(--muted)" }}>
-                  {EVENT_TYPE_LABELS[ev.eventType] ?? ev.eventType}{ev.location && ` · ${ev.location}`}
-                </small>
-                <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--stage, var(--ink))" }}>→</span>
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
+      <p style={{ margin: "10px 0 0", fontSize: 9, color: "var(--muted)" }}>
+        点击条目直接打开事件；任务上日历待任务日期字段就位。
+      </p>
     </section>
   );
 }
 
-const NAV_BTN: React.CSSProperties = {
-  width: 26, height: 26, borderRadius: 7, border: "1px solid var(--line)",
+const CAL_NAV_BTN: React.CSSProperties = {
+  width: 24, height: 24, borderRadius: 6, border: "1px solid var(--line)",
   background: "var(--surface)", color: "var(--muted)", cursor: "pointer",
-  fontSize: 14, lineHeight: 1,
+  fontSize: 13, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center",
 };
-const LEGEND_DOT: React.CSSProperties = {
-  display: "inline-block", width: 8, height: 8, borderRadius: "50%", marginRight: 5,
+const CAL_CHIP: React.CSSProperties = {
+  border: 0, borderRadius: 4, padding: 5, textAlign: "left", fontSize: 8, cursor: "pointer",
+  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
 };
-const CHIP: React.CSSProperties = {
-  fontSize: 10, borderRadius: 5, padding: "2px 5px",
-  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-};
-
 // ─── 执行日程（原型 TimetableMock：部门泳道 × 15 分钟格 rundown）──────────────
 
 // 原型 rundown_* 类型配色（call 橙/run 青/task 草绿/break 斜纹/notes 紫；默认=run 青）
@@ -445,24 +425,26 @@ export default function PlanningClient(props: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {/* viewTabs（原型：三等宽撑满、62px 卡、选中 ink 反色） */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {([
-          ["calendar", "项目日历", "事件与里程碑"],
-          ["gantt", "阶段甘特", "时间条总览"],
-          ["timetable", "执行日程", "按事件的部门 rundown"],
+          ["calendar", "项目日历", "事件、任务与里程碑"],
+          ["gantt", "阶段甘特", "项目阶段与重要排期"],
+          ["timetable", "执行日程", "按日期查看、导入与编辑"],
         ] as const).map(([id, label, hint]) => (
           <button
             key={id}
             aria-pressed={mode === id}
             onClick={() => setMode(id)}
             style={{
-              textAlign: "left", borderRadius: 10, padding: "10px 16px", cursor: "pointer",
               border: `1px solid ${mode === id ? "var(--ink)" : "var(--line)"}`,
-              background: mode === id ? "var(--ink)" : "var(--surface)",
+              borderRadius: 10, background: mode === id ? "var(--ink)" : "var(--surface)",
+              minHeight: 62, padding: "12px 15px", display: "flex", flexDirection: "column",
+              textAlign: "left", cursor: "pointer",
             }}
           >
-            <b style={{ display: "block", fontSize: 13, color: mode === id ? "#fff" : "var(--ink)" }}>{label}</b>
-            <small style={{ fontSize: 10, color: mode === id ? "rgba(255,255,255,.6)" : "var(--muted)" }}>{hint}</small>
+            <b style={{ fontSize: 12, color: mode === id ? "#fff" : "var(--ink)" }}>{label}</b>
+            <small style={{ color: mode === id ? "#b9c8c4" : "var(--muted)", fontSize: 9, marginTop: 4 }}>{hint}</small>
           </button>
         ))}
       </div>
