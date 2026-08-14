@@ -468,7 +468,7 @@ function SecurityCard({ productionId, initialMeta, perms }: {
     <Card title="安全">
       <Row
         title="页面水印"
-        hint="开启后项目内所有页面平铺显示访问者的 [用户名 邮箱] 水印，用于截图溯源。不影响页面操作。"
+        hint="开启后项目内所有页面平铺显示访问者的 [用户名 邮箱] 水印，用于截图溯源。不影响页面操作；开关变更后刷新页面生效。"
         last
       >
         {perms.canToggleWatermark ? (
