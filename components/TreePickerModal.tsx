@@ -23,12 +23,14 @@ type Props = {
   preselected: string[];
   confirmLabel?: string;
   busy?: boolean;
+  /** 单选模式：点击即确认（无 checkbox 与底部确认按钮） */
+  single?: boolean;
   onConfirm: (selectedIds: string[]) => void | Promise<void>;
   onClose: () => void;
 };
 
 export default function TreePickerModal({
-  kicker, title, items, preselected, confirmLabel = "保存", busy, onConfirm, onClose,
+  kicker, title, items, preselected, confirmLabel = "保存", busy, single, onConfirm, onClose,
 }: Props) {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set(preselected));
@@ -88,7 +90,7 @@ export default function TreePickerModal({
             <button
               key={item.id}
               disabled={busy || item.disabled}
-              onClick={() => toggle(item)}
+              onClick={() => (single ? !item.disabled && onConfirm([item.id]) : toggle(item))}
               style={{
                 display: "flex", alignItems: "center", gap: 8, width: "100%",
                 padding: "6px 8px", paddingLeft: 8 + depth * 16, borderRadius: 8,
@@ -97,15 +99,17 @@ export default function TreePickerModal({
                 opacity: item.disabled ? 0.55 : 1,
               }}
             >
-              <span style={{
-                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-                border: "1.5px solid " + (on ? "var(--script)" : "var(--line)"),
-                background: on ? "var(--script)" : "var(--paper)",
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontSize: 10, lineHeight: 1,
-              }}>
-                {on ? "✓" : ""}
-              </span>
+              {!single && (
+                <span style={{
+                  width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                  border: "1.5px solid " + (on ? "var(--script)" : "var(--line)"),
+                  background: on ? "var(--script)" : "var(--paper)",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontSize: 10, lineHeight: 1,
+                }}>
+                  {on ? "✓" : ""}
+                </span>
+              )}
               <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {item.label}
               </span>
@@ -121,12 +125,14 @@ export default function TreePickerModal({
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
         <span style={{ flex: 1, fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>
-          已选 {picked.size} 项
+          {single ? "点击即选定" : `已选 ${picked.size} 项`}
         </span>
         <button style={SECONDARY_BTN} onClick={onClose}>取消</button>
-        <button style={PRIMARY_BTN} disabled={busy} onClick={() => onConfirm([...picked])}>
-          {confirmLabel}
-        </button>
+        {!single && (
+          <button style={PRIMARY_BTN} disabled={busy} onClick={() => onConfirm([...picked])}>
+            {confirmLabel}
+          </button>
+        )}
       </div>
     </AdminModal>
   );

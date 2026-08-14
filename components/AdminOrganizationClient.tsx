@@ -405,6 +405,7 @@ export default function AdminOrganizationClient({
                   onPatch={patchDept}
                   onSaveMembers={saveDeptMembers}
                   onDelete={deleteDept}
+                  onCreateChild={createDept}
                 />
               ) : (
                 <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧部门查看详情</p>
@@ -673,7 +674,7 @@ function MemberDetail({
 // ─── 部门详情 ─────────────────────────────────────────────────────────────────
 
 function DeptDetail({
-  dept, depts, members, caps, busy, descendants, onPatch, onSaveMembers, onDelete,
+  dept, depts, members, caps, busy, descendants, onPatch, onSaveMembers, onDelete, onCreateChild,
 }: {
   dept: Dept;
   depts: Dept[];
@@ -684,13 +685,19 @@ function DeptDetail({
   onPatch: (deptId: string, body: Record<string, unknown>, apply: (d: Dept) => Dept) => Promise<void>;
   onSaveMembers: (dept: Dept, memberUserIds: string[], pocUserIds: string[]) => Promise<void>;
   onDelete: (dept: Dept) => Promise<void>;
+  onCreateChild: (name: string, parentId: string | null, kind: "dept" | "group") => Promise<void>;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(dept.name);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [childOpen, setChildOpen] = useState(false);
+  const [childName, setChildName] = useState("");
+  const [childKind, setChildKind] = useState<"dept" | "group">("dept");
 
   const memberMap = new Map(members.map(m => [m.userId, m]));
   const blocked = descendants(dept.id);
+  const parentDept = dept.parentId ? depts.find(d => d.id === dept.parentId) ?? null : null;
 
   return (
     <div>
@@ -724,23 +731,28 @@ function DeptDetail({
 
       {/* 结构设置 */}
       {caps.deptStructure && (
-        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>
           <div>
             <p style={SECTION_LABEL}>上级部门</p>
-            <select
-              value={dept.parentId ?? ""}
-              disabled={busy}
-              onChange={e => {
-                const v = e.target.value || null;
-                onPatch(dept.id, { parentId: v }, d => ({ ...d, parentId: v }));
-              }}
-              style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 160 }}
-            >
-              <option value="">（顶级）</option>
-              {depts.filter(d => !blocked.has(d.id)).map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "var(--ink)" }}>{parentDept?.name ?? "（顶级）"}</span>
+              <button
+                style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }}
+                disabled={busy}
+                onClick={() => setParentPickerOpen(true)}
+              >
+                更换
+              </button>
+              {dept.parentId && (
+                <button
+                  style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }}
+                  disabled={busy}
+                  onClick={() => onPatch(dept.id, { parentId: null }, d => ({ ...d, parentId: null }))}
+                >
+                  设为顶级
+                </button>
+              )}
+            </div>
           </div>
           <div>
             <p style={SECTION_LABEL}>类型</p>
@@ -757,7 +769,64 @@ function DeptDetail({
               <option value="group">用户组</option>
             </select>
           </div>
+          <div>
+            <p style={SECTION_LABEL}>子部门</p>
+            <button
+              style={{ ...SECONDARY_BTN, padding: "5px 12px", fontSize: 11 }}
+              disabled={busy}
+              onClick={() => setChildOpen(true)}
+            >
+              ＋ 添加子部门
+            </button>
+          </div>
         </div>
+      )}
+      {parentPickerOpen && (
+        <TreePickerModal
+          kicker="组织架构"
+          title={`选择「${dept.name}」的上级部门`}
+          single
+          items={depts.filter(d => !blocked.has(d.id)).map(d => ({
+            id: d.id, label: d.name, parentId: d.parentId,
+            badge: d.kind === "group" ? "组" : undefined,
+          }))}
+          preselected={dept.parentId ? [dept.parentId] : []}
+          busy={busy}
+          onClose={() => setParentPickerOpen(false)}
+          onConfirm={async ([pid]) => {
+            await onPatch(dept.id, { parentId: pid }, d => ({ ...d, parentId: pid }));
+            setParentPickerOpen(false);
+          }}
+        />
+      )}
+      {childOpen && (
+        <AdminModal kicker="组织架构" title={`在「${dept.name}」下新建子部门`} onClose={() => setChildOpen(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input
+              value={childName} onChange={e => setChildName(e.target.value)} placeholder="名称" autoFocus
+              style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+            />
+            <select
+              value={childKind} onChange={e => setChildKind(e.target.value === "group" ? "group" : "dept")}
+              style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+            >
+              <option value="dept">部门</option>
+              <option value="group">用户组</option>
+            </select>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={SECONDARY_BTN} onClick={() => setChildOpen(false)}>取消</button>
+              <button
+                style={PRIMARY_BTN} disabled={busy || !childName.trim()}
+                onClick={async () => {
+                  await onCreateChild(childName.trim(), dept.id, childKind);
+                  setChildName(""); setChildOpen(false);
+                }}
+              >
+                创建
+              </button>
+            </div>
+          </div>
+        </AdminModal>
       )}
 
       {/* 成员与 POC */}
