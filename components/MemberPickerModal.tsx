@@ -35,6 +35,8 @@ type Props = {
   excludeUserIds?: string[];
   confirmLabel?: string;
   busy?: boolean;
+  /** 单选模式：点击成员即确认（无 checkbox 与底部确认按钮） */
+  single?: boolean;
   onConfirm: (userIds: string[]) => void | Promise<void>;
   onClose: () => void;
 };
@@ -59,7 +61,7 @@ function Avatar({ m }: { m: PickerMember }) {
 }
 
 export default function MemberPickerModal({
-  kicker, title, members, depts, excludeUserIds = [], confirmLabel = "确认添加", busy, onConfirm, onClose,
+  kicker, title, members, depts, excludeUserIds = [], confirmLabel = "确认添加", busy, single, onConfirm, onClose,
 }: Props) {
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState("");
@@ -141,7 +143,8 @@ export default function MemberPickerModal({
     return (
       <button
         key={m.userId}
-        onClick={() => toggle(m.userId)}
+        disabled={busy}
+        onClick={() => (single ? onConfirm([m.userId]) : toggle(m.userId))}
         style={{
           display: "flex", alignItems: "center", gap: 8, width: "100%",
           padding: "5px 8px", paddingLeft: 8 + indent, borderRadius: 8,
@@ -149,15 +152,17 @@ export default function MemberPickerModal({
           background: on ? "var(--script-soft)" : "transparent",
         }}
       >
-        <span style={{
-          width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-          border: "1.5px solid " + (on ? "var(--script)" : "var(--line)"),
-          background: on ? "var(--script)" : "var(--paper)",
-          display: "inline-flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", fontSize: 10, lineHeight: 1,
-        }}>
-          {on ? "✓" : ""}
-        </span>
+        {!single && (
+          <span style={{
+            width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+            border: "1.5px solid " + (on ? "var(--script)" : "var(--line)"),
+            background: on ? "var(--script)" : "var(--paper)",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            color: "#fff", fontSize: 10, lineHeight: 1,
+          }}>
+            {on ? "✓" : ""}
+          </span>
+        )}
         <Avatar m={m} />
         <span style={{ minWidth: 0, flex: 1 }}>
           <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: m.status === "suspended" ? "var(--muted)" : "var(--ink)", textDecoration: m.status === "suspended" ? "line-through" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -234,17 +239,19 @@ export default function MemberPickerModal({
 
       {/* footer */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
-        <span style={{ flex: 1, fontSize: 11, color: picked.size ? "var(--ink)" : "var(--muted)", fontWeight: 700 }}>
-          已选 {picked.size} 人
+        <span style={{ flex: 1, fontSize: 11, color: !single && picked.size ? "var(--ink)" : "var(--muted)", fontWeight: 700 }}>
+          {single ? "点击成员即选定" : `已选 ${picked.size} 人`}
         </span>
         <button style={SECONDARY_BTN} onClick={onClose}>取消</button>
-        <button
-          style={PRIMARY_BTN}
-          disabled={busy || picked.size === 0}
-          onClick={() => onConfirm([...picked])}
-        >
-          {confirmLabel}
-        </button>
+        {!single && (
+          <button
+            style={PRIMARY_BTN}
+            disabled={busy || picked.size === 0}
+            onClick={() => onConfirm([...picked])}
+          >
+            {confirmLabel}
+          </button>
+        )}
       </div>
     </AdminModal>
   );

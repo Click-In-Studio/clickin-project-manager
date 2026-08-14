@@ -448,6 +448,7 @@ function MemberDetail({
   onRemove: (userId: string) => Promise<void>;
 }) {
   const myDepts = depts.filter(d => d.memberUserIds.includes(m.userId));
+  const [supPickerOpen, setSupPickerOpen] = useState(false);
 
   function toggleTag(tag: MemberTag) {
     const has = m.tags.includes(tag.name);
@@ -511,24 +512,45 @@ function MemberDetail({
       {/* 上级 */}
       <div style={{ marginBottom: 16 }}>
         <p style={SECTION_LABEL}>汇报上级</p>
-        {caps.editMember ? (
-          <select
-            value={m.supervisorId ?? ""}
-            disabled={busy}
-            onChange={e => {
-              const v = e.target.value || null;
-              const sup = v ? allMembers.find(x => x.userId === v) : null;
-              onPatch(m.userId, { supervisorId: v }, mm => ({ ...mm, supervisorId: v, supervisorName: sup?.name ?? null }));
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, color: "var(--ink)" }}>{m.supervisorName ?? "（无）"}</span>
+          {caps.editMember && (
+            <>
+              <button
+                style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }}
+                disabled={busy}
+                onClick={() => setSupPickerOpen(true)}
+              >
+                {m.supervisorId ? "更换" : "设置"}
+              </button>
+              {m.supervisorId && (
+                <button
+                  style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10, borderColor: "var(--danger)", color: "var(--danger)" }}
+                  disabled={busy}
+                  onClick={() => onPatch(m.userId, { supervisorId: null }, mm => ({ ...mm, supervisorId: null, supervisorName: null }))}
+                >
+                  清除
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        {supPickerOpen && (
+          <MemberPickerModal
+            kicker="组织架构"
+            title={`设置「${m.name}」的汇报上级`}
+            single
+            members={allMembers}
+            depts={depts}
+            excludeUserIds={[m.userId]}
+            busy={busy}
+            onClose={() => setSupPickerOpen(false)}
+            onConfirm={async ([supId]) => {
+              const sup = allMembers.find(x => x.userId === supId) ?? null;
+              await onPatch(m.userId, { supervisorId: supId }, mm => ({ ...mm, supervisorId: supId, supervisorName: sup?.name ?? null }));
+              setSupPickerOpen(false);
             }}
-            style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", minWidth: 180 }}
-          >
-            <option value="">（无）</option>
-            {allMembers.filter(x => x.userId !== m.userId).map(x => (
-              <option key={x.userId} value={x.userId}>{x.name || x.userId.slice(0, 8)}</option>
-            ))}
-          </select>
-        ) : (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--ink)" }}>{m.supervisorName ?? "（无）"}</p>
+          />
         )}
       </div>
 
