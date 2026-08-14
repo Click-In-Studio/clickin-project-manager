@@ -147,9 +147,9 @@ export async function searchProduction(
 
     // ── Contacts (name / roles array / department name) ───────────────────────
     pool.query<{ user_id: string; name: string; roles: string[]; match_hint: string | null }>(
-      `SELECT pm.user_id, fu.name, pm.roles,
+      `SELECT pm.user_id, COALESCE(up.name, '') AS name, pm.roles,
               CASE
-                WHEN fu.name ILIKE $2 THEN NULL
+                WHEN up.name ILIKE $2 THEN NULL
                 WHEN EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2) THEN NULL
                 ELSE (
                   SELECT '部门: ' || ed.name
@@ -162,10 +162,10 @@ export async function searchProduction(
                 )
               END AS match_hint
        FROM production_member pm
-       JOIN feishu_user fu ON fu.user_id = pm.user_id
+       LEFT JOIN user_profile up ON up.user_id = pm.user_id
        WHERE pm.production_id = $1
          AND (
-           fu.name ILIKE $2
+           up.name ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2)
            OR EXISTS (
              SELECT 1 FROM production_dept_member edm
@@ -175,7 +175,7 @@ export async function searchProduction(
                AND ed.name ILIKE $2
            )
          )
-       ORDER BY fu.name
+       ORDER BY up.name NULLS LAST
        LIMIT 5`,
       [productionId, like],
     ),

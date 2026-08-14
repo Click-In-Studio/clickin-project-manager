@@ -1352,10 +1352,10 @@ export async function deleteEventReport(id: string, eventId: string): Promise<vo
 export async function listReportNotes(reportId: string): Promise<EventReportNote[]> {
   const res = await getPool().query<ReportNoteRow>(
     `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
-            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
+            COALESCE(up.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
      FROM event_report_note n
      JOIN wiki w ON w.id = n.wiki_id
-     LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
+     LEFT JOIN user_profile up ON up.user_id = w.created_by
      WHERE n.report_id = $1 ORDER BY n.created_at`,
     [reportId]
   );
@@ -1439,10 +1439,10 @@ export async function deleteReportNote(
 export async function getReportNote(id: string, reportId: string): Promise<EventReportNote | null> {
   const res = await getPool().query<ReportNoteRow>(
     `SELECT n.id, n.report_id, n.department_id, w.body AS content, w.created_by AS author_user_id,
-            COALESCE(fu.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
+            COALESCE(up.name, '') AS author_name, n.created_at, n.updated_at, w.mentions, n.created_via
      FROM event_report_note n
      JOIN wiki w ON w.id = n.wiki_id
-     LEFT JOIN feishu_user fu ON fu.user_id = w.created_by
+     LEFT JOIN user_profile up ON up.user_id = w.created_by
      WHERE n.id = $1 AND n.report_id = $2`,
     [id, reportId]
   );
@@ -1790,10 +1790,10 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
          WHERE eta2.req_id = etr.id
        ) AS assignees_json,
        (
-         SELECT json_agg(json_build_object('userId', edm2.user_id, 'name', fu3.name)
-                ORDER BY fu3.name)
+         SELECT json_agg(json_build_object('userId', edm2.user_id, 'name', COALESCE(up3.name, ''))
+                ORDER BY up3.name)
          FROM production_dept_member edm2
-         JOIN feishu_user fu3 ON fu3.user_id = edm2.user_id
+         LEFT JOIN user_profile up3 ON up3.user_id = edm2.user_id
          WHERE edm2.dept_id = etr.department_id
        ) AS dept_people_json
      FROM event_tech_req etr

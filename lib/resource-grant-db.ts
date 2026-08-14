@@ -785,10 +785,10 @@ export async function listCueListGrants(
 ): Promise<Array<{ userId: string; userName: string; level: CueListLevel }>> {
   // 批A：从动词行推导每人伪级别（manage=grants edit > edit=cues edit > view）
   const { rows } = await getPool().query<{ user_id: string; user_name: string; resource_sub: string; permission_level: string }>(
-    `SELECT rg.user_id, COALESCE(fu.name, rg.user_id::text) AS user_name,
+    `SELECT rg.user_id, COALESCE(up.name, rg.user_id::text) AS user_name,
             rg.resource_sub, rg.permission_level
      FROM production_member_grant rg
-     LEFT JOIN feishu_user fu ON fu.user_id = rg.user_id
+     LEFT JOIN user_profile up ON up.user_id = rg.user_id
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND NOT rg.is_revoked

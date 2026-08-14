@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, searchFeishuUsers, listAllFeishuUsers } from "@/lib/db";
+import { getProductionPermissionContext, searchUsersByName, listAllUsersWithContact } from "@/lib/db";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = getSession(req.cookies);
@@ -16,6 +16,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
 
   const q = req.nextUrl.searchParams.get("q")?.trim();
-  const users = q ? await searchFeishuUsers(q) : await listAllFeishuUsers();
+  const users = q ? await searchUsersByName(q) : await listAllUsersWithContact();
   return Response.json({ users });
 }

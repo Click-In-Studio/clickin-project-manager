@@ -9,7 +9,6 @@ import { ROLE_GROUPS } from "@/lib/roles";
 // Search result returned by feishu-user-search API (local DB, includes raw contact info)
 type SearchResult = {
   userId: string;
-  openId: string;
   name: string;
   avatarUrl: string | null;
   enName?: string;
@@ -445,7 +444,6 @@ function AddMemberPanel({
       if (!data.ok) { setError(data.error ?? "添加失败"); return; }
       onAdded({
         userId: selected.userId,
-        openId: selected.openId,
         name: selected.name,
         avatarUrl: selected.avatarUrl,
         isAdmin: false,

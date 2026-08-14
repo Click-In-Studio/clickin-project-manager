@@ -77,7 +77,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
         replies={replies}
         canReply={false}
         memberDeptIds={[]}
-        members={allMembers.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
+        members={allMembers.map(m => ({ userId: m.userId, name: m.name }))}
       />
     );
   }
@@ -146,7 +146,7 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
       replies={replies}
       canReply={userCanReply}
       memberDeptIds={eventPermCtx.memberDeptIds}
-      members={allMembers.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
+      members={allMembers.map(m => ({ userId: m.userId, name: m.name }))}
     />
   );
 }
