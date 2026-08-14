@@ -116,6 +116,32 @@ export default function MyTasksClient() {
         <h1 className={styles.pageTitle}>我的任务</h1>
       </div>
 
+      {/* ── 摘要统计（通知提醒同款语汇）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(tasks.filter(t => t.status === "pending" || t.status === "awaiting").length), "待处理", "含待确认"],
+          [String(tasks.filter(t => t.status === "in_progress").length), "进行中", "跨项目推进"],
+          [String(tasks.filter(t => t.status === "done").length), "已完成", `共 ${tasks.length} 项`],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Panel（统一定高）── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       {tasks.length === 0 ? (
         <div className={styles.emptyState}>
           暂无与我相关的任务
@@ -266,8 +292,8 @@ export default function MyTasksClient() {
           </div>
 
           {/* ── Desktop: 3-column layout ── */}
-          <div className={styles.desktopOnly}>
-            <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 380px", gap: 0, height: "calc(100vh - 220px)", minHeight: 400 }}>
+          <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 380px", gap: 0, height: "100%", minHeight: 0 }}>
               {/* Left: filters */}
               <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
                 <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>演出</h3>
@@ -461,6 +487,7 @@ export default function MyTasksClient() {
           </div>
         </>
       )}
+      </section>
     </div>
   );
 }
