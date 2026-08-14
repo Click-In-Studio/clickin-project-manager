@@ -39,83 +39,57 @@ function resolvePhoto(raw: string | null): string | null {
   return `${BASE_PATH}/api/media?token=${encodeURIComponent(raw)}`;
 }
 
-function MemberCard({
-  member,
-  canManage,
-  isSelf,
-  onEdit,
-}: {
-  member: MemberWithRoles;
-  canManage: boolean;
-  isSelf: boolean;
-  onEdit: () => void;
-}) {
+function MemberCard({ member }: { member: MemberWithRoles }) {
   const photo = resolvePhoto(member.photoUrl) ?? member.avatarUrl;
 
+  // v3 纯展示卡：小圆头像 + 名字 + 角色/标签徽章（无编辑入口）
   return (
-    <div className="rounded-2xl bg-white shadow-sm overflow-hidden flex flex-col">
-      <div className="aspect-[4/5] bg-zinc-100 flex items-center justify-center overflow-hidden">
+    <div style={{
+      background: "white", border: "1px solid var(--line)", borderRadius: 10,
+      padding: "14px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+      textAlign: "center",
+    }}>
+      <div style={{
+        width: 52, height: 52, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+        background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
         {photo ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={photo} alt={member.name} className="w-full h-full object-cover" />
+          <img src={photo} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : (
-          <span className="text-3xl font-medium text-zinc-300">{member.name[0]}</span>
+          <span style={{ fontSize: 18, fontWeight: 500, color: "var(--muted)" }}>{member.name[0]}</span>
         )}
       </div>
 
-      <div className="px-2 py-2 flex flex-col gap-1">
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-1 min-w-0">
-            <p className="text-sm font-semibold text-zinc-800 truncate">{member.name}</p>
-            {member.status === "suspended" && (
-              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-red-50 text-red-400">停用</span>
-            )}
-          </div>
-          <div className="shrink-0 flex gap-0.5">
-            {(canManage || isSelf) && (
-              <button
-                onClick={onEdit}
-                className="rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:text-zinc-500 hover:bg-zinc-50 transition-colors"
-              >
-                编辑
-              </button>
-            )}
-          </div>
-        </div>
-
+      <div style={{ minWidth: 0, width: "100%" }}>
+        <p style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {member.name}
+          {member.status === "suspended" && (
+            <span style={{ marginLeft: 4, borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 600, background: "var(--danger-soft)", color: "var(--danger)", fontFamily: "system-ui, sans-serif", verticalAlign: 2 }}>停用</span>
+          )}
+        </p>
         {member.roles.length > 0 && (
-          <div className="flex flex-wrap gap-1">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center", marginTop: 6 }}>
             {member.roles.map((r) => (
-              <span key={r} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-500">
+              <span key={r} style={{ borderRadius: 999, background: "var(--surface-2)", padding: "2px 7px", fontSize: 9, fontWeight: 700, color: "var(--muted)" }}>
                 {r}
               </span>
             ))}
           </div>
         )}
-
         {member.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center", marginTop: 4 }}>
             {member.tags.map((t) => (
-              <span key={t} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-500">
+              <span key={t} style={{ borderRadius: 999, background: "var(--script-soft)", padding: "2px 7px", fontSize: 9, fontWeight: 700, color: "var(--script)" }}>
                 {t}
               </span>
             ))}
           </div>
         )}
-
-        {member.supervisorName && (
-          <p className="text-[11px] text-zinc-400 truncate">↑ {member.supervisorName}</p>
-        )}
-
         {member.email && (
-          <a href={`mailto:${member.email}`} className="text-xs text-zinc-400 hover:text-zinc-600 truncate">
+          <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {member.email}
-          </a>
-        )}
-        {member.phone && (
-          <a href={`tel:${member.phone}`} className="text-xs text-zinc-400 hover:text-zinc-600">
-            {member.phone}
-          </a>
+          </p>
         )}
       </div>
     </div>
@@ -781,23 +755,11 @@ export default function ContactsClient({
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       {/* Page header（v3 统一页头） */}
-      <PageHeader
-        eyebrow="People"
-        title="人员"
-        side="stage"
-        actions={canManage && (
-          <button onClick={() => setShowAddPanel(true)} style={PRIMARY_BTN}>
-            ＋ 添加人员
-          </button>
-        )}
-      />
-
-      {canImport && (
-        <ImportPanel productionId={productionId} onImported={setMembers} />
-      )}
+      {/* 纯展示页（v3）：人事编辑/导入/添加入口移除——人事操作归管理后台 */}
+      <PageHeader eyebrow="People" title="人员" side="stage" />
 
       {/* Main card */}
-      <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "20px 24px", minHeight: "calc(100vh - 280px)" }}>
+      <div style={{ background: "var(--surface)", borderRadius: 13, border: "1px solid var(--line)", padding: 22, minHeight: "calc(100vh - 280px)" }}>
         {sorted.length === 0 ? (
           <div style={{ padding: "48px 0", textAlign: "center" }}>
             <p style={{ fontSize: 13, color: "var(--muted)" }}>暂无人员</p>
@@ -805,38 +767,12 @@ export default function ContactsClient({
         ) : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8">
             {sorted.map((m) => (
-              <MemberCard
-                key={m.userId}
-                member={m}
-                canManage={canManage}
-                isSelf={m.userId === myUserId}
-                onEdit={() => setEditingOpenId(m.userId)}
-              />
+              <MemberCard key={m.userId} member={m} />
             ))}
           </div>
         )}
       </div>
 
-      {editingMember && (
-        <EditInfoPanel
-          productionId={productionId}
-          member={editingMember}
-          canManage={canManage}
-          allMembers={members}
-          onClose={() => setEditingOpenId(null)}
-          onSaved={(updated) => handleMemberSaved(editingMember.userId, updated)}
-          onDeleted={() => handleMemberDeleted(editingMember.userId)}
-        />
-      )}
-
-      {showAddPanel && (
-        <AddMemberPanel
-          productionId={productionId}
-          existingUserIds={existingUserIds}
-          onClose={() => setShowAddPanel(false)}
-          onAdded={handleMemberAdded}
-        />
-      )}
     </div>
   );
 }
