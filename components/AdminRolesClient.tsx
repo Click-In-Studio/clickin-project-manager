@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
+import AdminModal from "@/components/AdminModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -158,14 +159,7 @@ export default function AdminRolesClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader
-        eyebrow={productionName}
-        title="角色管理"
-        side="stage"
-        actions={caps.create ? (
-          <button style={PRIMARY_BTN} onClick={() => setCreating(true)}>＋ 新建角色</button>
-        ) : undefined}
-      />
+      <PageHeader eyebrow={productionName} title="角色管理" side="stage" />
 
       {/* 摘要 */}
       <div style={{
@@ -223,19 +217,10 @@ export default function AdminRolesClient({
                   <p style={{ fontSize: 12, color: "var(--muted)", padding: "6px 10px" }}>暂无自定义角色</p>
                 )}
 
-                {creating && (
-                  <div style={{ marginTop: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 10, background: "var(--paper)", display: "flex", flexDirection: "column", gap: 8 }}>
-                    <input
-                      value={newName} onChange={e => setNewName(e.target.value)} placeholder="角色名称"
-                      autoFocus
-                      onKeyDown={e => { if (e.key === "Enter") createRole(); }}
-                      style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}
-                    />
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button style={PRIMARY_BTN} disabled={busy || !newName.trim()} onClick={createRole}>创建</button>
-                      <button style={SECONDARY_BTN} onClick={() => { setCreating(false); setNewName(""); }}>取消</button>
-                    </div>
-                  </div>
+                {caps.create && (
+                  <button style={{ ...SECONDARY_BTN, width: "100%", marginTop: 10 }} onClick={() => setCreating(true)}>
+                    ＋ 新建角色
+                  </button>
                 )}
               </div>
             </div>
@@ -264,6 +249,23 @@ export default function AdminRolesClient({
           </div>
         </div>
       </section>
+
+      {creating && (
+        <AdminModal kicker="组织架构" title="新建角色" onClose={() => { setCreating(false); setNewName(""); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input
+              value={newName} onChange={e => setNewName(e.target.value)} placeholder="角色名称"
+              autoFocus
+              onKeyDown={e => { if (e.key === "Enter") createRole(); }}
+              style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={SECONDARY_BTN} onClick={() => { setCreating(false); setNewName(""); }}>取消</button>
+              <button style={PRIMARY_BTN} disabled={busy || !newName.trim()} onClick={createRole}>创建</button>
+            </div>
+          </div>
+        </AdminModal>
+      )}
     </div>
   );
 }

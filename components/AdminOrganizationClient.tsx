@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
+import AdminModal from "@/components/AdminModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberTag } from "@/lib/db";
@@ -766,36 +767,37 @@ function NewDeptForm({ depts, busy, onCreate }: {
   const [parentId, setParentId] = useState("");
   const [kind, setKind] = useState<"dept" | "group">("dept");
 
-  if (!open) {
-    return (
+  const FIELD: React.CSSProperties = {
+    padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8,
+    background: "var(--paper)", color: "var(--ink)",
+  };
+  return (
+    <>
       <button style={{ ...SECONDARY_BTN, width: "100%", marginTop: 10 }} onClick={() => setOpen(true)}>
         ＋ 新建部门 / 用户组
       </button>
-    );
-  }
-  return (
-    <div style={{ marginTop: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 10, background: "var(--paper)", display: "flex", flexDirection: "column", gap: 8 }}>
-      <input
-        value={name} onChange={e => setName(e.target.value)} placeholder="名称"
-        style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}
-      />
-      <select value={parentId} onChange={e => setParentId(e.target.value)}
-        style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}>
-        <option value="">（顶级）</option>
-        {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-      </select>
-      <select value={kind} onChange={e => setKind(e.target.value === "group" ? "group" : "dept")}
-        style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}>
-        <option value="dept">部门</option>
-        <option value="group">用户组</option>
-      </select>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button style={PRIMARY_BTN} disabled={busy || !name.trim()}
-          onClick={async () => { await onCreate(name.trim(), parentId || null, kind); setName(""); setOpen(false); }}>
-          创建
-        </button>
-        <button style={SECONDARY_BTN} onClick={() => setOpen(false)}>取消</button>
-      </div>
-    </div>
+      {open && (
+        <AdminModal kicker="组织架构" title="新建部门 / 用户组" onClose={() => setOpen(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="名称" autoFocus style={FIELD} />
+            <select value={parentId} onChange={e => setParentId(e.target.value)} style={FIELD}>
+              <option value="">（顶级）</option>
+              {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+            <select value={kind} onChange={e => setKind(e.target.value === "group" ? "group" : "dept")} style={FIELD}>
+              <option value="dept">部门</option>
+              <option value="group">用户组</option>
+            </select>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={SECONDARY_BTN} onClick={() => setOpen(false)}>取消</button>
+              <button style={PRIMARY_BTN} disabled={busy || !name.trim()}
+                onClick={async () => { await onCreate(name.trim(), parentId || null, kind); setName(""); setOpen(false); }}>
+                创建
+              </button>
+            </div>
+          </div>
+        </AdminModal>
+      )}
+    </>
   );
 }

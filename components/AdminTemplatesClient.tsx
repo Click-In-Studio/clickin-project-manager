@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
+import AdminModal from "@/components/AdminModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -206,26 +207,10 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
                     </button>
                   );
                 })}
-                {canManageTypes && !creatingType && (
+                {canManageTypes && (
                   <button style={{ ...SECONDARY_BTN, width: "100%", marginTop: 10 }} onClick={() => setCreatingType(true)}>
                     ＋ 新建模版类型
                   </button>
-                )}
-                {creatingType && (
-                  <div style={{ marginTop: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 10, background: "var(--paper)", display: "flex", flexDirection: "column", gap: 8 }}>
-                    <input
-                      value={newTypeKey} onChange={e => setNewTypeKey(e.target.value)} placeholder="类型名（如 服装）" autoFocus
-                      style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}
-                    />
-                    <input
-                      value={newTypeAbbr} onChange={e => setNewTypeAbbr(e.target.value)} placeholder="缩写提示（如 WQ，可空）"
-                      style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)" }}
-                    />
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button style={PRIMARY_BTN} disabled={busy || !newTypeKey.trim()} onClick={createType}>创建</button>
-                      <button style={SECONDARY_BTN} onClick={() => setCreatingType(false)}>取消</button>
-                    </div>
-                  </div>
                 )}
               </div>
             </div>
@@ -337,6 +322,26 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
           </div>
         </div>
       </section>
+
+      {creatingType && (
+        <AdminModal kicker="安全设置" title="新建 Cue 表模版类型" onClose={() => setCreatingType(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input
+              value={newTypeKey} onChange={e => setNewTypeKey(e.target.value)} placeholder="类型名（如 服装）" autoFocus
+              onKeyDown={e => { if (e.key === "Enter") createType(); }}
+              style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+            />
+            <input
+              value={newTypeAbbr} onChange={e => setNewTypeAbbr(e.target.value)} placeholder="缩写提示（如 WQ，可空）"
+              style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={SECONDARY_BTN} onClick={() => setCreatingType(false)}>取消</button>
+              <button style={PRIMARY_BTN} disabled={busy || !newTypeKey.trim()} onClick={createType}>创建</button>
+            </div>
+          </div>
+        </AdminModal>
+      )}
     </div>
   );
 }
