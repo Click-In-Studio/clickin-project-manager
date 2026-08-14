@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/event-permissions";
 import { canAccessNode } from "@/lib/grant-template";
-import { hasEffectiveGrant, listGrantedResourceIds, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "事件" };
 
 import { redirect, notFound } from "next/navigation";
@@ -36,14 +36,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
   ]);
   if (!name) notFound();
 
-  const VISIBLE_STATUSES = new Set(["published", "completed"]);
-  // draft 可见 = publication@view 行（通配全见或实例集）
-  const draftVis = (access.permCtx.isAdmin || access.permCtx.isOwner)
-    ? { wildcard: true, ids: [] as string[] }
-    : await listGrantedResourceIds(session.userId, id, "event", "publication", "view");
-  const events = draftVis.wildcard
-    ? allEvents
-    : allEvents.filter(e => VISIBLE_STATUSES.has(e.status) || draftVis.ids.includes(e.id));
+  const events = await filterDraftVisibleEvents(access.permCtx, id, allEvents);
 
   return (
     <>

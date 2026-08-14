@@ -307,3 +307,24 @@ export function canViewCall(isFollower: boolean): boolean {
 export function canViewReport(isFollower: boolean): boolean {
   return isFollower;
 }
+
+// ─── Draft 事件可见性（事件列表 / 计划面板共用——防止两页规则分叉）────────────
+
+import { listGrantedResourceIds } from "./grant-check";
+
+const DRAFT_VISIBLE_STATUSES = new Set(["published", "completed"]);
+
+/**
+ * 过滤 draft 事件可见性：published/completed 全员可见；
+ * draft 需 publication@view 行（admin/owner 旁路、通配全见、或实例 ids 命中）。
+ */
+export async function filterDraftVisibleEvents<T extends { id: string; status: string }>(
+  permCtx: { userId: string; isAdmin: boolean; isOwner: boolean },
+  productionId: string,
+  events: T[],
+): Promise<T[]> {
+  if (permCtx.isAdmin || permCtx.isOwner) return events;
+  const vis = await listGrantedResourceIds(permCtx.userId, productionId, "event", "publication", "view");
+  if (vis.wildcard) return events;
+  return events.filter(e => DRAFT_VISIBLE_STATUSES.has(e.status) || vis.ids.includes(e.id));
+}
