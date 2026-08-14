@@ -1,32 +1,18 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { requireGrantGate } from "@/lib/api-guard";
 import { listPrivateAssets, setAssetPublic, revokeAssetGrant } from "@/lib/asset-review-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 // 数字资产审查（越隐私查看/处置）。治理域显式门（production 为 RESERVED_TYPE）：
-// 读=production/*/asset_review@view；处置=production/*/asset_review@edit。
-async function requireGate(req: NextRequest, productionId: string, verb: "view" | "edit") {
-  const session = getSession(req.cookies);
-  if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
-  const { permCtx } = access;
-  const ok = session.isAdmin || permCtx.isAdmin || permCtx.isOwner ||
-    await hasGrant(permCtx.userId, productionId, "production", "*", "asset_review", verb) ||
-    (verb === "view" && await hasGrant(permCtx.userId, productionId, "production", "*", "asset_review", "edit"));
-  if (!ok) return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
-  if (verb === "edit" && access.isArchived) {
-    return { deny: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
-  }
-  return { deny: null };
-}
+// 读=production/*/asset_review@view（edit 覆盖读）；处置=production/*/asset_review@edit。
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGate(req, id, "view");
+  const { deny } = await requireGrantGate(req, id, [
+    ["production", "asset_review", "view"],
+    ["production", "asset_review", "edit"],
+  ]);
   if (deny) return deny;
   return Response.json({ assets: await listPrivateAssets(id) });
 }
@@ -35,7 +21,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
  *  { action: "set_public", assetId } 或 { action: "revoke_grant", grantId }（仅 asset 类 grant） */
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGate(req, id, "edit");
+  const { deny } = await requireGrantGate(req, id, [["production", "asset_review", "edit"]], { blockArchived: true });
   if (deny) return deny;
 
   const body = (await req.json()) as { action?: string; assetId?: string; grantId?: string };

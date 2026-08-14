@@ -8,6 +8,11 @@ import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminAnnouncementsClient from "@/components/AdminAnnouncementsClient";
 
+function countRecent(createdAts: string[]): number {
+  const cutoff = Date.now() - 30 * 86400_000;
+  return createdAts.filter(iso => new Date(iso).getTime() > cutoff).length;
+}
+
 export default async function AnnouncementsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   await requireAdminAccess(id);
@@ -29,6 +34,7 @@ export default async function AnnouncementsPage({ params }: { params: Promise<{ 
     <AdminAnnouncementsClient
       productionId={id}
       productionName={name ?? ""}
+      recent30Count={countRecent(announcements.map(a => a.createdAt))}
       initialAnnouncements={announcements.map(a => ({
         id: a.id,
         title: a.title,

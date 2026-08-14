@@ -1,7 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { requireGrantGate } from "@/lib/api-guard";
 import { getProductionDept } from "@/lib/dept-db";
 import {
   listDeptCueTemplates,
@@ -9,32 +7,19 @@ import {
   deleteDeptCueTemplate,
   listCueTemplateTypes,
 } from "@/lib/cue-template-db";
+import { isValidCueRelKey } from "@/lib/cue-list-types";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 // Cue 表权限模版声明行（dept_cue_list_template）。声明行实例化写
 // production_dept_permission，故与部门权限行同门：org_dept/*/grants@view·edit。
-async function requireGate(req: NextRequest, productionId: string, verb: "view" | "edit") {
-  const session = getSession(req.cookies);
-  if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
-  const { permCtx } = access;
-  const ok = session.isAdmin || permCtx.isAdmin || permCtx.isOwner ||
-    await hasGrant(permCtx.userId, productionId, "org_dept", "*", "grants", verb) ||
-    (verb === "view" && await hasGrant(permCtx.userId, productionId, "org_dept", "*", "grants", "edit"));
-  if (!ok) return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
-  if (verb === "edit" && access.isArchived) {
-    return { deny: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
-  }
-  return { deny: null };
-}
-
-const REL_KEY_RE = /^(?:[a-z_]+)?@(view|create|edit|delete)$/;
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGate(req, id, "view");
+  const { deny } = await requireGrantGate(req, id, [
+    ["org_dept", "grants", "view"],
+    ["org_dept", "grants", "edit"],
+  ]);
   if (deny) return deny;
   return Response.json({ templates: await listDeptCueTemplates(id) });
 }
@@ -42,7 +27,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /** PUT — upsert 一条声明行。Body: { deptId, template, canCreate, permissions } */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGate(req, id, "edit");
+  const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });
   if (deny) return deny;
 
   const body = (await req.json()) as {
@@ -55,8 +40,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   }
   const perms = body.permissions as string[];
   for (const rel of perms) {
-    if (!REL_KEY_RE.test(rel)) {
-      return Response.json({ error: `非法相对键：${rel}（形如 @view 或 cues@create）` }, { status: 400 });
+    // 面白名单校验（非仅格式）：typo 面会落成永不命中的孤儿声明键
+    if (!isValidCueRelKey(rel)) {
+      return Response.json({ error: `非法相对键：${rel}（面限 主面/cues/cues\/comments/grants/mounts）` }, { status: 400 });
     }
   }
   const [dept, types] = await Promise.all([
@@ -76,7 +62,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 /** DELETE — 删除一条声明行。Body: { deptId, template } */
 export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGate(req, id, "edit");
+  const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });
   if (deny) return deny;
 
   const body = (await req.json()) as { deptId?: string; template?: string };

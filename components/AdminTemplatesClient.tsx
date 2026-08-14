@@ -27,9 +27,11 @@ const SECTION_LABEL: React.CSSProperties = {
   textTransform: "uppercase", color: "var(--stage)",
 };
 
-// cue_list 相对键的常用面（自由输入仍允许）
-const REL_SUBS = ["", "cues", "grants", "mounts"];
-const REL_VERBS = ["view", "create", "edit", "delete"];
+import { CUE_REL_SUBS, CUE_REL_VERBS } from "@/lib/cue-list-types";
+
+// cue_list 相对键面/动词（与服务端白名单同源）
+const REL_SUBS = CUE_REL_SUBS;
+const REL_VERBS = CUE_REL_VERBS;
 
 function RelKeyAdder({ busy, onAdd }: { busy: boolean; onAdd: (rel: string) => void }) {
   const [sub, setSub] = useState("");

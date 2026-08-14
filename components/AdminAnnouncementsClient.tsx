@@ -32,6 +32,7 @@ type ReadStatus = {
 type Props = {
   productionId: string;
   productionName: string;
+  recent30Count: number;
   initialAnnouncements: Announcement[];
   canCreate: boolean;
   canEdit: boolean;
@@ -199,7 +200,7 @@ function AnnouncementForm({
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-export default function AdminAnnouncementsClient({ productionId, productionName, initialAnnouncements, canCreate, canEdit, canDelete }: Props) {
+export default function AdminAnnouncementsClient({ productionId, productionName, recent30Count, initialAnnouncements, canCreate, canEdit, canDelete }: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>(initialAnnouncements);
   const [mode, setMode] = useState<Mode | null>(null);
   const [saving, setSaving] = useState(false);
@@ -329,7 +330,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
         {[
           [String(announcements.length), "全部公告", "本项目累计"],
           [String(announcements.filter(a => a.isPinned).length), "置顶", "重点公告"],
-          [String(announcements.filter(a => Date.now() - new Date(a.createdAt).getTime() < 30 * 86400_000).length), "近 30 天", "最近发布"],
+          [String(recent30Count), "近 30 天", "最近发布"],
         ].map(([num, label, hint]) => (
           <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
             <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>

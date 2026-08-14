@@ -18,6 +18,19 @@ export const DEFAULT_CUE_TEMPLATE_TYPES: CueTemplateTypeSeed[] = [
   { key: "预设",     abbrHint: "PQ", creatorRoles: ["舞台监督"] },
 ];
 
+/** 声明行相对键的合法面白名单（服务端校验与 UI 选项的单一事实源）。 */
+export const CUE_REL_SUBS = ["", "cues", "cues/comments", "grants", "mounts"] as const;
+export const CUE_REL_VERBS = ["view", "create", "edit", "delete"] as const;
+
+export function isValidCueRelKey(rel: string): boolean {
+  const at = rel.lastIndexOf("@");
+  if (at < 0) return false;
+  const sub = rel.slice(0, at);
+  const verb = rel.slice(at + 1);
+  return (CUE_REL_SUBS as readonly string[]).includes(sub)
+    && (CUE_REL_VERBS as readonly string[]).includes(verb);
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type CueList = {

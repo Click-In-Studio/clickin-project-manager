@@ -1,7 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { requireGrantGate } from "@/lib/api-guard";
 import { getProductionDept } from "@/lib/dept-db";
 import { listDeptPermissionRows, setDeptPermissionRows } from "@/lib/perm-center-db";
 import { isGovernanceNodeKey } from "@/lib/grant-template";
@@ -9,26 +7,14 @@ import { isGovernanceNodeKey } from "@/lib/grant-template";
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
 // 部门权限行（production_dept_permission 区间）。
-// 可见门与可改门分离：view=org_dept/*/grants@view，edit=org_dept/*/grants@edit。
-async function requireGate(req: NextRequest, productionId: string, verb: "view" | "edit") {
-  const session = getSession(req.cookies);
-  if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }) };
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
-  const { permCtx } = access;
-  const ok = session.isAdmin || permCtx.isAdmin || permCtx.isOwner ||
-    await hasGrant(permCtx.userId, productionId, "org_dept", "*", "grants", verb) ||
-    (verb === "view" && await hasGrant(permCtx.userId, productionId, "org_dept", "*", "grants", "edit"));
-  if (!ok) return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
-  if (verb === "edit" && access.isArchived) {
-    return { deny: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
-  }
-  return { deny: null };
-}
+// 可见门与可改门分离：view=org_dept/*/grants@view（edit 覆盖读），edit=org_dept/*/grants@edit。
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id, deptId } = await ctx.params;
-  const { deny } = await requireGate(req, id, "view");
+  const { deny } = await requireGrantGate(req, id, [
+    ["org_dept", "grants", "view"],
+    ["org_dept", "grants", "edit"],
+  ]);
   if (deny) return deny;
   const dept = await getProductionDept(deptId, id);
   if (!dept) return Response.json({ error: "部门不存在" }, { status: 404 });
@@ -39,7 +25,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /** PUT — 全量替换该部门的权限行。Body: { keys: string[] } */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id, deptId } = await ctx.params;
-  const { deny } = await requireGate(req, id, "edit");
+  const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });
   if (deny) return deny;
   const dept = await getProductionDept(deptId, id);
   if (!dept) return Response.json({ error: "部门不存在" }, { status: 404 });
