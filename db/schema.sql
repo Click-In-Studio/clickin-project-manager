@@ -1268,6 +1268,11 @@ INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:cue_list/*/cues/comments@create')
 ON CONFLICT DO NOTHING;
 
+-- wiki 文档库 W3（add-wiki-create-template.sql）：全员创建资格（读面仍默认不可见）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:wiki/*@create')
+ON CONFLICT DO NOTHING;
+
 INSERT INTO grant_template (role_name, permission_key)
 SELECT r.name, 'node:cue_list/*@create'
 FROM (VALUES ('音响设计'), ('灯光设计'), ('多媒体设计'), ('舞美设计'), ('服化设计'),

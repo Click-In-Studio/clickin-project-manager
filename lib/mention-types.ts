@@ -1,6 +1,6 @@
 // Shared types and serialization for content mentions (#-prefix)
 
-export type ContentMentionKind = "page" | "scene" | "rehearsal" | "block" | "cue" | "asset";
+export type ContentMentionKind = "page" | "scene" | "rehearsal" | "block" | "cue" | "asset" | "wiki";
 export type BlockDisplayMode = "page" | "scene" | "rehearsal";
 
 export type ContentMentionAttrs = {

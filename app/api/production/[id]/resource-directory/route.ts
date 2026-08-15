@@ -3,6 +3,8 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasAdminPanelEligibility } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
+import { toActor } from "@/lib/grant-check";
+import { listVisibleWikiIds } from "@/lib/wiki-perm";
 
 // GET ?type=<resource_type> — 该类型的资源实例清单 {id,label}，供权限键
 // 选择器的 id 位下拉。只回 id+名称（无内容字段）；门=管理面资格。
@@ -32,9 +34,7 @@ const QUERIES: Record<string, string> = {
   task: `SELECT etr.id, COALESCE(etr.title, etr.id) AS label
          FROM task etr
          WHERE etr.production_id = $1 ORDER BY etr.id DESC`,
-  // wiki 故意缺席（picker 落回自由输入）：wiki 默认隐私，标题=目录级信息，
-  // 全量列出会把私有文档标题泄给管理面资格持有者。W3 实装可见性谓词
-  //（个人行 ∨ is_public ∨ dept 分享 ∨ 挂载宿主可见）后按调用者过滤加回。
+  // wiki 不在本表：默认隐私，须按调用者可见性过滤（见 handler 特例）。
 };
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -49,6 +49,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
 
   const type = req.nextUrl.searchParams.get("type") ?? "";
+
+  // wiki 特例（W3）：默认隐私模型下标题沿可见性流出——按调用者过滤，
+  // 不能像其他类型全量列出（管理面资格 ≠ 单篇文档可见性）
+  if (type === "wiki") {
+    const visible = await listVisibleWikiIds(toActor(session, permCtx), id);
+    const { rows } = await getPool().query<{ id: string; label: string }>(
+      `SELECT id::text AS id, COALESCE(title, id::text) AS label
+       FROM wiki WHERE production_id = $1 AND title IS NOT NULL ORDER BY created_at DESC`,
+      [id],
+    );
+    const items = visible.wildcard ? rows : rows.filter(r => visible.ids.has(r.id));
+    return Response.json({ items: items.slice(0, 500) });
+  }
+
   const sql = QUERIES[type];
   if (!sql) return Response.json({ items: [] });
 
