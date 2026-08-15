@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
@@ -70,6 +71,322 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
 
 const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;
 
+// ─── 新建任务模态框 ───────────────────────────────────────────────────────────
+
+type CreateOptions = {
+  pocDepts: { id: string; name: string }[];
+  people: { userId: string; name: string }[];
+  milestones: { id: string; name: string; endDate: string }[];
+  events: { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[];
+  canCreateStandalone: boolean;
+};
+
+const FIELD_LABEL: React.CSSProperties = {
+  display: "block", marginBottom: 5, fontSize: 10, fontWeight: 700,
+  letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)",
+};
+const FIELD_INPUT: React.CSSProperties = {
+  width: "100%", border: "1px solid var(--line)", borderRadius: 8,
+  padding: "9px 12px", fontSize: 12, color: "var(--ink)",
+  background: "var(--paper)", outline: "none",
+};
+const CHIP_TOGGLE = (active: boolean): React.CSSProperties => ({
+  border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
+  borderRadius: 999, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+  background: active ? "var(--ink)" : "transparent",
+  color: active ? "#fff" : "var(--muted)",
+});
+
+function CreateTaskModal({ productionId, onClose, onCreated }: {
+  productionId: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [options, setOptions] = useState<CreateOptions | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [deptId, setDeptId] = useState("");
+  const [assignees, setAssignees] = useState<Map<string, string>>(new Map());
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [milestoneIds, setMilestoneIds] = useState<Set<string>>(new Set());
+  const [eventId, setEventId] = useState("");
+  const [scheduleItems, setScheduleItems] = useState<{ id: string; title: string; startTime: string | null }[]>([]);
+  const [scheduleItemIds, setScheduleItemIds] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE_PATH}/api/production/${productionId}/tasks/create-options`)
+      .then(r => r.json())
+      .then((j: CreateOptions & { error?: string }) => {
+        if (cancelled) return;
+        if (j.error) setLoadError(j.error);
+        else setOptions(j);
+      })
+      .catch(() => { if (!cancelled) setLoadError("加载失败"); });
+    return () => { cancelled = true; };
+  }, [productionId]);
+
+  // 选择事件后拉取其 schedule 条目；换事件清空已选条目
+  useEffect(() => {
+    setScheduleItemIds(new Set());
+    if (!eventId) { setScheduleItems([]); return; }
+    let cancelled = false;
+    fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule`)
+      .then(r => r.json())
+      .then((j: { items?: { id: string; title: string; startTime: string | null }[] }) => {
+        if (!cancelled) setScheduleItems(j.items ?? []);
+      })
+      .catch(() => { if (!cancelled) setScheduleItems([]); });
+    return () => { cancelled = true; };
+  }, [productionId, eventId]);
+
+  const selectedEvent = options?.events.find(e => e.id === eventId) ?? null;
+  // 可挂载性：requiresPocDept 的事件必须同时绑定本人 POC 的部门（POC 路径三）
+  const eventNeedsDept = selectedEvent?.requiresPocDept && !deptId;
+  const nothingCreatable = options && !options.canCreateStandalone && options.events.length === 0;
+
+  async function submit() {
+    if (!options) return;
+    const t = title.trim();
+    if (!t) { setError("请填写任务名称"); return; }
+    if (!eventId && !options.canCreateStandalone) { setError("你没有创建独立任务的权限，请选择关联事件"); return; }
+    if (eventNeedsDept) { setError("该事件仅可通过部门 POC 路径挂载，请选择你负责的部门"); return; }
+    if (startTime && endTime && new Date(endTime) < new Date(startTime)) { setError("结束时间不能早于开始时间"); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: t,
+          description,
+          departmentId: deptId || null,
+          assignees: [...assignees.entries()].map(([userId, name]) => ({ userId, name })),
+          startTime: startTime ? new Date(startTime).toISOString() : null,
+          endTime: endTime ? new Date(endTime).toISOString() : null,
+          milestoneIds: [...milestoneIds],
+          eventId: eventId || null,
+          scheduleItemIds: [...scheduleItemIds],
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error ?? "创建失败"); return; }
+      onCreated();
+    } catch {
+      setError("网络错误，创建失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      role="presentation"
+      onMouseDown={onClose}
+      style={{ position: "fixed", zIndex: 100, inset: 0, background: "rgba(18,28,27,.65)", display: "grid", placeItems: "center", padding: 20 }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-task-title"
+        onMouseDown={e => e.stopPropagation()}
+        style={{ width: "min(680px, 100%)", maxHeight: "calc(100vh - 40px)", overflowY: "auto", background: "var(--surface)", borderRadius: 15, boxShadow: "0 24px 80px rgba(0,0,0,.3)" }}
+      >
+        {/* modalHeader（原型规格） */}
+        <div style={{ padding: "22px 25px 15px", display: "flex", gap: 18 }}>
+          <div>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 9, letterSpacing: ".13em" }}>CREATE TASK</p>
+            <h2 id="create-task-title" style={{ margin: "6px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 24, fontWeight: 500, color: "var(--ink)" }}>
+              新建任务
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="关闭"
+            style={{ marginLeft: "auto", width: 31, height: 31, border: "1px solid var(--line)", background: "transparent", borderRadius: "50%", fontSize: 20, cursor: "pointer", color: "var(--muted)" }}
+          >
+            ×
+          </button>
+        </div>
+        <p style={{ margin: 0, padding: "0 25px 15px", color: "var(--muted)", fontSize: 11, lineHeight: 1.6 }}>
+          任务可独立存在，也可关联事件、日程条目或里程碑；不设时间时将继承绑定日程/事件的起止。
+        </p>
+
+        {!options && !loadError && (
+          <p style={{ padding: "24px 25px", margin: 0, fontSize: 12, color: "var(--muted)" }}>加载中…</p>
+        )}
+        {loadError && (
+          <p style={{ padding: "24px 25px", margin: 0, fontSize: 12, color: "var(--danger)" }}>{loadError}</p>
+        )}
+        {nothingCreatable && (
+          <p style={{ padding: "0 25px 24px", margin: 0, fontSize: 12, color: "var(--danger)" }}>
+            你目前没有创建任务的权限（需要独立任务创建资格，或对某个事件有任务挂载资格）。
+          </p>
+        )}
+
+        {options && !nothingCreatable && (
+          <div style={{ padding: "0 25px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <label>
+              <span style={FIELD_LABEL}>任务名称 *</span>
+              <input autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="要做什么" style={FIELD_INPUT} />
+            </label>
+            <label>
+              <span style={FIELD_LABEL}>简介</span>
+              <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} placeholder="补充背景、验收标准或注意事项" style={{ ...FIELD_INPUT, resize: "vertical" }} />
+            </label>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label>
+                <span style={FIELD_LABEL}>开始时间</span>
+                <input type="datetime-local" value={startTime} onChange={e => setStartTime(e.target.value)} style={FIELD_INPUT} />
+              </label>
+              <label>
+                <span style={FIELD_LABEL}>结束 / 截止时间</span>
+                <input type="datetime-local" value={endTime} onChange={e => setEndTime(e.target.value)} style={FIELD_INPUT} />
+              </label>
+            </div>
+
+            <label>
+              <span style={FIELD_LABEL}>部门（仅限你担任 POC 的部门）</span>
+              <select value={deptId} onChange={e => setDeptId(e.target.value)} style={{ ...FIELD_INPUT, cursor: "pointer" }}>
+                <option value="">不绑定部门</option>
+                {options.pocDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </label>
+
+            {options.people.length > 0 && (
+              <div>
+                <span style={FIELD_LABEL}>参与人</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {options.people.map(p => {
+                    const active = assignees.has(p.userId);
+                    return (
+                      <button
+                        key={p.userId}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setAssignees(prev => {
+                          const next = new Map(prev);
+                          if (next.has(p.userId)) next.delete(p.userId);
+                          else next.set(p.userId, p.name);
+                          return next;
+                        })}
+                        style={CHIP_TOGGLE(active)}
+                      >
+                        {p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {options.milestones.length > 0 && (
+              <div>
+                <span style={FIELD_LABEL}>里程碑（可多选，不约束截止先后）</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {options.milestones.map(m => {
+                    const active = milestoneIds.has(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setMilestoneIds(prev => {
+                          const next = new Set(prev);
+                          if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                          return next;
+                        })}
+                        style={CHIP_TOGGLE(active)}
+                      >
+                        ◆ {m.name} · {m.endDate.slice(5, 10).replace("-", "/")}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <label>
+              <span style={FIELD_LABEL}>关联事件（仅列出你可挂载的）</span>
+              <select value={eventId} onChange={e => setEventId(e.target.value)} style={{ ...FIELD_INPUT, cursor: "pointer" }}>
+                <option value="">{options.canCreateStandalone ? "不关联（独立任务）" : "请选择事件"}</option>
+                {options.events.map(ev => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.startTime ? `${new Date(ev.startTime).getMonth() + 1}/${new Date(ev.startTime).getDate()} · ` : ""}
+                    {ev.title}{ev.requiresPocDept ? "（需绑定你负责的部门）" : ""}
+                  </option>
+                ))}
+              </select>
+              {eventNeedsDept && (
+                <small style={{ display: "block", marginTop: 5, fontSize: 10, color: "var(--warn)" }}>
+                  该事件仅可通过部门 POC 路径挂载——请在上方选择你负责的部门
+                </small>
+              )}
+            </label>
+
+            {eventId && scheduleItems.length > 0 && (
+              <div>
+                <span style={FIELD_LABEL}>绑定日程条目（可多选；不设时间时任务时间取条目区间）</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {scheduleItems.map(it => {
+                    const active = scheduleItemIds.has(it.id);
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setScheduleItemIds(prev => {
+                          const next = new Set(prev);
+                          if (next.has(it.id)) next.delete(it.id); else next.add(it.id);
+                          return next;
+                        })}
+                        style={CHIP_TOGGLE(active)}
+                      >
+                        {it.title}
+                        {it.startTime ? ` · ${new Date(it.startTime).getHours().toString().padStart(2, "0")}:${new Date(it.startTime).getMinutes().toString().padStart(2, "0")}` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {error && <p style={{ margin: 0, fontSize: 12, color: "var(--danger)" }}>{error}</p>}
+          </div>
+        )}
+
+        {/* modalFooter（原型规格） */}
+        <div style={{ borderTop: "1px solid var(--line)", padding: "15px 25px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            onClick={onClose}
+            style={{ borderRadius: 8, padding: "10px 14px", border: "1px solid var(--ink)", cursor: "pointer", fontSize: 12, fontWeight: 700, background: "transparent", color: "var(--ink)" }}
+          >
+            取消
+          </button>
+          <button
+            disabled={submitting || !options || !!nothingCreatable}
+            onClick={submit}
+            style={{
+              borderRadius: 8, padding: "10px 14px", border: "1px solid var(--ink)", cursor: "pointer",
+              fontSize: 12, fontWeight: 700, background: "var(--ink)", color: "#fff",
+              opacity: submitting || !options || nothingCreatable ? 0.5 : 1,
+            }}
+          >
+            {submitting ? "创建中…" : "创建任务"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function ProductionTasksClient({
   productionId,
   initialTasks,
@@ -83,7 +400,11 @@ export default function ProductionTasksClient({
   /** "我的"scope 判定（assignee 含本人） */
   currentUserId?: string;
 }) {
+  const router = useRouter();
   const [tasks, setTasks] = useState(initialTasks);
+  // router.refresh() 后服务端重投喂（新建任务落库）→ 本地列表跟进
+  useEffect(() => { setTasks(initialTasks); }, [initialTasks]);
+  const [createOpen, setCreateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   // 三 scope（原型）：我的 / 全部 / 按事件（仅看关联了事件的 Task）。
   const [scope, setScope] = useState<"mine" | "all" | "event">("all");
@@ -169,12 +490,32 @@ export default function ProductionTasksClient({
     }).length;
   }
 
+  const createModal = createOpen && (
+    <CreateTaskModal
+      productionId={productionId}
+      onClose={() => setCreateOpen(false)}
+      onCreated={() => { setCreateOpen(false); router.refresh(); }}
+    />
+  );
+
   if (tasks.length === 0) {
     return (
-      <div className={styles.emptyState}>
-        暂无任务
-        <small>事件中创建的任务与独立任务都会在这里汇总</small>
-      </div>
+      <>
+        <div className={styles.emptyState}>
+          暂无任务
+          <small>事件中创建的任务与独立任务都会在这里汇总</small>
+          <button
+            onClick={() => setCreateOpen(true)}
+            style={{
+              marginTop: 14, borderRadius: 8, padding: "10px 14px", border: "1px solid var(--ink)",
+              cursor: "pointer", fontSize: 12, fontWeight: 700, background: "var(--ink)", color: "#fff",
+            }}
+          >
+            ＋ 新建任务
+          </button>
+        </div>
+        {createModal}
+      </>
     );
   }
 
@@ -223,9 +564,29 @@ export default function ProductionTasksClient({
             }}>{label}</button>
           ))}
         </div>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-          任务可独立存在，也可关联事件或里程碑；截止时间取自身设置或继承绑定日程/事件
-        </span>
+        {/* taskToolbarActions（原型：在日历中查看 secondary + 新建 primary） */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link
+            href={`/production/${productionId}/planning`}
+            style={{
+              borderRadius: 8, padding: "10px 14px", border: "1px solid var(--ink)",
+              cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
+              background: "transparent", color: "var(--ink)", textDecoration: "none",
+            }}
+          >
+            在日历中查看
+          </Link>
+          <button
+            onClick={() => setCreateOpen(true)}
+            style={{
+              borderRadius: 8, padding: "10px 14px", border: "1px solid var(--ink)",
+              cursor: "pointer", fontSize: 12, fontWeight: 700,
+              background: "var(--ink)", color: "#fff", whiteSpace: "nowrap",
+            }}
+          >
+            ＋ 新建 Task
+          </button>
+        </div>
       </div>
 
       {/* ── Mobile: filter chips + accordion ── */}
@@ -602,6 +963,7 @@ export default function ProductionTasksClient({
         </div>
       </div>
       </section>
+      {createModal}
     </>
   );
 }
