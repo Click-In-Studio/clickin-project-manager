@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasEventContentEdit, hasEventDomainView } from "@/lib/event-permissions";
+import { hasEventDomainView } from "@/lib/event-permissions";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
