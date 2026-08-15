@@ -617,15 +617,60 @@ export default function ProductionTasksClient({
       {/* ── Panel（原型排版）：taskToolbar + 三栏（保留现有设计）── */}
       <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
-        {/* segmented（原型：surface-2 槽 + ink 选中块） */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 3, background: "var(--surface-2)", borderRadius: 8, padding: 3 }}>
-          {([["mine", "我的任务"], ["all", "全部"], ["event", "关联事件"]] as const).map(([id, label]) => (
-            <button key={id} aria-pressed={scope === id} onClick={() => setScope(id)} style={{
-              border: 0, borderRadius: 6, padding: "7px 14px", fontSize: 10, fontWeight: 700, cursor: "pointer",
-              background: scope === id ? "var(--ink)" : "transparent",
-              color: scope === id ? "#fff" : "var(--muted)", transition: "all .1s", whiteSpace: "nowrap",
-            }}>{label}</button>
-          ))}
+        {/* segmented（原型：surface-2 槽 + ink 选中块）+ 筛选下拉（长列表友好，左栏已撤） */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 3, background: "var(--surface-2)", borderRadius: 8, padding: 3 }}>
+            {([["mine", "我的任务"], ["all", "全部"], ["event", "关联事件"]] as const).map(([id, label]) => (
+              <button key={id} aria-pressed={scope === id} onClick={() => setScope(id)} style={{
+                border: 0, borderRadius: 6, padding: "7px 14px", fontSize: 10, fontWeight: 700, cursor: "pointer",
+                background: scope === id ? "var(--ink)" : "transparent",
+                color: scope === id ? "#fff" : "var(--muted)", transition: "all .1s", whiteSpace: "nowrap",
+              }}>{label}</button>
+            ))}
+          </div>
+          <div className={styles.desktopOnly}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(events.length + (hasStandalone ? 1 : 0)) > 1 && (
+              <div style={{ width: 190 }}>
+                <DropdownPicker
+                  items={[
+                    ...(hasStandalone ? [{ id: "__standalone", label: `独立任务 (${countFor(statusFilter, "__standalone", selectedDept)})` }] : []),
+                    ...events.map(([id, title]) => ({ id, label: `${title} (${countFor(statusFilter, id, selectedDept)})` })),
+                  ]}
+                  value={selectedEvent === "all" ? null : selectedEvent}
+                  placeholder={`全部日程 (${countFor(statusFilter, "all", selectedDept)})`}
+                  clearLabel={`全部日程 (${countFor(statusFilter, "all", selectedDept)})`}
+                  searchPlaceholder="搜索事件…"
+                  onChange={id => setSelectedEvent(id ?? "all")}
+                />
+              </div>
+            )}
+            {depts.length > 0 && (
+              <div style={{ width: 170 }}>
+                <DropdownPicker
+                  items={depts.map(([id, name]) => ({ id, label: `${name} (${countFor(statusFilter, selectedEvent, id)})` }))}
+                  value={selectedDept === "all" ? null : selectedDept}
+                  placeholder={`全部部门 (${countFor(statusFilter, selectedEvent, "all")})`}
+                  clearLabel={`全部部门 (${countFor(statusFilter, selectedEvent, "all")})`}
+                  searchPlaceholder="搜索部门…"
+                  onChange={id => setSelectedDept(id ?? "all")}
+                />
+              </div>
+            )}
+            <div style={{ width: 150 }}>
+              <DropdownPicker
+                items={(["awaiting", "pending", "in_progress", "done"] as StatusFilter[]).map(sf => ({
+                  id: sf, label: `${STATUS_FILTER_LABELS[sf]} (${countFor(sf)})`,
+                }))}
+                value={statusFilter === "active" ? null : statusFilter}
+                placeholder={`进行中任务 (${countFor("active")})`}
+                clearLabel={`进行中任务 (${countFor("active")})`}
+                searchPlaceholder="筛选状态…"
+                onChange={id => setStatusFilter((id as StatusFilter) ?? "active")}
+              />
+            </div>
+          </div>
+          </div>
         </div>
         {/* taskToolbarActions（原型：在日历中查看 secondary + 新建 primary） */}
         <div style={{ display: "flex", gap: 8 }}>
@@ -788,66 +833,11 @@ export default function ProductionTasksClient({
         )}
       </div>
 
-      {/* ── Desktop: 3-column layout ── */}
+      {/* ── Desktop: 2-column layout（筛选已上移工具栏下拉，左栏撤除）── */}
       <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 380px", gap: 0, height: "100%", minHeight: 0 }}>
-          {/* Left: filters */}
-          <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
-            {(events.length + (hasStandalone ? 1 : 0)) > 1 && (
-              <>
-                <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>日程</h3>
-                <div className={styles.filterList}>
-                  <button className={`${styles.filterItem} ${selectedEvent === "all" ? styles.active : ""}`} onClick={() => setSelectedEvent("all")}>
-                    <span>全部</span>
-                    <span className={styles.filterCount}>{countFor(statusFilter, "all", selectedDept)}</span>
-                  </button>
-                  {hasStandalone && (
-                    <button className={`${styles.filterItem} ${selectedEvent === "__standalone" ? styles.active : ""}`} onClick={() => setSelectedEvent("__standalone")}>
-                      <span>独立任务</span>
-                      <span className={styles.filterCount}>{countFor(statusFilter, "__standalone", selectedDept)}</span>
-                    </button>
-                  )}
-                  {events.map(([id, title]) => (
-                    <button key={id} className={`${styles.filterItem} ${selectedEvent === id ? styles.active : ""}`} onClick={() => setSelectedEvent(id)}>
-                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-                      <span className={styles.filterCount}>{countFor(statusFilter, id, selectedDept)}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {depts.length > 0 && (
-              <>
-                <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "20px 0 8px" }}>部门</h3>
-                <div className={styles.filterList}>
-                  <button className={`${styles.filterItem} ${selectedDept === "all" ? styles.active : ""}`} onClick={() => setSelectedDept("all")}>
-                    <span>全部</span>
-                    <span className={styles.filterCount}>{countFor(statusFilter, selectedEvent, "all")}</span>
-                  </button>
-                  {depts.map(([id, name]) => (
-                    <button key={id} className={`${styles.filterItem} ${selectedDept === id ? styles.active : ""}`} onClick={() => setSelectedDept(id)}>
-                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-                      <span className={styles.filterCount}>{countFor(statusFilter, selectedEvent, id)}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "20px 0 8px" }}>状态</h3>
-            <div className={styles.filterList}>
-              {statusFilters.map(sf => (
-                <button key={sf} className={`${styles.filterItem} ${statusFilter === sf ? styles.active : ""}`} onClick={() => setStatusFilter(sf)}>
-                  <span>{STATUS_FILTER_LABELS[sf]}</span>
-                  <span className={styles.filterCount}>{countFor(sf)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Middle: task table（原型 taskTableHeader + taskRows，规格照抄见 my-pages.module.css） */}
-          <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 12px 24px 20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 380px", gap: 0, height: "100%", minHeight: 0 }}>
+          {/* Task table（原型 taskTableHeader + taskRows，规格照抄见 my-pages.module.css） */}
+          <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 12px 24px 0" }}>
             {filtered.length === 0 ? (
               <div className={styles.emptyState} style={{ paddingTop: 60 }}>无匹配任务</div>
             ) : (
