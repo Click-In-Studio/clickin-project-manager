@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/MemberPickerModal";
+import TreePickerModal from "@/components/TreePickerModal";
 import styles from "@/components/my-pages.module.css";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -74,8 +76,11 @@ const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;
 // ─── 新建任务模态框 ───────────────────────────────────────────────────────────
 
 type CreateOptions = {
-  pocDepts: { id: string; name: string }[];
-  people: { userId: string; name: string }[];
+  pocDepts: { id: string; name: string; parentId: string | null }[];
+  /** 可指派人员池：assignees@edit 通配 ⇒ 全员；否则 ⇒ 我 POC 部门的成员并集 */
+  members: PickerMember[];
+  depts: PickerDept[];
+  canAssignAnyone: boolean;
   milestones: { id: string; name: string; endDate: string }[];
   events: { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[];
   canCreateStandalone: boolean;
@@ -108,7 +113,9 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [deptId, setDeptId] = useState("");
+  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
   const [assignees, setAssignees] = useState<Map<string, string>>(new Map());
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [milestoneIds, setMilestoneIds] = useState<Set<string>>(new Set());
@@ -189,7 +196,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
     <div
       role="presentation"
       onMouseDown={onClose}
-      style={{ position: "fixed", zIndex: 100, inset: 0, background: "rgba(18,28,27,.65)", display: "grid", placeItems: "center", padding: 20 }}
+      style={{ position: "fixed", zIndex: 80, inset: 0, background: "rgba(18,28,27,.65)", display: "grid", placeItems: "center", padding: 20 }}
     >
       <section
         role="dialog"
@@ -252,40 +259,50 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
               </label>
             </div>
 
-            <label>
-              <span style={FIELD_LABEL}>部门（仅限你担任 POC 的部门）</span>
-              <select value={deptId} onChange={e => setDeptId(e.target.value)} style={{ ...FIELD_INPUT, cursor: "pointer" }}>
-                <option value="">不绑定部门</option>
-                {options.pocDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            </label>
-
-            {options.people.length > 0 && (
+            {options.pocDepts.length > 0 && (
               <div>
-                <span style={FIELD_LABEL}>参与人</span>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {options.people.map(p => {
-                    const active = assignees.has(p.userId);
-                    return (
-                      <button
-                        key={p.userId}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setAssignees(prev => {
-                          const next = new Map(prev);
-                          if (next.has(p.userId)) next.delete(p.userId);
-                          else next.set(p.userId, p.name);
-                          return next;
-                        })}
-                        style={CHIP_TOGGLE(active)}
-                      >
-                        {p.name}
-                      </button>
-                    );
-                  })}
+                <span style={FIELD_LABEL}>部门（仅限你担任 POC 的部门）</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button type="button" onClick={() => setDeptPickerOpen(true)} style={{ ...FIELD_INPUT, cursor: "pointer", textAlign: "left", flex: 1, fontWeight: deptId ? 700 : 400, color: deptId ? "var(--ink)" : "var(--muted)" }}>
+                    {deptId ? options.pocDepts.find(d => d.id === deptId)?.name ?? "已选部门" : "不绑定部门（点击选择）"}
+                  </button>
+                  {deptId && (
+                    <button type="button" onClick={() => setDeptId("")} aria-label="清除部门" style={{ border: "1px solid var(--line)", borderRadius: 8, background: "transparent", padding: "8px 10px", fontSize: 12, cursor: "pointer", color: "var(--muted)" }}>
+                      清除
+                    </button>
+                  )}
                 </div>
               </div>
             )}
+
+            <div>
+              <span style={FIELD_LABEL}>
+                参与人{options.canAssignAnyone ? "" : "（限你担任 POC 的部门成员）"}
+              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                {[...assignees.entries()].map(([userId, name]) => (
+                  <span key={userId} style={{ ...CHIP_TOGGLE(true), display: "inline-flex", alignItems: "center", gap: 6, cursor: "default" }}>
+                    {name}
+                    <button
+                      type="button"
+                      aria-label={`移除 ${name}`}
+                      onClick={() => setAssignees(prev => { const next = new Map(prev); next.delete(userId); return next; })}
+                      style={{ border: 0, background: "transparent", color: "#fff", cursor: "pointer", fontSize: 12, lineHeight: 1, padding: 0 }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setMemberPickerOpen(true)}
+                  disabled={options.members.length === 0}
+                  style={{ ...CHIP_TOGGLE(false), opacity: options.members.length === 0 ? 0.5 : 1 }}
+                >
+                  ＋ 选择参与人
+                </button>
+              </div>
+            </div>
 
             {options.milestones.length > 0 && (
               <div>
@@ -382,6 +399,40 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
             {submitting ? "创建中…" : "创建任务"}
           </button>
         </div>
+
+        {/* 部门单选 picker（AdminModal z-90 叠在本模态 z-80 之上） */}
+        {deptPickerOpen && options && (
+          <TreePickerModal
+            kicker="BIND DEPARTMENT"
+            title="选择部门"
+            items={options.pocDepts.map(d => ({ id: d.id, label: d.name, parentId: d.parentId }))}
+            preselected={deptId ? [deptId] : []}
+            single
+            onConfirm={ids => { setDeptId(ids[0] ?? ""); setDeptPickerOpen(false); }}
+            onClose={() => setDeptPickerOpen(false)}
+          />
+        )}
+        {/* 参与人多选 picker */}
+        {memberPickerOpen && options && (
+          <MemberPickerModal
+            kicker="ASSIGN PEOPLE"
+            title="选择参与人"
+            members={options.members}
+            depts={options.depts}
+            excludeUserIds={[...assignees.keys()]}
+            confirmLabel="添加参与人"
+            onConfirm={ids => {
+              const nameOf = new Map(options.members.map(m => [m.userId, m.name]));
+              setAssignees(prev => {
+                const next = new Map(prev);
+                for (const id of ids) next.set(id, nameOf.get(id) ?? "");
+                return next;
+              });
+              setMemberPickerOpen(false);
+            }}
+            onClose={() => setMemberPickerOpen(false)}
+          />
+        )}
       </section>
     </div>
   );
