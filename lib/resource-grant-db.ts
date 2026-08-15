@@ -533,7 +533,7 @@ export async function writeReportGrants(
 }
 
 /**
- * wiki 创建者行集（§0.9 定式 C-7）：creator 获 WIKI manage 行集 + person 归属。
+ * wiki 创建者行集（§0.9 定式 C-6）：creator 获 WIKI manage 行集 + person 归属。
  * 独立文档无父资源，不做 dept/person 继承（挂载为 report/note 时可见性沿边推导，
  * 永不物化行——§0.9 负面清单）。
  */
