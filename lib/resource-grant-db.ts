@@ -370,7 +370,7 @@ export async function hasUserAnyTechReqGrantInEvent(
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM production_member_grant rg
-       JOIN event_tech_req etr ON etr.id = rg.resource_id
+       JOIN task etr ON etr.id = rg.resource_id
        WHERE rg.production_id = $1
          AND rg.user_id = $2
          AND rg.resource_type = 'task'
@@ -395,7 +395,7 @@ export async function getUserTechReqGrantIdsInEvent(
   const { rows } = await getPool().query<{ resource_id: string }>(
     `SELECT DISTINCT rg.resource_id
      FROM production_member_grant rg
-     JOIN event_tech_req etr ON etr.id = rg.resource_id
+     JOIN task etr ON etr.id = rg.resource_id
      WHERE rg.production_id = $1
        AND rg.user_id = $2
        AND rg.resource_type = 'task'
@@ -523,10 +523,11 @@ export async function writeReportGrants(
 }
 
 /**
- * Writes initial production_member_grant + resource_dept_manage when a new tech_req is created.
+ * Writes initial production_member_grant + resource_dept_manage when a new task is created.
  *   - POC(s) of the assigned dept get manage grant
  *   - Assigned dept gets resource_dept_manage
- *   - Parent event's managing depts/persons get resource_dept_manage / resource_person_manage
+ *   - If bound to an event: the event's managing depts/persons inherit
+ *     resource_dept_manage / resource_person_manage（无绑定 task 无此继承）
  *   - If neither assigned dept nor event depts exist, creator is written to resource_person_manage
  * eventDeptId is a production_dept.id（并表后单一 id 空间，name 映射 hack 已退役）.
  */
@@ -535,7 +536,7 @@ export async function writeTechReqGrants(
   productionId: string,
   eventDeptId: string | null,
   createdBy: string,
-  eventId: string,
+  eventId: string | null,
 ): Promise<void> {
   const pool = getPool();
   if (eventDeptId) {
@@ -561,33 +562,39 @@ export async function writeTechReqGrants(
       [productionId, reqId, eventDeptId, createdBy],
     );
   }
-  // Parent event's managing depts also manage the tech_req
-  await pool.query(
-    `INSERT INTO resource_dept_manage
-       (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-     SELECT production_id, dept_id, 'tech_req', $1, '*', $2
-     FROM resource_dept_manage
-     WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
-     ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-    [reqId, createdBy, productionId, eventId],
-  );
-  // Person fallback: no dept managers at all → creator manages this tech_req
+  // Parent event's managing depts also manage the task (bound tasks only)
+  // （曾误写 resource_type='tech_req' 死行——判定侧只读 'task'；存量由
+  //   migrate-task-standalone 并入修复）
+  if (eventId) {
+    await pool.query(
+      `INSERT INTO resource_dept_manage
+         (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
+       SELECT production_id, dept_id, 'task', $1, '*', $2
+       FROM resource_dept_manage
+       WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
+       ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+      [reqId, createdBy, productionId, eventId],
+    );
+  }
+  // Person fallback: no dept managers at all → creator manages this task
   const hasDept = await pool.query(
     `SELECT 1 FROM resource_dept_manage
      WHERE production_id=$1 AND resource_type='task' AND resource_id=$2 LIMIT 1`,
     [productionId, reqId],
   );
   if (hasDept.rows.length === 0) {
-    // Also inherit event's person manager if present
-    await pool.query(
-      `INSERT INTO resource_person_manage
-         (production_id, user_id, resource_type, resource_id, established_by)
-       SELECT production_id, user_id, 'task', $1, $2
-       FROM resource_person_manage
-       WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-      [reqId, createdBy, productionId, eventId],
-    );
+    // Also inherit event's person manager if present (bound tasks only)
+    if (eventId) {
+      await pool.query(
+        `INSERT INTO resource_person_manage
+           (production_id, user_id, resource_type, resource_id, established_by)
+         SELECT production_id, user_id, 'task', $1, $2
+         FROM resource_person_manage
+         WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+        [reqId, createdBy, productionId, eventId],
+      );
+    }
     // If still nothing, creator is the manager
     const hasPerson = await pool.query(
       `SELECT 1 FROM resource_person_manage

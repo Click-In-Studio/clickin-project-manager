@@ -527,41 +527,61 @@ CREATE TABLE IF NOT EXISTS event_call_time (
 
 CREATE INDEX IF NOT EXISTS event_call_time_event_idx ON event_call_time(event_id);
 
-CREATE TABLE IF NOT EXISTS event_tech_req (
-  id               TEXT PRIMARY KEY,
-  event_id         TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
-  schedule_item_id TEXT REFERENCES event_schedule_item(id) ON DELETE SET NULL,
-  title            TEXT NOT NULL,
-  description      TEXT NOT NULL DEFAULT '',
-  preset_minutes   INTEGER,
-  department_id    UUID REFERENCES production_dept(id) ON DELETE SET NULL,
-  status           TEXT NOT NULL DEFAULT 'pending',
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  chat_id          TEXT,
-  created_via      TEXT NOT NULL DEFAULT 'explicit'
-                   CHECK (created_via IN ('explicit', 'dept_auto', 'poc'))
+-- Task（原 event_tech_req"技术需求"，migrate-task-standalone 独立化）：
+-- production 级实体，event/schedule/部门绑定均可选；自身起止时间可选，
+-- 有效时间读侧解析链：自身 → 绑定 schedule items min/max → event 起止。
+CREATE TABLE IF NOT EXISTS task (
+  id             TEXT PRIMARY KEY,
+  production_id  TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  event_id       TEXT REFERENCES production_event(id) ON DELETE SET NULL,
+  title          TEXT NOT NULL,
+  description    TEXT NOT NULL DEFAULT '',
+  preset_minutes INTEGER,
+  department_id  UUID REFERENCES production_dept(id) ON DELETE SET NULL,
+  status         TEXT NOT NULL DEFAULT 'pending',
+  start_time     TIMESTAMPTZ,
+  end_time       TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  chat_id        TEXT,
+  created_via    TEXT NOT NULL DEFAULT 'explicit'
+                 CHECK (created_via IN ('explicit', 'dept_auto', 'poc')),
+  CONSTRAINT task_time_order_check
+    CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time)
 );
 
--- 存量库补列守卫（幂等；必须位于 CREATE TABLE 之后——语句顺序即执行顺序）
-ALTER TABLE event_tech_req ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'explicit'
-  CHECK (created_via IN ('explicit', 'dept_auto', 'poc'));
+CREATE INDEX IF NOT EXISTS task_event_idx ON task(event_id);
+CREATE INDEX IF NOT EXISTS task_production_idx ON task(production_id);
 
-CREATE INDEX IF NOT EXISTS event_tech_req_event_idx ON event_tech_req(event_id);
-
-CREATE TABLE IF NOT EXISTS event_tech_req_item (
-  req_id  TEXT NOT NULL REFERENCES event_tech_req(id) ON DELETE CASCADE,
+-- 绑定 schedule item（多对多；应用层不变量：item 必须属于 task.event_id）
+CREATE TABLE IF NOT EXISTS task_schedule_item (
+  task_id TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
-  PRIMARY KEY (req_id, item_id)
+  PRIMARY KEY (task_id, item_id)
 );
 
-CREATE INDEX IF NOT EXISTS event_tech_req_item_req_idx ON event_tech_req_item(req_id);
+CREATE INDEX IF NOT EXISTS task_schedule_item_task_idx ON task_schedule_item(task_id);
 
-CREATE TABLE IF NOT EXISTS event_tech_assignee (
-  req_id  TEXT NOT NULL REFERENCES event_tech_req(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS task_assignee (
+  task_id TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name    TEXT NOT NULL,
-  PRIMARY KEY (req_id, user_id)
+  PRIMARY KEY (task_id, user_id)
 );
+
+-- （task_milestone 定义在 milestone 表之后——语句顺序即执行顺序）
+
+-- Blocking 依赖边（GitHub 语义：blocking 挡住 blocked；纯信息性不进状态机，
+-- isBlocked 读侧派生；应用层写入时递归 CTE 禁环）
+CREATE TABLE IF NOT EXISTS task_dependency (
+  blocking_id TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  blocked_id  TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  created_by  UUID REFERENCES app_user(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (blocking_id, blocked_id),
+  CONSTRAINT task_dependency_no_self_check CHECK (blocking_id <> blocked_id)
+);
+
+CREATE INDEX IF NOT EXISTS task_dependency_blocked_idx ON task_dependency(blocked_id);
 
 -- ── Reports ───────────────────────────────────────────────────────────────────
 
@@ -887,6 +907,16 @@ CREATE TABLE IF NOT EXISTS milestone (
 );
 
 CREATE INDEX IF NOT EXISTS milestone_production_idx ON milestone(production_id, end_date);
+
+-- Task 里程碑关联（0..n；不约束 task 截止 ≤ 里程碑时间，前端仅软提示。
+-- task 表见 event 域段落；本表因引用 milestone 置于其后）
+CREATE TABLE IF NOT EXISTS task_milestone (
+  task_id      TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, milestone_id)
+);
+
+CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
 
 -- ── Announcements ─────────────────────────────────────────────────────────────
 

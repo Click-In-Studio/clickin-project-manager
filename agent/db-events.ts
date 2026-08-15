@@ -134,25 +134,25 @@ export async function getMyTechReqs(userId: string): Promise<MyTechReqEntry[]> {
     `SELECT etr.id, etr.title, etr.status, 'assignee' AS role,
             pe.id AS event_id, pe.title AS event_title,
             p.name AS production_name, ed.name AS department_name
-     FROM event_tech_req etr
-     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
-     JOIN production_event pe ON pe.id = etr.event_id
-     JOIN production p ON p.id = pe.production_id
-     LEFT JOIN event_department ed ON ed.id = etr.department_id
+     FROM task etr
+     JOIN task_assignee eta ON eta.task_id = etr.id AND eta.user_id = $1
+     LEFT JOIN production_event pe ON pe.id = etr.event_id
+     JOIN production p ON p.id = etr.production_id
+     LEFT JOIN production_dept ed ON ed.id = etr.department_id
      WHERE etr.status NOT IN ('done', 'cancelled')
-       AND pe.status NOT IN ('completed', 'cancelled')
+       AND (etr.event_id IS NULL OR pe.status NOT IN ('completed', 'cancelled'))
      UNION
      SELECT etr.id, etr.title, etr.status, 'poc' AS role,
             pe.id AS event_id, pe.title AS event_title,
             p.name AS production_name, ed.name AS department_name
-     FROM event_tech_req etr
-     JOIN event_department ed ON ed.id = etr.department_id
-     JOIN event_department_member edm
-       ON edm.department_id = etr.department_id AND edm.user_id = $1 AND edm.is_poc = true
-     JOIN production_event pe ON pe.id = etr.event_id
-     JOIN production p ON p.id = pe.production_id
+     FROM task etr
+     JOIN production_dept ed ON ed.id = etr.department_id
+     JOIN production_dept_member edm
+       ON edm.dept_id = etr.department_id AND edm.user_id = $1 AND edm.is_poc = true
+     LEFT JOIN production_event pe ON pe.id = etr.event_id
+     JOIN production p ON p.id = etr.production_id
      WHERE etr.status = 'awaiting'
-       AND pe.status NOT IN ('completed', 'cancelled')
+       AND (etr.event_id IS NULL OR pe.status NOT IN ('completed', 'cancelled'))
      ORDER BY event_title, title`,
     [userId],
   );
@@ -227,7 +227,7 @@ export async function queryEvents(
   }
   if (filters.techReqKeyword) {
     conds.push(
-      `EXISTS (SELECT 1 FROM event_tech_req etr WHERE etr.event_id = pe.id AND (etr.title ILIKE $${p} OR etr.description ILIKE $${p}))`,
+      `EXISTS (SELECT 1 FROM task etr WHERE etr.event_id = pe.id AND (etr.title ILIKE $${p} OR etr.description ILIKE $${p}))`,
     );
     params.push(`%${filters.techReqKeyword}%`); p++;
   }
@@ -369,7 +369,7 @@ export async function getEventDetail(
                 ) ORDER BY ect.call_at
               ) FILTER (WHERE ect.id IS NOT NULL) AS call_times
        FROM event_participant ep
-       LEFT JOIN event_department ed ON ed.id = ep.department_id
+       LEFT JOIN production_dept ed ON ed.id = ep.department_id
        LEFT JOIN event_call_time ect ON ect.event_id = $1 AND ect.user_id = ep.user_id
        LEFT JOIN event_schedule_item esi ON esi.id = ect.schedule_item_id
        WHERE ep.event_id = $1
@@ -387,10 +387,10 @@ export async function getEventDetail(
               ed.name AS department_name,
               array_agg(DISTINCT eta.name) FILTER (WHERE eta.name IS NOT NULL) AS assignees,
               array_agg(DISTINCT esi.title) FILTER (WHERE esi.title IS NOT NULL) AS schedule_item_titles
-       FROM event_tech_req etr
-       LEFT JOIN event_department ed ON ed.id = etr.department_id
-       LEFT JOIN event_tech_assignee eta ON eta.req_id = etr.id
-       LEFT JOIN event_tech_req_item etri ON etri.req_id = etr.id
+       FROM task etr
+       LEFT JOIN production_dept ed ON ed.id = etr.department_id
+       LEFT JOIN task_assignee eta ON eta.task_id = etr.id
+       LEFT JOIN task_schedule_item etri ON etri.task_id = etr.id
        LEFT JOIN event_schedule_item esi ON esi.id = etri.item_id
        WHERE etr.event_id = $1
        GROUP BY etr.id, etr.title, etr.description, etr.status, etr.preset_minutes, ed.name
@@ -413,7 +413,7 @@ export async function getEventDetail(
               ) FILTER (WHERE ern.id IS NOT NULL) AS notes
        FROM event_report er
        LEFT JOIN event_report_note ern ON ern.report_id = er.id
-       LEFT JOIN event_department ed ON ed.id = ern.department_id
+       LEFT JOIN production_dept ed ON ed.id = ern.department_id
        WHERE er.event_id = $1
        GROUP BY er.id
        ORDER BY er.created_at DESC`,
@@ -429,7 +429,7 @@ export async function getEventDetail(
               ed.name AS department_name,
               esi.title AS schedule_item_title
        FROM event_call_time ect
-       LEFT JOIN event_department ed ON ed.id = ect.department_id
+       LEFT JOIN production_dept ed ON ed.id = ect.department_id
        LEFT JOIN event_schedule_item esi ON esi.id = ect.schedule_item_id
        WHERE ect.event_id = $1
        ORDER BY ect.call_at, ect.name`,

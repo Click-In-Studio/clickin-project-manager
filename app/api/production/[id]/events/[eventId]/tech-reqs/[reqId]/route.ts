@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventTechReq, isUserDeptPoc, updateEventTechReq, deleteEventTechReq } from "@/lib/event-db";
+import { getProductionEvent, getEventDepartment, getEventTechReq, isUserDeptPoc, updateTaskByProduction, deleteTaskByProduction } from "@/lib/event-db";
 import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -29,7 +29,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     presetMinutes?: number | null; departmentId?: string | null; status?: string;
   };
 
-  const updated = await updateEventTechReq(reqId, eventId, {
+  // departmentId 必须属于本 production（isUserDeptPoc 不限 production）
+  if (typeof body.departmentId === "string"
+      && !(await getEventDepartment(body.departmentId, productionId)))
+    return Response.json({ error: "部门不存在" }, { status: 400 });
+
+  const updated = await updateTaskByProduction(reqId, productionId, {
     title: body.title?.trim(),
     description: body.description,
     presetMinutes: body.presetMinutes,
@@ -61,6 +66,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  await deleteEventTechReq(reqId, eventId);
+  await deleteTaskByProduction(reqId, productionId);
   return Response.json({ ok: true });
 }

@@ -66,12 +66,9 @@ async function validateMountTarget(productionId: string, mountType: MountType, m
       );
       return res.rows.length > 0;
     }
-    case "event_tech_req": {
+    case "task": {
       const res = await pool.query(
-        `SELECT 1
-         FROM event_tech_req etr
-         JOIN production_event pe ON pe.id = etr.event_id
-         WHERE etr.id = $1 AND pe.production_id = $2`,
+        "SELECT 1 FROM task WHERE id = $1 AND production_id = $2",
         [mountId, productionId]
       );
       return res.rows.length > 0;

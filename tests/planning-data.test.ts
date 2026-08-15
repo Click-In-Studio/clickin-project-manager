@@ -51,13 +51,13 @@ beforeAll(async () => {
     description: "", createdBy: userId,
   });
   await getPool().query(
-    `INSERT INTO event_tech_req (id, event_id, title, status) VALUES
-       ($1, $3, '任务1', 'pending'), ($2, $3, '任务2', 'pending')`,
-    [`r${shortId()}`, `r${shortId()}`, eventA],
+    `INSERT INTO task (id, production_id, event_id, title, status) VALUES
+       ($1, $4, $3, '任务1', 'pending'), ($2, $4, $3, '任务2', 'pending')`,
+    [`r${shortId()}`, `r${shortId()}`, eventA, prodId],
   );
   await getPool().query(
-    `INSERT INTO event_tech_req (id, event_id, title, status) VALUES ($1, $2, '别家任务', 'pending')`,
-    [`r${shortId()}`, evX.id],
+    `INSERT INTO task (id, production_id, event_id, title, status) VALUES ($1, $3, $2, '别家任务', 'pending')`,
+    [`r${shortId()}`, evX.id, otherProdId],
   );
 });
 

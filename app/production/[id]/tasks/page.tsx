@@ -44,6 +44,12 @@ export default async function ProductionTasksPage({ params, searchParams }: {
           eventId: t.eventId,
           eventTitle: t.eventTitle,
           eventStartTime: null as string | null,
+          startTime: null as string | null,
+          endTime: null as string | null,
+          effectiveStartTime: t.effectiveStartTime,
+          effectiveEndTime: t.effectiveEndTime,
+          milestones: [] as { id: string; name: string; endDate: string }[],
+          isBlocked: false,
           assignees: t.assignees,
         }));
 

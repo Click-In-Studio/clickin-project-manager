@@ -42,14 +42,15 @@ async function makePocMember(deptId: string, userId: string): Promise<void> {
 async function makeTechReq(eventId: string, deptId: string | null, status: string): Promise<string> {
   const id = `r${shortId()}`;
   await getPool().query(
-    `INSERT INTO event_tech_req (id, event_id, department_id, title, status) VALUES ($1, $2, $3, '测试需求', $4)`,
+    `INSERT INTO task (id, production_id, event_id, department_id, title, status)
+     SELECT $1, pe.production_id, $2, $3, '测试需求', $4 FROM production_event pe WHERE pe.id = $2`,
     [id, eventId, deptId, status],
   );
   return id;
 }
 async function makeAssignee(reqId: string, userId: string): Promise<void> {
   await getPool().query(
-    `INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1, $2, '测试') ON CONFLICT DO NOTHING`,
+    `INSERT INTO task_assignee (task_id, user_id, name) VALUES ($1, $2, '测试') ON CONFLICT DO NOTHING`,
     [reqId, userId],
   );
 }

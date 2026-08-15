@@ -3034,7 +3034,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`DELETE FROM production_dept_member WHERE user_id = $1`, [deleteUserId]);
     await client.query(`UPDATE event_stage_manager SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE schedule_item_participant SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
-    await client.query(`UPDATE event_tech_assignee SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE task_assignee SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);

@@ -220,8 +220,20 @@ export default function AccessRequestModal({
     "node:task/*/meta@view": "查看任务",
     "node:event/*/meta@view": "查看事件",
   };
+  // 实例级 node 键（node:task/<id>/*@edit）精确表匹配不到 → 按 type+verb 通用取名
+  const NODE_TYPE_LABELS: Record<string, string> = {
+    task: "任务", event: "事件", cue_list: "Cue 表", scene: "章节/段落",
+    character: "角色", script: "剧本", asset: "附件", member: "人员",
+    report: "报告", note: "备注", dept: "部门", production: "项目",
+  };
+  const NODE_VERB_LABELS: Record<string, string> = {
+    view: "查看", edit: "编辑", create: "创建", delete: "删除", manage: "管理", "*": "全部操作",
+  };
+  const genericNodeLabel = nodeMatch
+    ? `${NODE_VERB_LABELS[nodeMatch[4]] ?? nodeMatch[4]}${NODE_TYPE_LABELS[nodeMatch[1]] ?? nodeMatch[1]}${nodeMatch[2] !== "*" ? "（单个）" : ""}`
+    : null;
   const permLabel = permission
-    ? (NODE_LABELS[permission] ?? PERMISSION_LABELS[permission] ?? permission)
+    ? (NODE_LABELS[permission] ?? PERMISSION_LABELS[permission] ?? genericNodeLabel ?? permission)
     : null;
 
   return (
@@ -311,14 +323,17 @@ export default function AccessRequestModal({
                   <p style={{ margin: "0 0 3px", fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
                     申请权限
                   </p>
-                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ink)", overflowWrap: "anywhere" }}>
                     {permLabel}
-                    <span style={{
-                      marginLeft: 8, fontFamily: "monospace", fontSize: 11,
-                      color: "var(--muted)", fontWeight: 400,
-                    }}>
-                      {permission}
-                    </span>
+                    {permLabel !== permission && (
+                      <span style={{
+                        marginLeft: 8, fontFamily: "monospace", fontSize: 11,
+                        color: "var(--muted)", fontWeight: 400,
+                        overflowWrap: "anywhere", wordBreak: "break-all",
+                      }}>
+                        {permission}
+                      </span>
+                    )}
                   </p>
                 </div>
               ) : (

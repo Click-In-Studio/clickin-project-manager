@@ -121,53 +121,65 @@ export async function canPublishReport(
 }
 
 /**
- * Can add or edit a specific tech requirement.
- * Primary: production_member_grant(tech_req, reqId, 'edit'+).
- * Event-level edit also grants access (cascades down to all tech_reqs in the event).
+ * Can add or edit a specific task.
+ * Primary: production_member_grant(task, taskId, 'edit'+).
+ * 绑定 event 时 event 的 details@edit 级联可编（无绑定 task 无此通道）。
  */
 export async function canEditTechReq(
   permCtx: PermissionContext,
   techReqId: string,
-  eventId: string,
+  eventId: string | null,
   productionId: string,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (permCtx.memberPermissions === null) return false;
   const [hasReqGrant, hasEventGrant] = await Promise.all([
     hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "edit"),
-    hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit"),
+    eventId
+      ? hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")
+      : Promise.resolve(false),
   ]);
   if (hasReqGrant || hasEventGrant) return true;
   // 规则（用户规范）：不论创建路径与进度，task 关联部门的 POC 恒可编辑内容并推进
   // 状态——上下文关系判定（Type B），部门后关联/POC 变更自动跟踪，无需行同步
-  const { getEventTechReq, isUserDeptPoc } = await import("./event-db");
-  const req = await getEventTechReq(techReqId, eventId);
+  const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
+  const req = await getTechReqByProduction(techReqId, productionId);
   if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
   return false;
 }
 
-/** Can assign tech personnel to a requirement. Same rule as canEditTechReq. */
+/**
+ * Can assign personnel to a task.
+ * 指派面独立于内容编辑（2026-08-15 用户定谳）：event details@edit 级联**不含**
+ * task 指派——organizer 只能给部门发 task，任务分配归部门 POC（确认流程）。
+ * 通道：task 实例/通配 assignees@edit 行，或关联部门 POC（上下文判定）。
+ */
 export async function canAssignTechReq(
   permCtx: PermissionContext,
   techReqId: string,
-  eventId: string,
   productionId: string,
 ): Promise<boolean> {
-  return canEditTechReq(permCtx, techReqId, eventId, productionId);
+  if (permCtx.isAdmin) return true;
+  if (permCtx.memberPermissions === null) return false;
+  if (await hasGrant(permCtx.userId, productionId, "task", techReqId, "assignees", "edit")) return true;
+  const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
+  const req = await getTechReqByProduction(techReqId, productionId);
+  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  return false;
 }
 
-/** Can view a tech requirement (for display gating in the list). */
+/** Can view a task (for display gating in the list). */
 export async function canViewTechReq(
   permCtx: PermissionContext,
   techReqId: string,
-  eventId: string,
+  eventId: string | null,
   productionId: string,
   techReqDeptId: string | null,
   ctx: Pick<EventPermContext, "participantDeptIds">,
 ): Promise<boolean> {
   if (permCtx.isAdmin) return true;
   if (await hasGrant(permCtx.userId, productionId, "task", "*", "*", "view")) return true;
-  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "tasks", "view")) return true;
+  if (eventId && await hasGrant(permCtx.userId, productionId, "event", eventId, "tasks", "view")) return true;
   // Participants of the req's dept can view
   if (techReqDeptId && ctx.participantDeptIds.includes(techReqDeptId)) return true;
   // Or if user has any grant on this req
@@ -175,10 +187,10 @@ export async function canViewTechReq(
   // 规则（用户规范，上下文判定）：
   //   - assign 了个人 → 个人恒可见（并可推进进度，见 status 路由）
   //   - task 已确认（非 awaiting）且关联部门 → 部门全员可见
-  const { isUserReqAssignee, isUserDeptMember, getEventTechReq } = await import("./event-db");
+  const { isUserReqAssignee, isUserDeptMember, getTechReqByProduction } = await import("./event-db");
   if (await isUserReqAssignee(techReqId, permCtx.userId)) return true;
   if (techReqDeptId) {
-    const req = await getEventTechReq(techReqId, eventId);
+    const req = await getTechReqByProduction(techReqId, productionId);
     if (req && req.status !== "awaiting" && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
   }
   return false;

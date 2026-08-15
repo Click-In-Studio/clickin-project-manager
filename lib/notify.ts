@@ -177,6 +177,57 @@ export async function notifyUsers(params: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Task assignment notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 任务指派通知（2026-08-15 定谳：老板派活语义——纯告知，act=打开详情，
+ * 不设接受/拒绝回执）。发送面 = 指派动作的四个写点（两条 PUT assignees 的
+ * diff 新增、两条 POST 创建即指派）。指派人本人不收；正文带指派人名 attribution。
+ */
+export async function notifyTaskAssigned(params: {
+  productionId: string;
+  taskId: string;
+  taskTitle: string;
+  /** 绑定 event 时的语境标注（可空） */
+  eventTitle?: string | null;
+  /** 指派动作发起人（过滤自指派 + attribution） */
+  assignedBy: string;
+  userIds: string[];
+}): Promise<void> {
+  const recipients = [...new Set(params.userIds)].filter(id => id !== params.assignedBy);
+  if (!recipients.length) return;
+
+  const assignerRes = await getPool().query<{ name: string; display_name: string | null }>(
+    `SELECT name, display_name FROM user_profile WHERE user_id = $1`,
+    [params.assignedBy],
+  ).catch(() => null);
+  const assignerName = assignerRes?.rows[0]?.display_name || assignerRes?.rows[0]?.name || "";
+
+  const taskTitle = params.taskTitle || "（未命名任务）";
+  const context = params.eventTitle ? `（${params.eventTitle}）` : "";
+  const reqPath = `${SERVER_URL}/production/${params.productionId}/tasks/${params.taskId}`;
+
+  await notifyUsers({
+    userIds: recipients,
+    kind: "task_assign",
+    productionId: params.productionId,
+    entityType: "tech_req",
+    entityId: params.taskId,
+    title: `你被指派了任务：${taskTitle}`,
+    body: [context, assignerName ? `指派人：${assignerName}` : ""].filter(Boolean).join(" "),
+    viewHref: reqPath,
+    category: "info",
+    buildExternalMessage: async (_userId, target) => {
+      const actionUrl = target.adapter.buildActionUrl(reqPath);
+      return {
+        text: `你被指派了任务：${taskTitle}${context}${assignerName ? `，指派人：${assignerName}` : ""}，查看：${actionUrl}`,
+      };
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Event publish notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -455,8 +506,8 @@ async function getWeeklyCallDataForUser(
     ),
     pool.query<{ event_id: string; title: string }>(
       `SELECT etr.event_id, etr.title
-       FROM event_tech_req etr
-       JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
+       FROM task etr
+       JOIN task_assignee eta ON eta.task_id = etr.id AND eta.user_id = $1
        WHERE etr.event_id = ANY($2) AND etr.status != 'done'`,
       [userId, eventIds],
     ),

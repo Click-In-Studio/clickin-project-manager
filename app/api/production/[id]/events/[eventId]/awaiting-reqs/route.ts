@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!departmentIds.length) return Response.json({ techReqs: [] });
 
   const existingRes = await getPool().query<{ department_id: string }>(
-    `SELECT department_id FROM event_tech_req WHERE event_id = $1 AND department_id = ANY($2) AND status = 'awaiting'`,
+    `SELECT department_id FROM task WHERE event_id = $1 AND department_id = ANY($2) AND status = 'awaiting'`,
     [eventId, departmentIds],
   );
   const alreadyExisting = new Set(existingRes.rows.map(r => r.department_id));
