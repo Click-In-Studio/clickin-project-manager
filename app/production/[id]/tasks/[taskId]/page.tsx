@@ -9,6 +9,7 @@ import {
   getTechReqByProduction,
   getProductionEvent,
   getTaskDependencies,
+  listProductionTechReqs,
   listScheduleItems,
   listEventDepartments,
 } from "@/lib/event-db";
@@ -36,20 +37,24 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   const eventId = req.eventId;
 
-  const [event, scheduleItems, departments, productionMembers, allMilestones, dependencies] = await Promise.all([
+  const [event, scheduleItems, departments, productionMembers, allMilestones, dependencies, allTasks] = await Promise.all([
     eventId ? getProductionEvent(eventId, productionId) : Promise.resolve(null),
     eventId ? listScheduleItems(eventId) : Promise.resolve([]),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
     listMilestones(productionId),
     getTaskDependencies(taskId),
+    listProductionTechReqs(productionId),
   ]);
 
   if (eventId && !event) notFound();
 
-  const boundMilestones = allMilestones
-    .filter(m => req.milestoneIds.includes(m.id))
-    .map(m => ({ id: m.id, name: m.name, endDate: m.endDate }));
+  const milestoneOptions = allMilestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }));
+  const boundMilestones = milestoneOptions.filter(m => req.milestoneIds.includes(m.id));
+  // 依赖候选：同 production 的其他任务（成环由服务端递归 CTE 兜底拒绝）
+  const taskOptions = allTasks
+    .filter(t => t.id !== taskId)
+    .map(t => ({ id: t.id, title: t.title, status: t.status }));
 
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
@@ -80,6 +85,8 @@ export default async function TaskDetailPage({ params }: Ctx) {
         deptPeople={deptPeople}
         allPeople={allPeople}
         milestones={boundMilestones}
+        milestoneOptions={milestoneOptions}
+        taskOptions={taskOptions}
         blockedBy={dependencies.blockedBy}
         blocks={dependencies.blocks}
         isPocOfDept={isPocOfDept}

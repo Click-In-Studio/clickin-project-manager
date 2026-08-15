@@ -8,12 +8,14 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
-import PageHeader, { PAGE_TITLE_FONT, SECONDARY_BTN } from "@/components/PageHeader";
+import PageHeader, { PAGE_TITLE_FONT, PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import AccessRequestModal from "@/components/AccessRequestModal";
+import DropdownPicker from "@/components/DropdownPicker";
 import styles from "@/components/my-pages.module.css";
 import type { EventTechReq, EventScheduleItem, ProductionEvent, TaskDependencyRef } from "@/lib/event-db";
 import { fmtTime, fmtDateTime } from "@/lib/tz";
@@ -64,7 +66,12 @@ type Props = {
   deptName: string | null;
   deptPeople: { userId: string; name: string }[];
   allPeople?: { userId: string; name: string }[];
+  /** 当前绑定的里程碑（展示用） */
   milestones: { id: string; name: string; endDate: string }[];
+  /** 全量里程碑（编辑面选项） */
+  milestoneOptions: { id: string; name: string; endDate: string }[];
+  /** 依赖候选：同 production 其他任务（编辑面选项） */
+  taskOptions: { id: string; title: string; status: string }[];
   blockedBy: TaskDependencyRef[];
   blocks: TaskDependencyRef[];
   isPocOfDept: boolean;
@@ -72,6 +79,19 @@ type Props = {
   canViewFull: boolean;
   productionId: string;
 };
+
+/** ISO ↔ datetime-local（本地时区） */
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+type AccessResult =
+  | { canAccess: true; level?: string }
+  | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "edit" | "manage" }
+  | { canAccess: false; canSelfConfirm: false };
 
 // ── 样式基元（页面统一语汇）────────────────────────────────────────────────────
 
@@ -217,17 +237,156 @@ function ReqChatSection({
 export default function ReqDetailClient({
   req: initialReq, event, scheduleItems,
   deptName, deptPeople, allPeople,
-  milestones, blockedBy, blocks,
+  milestones, milestoneOptions, taskOptions, blockedBy, blocks,
   isPocOfDept, isAssignee, canViewFull,
   productionId,
 }: Props) {
+  const router = useRouter();
   const [req, setReq] = useState(initialReq);
   const [title, setTitle] = useState(initialReq.title);
   const [description, setDescription] = useState(initialReq.description);
   const [assignees, setAssignees] = useState(initialReq.assignees);
-  const [showAllAssignees, setShowAllAssignees] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // router.refresh() 后服务端重投喂 → 本地跟进
+  useEffect(() => {
+    setReq(initialReq);
+    setTitle(initialReq.title);
+    setDescription(initialReq.description);
+    setAssignees(initialReq.assignees);
+  }, [initialReq]);
+
+  // ── inline 编辑态（编辑按钮常驻；无权限走自确认/申请分流）──────────────────
+  const [editMode, setEditMode] = useState(false);
+  const [accessChecking, setAccessChecking] = useState(false);
+  const [selfConfirmLevel, setSelfConfirmLevel] = useState<"edit" | "manage" | null>(null);
+  const [selfConfirming, setSelfConfirming] = useState(false);
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
+  const [editMilestoneIds, setEditMilestoneIds] = useState<Set<string>>(new Set());
+  const [editBlockedByIds, setEditBlockedByIds] = useState<Set<string>>(new Set());
+
+  function enterEditMode() {
+    setTitle(req.title);
+    setDescription(req.description);
+    setAssignees(req.assignees);
+    setEditStartTime(isoToLocalInput(req.startTime));
+    setEditEndTime(isoToLocalInput(req.endTime));
+    setEditMilestoneIds(new Set(req.milestoneIds));
+    setEditBlockedByIds(new Set(blockedBy.map(d => d.id)));
+    setError(null);
+    setEditMode(true);
+  }
+
+  async function handleEditClick() {
+    setAccessChecking(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${req.id}/access`);
+      if (!res.ok) { setRequestModalOpen(true); return; }
+      const data = await res.json() as AccessResult;
+      if (data.canAccess) enterEditMode();
+      else if (data.canSelfConfirm) setSelfConfirmLevel(data.selfConfirmLevel);
+      else setRequestModalOpen(true);
+    } catch {
+      setRequestModalOpen(true);
+    } finally {
+      setAccessChecking(false);
+    }
+  }
+
+  async function selfConfirmAndEdit() {
+    if (!selfConfirmLevel) return;
+    setSelfConfirming(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${req.id}/access`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "self_confirm", level: selfConfirmLevel }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error ?? "自我确认失败");
+        return;
+      }
+      setSelfConfirmLevel(null);
+      enterEditMode();
+    } finally {
+      setSelfConfirming(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!title.trim()) { setError("请填写任务名称"); return; }
+    if (editStartTime && editEndTime && new Date(editEndTime) < new Date(editStartTime)) {
+      setError("结束时间不能早于开始时间");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const base = `${BASE_PATH}/api/production/${productionId}/tasks/${req.id}`;
+      const patchRes = await fetch(base, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description,
+          startTime: editStartTime ? new Date(editStartTime).toISOString() : null,
+          endTime: editEndTime ? new Date(editEndTime).toISOString() : null,
+        }),
+      });
+      if (!patchRes.ok) {
+        const data = await patchRes.json().catch(() => null);
+        setError(data?.error ?? "保存失败");
+        return;
+      }
+      const errs: string[] = [];
+      // 负责人：仅变更时提交（指派面独立——编辑权≠指派权，403 单独提示）
+      const assigneesChanged =
+        assignees.length !== req.assignees.length
+        || assignees.some(a => !req.assignees.some(b => b.userId === a.userId));
+      if (assigneesChanged) {
+        const r = await fetch(`${base}/assignees`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assignees }),
+        });
+        if (!r.ok) errs.push("负责人未保存（需要指派权限：部门 POC 或任务指派授权）");
+      }
+      const milestonesChanged =
+        editMilestoneIds.size !== req.milestoneIds.length
+        || req.milestoneIds.some(id => !editMilestoneIds.has(id));
+      if (milestonesChanged) {
+        const r = await fetch(`${base}/milestones`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ milestoneIds: [...editMilestoneIds] }),
+        });
+        if (!r.ok) errs.push("里程碑未保存");
+      }
+      const blockedChanged =
+        editBlockedByIds.size !== blockedBy.length
+        || blockedBy.some(d => !editBlockedByIds.has(d.id));
+      if (blockedChanged) {
+        const r = await fetch(`${base}/blocked-by`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskIds: [...editBlockedByIds] }),
+        });
+        if (!r.ok) {
+          const data = await r.json().catch(() => null);
+          errs.push(data?.error ? `依赖未保存：${data.error}` : "依赖未保存");
+        }
+      }
+      if (errs.length) { setError(errs.join("；")); return; }
+      setEditMode(false);
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const searchParams = useSearchParams();
   const notifId = searchParams.get("notif");
@@ -267,6 +426,63 @@ export default function ReqDetailClient({
       prev.some(a => a.userId === person.userId)
         ? prev.filter(a => a.userId !== person.userId)
         : [...prev, person]
+    );
+  }
+
+  // ── 负责人 picker（部门分组下拉，与新建表单同款；替代 chips 池）──────────────
+  const peopleNameOf = new Map([...deptPeople, ...(allPeople ?? [])].map(p => [p.userId, p.name]));
+  const assigneeItems = (() => {
+    const items: { id: string; value?: string; label: string; parentId?: string | null; header?: boolean }[] = [];
+    if (deptPeople.length > 0) {
+      items.push({ id: "g:dept", label: deptName ? `${deptName}（本部门）` : "本部门", header: true });
+      for (const p of deptPeople) items.push({ id: `g:dept:${p.userId}`, value: p.userId, parentId: "g:dept", label: p.name });
+    }
+    const deptIds = new Set(deptPeople.map(p => p.userId));
+    const others = (allPeople ?? []).filter(p => !deptIds.has(p.userId));
+    if (others.length > 0) {
+      items.push({ id: "g:all", label: "其他成员", header: true });
+      for (const p of others) items.push({ id: `g:all:${p.userId}`, value: p.userId, parentId: "g:all", label: p.name });
+    }
+    return items;
+  })();
+
+  function assigneePickerBlock(label: string) {
+    if (assigneeItems.length === 0) return null;
+    return (
+      <div>
+        <span style={FIELD_LABEL}>{label}</span>
+        {assignees.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {assignees.map(a => (
+              <span key={a.userId} style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                borderRadius: 999, padding: "4px 11px", fontSize: 11, fontWeight: 600,
+                background: "var(--ink)", color: "#fff",
+              }}>
+                {a.name}
+                <button
+                  type="button"
+                  aria-label={`移除 ${a.name}`}
+                  onClick={() => toggleAssignee(a)}
+                  style={{ border: 0, background: "transparent", color: "#fff", cursor: "pointer", fontSize: 12, lineHeight: 1, padding: 0 }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <DropdownPicker
+          multi
+          items={assigneeItems}
+          values={new Set(assignees.map(a => a.userId))}
+          placeholder="选择负责人"
+          multiCountLabel={n => `已选 ${n} 人`}
+          searchPlaceholder="搜索成员…"
+          onChange={() => {}}
+          onToggle={userId => toggleAssignee({ userId, name: peopleNameOf.get(userId) ?? "" })}
+        />
+      </div>
     );
   }
 
@@ -382,7 +598,23 @@ export default function ReqDetailClient({
         {/* ── 主栏 ── */}
         <div style={{ flex: "1 1 460px", minWidth: 0, display: "flex", flexDirection: "column", gap: 18 }}>
           <section style={PANEL}>
-            <p style={SECTION_KICKER}>任务信息</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <p style={{ ...SECTION_KICKER, margin: 0, flex: 1 }}>任务信息</p>
+              {/* 编辑按钮常驻：有权→inline 编辑；免审批区间→自确认；无权→申请 modal */}
+              {!canEdit && !editMode && (
+                <button
+                  onClick={handleEditClick}
+                  disabled={accessChecking}
+                  style={{
+                    borderRadius: 8, padding: "6px 14px", fontSize: 11, fontWeight: 700,
+                    border: "1px solid var(--ink)", background: "transparent",
+                    color: "var(--ink)", cursor: "pointer", opacity: accessChecking ? 0.5 : 1,
+                  }}
+                >
+                  {accessChecking ? "…" : "编辑"}
+                </button>
+              )}
+            </div>
 
             {/* 时间行（有效解析链） */}
             {timeRange && (
@@ -415,43 +647,7 @@ export default function ReqDetailClient({
                     placeholder="任务详情（可选）"
                   />
                 </label>
-                {(deptPeople.length > 0 || (allPeople && allPeople.length > 0)) && (() => {
-                  const hasOutside = !!allPeople && allPeople.length > deptPeople.length;
-                  const pool = showAllAssignees && hasOutside ? allPeople! : deptPeople;
-                  return (
-                    <div>
-                      <span style={FIELD_LABEL}>负责人</span>
-                      {hasOutside && (
-                        <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, cursor: "pointer", fontSize: 11, color: "var(--muted)" }}>
-                          <input type="checkbox" checked={showAllAssignees} onChange={e => setShowAllAssignees(e.target.checked)} />
-                          显示全部成员
-                        </label>
-                      )}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {pool.map(p => {
-                          const selected = assignees.some(a => a.userId === p.userId);
-                          return (
-                            <button
-                              key={p.userId}
-                              type="button"
-                              aria-pressed={selected}
-                              onClick={() => toggleAssignee(p)}
-                              style={{
-                                border: `1px solid ${selected ? "var(--ink)" : "var(--line)"}`,
-                                borderRadius: 999, padding: "5px 12px", fontSize: 11, fontWeight: 600,
-                                cursor: "pointer",
-                                background: selected ? "var(--ink)" : "transparent",
-                                color: selected ? "#fff" : "var(--muted)",
-                              }}
-                            >
-                              {p.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {assigneePickerBlock("负责人")}
                 {error && <p style={{ margin: 0, fontSize: 12, color: "var(--danger)" }}>{error}</p>}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid var(--line)" }}>
                   <span style={{ fontSize: 11, color: "var(--muted)" }}>确认并标为：</span>
@@ -469,6 +665,98 @@ export default function ReqDetailClient({
                       {saving ? "…" : opt.label}
                     </button>
                   ))}
+                </div>
+              </div>
+            ) : editMode ? (
+              /* inline 编辑态（编辑按钮进入；名称/详情/时间/负责人/里程碑/依赖一次保存） */
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <label>
+                  <span style={FIELD_LABEL}>任务名称 *</span>
+                  <input value={title} onChange={e => setTitle(e.target.value)} placeholder="任务名称" style={FIELD_INPUT} />
+                </label>
+                <label>
+                  <span style={FIELD_LABEL}>详情</span>
+                  <SmartTextarea
+                    value={description}
+                    onChange={setDescription}
+                    contentMention={{ productionId }}
+                    rows={4}
+                    className={styles.fieldInput}
+                    placeholder="任务详情（可选）"
+                  />
+                </label>
+                <div>
+                  <span style={FIELD_LABEL}>起止时间（留空 = 继承绑定日程/事件）</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input type="datetime-local" value={editStartTime} onChange={e => setEditStartTime(e.target.value)} style={{ ...FIELD_INPUT, width: 200 }} />
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                    <input type="datetime-local" value={editEndTime} onChange={e => setEditEndTime(e.target.value)} style={{ ...FIELD_INPUT, width: 200 }} />
+                    {(editStartTime || editEndTime) && (
+                      <button
+                        type="button"
+                        onClick={() => { setEditStartTime(""); setEditEndTime(""); }}
+                        style={{ border: "1px solid var(--line)", borderRadius: 8, background: "transparent", padding: "8px 10px", fontSize: 11, cursor: "pointer", color: "var(--muted)" }}
+                      >
+                        清除（恢复继承）
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {assigneePickerBlock("负责人（保存需指派权限：部门 POC 或任务指派授权）")}
+                {milestoneOptions.length > 0 && (
+                  <div>
+                    <span style={FIELD_LABEL}>里程碑</span>
+                    <DropdownPicker
+                      multi
+                      items={milestoneOptions.map(m => ({
+                        id: m.id,
+                        label: `◆ ${m.name}`,
+                        sublabel: m.endDate.slice(0, 10),
+                      }))}
+                      values={editMilestoneIds}
+                      placeholder="绑定里程碑（可多选）"
+                      multiCountLabel={n => `已绑定 ${n} 个里程碑`}
+                      searchPlaceholder="搜索里程碑…"
+                      onChange={() => {}}
+                      onToggle={id => setEditMilestoneIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id); else next.add(id);
+                        return next;
+                      })}
+                    />
+                  </div>
+                )}
+                {taskOptions.length > 0 && (
+                  <div>
+                    <span style={FIELD_LABEL}>前置依赖（被哪些任务挡住；成环会被拒绝）</span>
+                    <DropdownPicker
+                      multi
+                      items={taskOptions.map(t => ({
+                        id: t.id,
+                        label: t.title || "（未命名任务）",
+                        sublabel: STATUS_LABELS[t.status] ?? t.status,
+                      }))}
+                      values={editBlockedByIds}
+                      placeholder="选择挡住本任务的前置任务"
+                      multiCountLabel={n => `${n} 个前置任务`}
+                      searchPlaceholder="搜索任务…"
+                      onChange={() => {}}
+                      onToggle={id => setEditBlockedByIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id); else next.add(id);
+                        return next;
+                      })}
+                    />
+                  </div>
+                )}
+                {error && <p style={{ margin: 0, fontSize: 12, color: "var(--danger)" }}>{error}</p>}
+                <div style={{ display: "flex", gap: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                  <button onClick={saveEdit} disabled={saving} style={{ ...PRIMARY_BTN, opacity: saving ? 0.5 : 1 }}>
+                    {saving ? "保存中…" : "保存"}
+                  </button>
+                  <button onClick={() => { setEditMode(false); setError(null); }} disabled={saving} style={SECONDARY_BTN}>
+                    取消
+                  </button>
                 </div>
               </div>
             ) : (
@@ -655,6 +943,44 @@ export default function ReqDetailClient({
           </div>
         </div>
       </div>
+
+      {/* 免审批区间自确认（三态中间态） */}
+      {selfConfirmLevel && (
+        <div
+          role="presentation"
+          onMouseDown={() => setSelfConfirmLevel(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(18,28,27,.5)", display: "grid", placeItems: "center", padding: 20 }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={e => e.stopPropagation()}
+            style={{ width: "min(420px, 100%)", background: "var(--surface)", borderRadius: 13, padding: 22 }}
+          >
+            <p style={{ margin: 0, fontSize: 9, letterSpacing: ".13em", textTransform: "uppercase", color: "var(--muted)" }}>SELF CONFIRM</p>
+            <h2 style={{ margin: "6px 0 10px", fontFamily: PAGE_TITLE_FONT, fontSize: 19, fontWeight: 500, color: "var(--ink)" }}>
+              确认编辑此任务
+            </h2>
+            <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
+              你在此任务的免审批区间内——确认后将获得{selfConfirmLevel === "manage" ? "管理" : "编辑"}权限并进入编辑，此操作会被记录。
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button style={SECONDARY_BTN} onClick={() => setSelfConfirmLevel(null)}>取消</button>
+              <button style={{ ...PRIMARY_BTN, opacity: selfConfirming ? 0.5 : 1 }} disabled={selfConfirming} onClick={selfConfirmAndEdit}>
+                {selfConfirming ? "确认中…" : "确认并编辑"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* 无权限 → 固定款申请 modal（锁定到本任务 edit 面） */}
+      <AccessRequestModal
+        open={requestModalOpen}
+        onClose={() => setRequestModalOpen(false)}
+        productionId={productionId}
+        permission={`node:task/${req.id}/*@edit`}
+      />
     </div>
   );
 }
