@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { NextRequest } from "next/server";
 import {
   createEventReport, updateEventReport, createReportNote,
   createReportReply, deleteReportReply, getReportReply,
@@ -6,6 +7,10 @@ import {
 import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify";
 import { mergeAccounts } from "@/lib/db";
 import { getPool } from "@/lib/pg";
+import { createSession, SESSION_COOKIE } from "@/lib/session";
+import {
+  GET as repliesGET, POST as repliesPOST,
+} from "@/app/api/production/[id]/events/[eventId]/reports/[reportId]/replies/route";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // wiki-split（批C PR-C1）遗留清理的回归测试：
@@ -21,20 +26,27 @@ async function newUser(): Promise<string> {
 
 let prodId: string;
 let eventId: string;
+let eventB: string;
 let reportA: string;
 let reportB: string;
 let deptId: string;
 let author: string;
 let mentioned: string;
+let mergeKeep: string;
 
 beforeAll(async () => {
   ({ prodId } = await makeProduction());
   [author, mentioned] = await Promise.all([newUser(), newUser()]);
 
   eventId = `ev${shortId()}`;
+  eventB = `ev${shortId()}`;
   await getPool().query(
     `INSERT INTO production_event (id, production_id, title, created_by, status) VALUES ($1, $2, '排练', $3, 'published')`,
     [eventId, prodId, author],
+  );
+  await getPool().query(
+    `INSERT INTO production_event (id, production_id, title, created_by, status) VALUES ($1, $2, '另一事件', $3, 'published')`,
+    [eventB, prodId, author],
   );
   ({ rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
     `INSERT INTO production_dept (production_id, name) VALUES ($1, '灯光') RETURNING id`,
@@ -52,8 +64,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await getPool().query("DELETE FROM production_event WHERE id = $1", [eventId]).catch(() => {});
+  await getPool().query("DELETE FROM production_event WHERE id = ANY($1)", [[eventId, eventB]]).catch(() => {});
   await cleanupProduction(prodId).catch(() => {});
+  // newUser 行清理（del 已被 mergeAccounts 删除；wiki 等引用行已随 production 级联）
+  await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [[author, mentioned, mergeKeep].filter(Boolean)]).catch(() => {});
 });
 
 describe("deleteReportReply cross-report scoping", () => {
@@ -106,9 +120,56 @@ describe("report notifications after wiki split", () => {
   });
 });
 
+describe("replies route ownership guards", () => {
+  const cookie = () =>
+    `${SESSION_COOKIE}=${createSession({ userId: author, name: "管理员", avatarUrl: null, isAdmin: true })}`;
+
+  function makeCtx(pid: string, eid: string, rid: string) {
+    return { params: Promise.resolve({ id: pid, eventId: eid, reportId: rid }) };
+  }
+  function makeGet(pid: string, eid: string, rid: string) {
+    return new NextRequest(`http://localhost/api/production/${pid}/events/${eid}/reports/${rid}/replies`, {
+      headers: { Cookie: cookie() },
+    });
+  }
+  function makePost(pid: string, eid: string, rid: string, body: unknown) {
+    return new NextRequest(`http://localhost/api/production/${pid}/events/${eid}/reports/${rid}/replies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie() },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("GET 404s on an event that is not in the production", async () => {
+    const res = await repliesGET(makeGet(prodId, `ev${shortId()}`, reportA), makeCtx(prodId, `ev${shortId()}`, reportA));
+    expect(res.status).toBe(404);
+  });
+
+  it("GET 404s on a report that belongs to another event", async () => {
+    const res = await repliesGET(makeGet(prodId, eventB, reportA), makeCtx(prodId, eventB, reportA));
+    expect(res.status).toBe(404);
+  });
+
+  it("GET 200s on the matching event/report pair", async () => {
+    const res = await repliesGET(makeGet(prodId, eventId, reportA), makeCtx(prodId, eventId, reportA));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data.replies)).toBe(true);
+  });
+
+  it("POST 404s on a report that belongs to another event", async () => {
+    const res = await repliesPOST(
+      makePost(prodId, eventB, reportA, { parentType: "report", parentId: reportA, content: "越权评论" }),
+      makeCtx(prodId, eventB, reportA),
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("mergeAccounts after wiki split", () => {
   it("transfers wiki authorship and comment identity, then deletes the old user", async () => {
     const keep = await newUser();
+    mergeKeep = keep;
     const del = await newUser();
 
     const mergedReport = `rp${shortId()}`;
