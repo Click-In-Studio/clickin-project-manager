@@ -137,6 +137,7 @@ export async function selfConfirmResourceGrant(
     task: TASK_LEVEL_ROW_SETS,
     report: REPORT_LEVEL_ROW_SETS,
     note: NOTE_LEVEL_ROW_SETS,
+    wiki: WIKI_LEVEL_ROW_SETS,
   };
   const rows = sets[resourceType]?.[level] ?? [["*", level] as const];
   for (const [sub, verb] of rows) {
@@ -201,6 +202,15 @@ export const NOTE_LEVEL_ROW_SETS: Record<NoteLevel, ReadonlyArray<readonly [stri
   view:   [["*", "view"]],
   edit:   [["*", "view"], ["*", "edit"]],
   manage: [["*", "view"], ["*", "edit"], ["*", "delete"], ["grants", "edit"]],
+};
+
+// wiki 文档库（W2）：meta@view=目录/标题可见（树中可见该节点），*@view=内容。
+// 分享档 view/edit 供 grants@edit 持有者发行；manage=创建者行集（writeWikiGrants）。
+export type WikiLevel = "view" | "edit" | "manage";
+export const WIKI_LEVEL_ROW_SETS: Record<WikiLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["meta", "view"], ["*", "view"]],
+  edit:   [["meta", "view"], ["*", "view"], ["*", "edit"]],
+  manage: [["meta", "view"], ["*", "view"], ["*", "edit"], ["*", "delete"], ["grants", "edit"]],
 };
 
 export type TaskLevel = "view" | "edit" | "assign" | "manage";
@@ -519,6 +529,38 @@ export async function writeReportGrants(
      WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
     [reportId, createdBy, productionId, eventId],
+  );
+}
+
+/**
+ * wiki 创建者行集（§0.9 定式 C-7）：creator 获 WIKI manage 行集 + person 归属。
+ * 独立文档无父资源，不做 dept/person 继承（挂载为 report/note 时可见性沿边推导，
+ * 永不物化行——§0.9 负面清单）。
+ */
+export async function writeWikiGrants(
+  wikiId: string,
+  productionId: string,
+  createdBy: string,
+): Promise<void> {
+  const pool = getPool();
+  for (const [sub, verb] of WIKI_LEVEL_ROW_SETS.manage) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'wiki', $3, $4, $5, 'self_confirmed', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, createdBy, wikiId, sub, verb],
+    );
+  }
+  await pool.query(
+    `INSERT INTO resource_person_manage
+       (production_id, user_id, resource_type, resource_id, resource_sub, established_by)
+     VALUES ($1, $2, 'wiki', $3, '*', $2)
+     ON CONFLICT DO NOTHING`,
+    [productionId, createdBy, wikiId],
   );
 }
 

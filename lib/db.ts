@@ -16,7 +16,7 @@ export type ProductionAccess = {
 };
 import { ROLE_NAMES } from "./permissions";
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
-import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS } from "./resource-grant-db";
+import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS } from "./resource-grant-db";
 import { seedRoleFromTemplate } from "./grant-template";
 
 import type { Cue, CueAnchor } from "./cue-types";
@@ -2997,6 +2997,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE production_event SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     // report/note 作者已随 wiki-split 迁入 wiki.created_by
     await client.query(`UPDATE wiki SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE wiki_revision SET author_user_id = $1 WHERE author_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
@@ -7715,6 +7716,7 @@ export async function approveAccessRequest(
         task: TASK_LEVEL_ROW_SETS,
         report: REPORT_LEVEL_ROW_SETS,
         note: NOTE_LEVEL_ROW_SETS,
+        wiki: WIKI_LEVEL_ROW_SETS,
       };
       const rows: ReadonlyArray<readonly [string, string]> =
         setsByType[req.resource_type ?? ""]?.[req.permission_level ?? ""]

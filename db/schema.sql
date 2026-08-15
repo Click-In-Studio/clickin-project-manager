@@ -585,9 +585,14 @@ CREATE INDEX IF NOT EXISTS task_dependency_blocked_idx ON task_dependency(blocke
 
 -- ── Reports ───────────────────────────────────────────────────────────────────
 
--- ── Wiki（批C PR-C1：内容实体——未来独立文档库；命名跟飞书）────────────────────
+-- ── Wiki（批C PR-C1 内容实体；wiki 文档库 W1 补树/分享/链接/tag/历史）──────────
 -- report/note 的本体拆分产物：wiki=内容内禀（title/body/mentions/作者），
 -- event_report / event_report_note 退化为纯挂载边。
+-- W1（add-wiki-library.sql）：文档树=内禀 parent_id（标准树非图）；可见性推导
+-- （asset 同构）：个人 grant 行 ∨ is_public ∨ dept 分享面 ∨ ∃挂载边:宿主可见，
+-- 挂载/分享面永不物化 grant 行（§0.9 负面清单），新建默认隐私。
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS wiki (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -596,11 +601,59 @@ CREATE TABLE IF NOT EXISTS wiki (
   body          TEXT        NOT NULL DEFAULT '',
   mentions      JSONB       NOT NULL DEFAULT '[]',
   created_by    UUID        NULL REFERENCES app_user(id),
+  -- W1 文档树：删父提根（SET NULL），排序 fractional index（lib/lex-order.ts）
+  parent_id     UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  sort_key      TEXT        NULL,
+  is_public     BOOLEAN     NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS wiki_production_idx ON wiki (production_id);
+CREATE INDEX IF NOT EXISTS wiki_parent_idx     ON wiki (parent_id);
+CREATE INDEX IF NOT EXISTS wiki_mentions_idx   ON wiki USING GIN (mentions);
+CREATE INDEX IF NOT EXISTS wiki_title_trgm_idx ON wiki USING GIN (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_ops);
+
+-- 交叉引用边（保存时服务端解析正文提取；backlinks/unlinked references 数据基础）
+CREATE TABLE IF NOT EXISTS wiki_link (
+  source_wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  target_wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  PRIMARY KEY (source_wiki_id, target_wiki_id)
+);
+
+CREATE INDEX IF NOT EXISTS wiki_link_target_idx ON wiki_link (target_wiki_id);
+
+-- 自由 tag（必可手写，非受控词表；production 归属经 wiki join）
+CREATE TABLE IF NOT EXISTS wiki_tag (
+  wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  tag     TEXT NOT NULL,
+  PRIMARY KEY (wiki_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS wiki_tag_tag_idx ON wiki_tag (tag);
+
+-- 部门分享面（结构面：判定时查部门成员，部门变动零 sweep；不走区间不落行）
+CREATE TABLE IF NOT EXISTS wiki_dept_share (
+  wiki_id    UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  dept_id    UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (wiki_id, dept_id)
+);
+
+-- 线性历史（每次内容 update 落一行；origin 为 AI 化 provenance 预留）
+CREATE TABLE IF NOT EXISTS wiki_revision (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  wiki_id        UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  title          TEXT        NULL,
+  body           TEXT        NOT NULL,
+  mentions       JSONB       NOT NULL DEFAULT '[]',
+  author_user_id UUID        NULL REFERENCES app_user(id),
+  origin         TEXT        NOT NULL DEFAULT 'user',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wiki_revision_wiki_idx ON wiki_revision (wiki_id, created_at);
 
 CREATE TABLE IF NOT EXISTS wiki_comment (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -627,6 +680,7 @@ CREATE TABLE IF NOT EXISTS event_report (
 );
 
 CREATE INDEX IF NOT EXISTS event_report_event_idx ON event_report(event_id);
+CREATE INDEX IF NOT EXISTS event_report_wiki_idx  ON event_report(wiki_id);
 
 -- event_report_note = report边↔wiki×dept 挂载边（per-dept 联合关系）
 CREATE TABLE IF NOT EXISTS event_report_note (
@@ -642,6 +696,7 @@ CREATE TABLE IF NOT EXISTS event_report_note (
 );
 
 CREATE INDEX IF NOT EXISTS event_report_note_report_idx ON event_report_note(report_id);
+CREATE INDEX IF NOT EXISTS event_report_note_wiki_idx   ON event_report_note(wiki_id);
 
 CREATE TABLE IF NOT EXISTS event_report_read (
   report_id TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
@@ -1089,6 +1144,12 @@ ON CONFLICT DO NOTHING;
 -- 批B（add-task-verbs.sql）：task 类型四动词（tech_req 更名承接）
 INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
   ('task', 'view', 0), ('task', 'create', 0), ('task', 'edit', 0), ('task', 'delete', 0)
+ON CONFLICT DO NOTHING;
+
+-- wiki 文档库 W2（add-wiki-library.sql）：wiki 四动词。默认角色不发行
+-- （拍板 §4.7 默认不可见，分享/挂载驱动）；制作人通配区间自动覆盖
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('wiki', 'view', 0), ('wiki', 'create', 0), ('wiki', 'edit', 0), ('wiki', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────

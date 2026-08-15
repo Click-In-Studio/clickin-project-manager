@@ -32,6 +32,8 @@ const QUERIES: Record<string, string> = {
   task: `SELECT etr.id, COALESCE(etr.title, etr.id) AS label
          FROM task etr
          WHERE etr.production_id = $1 ORDER BY etr.id DESC`,
+  wiki: `SELECT id::text AS id, COALESCE(title, id::text) AS label
+         FROM wiki WHERE production_id = $1 ORDER BY created_at DESC`,
 };
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

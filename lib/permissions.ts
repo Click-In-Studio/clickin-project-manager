@@ -69,7 +69,8 @@ export type ResourceType =
   | "task"
   | "note"
   | "script_view"
-  | "asset";
+  | "asset"
+  | "wiki";
 
 export type PermissionLevel = "view" | "mount" | "edit" | "manage";
 
