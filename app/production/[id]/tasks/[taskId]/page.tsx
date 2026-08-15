@@ -4,10 +4,11 @@ import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { getProductionPermissionContext, listProductionMembersWithRoles, listMilestones } from "@/lib/db";
 import {
   getTechReqByProduction,
   getProductionEvent,
+  getTaskDependencies,
   listScheduleItems,
   listEventDepartments,
 } from "@/lib/event-db";
@@ -35,14 +36,20 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   const eventId = req.eventId;
 
-  const [event, scheduleItems, departments, productionMembers] = await Promise.all([
+  const [event, scheduleItems, departments, productionMembers, allMilestones, dependencies] = await Promise.all([
     eventId ? getProductionEvent(eventId, productionId) : Promise.resolve(null),
     eventId ? listScheduleItems(eventId) : Promise.resolve([]),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
+    listMilestones(productionId),
+    getTaskDependencies(taskId),
   ]);
 
   if (eventId && !event) notFound();
+
+  const boundMilestones = allMilestones
+    .filter(m => req.milestoneIds.includes(m.id))
+    .map(m => ({ id: m.id, name: m.name, endDate: m.endDate }));
 
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
@@ -72,6 +79,9 @@ export default async function TaskDetailPage({ params }: Ctx) {
         deptName={dept?.name ?? null}
         deptPeople={deptPeople}
         allPeople={allPeople}
+        milestones={boundMilestones}
+        blockedBy={dependencies.blockedBy}
+        blocks={dependencies.blocks}
         isPocOfDept={isPocOfDept}
         isAssignee={isAssignee}
         canViewFull={canViewFull}
