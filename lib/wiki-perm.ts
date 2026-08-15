@@ -1,0 +1,161 @@
+import { getPool } from "./pg";
+import { hasGrant, listGrantedResourceIds, type GrantActor } from "./grant-check";
+import { hasEventDomainView } from "./event-permissions";
+
+// ─── wiki 文档库 W3：可见性判定（账本 §4.2，asset 隐私模型同构）─────────────────
+//
+// 可见(user, wiki) = 个人 grant 行（创建者行集 / grants@edit 持有者分享）
+//                  ∨ is_public（全体，结构面）
+//                  ∨ dept 分享面（wiki_dept_share ∩ 用户部门，判定时查成员零 sweep）
+//                  ∨ ∃挂载边: 宿主可见（report 边→报告可见性；note 边→其 report 可见性）
+//
+// 挂载/分享面永不物化 grant 行（§0.9 负面清单）；解除挂载/分享即收缩。
+// 标题=目录级信息沿引用边流出（§4.1），由 mention-resolve 承担，不经本判定。
+
+type WikiVisibilityRow = { id: string; is_public: boolean };
+
+/** report 边的宿主可见判据（对齐 reports/[reportId]/page.tsx 的门）：
+ *  已发布 ∧ 事件域 view；或 draft 四通道（report 实例行 / publication@view /
+ *  event reports@view / 部门参与者）。 */
+async function reportEdgeVisible(
+  actor: GrantActor,
+  productionId: string,
+  edge: { reportId: string; eventId: string; published: boolean },
+): Promise<boolean> {
+  if (edge.published && await hasEventDomainView(actor, productionId)) return true;
+  if (await hasGrant(actor.userId, productionId, "report", edge.reportId, "meta", "view")) return true;
+  if (await hasGrant(actor.userId, productionId, "report", edge.reportId, "publication", "view")) return true;
+  if (await hasGrant(actor.userId, productionId, "event", edge.eventId, "reports", "view")) return true;
+  const dept = await getPool().query(
+    `SELECT 1 FROM event_participant
+     WHERE event_id = $1 AND user_id = $2 AND department_id IS NOT NULL LIMIT 1`,
+    [edge.eventId, actor.userId],
+  );
+  return dept.rows.length > 0;
+}
+
+/** 单实例可见性判定（内容面）。wiki 不存在时返回 false。 */
+export async function canViewWiki(
+  actor: GrantActor,
+  productionId: string,
+  wikiId: string,
+): Promise<boolean> {
+  if (actor.isAdmin || actor.isOwner) return true;
+  const pool = getPool();
+  const w = await pool.query<WikiVisibilityRow>(
+    `SELECT id::text AS id, is_public FROM wiki WHERE id = $1::uuid AND production_id = $2`,
+    [wikiId, productionId],
+  );
+  if (!w.rows[0]) return false;
+  if (w.rows[0].is_public) return true;
+  if (await hasGrant(actor.userId, productionId, "wiki", wikiId, "*", "view")) return true;
+  const deptShare = await pool.query(
+    `SELECT 1 FROM wiki_dept_share ws
+     JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
+     WHERE ws.wiki_id = $1::uuid AND pdm.user_id = $2 AND pdm.production_id = $3 LIMIT 1`,
+    [wikiId, actor.userId, productionId],
+  );
+  if (deptShare.rows.length > 0) return true;
+  // 挂载边（直接 report 边 ∪ 经 note 边到其 report）
+  const edges = await pool.query<{ report_id: string; event_id: string; published: boolean }>(
+    `SELECT er.id AS report_id, er.event_id, (er.published_at IS NOT NULL) AS published
+     FROM event_report er WHERE er.wiki_id = $1::uuid
+     UNION
+     SELECT er.id, er.event_id, (er.published_at IS NOT NULL)
+     FROM event_report_note n JOIN event_report er ON er.id = n.report_id
+     WHERE n.wiki_id = $1::uuid`,
+    [wikiId],
+  );
+  for (const e of edges.rows) {
+    if (await reportEdgeVisible(actor, productionId, {
+      reportId: e.report_id, eventId: e.event_id, published: e.published,
+    })) return true;
+  }
+  return false;
+}
+
+/**
+ * 列表过滤：返回该用户可见的 wiki id 集合（或 wildcard=true 表示全可见）。
+ * 与 canViewWiki 同语义的集合式实现，供文档树列表/目录/搜索使用。
+ */
+export async function listVisibleWikiIds(
+  actor: GrantActor,
+  productionId: string,
+): Promise<{ wildcard: boolean; ids: Set<string> }> {
+  if (actor.isAdmin || actor.isOwner) return { wildcard: true, ids: new Set() };
+  const pool = getPool();
+  const ids = new Set<string>();
+
+  const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "*", "view");
+  if (granted.wildcard) return { wildcard: true, ids: new Set() };
+  for (const id of granted.ids) ids.add(id);
+
+  const structural = await pool.query<{ id: string }>(
+    `SELECT w.id::text AS id FROM wiki w
+     WHERE w.production_id = $1 AND (
+       w.is_public
+       OR EXISTS (SELECT 1 FROM wiki_dept_share ws
+                  JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
+                  WHERE ws.wiki_id = w.id AND pdm.user_id = $2::uuid AND pdm.production_id = $1)
+     )`,
+    [productionId, actor.userId],
+  );
+  for (const r of structural.rows) ids.add(r.id);
+
+  // 挂载边推导（集合式）：
+  //   已发布报告 → 事件域 view 全量；draft 通道 → report 实例行 / publication@view /
+  //   event reports@view / 部门参与者。note 边随其 report。
+  const domainView = await hasEventDomainView(actor, productionId);
+  const [reportMeta, reportPub, eventReports] = await Promise.all([
+    listGrantedResourceIds(actor.userId, productionId, "report", "meta", "view"),
+    listGrantedResourceIds(actor.userId, productionId, "report", "publication", "view"),
+    listGrantedResourceIds(actor.userId, productionId, "event", "reports", "view"),
+  ]);
+  const mounted = await pool.query<{ id: string }>(
+    `WITH edges AS (
+       SELECT er.wiki_id, er.id AS report_id, er.event_id, er.published_at
+       FROM event_report er JOIN production_event pe ON pe.id = er.event_id
+       WHERE pe.production_id = $1
+       UNION ALL
+       SELECT n.wiki_id, er.id, er.event_id, er.published_at
+       FROM event_report_note n
+       JOIN event_report er ON er.id = n.report_id
+       JOIN production_event pe ON pe.id = er.event_id
+       WHERE pe.production_id = $1
+     )
+     SELECT DISTINCT e.wiki_id::text AS id FROM edges e
+     WHERE (e.published_at IS NOT NULL AND $2)
+        OR ($3 OR e.report_id = ANY($4::text[]))
+        OR ($5 OR e.report_id = ANY($6::text[]))
+        OR ($7 OR e.event_id = ANY($8::text[]))
+        OR EXISTS (SELECT 1 FROM event_participant ep
+                   WHERE ep.event_id = e.event_id AND ep.user_id = $9::uuid
+                     AND ep.department_id IS NOT NULL)`,
+    [productionId, domainView,
+     reportMeta.wildcard, reportMeta.ids,
+     reportPub.wildcard, reportPub.ids,
+     eventReports.wildcard, eventReports.ids,
+     actor.userId],
+  );
+  for (const r of mounted.rows) ids.add(r.id);
+
+  return { wildcard: false, ids };
+}
+
+// ─── 写面门（行判定，admin/owner 旁路由 hasEffectiveGrant 调用侧承担）──────────
+
+export async function canEditWiki(actor: GrantActor, productionId: string, wikiId: string): Promise<boolean> {
+  if (actor.isAdmin || actor.isOwner) return true;
+  return hasGrant(actor.userId, productionId, "wiki", wikiId, "*", "edit");
+}
+
+export async function canDeleteWiki(actor: GrantActor, productionId: string, wikiId: string): Promise<boolean> {
+  if (actor.isAdmin || actor.isOwner) return true;
+  return hasGrant(actor.userId, productionId, "wiki", wikiId, "*", "delete");
+}
+
+/** 分享面（个人授权/部门分享/公开开关）统一走 grants@edit（保留段，'*' 不覆盖）。 */
+export async function canShareWiki(actor: GrantActor, productionId: string, wikiId: string): Promise<boolean> {
+  if (actor.isAdmin || actor.isOwner) return true;
+  return hasGrant(actor.userId, productionId, "wiki", wikiId, "grants", "edit");
+}
