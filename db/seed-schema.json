@@ -2833,6 +2833,22 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "parent_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "sort_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "is_public",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "wiki_comment": [
@@ -2878,6 +2894,94 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    }
+  ],
+  "wiki_dept_share": [
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "wiki_link": [
+    {
+      "column": "source_wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "target_wiki_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
+  "wiki_revision": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "mentions",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[]'::jsonb"
+    },
+    {
+      "column": "author_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "origin",
+      "type": "text",
+      "nullable": false,
+      "default": "'user'::text"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "wiki_tag": [
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "tag",
+      "type": "text",
+      "nullable": false
     }
   ]
 }

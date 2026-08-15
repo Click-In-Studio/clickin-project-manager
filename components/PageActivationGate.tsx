@@ -13,6 +13,7 @@ const PAGE_TITLES: Record<PageScope, string> = {
   events:      "激活事件权限",
   reports:     "激活报告权限",
   assets:      "激活附件权限",
+  wiki:        "激活文档权限",
 };
 
 const PAGE_SUBTITLES: Record<PageScope, string> = {
@@ -24,6 +25,7 @@ const PAGE_SUBTITLES: Record<PageScope, string> = {
   events:      "你在此项目中拥有以下事件管理权限，进入前请一键激活：",
   reports:     "你在此项目中拥有以下报告管理权限，进入前请一键激活：",
   assets:      "你在此项目中拥有以下附件管理权限，进入前请一键激活：",
+  wiki:        "你在此项目中拥有以下文档库权限，进入前请一键激活：",
 };
 
 type Props = {

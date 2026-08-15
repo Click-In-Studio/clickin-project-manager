@@ -32,6 +32,9 @@ const QUERIES: Record<string, string> = {
   task: `SELECT etr.id, COALESCE(etr.title, etr.id) AS label
          FROM task etr
          WHERE etr.production_id = $1 ORDER BY etr.id DESC`,
+  // wiki 故意缺席（picker 落回自由输入）：wiki 默认隐私，标题=目录级信息，
+  // 全量列出会把私有文档标题泄给管理面资格持有者。W3 实装可见性谓词
+  //（个人行 ∨ is_public ∨ dept 分享 ∨ 挂载宿主可见）后按调用者过滤加回。
 };
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

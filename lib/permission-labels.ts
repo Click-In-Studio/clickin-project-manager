@@ -111,6 +111,7 @@ export const TYPE_LABELS: Record<string, string> = {
   script_view: "剧本视图",
   tag_group: "标签组",
   task: "任务",
+  wiki: "文档",
 };
 
 export const SUB_LABELS: Record<string, string> = {

@@ -52,6 +52,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:report/*/replies@delete",
   ]),
 
+  wiki: new Set<string>([
+    // wiki 文档库 W2：文档创建（实例面 view/edit 走分享/挂载推导，不设页面激活）
+    "node:wiki/*@create",
+  ]),
+
   assets: new Set<Permission>([
   ]),
 } as const;
