@@ -14,11 +14,12 @@ const STATUS_LABEL: Record<string, string> = {
   done: "完成",
 };
 
+/** 状态徽章：主题色板（原型 notes 紫 / warn / script 青 / success 绿） */
 function statusBadgeStyle(status: string): React.CSSProperties {
-  if (status === "awaiting") return { background: "#f3eeff", color: "#7c3aed" };
-  if (status === "pending") return { background: "#fffbeb", color: "#d97706" };
-  if (status === "in_progress") return { background: "#eff6ff", color: "#2563eb" };
-  if (status === "done") return { background: "#f0fdf4", color: "#16a34a" };
+  if (status === "awaiting") return { background: "#eee5f0", color: "#7a5a86" };
+  if (status === "pending") return { background: "var(--warn-soft)", color: "var(--warn)" };
+  if (status === "in_progress") return { background: "var(--script-soft)", color: "var(--script)" };
+  if (status === "done") return { background: "var(--success-soft)", color: "var(--success)" };
   return { background: "var(--paper)", color: "var(--muted)" };
 }
 
@@ -143,8 +144,20 @@ export default function ProductionTasksClient({
   const inProgressDepts = new Set(
     tasks.filter(t => t.status === "in_progress" && t.departmentId).map(t => t.departmentId)
   ).size;
-  const summaryTotal = tasks.length || 1;
-  const donePct = Math.round((summary.done / summaryTotal) * 100);
+  // 本周完成度（原型：按 Task 状态统计）：本周到期（有效结束时间落在周一～周日）的任务中已完成占比
+  const now = new Date();
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
+  const weekTasks = tasks.filter(t => {
+    if (!t.effectiveEndTime) return false;
+    const d = new Date(t.effectiveEndTime);
+    return d >= weekStart && d < weekEnd;
+  });
+  const weekDone = weekTasks.filter(t => t.status === "done").length;
+  const weekPct = weekTasks.length > 0 ? `${Math.round((weekDone / weekTasks.length) * 100)}%` : "—";
+  const weekHint = weekTasks.length > 0
+    ? `本周到期 ${weekTasks.length} 项 · 完成 ${weekDone}`
+    : "本周无到期任务";
 
   const visibleSelected = filtered.find(t => t.id === selected?.id) ?? null;
 
@@ -179,7 +192,7 @@ export default function ProductionTasksClient({
           [String(summary.pending), "待处理", dueToday > 0 ? `${dueToday} 项今日截止` : "含待认领"],
           [String(summary.inProgress), "进行中", inProgressDepts > 1 ? `跨 ${inProgressDepts} 个部门` : "推进中"],
           [String(summary.blocked), "已阻塞", "等待前置任务"],
-          [`${donePct}%`, "完成度", `已完成 ${summary.done} / ${tasks.length} 项`],
+          [weekPct, "本周完成度", weekHint],
         ].map(([num, label, hint]) => (
           <div key={label} style={{
             minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
@@ -340,7 +353,7 @@ export default function ProductionTasksClient({
                           fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
                         }}
                       >
-                        前往需求详情 →
+                        前往任务详情 →
                       </Link>
                     </div>
                   )}
@@ -409,79 +422,78 @@ export default function ProductionTasksClient({
             </div>
           </div>
 
-          {/* Middle: task list */}
-          <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 0 24px 20px" }}>
+          {/* Middle: task table（原型 taskTableHeader + taskRows，规格照抄见 my-pages.module.css） */}
+          <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 12px 24px 20px" }}>
             {filtered.length === 0 ? (
               <div className={styles.emptyState} style={{ paddingTop: 60 }}>无匹配任务</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {filtered.map((t, i) => {
+                <div className={styles.taskTableHeader}>
+                  <span>状态</span>
+                  <span>任务</span>
+                  <span>关系</span>
+                  <span style={{ textAlign: "right" }}>负责人 / 截止</span>
+                </div>
+                {filtered.map(t => {
                   const isSelected = visibleSelected?.id === t.id;
                   const isDone = t.status === "done";
+                  const due = dueInfo(t);
                   return (
-                    <div
+                    <article
                       key={t.id}
-                      style={{
-                        display: "flex", alignItems: "flex-start", gap: 12,
-                        borderTop: i === 0 ? 0 : "1px solid var(--line)",
-                        padding: "13px 10px 13px 6px",
-                        background: isSelected ? "var(--surface)" : "transparent",
-                        boxShadow: isSelected ? "inset 3px 0 0 var(--ink)" : undefined,
-                        opacity: isDone ? 0.55 : 1,
-                      }}
+                      className={[
+                        styles.taskRow,
+                        isDone ? styles.taskRowDone : "",
+                        isSelected ? styles.taskRowSelected : "",
+                      ].filter(Boolean).join(" ")}
                     >
                       {/* 勾选圈（原型 taskCheck）：完成/恢复切换 */}
                       <button
                         aria-label={isDone ? `恢复 ${t.title}` : `完成 ${t.title}`}
                         disabled={updating}
                         onClick={() => updateStatus(t, isDone ? "in_progress" : "done")}
-                        style={{
-                          flexShrink: 0, width: 20, height: 20, marginTop: 2, borderRadius: "50%",
-                          border: `1.5px solid ${isDone ? "var(--ink)" : "var(--line)"}`,
-                          background: isDone ? "var(--ink)" : "transparent",
-                          color: "#fff", fontSize: 11, lineHeight: 1, cursor: "pointer",
-                          display: "grid", placeItems: "center",
-                        }}
+                        className={styles.taskCheckBtn}
                       >
                         {isDone ? "✓" : ""}
                       </button>
-                      <button
-                        onClick={() => setSelected(t)}
-                        style={{ flex: 1, minWidth: 0, border: 0, background: "transparent", cursor: "pointer", textAlign: "left", padding: 0 }}
-                      >
-                        <p style={{
-                          margin: "0 0 4px", fontSize: 10, fontWeight: 700,
-                          letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
-                          {relationLabel(t)}
-                        </p>
-                        <p style={{
-                          margin: 0, fontSize: 13, fontWeight: 600, lineHeight: 1.35, color: "var(--ink)",
-                          textDecoration: isDone ? "line-through" : "none",
-                          display: "-webkit-box", WebkitLineClamp: 2,
-                          WebkitBoxOrient: "vertical", overflow: "hidden",
-                        }}>
-                          {t.title || "待填写需求名称…"}
-                        </p>
-                        {(t.assignees.length > 0 || dueInfo(t)) && (
-                          <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)" }}>
-                            {t.assignees.map(a => a.name).join("、")}
-                            {t.assignees.length > 0 && dueInfo(t) && " · "}
-                            {dueInfo(t) && <span style={dueInfo(t)!.style}>{dueInfo(t)!.label}</span>}
-                          </p>
-                        )}
+                      {/* taskTitleCell：标题 + 状态/受阻 */}
+                      <button onClick={() => setSelected(t)} className={styles.taskTitleCell}>
+                        <b>{t.title || "待填写需求名称…"}</b>
+                        <small style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <span style={{
+                            borderRadius: 5, padding: "2px 7px", fontWeight: 700,
+                            ...statusBadgeStyle(t.status),
+                          }}>
+                            {STATUS_LABEL[t.status] ?? t.status}
+                          </span>
+                          {isBlockedActive(t) && (
+                            <span style={{
+                              borderRadius: 5, padding: "2px 7px", fontWeight: 700,
+                              background: "var(--danger-soft)", color: "var(--danger)",
+                            }}>
+                              ⛔ 受阻
+                            </span>
+                          )}
+                        </small>
                       </button>
-                      <span style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                        <span style={{
-                          borderRadius: 6, padding: "3px 8px",
-                          fontSize: 10, fontWeight: 700, ...statusBadgeStyle(t.status),
-                        }}>
-                          {STATUS_LABEL[t.status] ?? t.status}
+                      {/* taskRelation：关联事件直达 / 独立任务 */}
+                      {t.eventId ? (
+                        <Link href={`/production/${productionId}/events/${t.eventId}`} className={styles.taskRelationCell}>
+                          <b>{t.eventTitle}{t.departmentName && ` · ${t.departmentName}`}</b>
+                          <small>打开关联事件 →</small>
+                        </Link>
+                      ) : (
+                        <span className={styles.taskRelationCell} style={{ cursor: "default" }}>
+                          <b>独立任务{t.departmentName && ` · ${t.departmentName}`}</b>
+                          <small>未绑定事件</small>
                         </span>
-                        {isBlockedActive(t) && <BlockedChip />}
+                      )}
+                      {/* taskOwner：右对齐 负责人 / 截止 */}
+                      <span className={styles.taskOwnerCell}>
+                        <small>{t.assignees.length > 0 ? t.assignees.map(a => a.name).join("、") : "未指派"}</small>
+                        <b style={due?.style}>{due?.label ?? "—"}</b>
                       </span>
-                    </div>
+                    </article>
                   );
                 })}
               </div>
@@ -582,7 +594,7 @@ export default function ProductionTasksClient({
                     fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
                   }}
                 >
-                  前往需求详情 →
+                  前往任务详情 →
                 </Link>
               </div>
             )}
