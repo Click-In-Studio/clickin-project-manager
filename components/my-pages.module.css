@@ -1075,3 +1075,25 @@
   outline: none;
   resize: vertical;
 }
+
+/* ── 任务详情抽屉（原型 drawer 规格：右侧浮层 + drawerIn 动画）── */
+.taskDrawer {
+  position: fixed;
+  z-index: 60;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: -15px 0 50px rgba(24, 42, 42, .14);
+  animation: taskDrawerIn .2s ease-out;
+}
+@keyframes taskDrawerIn {
+  from { transform: translateX(20px); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .taskDrawer { animation: none; }
+}

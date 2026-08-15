@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
@@ -464,21 +464,64 @@ export default function ProductionTasksClient({
   currentUserId?: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tasks, setTasks] = useState(initialTasks);
   // router.refresh() 后服务端重投喂（新建任务落库）→ 本地列表跟进
   useEffect(() => { setTasks(initialTasks); }, [initialTasks]);
   const [createOpen, setCreateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // 筛选态初始化自 URL query（详情页 ↗ 跳走返回 / 分享链接不丢上下文）
   // 三 scope（原型）：我的 / 全部 / 按事件（仅看关联了事件的 Task）。
-  const [scope, setScope] = useState<"mine" | "all" | "event">("all");
-  const [selectedEvent, setSelectedEvent] = useState<string>(
-    initialEventFilter && initialTasks.some(t => t.eventId === initialEventFilter) ? initialEventFilter : "all"
-  );
-  const [selectedDept, setSelectedDept] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
-  const [selected, setSelected] = useState<ProductionTechReqEntry | null>(
-    () => initialTasks.find(t => t.status !== "done") ?? initialTasks[0] ?? null
-  );
+  const [scope, setScope] = useState<"mine" | "all" | "event">(() => {
+    const s = searchParams.get("scope");
+    return s === "mine" || s === "event" ? s : "all";
+  });
+  const [selectedEvent, setSelectedEvent] = useState<string>(() => {
+    const fromQuery = initialEventFilter ?? searchParams.get("event");
+    if (fromQuery === "__standalone") return "__standalone";
+    return fromQuery && initialTasks.some(t => t.eventId === fromQuery) ? fromQuery : "all";
+  });
+  const [selectedDept, setSelectedDept] = useState<string>(() => {
+    const d = searchParams.get("dept");
+    return d && initialTasks.some(t => t.departmentId === d) ? d : "all";
+  });
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
+    const s = searchParams.get("status");
+    return s && ["awaiting", "pending", "in_progress", "done"].includes(s) ? (s as StatusFilter) : "active";
+  });
+  // 抽屉态：selected 非空 = 抽屉开（点击行开/切换，点外部/Esc/×/再点同行关）
+  const [selected, setSelected] = useState<ProductionTechReqEntry | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // 筛选态回写 URL（replaceState，不触发导航）
+  useEffect(() => {
+    const q = new URLSearchParams();
+    if (scope !== "all") q.set("scope", scope);
+    if (selectedEvent !== "all") q.set("event", selectedEvent);
+    if (selectedDept !== "all") q.set("dept", selectedDept);
+    if (statusFilter !== "active") q.set("status", statusFilter);
+    const qs = q.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+  }, [scope, selectedEvent, selectedDept, statusFilter]);
+
+  // 抽屉：Esc / 点外部关闭（行按钮自身的开/关切换由行 onClick 处理）
+  useEffect(() => {
+    if (!selected) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    const outside = (e: PointerEvent) => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (drawerRef.current?.contains(t)) return;
+      if (t instanceof Element && t.closest("[data-task-row]")) return;
+      setSelected(null);
+    };
+    document.addEventListener("keydown", esc);
+    document.addEventListener("pointerdown", outside);
+    return () => {
+      document.removeEventListener("keydown", esc);
+      document.removeEventListener("pointerdown", outside);
+    };
+  }, [selected]);
 
   async function updateStatus(task: ProductionTechReqEntry, newStatus: string) {
     setUpdating(true);
@@ -755,7 +798,7 @@ export default function ProductionTasksClient({
             {filtered.map(t => {
               const isExpanded = selected?.id === t.id;
               return (
-                <div key={t.id} className={styles.mobileTaskCard}>
+                <div key={t.id} data-task-row className={styles.mobileTaskCard}>
                   <button
                     onClick={() => setSelected(isExpanded ? null : t)}
                     className={styles.mobileTaskCardBtn}
@@ -833,11 +876,11 @@ export default function ProductionTasksClient({
         )}
       </div>
 
-      {/* ── Desktop: 2-column layout（筛选已上移工具栏下拉，左栏撤除）── */}
+      {/* ── Desktop: 全宽表格（筛选在工具栏下拉，详情走抽屉 peek）── */}
       <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 380px", gap: 0, height: "100%", minHeight: 0 }}>
+        <div style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
           {/* Task table（原型 taskTableHeader + taskRows，规格照抄见 my-pages.module.css） */}
-          <div style={{ borderRight: "1px solid var(--line)", overflowY: "auto", padding: "0 12px 24px 0" }}>
+          <div style={{ overflowY: "auto", padding: "0 0 24px 0", flex: 1, minHeight: 0 }}>
             {filtered.length === 0 ? (
               <div className={styles.emptyState} style={{ paddingTop: 60 }}>无匹配任务</div>
             ) : (
@@ -855,6 +898,7 @@ export default function ProductionTasksClient({
                   return (
                     <article
                       key={t.id}
+                      data-task-row
                       className={[
                         styles.taskRow,
                         isDone ? styles.taskRowDone : "",
@@ -870,8 +914,11 @@ export default function ProductionTasksClient({
                       >
                         {isDone ? "✓" : ""}
                       </button>
-                      {/* taskTitleCell：标题 + 状态/受阻 */}
-                      <button onClick={() => setSelected(t)} className={styles.taskTitleCell}>
+                      {/* taskTitleCell：点击开抽屉 / 切换；再点同行关（点外部=关的对称面） */}
+                      <button
+                        onClick={() => setSelected(prev => prev?.id === t.id ? null : t)}
+                        className={styles.taskTitleCell}
+                      >
                         <b>{t.title || "待填写需求名称…"}</b>
                         <small style={{ display: "flex", alignItems: "center", gap: 5 }}>
                           <span style={{
@@ -914,108 +961,150 @@ export default function ProductionTasksClient({
             )}
           </div>
 
-          {/* Right: detail */}
-          <div style={{ overflowY: "auto", padding: "0 0 24px 24px" }}>
-            {!visibleSelected ? (
-              <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧任务查看详情</div>
-            ) : (
-              <div>
-                <div style={{ marginBottom: 18 }}>
-                  {/* 关系行：关联事件直达；独立 Task 分支为未来模型预留（当前 event_id 恒非空） */}
-                  {visibleSelected.eventId ? (
-                    <Link
-                      href={`/production/${productionId}/events/${visibleSelected.eventId}`}
-                      style={{ display: "inline-block", margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage, var(--muted))", textDecoration: "none" }}
-                    >
-                      {visibleSelected.eventTitle}{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`} →
-                    </Link>
-                  ) : (
-                    <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
-                      独立任务{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`}
-                    </p>
-                  )}
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                    <h2 style={{
-                      margin: 0, flex: 1,
-                      fontFamily: 'Georgia, "Noto Serif SC", serif',
-                      fontSize: "clamp(18px, 1.8vw, 24px)", fontWeight: 500, color: "var(--ink)",
-                      lineHeight: 1.3,
-                    }}>
-                      {visibleSelected.title || "待填写需求名称…"}
-                    </h2>
-                    <select
-                      disabled={updating}
-                      value={visibleSelected.status}
-                      onChange={e => updateStatus(visibleSelected, e.target.value)}
-                      style={{
-                        flexShrink: 0, borderRadius: 6, padding: "4px 8px",
-                        fontSize: 11, fontWeight: 700, cursor: "pointer",
-                        border: "1px solid transparent", outline: "none",
-                        opacity: updating ? 0.5 : 1, ...statusBadgeStyle(visibleSelected.status),
-                      }}
-                    >
-                      {VALID_STATUSES.map(s => (
-                        <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {visibleSelected.assignees.length > 0 && (
-                    <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
-                      负责人：{visibleSelected.assignees.map(a => a.name).join("、")}
-                    </p>
-                  )}
-                  {visibleSelected.effectiveStartTime && (
-                    <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
-                      时间：{new Date(visibleSelected.effectiveStartTime).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}
-                      {visibleSelected.effectiveEndTime && (
-                        <> — <span style={dueInfo(visibleSelected)?.style}>{dueInfo(visibleSelected)?.label}</span></>
-                      )}
-                      {!visibleSelected.startTime && <span style={{ fontSize: 10 }}>（继承自{visibleSelected.eventId ? "事件/日程" : "绑定对象"}）</span>}
-                    </p>
-                  )}
-                  {visibleSelected.milestones.length > 0 && (
-                    <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      里程碑：
-                      {visibleSelected.milestones.map(m => (
-                        <span key={m.id} title={m.endDate} style={{
-                          borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700,
-                          background: "var(--surface-2)", color: "var(--ink)",
-                        }}>
-                          ◆ {m.name} · {m.endDate.slice(5).replace("-", "/")}
-                        </span>
-                      ))}
-                    </p>
-                  )}
-                  {isBlockedActive(visibleSelected) && (
-                    <p style={{
-                      margin: "10px 0 0", padding: "8px 12px", borderRadius: 8,
-                      background: "var(--danger-soft)", color: "var(--danger)", fontSize: 12, fontWeight: 600,
-                    }}>
-                      ⛔ 被前置任务阻塞——前置任务全部完成前建议暂缓推进（详情页可查看/编辑依赖）
-                    </p>
-                  )}
-                </div>
-                {visibleSelected.description && (
-                  <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 20 }}>
-                    <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
-                  </div>
-                )}
-                <Link
-                  href={`/production/${productionId}/tasks/${visibleSelected.id}`}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 6,
-                    border: "1px solid var(--ink)", borderRadius: 8, padding: "9px 18px",
-                    fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
-                  }}
-                >
-                  前往任务详情 →
-                </Link>
-              </div>
-            )}
-          </div>
         </div>
       </div>
       </section>
+
+      {/* ── 任务抽屉（peek，仅桌面；移动端沿用手风琴）：点击行开/切换，点外部/Esc/×/再点同行关 ── */}
+      {visibleSelected && (
+        <div className={styles.desktopOnly}>
+        <aside ref={drawerRef} className={styles.taskDrawer} aria-label="任务详情抽屉">
+          {/* drawerHeader（原型规格：kicker + serif 标题 + 圆钮） */}
+          <div style={{ minHeight: 92, padding: "20px 22px", borderBottom: "1px solid var(--line)", display: "flex", gap: 15 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <p style={{ margin: 0, color: "var(--muted)", fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase" }}>
+                Task
+              </p>
+              <h2 style={{ margin: "6px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)", lineHeight: 1.3 }}>
+                <Link
+                  href={`/production/${productionId}/tasks/${visibleSelected.id}`}
+                  style={{ color: "inherit", textDecoration: "none" }}
+                  title="打开完整详情页"
+                >
+                  {visibleSelected.title || "待填写需求名称…"}
+                </Link>
+              </h2>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "flex-start" }}>
+              <Link
+                href={`/production/${productionId}/tasks/${visibleSelected.id}`}
+                aria-label="打开完整详情页"
+                title="打开完整详情页"
+                style={{
+                  width: 30, height: 30, border: "1px solid var(--line)", borderRadius: "50%",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 13, color: "var(--ink)", textDecoration: "none",
+                }}
+              >
+                ↗
+              </Link>
+              <button
+                onClick={() => setSelected(null)}
+                aria-label="关闭"
+                style={{
+                  width: 30, height: 30, border: "1px solid var(--line)", borderRadius: "50%",
+                  background: "transparent", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "var(--muted)",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {/* drawerBody */}
+          <div style={{ padding: 22 }}>
+            {/* 关系行 */}
+            {visibleSelected.eventId ? (
+              <Link
+                href={`/production/${productionId}/events/${visibleSelected.eventId}`}
+                style={{ display: "inline-block", margin: "0 0 10px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage, var(--muted))", textDecoration: "none" }}
+              >
+                {visibleSelected.eventTitle}{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`} →
+              </Link>
+            ) : (
+              <p style={{ margin: "0 0 10px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)" }}>
+                独立任务{visibleSelected.departmentName && ` · ${visibleSelected.departmentName}`}
+              </p>
+            )}
+
+            {/* 状态推进 */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>状态</span>
+              <select
+                disabled={updating}
+                value={visibleSelected.status}
+                onChange={e => updateStatus(visibleSelected, e.target.value)}
+                style={{
+                  borderRadius: 6, padding: "4px 8px",
+                  fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  border: "1px solid transparent", outline: "none",
+                  opacity: updating ? 0.5 : 1, ...statusBadgeStyle(visibleSelected.status),
+                }}
+              >
+                {VALID_STATUSES.map(s => (
+                  <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                ))}
+              </select>
+              {isBlockedActive(visibleSelected) && <BlockedChip />}
+            </div>
+
+            {visibleSelected.assignees.length > 0 && (
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
+                负责人：{visibleSelected.assignees.map(a => a.name).join("、")}
+              </p>
+            )}
+            {visibleSelected.effectiveStartTime && (
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
+                时间：{new Date(visibleSelected.effectiveStartTime).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}
+                {visibleSelected.effectiveEndTime && (
+                  <> — <span style={dueInfo(visibleSelected)?.style}>{dueInfo(visibleSelected)?.label}</span></>
+                )}
+                {!visibleSelected.startTime && <span style={{ fontSize: 10 }}>（继承自{visibleSelected.eventId ? "事件/日程" : "绑定对象"}）</span>}
+              </p>
+            )}
+            {visibleSelected.milestones.length > 0 && (
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                里程碑：
+                {visibleSelected.milestones.map(m => (
+                  <span key={m.id} title={m.endDate} style={{
+                    borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700,
+                    background: "var(--surface-2)", color: "var(--ink)",
+                  }}>
+                    ◆ {m.name} · {m.endDate.slice(5).replace("-", "/")}
+                  </span>
+                ))}
+              </p>
+            )}
+            {isBlockedActive(visibleSelected) && (
+              <p style={{
+                margin: "10px 0 0", padding: "8px 12px", borderRadius: 8,
+                background: "var(--danger-soft)", color: "var(--danger)", fontSize: 12, fontWeight: 600,
+              }}>
+                ⛔ 被前置任务阻塞——前置任务全部完成前建议暂缓推进（详情页可查看/编辑依赖）
+              </p>
+            )}
+            {visibleSelected.description && (
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14, marginTop: 14, marginBottom: 6 }}>
+                <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+              </div>
+            )}
+            <div style={{ marginTop: 18 }}>
+              <Link
+                href={`/production/${productionId}/tasks/${visibleSelected.id}`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: "1px solid var(--ink)", borderRadius: 8, padding: "9px 18px",
+                  fontSize: 12, fontWeight: 700, color: "var(--ink)", textDecoration: "none",
+                }}
+              >
+                前往任务详情 →
+              </Link>
+            </div>
+          </div>
+        </aside>
+        </div>
+      )}
+
       {createModal}
     </>
   );
