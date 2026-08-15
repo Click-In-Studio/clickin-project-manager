@@ -45,6 +45,7 @@ const PRODUCTION_NAV = [
   { label: "事件", hint: "围读 · 排练 · 演出", path: "events", symbol: "事" },
   { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
   { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },
+  { label: "文档", hint: "wiki · 团队知识库", path: "wiki", symbol: "文" },
   { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications", symbol: "通" },
   { label: "财务", hint: "预算 · 支出 · 关联", path: "finance", symbol: "财" },
   { label: "物料", hint: "道具 · 服装 · 设备", path: "materials", symbol: "物" },
