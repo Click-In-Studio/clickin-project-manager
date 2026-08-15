@@ -6,6 +6,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
 import {
   createEventTechReq,
+  getEventDepartment,
   getProductionEvent,
   isUserDeptPoc,
   listMyTechReqsFull,
@@ -60,6 +61,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
   const eventId = body.eventId ?? null;
+
+  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
+  // 不先校验会被跨剧组部门 id 骗过 POC 各门 + 绑入跨剧组部门）
+  if (typeof body.departmentId === "string"
+      && !(await getEventDepartment(body.departmentId, productionId)))
+    return Response.json({ error: "部门不存在" }, { status: 400 });
 
   let viaPoc = false;
   if (eventId) {

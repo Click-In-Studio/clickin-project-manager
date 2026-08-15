@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   deleteTaskByProduction,
+  getEventDepartment,
   getProductionEvent,
   getTaskDependencies,
   getTechReqByProduction,
@@ -53,6 +54,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     startTime?: string | null; endTime?: string | null;
     eventId?: string | null;
   };
+
+  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
+  // POC 上下文判定的前提是任务部门恒为本 production 部门）
+  if (typeof body.departmentId === "string"
+      && !(await getEventDepartment(body.departmentId, productionId)))
+    return Response.json({ error: "部门不存在" }, { status: 400 });
 
   // 换绑事件 = 对目标 event 的 attach 操作，同创建时的挂载资格门
   // （event tasks@create，或 POC 路径：任务绑我 POC 的部门 + 目标 event details@view）。

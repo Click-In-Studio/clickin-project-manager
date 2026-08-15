@@ -49,6 +49,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 路径三（用户场景：服装设计看到排练 schedule 主动来对装）：部门 POC 可为
   // **本部门**对可见 event 发起 task——可见性由成员基础 details@view 天然界定
   const bodyPeek = (await req.clone().json()) as { departmentId?: string | null };
+  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
+  // 不先校验会被跨剧组部门 id 骗过 POC 各门 + 绑入跨剧组部门）
+  if (typeof bodyPeek.departmentId === "string"
+      && !(await getEventDepartment(bodyPeek.departmentId, productionId)))
+    return Response.json({ error: "部门不存在" }, { status: 400 });
   // 路径三前提=对该 event 有 details 视图（"对看得见的东西反应"）：宽松剧组经
   // 成员模板通配行命中；严格剧组（模板撤掉 details@view）未被授视图的 POC 发不了
   const viaPoc = typeof bodyPeek.departmentId === "string"
