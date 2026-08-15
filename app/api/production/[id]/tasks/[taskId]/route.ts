@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   deleteTaskByProduction,
+  getProductionEvent,
   getTaskDependencies,
   getTechReqByProduction,
   isUserDeptPoc,
@@ -52,6 +53,22 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     startTime?: string | null; endTime?: string | null;
     eventId?: string | null;
   };
+
+  // 换绑事件 = 对目标 event 的 attach 操作，同创建时的挂载资格门
+  // （event tasks@create，或 POC 路径：任务绑我 POC 的部门 + 目标 event details@view）。
+  // 解绑（null）与保持不变不查
+  if (body.eventId !== undefined && body.eventId !== null && body.eventId !== existing.eventId) {
+    const targetEvent = await getProductionEvent(body.eventId, productionId);
+    if (!targetEvent) return Response.json({ error: "目标事件不存在" }, { status: 400 });
+    const actor = toActor(session, permCtx);
+    const canAttach =
+      await hasEffectiveGrant(actor, productionId, "event", body.eventId, "tasks", "create")
+      || (existing.departmentId != null
+          && await isUserDeptPoc(existing.departmentId, session.userId)
+          && await hasEffectiveGrant(actor, productionId, "event", body.eventId, "details", "view"));
+    if (!canAttach)
+      return Response.json({ error: "对目标事件没有任务挂载资格" }, { status: 403 });
+  }
 
   try {
     const updated = await updateTaskByProduction(taskId, productionId, {

@@ -267,6 +267,13 @@ export default function ReqDetailClient({
   const [editEndTime, setEditEndTime] = useState("");
   const [editMilestoneIds, setEditMilestoneIds] = useState<Set<string>>(new Set());
   const [editBlockedByIds, setEditBlockedByIds] = useState<Set<string>>(new Set());
+  // 事件改绑：可挂载事件列表懒加载（create-options 的服务端过滤复用）
+  const [editEventId, setEditEventId] = useState("");
+  const [editScheduleItemIds, setEditScheduleItemIds] = useState<Set<string>>(new Set());
+  const [attachableEvents, setAttachableEvents] = useState<
+    { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[] | null
+  >(null);
+  const [editScheduleOptions, setEditScheduleOptions] = useState<{ id: string; title: string; startTime: string | null }[]>([]);
 
   function enterEditMode() {
     setTitle(req.title);
@@ -276,9 +283,38 @@ export default function ReqDetailClient({
     setEditEndTime(isoToLocalInput(req.endTime));
     setEditMilestoneIds(new Set(req.milestoneIds));
     setEditBlockedByIds(new Set(blockedBy.map(d => d.id)));
+    setEditEventId(req.eventId ?? "");
+    setEditScheduleItemIds(new Set(req.scheduleItemIds));
     setError(null);
     setEditMode(true);
+    if (!attachableEvents) {
+      fetch(`${BASE_PATH}/api/production/${productionId}/tasks/create-options`)
+        .then(r => r.json())
+        .then((j: { events?: { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[] }) => {
+          setAttachableEvents(j.events ?? []);
+        })
+        .catch(() => setAttachableEvents([]));
+    }
   }
+
+  // 编辑态选中事件 → 拉取其 schedule 条目；换事件清空已选（原事件保留当前绑定）
+  useEffect(() => {
+    if (!editMode || !editEventId) { setEditScheduleOptions([]); return; }
+    if (editEventId === (req.eventId ?? "")) {
+      setEditScheduleOptions(scheduleItems.map(it => ({ id: it.id, title: it.title, startTime: it.startTime })));
+      return;
+    }
+    setEditScheduleItemIds(new Set());
+    let cancelled = false;
+    fetch(`${BASE_PATH}/api/production/${productionId}/events/${editEventId}/schedule`)
+      .then(r => r.json())
+      .then((j: { items?: { id: string; title: string; startTime: string | null }[] }) => {
+        if (!cancelled) setEditScheduleOptions(j.items ?? []);
+      })
+      .catch(() => { if (!cancelled) setEditScheduleOptions([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode, editEventId]);
 
   async function handleEditClick() {
     setAccessChecking(true);
@@ -327,6 +363,7 @@ export default function ReqDetailClient({
     setError(null);
     try {
       const base = `${BASE_PATH}/api/production/${productionId}/tasks/${req.id}`;
+      const eventChanged = (editEventId || null) !== (req.eventId ?? null);
       const patchRes = await fetch(base, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -335,6 +372,8 @@ export default function ReqDetailClient({
           description,
           startTime: editStartTime ? new Date(editStartTime).toISOString() : null,
           endTime: editEndTime ? new Date(editEndTime).toISOString() : null,
+          // 换绑/解绑才提交（服务端有目标事件挂载资格门；换绑会清旧 schedule 绑定）
+          ...(eventChanged ? { eventId: editEventId || null } : {}),
         }),
       });
       if (!patchRes.ok) {
@@ -343,6 +382,21 @@ export default function ReqDetailClient({
         return;
       }
       const errs: string[] = [];
+      // schedule 绑定：换绑后重设（PATCH 已清旧绑定），或同事件下集合有变时重设
+      if (editEventId) {
+        const itemsChanged = eventChanged
+          ? editScheduleItemIds.size > 0
+          : editScheduleItemIds.size !== req.scheduleItemIds.length
+            || req.scheduleItemIds.some(id => !editScheduleItemIds.has(id));
+        if (itemsChanged) {
+          const r = await fetch(`${base}/items`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemIds: [...editScheduleItemIds] }),
+          });
+          if (!r.ok) errs.push("日程条目绑定未保存");
+        }
+      }
       // 负责人：仅变更时提交（指派面独立——编辑权≠指派权，403 单独提示）
       const assigneesChanged =
         assignees.length !== req.assignees.length
@@ -701,6 +755,64 @@ export default function ReqDetailClient({
                       </button>
                     )}
                   </div>
+                </div>
+                <div>
+                  <span style={FIELD_LABEL}>关联事件（仅列出你可挂载的；换绑会清空原日程条目绑定）</span>
+                  {attachableEvents === null ? (
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>加载可挂载事件…</p>
+                  ) : (
+                    <DropdownPicker
+                      items={(() => {
+                        const items = attachableEvents.map(ev => ({
+                          id: ev.id,
+                          label: `${ev.startTime ? `${new Date(ev.startTime).getMonth() + 1}/${new Date(ev.startTime).getDate()} · ` : ""}${ev.title}`,
+                          sublabel: ev.requiresPocDept ? "POC 路径（需任务绑定你负责的部门）" : undefined,
+                          disabled: ev.requiresPocDept && !isPocOfDept,
+                        }));
+                        // 当前绑定的事件不在可挂载列表时补一项（保持现绑定合法可见）
+                        if (event && !attachableEvents.some(ev => ev.id === event.id)) {
+                          items.unshift({ id: event.id, label: `${event.title}（当前绑定）`, sublabel: undefined, disabled: false });
+                        }
+                        return items;
+                      })()}
+                      value={editEventId || null}
+                      placeholder="不关联（独立任务）"
+                      clearLabel="不关联（独立任务）"
+                      searchPlaceholder="搜索事件…"
+                      onChange={id => setEditEventId(id ?? "")}
+                    />
+                  )}
+                  {editEventId && editScheduleOptions.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <span style={{ ...FIELD_LABEL, marginBottom: 6 }}>绑定日程条目（不设时间时任务时间取条目区间）</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {editScheduleOptions.map(it => {
+                          const active = editScheduleItemIds.has(it.id);
+                          return (
+                            <button
+                              key={it.id}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => setEditScheduleItemIds(prev => {
+                                const next = new Set(prev);
+                                if (next.has(it.id)) next.delete(it.id); else next.add(it.id);
+                                return next;
+                              })}
+                              style={{
+                                border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
+                                borderRadius: 999, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                background: active ? "var(--ink)" : "transparent",
+                                color: active ? "#fff" : "var(--muted)",
+                              }}
+                            >
+                              {it.title}
+                              {it.startTime ? ` · ${fmtTime(it.startTime)}` : ""}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {assigneePickerBlock("负责人（保存需指派权限：部门 POC 或任务指派授权）")}
                 {milestoneOptions.length > 0 && (
