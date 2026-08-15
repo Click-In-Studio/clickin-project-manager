@@ -3,6 +3,7 @@ import { canAccessNode } from "@/lib/grant-template";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
+import { notifyTaskAssigned } from "@/lib/notify";
 import {
   createEventTechReq,
   getProductionEvent,
@@ -108,6 +109,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     createdBy: session.userId,
     createdVia: viaPoc ? "poc" : "explicit",
   });
+
+  // 创建即指派 → 指派通知（老板派活语义：纯告知，act=打开详情）
+  if (techReq.assignees.length > 0) {
+    const event = eventId ? await getProductionEvent(eventId, productionId) : null;
+    void notifyTaskAssigned({
+      productionId,
+      taskId: techReq.id,
+      taskTitle: techReq.title,
+      eventTitle: event?.title ?? null,
+      assignedBy: session.userId,
+      userIds: techReq.assignees.map(a => a.userId),
+    }).catch(e => console.error("[task-assign] notify failed:", e));
+  }
 
   return Response.json({ task: techReq }, { status: 201 });
 }

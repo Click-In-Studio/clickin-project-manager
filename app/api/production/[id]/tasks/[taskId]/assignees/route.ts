@@ -1,9 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
-import { getTechReqByProduction, setTechReqAssignees } from "@/lib/event-db";
+import { getTechReqByProduction, setTechReqAssignees, getProductionEvent } from "@/lib/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { canAssignTechReq } from "@/lib/event-permissions";
+import { notifyTaskAssigned } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 
@@ -43,11 +44,23 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   await setTechReqAssignees(taskId, body.assignees as { userId: string; name: string }[]);
   const updated = await getTechReqByProduction(taskId, productionId);
 
-  if (updated?.chatId) {
-    const newUserIds = (body.assignees as { userId: string }[])
-      .map(a => a.userId)
-      .filter(id => !prevAssignees.has(id));
-    if (newUserIds.length) {
+  const newUserIds = (body.assignees as { userId: string }[])
+    .map(a => a.userId)
+    .filter(id => !prevAssignees.has(id));
+
+  if (newUserIds.length && updated) {
+    // 指派通知（老板派活语义：纯告知，act=打开详情）
+    const event = updated.eventId ? await getProductionEvent(updated.eventId, productionId) : null;
+    void notifyTaskAssigned({
+      productionId,
+      taskId,
+      taskTitle: updated.title,
+      eventTitle: event?.title ?? null,
+      assignedBy: session.userId,
+      userIds: newUserIds,
+    }).catch(e => console.error("[task-assign] notify failed:", e));
+
+    if (updated.chatId) {
       batchGetFeishuOpenIds(newUserIds).then(m => {
         const openIds = newUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);
         if (openIds.length) feishuPlatform.addGroupMembers(updated.chatId!, openIds).catch(console.error);

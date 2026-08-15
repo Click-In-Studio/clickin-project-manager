@@ -8,7 +8,7 @@ import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { SERVER_URL } from "@/lib/server-url";
-import { notifyUsers } from "@/lib/notify";
+import { notifyTaskAssigned, notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -89,6 +89,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     createdBy: session.userId,
     createdVia: viaPoc ? "poc" : "explicit",
   });
+
+  // 创建即指派 → 指派通知（老板派活语义：纯告知，act=打开详情）
+  if (techReq.assignees.length > 0) {
+    void notifyTaskAssigned({
+      productionId,
+      taskId: techReq.id,
+      taskTitle: techReq.title,
+      eventTitle: event.title,
+      assignedBy: session.userId,
+      userIds: techReq.assignees.map(a => a.userId),
+    }).catch(e => console.error("[task-assign] notify failed:", e));
+  }
 
   // Notify POCs when a new awaiting req is created for their department.
   if (techReq.status === "awaiting" && techReq.departmentId) {
