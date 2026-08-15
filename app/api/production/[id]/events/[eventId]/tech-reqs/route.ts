@@ -66,6 +66,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
 
+  // 创建即指派同受指派面约束（2026-08-15 定谳：event 编辑级联不含指派——
+  // organizer 发部门、POC 分人）：task 通配 assignees@edit 或所绑部门 POC
+  if ((body.assignees?.length ?? 0) > 0) {
+    const canDirectAssign =
+      await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "assignees", "edit")
+      || (typeof body.departmentId === "string" && await isUserDeptPoc(body.departmentId, session.userId));
+    if (!canDirectAssign)
+      return Response.json({ error: "你没有直接指派的权限——请绑定部门后交由部门 POC 分配" }, { status: 403 });
+  }
+
   const techReq = await createEventTechReq({
     id: uid(),
     productionId,

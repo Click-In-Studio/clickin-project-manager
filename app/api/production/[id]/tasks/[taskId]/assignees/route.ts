@@ -23,7 +23,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const existing = await getTechReqByProduction(taskId, productionId);
   if (!existing) return Response.json({ error: "任务不存在" }, { status: 404 });
 
-  if (!await canAssignTechReq(permCtx, taskId, existing.eventId, productionId))
+  if (!await canAssignTechReq(permCtx, taskId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { assignees?: unknown };

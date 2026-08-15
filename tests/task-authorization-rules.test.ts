@@ -5,7 +5,7 @@ import {
   createProductionEvent, createEventTechReq, upsertAwaitingTechReqs,
   setTechReqAssignees, updateTaskByProduction, isUserDeptPoc, isUserDeptMember,
 } from "@/lib/event-db";
-import { canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
+import { canAssignTechReq, canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
 import { getPool } from "@/lib/pg";
 import type { PermissionContext } from "@/lib/permissions";
 
@@ -127,6 +127,35 @@ describe("路径三：POC 为本部门主动发起 task", () => {
       await ctxOf(memberId), req.id, eventId, prodId, deptId, { participantDeptIds: [] },
     );
     expect(visible).toBe(true);
+  });
+});
+
+describe("规则5：指派面独立于 event 编辑级联（2026-08-15 定谳）", () => {
+  it("organizer（event details@edit 级联）可编辑内容但不可指派；POC 可指派", async () => {
+    const organizerId = (await upsertFeishuUser(`test-open-${shortId()}`, `组织者${shortId()}`, null, false)).userId;
+    await addProductionMember(prodId, organizerId);
+    // organizer 创建 event → writeEventGrants 发创建者 manage 行集（含 details@edit）
+    const ev = await createProductionEvent({
+      id: `ev_${shortId()}`, productionId: prodId, title: "指派面事件",
+      eventType: "rehearsal", location: "", startTime: null, endTime: null,
+      description: "", createdBy: organizerId,
+    });
+    const req = await createEventTechReq({
+      id: `tr_${shortId()}`, productionId: prodId, eventId: ev.id, scheduleItemIds: [],
+      title: "指派面task", description: "", presetMinutes: null, departmentId: deptId,
+      assignees: [], createdBy: organizerId,
+    });
+    const organizerCtx = await ctxOf(organizerId);
+    // 内容编辑：event details@edit 级联保留
+    expect(await canEditTechReq(organizerCtx, req.id, ev.id, prodId)).toBe(true);
+    // 指派：级联不含——organizer 发部门、POC 分人
+    expect(await canAssignTechReq(organizerCtx, req.id, prodId)).toBe(false);
+    // 关联部门 POC 可指派（上下文判定 + writeTechReqGrants 的 assignees@edit 行）
+    expect(await canAssignTechReq(await ctxOf(pocId), req.id, prodId)).toBe(true);
+    // 无关成员不可指派
+    expect(await canAssignTechReq(await ctxOf(memberId), req.id, prodId)).toBe(false);
+
+    await getPool().query("DELETE FROM production_event WHERE id = $1", [ev.id]).catch(() => {});
   });
 });
 
