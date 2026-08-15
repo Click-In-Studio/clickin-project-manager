@@ -66,7 +66,7 @@ export default function ProductionTasksClient({
     setUpdating(true);
     try {
       const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/events/${task.eventId}/tech-reqs/${task.id}/status`,
+        `${BASE_PATH}/api/production/${productionId}/tasks/${task.id}/status`,
         { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) }
       );
       if (!res.ok) return;
@@ -78,7 +78,9 @@ export default function ProductionTasksClient({
     }
   }
 
-  const events = Array.from(new Map(tasks.map(t => [t.eventId, t.eventTitle])).entries());
+  const events = Array.from(new Map(
+    tasks.filter(t => t.eventId != null).map(t => [t.eventId!, t.eventTitle ?? ""] as [string, string])
+  ).entries());
   const depts = Array.from(
     new Map(tasks.filter(t => t.departmentId).map(t => [t.departmentId!, t.departmentName!])).entries()
   );

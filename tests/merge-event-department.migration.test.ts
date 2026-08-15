@@ -75,12 +75,14 @@ describe("schema verification", () => {
   });
 
   it("all six FK columns are UUID referencing production_dept", async () => {
+    // task 原名 event_tech_req——本迁移之后的 task-standalone 迁移改的名，
+    // 这里断言的是当前终态列
     const { rows } = await getPool().query<{ table_name: string; data_type: string }>(`
       SELECT table_name, data_type FROM information_schema.columns
       WHERE (table_name, column_name) IN (
         ('event_participant', 'department_id'),
         ('event_call_time', 'department_id'),
-        ('event_tech_req', 'department_id'),
+        ('task', 'department_id'),
         ('schedule_item_department', 'dept_id'),
         ('event_report_note', 'department_id')
       )
@@ -95,7 +97,7 @@ describe("schema verification", () => {
         ON ccu.constraint_name = tc.constraint_name
       WHERE tc.constraint_type = 'FOREIGN KEY'
         AND ccu.table_name = 'production_dept'
-        AND tc.table_name IN ('event_participant', 'event_call_time', 'event_tech_req',
+        AND tc.table_name IN ('event_participant', 'event_call_time', 'task',
                               'schedule_item_department', 'event_report_note')
     `);
     expect(Number(fks[0].count)).toBeGreaterThanOrEqual(5);
@@ -134,7 +136,7 @@ describe("invariance verification", () => {
       getPool().query<{ department_id: string }>(
         "SELECT department_id FROM event_report_note WHERE id = $1", [s.reportNoteId]),
       getPool().query<{ department_id: string }>(
-        "SELECT department_id FROM event_tech_req WHERE id = $1", [s.techReqId]),
+        "SELECT department_id FROM task WHERE id = $1", [s.techReqId]),
       getPool().query<{ dept_id: string }>(
         "SELECT dept_id FROM schedule_item_department WHERE item_id = $1", [s.scheduleItemId]),
     ]);

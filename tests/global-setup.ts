@@ -98,6 +98,12 @@ import {
   createMergeEventDeptPreMigrationData,
   MERGE_EVENT_DEPT_SNAPSHOT_PATH,
 } from "./merge-event-department-snapshot";
+import {
+  isTaskStandalonePreMigrationSchema,
+  createTaskStandalonePreMigrationData,
+  TASK_STANDALONE_SNAPSHOT_PATH,
+  type TaskStandaloneSnapshot,
+} from "./task-standalone-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -401,10 +407,39 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // Task 独立化（event_tech_req → task）：必须在并表迁移之后——
+  // 并表迁移与前序工厂仍按旧表名 event_tech_req 读写。
+  if (await isTaskStandalonePreMigrationSchema(pool)) {
+    const taskSnapshot = await createTaskStandalonePreMigrationData(pool, TEST_USER);
+    await writeFile(TASK_STANDALONE_SNAPSHOT_PATH, JSON.stringify(taskSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-task-standalone.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
   const pool = getPool();
+
+  // Clean up task-standalone migration factory data (migration path only).
+  {
+    let taskSnapshot: TaskStandaloneSnapshot | null = null;
+    try {
+      taskSnapshot = JSON.parse(
+        await readFile(TASK_STANDALONE_SNAPSHOT_PATH, "utf8"),
+      ) as TaskStandaloneSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (taskSnapshot) {
+      // production 删除经 task.production_id CASCADE 清 task/asset/event 全家族
+      await pool.query("DELETE FROM production WHERE id = $1", [taskSnapshot.prodId]).catch(() => {});
+      await unlink(TASK_STANDALONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // Clean up merge-event-department migration factory data (migration path only).
   {

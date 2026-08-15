@@ -38,7 +38,8 @@ export async function myTechReqs(userId: string): Promise<string> {
     .map((r) => {
       const dept = r.departmentName ? `［${r.departmentName}］` : "";
       const poc = r.amPoc ? "（你是负责人）" : "";
-      return `- ${dept}${r.title} — 状态：${r.status}${poc}｜《${r.productionName}》${r.eventTitle}`;
+      const eventPart = r.eventTitle ? r.eventTitle : "（未绑定事件）";
+      return `- ${dept}${r.title} — 状态：${r.status}${poc}｜《${r.productionName}》${eventPart}`;
     })
     .join("\n");
 }

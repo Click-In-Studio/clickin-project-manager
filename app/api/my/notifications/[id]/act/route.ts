@@ -118,7 +118,7 @@ async function executeEffect(
 
     case "set_status": {
       const ALLOWED_STATUS: Record<string, { table: string; column: string; values: string[] }> = {
-        tech_req: { table: "event_tech_req", column: "status", values: ["awaiting", "pending", "in_progress", "done", "cancelled"] },
+        tech_req: { table: "task", column: "status", values: ["awaiting", "pending", "in_progress", "done", "cancelled"] },
       };
       const meta = ALLOWED_STATUS[effect.entityType];
       if (!meta) throw new Error(`Unknown entityType for set_status: ${effect.entityType}`);
@@ -134,7 +134,7 @@ async function executeEffect(
       // Stores the user's choice value on the entity. The specific column depends
       // on the entity type; extend this map as new choice-bearing types are added.
       const ALLOWED_CHOICE: Record<string, { table: string; column: string; ownerColumn?: string }> = {
-        tech_req: { table: "event_tech_req", column: "assignee_response", ownerColumn: undefined },
+        tech_req: { table: "task", column: "assignee_response", ownerColumn: undefined },
       };
       const meta = ALLOWED_CHOICE[effect.entityType];
       if (!meta) throw new Error(`Unknown entityType for set_choice: ${effect.entityType}`);

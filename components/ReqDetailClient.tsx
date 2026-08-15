@@ -39,14 +39,15 @@ function fmtItemTime(item: EventScheduleItem, singleDay: boolean): string {
   return singleDay ? fmtTime(item.startTime) : fmtDateTime(item.startTime);
 }
 
-function isSingleDay(event: ProductionEvent): boolean {
-  if (!event.startTime || !event.endTime) return false;
+function isSingleDay(event: ProductionEvent | null): boolean {
+  if (!event?.startTime || !event.endTime) return false;
   return event.startTime.slice(0, 10) === event.endTime.slice(0, 10);
 }
 
 type Props = {
   req: EventTechReq;
-  event: ProductionEvent;
+  /** null = 未绑定 event 的独立任务 */
+  event: ProductionEvent | null;
   scheduleItems: EventScheduleItem[];
   deptName: string | null;
   deptPeople: { userId: string; name: string }[];
@@ -218,7 +219,7 @@ export default function ReqDetailClient({
     );
   }
 
-  const base = `${BASE_PATH}/api/production/${productionId}/events/${event.id}/tech-reqs/${req.id}`;
+  const base = `${BASE_PATH}/api/production/${productionId}/tasks/${req.id}`;
 
   async function confirm(newStatus: string) {
     if (!title.trim()) { setError("请填写需求名称"); return; }
@@ -273,9 +274,11 @@ export default function ReqDetailClient({
       <p style={{ margin: "0 0 10px", fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--stage)" }}>
         Tasks
       </p>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
-        <Link href={`/production/${productionId}/events/${event.id}/view`} style={navLink}>日程: {event.title}</Link>
-      </div>
+      {event && (
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <Link href={`/production/${productionId}/events/${event.id}/view`} style={navLink}>日程: {event.title}</Link>
+        </div>
+      )}
 
       {/* Page sheet */}
       <div style={{ background: "white", border: "1px solid var(--line)", borderRadius: 12, padding: "24px 28px" }}>
@@ -345,8 +348,8 @@ export default function ReqDetailClient({
           </section>
         )}
 
-        {/* Group chat section */}
-        {(isPocOfDept || canViewFull) && (
+        {/* Group chat section（chat API 仍为 event 语境——无绑定任务暂不提供建群） */}
+        {event && (isPocOfDept || canViewFull) && (
           <section className="mb-6">
             <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 16px" }} />
             <p className="text-[11px] font-semibold tracking-widest text-zinc-300 uppercase mb-3">飞书群</p>

@@ -30,8 +30,8 @@ const QUERIES: Record<string, string> = {
                 AND cv.version_id = (SELECT active_version_id FROM production WHERE id = $1)
               WHERE c.production_id = $1 ORDER BY cv.name NULLS LAST`,
   task: `SELECT etr.id, COALESCE(etr.title, etr.id) AS label
-         FROM event_tech_req etr JOIN production_event pe ON pe.id = etr.event_id
-         WHERE pe.production_id = $1 ORDER BY etr.id DESC`,
+         FROM task etr
+         WHERE etr.production_id = $1 ORDER BY etr.id DESC`,
 };
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

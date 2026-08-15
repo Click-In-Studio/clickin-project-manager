@@ -68,6 +68,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const techReq = await createEventTechReq({
     id: uid(),
+    productionId,
     eventId,
     scheduleItemIds: body.scheduleItemIds ?? [],
     title,

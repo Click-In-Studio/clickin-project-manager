@@ -1973,7 +1973,7 @@ function TechReqCard({
           />
           <MountPointAssets
             productionId={productionId}
-            mountType="event_tech_req"
+            mountType="task"
             mountId={req.id}
             label={req.title}
             canEdit={canEditThisReq && !isEventClosed}

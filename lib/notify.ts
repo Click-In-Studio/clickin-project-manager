@@ -455,8 +455,8 @@ async function getWeeklyCallDataForUser(
     ),
     pool.query<{ event_id: string; title: string }>(
       `SELECT etr.event_id, etr.title
-       FROM event_tech_req etr
-       JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
+       FROM task etr
+       JOIN task_assignee eta ON eta.task_id = etr.id AND eta.user_id = $1
        WHERE etr.event_id = ANY($2) AND etr.status != 'done'`,
       [userId, eventIds],
     ),

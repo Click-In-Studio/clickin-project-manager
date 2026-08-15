@@ -1002,96 +1002,6 @@
       "nullable": false
     }
   ],
-  "event_tech_assignee": [
-    {
-      "column": "req_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    }
-  ],
-  "event_tech_req": [
-    {
-      "column": "id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "event_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "schedule_item_id",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "title",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "description",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
-      "column": "preset_minutes",
-      "type": "integer",
-      "nullable": true
-    },
-    {
-      "column": "department_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
-      "column": "status",
-      "type": "text",
-      "nullable": false,
-      "default": "'pending'::text"
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
-      "column": "chat_id",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "created_via",
-      "type": "text",
-      "nullable": false,
-      "default": "'explicit'::text"
-    }
-  ],
-  "event_tech_req_item": [
-    {
-      "column": "req_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "item_id",
-      "type": "text",
-      "nullable": false
-    }
-  ],
   "feishu_user": [
     {
       "column": "open_id",
@@ -2490,6 +2400,141 @@
       "type": "integer",
       "nullable": false,
       "default": "0"
+    }
+  ],
+  "task": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "description",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "preset_minutes",
+      "type": "integer",
+      "nullable": true
+    },
+    {
+      "column": "department_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'pending'::text"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "chat_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_via",
+      "type": "text",
+      "nullable": false,
+      "default": "'explicit'::text"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "start_time",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "end_time",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
+  "task_assignee": [
+    {
+      "column": "task_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
+  "task_dependency": [
+    {
+      "column": "blocking_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "blocked_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "task_milestone": [
+    {
+      "column": "task_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "milestone_id",
+      "type": "text",
+      "nullable": false
+    }
+  ],
+  "task_schedule_item": [
+    {
+      "column": "task_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "item_id",
+      "type": "text",
+      "nullable": false
     }
   ],
   "user_notification": [

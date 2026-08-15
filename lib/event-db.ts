@@ -77,9 +77,18 @@ export type EventCallTime = {
 
 export type EventTechReqAssignee = { userId: string; name: string };
 
+/** Task 依赖边端点（GitHub 语义：blockedBy=挡住我的，blocks=我挡住的）。 */
+export type TaskDependencyRef = { id: string; title: string; status: string };
+
+/**
+ * Task（原 event_tech_req）：production 级实体，event/schedule 绑定可选。
+ * effectiveStartTime/effectiveEndTime 为读侧解析链：自身 → 绑定 schedule
+ * items 的 min/max → event 起止。
+ */
 export type EventTechReq = {
   id: string;
-  eventId: string;
+  productionId: string;
+  eventId: string | null;
   scheduleItemIds: string[];
   title: string;
   description: string;
@@ -90,6 +99,11 @@ export type EventTechReq = {
   chatId: string | null;
   createdAt: string;
   createdVia: "explicit" | "dept_auto" | "poc";
+  startTime: string | null;
+  endTime: string | null;
+  effectiveStartTime: string | null;
+  effectiveEndTime: string | null;
+  milestoneIds: string[];
 };
 
 export type Mention = { userId: string; name: string };
@@ -165,13 +179,31 @@ type CallTimeRow = {
 };
 
 type TechReqRow = {
-  id: string; event_id: string;
+  id: string; production_id: string; event_id: string | null;
   title: string; description: string; preset_minutes: number | null;
   department_id: string | null; status: string; chat_id: string | null; created_at: Date;
   created_via?: string | null;
+  start_time: Date | null; end_time: Date | null;
+  effective_start_time: Date | null; effective_end_time: Date | null;
 };
 
-type TechAssigneeRow = { req_id: string; user_id: string; name: string };
+/** SELECT 列清单（task t 别名 + production_event pe LEFT JOIN 下的有效时间解析链）。 */
+const TASK_SELECT_COLS = `
+  t.id, t.production_id, t.event_id, t.title, t.description,
+  t.preset_minutes, t.department_id, t.status, t.chat_id, t.created_via, t.created_at,
+  t.start_time, t.end_time,
+  COALESCE(t.start_time,
+    (SELECT MIN(esi.start_time) FROM task_schedule_item tsi
+     JOIN event_schedule_item esi ON esi.id = tsi.item_id
+     WHERE tsi.task_id = t.id),
+    pe.start_time) AS effective_start_time,
+  COALESCE(t.end_time,
+    (SELECT MAX(esi.end_time) FROM task_schedule_item tsi
+     JOIN event_schedule_item esi ON esi.id = tsi.item_id
+     WHERE tsi.task_id = t.id),
+    pe.end_time) AS effective_end_time`;
+
+type TechAssigneeRow = { task_id: string; user_id: string; name: string };
 
 type ReportRow = {
   id: string; event_id: string; report_type: string; title: string;
@@ -239,14 +271,24 @@ function rowToCallTime(r: CallTimeRow): EventCallTime {
   };
 }
 
-function rowToTechReq(r: TechReqRow, assignees: EventTechReqAssignee[], scheduleItemIds: string[]): EventTechReq {
+function rowToTechReq(
+  r: TechReqRow,
+  assignees: EventTechReqAssignee[],
+  scheduleItemIds: string[],
+  milestoneIds: string[] = [],
+): EventTechReq {
   return {
-    id: r.id, eventId: r.event_id, scheduleItemIds,
+    id: r.id, productionId: r.production_id, eventId: r.event_id, scheduleItemIds,
     title: r.title, description: r.description,
     presetMinutes: r.preset_minutes, departmentId: r.department_id,
     status: r.status, assignees, chatId: r.chat_id ?? null,
     createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto" | "poc",
     createdAt: r.created_at.toISOString(),
+    startTime: r.start_time?.toISOString() ?? null,
+    endTime: r.end_time?.toISOString() ?? null,
+    effectiveStartTime: r.effective_start_time?.toISOString() ?? null,
+    effectiveEndTime: r.effective_end_time?.toISOString() ?? null,
+    milestoneIds,
   };
 }
 
@@ -763,8 +805,8 @@ export async function listEventPeople(eventId: string): Promise<{ userId: string
      WHERE esi.event_id = $1
      UNION
      SELECT a.user_id, a.name
-     FROM event_tech_assignee a
-     JOIN event_tech_req tr ON tr.id = a.req_id
+     FROM task_assignee a
+     JOIN task tr ON tr.id = a.task_id
      WHERE tr.event_id = $1 AND tr.status != 'awaiting'
      ORDER BY name`,
     [eventId]
@@ -886,105 +928,210 @@ export async function deleteEventCallTime(id: string, eventId: string): Promise<
 
 export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]> {
   const pool = getPool();
-  const [reqRes, assigneeRes, itemRes] = await Promise.all([
+  const [reqRes, assigneeRes, itemRes, milestoneRes] = await Promise.all([
     pool.query<TechReqRow>(
-      `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_via, created_at
-       FROM event_tech_req WHERE event_id = $1 ORDER BY created_at`,
+      `SELECT ${TASK_SELECT_COLS}
+       FROM task t
+       LEFT JOIN production_event pe ON pe.id = t.event_id
+       WHERE t.event_id = $1 ORDER BY t.created_at`,
       [eventId]
     ),
     pool.query<TechAssigneeRow>(
-      `SELECT eta.req_id, eta.user_id, eta.name
-       FROM event_tech_assignee eta
-       JOIN event_tech_req etr ON etr.id = eta.req_id
-       WHERE etr.event_id = $1`,
+      `SELECT ta.task_id, ta.user_id, ta.name
+       FROM task_assignee ta
+       JOIN task t ON t.id = ta.task_id
+       WHERE t.event_id = $1`,
       [eventId]
     ),
-    pool.query<{ req_id: string; item_id: string }>(
-      `SELECT etri.req_id, etri.item_id
-       FROM event_tech_req_item etri
-       JOIN event_tech_req etr ON etr.id = etri.req_id
-       WHERE etr.event_id = $1`,
+    pool.query<{ task_id: string; item_id: string }>(
+      `SELECT tsi.task_id, tsi.item_id
+       FROM task_schedule_item tsi
+       JOIN task t ON t.id = tsi.task_id
+       WHERE t.event_id = $1`,
+      [eventId]
+    ),
+    pool.query<{ task_id: string; milestone_id: string }>(
+      `SELECT tm.task_id, tm.milestone_id
+       FROM task_milestone tm
+       JOIN task t ON t.id = tm.task_id
+       WHERE t.event_id = $1`,
       [eventId]
     ),
   ]);
   const assigneeMap = new Map<string, EventTechReqAssignee[]>();
   for (const r of assigneeRes.rows) {
-    if (!assigneeMap.has(r.req_id)) assigneeMap.set(r.req_id, []);
-    assigneeMap.get(r.req_id)!.push({ userId: r.user_id, name: r.name });
+    if (!assigneeMap.has(r.task_id)) assigneeMap.set(r.task_id, []);
+    assigneeMap.get(r.task_id)!.push({ userId: r.user_id, name: r.name });
   }
   const itemMap = new Map<string, string[]>();
   for (const r of itemRes.rows) {
-    if (!itemMap.has(r.req_id)) itemMap.set(r.req_id, []);
-    itemMap.get(r.req_id)!.push(r.item_id);
+    if (!itemMap.has(r.task_id)) itemMap.set(r.task_id, []);
+    itemMap.get(r.task_id)!.push(r.item_id);
   }
-  return reqRes.rows.map(r => rowToTechReq(r, assigneeMap.get(r.id) ?? [], itemMap.get(r.id) ?? []));
+  const milestoneMap = new Map<string, string[]>();
+  for (const r of milestoneRes.rows) {
+    if (!milestoneMap.has(r.task_id)) milestoneMap.set(r.task_id, []);
+    milestoneMap.get(r.task_id)!.push(r.milestone_id);
+  }
+  return reqRes.rows.map(r => rowToTechReq(
+    r, assigneeMap.get(r.id) ?? [], itemMap.get(r.id) ?? [], milestoneMap.get(r.id) ?? [],
+  ));
 }
 
-export async function getEventTechReq(id: string, eventId: string): Promise<EventTechReq | null> {
+async function getTaskWhere(whereSql: string, params: unknown[]): Promise<EventTechReq | null> {
   const pool = getPool();
-  const [reqRes, assigneeRes, itemRes] = await Promise.all([
-    pool.query<TechReqRow>(
-      `SELECT id, event_id, title, description,
-              preset_minutes, department_id, status, chat_id, created_via, created_at
-       FROM event_tech_req WHERE id = $1 AND event_id = $2`,
-      [id, eventId]
-    ),
+  const reqRes = await pool.query<TechReqRow>(
+    `SELECT ${TASK_SELECT_COLS}
+     FROM task t
+     LEFT JOIN production_event pe ON pe.id = t.event_id
+     WHERE ${whereSql}`,
+    params,
+  );
+  if (!reqRes.rows[0]) return null;
+  const id = reqRes.rows[0].id;
+  const [assigneeRes, itemRes, milestoneRes] = await Promise.all([
     pool.query<TechAssigneeRow>(
-      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1",
-      [id]
+      "SELECT task_id, user_id, name FROM task_assignee WHERE task_id = $1", [id]
     ),
     pool.query<{ item_id: string }>(
-      "SELECT item_id FROM event_tech_req_item WHERE req_id = $1",
-      [id]
+      "SELECT item_id FROM task_schedule_item WHERE task_id = $1", [id]
+    ),
+    pool.query<{ milestone_id: string }>(
+      "SELECT milestone_id FROM task_milestone WHERE task_id = $1", [id]
     ),
   ]);
-  if (!reqRes.rows[0]) return null;
   return rowToTechReq(
     reqRes.rows[0],
     assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
     itemRes.rows.map(r => r.item_id),
+    milestoneRes.rows.map(r => r.milestone_id),
   );
+}
+
+/** event 语境 getter：仅命中绑定该 event 的 task（无绑定 task 走 getTechReqByProduction）。 */
+export async function getEventTechReq(id: string, eventId: string): Promise<EventTechReq | null> {
+  return getTaskWhere("t.id = $1 AND t.event_id = $2", [id, eventId]);
 }
 
 export async function getTechReqByProduction(id: string, productionId: string): Promise<EventTechReq | null> {
-  const pool = getPool();
-  const [reqRes, assigneeRes, itemRes] = await Promise.all([
-    pool.query<TechReqRow>(
-      `SELECT etr.id, etr.event_id, etr.title, etr.description,
-              etr.preset_minutes, etr.department_id, etr.status, etr.chat_id, etr.created_at
-       FROM event_tech_req etr
-       JOIN production_event pe ON pe.id = etr.event_id
-       WHERE etr.id = $1 AND pe.production_id = $2`,
-      [id, productionId]
-    ),
-    pool.query<TechAssigneeRow>(
-      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1",
-      [id]
-    ),
-    pool.query<{ item_id: string }>(
-      "SELECT item_id FROM event_tech_req_item WHERE req_id = $1",
-      [id]
-    ),
-  ]);
-  if (!reqRes.rows[0]) return null;
-  return rowToTechReq(
-    reqRes.rows[0],
-    assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
-    itemRes.rows.map(r => r.item_id),
-  );
+  return getTaskWhere("t.id = $1 AND t.production_id = $2", [id, productionId]);
 }
 
+/** Task 的双向依赖（blockedBy=挡住我的，blocks=我挡住的）。 */
+export async function getTaskDependencies(taskId: string): Promise<{
+  blockedBy: TaskDependencyRef[]; blocks: TaskDependencyRef[];
+}> {
+  const pool = getPool();
+  const [blockedByRes, blocksRes] = await Promise.all([
+    pool.query<{ id: string; title: string; status: string }>(
+      `SELECT t.id, t.title, t.status FROM task_dependency d
+       JOIN task t ON t.id = d.blocking_id
+       WHERE d.blocked_id = $1 ORDER BY t.created_at`,
+      [taskId]
+    ),
+    pool.query<{ id: string; title: string; status: string }>(
+      `SELECT t.id, t.title, t.status FROM task_dependency d
+       JOIN task t ON t.id = d.blocked_id
+       WHERE d.blocking_id = $1 ORDER BY t.created_at`,
+      [taskId]
+    ),
+  ]);
+  return { blockedBy: blockedByRes.rows, blocks: blocksRes.rows };
+}
+
+/**
+ * 整体替换"挡住我的"任务集合（GitHub blocked-by 编辑面）。
+ * 应用层不变量：同 production；新边不得成环（递归 CTE 检查 blocking 一侧的
+ * 传递闭包是否够到本 task）。违反抛错，由路由映射为 400。
+ */
+export async function setTaskBlockedBy(
+  taskId: string, productionId: string, blockingIds: string[], createdBy: string,
+): Promise<void> {
+  const unique = [...new Set(blockingIds)].filter(id => id !== taskId);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (unique.length > 0) {
+      const valid = await client.query<{ id: string }>(
+        `SELECT id FROM task WHERE id = ANY($1::text[]) AND production_id = $2`,
+        [unique, productionId],
+      );
+      if (valid.rows.length !== unique.length) throw new Error("blocking task 不存在或跨剧组");
+      // 环检测：从候选 blocker 出发沿"谁挡住它"上溯，若够到本 task 则成环
+      const cycle = await client.query<{ id: string }>(
+        `WITH RECURSIVE up AS (
+           SELECT d.blocking_id AS id FROM task_dependency d WHERE d.blocked_id = ANY($1::text[])
+           UNION
+           SELECT d.blocking_id FROM task_dependency d JOIN up ON d.blocked_id = up.id
+         )
+         SELECT id FROM up WHERE id = $2 LIMIT 1`,
+        [unique, taskId],
+      );
+      if (cycle.rows.length > 0 || unique.includes(taskId)) throw new Error("依赖成环");
+    }
+    await client.query("DELETE FROM task_dependency WHERE blocked_id = $1", [taskId]);
+    for (const blockingId of unique) {
+      await client.query(
+        `INSERT INTO task_dependency (blocking_id, blocked_id, created_by)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [blockingId, taskId, createdBy],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 整体替换里程碑绑定。应用层不变量：milestone 与 task 同 production
+ * （跨剧组 id 直接过滤丢弃）。不约束 task 截止 ≤ 里程碑时间。
+ */
+export async function setTaskMilestones(
+  taskId: string, productionId: string, milestoneIds: string[],
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM task_milestone WHERE task_id = $1", [taskId]);
+    const unique = [...new Set(milestoneIds)];
+    if (unique.length > 0) {
+      await client.query(
+        `INSERT INTO task_milestone (task_id, milestone_id)
+         SELECT $1, m.id FROM milestone m
+         WHERE m.id = ANY($2::text[]) AND m.production_id = $3
+         ON CONFLICT DO NOTHING`,
+        [taskId, unique, productionId],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** 应用层不变量：绑定的 item 必须属于 task 当前绑定的 event（跨 event id 过滤丢弃）。 */
 export async function setTechReqItems(reqId: string, itemIds: string[]): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM event_tech_req_item WHERE req_id = $1", [reqId]);
+    await client.query("DELETE FROM task_schedule_item WHERE task_id = $1", [reqId]);
     const unique = [...new Set(itemIds)];
-    for (const itemId of unique) {
+    if (unique.length > 0) {
       await client.query(
-        "INSERT INTO event_tech_req_item (req_id, item_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-        [reqId, itemId]
+        `INSERT INTO task_schedule_item (task_id, item_id)
+         SELECT t.id, esi.id
+         FROM task t
+         JOIN event_schedule_item esi ON esi.event_id = t.event_id
+         WHERE t.id = $1 AND esi.id = ANY($2::text[])
+         ON CONFLICT DO NOTHING`,
+        [reqId, unique]
       );
     }
     await client.query("COMMIT");
@@ -997,97 +1144,130 @@ export async function setTechReqItems(reqId: string, itemIds: string[]): Promise
 }
 
 export async function createEventTechReq(data: {
-  id: string; eventId: string; scheduleItemIds: string[];
+  id: string; productionId: string; eventId: string | null;
+  scheduleItemIds: string[];
   title: string; description: string; presetMinutes: number | null;
   departmentId: string | null; assignees: EventTechReqAssignee[];
+  startTime?: string | null; endTime?: string | null;
+  milestoneIds?: string[];
   createdVia?: "explicit" | "poc";
   createdBy: string;
 }): Promise<EventTechReq> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const res = await client.query<TechReqRow>(
-      `INSERT INTO event_tech_req
-         (id, event_id, title, description, preset_minutes, department_id, created_via)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING id, event_id, title, description,
-                 preset_minutes, department_id, status, chat_id, created_via, created_at`,
-      [data.id, data.eventId, data.title, data.description, data.presetMinutes, data.departmentId, data.createdVia ?? "explicit"]
+    await client.query(
+      `INSERT INTO task
+         (id, production_id, event_id, title, description, preset_minutes,
+          department_id, start_time, end_time, created_via)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [data.id, data.productionId, data.eventId, data.title, data.description,
+       data.presetMinutes, data.departmentId,
+       data.startTime ?? null, data.endTime ?? null, data.createdVia ?? "explicit"]
     );
+    // schedule 绑定蕴含 event 绑定：无 event 或跨 event 的 item 直接过滤丢弃
     const unique = [...new Set(data.scheduleItemIds)];
-    for (const itemId of unique) {
+    if (unique.length > 0 && data.eventId) {
       await client.query(
-        "INSERT INTO event_tech_req_item (req_id, item_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-        [data.id, itemId]
+        `INSERT INTO task_schedule_item (task_id, item_id)
+         SELECT $1, esi.id FROM event_schedule_item esi
+         WHERE esi.event_id = $2 AND esi.id = ANY($3::text[])
+         ON CONFLICT DO NOTHING`,
+        [data.id, data.eventId, unique]
       );
     }
     for (const a of data.assignees) {
       await client.query(
-        "INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1,$2,$3)",
+        "INSERT INTO task_assignee (task_id, user_id, name) VALUES ($1,$2,$3)",
         [data.id, a.userId, a.name]
+      );
+    }
+    const milestones = [...new Set(data.milestoneIds ?? [])];
+    if (milestones.length > 0) {
+      await client.query(
+        `INSERT INTO task_milestone (task_id, milestone_id)
+         SELECT $1, m.id FROM milestone m
+         WHERE m.id = ANY($2::text[]) AND m.production_id = $3
+         ON CONFLICT DO NOTHING`,
+        [data.id, milestones, data.productionId]
       );
     }
     await client.query("COMMIT");
     // Write resource grants after transaction commit (best-effort; failures don't roll back the req)
-    const prodRow = await getPool().query<{ production_id: string }>(
-      "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
-    );
-    if (prodRow.rows[0]) {
-      await writeTechReqGrants(data.id, prodRow.rows[0].production_id, data.departmentId, data.createdBy, data.eventId);
-      if (data.departmentId) {
-        await writeTaskDeptEventVisibility(data.eventId, data.departmentId, prodRow.rows[0].production_id, data.createdBy);
-      }
+    await writeTechReqGrants(data.id, data.productionId, data.departmentId, data.createdBy, data.eventId);
+    if (data.departmentId && data.eventId) {
+      await writeTaskDeptEventVisibility(data.eventId, data.departmentId, data.productionId, data.createdBy);
     }
-    return rowToTechReq(res.rows[0], data.assignees, unique);
+    const created = await getTechReqByProduction(data.id, data.productionId);
+    if (!created) throw new Error(`task not found after create: ${data.id}`);
+    return created;
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
   }
 }
 
-export async function updateEventTechReq(
-  id: string, eventId: string,
+export async function updateTaskByProduction(
+  id: string, productionId: string,
   fields: {
     title?: string; description?: string;
     presetMinutes?: number | null; departmentId?: string | null; status?: string;
+    startTime?: string | null; endTime?: string | null;
+    /** 重绑/解绑 event；置 null 时连带清空 schedule 绑定（应用层不变量） */
+    eventId?: string | null;
   }
 ): Promise<EventTechReq | null> {
   const sets: string[] = [];
-  const vals: unknown[] = [id, eventId];
+  const vals: unknown[] = [id, productionId];
   if (fields.title         !== undefined) sets.push(`title          = $${vals.push(fields.title)}`);
   if (fields.description   !== undefined) sets.push(`description    = $${vals.push(fields.description)}`);
   if (fields.presetMinutes !== undefined) sets.push(`preset_minutes = $${vals.push(fields.presetMinutes)}`);
   if (fields.departmentId  !== undefined) sets.push(`department_id  = $${vals.push(fields.departmentId)}`);
   if (fields.status        !== undefined) sets.push(`status         = $${vals.push(fields.status)}`);
-  if (!sets.length) return getEventTechReq(id, eventId);
-  const res = await getPool().query<TechReqRow>(
-    `UPDATE event_tech_req SET ${sets.join(", ")} WHERE id = $1 AND event_id = $2
-     RETURNING id, event_id, title, description,
-               preset_minutes, department_id, status, chat_id, created_via, created_at`,
-    vals
-  );
-  if (!res.rows[0]) return null;
-  const [assigneeRes, itemRes] = await Promise.all([
-    getPool().query<TechAssigneeRow>(
-      "SELECT req_id, user_id, name FROM event_tech_assignee WHERE req_id = $1", [id]
-    ),
-    getPool().query<{ item_id: string }>(
-      "SELECT item_id FROM event_tech_req_item WHERE req_id = $1", [id]
-    ),
-  ]);
-  return rowToTechReq(
-    res.rows[0],
-    assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
-    itemRes.rows.map(r => r.item_id),
-  );
+  if (fields.startTime     !== undefined) sets.push(`start_time     = $${vals.push(fields.startTime)}`);
+  if (fields.endTime       !== undefined) sets.push(`end_time       = $${vals.push(fields.endTime)}`);
+  if (fields.eventId       !== undefined) sets.push(`event_id       = $${vals.push(fields.eventId)}`);
+  if (!sets.length) return getTechReqByProduction(id, productionId);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (fields.eventId !== undefined) {
+      // 重绑 event 必须同 production；解绑/重绑都先清 schedule 绑定
+      if (fields.eventId !== null) {
+        const ev = await client.query(
+          "SELECT 1 FROM production_event WHERE id = $1 AND production_id = $2",
+          [fields.eventId, productionId],
+        );
+        if (!ev.rows[0]) throw new Error("event 不存在或跨剧组");
+      }
+      await client.query(
+        `DELETE FROM task_schedule_item tsi USING task t
+         WHERE tsi.task_id = t.id AND t.id = $1
+           AND t.event_id IS DISTINCT FROM $2`,
+        [id, fields.eventId],
+      );
+    }
+    const res = await client.query<{ id: string }>(
+      `UPDATE task SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2 RETURNING id`,
+      vals
+    );
+    await client.query("COMMIT");
+    if (!res.rows[0]) return null;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  return getTechReqByProduction(id, productionId);
 }
 
-export async function deleteEventTechReq(id: string, eventId: string): Promise<void> {
+export async function deleteTaskByProduction(id: string, productionId: string): Promise<void> {
   await getPool().query(
-    "DELETE FROM event_tech_req WHERE id = $1 AND event_id = $2",
-    [id, eventId]
+    "DELETE FROM task WHERE id = $1 AND production_id = $2",
+    [id, productionId]
   );
 }
 
@@ -1106,9 +1286,15 @@ export async function upsertAwaitingTechReqs(
   let seq = 0;
   const uid = () => `tr${Date.now().toString(36)}${(++seq).toString(36)}`;
 
+  const prodRow = await pool.query<{ production_id: string; created_by: string }>(
+    "SELECT production_id, created_by FROM production_event WHERE id = $1", [eventId],
+  );
+  if (!prodRow.rows[0]) return result;
+  const productionId = prodRow.rows[0].production_id;
+
   for (const deptId of departmentIds) {
     const existing = await pool.query<{ id: string }>(
-      `SELECT id FROM event_tech_req WHERE event_id = $1 AND department_id = $2 AND status = 'awaiting'`,
+      `SELECT id FROM task WHERE event_id = $1 AND department_id = $2 AND status = 'awaiting'`,
       [eventId, deptId],
     );
 
@@ -1117,20 +1303,20 @@ export async function upsertAwaitingTechReqs(
       reqId = existing.rows[0].id;
       if (scheduleItemId) {
         await pool.query(
-          `INSERT INTO event_tech_req_item (req_id, item_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          `INSERT INTO task_schedule_item (task_id, item_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
           [reqId, scheduleItemId],
         );
       }
     } else {
       reqId = uid();
       await pool.query(
-        `INSERT INTO event_tech_req (id, event_id, title, description, department_id, status, created_via)
-         VALUES ($1, $2, '', '', $3, 'awaiting', 'dept_auto')`,
-        [reqId, eventId, deptId],
+        `INSERT INTO task (id, production_id, event_id, title, description, department_id, status, created_via)
+         VALUES ($1, $2, $3, '', '', $4, 'awaiting', 'dept_auto')`,
+        [reqId, productionId, eventId, deptId],
       );
       if (scheduleItemId) {
         await pool.query(
-          `INSERT INTO event_tech_req_item (req_id, item_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          `INSERT INTO task_schedule_item (task_id, item_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
           [reqId, scheduleItemId],
         );
       }
@@ -1141,13 +1327,8 @@ export async function upsertAwaitingTechReqs(
   }
 
   // 规则4：部门被 assign（dept_auto 路径）→ event 可见性行
-  const prodRow = await pool.query<{ production_id: string; created_by: string }>(
-    "SELECT production_id, created_by FROM production_event WHERE id = $1", [eventId],
-  );
-  if (prodRow.rows[0]) {
-    for (const deptId of departmentIds) {
-      await writeTaskDeptEventVisibility(eventId, deptId, prodRow.rows[0].production_id, prodRow.rows[0].created_by);
-    }
+  for (const deptId of departmentIds) {
+    await writeTaskDeptEventVisibility(eventId, deptId, productionId, prodRow.rows[0].created_by);
   }
 
   return result;
@@ -1183,7 +1364,7 @@ export async function writeTaskDeptEventVisibility(
 
 export async function completeAllEventTechReqs(eventId: string): Promise<void> {
   await getPool().query(
-    "UPDATE event_tech_req SET status = 'done' WHERE event_id = $1 AND status != 'done'",
+    "UPDATE task SET status = 'done' WHERE event_id = $1 AND status != 'done'",
     [eventId]
   );
 }
@@ -1194,10 +1375,10 @@ export async function setTechReqAssignees(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM event_tech_assignee WHERE req_id = $1", [reqId]);
+    await client.query("DELETE FROM task_assignee WHERE task_id = $1", [reqId]);
     for (const a of assignees) {
       await client.query(
-        "INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1,$2,$3)",
+        "INSERT INTO task_assignee (task_id, user_id, name) VALUES ($1,$2,$3)",
         [reqId, a.userId, a.name]
       );
     }
@@ -1211,7 +1392,7 @@ export async function setTechReqAssignees(
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
-         FROM event_tech_req etr
+         FROM task etr
          JOIN production_event pe ON pe.id = etr.event_id
          CROSS JOIN unnest($2::uuid[]) AS u
          CROSS JOIN (VALUES ('meta'), ('details'), ('publication')) AS s(sub)
@@ -1706,8 +1887,8 @@ export async function listUserCallTimes(eventId: string, userId: string): Promis
 export async function isUserEventTechAssignee(eventId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_tech_assignee eta
-       JOIN event_tech_req etr ON etr.id = eta.req_id
+       SELECT 1 FROM task_assignee eta
+       JOIN task etr ON etr.id = eta.task_id
        WHERE etr.event_id = $1 AND eta.user_id = $2
      ) AS exists`,
     [eventId, userId]
@@ -1719,7 +1900,7 @@ export async function isUserEventTechAssignee(eventId: string, userId: string): 
 export async function isUserReqAssignee(reqId: string, userId: string): Promise<boolean> {
   const res = await getPool().query<{ exists: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM event_tech_assignee WHERE req_id = $1 AND user_id = $2
+       SELECT 1 FROM task_assignee WHERE task_id = $1 AND user_id = $2
      ) AS exists`,
     [reqId, userId]
   );
@@ -1757,10 +1938,12 @@ export type MyTechReqFullEntry = {
   status: string;
   departmentId: string | null;
   departmentName: string | null;
-  eventId: string;
-  eventTitle: string;
+  eventId: string | null;
+  eventTitle: string | null;
   productionId: string;
   productionName: string;
+  effectiveStartTime: string | null;
+  effectiveEndTime: string | null;
   assignees: { userId: string; name: string }[];
   deptPeople: { userId: string; name: string }[];
   amPoc: boolean;
@@ -1771,46 +1954,55 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
     department_id: string | null; department_name: string | null;
-    event_id: string; event_title: string;
+    event_id: string | null; event_title: string | null;
     production_id: string; production_name: string;
+    effective_start_time: Date | null; effective_end_time: Date | null;
     am_poc: boolean;
     assignees_json: { userId: string; name: string }[] | null;
     dept_people_json: { userId: string; name: string }[] | null;
   }>(
     `SELECT
-       etr.id, etr.title, etr.description, etr.status, etr.department_id,
+       t.id, t.title, t.description, t.status, t.department_id,
        ed.name AS department_name,
        pe.id AS event_id, pe.title AS event_title,
-       pe.production_id, p.name AS production_name,
+       t.production_id, p.name AS production_name,
+       COALESCE(t.start_time,
+         (SELECT MIN(esi.start_time) FROM task_schedule_item tsi
+          JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
+         pe.start_time) AS effective_start_time,
+       COALESCE(t.end_time,
+         (SELECT MAX(esi.end_time) FROM task_schedule_item tsi
+          JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
+         pe.end_time) AS effective_end_time,
        (edm_poc.user_id IS NOT NULL) AS am_poc,
        (
          SELECT json_agg(json_build_object('userId', eta2.user_id, 'name', eta2.name)
                 ORDER BY eta2.name)
-         FROM event_tech_assignee eta2
-         WHERE eta2.req_id = etr.id
+         FROM task_assignee eta2
+         WHERE eta2.task_id = t.id
        ) AS assignees_json,
        (
          SELECT json_agg(json_build_object('userId', edm2.user_id, 'name', COALESCE(up3.name, ''))
                 ORDER BY up3.name)
          FROM production_dept_member edm2
          LEFT JOIN user_profile up3 ON up3.user_id = edm2.user_id
-         WHERE edm2.dept_id = etr.department_id
+         WHERE edm2.dept_id = t.department_id
        ) AS dept_people_json
-     FROM event_tech_req etr
-     JOIN production_event pe ON pe.id = etr.event_id
-     JOIN production p ON p.id = pe.production_id
-     LEFT JOIN production_dept ed ON ed.id = etr.department_id
+     FROM task t
+     LEFT JOIN production_event pe ON pe.id = t.event_id
+     JOIN production p ON p.id = t.production_id
+     LEFT JOIN production_dept ed ON ed.id = t.department_id
      LEFT JOIN production_dept_member edm_poc
-       ON edm_poc.dept_id = etr.department_id
+       ON edm_poc.dept_id = t.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
-     LEFT JOIN event_tech_assignee eta
-       ON eta.req_id = etr.id AND eta.user_id = $1
-     WHERE pe.status != 'cancelled'
+     LEFT JOIN task_assignee eta
+       ON eta.task_id = t.id AND eta.user_id = $1
+     WHERE (t.event_id IS NULL OR pe.status != 'cancelled')
        AND (
-         (etr.status = 'awaiting' AND edm_poc.user_id IS NOT NULL)
-         OR (etr.status != 'awaiting' AND (eta.user_id IS NOT NULL OR edm_poc.user_id IS NOT NULL))
+         (t.status = 'awaiting' AND edm_poc.user_id IS NOT NULL)
+         OR (t.status != 'awaiting' AND (eta.user_id IS NOT NULL OR edm_poc.user_id IS NOT NULL))
        )
-     ORDER BY pe.start_time NULLS LAST, etr.created_at`,
+     ORDER BY pe.start_time NULLS LAST, t.created_at`,
     [userId]
   );
   return res.rows.map(r => ({
@@ -1824,6 +2016,8 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
     eventTitle: r.event_title,
     productionId: r.production_id,
     productionName: r.production_name,
+    effectiveStartTime: r.effective_start_time?.toISOString() ?? null,
+    effectiveEndTime: r.effective_end_time?.toISOString() ?? null,
     amPoc: r.am_poc,
     assignees: r.assignees_json ?? [],
     deptPeople: r.dept_people_json ?? [],
@@ -1837,20 +2031,26 @@ export type ProductionTechReqEntry = {
   status: string;
   departmentId: string | null;
   departmentName: string | null;
-  eventId: string;
-  eventTitle: string;
+  eventId: string | null;
+  eventTitle: string | null;
   eventStartTime: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  effectiveStartTime: string | null;
+  effectiveEndTime: string | null;
+  milestones: { id: string; name: string; endDate: string }[];
+  /** 存在未 done 的 blocker（读侧派生，GitHub 语义，不进状态机） */
+  isBlocked: boolean;
   assignees: { userId: string; name: string }[];
 };
 
 /** 每个 event 的关联任务数（事件列表关联徽章用）。 */
 export async function listEventTaskCounts(productionId: string): Promise<Record<string, number>> {
   const res = await getPool().query<{ event_id: string; count: string }>(
-    `SELECT etr.event_id, COUNT(*) AS count
-     FROM event_tech_req etr
-     JOIN production_event pe ON pe.id = etr.event_id
-     WHERE pe.production_id = $1
-     GROUP BY etr.event_id`,
+    `SELECT event_id, COUNT(*) AS count
+     FROM task
+     WHERE production_id = $1 AND event_id IS NOT NULL
+     GROUP BY event_id`,
     [productionId],
   );
   return Object.fromEntries(res.rows.map(r => [r.event_id, Number(r.count)]));
@@ -1860,22 +2060,46 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
     department_id: string | null; department_name: string | null;
-    event_id: string; event_title: string; event_start_time: string | null;
+    event_id: string | null; event_title: string | null; event_start_time: Date | null;
+    start_time: Date | null; end_time: Date | null;
+    effective_start_time: Date | null; effective_end_time: Date | null;
+    milestones_json: { id: string; name: string; endDate: string }[] | null;
+    is_blocked: boolean;
     assignees_json: { userId: string; name: string }[] | null;
   }>(
     `SELECT
-       etr.id, etr.title, etr.description, etr.status, etr.department_id,
+       t.id, t.title, t.description, t.status, t.department_id,
        ed.name AS department_name,
        pe.id AS event_id, pe.title AS event_title, pe.start_time AS event_start_time,
+       t.start_time, t.end_time,
+       COALESCE(t.start_time,
+         (SELECT MIN(esi.start_time) FROM task_schedule_item tsi
+          JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
+         pe.start_time) AS effective_start_time,
+       COALESCE(t.end_time,
+         (SELECT MAX(esi.end_time) FROM task_schedule_item tsi
+          JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
+         pe.end_time) AS effective_end_time,
+       (
+         SELECT json_agg(json_build_object('id', m.id, 'name', m.name, 'endDate', m.end_date)
+                ORDER BY m.end_date)
+         FROM task_milestone tm JOIN milestone m ON m.id = tm.milestone_id
+         WHERE tm.task_id = t.id
+       ) AS milestones_json,
+       EXISTS (
+         SELECT 1 FROM task_dependency d
+         JOIN task bt ON bt.id = d.blocking_id
+         WHERE d.blocked_id = t.id AND bt.status != 'done'
+       ) AS is_blocked,
        (
          SELECT json_agg(json_build_object('userId', eta.user_id, 'name', eta.name) ORDER BY eta.name)
-         FROM event_tech_assignee eta WHERE eta.req_id = etr.id
+         FROM task_assignee eta WHERE eta.task_id = t.id
        ) AS assignees_json
-     FROM event_tech_req etr
-     JOIN production_event pe ON pe.id = etr.event_id
-     LEFT JOIN production_dept ed ON ed.id = etr.department_id
-     WHERE pe.production_id = $1 AND pe.status != 'cancelled'
-     ORDER BY pe.start_time NULLS LAST, etr.created_at`,
+     FROM task t
+     LEFT JOIN production_event pe ON pe.id = t.event_id
+     LEFT JOIN production_dept ed ON ed.id = t.department_id
+     WHERE t.production_id = $1 AND (t.event_id IS NULL OR pe.status != 'cancelled')
+     ORDER BY COALESCE(t.start_time, pe.start_time) NULLS LAST, t.created_at`,
     [productionId]
   );
   return res.rows.map(r => ({
@@ -1887,7 +2111,13 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
     departmentName: r.department_name,
     eventId: r.event_id,
     eventTitle: r.event_title,
-    eventStartTime: r.event_start_time,
+    eventStartTime: r.event_start_time?.toISOString() ?? null,
+    startTime: r.start_time?.toISOString() ?? null,
+    endTime: r.end_time?.toISOString() ?? null,
+    effectiveStartTime: r.effective_start_time?.toISOString() ?? null,
+    effectiveEndTime: r.effective_end_time?.toISOString() ?? null,
+    milestones: r.milestones_json ?? [],
+    isBlocked: r.is_blocked,
     assignees: r.assignees_json ?? [],
   }));
 }
@@ -1994,35 +2224,35 @@ export type MyPendingTechReqEntry = {
   id: string;
   title: string;
   status: string;
-  eventId: string;
-  eventTitle: string;
+  eventId: string | null;
+  eventTitle: string | null;
   productionId: string;
   productionName: string;
 };
 
 export type MyPocAwaitingReqEntry = {
   id: string;
-  eventId: string;
-  eventTitle: string;
+  eventId: string | null;
+  eventTitle: string | null;
   productionId: string;
   departmentName: string | null;
 };
 
 export async function listMyPocAwaitingReqs(userId: string, productionId?: string): Promise<MyPocAwaitingReqEntry[]> {
   const params: unknown[] = [userId];
-  const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
+  const prodFilter = productionId ? `AND etr.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
-    id: string; event_id: string; event_title: string; production_id: string; department_name: string | null;
+    id: string; event_id: string | null; event_title: string | null; production_id: string; department_name: string | null;
   }>(
-    `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, pe.production_id, ed.name AS department_name
-     FROM event_tech_req etr
-     JOIN production_event pe ON pe.id = etr.event_id
+    `SELECT etr.id, pe.id AS event_id, pe.title AS event_title, etr.production_id, ed.name AS department_name
+     FROM task etr
+     LEFT JOIN production_event pe ON pe.id = etr.event_id
      LEFT JOIN production_dept ed ON ed.id = etr.department_id
      JOIN production_dept_member edm_poc
        ON edm_poc.dept_id = etr.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
      WHERE etr.status = 'awaiting'
-       AND pe.status != 'cancelled'
+       AND (etr.event_id IS NULL OR pe.status != 'cancelled')
        ${prodFilter}
      ORDER BY pe.start_time NULLS LAST, etr.created_at`,
     params
@@ -2123,19 +2353,19 @@ export async function listMyFollowedUpcomingEvents(userId: string): Promise<MyFo
 
 export async function listMyPendingTechReqs(userId: string, productionId?: string): Promise<MyPendingTechReqEntry[]> {
   const params: unknown[] = [userId];
-  const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
+  const prodFilter = productionId ? `AND etr.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{
     id: string; title: string; status: string;
-    event_id: string; event_title: string;
+    event_id: string | null; event_title: string | null;
     production_id: string; production_name: string;
   }>(
     `SELECT etr.id, etr.title, etr.status,
             pe.id AS event_id, pe.title AS event_title,
-            pe.production_id, p.name AS production_name
-     FROM event_tech_req etr
-     JOIN event_tech_assignee eta ON eta.req_id = etr.id AND eta.user_id = $1
-     JOIN production_event pe ON pe.id = etr.event_id
-     JOIN production p ON p.id = pe.production_id
+            etr.production_id, p.name AS production_name
+     FROM task etr
+     JOIN task_assignee eta ON eta.task_id = etr.id AND eta.user_id = $1
+     LEFT JOIN production_event pe ON pe.id = etr.event_id
+     JOIN production p ON p.id = etr.production_id
      WHERE etr.status NOT IN ('done', 'awaiting')
        ${prodFilter}
      ORDER BY etr.created_at`,
@@ -2274,7 +2504,7 @@ export async function clearEventChatId(eventId: string): Promise<void> {
 }
 
 export async function clearTechReqChatId(reqId: string): Promise<void> {
-  await getPool().query("UPDATE event_tech_req SET chat_id = NULL WHERE id = $1", [reqId]);
+  await getPool().query("UPDATE task SET chat_id = NULL WHERE id = $1", [reqId]);
 }
 
 export async function setDepartmentChatId(deptId: string, chatId: string): Promise<void> {
@@ -2293,7 +2523,7 @@ export async function setEventChatId(eventId: string, chatId: string): Promise<v
 
 export async function setTechReqChatId(reqId: string, chatId: string): Promise<void> {
   await getPool().query(
-    "UPDATE event_tech_req SET chat_id = $1 WHERE id = $2",
+    "UPDATE task SET chat_id = $1 WHERE id = $2",
     [chatId, reqId]
   );
 }
@@ -2339,12 +2569,12 @@ export async function getEventChatTargets(eventId: string): Promise<string[]> {
 export async function getReqChatTargets(reqId: string): Promise<string[]> {
   const res = await getPool().query<{ open_id: string }>(
     `SELECT fu.open_id
-     FROM event_tech_assignee eta
+     FROM task_assignee eta
      JOIN feishu_user fu ON fu.user_id = eta.user_id
-     WHERE eta.req_id = $1
+     WHERE eta.task_id = $1
      UNION
      SELECT fu.open_id
-     FROM event_tech_req etr
+     FROM task etr
      JOIN production_dept_member edm ON edm.dept_id = etr.department_id AND edm.is_poc = true
      JOIN feishu_user fu ON fu.user_id = edm.user_id
      WHERE etr.id = $1`,
@@ -2358,7 +2588,7 @@ export async function getDeptReqsWithChat(
   deptId: string
 ): Promise<{ id: string; chatId: string }[]> {
   const res = await getPool().query<{ id: string; chat_id: string }>(
-    "SELECT id, chat_id FROM event_tech_req WHERE department_id = $1 AND chat_id IS NOT NULL",
+    "SELECT id, chat_id FROM task WHERE department_id = $1 AND chat_id IS NOT NULL",
     [deptId]
   );
   return res.rows.map(r => ({ id: r.id, chatId: r.chat_id }));
@@ -2412,17 +2642,17 @@ export async function countUnreadReportsForUser(userId: string, productionId?: s
  */
 export async function countPendingTasksForUser(userId: string, productionId?: string): Promise<number> {
   const params: unknown[] = [userId];
-  const prodFilter = productionId ? `AND pe.production_id = $${params.push(productionId)}` : "";
+  const prodFilter = productionId ? `AND etr.production_id = $${params.push(productionId)}` : "";
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(DISTINCT etr.id) AS count
-     FROM event_tech_req etr
-     JOIN production_event pe ON pe.id = etr.event_id
+     FROM task etr
+     LEFT JOIN production_event pe ON pe.id = etr.event_id
      LEFT JOIN production_dept_member edm_poc
        ON edm_poc.dept_id = etr.department_id
       AND edm_poc.user_id = $1
       AND edm_poc.is_poc = true
-     LEFT JOIN event_tech_assignee eta
-       ON eta.req_id = etr.id
+     LEFT JOIN task_assignee eta
+       ON eta.task_id = etr.id
       AND eta.user_id = $1
      WHERE (
        (edm_poc.user_id IS NOT NULL OR eta.user_id IS NOT NULL)

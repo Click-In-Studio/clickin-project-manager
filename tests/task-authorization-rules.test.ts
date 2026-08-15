@@ -3,7 +3,7 @@ import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember, getProductionPermissionContext } from "@/lib/db";
 import {
   createProductionEvent, createEventTechReq, upsertAwaitingTechReqs,
-  setTechReqAssignees, updateEventTechReq, isUserDeptPoc, isUserDeptMember,
+  setTechReqAssignees, updateTaskByProduction, isUserDeptPoc, isUserDeptMember,
 } from "@/lib/event-db";
 import { canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
 import { getPool } from "@/lib/pg";
@@ -61,7 +61,7 @@ afterAll(async () => {
 describe("规则1：关联部门的 POC 恒可编辑（不论路径/进度）", () => {
   it("explicitly created task with dept: POC can edit via contextual rule", async () => {
     const req = await createEventTechReq({
-      id: `tr_${shortId()}`, eventId, scheduleItemIds: [], title: "显式task",
+      id: `tr_${shortId()}`, productionId: prodId, eventId, scheduleItemIds: [], title: "显式task",
       description: "", presetMinutes: null, departmentId: deptId,
       assignees: [], createdBy: ownerId,
     });
@@ -75,7 +75,7 @@ describe("规则1：关联部门的 POC 恒可编辑（不论路径/进度）", 
 describe("规则2：assignee 恒可见（不论路径/进度）", () => {
   it("assignee sees the task via contextual rule", async () => {
     const req = await createEventTechReq({
-      id: `tr_${shortId()}`, eventId, scheduleItemIds: [], title: "指派task",
+      id: `tr_${shortId()}`, productionId: prodId, eventId, scheduleItemIds: [], title: "指派task",
       description: "", presetMinutes: null, departmentId: null,
       assignees: [], createdBy: ownerId,
     });
@@ -104,7 +104,7 @@ describe("规则3：已确认 + 关联部门 → 部门全员可见", () => {
       await ctxOf(memberId), req.id, eventId, prodId, deptId, { participantDeptIds: [] },
     );
     expect(before).toBe(false);
-    await updateEventTechReq(req.id, eventId, { status: "pending" });
+    await updateTaskByProduction(req.id, prodId, { status: "pending" });
     const after = await canViewTechReq(
       await ctxOf(memberId), req.id, eventId, prodId, deptId, { participantDeptIds: [] },
     );
@@ -115,7 +115,7 @@ describe("规则3：已确认 + 关联部门 → 部门全员可见", () => {
 describe("路径三：POC 为本部门主动发起 task", () => {
   it("poc-created task is marked 'poc' and dept members see it once confirmed-by-nature", async () => {
     const req = await createEventTechReq({
-      id: `tr_${shortId()}`, eventId, scheduleItemIds: [], title: "服装对装",
+      id: `tr_${shortId()}`, productionId: prodId, eventId, scheduleItemIds: [], title: "服装对装",
       description: "", presetMinutes: null, departmentId: deptId,
       assignees: [], createdBy: pocId, createdVia: "poc",
     });

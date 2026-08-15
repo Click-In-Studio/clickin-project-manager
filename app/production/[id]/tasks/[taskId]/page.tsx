@@ -36,13 +36,13 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const eventId = req.eventId;
 
   const [event, scheduleItems, departments, productionMembers] = await Promise.all([
-    getProductionEvent(eventId, productionId),
-    listScheduleItems(eventId),
+    eventId ? getProductionEvent(eventId, productionId) : Promise.resolve(null),
+    eventId ? listScheduleItems(eventId) : Promise.resolve([]),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
   ]);
 
-  if (!event) notFound();
+  if (eventId && !event) notFound();
 
   const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
