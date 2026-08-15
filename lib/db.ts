@@ -2995,8 +2995,8 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     // 1. Update RESTRICT (non-CASCADE) FKs — must happen before DELETE
     await client.query(`UPDATE cue_list SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE production_event SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
-    await client.query(`UPDATE event_report SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
-    await client.query(`UPDATE event_report_note SET author_user_id = $1 WHERE author_user_id = $2`, [keepUserId, deleteUserId]);
+    // report/note 作者已随 wiki-split 迁入 wiki.created_by
+    await client.query(`UPDATE wiki SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
@@ -3036,7 +3036,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE schedule_item_participant SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE task_assignee SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE event_report_read SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
-    await client.query(`UPDATE event_report_reply SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE wiki_comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE comment SET user_id = $1 WHERE user_id = $2`, [keepUserId, deleteUserId]);
     // Transfer cue list production_member_grant rows (cue_list_permission/role tables dropped in Phase 4)
     await client.query(

@@ -2488,11 +2488,9 @@ export async function getReportReply(id: string, reportId: string): Promise<Repo
 export async function deleteReportReply(id: string, reportId: string): Promise<void> {
   await getPool().query(
     `DELETE FROM wiki_comment wc
-     USING wiki w
-     WHERE wc.id = $1::uuid AND wc.wiki_id = w.id
-       AND (EXISTS (SELECT 1 FROM event_report er
-     JOIN wiki w ON w.id = er.wiki_id WHERE er.wiki_id = w.id AND er.id = $2)
-         OR EXISTS (SELECT 1 FROM event_report_note n WHERE n.wiki_id = w.id AND n.report_id = $2))`,
+     WHERE wc.id = $1::uuid
+       AND (EXISTS (SELECT 1 FROM event_report er WHERE er.wiki_id = wc.wiki_id AND er.id = $2)
+         OR EXISTS (SELECT 1 FROM event_report_note n WHERE n.wiki_id = wc.wiki_id AND n.report_id = $2))`,
     [id, reportId]
   );
 }
