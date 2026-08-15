@@ -22,6 +22,41 @@ function statusBadgeStyle(status: string): React.CSSProperties {
   return { background: "var(--paper)", color: "var(--muted)" };
 }
 
+/** 截止展示：有效结束时间（自身→绑定日程→事件解析链）；过期红、今日警示 */
+function dueInfo(t: ProductionTechReqEntry): { label: string; style: React.CSSProperties } | null {
+  const iso = t.effectiveEndTime;
+  if (!iso) return null;
+  const d = new Date(iso);
+  const label = `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (t.status === "done") return { label, style: { color: "var(--muted)" } };
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (d.getTime() < now.getTime() && !sameDay)
+    return { label: `${label} 已逾期`, style: { color: "var(--danger)", fontWeight: 700 } };
+  if (sameDay)
+    return { label: `${label} 今日截止`, style: { color: "var(--warn)", fontWeight: 700 } };
+  return { label, style: { color: "var(--muted)" } };
+}
+
+const isBlockedActive = (t: ProductionTechReqEntry) => t.isBlocked && t.status !== "done";
+
+function BlockedChip() {
+  return (
+    <span style={{
+      flexShrink: 0, borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 700,
+      background: "var(--danger-soft)", color: "var(--danger)",
+    }}>
+      ⛔ 受阻
+    </span>
+  );
+}
+
+/** 关系行文案：关联事件 / 独立任务（event 绑定可选后 eventTitle 可空） */
+function relationLabel(t: ProductionTechReqEntry): string {
+  const base = t.eventTitle ?? "独立任务";
+  return t.departmentName ? `${base} · ${t.departmentName}` : base;
+}
+
 type StatusFilter = "active" | "awaiting" | "pending" | "in_progress" | "done";
 
 const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
@@ -49,9 +84,7 @@ export default function ProductionTasksClient({
 }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [updating, setUpdating] = useState(false);
-  // 三 scope（原型）：我的 / 全部 / 按事件。
-  // "按事件"=仅看关联了事件的 Task——当前数据模型 event_id NOT NULL 恒为全集，
-  // 独立 Task 为未来目标（模型放开后此处零改动激活），见列表"独立 Task"分支。
+  // 三 scope（原型）：我的 / 全部 / 按事件（仅看关联了事件的 Task）。
   const [scope, setScope] = useState<"mine" | "all" | "event">("all");
   const [selectedEvent, setSelectedEvent] = useState<string>(
     initialEventFilter && initialTasks.some(t => t.eventId === initialEventFilter) ? initialEventFilter : "all"
@@ -85,21 +118,31 @@ export default function ProductionTasksClient({
     new Map(tasks.filter(t => t.departmentId).map(t => [t.departmentId!, t.departmentName!])).entries()
   );
 
+  const hasStandalone = tasks.some(t => !t.eventId);
+
   const filtered = tasks.filter(t => {
     if (scope === "mine" && !(currentUserId && t.assignees.some(a => a.userId === currentUserId))) return false;
-    if (scope === "event" && !t.eventId) return false;  // 独立 Task（未来模型）排除
-    if (selectedEvent !== "all" && t.eventId !== selectedEvent) return false;
+    if (scope === "event" && !t.eventId) return false;  // 仅看关联事件的
+    if (selectedEvent === "__standalone" ? t.eventId != null : (selectedEvent !== "all" && t.eventId !== selectedEvent)) return false;
     if (selectedDept !== "all" && t.departmentId !== selectedDept) return false;
     if (statusFilter === "active") return t.status !== "done";
     return t.status === statusFilter;
   });
 
-  // 摘要统计（原型 taskSummary）
+  // 摘要统计（原型 taskSummary：待处理 / 进行中 / 已阻塞 / 完成度）
+  const todayStr = new Date().toDateString();
+  const dueToday = tasks.filter(t =>
+    t.status !== "done" && t.effectiveEndTime && new Date(t.effectiveEndTime).toDateString() === todayStr
+  ).length;
   const summary = {
     pending: tasks.filter(t => t.status === "pending" || t.status === "awaiting").length,
     inProgress: tasks.filter(t => t.status === "in_progress").length,
+    blocked: tasks.filter(isBlockedActive).length,
     done: tasks.filter(t => t.status === "done").length,
   };
+  const inProgressDepts = new Set(
+    tasks.filter(t => t.status === "in_progress" && t.departmentId).map(t => t.departmentId)
+  ).size;
   const summaryTotal = tasks.length || 1;
   const donePct = Math.round((summary.done / summaryTotal) * 100);
 
@@ -107,7 +150,7 @@ export default function ProductionTasksClient({
 
   function countFor(sf: StatusFilter, eventId = selectedEvent, deptId = selectedDept) {
     return tasks.filter(t => {
-      if (eventId !== "all" && t.eventId !== eventId) return false;
+      if (eventId === "__standalone" ? t.eventId != null : (eventId !== "all" && t.eventId !== eventId)) return false;
       if (deptId !== "all" && t.departmentId !== deptId) return false;
       return sf === "active" ? t.status !== "done" : t.status === sf;
     }).length;
@@ -116,8 +159,8 @@ export default function ProductionTasksClient({
   if (tasks.length === 0) {
     return (
       <div className={styles.emptyState}>
-        暂无技术需求
-        <small>日程中创建技术需求后会在这里汇总</small>
+        暂无任务
+        <small>事件中创建的任务与独立任务都会在这里汇总</small>
       </div>
     );
   }
@@ -133,16 +176,19 @@ export default function ProductionTasksClient({
         background: "var(--line)", marginBottom: 18,
       }}>
         {[
-          [String(summary.pending), "待处理", "含待认领"],
-          [String(summary.inProgress), "进行中", "跨部门推进"],
-          [String(summary.done), "已完成", `共 ${tasks.length} 项`],
-          [`${donePct}%`, "完成度", "按任务状态统计"],
+          [String(summary.pending), "待处理", dueToday > 0 ? `${dueToday} 项今日截止` : "含待认领"],
+          [String(summary.inProgress), "进行中", inProgressDepts > 1 ? `跨 ${inProgressDepts} 个部门` : "推进中"],
+          [String(summary.blocked), "已阻塞", "等待前置任务"],
+          [`${donePct}%`, "完成度", `已完成 ${summary.done} / ${tasks.length} 项`],
         ].map(([num, label, hint]) => (
           <div key={label} style={{
             minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
             background: "var(--surface)",
           }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <span style={{
+              fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28,
+              color: label === "已阻塞" && summary.blocked > 0 ? "var(--danger)" : "var(--ink)",
+            }}>{num}</span>
             <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
               <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
               <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
@@ -165,14 +211,14 @@ export default function ProductionTasksClient({
           ))}
         </div>
         <span style={{ fontSize: 11, color: "var(--muted)" }}>
-          任务可关联事件协同推进；独立任务能力规划中
+          任务可独立存在，也可关联事件或里程碑；截止时间取自身设置或继承绑定日程/事件
         </span>
       </div>
 
       {/* ── Mobile: filter chips + accordion ── */}
       <div className={styles.mobileOnly}>
         <div className={styles.mobileTaskFilterBar}>
-          {events.length > 1 && (
+          {(events.length + (hasStandalone ? 1 : 0)) > 1 && (
             <select
               value={selectedEvent}
               onChange={e => setSelectedEvent(e.target.value)}
@@ -183,6 +229,9 @@ export default function ProductionTasksClient({
               }}
             >
               <option value="all">所有日程 ({countFor(statusFilter, "all", selectedDept)})</option>
+              {hasStandalone && (
+                <option value="__standalone">独立任务 ({countFor(statusFilter, "__standalone", selectedDept)})</option>
+              )}
               {events.map(([id, title]) => (
                 <option key={id} value={id}>{title} ({countFor(statusFilter, id, selectedDept)})</option>
               ))}
@@ -231,8 +280,9 @@ export default function ProductionTasksClient({
                   >
                     <div className={styles.mobileTaskCardMeta}>
                       <span className={styles.mobileTaskCardKicker}>
-                        {t.eventTitle}{t.departmentName && ` · ${t.departmentName}`}
+                        {relationLabel(t)}
                       </span>
+                      {isBlockedActive(t) && <BlockedChip />}
                       <span style={{
                         flexShrink: 0, borderRadius: 6, padding: "3px 8px",
                         fontSize: 10, fontWeight: 700, ...statusBadgeStyle(t.status),
@@ -243,9 +293,11 @@ export default function ProductionTasksClient({
                     <p className={`${styles.mobileTaskCardTitle} ${isExpanded ? "" : styles.mobileTaskCardTitleClamp}`}>
                       {t.title || "待填写需求名称…"}
                     </p>
-                    {t.assignees.length > 0 && (
+                    {(t.assignees.length > 0 || dueInfo(t)) && (
                       <p className={styles.mobileTaskCardAssignees}>
                         {t.assignees.map(a => a.name).join("、")}
+                        {t.assignees.length > 0 && dueInfo(t) && " · "}
+                        {dueInfo(t) && <span style={dueInfo(t)!.style}>{dueInfo(t)!.label}</span>}
                       </p>
                     )}
                   </button>
@@ -304,7 +356,7 @@ export default function ProductionTasksClient({
         <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 380px", gap: 0, height: "100%", minHeight: 0 }}>
           {/* Left: filters */}
           <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
-            {events.length > 1 && (
+            {(events.length + (hasStandalone ? 1 : 0)) > 1 && (
               <>
                 <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>日程</h3>
                 <div className={styles.filterList}>
@@ -312,6 +364,12 @@ export default function ProductionTasksClient({
                     <span>全部</span>
                     <span className={styles.filterCount}>{countFor(statusFilter, "all", selectedDept)}</span>
                   </button>
+                  {hasStandalone && (
+                    <button className={`${styles.filterItem} ${selectedEvent === "__standalone" ? styles.active : ""}`} onClick={() => setSelectedEvent("__standalone")}>
+                      <span>独立任务</span>
+                      <span className={styles.filterCount}>{countFor(statusFilter, "__standalone", selectedDept)}</span>
+                    </button>
+                  )}
                   {events.map(([id, title]) => (
                     <button key={id} className={`${styles.filterItem} ${selectedEvent === id ? styles.active : ""}`} onClick={() => setSelectedEvent(id)}>
                       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
@@ -396,7 +454,7 @@ export default function ProductionTasksClient({
                           letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)",
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                         }}>
-                          {t.eventTitle}{t.departmentName && ` · ${t.departmentName}`}
+                          {relationLabel(t)}
                         </p>
                         <p style={{
                           margin: 0, fontSize: 13, fontWeight: 600, lineHeight: 1.35, color: "var(--ink)",
@@ -406,17 +464,22 @@ export default function ProductionTasksClient({
                         }}>
                           {t.title || "待填写需求名称…"}
                         </p>
-                        {t.assignees.length > 0 && (
+                        {(t.assignees.length > 0 || dueInfo(t)) && (
                           <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)" }}>
                             {t.assignees.map(a => a.name).join("、")}
+                            {t.assignees.length > 0 && dueInfo(t) && " · "}
+                            {dueInfo(t) && <span style={dueInfo(t)!.style}>{dueInfo(t)!.label}</span>}
                           </p>
                         )}
                       </button>
-                      <span style={{
-                        flexShrink: 0, borderRadius: 6, padding: "3px 8px",
-                        fontSize: 10, fontWeight: 700, ...statusBadgeStyle(t.status),
-                      }}>
-                        {STATUS_LABEL[t.status] ?? t.status}
+                      <span style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                        <span style={{
+                          borderRadius: 6, padding: "3px 8px",
+                          fontSize: 10, fontWeight: 700, ...statusBadgeStyle(t.status),
+                        }}>
+                          {STATUS_LABEL[t.status] ?? t.status}
+                        </span>
+                        {isBlockedActive(t) && <BlockedChip />}
                       </span>
                     </div>
                   );
@@ -473,6 +536,36 @@ export default function ProductionTasksClient({
                   {visibleSelected.assignees.length > 0 && (
                     <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
                       负责人：{visibleSelected.assignees.map(a => a.name).join("、")}
+                    </p>
+                  )}
+                  {visibleSelected.effectiveStartTime && (
+                    <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
+                      时间：{new Date(visibleSelected.effectiveStartTime).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}
+                      {visibleSelected.effectiveEndTime && (
+                        <> — <span style={dueInfo(visibleSelected)?.style}>{dueInfo(visibleSelected)?.label}</span></>
+                      )}
+                      {!visibleSelected.startTime && <span style={{ fontSize: 10 }}>（继承自{visibleSelected.eventId ? "事件/日程" : "绑定对象"}）</span>}
+                    </p>
+                  )}
+                  {visibleSelected.milestones.length > 0 && (
+                    <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      里程碑：
+                      {visibleSelected.milestones.map(m => (
+                        <span key={m.id} title={m.endDate} style={{
+                          borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700,
+                          background: "var(--surface-2)", color: "var(--ink)",
+                        }}>
+                          ◆ {m.name} · {m.endDate.slice(5).replace("-", "/")}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  {isBlockedActive(visibleSelected) && (
+                    <p style={{
+                      margin: "10px 0 0", padding: "8px 12px", borderRadius: 8,
+                      background: "var(--danger-soft)", color: "var(--danger)", fontSize: 12, fontWeight: 600,
+                    }}>
+                      ⛔ 被前置任务阻塞——前置任务全部完成前建议暂缓推进（详情页可查看/编辑依赖）
                     </p>
                   )}
                 </div>
