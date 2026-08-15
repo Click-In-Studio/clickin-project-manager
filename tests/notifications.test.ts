@@ -21,6 +21,7 @@ import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { TEST_USER } from "./helpers";
 import { makeProduction, cleanupProduction } from "./factories";
+import { notifyTaskAssigned } from "@/lib/notify";
 import {
   createUserNotification,
   batchCreateUserNotifications,
@@ -815,5 +816,66 @@ describe("POST /api/my/notifications/[id]/act", () => {
     );
     expect(row.rows[0].rsvp).toBe("no");
     expect(row.rows[0].rsvp_at).not.toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// notifyTaskAssigned — 任务指派通知（老板派活语义：纯告知，无回执）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("notifyTaskAssigned", () => {
+  async function makeTask(title: string): Promise<string> {
+    const id = `tr${Math.random().toString(36).slice(2, 9)}`;
+    await getPool().query(
+      `INSERT INTO task (id, production_id, title, status) VALUES ($1, $2, $3, 'pending')`,
+      [id, prodId, title],
+    );
+    return id;
+  }
+
+  it("给新指派人写 inbox（kind=task_assign，info 无 action），过滤自指派与重复", async () => {
+    const taskId = await makeTask("指派通知任务");
+    await notifyTaskAssigned({
+      productionId: prodId,
+      taskId,
+      taskTitle: "指派通知任务",
+      eventTitle: "测试活动",
+      assignedBy: TEST_USER,
+      // 含指派人本人 + 重复 id：应只给 otherUserId 落一条
+      userIds: [TEST_USER, otherUserId, otherUserId],
+    });
+
+    const rows = await getPool().query<{
+      user_id: string; kind: string; category: string; action_required: boolean;
+      title: string; view_href: string | null;
+    }>(
+      `SELECT user_id, kind, category, action_required, title, view_href
+       FROM user_notification WHERE entity_type = 'tech_req' AND entity_id = $1`,
+      [taskId],
+    );
+    expect(rows.rows).toHaveLength(1);
+    const n = rows.rows[0];
+    expect(n.user_id).toBe(otherUserId);
+    expect(n.kind).toBe("task_assign");
+    expect(n.category).toBe("info");
+    expect(n.action_required).toBe(false);
+    expect(n.title).toContain("指派通知任务");
+    expect(n.view_href).toContain(`/tasks/${taskId}`);
+  });
+
+  it("仅自指派时不落任何通知", async () => {
+    const taskId = await makeTask("自指派任务");
+    await notifyTaskAssigned({
+      productionId: prodId,
+      taskId,
+      taskTitle: "自指派任务",
+      assignedBy: TEST_USER,
+      userIds: [TEST_USER],
+    });
+    const rows = await getPool().query(
+      `SELECT 1 FROM user_notification WHERE entity_type = 'tech_req' AND entity_id = $1`,
+      [taskId],
+    );
+    expect(rows.rows).toHaveLength(0);
   });
 });
