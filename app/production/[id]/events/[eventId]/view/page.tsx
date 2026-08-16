@@ -46,7 +46,7 @@ export default async function EventViewPage({
   if (!event) notFound();
 
   // Per-instance production_member_grant edit+ → full editor view on this page
-  const canViewFull = prodPermCtx.isAdmin
+  const canViewFull = prodPermCtx.isAdmin || prodPermCtx.isOwner
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   // Non-editors cannot see unpublished events
@@ -68,7 +68,7 @@ export default async function EventViewPage({
   const canViewReqsFull = await hasGrant(session.userId, productionId, "task", "*", "*", "view")
     || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
     || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit")
-    || prodPermCtx.isAdmin;
+    || prodPermCtx.isAdmin || prodPermCtx.isOwner;
   const canViewReqs = canViewReqsFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
   const viewerPermCtx = await loadEventPermContext(session.userId, eventId);

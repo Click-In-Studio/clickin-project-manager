@@ -66,7 +66,7 @@ export async function canViewAsset(
   asset: Pick<Asset, "id" | "isPublic">,
   face: AssetFace,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (await hasGrant(permCtx.userId, productionId, "asset", asset.id, "publication", "view")) return true;
   if (!await hasGrant(permCtx.userId, productionId, "asset", asset.id, face, "view")) return false;
   if (asset.isPublic) return true;
@@ -114,7 +114,7 @@ export async function filterVisibleAssets<T extends Pick<Asset, "id" | "isPublic
   productionId: string,
   assets: T[],
 ): Promise<T[]> {
-  if (permCtx.isAdmin || assets.length === 0) return assets;
+  if (permCtx.isAdmin || permCtx.isOwner || assets.length === 0) return assets;
   const [meta, pub, structIds] = await Promise.all([
     listGrantedResourceIds(permCtx.userId, productionId, "asset", "meta", "view"),
     listGrantedResourceIds(permCtx.userId, productionId, "asset", "publication", "view"),
@@ -136,7 +136,7 @@ export async function canPublishAsset(
   assetId: string,
   verb: "create" | "delete",
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   return hasGrant(permCtx.userId, productionId, "asset", assetId, "publication", verb);
 }
 
@@ -147,7 +147,7 @@ export async function mountHostSidePermitted(
   mountType: string,
   mountId: string,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (mountType === "production") return (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "production", "*", "mounts", "create"));
   if (SCENE_MOUNT_TYPES.includes(mountType))
     return hasGrant(permCtx.userId, productionId, "scene", mountId, "mounts", "create");
@@ -161,7 +161,7 @@ export async function canCreateShareToken(
   productionId: string,
   asset: Pick<Asset, "id" | "isPublic">,
 ): Promise<{ allowed: boolean; downloadable: boolean }> {
-  if (permCtx.isAdmin) return { allowed: true, downloadable: true };
+  if (permCtx.isAdmin || permCtx.isOwner) return { allowed: true, downloadable: true };
   const allowed = await hasGrant(permCtx.userId, productionId, "asset", asset.id, "shares", "create")
     && await canViewAsset(permCtx, productionId, asset, "meta");
   if (!allowed) return { allowed: false, downloadable: false };

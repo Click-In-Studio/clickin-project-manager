@@ -46,7 +46,7 @@ export default async function EventDetailPage({
   if (!event) notFound();
 
   // Check per-event resource grant
-  const accessResult = prodPermCtx.isAdmin
+  const accessResult = (prodPermCtx.isAdmin || prodPermCtx.isOwner)
     ? { canAccess: true as const, level: "manage" as const }
     : await getEventAccess(session.userId, productionId, eventId);
 

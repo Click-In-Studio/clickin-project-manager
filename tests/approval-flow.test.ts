@@ -232,6 +232,51 @@ describe("submitAccessRequest", () => {
     await getPool().query(`UPDATE approval_request SET status='cancelled' WHERE id=$1`, [req.id]);
   });
 
+  it("re-request for the same target supersedes the pending one (auto-cancel + expire notifications)", async () => {
+    // 2026-08-16 用户反馈：先申 1 天 TTL 再申 30 天，旧申请待办堆积审批人收件箱
+    const first = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "1 day",
+    });
+    const second = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "30 days",
+    });
+
+    const firstRow = await getPool().query<{ status: string; resolved_at: Date | null }>(
+      `SELECT status, resolved_at FROM approval_request WHERE id = $1`, [first.id]);
+    expect(firstRow.rows[0].status).toBe("cancelled");
+    expect(firstRow.rows[0].resolved_at).not.toBeNull();
+
+    // 旧申请的审批待办已过期，新申请的待办存活
+    const firstNotifs = await getPool().query(
+      `SELECT 1 FROM user_notification
+       WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+      [first.id]);
+    expect(firstNotifs.rows.length).toBe(0);
+    const secondNotifs = await getPool().query(
+      `SELECT 1 FROM user_notification
+       WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+      [second.id]);
+    expect(secondNotifs.rows.length).toBeGreaterThan(0);
+
+    // 不同 level 的 pending 不被覆盖
+    const editReq = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "edit",
+    });
+    const secondRow = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [second.id]);
+    expect(secondRow.rows[0].status).toBe("pending_supervisor");
+
+    await getPool().query(`UPDATE approval_request SET status='cancelled' WHERE id = ANY($1::uuid[])`,
+      [[second.id, editReq.id]]);
+  });
+
   it("escalation_chain records the notified phase", async () => {
     const req = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",

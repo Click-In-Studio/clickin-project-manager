@@ -7458,27 +7458,61 @@ export async function submitAccessRequest(
   const supervisorId = supervisorRes.rows[0]?.supervisor_id ?? null;
 
   const initialStatus = supervisorId ? "pending_supervisor" : "pending_resource";
-
-  // Insert the request
   const requestType = params.type ?? "resource_access";
-  const insertRes = await getPool().query<ApprovalRow>(
-    `INSERT INTO approval_request
-       (production_id, subject_id, type,
-        resource_type, resource_id, resource_sub,
-        permission_level, grant_type, ttl_duration, note, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10,$11)
-     RETURNING *`,
-    [
-      productionId, userId, requestType,
-      params.resourceType, resourceId, resourceSub,
-      params.permissionLevel,
-      params.grantType ?? "permanent",
-      params.ttlDuration ?? null,
-      params.note ?? null,
-      initialStatus,
-    ],
-  );
-  const request = insertRes.rows[0];
+
+  // 覆盖式申请自动完成（2026-08-16 用户反馈）：同人同目标同级别的旧 pending 申请
+  // 被新申请取代（如先申 1 天 TTL 又申 30 天）——自动 cancel 并过期其待办通知，
+  // 否则旧申请的审批待办永远挂着，审批人收件箱堆积。
+  // 与新申请 INSERT 同事务（AI review）：中途失败不能留"旧的已撤、新的没建"半态；
+  // IS NOT DISTINCT FROM 兼容存量 NULL resource_id/sub（新写入恒 '*'，老行可能 NULL）
+  const supersedeClient = await getPool().connect();
+  let request: ApprovalRow;
+  try {
+    await supersedeClient.query("BEGIN");
+    const superseded = await supersedeClient.query<{ id: string }>(
+      `UPDATE approval_request
+       SET status = 'cancelled', resolved_at = now()
+       WHERE production_id = $1 AND subject_id = $2 AND type = $3
+         AND resource_type = $4
+         AND resource_id IS NOT DISTINCT FROM $5
+         AND resource_sub IS NOT DISTINCT FROM $6
+         AND permission_level = $7
+         AND status IN ('pending_supervisor', 'pending_resource')
+       RETURNING id`,
+      [productionId, userId, requestType, params.resourceType, resourceId, resourceSub, params.permissionLevel],
+    );
+    for (const r of superseded.rows) {
+      await supersedeClient.query(
+        `UPDATE user_notification SET expired_at = now()
+         WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+        [r.id],
+      );
+    }
+    const insertRes = await supersedeClient.query<ApprovalRow>(
+      `INSERT INTO approval_request
+         (production_id, subject_id, type,
+          resource_type, resource_id, resource_sub,
+          permission_level, grant_type, ttl_duration, note, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10,$11)
+       RETURNING *`,
+      [
+        productionId, userId, requestType,
+        params.resourceType, resourceId, resourceSub,
+        params.permissionLevel,
+        params.grantType ?? "permanent",
+        params.ttlDuration ?? null,
+        params.note ?? null,
+        initialStatus,
+      ],
+    );
+    request = insertRes.rows[0];
+    await supersedeClient.query("COMMIT");
+  } catch (e) {
+    await supersedeClient.query("ROLLBACK");
+    throw e;
+  } finally {
+    supersedeClient.release();
+  }
 
   // Get subject display name and resource description for notifications
   const nameRes = await getPool().query<{ name: string }>(

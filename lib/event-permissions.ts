@@ -102,7 +102,7 @@ export async function canWriteReport(
   reportId: string,
   productionId: string,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (permCtx.memberPermissions === null) return false;
   return hasGrant(permCtx.userId, productionId, "report", reportId, "*", "edit");
 }
@@ -115,7 +115,7 @@ export async function canPublishReport(
   reportId: string,
   productionId: string,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (permCtx.memberPermissions === null) return false;
   return hasGrant(permCtx.userId, productionId, "report", reportId, "publication", "create");
 }
@@ -131,7 +131,7 @@ export async function canEditTechReq(
   eventId: string | null,
   productionId: string,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (permCtx.memberPermissions === null) return false;
   const [hasReqGrant, hasEventGrant] = await Promise.all([
     hasGrant(permCtx.userId, productionId, "task", techReqId, "*", "edit"),
@@ -159,7 +159,7 @@ export async function canAssignTechReq(
   techReqId: string,
   productionId: string,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (permCtx.memberPermissions === null) return false;
   if (await hasGrant(permCtx.userId, productionId, "task", techReqId, "assignees", "edit")) return true;
   const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
@@ -177,7 +177,7 @@ export async function canViewTechReq(
   techReqDeptId: string | null,
   ctx: Pick<EventPermContext, "participantDeptIds">,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (await hasGrant(permCtx.userId, productionId, "task", "*", "*", "view")) return true;
   if (eventId && await hasGrant(permCtx.userId, productionId, "event", eventId, "tasks", "view")) return true;
   // Participants of the req's dept can view
@@ -214,8 +214,8 @@ export async function canWriteNote(
   departmentId: string,
   participantDeptIds: string[],
 ): Promise<NoteWriteChannel | null> {
+  if (permCtx.isAdmin || permCtx.isOwner) return "moderator";
   if (permCtx.memberPermissions === null) return null;
-  if (permCtx.isAdmin) return "moderator";
   if (participantDeptIds.includes(departmentId)) return "dept";
   if (await hasGrant(permCtx.userId, productionId, "dept", departmentId, "notes", "create")) {
     // 归因：POC = 本部门通道；其余（通配/被授实例行的非 POC）= wildcard。
@@ -245,7 +245,7 @@ export async function canEditNote(
   participantDeptIds: string[],
   verb: "edit" | "delete",
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
   if (permCtx.userId === note.authorUserId && participantDeptIds.includes(note.departmentId)) return true;
   // 批C C3：POC（dept/<D>/notes@edit|delete 行）可管**本部门通道**提出的 note；
@@ -263,7 +263,7 @@ export async function canModerateNotes(
   productionId: string,
   eventId: string,
 ): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   return hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit");
 }
 
@@ -273,7 +273,7 @@ export async function canModerateNotes(
  * synchronous proxy for "SM/producer" role until Phase 5b migrates reports to production_member_grant.
  */
 export async function isReportViewer(permCtx: PermissionContext, productionId: string): Promise<boolean> {
-  if (permCtx.isAdmin) return true;
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
   // 批B：查看未发布报告是独立可授节点（event/<id>/reports@view）；
   // organizer 经迁移/模板保真获得通配行，但该能力从此与创建权解耦
   return hasGrant(permCtx.userId, productionId, "event", "*", "reports", "view");

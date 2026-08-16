@@ -35,7 +35,7 @@ export default async function AssetPreviewPage({
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
   // 批D：实例可见判定（能力票∧结构 ∨ publication@view），asset 加载后判
-  if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
+  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
   const asset = await getAsset(assetId);
