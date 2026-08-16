@@ -112,9 +112,13 @@ export default function WikiDocClient({
 
   async function saveNow(next?: { title?: string; body?: string; tags?: string }) {
     if (savingRef.current) return;
-    const t = (next?.title ?? title).trim();
-    const b = next?.body ?? body;
-    const tg = next?.tags ?? tagsInput;
+    // 必须经 latestRef 读最新值：schedule 的 setTimeout 捕获的是 arm 时那轮渲染的
+    // 闭包，直接读 state 会保存"本次操作之前"的内容——单次操作（[[ 补全选中、
+    // 拖放成链）会被整个丢掉（用户实测：刷新后只剩 [[x / 拖入内容消失）
+    const cur = latestRef.current;
+    const t = (next?.title ?? cur.title).trim();
+    const b = next?.body ?? cur.body;
+    const tg = next?.tags ?? cur.tags;
     if (!t) return; // 空标题不落库，等用户补
     const prev = savedRef.current;
     if (t === prev.title && b === prev.body && tg === prev.tags) { setStatus(s => s === "dirty" ? "saved" : s); return; }

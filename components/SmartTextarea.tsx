@@ -448,6 +448,10 @@ export default function SmartTextarea({
   function makeSuggestion(trigger: string, enabled: boolean) {
     return {
       char: trigger,
+      // 默认 allowedPrefixes=[' '] 只在空格/行首后触发——CJK 文本后敲 @/#/[[
+      // 全都不弹（用户实测）。任意前缀放开，三种触发器统一
+      allowedPrefixes: null,
+      startOfLine: false,
       pluginKey: new PluginKey(trigger === "#" ? "contentMention" : trigger === "@" ? "atMention" : "wikiMention"),
       allow: () => enabled,
       items: ({ query }: { query: string }) =>
@@ -473,6 +477,9 @@ export default function SmartTextarea({
         });
 
     const contentMentionCfg = ContentMentionExt.configure({
+      // v3 Mention 退格默认把 chip 还原成 mentionSuggestionChar（未设=@）——
+      // 用户实测删 wiki chip 留下 '@'；改为整颗删净
+      deleteTriggerWithBackspace: true,
       renderText: ({ node }) => {
         const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
         return serializeMention({ kind, displayMode, id, aux, versionId });
@@ -504,9 +511,6 @@ export default function SmartTextarea({
     const wikiTriggerCfg = WikiLinkTrigger.configure({
       suggestion: {
         ...makeSuggestion("[[", hasWikiPlugin),
-        startOfLine: false,
-        // CJK 关键：默认 allowedPrefixes=[' '] 导致中文后敲 [[ 不触发
-        allowedPrefixes: null,
         command: ({ editor, range, props }: { editor: unknown; range: { from: number; to: number }; props: { id: string; label: string } }) => {
           insertWikiMentionAt(editor, range, props);
         },
