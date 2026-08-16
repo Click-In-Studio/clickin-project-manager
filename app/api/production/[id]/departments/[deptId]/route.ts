@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { toActor, hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getProductionDept,
   updateProductionDept,
@@ -18,7 +19,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   );
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
-  if (!hasPermission("dept:create", permCtx))
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "org_dept", "*", "*", "create")))
     return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };
   return { session, deny: null, isArchived };
 }
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const dept = await getProductionDept(deptId, productionId);
@@ -49,9 +50,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     name?: string;
     parentId?: string | null;
+    kind?: "dept" | "group";
     displayOrder?: number;
-    permissions?: string[];
-    allowedCueTypes?: string[];
   };
 
   const fields: Parameters<typeof updateProductionDept>[2] = {};
@@ -61,9 +61,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     fields.name = name;
   }
   if ("parentId" in body) fields.parentId = body.parentId ?? null;
+  if (body.kind === "dept" || body.kind === "group") fields.kind = body.kind;
   if (typeof body.displayOrder === "number") fields.displayOrder = body.displayOrder;
-  if (Array.isArray(body.permissions)) fields.permissions = body.permissions;
-  if (Array.isArray(body.allowedCueTypes)) fields.allowedCueTypes = body.allowedCueTypes;
 
   await updateProductionDept(deptId, productionId, fields);
 

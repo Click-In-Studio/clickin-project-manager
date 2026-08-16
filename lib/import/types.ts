@@ -41,6 +41,8 @@ export type ScriptColMap = {
   character?: ColRef;
   stageComment?: ColRef;
   bodyColumns: ColRef[];   // one or more body columns, concatenated in order
+  cueColumns?: ColRef[];   // cue-list columns; values become cues anchored to each row's block
+  cueColumnNames?: Record<number, string>; // cue column index → imported Cue list name
   stageInlineColumns?: ColRef[]; // subset of bodyColumns treated as inline stage directions
   /** Bracket patterns in body text that are normalized as inline stage directions.
    *  Supported values: "（）" "【】" "()" "[]" */
@@ -104,6 +106,32 @@ export type ImportScriptPreview = {
   charConflicts: CharConflict[];
   blockCount: number;
   warningRehearsalMarks: string[];  // marks that don't match expected pattern
+  typeConflicts: ImportTypeConflict[];
+};
+
+export type ImportTypeConflict = {
+  sourceIndex: number;
+  rawType: string;
+  blockTypes: Array<"dialogue" | "stage" | "lyric" | "marker">;
+  resolvedBlockType: "dialogue" | "stage" | "lyric" | "marker";
+};
+
+export type ImportTagChanges = {
+  createGroups: Array<{ clientId: string; name: string }>;
+  createOptions: Array<{ clientId: string; groupId: string; label: string; color: string; sortOrder: number }>;
+  updateGroups: Array<{
+    groupId: string;
+    defaultOptionId?: string | null;
+    lyricSplitAfterOptionId?: string | null;
+  }>;
+  updateOptions: Array<{
+    groupId: string;
+    optionId: string;
+    color?: string;
+    sortOrder?: number;
+  }>;
+  deleteGroupIds: string[];
+  deleteOptionIds: string[];
 };
 
 export type JointImportMarker = {

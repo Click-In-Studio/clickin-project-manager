@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { presignedPut } from "@/lib/r2";
 
 // Fixed key — probe uploads always overwrite this object, no accumulation.
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("script:view", permCtx))
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view")))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const { url } = presignedPut(PROBE_R2_KEY, "application/octet-stream", 120);

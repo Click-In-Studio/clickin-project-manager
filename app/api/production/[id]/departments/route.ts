@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { toActor, hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, getBossOpenIds } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   listProductionDepts,
   createProductionDept,
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), id)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const departments = await listProductionDepts(id);
@@ -43,15 +44,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("dept:create", permCtx))
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "org_dept", "*", "*", "create")))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
     name?: string;
     parentId?: string | null;
+    kind?: "dept" | "group";
     displayOrder?: number;
-    permissions?: string[];
-    allowedCueTypes?: string[];
   };
 
   const name = body.name?.trim();
@@ -63,9 +63,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     productionId: id,
     name,
     parentId: body.parentId ?? null,
+    kind: body.kind === "group" ? "group" : "dept",
     displayOrder,
-    permissions: body.permissions ?? [],
-    allowedCueTypes: body.allowedCueTypes ?? [],
   });
 
   // Auto-create Feishu group for new dept

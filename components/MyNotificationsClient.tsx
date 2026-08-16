@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import PageHeader from "@/components/PageHeader";
 import Link from "next/link";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
@@ -435,12 +436,7 @@ export default function MyNotificationsClient({ productions = [], productionId }
   return (
     <div className={productionId ? undefined : styles.workspace} style={productionId ? { padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" } : undefined}>
       {productionId ? (
-        <div style={{ marginBottom: 20 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4, margin: "0 0 4px" }}>
-            Notifications
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: 0 }}>通知提醒</h1>
-        </div>
+        <PageHeader eyebrow="Notifications" title="通知提醒" side="stage" />
       ) : (
         <div className={styles.pageHeader}>
           <p className={styles.eyebrow}>Platform · 通知</p>
@@ -448,6 +444,32 @@ export default function MyNotificationsClient({ productions = [], productionId }
         </div>
       )}
 
+      {/* ── 摘要统计（原型 notificationSummary；Action Bar 横幅省略——与页头重复）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(items.filter((n) => actMode(n) === "view" && !n.readAt).length), "未读", "仅告知或需要查看"],
+          [String(items.filter((n) => n.actionRequired && !n.actedAt).length), "待确认 / 处理", "关键变化与行动"],
+          [String(items.filter(isDone).length), "已处理", "确认与完成的记录"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Panel（原型排版）：内部维持现有 tab + 分栏 ── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       <div className={styles.tabBar} style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {(["all", "action", "info", "done"] as Tab[]).map((t) => (
           <button key={t} aria-selected={tab === t} onClick={() => handleTabChange(t)}>
@@ -577,8 +599,8 @@ export default function MyNotificationsClient({ productions = [], productionId }
       </div>
 
       {/* ── Desktop: master-detail split ── */}
-      <div className={styles.desktopOnly}>
-        <div className={styles.splitLayout}>
+      <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+        <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
           {/* Left: list */}
           <div className={`${styles.splitPane} ${styles.splitList}`}>
             {loading ? (
@@ -609,6 +631,7 @@ export default function MyNotificationsClient({ productions = [], productionId }
           </div>
         </div>
       </div>
+      </section>
     </div>
   );
 }

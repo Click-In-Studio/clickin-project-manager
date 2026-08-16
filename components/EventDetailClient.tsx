@@ -2,8 +2,11 @@
 
 import React, { useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
+import TreePickerModal from "@/components/TreePickerModal";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
+import ChevronIcon from "@/components/ChevronIcon";
 import type {
   ProductionEvent, EventScheduleItemWithParticipants, ScheduleItemParticipant,
   EventCallTime, EventTechReq, EventReport, EventReportNote, EventDepartment,
@@ -1907,7 +1910,7 @@ function TechReqCard({
         <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${TECH_STATUS_COLORS[req.status] ?? "bg-zinc-100 text-zinc-500"}`}>
           {TECH_STATUS_LABELS[req.status] ?? req.status}
         </span>
-        <span className="text-zinc-300 text-sm">{expanded ? "▲" : "▼"}</span>
+        <ChevronIcon direction={expanded ? "up" : "down"} size={14} className="shrink-0 text-zinc-300" />
       </div>
       {expanded && (
         <div className="px-4 pb-4 flex flex-col gap-3 border-t border-zinc-100">
@@ -1972,7 +1975,7 @@ function TechReqCard({
           />
           <MountPointAssets
             productionId={productionId}
-            mountType="event_tech_req"
+            mountType="task"
             mountId={req.id}
             label={req.title}
             canEdit={canEditThisReq && !isEventClosed}
@@ -2265,8 +2268,9 @@ function AssigneeEditor({
 
   return (
     <div>
-      <button onClick={() => setEditing(!editing)} className="text-xs text-zinc-500 hover:text-zinc-700 mb-2">
-        {editing ? "▲ 收起" : "▼ 编辑负责人"}
+      <button onClick={() => setEditing(!editing)} className="mb-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700">
+        <ChevronIcon direction={editing ? "up" : "down"} size={12} />
+        {editing ? "收起" : "编辑负责人"}
       </button>
       {editing && (
         <div className="flex flex-col gap-2">
@@ -2318,8 +2322,41 @@ function ReportsTab({
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
+  // W5：从文档库挂载既有文档为报告
+  const [mountPicking, setMountPicking] = useState(false);
+  const [mountItems, setMountItems] = useState<{ id: string; label: string; parentId?: string | null }[] | null>(null);
 
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/reports`;
+
+  async function openMountPicker() {
+    setMountPicking(true);
+    if (mountItems) return;
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`);
+      const data = await res.json() as { wikis?: { id: string; title: string | null; parentId: string | null; isAnchor: boolean }[] };
+      const mounted = new Set(reports.map(r => r.wikiId));
+      setMountItems((data.wikis ?? [])
+        .filter(w => !w.isAnchor && !mounted.has(w.id))
+        .map(w => ({ id: w.id, label: w.title ?? "（无标题）", parentId: w.parentId })));
+    } catch {
+      setMountItems([]);
+    }
+  }
+
+  async function mountWiki(ids: string[]) {
+    setMountPicking(false);
+    const wikiId = ids[0];
+    if (!wikiId) return;
+    const res = await fetch(base, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wikiId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error ?? "挂载失败"); return; }
+    onReportsChange([...reports, data.report]);
+    setMountItems(null);
+  }
 
   async function saveRename(id: string) {
     if (!renameTitle.trim()) return;
@@ -2416,7 +2453,7 @@ function ReportsTab({
             >
               查看
             </Link>
-            <span className="text-zinc-300 text-sm">{expandedId === report.id ? "▲" : "▼"}</span>
+            <ChevronIcon direction={expandedId === report.id ? "up" : "down"} size={14} className="shrink-0 text-zinc-300" />
           </div>
 
           {expandedId === report.id && (
@@ -2455,11 +2492,30 @@ function ReportsTab({
             </div>
           </div>
         ) : (
-          <button onClick={() => setAdding(true)}
-            className="rounded-xl border-2 border-dashed border-zinc-200 py-3 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors">
-            + 新建记录
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setAdding(true)}
+              className="flex-1 rounded-xl border-2 border-dashed border-zinc-200 py-3 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors">
+              + 新建记录
+            </button>
+            <button onClick={openMountPicker}
+              title="把文档库中的既有文档挂载为本事件的报告（需要该文档的分享权）"
+              className="flex-1 rounded-xl border-2 border-dashed border-zinc-200 py-3 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors">
+              ⧉ 从文档库挂载
+            </button>
+          </div>
         )
+      )}
+
+      {mountPicking && (
+        <TreePickerModal
+          kicker="Wiki"
+          title="挂载文档为报告"
+          items={mountItems ?? []}
+          preselected={[]}
+          single
+          onConfirm={mountWiki}
+          onClose={() => setMountPicking(false)}
+        />
       )}
     </div>
   );
@@ -2503,7 +2559,16 @@ function ReportEditor({
       {/* Body: editable only when canWrite and not yet published */}
       {canWrite && !isPublished ? (
         <div className="flex flex-col gap-2">
-          <label className="text-xs text-zinc-400">正文</label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-zinc-400">正文</label>
+            {/* W5 统一日：报告=挂载的 wiki 文档，可去文档视图编辑（全屏/树上下文） */}
+            {report.wikiId && (
+              <Link href={`/production/${productionId}/wiki/${report.wikiId}`}
+                className="text-xs text-sky-700 hover:underline">
+                在文档视图中编辑 ↗
+              </Link>
+            )}
+          </div>
           <MarkdownEditor
             content={body}
             onChange={setBody}
@@ -2534,7 +2599,7 @@ function ReportEditor({
       ) : (
         <div className="flex flex-col gap-2">
           {report.body
-            ? <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
+            ? <WikiMarkdown content={report.body} productionId={productionId} />
             : <p className="text-xs text-zinc-300">暂无正文</p>
           }
           {canWrite && !isPublished && (
@@ -2634,8 +2699,9 @@ function DeptNotesList({
 
   if (!loaded) {
     return (
-      <button onClick={load} className="text-xs text-zinc-400 hover:text-zinc-600">
-        ▼ 查看部门 Notes
+      <button onClick={load} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600">
+        <ChevronIcon size={12} />
+        查看部门 Notes
       </button>
     );
   }
@@ -3352,7 +3418,7 @@ export default function EventDetailClient({
         <ReportsTab
           eventId={event.id} productionId={productionId}
           reports={reports} departments={departments}
-          members={members.map(m => ({ openId: m.openId, userId: m.userId, name: m.name }))}
+          members={members.map(m => ({ userId: m.userId, name: m.name }))}
           canWrite={canWriteReport}
           currentUserId={currentUserId}
           versionId={event.versionId ?? null}

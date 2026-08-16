@@ -12,10 +12,10 @@
  *
  * Layer structure:
  *   1. Schema    — cue_list_permission and cue_list_role tables DROPPED;
- *                  resource_grant still has edit/manage levels for cue_list
- *   2. Integrity — resource_grant: no orphan user_id/production_id FKs for cue_list type
+ *                  production_member_grant still has edit/manage levels for cue_list
+ *   2. Integrity — production_member_grant: no orphan user_id/production_id FKs for cue_list type
  *   3. Invariance — factory users (creator, personal grant, role grant) all have
- *                   active resource_grant rows for the factory cue list
+ *                   active production_member_grant rows for the factory cue list
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -48,15 +48,15 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("resource_grant table still exists", async () => {
+  it("production_member_grant table still exists", async () => {
     const { rows } = await getPool().query(`
       SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'resource_grant'
+      WHERE table_schema = 'public' AND table_name = 'production_member_grant'
     `);
     expect(rows).toHaveLength(1);
   });
 
-  it("resource_permission_level has cue_list/edit and cue_list/manage entries", async () => {
+  it("resource_permission_level has cue_list verb entries (批A 后 manage/mount 退役)", async () => {
     const { rows } = await getPool().query(`
       SELECT permission_level FROM resource_permission_level
       WHERE resource_type = 'cue_list'
@@ -64,37 +64,38 @@ describe("schema verification", () => {
     `);
     const levels = rows.map((r) => r.permission_level);
     expect(levels).toContain("edit");
-    expect(levels).toContain("manage");
+    expect(levels).toContain("view");
+    expect(levels).not.toContain("manage");
   });
 });
 
 // ── 2. Integrity verification ─────────────────────────────────────────────────
 
 describe("integrity verification", () => {
-  it("resource_grant(cue_list): no orphan user_id", async () => {
+  it("production_member_grant(cue_list): no orphan user_id", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM resource_grant rg
+      FROM production_member_grant rg
       LEFT JOIN app_user au ON au.id = rg.user_id
       WHERE rg.resource_type = 'cue_list' AND au.id IS NULL
     `);
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("resource_grant(cue_list): no orphan production_id", async () => {
+  it("production_member_grant(cue_list): no orphan production_id", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM resource_grant rg
+      FROM production_member_grant rg
       LEFT JOIN production p ON p.id = rg.production_id
       WHERE rg.resource_type = 'cue_list' AND p.id IS NULL
     `);
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("resource_grant: all cue_list permission_levels are valid", async () => {
+  it("production_member_grant: all cue_list permission_levels are valid", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt
-      FROM resource_grant rg
+      FROM production_member_grant rg
       LEFT JOIN resource_permission_level rpl
         ON rpl.resource_type = rg.resource_type
         AND rpl.permission_level = rg.permission_level
@@ -103,12 +104,12 @@ describe("integrity verification", () => {
     expect(rows[0].cnt).toBe(0);
   });
 
-  it("resource_grant: no duplicate active grants", async () => {
+  it("production_member_grant: no duplicate active grants", async () => {
     const { rows } = await getPool().query(`
       SELECT COUNT(*)::int AS cnt FROM (
         SELECT production_id, user_id, resource_type, resource_id, resource_sub, permission_level,
                COUNT(*) AS c
-        FROM resource_grant
+        FROM production_member_grant
         WHERE NOT is_revoked AND resource_type = 'cue_list'
         GROUP BY production_id, user_id, resource_type, resource_id, resource_sub, permission_level
         HAVING COUNT(*) > 1
@@ -126,7 +127,7 @@ describe("invariance verification", () => {
     async () => {
       const { cueList, production } = snapshot!;
       const { rows } = await getPool().query(
-        `SELECT permission_level FROM resource_grant
+        `SELECT permission_level FROM production_member_grant
          WHERE production_id = $1 AND user_id = $2
            AND resource_type = 'cue_list' AND resource_id = $3
            AND permission_level = 'manage' AND NOT is_revoked`,
@@ -141,7 +142,7 @@ describe("invariance verification", () => {
     async () => {
       const { cueList, production } = snapshot!;
       const { rows } = await getPool().query(
-        `SELECT permission_level FROM resource_grant
+        `SELECT permission_level FROM production_member_grant
          WHERE production_id = $1 AND user_id = $2
            AND resource_type = 'cue_list' AND resource_id = $3
            AND permission_level = 'edit' AND NOT is_revoked`,
@@ -156,7 +157,7 @@ describe("invariance verification", () => {
     async () => {
       const { cueList, production, personalGrantUserId } = snapshot!;
       const { rows } = await getPool().query(
-        `SELECT permission_level FROM resource_grant
+        `SELECT permission_level FROM production_member_grant
          WHERE production_id = $1 AND user_id = $2
            AND resource_type = 'cue_list' AND resource_id = $3
            AND permission_level = 'edit' AND NOT is_revoked`,
@@ -171,7 +172,7 @@ describe("invariance verification", () => {
     async () => {
       const { cueList, production, roleGrantUserId } = snapshot!;
       const { rows } = await getPool().query(
-        `SELECT permission_level FROM resource_grant
+        `SELECT permission_level FROM production_member_grant
          WHERE production_id = $1 AND user_id = $2
            AND resource_type = 'cue_list' AND resource_id = $3
            AND permission_level = 'edit' AND NOT is_revoked`,

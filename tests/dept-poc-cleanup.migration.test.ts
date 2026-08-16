@@ -47,27 +47,9 @@ describe("schema verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("production_dept_member: poc_blocked_permissions is TEXT[] NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_dept_member'
-        AND column_name = 'poc_blocked_permissions'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("ARRAY");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
+  // poc_blocked_permissions 断言已随 migrate-merge-event-department 退役（列 DROP）。
 
-  it("production_dept_member: poc_extra_permissions is TEXT[] NOT NULL", async () => {
-    const { rows } = await getPool().query(`
-      SELECT data_type, is_nullable FROM information_schema.columns
-      WHERE table_name = 'production_dept_member'
-        AND column_name = 'poc_extra_permissions'
-    `);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].data_type).toBe("ARRAY");
-    expect(rows[0].is_nullable).toBe("NO");
-  });
+  // poc_extra_permissions 断言已随 migrate-merge-event-department 退役（列 DROP）。
 
   it("production_dept_member: is_poc is BOOLEAN NOT NULL", async () => {
     const { rows } = await getPool().query(`

@@ -9,9 +9,10 @@
  */
 
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getProductionDeptChatIds } from "@/lib/event-db";
 import { searchChats, getChatMemberOpenIds } from "@/lib/platform/feishu/feishu-chat";
 
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";

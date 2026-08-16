@@ -9,6 +9,10 @@
  *   - manage 级：user 是上述 dept 的 POC
  */
 import { getPool } from "./pg";
+import type { Pool, PoolClient } from "pg";
+
+/** 可注入连接：调用方在事务内传 client，缺省用池（W5 AI review——多步写点须同事务） */
+type Queryable = Pool | PoolClient;
 
 // ─── Generic resource grant helpers ──────────────────────────────────────────
 
@@ -24,7 +28,7 @@ export async function getResourceGrantLevel(
 ): Promise<string | null> {
   const { rows } = await getPool().query<{ permission_level: string }>(
     `SELECT rg.permission_level
-     FROM resource_grant rg
+     FROM production_member_grant rg
      JOIN resource_permission_level rpl
        ON rpl.resource_type = rg.resource_type
        AND rpl.permission_level = rg.permission_level
@@ -33,6 +37,7 @@ export async function getResourceGrantLevel(
        AND rg.resource_type = $3
        AND rg.resource_id = $4
        AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ORDER BY rpl.sort_order DESC
      LIMIT 1`,
     [productionId, userId, resourceType, resourceId],
@@ -54,7 +59,7 @@ export async function hasResourceGrantLevel(
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
        SELECT 1
-       FROM resource_grant rg
+       FROM production_member_grant rg
        JOIN resource_permission_level rpl
          ON rpl.resource_type = rg.resource_type
          AND rpl.permission_level = rg.permission_level
@@ -66,6 +71,7 @@ export async function hasResourceGrantLevel(
          AND rg.resource_type = $3
          AND rg.resource_id = $4
          AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
          AND rpl.sort_order >= rpl_req.sort_order
      ) AS ok`,
     [productionId, userId, resourceType, resourceId, requiredLevel],
@@ -119,7 +125,7 @@ export async function checkResourceFreeApprovalZone(
 }
 
 /**
- * Writes a self_confirmed resource_grant for any resource type.
+ * Writes a self_confirmed production_member_grant for any resource type.
  * Idempotent: ON CONFLICT DO NOTHING.
  */
 export async function selfConfirmResourceGrant(
@@ -129,16 +135,27 @@ export async function selfConfirmResourceGrant(
   resourceId: string,
   level: string,
 ): Promise<void> {
-  await getPool().query(
-    `INSERT INTO resource_grant
-       (production_id, user_id, resource_type, resource_id, resource_sub,
-        permission_level, grant_source, confirmed_by)
-     VALUES ($1, $2, $3, $4, '*', $5, 'self_confirmed', $2)
-     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-       WHERE is_revoked = false
-     DO NOTHING`,
-    [productionId, userId, resourceType, resourceId, level],
-  );
+  // 批B：REST 化域（event/task）伪级别展开为动词行集；未迁移域（report/note）仍写单行
+  const sets: Record<string, Record<string, ReadonlyArray<readonly [string, string]>>> = {
+    event: EVENT_LEVEL_ROW_SETS,
+    task: TASK_LEVEL_ROW_SETS,
+    report: REPORT_LEVEL_ROW_SETS,
+    note: NOTE_LEVEL_ROW_SETS,
+    wiki: WIKI_LEVEL_ROW_SETS,
+  };
+  const rows = sets[resourceType]?.[level] ?? [["*", level] as const];
+  for (const [sub, verb] of rows) {
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'self_confirmed', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, userId, resourceType, resourceId, sub, verb],
+    );
+  }
 }
 
 // ─── Typed level helpers ──────────────────────────────────────────────────────
@@ -147,6 +164,143 @@ export type EventLevel = "view" | "edit" | "publish" | "edit_published" | "revok
 export type ReportLevel = "view" | "edit" | "publish" | "edit_published" | "revoke" | "manage";
 export type TechReqLevel = "view" | "edit" | "assign" | "manage";
 export type NoteLevel = "view" | "edit" | "manage";
+
+/**
+ * 批B：event / task 伪级别 → 动词行集（授权面统一展开表，同 CUE_LIST_LEVEL_ROW_SETS）。
+ * 非线性：publish 系与 edit 无蕴含（各自独立申请）；manage=全集+grants。
+ * assignees 是保留段（assign 独立能力，'*' 通配不覆盖）。
+ */
+export const EVENT_LEVEL_ROW_SETS: Record<EventLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:           [["meta", "view"], ["details", "view"]],
+  edit:           [["meta", "view"], ["details", "view"], ["publication", "view"], ["*", "edit"],
+                   ["tasks", "create"], ["tasks", "delete"],
+                   ["reports", "create"], ["reports", "delete"]],
+  publish:        [["publication", "create"]],
+  edit_published: [["publication", "edit"]],
+  revoke:         [["publication", "delete"]],
+  // 2026-08-13 用户定稿（两个指派面）：organizer 默认含 assignees@c/d（名单）+
+  // call_sheet@edit（排 call），**不含 publication@create**——发布动作归舞监 role
+  // （模板 event/*/publication@c/d）；organizer 保留 publication@edit/delete（修订/撤回）
+  manage:         [["meta", "view"], ["details", "view"], ["publication", "view"], ["*", "edit"],
+                   ["assignees", "create"], ["assignees", "delete"], ["call_sheet", "edit"],
+                   ["tasks", "create"], ["tasks", "delete"],
+                   ["reports", "create"], ["reports", "delete"],
+                   ["publication", "edit"], ["publication", "delete"],
+                   ["grants", "edit"]],
+};
+
+export const REPORT_LEVEL_ROW_SETS: Record<ReportLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:           [["meta", "view"]],
+  edit:           [["meta", "view"], ["publication", "view"], ["*", "edit"],
+                   ["notes", "create"], ["notes", "delete"]],
+  publish:        [["publication", "create"]],
+  edit_published: [["publication", "edit"]],
+  revoke:         [["publication", "delete"]],
+  manage:         [["meta", "view"], ["publication", "view"], ["*", "edit"],
+                   ["notes", "create"], ["notes", "delete"],
+                   ["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+                   ["grants", "edit"]],
+};
+
+export const NOTE_LEVEL_ROW_SETS: Record<NoteLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["*", "view"]],
+  edit:   [["*", "view"], ["*", "edit"]],
+  manage: [["*", "view"], ["*", "edit"], ["*", "delete"], ["grants", "edit"]],
+};
+
+// wiki 文档库（W2）：meta@view=目录/标题可见（树中可见该节点），*@view=内容。
+// 分享档 view/edit 供 grants@edit 持有者发行；manage=创建者行集（writeWikiGrants）。
+export type WikiLevel = "view" | "edit" | "manage";
+export const WIKI_LEVEL_ROW_SETS: Record<WikiLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["meta", "view"], ["*", "view"]],
+  edit:   [["meta", "view"], ["*", "view"], ["*", "edit"]],
+  manage: [["meta", "view"], ["*", "view"], ["*", "edit"], ["*", "delete"], ["grants", "edit"]],
+};
+
+export type TaskLevel = "view" | "edit" | "assign" | "manage";
+export const TASK_LEVEL_ROW_SETS: Record<TaskLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["*", "view"]],
+  edit:   [["*", "view"], ["*", "edit"]],
+  assign: [["*", "view"], ["assignees", "edit"]],
+  manage: [["*", "view"], ["*", "edit"], ["assignees", "edit"], ["*", "delete"], ["grants", "edit"]],
+};
+
+/** 通用节点 zone（六步链第 3 步，dept 面）：edit 档=dept_permission 节点键∪管理 dept POC；
+ *  manage 档=管理 dept POC（代码规则）。cue 版语义的类型通用化。 */
+export async function checkNodeFreeApprovalZone(
+  userId: string,
+  productionId: string,
+  resourceType: string,
+  resourceId: string,
+  level: "edit" | "manage",
+): Promise<boolean> {
+  if (level === "manage") {
+    const { rows } = await getPool().query(
+      `SELECT 1
+       FROM resource_dept_manage rdm
+       JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
+       WHERE rdm.production_id = $1
+         AND rdm.resource_type = $2
+         AND rdm.resource_id IN ($3, '*')
+         AND pdm.user_id = $4
+         AND pdm.is_poc = true
+       LIMIT 1`,
+      [productionId, resourceType, resourceId, userId],
+    );
+    return rows.length > 0;
+  }
+  const editKeys = [
+    `node:${resourceType}/${resourceId}@edit`,
+    `node:${resourceType}/*@edit`,
+  ];
+  const { rows } = await getPool().query(
+    `SELECT 1
+     FROM production_dept_member pdm
+     WHERE pdm.production_id = $1
+       AND pdm.user_id = $2
+       AND (
+         EXISTS (
+           SELECT 1 FROM production_dept_permission pdp
+           WHERE pdp.dept_id = pdm.dept_id AND pdp.permission_key = ANY($5)
+         )
+         OR (pdm.is_poc AND EXISTS (
+           SELECT 1 FROM resource_dept_manage rdm
+           WHERE rdm.production_id = $1
+             AND rdm.resource_type = $3
+             AND rdm.resource_id IN ($4, '*')
+             AND rdm.dept_id = pdm.dept_id
+         ))
+       )
+     LIMIT 1`,
+    [productionId, userId, resourceType, resourceId, editKeys],
+  );
+  return rows.length > 0;
+}
+
+/** 从动词行推导 UI 伪级别（manage=grants edit > edit > view）。检查本体是动词行。 */
+async function deriveNodePseudoLevel(
+  userId: string,
+  productionId: string,
+  resourceType: string,
+  resourceId: string,
+  viewSubs: string[],
+  editSubs: string[],
+): Promise<"manage" | "edit" | "view" | null> {
+  const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+    `SELECT resource_sub, permission_level FROM production_member_grant
+     WHERE production_id = $1 AND user_id = $2
+       AND resource_type = $3 AND resource_id IN ($4, '*')
+       AND NOT is_revoked
+       AND (expires_at IS NULL OR expires_at > NOW())`,
+    [productionId, userId, resourceType, resourceId],
+  );
+  const has = (subs: string[], verb: string) =>
+    rows.some((r) => subs.includes(r.resource_sub) && r.permission_level === verb);
+  if (has(["grants"], "edit")) return "manage";
+  if (has(editSubs, "edit")) return "edit";
+  if (has(viewSubs, "view")) return "view";
+  return null;
+}
 
 export type ResourceAccessResult<L extends string> =
   | { canAccess: true; level: L }
@@ -165,11 +319,15 @@ export async function getEventAccess(
   productionId: string,
   eventId: string,
 ): Promise<ResourceAccessResult<EventLevel>> {
-  const level = (await getResourceGrantLevel(userId, productionId, "event", eventId)) as EventLevel | null;
+  // 批B：动词行推导 + 节点 zone（伪级别仅供 UI 兼容）
+  const level = await deriveNodePseudoLevel(
+    userId, productionId, "event", eventId,
+    ["meta", "details", "*"], ["details", "*"],
+  );
   if (level) return { canAccess: true, level };
   const [canManage, canEdit] = await Promise.all([
-    checkResourceFreeApprovalZone(userId, productionId, "event", eventId, "event:edit", "manage"),
-    checkResourceFreeApprovalZone(userId, productionId, "event", eventId, "event:edit", "edit"),
+    checkNodeFreeApprovalZone(userId, productionId, "event", eventId, "manage"),
+    checkNodeFreeApprovalZone(userId, productionId, "event", eventId, "edit"),
   ]);
   if (canManage) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "manage" };
   if (canEdit) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "edit" };
@@ -181,11 +339,14 @@ export async function getReportAccess(
   productionId: string,
   reportId: string,
 ): Promise<ResourceAccessResult<ReportLevel>> {
-  const level = (await getResourceGrantLevel(userId, productionId, "report", reportId)) as ReportLevel | null;
+  // 批C：动词行推导 + 节点 zone（伪级别仅供 UI 兼容；report=挂载边类型）
+  const level = await deriveNodePseudoLevel(
+    userId, productionId, "report", reportId, ["meta", "*"], ["*"],
+  );
   if (level) return { canAccess: true, level };
   const [canManage, canEdit] = await Promise.all([
-    checkResourceFreeApprovalZone(userId, productionId, "report", reportId, "report:edit", "manage"),
-    checkResourceFreeApprovalZone(userId, productionId, "report", reportId, "report:edit", "edit"),
+    checkNodeFreeApprovalZone(userId, productionId, "report", reportId, "manage"),
+    checkNodeFreeApprovalZone(userId, productionId, "report", reportId, "edit"),
   ]);
   if (canManage) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "manage" };
   if (canEdit) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "edit" };
@@ -197,11 +358,14 @@ export async function getTechReqAccess(
   productionId: string,
   reqId: string,
 ): Promise<ResourceAccessResult<TechReqLevel>> {
-  const level = (await getResourceGrantLevel(userId, productionId, "tech_req", reqId)) as TechReqLevel | null;
+  // 批B：tech_req 已更名 task（resource_type='task'）；动词行推导 + 节点 zone
+  const level = await deriveNodePseudoLevel(
+    userId, productionId, "task", reqId, ["*"], ["*"],
+  );
   if (level) return { canAccess: true, level };
   const [canManage, canEdit] = await Promise.all([
-    checkResourceFreeApprovalZone(userId, productionId, "tech_req", reqId, "tech_req:edit", "manage"),
-    checkResourceFreeApprovalZone(userId, productionId, "tech_req", reqId, "tech_req:edit", "edit"),
+    checkNodeFreeApprovalZone(userId, productionId, "task", reqId, "manage"),
+    checkNodeFreeApprovalZone(userId, productionId, "task", reqId, "edit"),
   ]);
   if (canManage) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "manage" };
   if (canEdit) return { canAccess: false, canSelfConfirm: true, selfConfirmLevel: "edit" };
@@ -209,7 +373,7 @@ export async function getTechReqAccess(
 }
 
 /**
- * Returns true if the user has any active resource_grant on any tech_req in the given event.
+ * Returns true if the user has any active production_member_grant on any tech_req in the given event.
  * Used to gate access to the reqs page and the reqs link in the follower view.
  */
 export async function hasUserAnyTechReqGrantInEvent(
@@ -219,13 +383,14 @@ export async function hasUserAnyTechReqGrantInEvent(
 ): Promise<boolean> {
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM resource_grant rg
-       JOIN event_tech_req etr ON etr.id = rg.resource_id
+       SELECT 1 FROM production_member_grant rg
+       JOIN task etr ON etr.id = rg.resource_id
        WHERE rg.production_id = $1
          AND rg.user_id = $2
-         AND rg.resource_type = 'tech_req'
+         AND rg.resource_type = 'task'
          AND etr.event_id = $3
          AND NOT rg.is_revoked
+         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ) AS ok`,
     [productionId, userId, eventId],
   );
@@ -234,7 +399,7 @@ export async function hasUserAnyTechReqGrantInEvent(
 
 /**
  * Returns the resource_ids of all tech_reqs in the given event where the user
- * has an active resource_grant. Used to filter the reqs list for non-full viewers.
+ * has an active production_member_grant. Used to filter the reqs list for non-full viewers.
  */
 export async function getUserTechReqGrantIdsInEvent(
   userId: string,
@@ -243,13 +408,14 @@ export async function getUserTechReqGrantIdsInEvent(
 ): Promise<string[]> {
   const { rows } = await getPool().query<{ resource_id: string }>(
     `SELECT DISTINCT rg.resource_id
-     FROM resource_grant rg
-     JOIN event_tech_req etr ON etr.id = rg.resource_id
+     FROM production_member_grant rg
+     JOIN task etr ON etr.id = rg.resource_id
      WHERE rg.production_id = $1
        AND rg.user_id = $2
-       AND rg.resource_type = 'tech_req'
+       AND rg.resource_type = 'task'
        AND etr.event_id = $3
-       AND NOT rg.is_revoked`,
+       AND NOT rg.is_revoked
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [productionId, userId, eventId],
   );
   return rows.map(r => r.resource_id);
@@ -258,9 +424,9 @@ export async function getUserTechReqGrantIdsInEvent(
 // ─── Grant-write helpers for new resource creation ────────────────────────────
 
 /**
- * Writes initial resource_grant + resource_dept_manage when a new event is created.
+ * Writes initial production_member_grant + resource_dept_manage when a new event is created.
  *   - creator gets manage grant
- *   - depts with 'event:create' permission get resource_dept_manage
+ *   - depts holding the event collection-create zone key get resource_dept_manage
  *   - if no such depts exist, creator is written to resource_person_manage as fallback
  */
 export async function writeEventGrants(
@@ -269,25 +435,42 @@ export async function writeEventGrants(
   createdBy: string,
 ): Promise<void> {
   const pool = getPool();
-  await pool.query(
-    `INSERT INTO resource_grant
-       (production_id, user_id, resource_type, resource_id, resource_sub,
-        permission_level, grant_source, confirmed_by)
-     VALUES ($1, $2, 'event', $3, '*', 'manage', 'direct', $2)
-     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-       WHERE is_revoked = false
-     DO NOTHING`,
-    [productionId, createdBy, eventId],
-  );
+  // 批B：创建者获 EVENT manage 行集（动词行取代 manage 单行）
+  for (const [sub, verb] of EVENT_LEVEL_ROW_SETS.manage) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'event', $3, $4, $5, 'direct', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, createdBy, eventId, sub, verb],
+    );
+  }
+  // 事件管理 dept：持有集合 create 资格键的 dept 获归属 + 实例 zone 键
+  // （原 dept 数组伪键「事件创建」的节点行版）
   await pool.query(
     `INSERT INTO resource_dept_manage
        (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-     SELECT $1, pd.id, 'event', $2, '*', $3
-     FROM production_dept pd
-     WHERE pd.production_id = $1
-       AND 'event:create' = ANY(pd.permissions)
+     SELECT $1, pdp.dept_id, 'event', $2, '*', $3
+     FROM production_dept_permission pdp
+     WHERE pdp.production_id = $1
+       AND pdp.permission_key = 'node:event/*@create'
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
     [productionId, eventId, createdBy],
+  );
+  await pool.query(
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+     SELECT $1, rdm.dept_id, k.key
+     FROM resource_dept_manage rdm
+     CROSS JOIN LATERAL (VALUES
+       ('node:event/' || $2 || '@view'),
+       ('node:event/' || $2 || '@edit')
+     ) AS k(key)
+     WHERE rdm.production_id = $1 AND rdm.resource_type = 'event' AND rdm.resource_id = $2
+     ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+    [productionId, eventId],
   );
   // Person fallback: no dept managers → creator manages this event
   const hasDept = await pool.query(
@@ -307,7 +490,7 @@ export async function writeEventGrants(
 }
 
 /**
- * Writes initial resource_grant + resource_dept_manage when a new report is created.
+ * Writes initial production_member_grant + resource_dept_manage when a new report is created.
  * Inherits managing depts/persons from the parent event's resource_dept_manage /
  * resource_person_manage (not queried from dept permissions).
  */
@@ -316,18 +499,22 @@ export async function writeReportGrants(
   productionId: string,
   createdBy: string,
   eventId: string,
+  db: Queryable = getPool(),
 ): Promise<void> {
-  const pool = getPool();
-  await pool.query(
-    `INSERT INTO resource_grant
-       (production_id, user_id, resource_type, resource_id, resource_sub,
-        permission_level, grant_source, confirmed_by)
-     VALUES ($1, $2, 'report', $3, '*', 'manage', 'direct', $2)
-     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-       WHERE is_revoked = false
-     DO NOTHING`,
-    [productionId, createdBy, reportId],
-  );
+  const pool = db;
+  // 批C：创建者获 REPORT manage 行集（动词行取代 manage 单行）
+  for (const [sub, verb] of REPORT_LEVEL_ROW_SETS.manage) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'report', $3, $4, $5, 'direct', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, createdBy, reportId, sub, verb],
+    );
+  }
   // Inherit dept managers from parent event
   await pool.query(
     `INSERT INTO resource_dept_manage
@@ -351,34 +538,65 @@ export async function writeReportGrants(
 }
 
 /**
- * Writes initial resource_grant + resource_dept_manage when a new tech_req is created.
+ * wiki 创建者行集（§0.9 定式 C-6）：creator 获 WIKI manage 行集 + person 归属。
+ * 独立文档无父资源，不做 dept/person 继承（挂载为 report/note 时可见性沿边推导，
+ * 永不物化行——§0.9 负面清单）。
+ */
+export async function writeWikiGrants(
+  wikiId: string,
+  productionId: string,
+  createdBy: string,
+  db: Queryable = getPool(),
+): Promise<void> {
+  const pool = db;
+  for (const [sub, verb] of WIKI_LEVEL_ROW_SETS.manage) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'wiki', $3, $4, $5, 'self_confirmed', $2)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, createdBy, wikiId, sub, verb],
+    );
+  }
+  await pool.query(
+    `INSERT INTO resource_person_manage
+       (production_id, user_id, resource_type, resource_id, resource_sub, established_by)
+     VALUES ($1, $2, 'wiki', $3, '*', $2)
+     ON CONFLICT DO NOTHING`,
+    [productionId, createdBy, wikiId],
+  );
+}
+
+/**
+ * Writes initial production_member_grant + resource_dept_manage when a new task is created.
  *   - POC(s) of the assigned dept get manage grant
  *   - Assigned dept gets resource_dept_manage
- *   - Parent event's managing depts/persons get resource_dept_manage / resource_person_manage
+ *   - If bound to an event: the event's managing depts/persons inherit
+ *     resource_dept_manage / resource_person_manage（无绑定 task 无此继承）
  *   - If neither assigned dept nor event depts exist, creator is written to resource_person_manage
- * eventDeptId is an event_department.id (TEXT); we map to production_dept by name.
+ * eventDeptId is a production_dept.id（并表后单一 id 空间，name 映射 hack 已退役）.
  */
 export async function writeTechReqGrants(
   reqId: string,
   productionId: string,
   eventDeptId: string | null,
   createdBy: string,
-  eventId: string,
+  eventId: string | null,
 ): Promise<void> {
   const pool = getPool();
   if (eventDeptId) {
-    // Map event_department → production_dept by name, write grants for POCs
     await pool.query(
-      `INSERT INTO resource_grant
+      `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
-       SELECT DISTINCT $1, pdm.user_id, 'tech_req', $2, '*', 'manage', 'direct', pdm.user_id
-       FROM event_department ed
-       JOIN production_dept pd_mapped
-         ON pd_mapped.production_id = $1 AND pd_mapped.name = ed.name
-       JOIN production_dept_member pdm
-         ON pdm.dept_id = pd_mapped.id AND pdm.is_poc = true
-       WHERE ed.id = $3
+       SELECT DISTINCT $1, pdm.user_id, 'task', $2, s.sub, s.verb, 'direct', pdm.user_id
+       FROM production_dept_member pdm
+       CROSS JOIN (VALUES ('*', 'view'), ('*', 'edit'), ('assignees', 'edit'),
+                          ('*', 'delete'), ('grants', 'edit')) AS s(sub, verb)
+       WHERE pdm.dept_id = $3 AND pdm.is_poc = true
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
@@ -387,53 +605,55 @@ export async function writeTechReqGrants(
     await pool.query(
       `INSERT INTO resource_dept_manage
          (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-       SELECT DISTINCT $1, pd_mapped.id, 'tech_req', $2, '*', $4
-       FROM event_department ed
-       JOIN production_dept pd_mapped
-         ON pd_mapped.production_id = $1 AND pd_mapped.name = ed.name
-       WHERE ed.id = $3
+       VALUES ($1, $3, 'task', $2, '*', $4::uuid)
        ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
       [productionId, reqId, eventDeptId, createdBy],
     );
   }
-  // Parent event's managing depts also manage the tech_req
-  await pool.query(
-    `INSERT INTO resource_dept_manage
-       (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
-     SELECT production_id, dept_id, 'tech_req', $1, '*', $2
-     FROM resource_dept_manage
-     WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
-     ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-    [reqId, createdBy, productionId, eventId],
-  );
-  // Person fallback: no dept managers at all → creator manages this tech_req
+  // Parent event's managing depts also manage the task (bound tasks only)
+  // （曾误写 resource_type='tech_req' 死行——判定侧只读 'task'；存量由
+  //   migrate-task-standalone 并入修复）
+  if (eventId) {
+    await pool.query(
+      `INSERT INTO resource_dept_manage
+         (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
+       SELECT production_id, dept_id, 'task', $1, '*', $2
+       FROM resource_dept_manage
+       WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
+       ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+      [reqId, createdBy, productionId, eventId],
+    );
+  }
+  // Person fallback: no dept managers at all → creator manages this task
   const hasDept = await pool.query(
     `SELECT 1 FROM resource_dept_manage
-     WHERE production_id=$1 AND resource_type='tech_req' AND resource_id=$2 LIMIT 1`,
+     WHERE production_id=$1 AND resource_type='task' AND resource_id=$2 LIMIT 1`,
     [productionId, reqId],
   );
   if (hasDept.rows.length === 0) {
-    // Also inherit event's person manager if present
-    await pool.query(
-      `INSERT INTO resource_person_manage
-         (production_id, user_id, resource_type, resource_id, established_by)
-       SELECT production_id, user_id, 'tech_req', $1, $2
-       FROM resource_person_manage
-       WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-      [reqId, createdBy, productionId, eventId],
-    );
+    // Also inherit event's person manager if present (bound tasks only)
+    if (eventId) {
+      await pool.query(
+        `INSERT INTO resource_person_manage
+           (production_id, user_id, resource_type, resource_id, established_by)
+         SELECT production_id, user_id, 'task', $1, $2
+         FROM resource_person_manage
+         WHERE production_id = $3 AND resource_type = 'event' AND resource_id = $4
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+        [reqId, createdBy, productionId, eventId],
+      );
+    }
     // If still nothing, creator is the manager
     const hasPerson = await pool.query(
       `SELECT 1 FROM resource_person_manage
-       WHERE production_id=$1 AND resource_type='tech_req' AND resource_id=$2 LIMIT 1`,
+       WHERE production_id=$1 AND resource_type='task' AND resource_id=$2 LIMIT 1`,
       [productionId, reqId],
     );
     if (hasPerson.rows.length === 0) {
       await pool.query(
         `INSERT INTO resource_person_manage
            (production_id, user_id, resource_type, resource_id, established_by)
-         VALUES ($1,$2,'tech_req',$3,$2)
+         VALUES ($1,$2,'task',$3,$2)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
         [productionId, createdBy, reqId],
       );
@@ -442,6 +662,19 @@ export async function writeTechReqGrants(
 }
 
 export type CueListLevel = "manage" | "edit" | "mount" | "view";
+
+/**
+ * 批A：cue_list 伪级别 → 动词行集（授权面统一展开表）。
+ * 非线性模型下"级别"只是授权 UX 的语言，蕴含由授权时发多行表达（总表 §0）。
+ * selfConfirm / 直接授权 / 审批发行共用此表。
+ */
+export const CUE_LIST_LEVEL_ROW_SETS: Record<CueListLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:   [["*", "view"]],
+  mount:  [["*", "view"], ["mounts", "create"]],
+  edit:   [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"]],
+  manage: [["*", "view"], ["*", "edit"], ["cues", "create"], ["cues", "delete"],
+           ["*", "delete"], ["grants", "edit"]],
+};
 
 export type CueListAccessResult =
   | { canAccess: true; level: CueListLevel }
@@ -457,29 +690,34 @@ export async function getCueListGrantLevel(
   productionId: string,
   cueListId: string,
 ): Promise<CueListLevel | null> {
-  const { rows } = await getPool().query<{ permission_level: string }>(
-    `SELECT rg.permission_level
-     FROM resource_grant rg
-     JOIN resource_permission_level rpl
-       ON rpl.resource_type = rg.resource_type
-       AND rpl.permission_level = rg.permission_level
+  // 批A REST 语义：从动词行推导 UI 伪级别（manage=grants edit；edit=覆盖 cues 的
+  // edit；view=meta/cues view）。伪级别仅为前端展示兼容，检查本体是动词行。
+  const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+    `SELECT rg.resource_sub, rg.permission_level
+     FROM production_member_grant rg
      WHERE rg.production_id = $1
        AND rg.user_id = $2
        AND rg.resource_type = 'cue_list'
-       AND rg.resource_id = $3
+       AND rg.resource_id IN ($3, '*')
        AND NOT rg.is_revoked
-     ORDER BY rpl.sort_order DESC
-     LIMIT 1`,
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [productionId, userId, cueListId],
   );
-  return (rows[0]?.permission_level ?? null) as CueListLevel | null;
+  const has = (sub: string[], verb: string) =>
+    rows.some((r) => sub.includes(r.resource_sub) && r.permission_level === verb);
+  if (has(["grants"], "edit")) return "manage";
+  if (has(["cues", "*"], "edit")) return "edit";
+  if (has(["meta", "cues", "*"], "view")) return "view";
+  return null;
 }
 
 /**
  * Checks whether user is in the free-approval zone for a given level on a cue list.
- * Free-approval zone = user is member of a dept that has resource_dept_manage for this cue list
- * AND (dept.permissions[] ⊇ 'cue_list:edit' OR user is POC of that dept).
- * For manage level, only POC qualifies.
+ *
+ * 批A（六步链 §0.8）：
+ *   edit 档 = production_dept_permission 节点行（zone 键与 grant 键同词汇；
+ *             POC 兜底保留——管理部门的 POC 天然有 edit 资格）
+ *   manage 档 = 管理 dept 的 POC（代码规则；模板行不区分 POC，已知例外记总表）
  */
 export async function checkCueListFreeApprovalZone(
   userId: string,
@@ -503,25 +741,37 @@ export async function checkCueListFreeApprovalZone(
     return rows.length > 0;
   }
 
-  // edit level: POC or dept has 'cue_list:edit' in permissions[]
+  // edit 档：dept 节点行（含通配）∪ 管理 dept 的 POC
+  const editKeys = [
+    `node:cue_list/${cueListId}@edit`,
+    `node:cue_list/*@edit`,
+  ];
   const { rows } = await getPool().query(
     `SELECT 1
-     FROM resource_dept_manage rdm
-     JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE rdm.production_id = $1
-       AND rdm.resource_type = 'cue_list'
-       AND rdm.resource_id = $2
-       AND pdm.user_id = $3
-       AND (pdm.is_poc = true OR 'cue_list:edit' = ANY(pd.permissions))
+     FROM production_dept_member pdm
+     WHERE pdm.production_id = $1
+       AND pdm.user_id = $2
+       AND (
+         EXISTS (
+           SELECT 1 FROM production_dept_permission pdp
+           WHERE pdp.dept_id = pdm.dept_id AND pdp.permission_key = ANY($4)
+         )
+         OR (pdm.is_poc AND EXISTS (
+           SELECT 1 FROM resource_dept_manage rdm
+           WHERE rdm.production_id = $1
+             AND rdm.resource_type = 'cue_list'
+             AND rdm.resource_id = $3
+             AND rdm.dept_id = pdm.dept_id
+         ))
+       )
      LIMIT 1`,
-    [productionId, cueListId, userId],
+    [productionId, userId, cueListId, editKeys],
   );
   return rows.length > 0;
 }
 
 /**
- * Writes a self_confirmed resource_grant for the user on a cue list.
+ * Writes a self_confirmed production_member_grant for the user on a cue list.
  * Idempotent: ON CONFLICT DO NOTHING (active-grant unique index).
  */
 export async function selfConfirmCueListGrant(
@@ -530,16 +780,31 @@ export async function selfConfirmCueListGrant(
   cueListId: string,
   level: "edit" | "manage",
 ): Promise<void> {
+  // 批A：自我确认写动词行集（非线性——edit 集含 view；manage 集另含 delete+grants）
   await getPool().query(
-    `INSERT INTO resource_grant
+    `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by)
-     VALUES ($1, $2, 'cue_list', $3, '*', $4, 'self_confirmed', $2)
+     SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
+     FROM (VALUES ('*', 'view'), ('*', 'edit'), ('cues', 'create'), ('cues', 'delete')) AS s(sub, verb)
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
        WHERE is_revoked = false
      DO NOTHING`,
-    [productionId, userId, cueListId, level],
+    [productionId, userId, cueListId],
   );
+  if (level === "manage") {
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT $1, $2, 'cue_list', $3, s.sub, s.verb, 'self_confirmed', $2
+       FROM (VALUES ('*', 'delete'), ('grants', 'edit')) AS s(sub, verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, userId, cueListId],
+    );
+  }
 }
 
 /**
@@ -567,27 +832,42 @@ export async function getCueListAccess(
 }
 
 /**
- * Returns all active resource_grant rows for a cue list, with user display name.
+ * Returns all active production_member_grant rows for a cue list, with user display name.
  * Used for the collaborator management panel.
  */
 export async function listCueListGrants(
   cueListId: string,
 ): Promise<Array<{ userId: string; userName: string; level: CueListLevel }>> {
-  const { rows } = await getPool().query<{ user_id: string; user_name: string; permission_level: string }>(
-    `SELECT rg.user_id, COALESCE(fu.name, rg.user_id::text) AS user_name, rg.permission_level
-     FROM resource_grant rg
-     LEFT JOIN feishu_user fu ON fu.user_id = rg.user_id
-     JOIN resource_permission_level rpl
-       ON rpl.resource_type = rg.resource_type
-       AND rpl.permission_level = rg.permission_level
+  // 批A：从动词行推导每人伪级别（manage=grants edit > edit=cues edit > view）
+  const { rows } = await getPool().query<{ user_id: string; user_name: string; resource_sub: string; permission_level: string }>(
+    `SELECT rg.user_id, COALESCE(up.name, rg.user_id::text) AS user_name,
+            rg.resource_sub, rg.permission_level
+     FROM production_member_grant rg
+     LEFT JOIN user_profile up ON up.user_id = rg.user_id
      WHERE rg.resource_type = 'cue_list'
        AND rg.resource_id = $1
        AND NOT rg.is_revoked
-     GROUP BY rg.user_id, fu.name, rg.permission_level, rpl.sort_order
-     ORDER BY rpl.sort_order DESC`,
+       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())`,
     [cueListId],
   );
-  return rows.map((r) => ({ userId: r.user_id, userName: r.user_name, level: r.permission_level as CueListLevel }));
+  const byUser = new Map<string, { userName: string; subs: Array<{ sub: string; verb: string }> }>();
+  for (const r of rows) {
+    const e = byUser.get(r.user_id) ?? { userName: r.user_name, subs: [] };
+    e.subs.push({ sub: r.resource_sub, verb: r.permission_level });
+    byUser.set(r.user_id, e);
+  }
+  const rank: Record<CueListLevel, number> = { manage: 3, edit: 2, mount: 1, view: 0 };
+  const out: Array<{ userId: string; userName: string; level: CueListLevel }> = [];
+  for (const [userId, e] of byUser) {
+    const has = (subs: string[], verb: string) =>
+      e.subs.some((s) => subs.includes(s.sub) && s.verb === verb);
+    let level: CueListLevel | null = null;
+    if (has(["grants"], "edit")) level = "manage";
+    else if (has(["cues", "*"], "edit")) level = "edit";
+    else if (has(["meta", "cues", "*"], "view")) level = "view";
+    if (level) out.push({ userId, userName: e.userName, level });
+  }
+  return out.sort((a, b) => rank[b.level] - rank[a.level] || a.userId.localeCompare(b.userId));
 }
 
 /**
@@ -616,12 +896,24 @@ export async function addCueListDeptAccess(
   deptId: string,
   establishedBy: string,
 ): Promise<void> {
+  // dept 分享 = 归属（rdm，审批人/POC manage 档）+ zone 资格（dept_permission
+  // 实例级 edit 行集，成员经六步链第 3 步自我确认落 grant）
   await getPool().query(
     `INSERT INTO resource_dept_manage
        (production_id, dept_id, resource_type, resource_id, resource_sub, established_by)
      VALUES ($1, $2, 'cue_list', $3, '*', $4)
      ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
     [productionId, deptId, cueListId, establishedBy],
+  );
+  await getPool().query(
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+     SELECT $1, $2, unnest(ARRAY[
+       'node:cue_list/' || $3 || '@view',
+       'node:cue_list/' || $3 || '@edit',
+       'node:cue_list/' || $3 || '/cues@create',
+       'node:cue_list/' || $3 || '/cues@delete'
+     ]) ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+    [productionId, deptId, cueListId],
   );
 }
 
@@ -630,6 +922,7 @@ export async function addCueListDeptAccess(
  */
 export async function removeCueListDeptAccess(
   cueListId: string,
+  productionId: string,
   deptId: string,
 ): Promise<void> {
   await getPool().query(
@@ -637,11 +930,26 @@ export async function removeCueListDeptAccess(
      WHERE resource_type = 'cue_list' AND resource_id = $1 AND dept_id = $2`,
     [cueListId, deptId],
   );
+  // 撤 zone 资格行，并对该 dept 成员立即重算存续（资格消失 → self_confirmed 行收走，
+  // 不等下次偶然的 role/dept 变动）
+  await getPool().query(
+    `DELETE FROM production_dept_permission
+     WHERE dept_id = $1 AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
+    [deptId, cueListId],
+  );
+  const { rows: members } = await getPool().query<{ user_id: string }>(
+    `SELECT user_id FROM production_dept_member WHERE dept_id = $1`,
+    [deptId],
+  );
+  const { recomputeAndRevokeGrants } = await import("./dept-db");
+  for (const m of members) {
+    await recomputeAndRevokeGrants(m.user_id, productionId, "dept_change");
+  }
 }
 
 /**
  * Grants or revokes a user's direct access to a cue list at a specific level.
- * grant=true  → upsert resource_grant(level, direct)
+ * grant=true  → upsert production_member_grant(level, direct)
  * grant=false/null → revoke ALL active grants for this user on this cue list
  */
 export async function setCueListGrant(
@@ -657,20 +965,23 @@ export async function setCueListGrant(
     try {
       await client.query("BEGIN");
       await client.query(
-        `UPDATE resource_grant
+        `UPDATE production_member_grant
          SET is_revoked = true, revoked_reason = 'manual'
          WHERE production_id = $1 AND user_id = $2
            AND resource_type = 'cue_list' AND resource_id = $3
            AND NOT is_revoked`,
         [productionId, userId, cueListId],
       );
-      await client.query(
-        `INSERT INTO resource_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by)
-         VALUES ($1, $2, 'cue_list', $3, '*', $4, 'direct', $5)`,
-        [productionId, userId, cueListId, level, grantedBy],
-      );
+      // 批A：按伪级别写动词行集（direct 授权不受 dept/role sweep 影响）
+      for (const [sub, verb] of CUE_LIST_LEVEL_ROW_SETS[level] ?? CUE_LIST_LEVEL_ROW_SETS.edit) {
+        await client.query(
+          `INSERT INTO production_member_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by)
+           VALUES ($1, $2, 'cue_list', $3, $4, $5, 'direct', $6)`,
+          [productionId, userId, cueListId, sub, verb, grantedBy],
+        );
+      }
       await client.query("COMMIT");
     } catch (e) {
       await client.query("ROLLBACK");
@@ -680,7 +991,7 @@ export async function setCueListGrant(
     }
   } else {
     await getPool().query(
-      `UPDATE resource_grant
+      `UPDATE production_member_grant
        SET is_revoked = true, revoked_reason = 'manual'
        WHERE production_id = $1
          AND user_id = $2

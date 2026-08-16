@@ -1,17 +1,22 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "任务" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/event-db";
 import ProductionTasksClient from "@/components/ProductionTasksClient";
+import PageHeader from "@/components/PageHeader";
 
 
-export default async function ProductionTasksPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProductionTasksPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ event?: string }>;
+}) {
   const { id: productionId } = await params;
+  const { event: eventFilter } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -23,7 +28,7 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
   if (!access) redirect(`/unauthorized?id=${productionId}`);
   if (!productionName) notFound();
 
-  const canViewAll = hasPermission("task:view_any", access.permCtx);
+  const canViewAll = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
 
   const tasks = canViewAll
     ? await listProductionTechReqs(productionId)
@@ -39,16 +44,19 @@ export default async function ProductionTasksPage({ params }: { params: Promise<
           eventId: t.eventId,
           eventTitle: t.eventTitle,
           eventStartTime: null as string | null,
+          startTime: null as string | null,
+          endTime: null as string | null,
+          effectiveStartTime: t.effectiveStartTime,
+          effectiveEndTime: t.effectiveEndTime,
+          milestones: [] as { id: string; name: string; endDate: string }[],
+          isBlocked: false,
           assignees: t.assignees,
         }));
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <div>
-        <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)" }}>Tasks</p>
-        <h1 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>任务</h1>
-      </div>
-      <ProductionTasksClient productionId={productionId} initialTasks={tasks} />
+      <PageHeader eyebrow="Tasks" title="任务" side="stage" />
+      <ProductionTasksClient productionId={productionId} initialTasks={tasks} initialEventFilter={eventFilter} currentUserId={session.userId} />
     </div>
   );
 }

@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
-import { getProductionEvent, listEventTechReqs, createEventTechReq, getEventDepartment } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
+import { createEventTechReq, getEventDepartment, getProductionEvent, isUserDeptPoc, listEventTechReqs } from "@/lib/event-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { SERVER_URL } from "@/lib/server-url";
-import { notifyUsers } from "@/lib/notify";
+import { notifyTaskAssigned, notifyUsers } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -44,29 +44,71 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  // Creating a tech_req requires edit-level on the event
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-
+  // 单次解析：departmentId 校验、viaPoc 门、指派门、创建全部消费同一份值
+  //（此前 clone 双重解析被 review 指为潜在分歧面）
   const body = (await req.json()) as {
     title?: string; description?: string; scheduleItemIds?: string[];
     presetMinutes?: number | null; departmentId?: string | null;
     assignees?: { userId: string; name: string }[];
   };
+  const departmentId = typeof body.departmentId === "string" ? body.departmentId : null;
+
+  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
+  // 不先校验会被跨剧组部门 id 骗过 POC 各门 + 绑入跨剧组部门）
+  if (departmentId && !(await getEventDepartment(departmentId, productionId)))
+    return Response.json({ error: "部门不存在" }, { status: 400 });
+
+  // Creating a tech_req requires edit-level on the event
+  // attach 语义：给 event 挂 task = event 子集合操作。
+  // 路径三（用户场景：服装设计看到排练 schedule 主动来对装）：部门 POC 可为
+  // **本部门**对可见 event 发起 task——可见性由成员基础 details@view 天然界定。
+  // 路径三前提=对该 event 有 details 视图（"对看得见的东西反应"）：宽松剧组经
+  // 成员模板通配行命中；严格剧组（模板撤掉 details@view）未被授视图的 POC 发不了
+  const viaPoc = departmentId !== null
+    && await isUserDeptPoc(departmentId, session.userId)
+    && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "details", "view");
+  if (!viaPoc
+      && !await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "create"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
 
+  // 创建即指派同受指派面约束（2026-08-15 定谳：event 编辑级联不含指派——
+  // organizer 发部门、POC 分人）：task 通配 assignees@edit 或所绑部门 POC
+  if ((body.assignees?.length ?? 0) > 0) {
+    const canDirectAssign =
+      await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "assignees", "edit")
+      || (departmentId !== null && await isUserDeptPoc(departmentId, session.userId));
+    if (!canDirectAssign)
+      return Response.json({ error: "你没有直接指派的权限——请绑定部门后交由部门 POC 分配" }, { status: 403 });
+  }
+
   const techReq = await createEventTechReq({
     id: uid(),
+    productionId,
     eventId,
     scheduleItemIds: body.scheduleItemIds ?? [],
     title,
     description: body.description ?? "",
     presetMinutes: body.presetMinutes ?? null,
-    departmentId: body.departmentId ?? null,
+    departmentId,
     assignees: body.assignees ?? [],
     createdBy: session.userId,
+    createdVia: viaPoc ? "poc" : "explicit",
   });
+
+  // 创建即指派 → 指派通知（老板派活语义：纯告知，act=打开详情）
+  if (techReq.assignees.length > 0) {
+    void notifyTaskAssigned({
+      productionId,
+      taskId: techReq.id,
+      taskTitle: techReq.title,
+      eventTitle: event.title,
+      assignedBy: session.userId,
+      userIds: techReq.assignees.map(a => a.userId),
+    }).catch(e => console.error("[task-assign] notify failed:", e));
+  }
 
   // Notify POCs when a new awaiting req is created for their department.
   if (techReq.status === "awaiting" && techReq.departmentId) {

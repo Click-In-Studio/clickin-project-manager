@@ -22,13 +22,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     });
   }
 
-  // Fallback: redirect to the platform avatar URL stored in feishu_user
+  // Fallback: redirect to the profile avatar URL (feishu sync value as last resort)
   const res = await getPool().query<{ avatar_url: string | null }>(
-    "SELECT avatar_url FROM feishu_user WHERE user_id = $1",
+    `SELECT COALESCE(
+       (SELECT avatar_url FROM user_profile WHERE user_id = $1),
+       (SELECT avatar_url FROM feishu_user WHERE user_id = $1)
+     ) AS avatar_url`,
     [userId],
   );
-  const feishuUrl = res.rows[0]?.avatar_url;
-  if (feishuUrl) return Response.redirect(feishuUrl, 302);
+  const fallbackUrl = res.rows[0]?.avatar_url;
+  if (fallbackUrl) return Response.redirect(fallbackUrl, 302);
 
   return new Response(null, { status: 404 });
 }

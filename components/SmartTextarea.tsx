@@ -2,23 +2,27 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { Extension } from "@tiptap/core";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
-import { PluginKey } from "@tiptap/pm/state";
+import { TableKit } from "@tiptap/extension-table";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
+import Suggestion from "@tiptap/suggestion";
+import { PluginKey, Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import { BASE_PATH } from "@/lib/base-path";
-import type { JSONContent } from "@tiptap/react";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
 import type { MentionSearchResult } from "@/lib/mention-types";
 import {
-  deserializeMention,
   encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { parseLine, parseToDoc, serializeAtMention } from "@/lib/mention-format";
+import { parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
+export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -112,6 +116,37 @@ export function contentRefPlugin(productionId: string, versionId?: string | null
 
 export { contentRefPlugin as scriptRefDropPlugin };
 
+// ── Factory: [[wikilink ───────────────────────────────────────────────────────
+// wiki 文档库 W4：`[[` 触发文档补全。落节点 kind='wiki' 的 contentMention 语义，
+// markdown 序列化为 [#标题](/__cm__wiki:<id>)（存 id 不存标题——标题仅编辑期快照，
+// 渲染端逐观看者经 mention-resolve 刷新，账本 §4.1）。
+
+export function wikiLinkDropPlugin(productionId: string): DropPlugin {
+  return {
+    trigger: "[[",
+    emptyLabel: "无匹配文档",
+    search: async (query) => {
+      if (!query) return [];
+      try {
+        const res = await fetch(
+          `${BASE_PATH}/api/production/${productionId}/wiki?q=${encodeURIComponent(query)}`
+        );
+        const data = await res.json() as { results?: { id: string; title: string | null }[] };
+        return (data.results ?? []).map(r => ({ id: r.id, label: r.title ?? "（无标题）" }));
+      } catch {
+        return [];
+      }
+    },
+    renderItem: (item, active) => (
+      <span className={`text-sm font-medium ${active ? "text-sky-800" : "text-sky-600"}`}>
+        [[{item.label}]]
+      </span>
+    ),
+    format: (item) => `[#${item.label}](${CM_HREF_PREFIX}wiki:${item.id})`,
+    toNode: (item) => ({ id: item.id, label: item.label }),
+  };
+}
+
 // ── Toolbar (markdown mode only) ──────────────────────────────────────────────
 
 type TiptapEditor = ReturnType<typeof useEditor>;
@@ -143,8 +178,10 @@ function Toolbar({ editor }: { editor: TiptapEditor | null }) {
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="无序列表">≡</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="有序列表">1.</ToolbarBtn>
+      <ToolbarBtn onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="任务列表">☑</ToolbarBtn>
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
+      <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
     </div>
@@ -231,19 +268,64 @@ const MarkdownContentMentionExt = Mention.extend({
   },
 });
 
-// @ mention — works in both modes; adds markdown serialization for markdown mode
+// [[wikilink 触发器（UI 修缮轮重构）：不再用独立 node——插入走已验证的
+// contentMention(kind='wiki') 管线（序列化/重载/chip 渲染全部现成）。
+// 独立 Suggestion 插件而非 Mention 内建：可设 allowedPrefixes=null——
+// 默认只在空格/行首后触发，CJK 文本后直接敲 [[ 原本根本不弹补全（首版 bug 根因）。
+const WikiLinkTrigger = Extension.create<{ suggestion: Record<string, unknown> }>({
+  name: "wikiLinkTrigger",
+  addOptions() {
+    return { suggestion: {} };
+  },
+  addProseMirrorPlugins() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return [Suggestion({ editor: this.editor, ...(this.options.suggestion as any) })];
+  },
+});
+
+/** 在指定位置插入 wiki 引用 chip（补全选中与拖放共用） */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function insertWikiMentionAt(editor: any, range: { from: number; to: number } | number, props: { id: string; label: string }) {
+  const content = [
+    { type: "contentMention", attrs: { kind: "wiki", displayMode: null, id: props.id, aux: null, versionId: null, label: props.label } },
+    { type: "text", text: " " },
+  ];
+  editor.chain().focus().insertContentAt(range, content).run();
+}
+
+// @ mention — works in both modes; adds markdown serialization for markdown mode.
+// markdown 形态 [@名](uid:id)（@ 收进链接文本）：原 @[名](uid:id) 只有序列化没有
+// 反序列化（被 StarterKit Link 抢走），重载即失真 → 保真警告 → 源码保存毁 chip
 const AtMentionExt = Mention.extend({
   name: "atMention",
+  parseHTML() {
+    return [
+      { tag: 'span[data-type="atMention"]' },
+      {
+        tag: "a",
+        priority: 1001,
+        getAttrs(el) {
+          if (typeof el === "string") return false;
+          const href = el.getAttribute("href") ?? "";
+          if (!href.startsWith("uid:")) return false;
+          const label = (el.textContent ?? "").replace(/^@/, "");
+          return { id: href.slice(4) || null, label };
+        },
+      },
+    ];
+  },
   addStorage() {
     return {
       markdown: {
         serialize(state: { write: (s: string) => void }, node: { attrs: { id: string | null; label: string } }) {
-          state.write(serializeAtMention(node.attrs.id, node.attrs.label));
+          const { id, label } = node.attrs;
+          state.write(id ? `[@${label}](uid:${id})` : `@${label}`);
         },
       },
     };
   },
 });
+
 
 // ── Plain-text serialisation (non-markdown mode) ───────────────────────────────
 
@@ -284,6 +366,8 @@ export interface SmartTextareaProps {
   contentMention?: { productionId: string; versionId?: string | null };
   /** Enable markdown toolbar and serialisation */
   markdown?: boolean;
+  /** markdown 模式去外框（Notion 式整页编辑场景） */
+  frameless?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   placeholder?: string;
@@ -293,6 +377,14 @@ export interface SmartTextareaProps {
   onKeyDown?: (e: KeyboardEvent) => void;
   autoFocus?: boolean;
   readOnly?: boolean;
+  /** markdown 模式：编辑器就绪时回调"初始 value 解析后再序列化"的结果——
+   *  调用方对比原文可检测富文本模式无法无损保留的语法（不支持的方言会被
+   *  prosemirror-markdown 转义/规范化）。 */
+  onInitialRoundTrip?: (serialized: string) => void;
+  /** 协作：远端光标（顶层块索引+块内偏移=精确位）；变化即重绘装饰 */
+  remoteCursors?: { name: string; color: string; blockIndex: number; offset: number }[];
+  /** 协作：本端光标位置变化回调（块索引+块内字符偏移，去重后触发） */
+  onCursorChange?: (cursor: { blockIndex: number; offset: number }) => void;
 }
 
 // ── SmartTextarea ─────────────────────────────────────────────────────────────
@@ -303,6 +395,7 @@ export default function SmartTextarea({
   memberMention,
   contentMention,
   markdown = false,
+  frameless = false,
   plugins: extraPlugins = [],
   placeholder,
   rows = 3,
@@ -311,7 +404,17 @@ export default function SmartTextarea({
   onKeyDown,
   autoFocus,
   readOnly = false,
+  onInitialRoundTrip,
+  remoteCursors,
+  onCursorChange,
 }: SmartTextareaProps) {
+  const onInitialRoundTripRef = useRef(onInitialRoundTrip);
+  onInitialRoundTripRef.current = onInitialRoundTrip;
+  const remoteCursorsRef = useRef(remoteCursors ?? []);
+  remoteCursorsRef.current = remoteCursors ?? [];
+  const onCursorChangeRef = useRef(onCursorChange);
+  onCursorChangeRef.current = onCursorChange;
+  const lastCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
   const [drop, setDrop] = useState<DropState>(null);
   const dropRef = useRef<DropState>(null);
   const lastEmittedRef = useRef(value);
@@ -340,6 +443,7 @@ export default function SmartTextarea({
 
   const hasHashPlugin = allPlugins.some(p => p.trigger === "#");
   const hasAtPlugin = allPlugins.some(p => p.trigger === "@");
+  const hasWikiPlugin = allPlugins.some(p => p.trigger === "[[");
 
   const suggHandlers = useRef({
     onStart(props: SuggestionProps<DropItem>, trigger: string) {
@@ -375,7 +479,11 @@ export default function SmartTextarea({
   function makeSuggestion(trigger: string, enabled: boolean) {
     return {
       char: trigger,
-      pluginKey: new PluginKey(trigger === "#" ? "contentMention" : "atMention"),
+      // 默认 allowedPrefixes=[' '] 只在空格/行首后触发——CJK 文本后敲 @/#/[[
+      // 全都不弹（用户实测）。任意前缀放开，三种触发器统一
+      allowedPrefixes: null,
+      startOfLine: false,
+      pluginKey: new PluginKey(trigger === "#" ? "contentMention" : trigger === "@" ? "atMention" : "wikiMention"),
       allow: () => enabled,
       items: ({ query }: { query: string }) =>
         allPluginsRef.current.find(p => p.trigger === trigger)?.search(query) ?? [],
@@ -387,6 +495,42 @@ export default function SmartTextarea({
       }),
     };
   }
+
+  // 协作远端光标：装饰器读 ref（cursors 变化由外层 ping 空事务触发重算）
+  const remoteCursorExt = useMemo(() => {
+    const cursorsRef = remoteCursorsRef;
+    return Extension.create({
+      name: "remoteCursors",
+      addProseMirrorPlugins() {
+        return [new Plugin({
+          key: new PluginKey("remoteCursorsDeco"),
+          props: {
+            decorations(state) {
+              const cursors = cursorsRef.current;
+              if (!cursors.length) return DecorationSet.empty;
+              const decos: Decoration[] = [];
+              for (const c of cursors) {
+                if (c.blockIndex == null || c.blockIndex < 0 || c.blockIndex >= state.doc.childCount) continue;
+                let pos = 0;
+                for (let i = 0; i < c.blockIndex; i++) pos += state.doc.child(i).nodeSize;
+                // 精确位：块内容起点 + 偏移（钳到块内容尺寸——远端文档可能略有出入）
+                const block = state.doc.child(c.blockIndex);
+                const offset = Math.min(Math.max(0, c.offset ?? 0), block.content.size);
+                decos.push(Decoration.widget(pos + 1 + offset, () => {
+                  const el = document.createElement("span");
+                  el.className = "wiki-remote-cursor";
+                  el.style.setProperty("--rc-color", c.color);
+                  el.setAttribute("data-name", c.name);
+                  return el;
+                }, { side: -1 }));
+              }
+              return DecorationSet.create(state.doc, decos);
+            },
+          },
+        })];
+      },
+    });
+  }, []);
 
   const ContentMentionExt = markdown ? MarkdownContentMentionExt : PlainContentMentionExt;
 
@@ -400,12 +544,17 @@ export default function SmartTextarea({
         });
 
     const contentMentionCfg = ContentMentionExt.configure({
+      // v3 Mention 退格默认把 chip 还原成 mentionSuggestionChar（未设=@）——
+      // 用户实测删 wiki chip 留下 '@'；改为整颗删净
+      deleteTriggerWithBackspace: true,
       renderText: ({ node }) => {
         const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
         return serializeMention({ kind, displayMode, id, aux, versionId });
       },
       renderHTML: ({ node }) => {
         const { kind, displayMode, id, aux, versionId, label } = node.attrs;
+        // wiki 引用（含重载回流的 [[链接]]）用 sky 色 [[标题]] 形态，与剧本域 # 区分
+        const isWiki = kind === "wiki";
         return [
           "span",
           {
@@ -416,12 +565,23 @@ export default function SmartTextarea({
             "data-id": id,
             "data-aux": aux ?? "",
             "data-version-id": versionId ?? "",
-            class: "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-default",
+            class: isWiki
+              ? "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-pointer hover:bg-sky-100"
+              : "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100",
           },
-          `#${label ?? kind}`,
+          isWiki ? `[[${label ?? "文档"}]]` : `#${label ?? kind}`,
         ];
       },
       suggestion: makeSuggestion("#", hasHashPlugin),
+    });
+
+    const wikiTriggerCfg = WikiLinkTrigger.configure({
+      suggestion: {
+        ...makeSuggestion("[[", hasWikiPlugin),
+        command: ({ editor, range, props }: { editor: unknown; range: { from: number; to: number }; props: { id: string; label: string } }) => {
+          insertWikiMentionAt(editor, range, props);
+        },
+      },
     });
 
     const atMentionCfg = AtMentionExt.configure({
@@ -441,10 +601,15 @@ export default function SmartTextarea({
     ];
 
     return markdown
-      ? [base, Markdown.configure({ transformCopiedText: true }), ...commonExts]
+      // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）；
+      // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞
+      ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
+         TableKit.configure({ table: { resizable: false } }),
+         TaskList, TaskItem.configure({ nested: true }),
+         ...commonExts, wikiTriggerCfg, remoteCursorExt]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown]);
+  }, [markdown, remoteCursorExt]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`
@@ -454,7 +619,7 @@ export default function SmartTextarea({
     immediatelyRender: false,
     editable: !readOnly,
     extensions,
-    content: markdown ? value : parseToDoc(value),
+    content: markdown ? normalizeLegacyMentions(value) : parseToDoc(value),
     autofocus: autoFocus,
     editorProps: {
       attributes: {
@@ -470,6 +635,72 @@ export default function SmartTextarea({
         }
         return false;
       },
+      // 富文本 chip 点击跳转（wiki 直跳文档页；剧本域 chip 经 mention-resolve 取 url）。
+      // chip 是原子节点，点击导航是自然语义（飞书/Notion 同款）
+      handleClickOn: (_view, _pos, node) => {
+        if (node.type.name !== "contentMention") return false;
+        const pid = contentMentionRef.current?.productionId;
+        if (!pid) return false;
+        const { kind, id, aux, versionId, displayMode } = node.attrs as ContentMentionAttrs;
+        if (kind === "wiki") {
+          window.location.assign(`${BASE_PATH}/production/${pid}/wiki/${id}`);
+          return true;
+        }
+        void (async () => {
+          try {
+            const res = await fetch(`${BASE_PATH}/api/production/${pid}/mention-resolve`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ mentions: [{ kind, displayMode, id, aux, versionId }] }),
+            });
+            if (!res.ok) return;
+            const data = await res.json() as { urls: (string | null)[] };
+            if (data.urls?.[0]) window.location.assign(`${BASE_PATH}${data.urls[0]}`);
+          } catch { /* 解析失败不跳 */ }
+        })();
+        return true;
+      },
+      // 从文档树拖文档进编辑器 → 自动成为双向链接 chip（UI 修缮轮）
+      handleDrop: (view, event) => {
+        const raw = event.dataTransfer?.getData("application/x-clickin-wiki");
+        if (!raw) return false;
+        try {
+          const { id, label } = JSON.parse(raw) as { id: string; label: string };
+          if (!id) return false;
+          event.preventDefault();
+          const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+            ?? view.state.selection.to;
+          const node = view.state.schema.nodes.contentMention.create({
+            kind: "wiki", displayMode: null, id, aux: null, versionId: null, label: label ?? "文档",
+          });
+          view.dispatch(view.state.tr.insert(pos, [node, view.state.schema.text(" ")]));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const cb = onCursorChangeRef.current;
+      if (!cb) return;
+      try {
+        const $head = editor.state.selection.$head;
+        if ($head.depth < 1) return;
+        const blockIndex = $head.index(0);
+        // 块内偏移：绝对 pos - 顶层块内容起点（跨嵌套结构展平计数）
+        const offset = Math.max(0, $head.pos - $head.start(1));
+        const last = lastCursorRef.current;
+        if (!last || last.blockIndex !== blockIndex || last.offset !== offset) {
+          lastCursorRef.current = { blockIndex, offset };
+          cb({ blockIndex, offset });
+        }
+      } catch { /* selection 在非常规位置时忽略 */ }
+    },
+    onCreate: ({ editor }) => {
+      if (markdown && onInitialRoundTripRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onInitialRoundTripRef.current((editor.storage as any).markdown.getMarkdown());
+      }
     },
     onUpdate: ({ editor }) => {
       if (readOnly) return;
@@ -516,9 +747,19 @@ export default function SmartTextarea({
     if (!editor || editor.isDestroyed) return;
     if (value === lastEmittedRef.current) return;
     lastEmittedRef.current = value;
-    const newContent = markdown ? value : parseToDoc(value);
+    const newContent = markdown ? normalizeLegacyMentions(value) : parseToDoc(value);
+    const { from, to } = editor.state.selection;
     editor.commands.setContent(newContent, { emitUpdate: false });
+    // 协作合并回灌时保留本端选区（钳到新文档尺寸内）
+    const max = editor.state.doc.content.size;
+    editor.commands.setTextSelection({ from: Math.min(from, max), to: Math.min(to, max) });
   }, [value, editor, markdown]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta("remoteCursorsPing", true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(remoteCursors ?? []), editor]);
 
   const rect = drop?.clientRect?.();
 
@@ -562,8 +803,13 @@ export default function SmartTextarea({
   );
 
   if (markdown) {
+    const frame = readOnly
+      ? "overflow-hidden"
+      : frameless
+        ? `overflow-hidden ${className}`
+        : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`;
     return (
-      <div className={readOnly ? "overflow-hidden" : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`}>
+      <div className={frame}>
         {!readOnly && <Toolbar editor={editor} />}
         {editorEl}
       </div>

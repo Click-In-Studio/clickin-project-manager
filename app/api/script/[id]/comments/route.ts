@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { buildScriptCommentMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
@@ -13,7 +13,7 @@ async function guard(req: NextRequest, productionId: string) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx } = access;
-  if (!hasPermission("script:comment", permCtx)) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "script", "*", "comments", "create"))) {
     return { session, deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   }
   return { session, deny: null };

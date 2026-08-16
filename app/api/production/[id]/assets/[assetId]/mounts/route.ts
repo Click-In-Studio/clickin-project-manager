@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, cowBlockSnapshotForMount, cowCueRevisionForMount, getVersion } from "@/lib/db";
 import { getAsset, addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset-db";
+import { canViewAsset, canPublishAsset, mountHostSidePermitted } from "@/lib/asset-perm";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -65,12 +66,9 @@ async function validateMountTarget(productionId: string, mountType: MountType, m
       );
       return res.rows.length > 0;
     }
-    case "event_tech_req": {
+    case "task": {
       const res = await pool.query(
-        `SELECT 1
-         FROM event_tech_req etr
-         JOIN production_event pe ON pe.id = etr.event_id
-         WHERE etr.id = $1 AND pe.production_id = $2`,
+        "SELECT 1 FROM task WHERE id = $1 AND production_id = $2",
         [mountId, productionId]
       );
       return res.rows.length > 0;
@@ -118,6 +116,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
+  if (!await canViewAsset(access.permCtx, id, asset, "meta"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const mounts = await listAssetMounts(assetId);
   return Response.json({ mounts });
@@ -133,9 +133,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const isOwner = asset.uploaderUserId === session.userId;
-  if (!isOwner && !session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
-
   const body = (await req.json()) as {
     mountType: MountType;
     mountId: string;
@@ -148,6 +145,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (!body.mountType || !body.mountId)
     return Response.json({ error: "缺少 mountType 或 mountId" }, { status: 400 });
+
+  // 批D 双门：挂载 = asset publication@create（主人侧让渡）∧ 宿主侧 attach（批E/F 前沿用其域现有键）
+  if (!await canPublishAsset(access.permCtx, id, assetId, "create")
+      || !await mountHostSidePermitted(access.permCtx, id, body.mountType, body.mountId))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   let mountId = body.mountId;
   const mode = body.mountMode;

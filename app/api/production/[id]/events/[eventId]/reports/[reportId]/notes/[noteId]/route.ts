@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!note) return Response.json({ error: "Note 不存在" }, { status: 404 });
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!await canEditNote(permCtx, productionId, eventId, note.authorUserId, note.departmentId, eventPermCtx.participantDeptIds))
+  if (!await canEditNote(permCtx, productionId, eventId, note, eventPermCtx.participantDeptIds, "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { content?: string; mentions?: Mention[] };
@@ -54,7 +54,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!note) return Response.json({ error: "Note 不存在" }, { status: 404 });
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
-  if (!await canEditNote(permCtx, productionId, eventId, note.authorUserId, note.departmentId, eventPermCtx.participantDeptIds))
+  if (!await canEditNote(permCtx, productionId, eventId, note, eventPermCtx.participantDeptIds, "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const deleted = await deleteReportNote(noteId, reportId, session.userId, true);

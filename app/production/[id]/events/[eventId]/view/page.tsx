@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { hasEventDomainView, loadEventPermContext } from "@/lib/event-permissions";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -12,7 +13,8 @@ import {
   getSelfParticipantRole,
   listEventDepartments,
 } from "@/lib/event-db";
-import { hasResourceGrantLevel, hasUserAnyTechReqGrantInEvent } from "@/lib/resource-grant-db";
+import { hasUserAnyTechReqGrantInEvent } from "@/lib/resource-grant-db";
+import { hasGrant as hasGrantCheck } from "@/lib/grant-check";
 import EventFollowerClient from "@/components/EventFollowerClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -36,17 +38,21 @@ export default async function EventViewPage({
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!hasPermission("event:follow", prodPermCtx)) redirect(`/unauthorized?resource=event%3Afollow&id=${productionId}`);
+  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) // event:follow 批B 两职拆分：订阅=followers@create、读取=meta/details@view——
+  // 此门是 hasEventDomainView（域 view），申请节点=meta@view 才与门一致（非 verb swap）
+  redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
-  // Per-instance resource_grant edit+ → full editor view on this page
-  const canViewFull = prodPermCtx.isAdmin
-    || await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit");
+  // Per-instance production_member_grant edit+ → full editor view on this page
+  const canViewFull = prodPermCtx.isAdmin || prodPermCtx.isOwner
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
 
   // Non-editors cannot see unpublished events
-  if (!canViewFull && !VISIBLE_STATUSES.has(event.status))
+  // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
+  const canSeeDraft = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "event", eventId, "publication", "view");
+  if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
   const [scheduleItems, reports, isAssignee, selfRole, departments, hasAnyTechReqGrant] = await Promise.all([
@@ -59,15 +65,22 @@ export default async function EventViewPage({
   ]);
 
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
-  const canViewReqs = canViewFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
+  const canViewReqsFull = await hasGrant(session.userId, productionId, "task", "*", "*", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
+    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit")
+    || prodPermCtx.isAdmin || prodPermCtx.isOwner;
+  const canViewReqs = canViewReqsFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
+  const viewerPermCtx = await loadEventPermContext(session.userId, eventId);
   const visibleReports = canViewFull
     ? reports
     : (await Promise.all(
         reports.map(async r => {
           if (r.publishedAt !== null) return r;
-          const hasGrant = await hasResourceGrantLevel(session.userId, productionId, "report", r.id, "view");
-          return hasGrant ? r : null;
+          // 部门参与者可见 draft（发布前写 note 的业务规则）
+          if (viewerPermCtx.participantDeptIds.length > 0) return r;
+          const hasReportView = await hasGrantCheck(session.userId, productionId, "report", r.id, "publication", "view");
+          return hasReportView ? r : null;
         })
       )).filter((r): r is NonNullable<typeof r> => r !== null);
 

@@ -9,7 +9,7 @@
  *   - A role in cue_list_role, with a third user having that role in production_member
  *
  * Invariance test verifies that after migration all three users have active
- * resource_grant rows for that cue list, and that cue_list_permission /
+ * production_member_grant rows for that cue list, and that cue_list_permission /
  * cue_list_role tables no longer exist.
  */
 import os from "os";

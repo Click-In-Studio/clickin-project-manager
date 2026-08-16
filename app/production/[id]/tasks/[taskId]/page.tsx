@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { getProductionPermissionContext, listProductionMembersWithRoles, listMilestones } from "@/lib/db";
 import {
   getTechReqByProduction,
   getProductionEvent,
+  getTaskDependencies,
+  listProductionTechReqs,
   listScheduleItems,
   listEventDepartments,
 } from "@/lib/event-db";
@@ -35,16 +37,26 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   const eventId = req.eventId;
 
-  const [event, scheduleItems, departments, productionMembers] = await Promise.all([
-    getProductionEvent(eventId, productionId),
-    listScheduleItems(eventId),
+  const [event, scheduleItems, departments, productionMembers, allMilestones, dependencies, allTasks] = await Promise.all([
+    eventId ? getProductionEvent(eventId, productionId) : Promise.resolve(null),
+    eventId ? listScheduleItems(eventId) : Promise.resolve([]),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
+    listMilestones(productionId),
+    getTaskDependencies(taskId),
+    listProductionTechReqs(productionId),
   ]);
 
-  if (!event) notFound();
+  if (eventId && !event) notFound();
 
-  const canViewFull = hasPermission("event:view_call_sheet_any", access.permCtx);
+  const milestoneOptions = allMilestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }));
+  const boundMilestones = milestoneOptions.filter(m => req.milestoneIds.includes(m.id));
+  // 依赖候选：同 production 的其他任务（成环由服务端递归 CTE 兜底拒绝）
+  const taskOptions = allTasks
+    .filter(t => t.id !== taskId)
+    .map(t => ({ id: t.id, title: t.title, status: t.status }));
+
+  const canViewFull = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
   const pocDeptIds = departments
     .filter(d => d.pocUserIds.includes(session.userId))
     .map(d => d.id);
@@ -52,7 +64,7 @@ export default async function TaskDetailPage({ params }: Ctx) {
   const isAssignee = req.assignees.some(a => a.userId === session.userId);
 
   if (!canViewFull && !isPocOfDept && !isAssignee)
-    redirect(`/unauthorized?resource=task%3Aview&id=${productionId}&taskId=${taskId}`);
+    redirect(`/unauthorized?resource=node%3Atask%2F*%2Fmeta%40view&id=${productionId}&taskId=${taskId}`);
 
   const dept = departments.find(d => d.id === req.departmentId);
   const deptPeople = dept
@@ -72,6 +84,11 @@ export default async function TaskDetailPage({ params }: Ctx) {
         deptName={dept?.name ?? null}
         deptPeople={deptPeople}
         allPeople={allPeople}
+        milestones={boundMilestones}
+        milestoneOptions={milestoneOptions}
+        taskOptions={taskOptions}
+        blockedBy={dependencies.blockedBy}
+        blocks={dependencies.blocks}
         isPocOfDept={isPocOfDept}
         isAssignee={isAssignee}
         canViewFull={canViewFull}

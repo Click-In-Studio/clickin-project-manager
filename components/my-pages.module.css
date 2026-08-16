@@ -1,5 +1,5 @@
 .workspace {
-  padding: 34px clamp(22px, 4vw, 62px) 72px;
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
 }
 
 /* Split panel (master-detail) */
@@ -330,34 +330,6 @@
   font-weight: 500;
   margin: 3px 0 0;
   color: var(--ink);
-}
-
-/* View mode toggle — lighter segmented control (list / table / grid) */
-.viewToggle {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--surface-2);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.viewToggle button {
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  padding: 5px 13px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: var(--muted);
-  white-space: nowrap;
-  transition: background .1s, color .1s;
-}
-
-.viewToggle button[aria-selected="true"] {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 0 1px 3px rgba(24,42,42,.08);
 }
 
 /* Tab bar (segmented control) */
@@ -1056,4 +1028,72 @@
   .splitLayout {
     display: none;
   }
+}
+
+/* ── 任务面板中栏表格（照抄原型 taskTableHeader / taskRows / taskCheck 规格）── */
+.taskTableHeader, .taskRow {
+  display: grid;
+  grid-template-columns: 42px minmax(150px, 1.35fr) minmax(130px, 1fr) minmax(110px, .65fr);
+  gap: 12px;
+  align-items: center;
+}
+.taskTableHeader {
+  padding: 8px 10px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.taskRow { min-height: 72px; padding: 9px 10px; border-bottom: 1px solid var(--line); background: transparent; }
+.taskRow:last-child { border-bottom: 0; }
+.taskRowSelected { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--ink); }
+.taskCheckBtn {
+  width: 25px; height: 25px; flex: 0 0 auto;
+  border: 1px solid #b8c4c0; border-radius: 50%;
+  background: transparent; color: #fff; cursor: pointer;
+  font-size: 12px; line-height: 1; display: grid; place-items: center;
+}
+.taskRowDone .taskCheckBtn { background: var(--success); border-color: var(--success); }
+.taskTitleCell, .taskRelationCell { border: 0; background: transparent; text-align: left; cursor: pointer; padding: 0; min-width: 0; text-decoration: none; }
+.taskTitleCell b, .taskRelationCell b, .taskOwnerCell b { display: block; color: var(--ink); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskTitleCell small, .taskRelationCell small, .taskOwnerCell small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+.taskTitleCell:hover b, .taskRelationCell:hover b { color: var(--stage); }
+.taskRowDone .taskTitleCell b { text-decoration: line-through; color: var(--muted); }
+.taskOwnerCell { min-width: 0; text-align: right; }
+.taskOwnerCell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 表单字段统一输入样式（任务详情等页的 SmartTextarea 用） */
+.fieldInput {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper);
+  outline: none;
+  resize: vertical;
+}
+
+/* ── 任务详情抽屉（原型 drawer 规格：右侧浮层 + drawerIn 动画）── */
+.taskDrawer {
+  position: fixed;
+  z-index: 60;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: -15px 0 50px rgba(24, 42, 42, .14);
+  animation: taskDrawerIn .2s ease-out;
+}
+@keyframes taskDrawerIn {
+  from { transform: translateX(20px); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .taskDrawer { animation: none; }
 }

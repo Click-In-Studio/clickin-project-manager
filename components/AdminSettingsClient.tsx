@@ -1,5 +1,7 @@
 "use client";
 
+import PageHeader from "@/components/PageHeader";
+
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -153,6 +155,7 @@ export type SettingsPerms = {
   canImportScript: boolean;
   canImportScenes: boolean;
   canManageTags: boolean;
+  canToggleWatermark: boolean;
 };
 
 export type InitialMeta = {
@@ -162,6 +165,7 @@ export type InitialMeta = {
   type: string | null;
   typeLabel: string | null;
   language: string | null;
+  watermarkEnabled: boolean;
 };
 
 export default function AdminSettingsClient({
@@ -177,36 +181,32 @@ export default function AdminSettingsClient({
 }) {
   return (
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
-      <div style={{ padding: "24px clamp(20px, 3vw, 48px) 56px" }}>
+      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
 
-        {/* Page header */}
-        <div style={{ marginBottom: 24 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-            Admin · Settings
-          </p>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em" }}>
-              项目管理
-            </h1>
-            {isArchived && (
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#f97316", background: "#ffedd5", borderRadius: 6, padding: "2px 8px" }}>
-                已归档
-              </span>
-            )}
-          </div>
-        </div>
+        {/* Page header（v3 统一页头） */}
+        <PageHeader
+          eyebrow={initialMeta.name}
+          title={
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 12 }}>
+              项目信息
+              {isArchived && (
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "var(--stage-soft)", color: "var(--stage)", fontFamily: "system-ui, sans-serif" }}>
+                  已归档
+                </span>
+              )}
+            </span>
+          }
+          side="stage"
+        />
 
         {/* ── 基本信息 ── */}
         <BasicInfoCard productionId={productionId} initialMeta={initialMeta} perms={perms} />
 
+        {/* ── 安全 ── */}
+        <SecurityCard productionId={productionId} initialMeta={initialMeta} perms={perms} />
+
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
-
-        {/* ── 数据 ── */}
-        <DataCard productionId={productionId} perms={perms} />
-
-        {/* ── 危险区域 ── */}
-        <DangerCard productionId={productionId} productionName={initialMeta.name} isArchived={isArchived} perms={perms} />
 
       </div>
     </div>
@@ -442,6 +442,50 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
 
 type MemberTag = { id: string; name: string; isSystem: boolean };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 安全 card（水印开关）
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SecurityCard({ productionId, initialMeta, perms }: {
+  productionId: string;
+  initialMeta: InitialMeta;
+  perms: SettingsPerms;
+}) {
+  const [enabled, setEnabled] = useState(initialMeta.watermarkEnabled);
+  const { save, saving, saved } = useSave(productionId);
+
+  const toggle = async (next: boolean) => {
+    setEnabled(next);
+    await save({ watermarkEnabled: next });
+  };
+
+  return (
+    <Card title="安全">
+      <Row
+        title="页面水印"
+        hint="开启后项目内所有页面平铺显示访问者的 [用户名 邮箱] 水印，用于截图溯源。不影响页面操作；开关变更后刷新页面生效。"
+        last
+      >
+        {perms.canToggleWatermark ? (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: saving ? "wait" : "pointer", fontSize: 13, color: "var(--ink)" }}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={saving}
+              onChange={(e) => toggle(e.target.checked)}
+              style={{ width: 15, height: 15, accentColor: "var(--ink)", cursor: "inherit" }}
+            />
+            启用水印
+            {saved && <span style={{ fontSize: 12, color: "var(--stage)" }}>已保存</span>}
+          </label>
+        ) : (
+          <LockedNotice reason="需要项目配置编辑权限" />
+        )}
+      </Row>
+    </Card>
+  );
+}
+
 function MemberTagsCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
   const [tags, setTags] = useState<MemberTag[]>([]);
   const [newName, setNewName] = useState("");
@@ -570,7 +614,7 @@ function MemberTagsCard({ productionId, perms }: { productionId: string; perms: 
 // 数据 card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
+export function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -604,8 +648,8 @@ function DataCard({ productionId, perms }: { productionId: string; perms: Settin
   };
 
   const importLinks = [
-    { label: "导入剧本", desc: "从飞书表格导入台词、角色、场景号", href: `/production/${productionId}/import-script`, can: perms.canImportScript, lock: "script:import" },
-    { label: "导入构作", desc: "从飞书表格导入场次、梗概、时长", href: `/production/${productionId}/import-scenes`, can: perms.canImportScenes, lock: "dramaturgy:import" },
+    { label: "导入剧本", desc: "从飞书表格导入台词、角色、场景号", href: `/production/${productionId}/import-script`, can: perms.canImportScript, lock: "" },
+    { label: "导入构作", desc: "从飞书表格导入场次、梗概、时长", href: `/production/${productionId}/import-scenes`, can: perms.canImportScenes, lock: "" },
   ];
 
   const inputFocus = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--ink)"; };
@@ -674,7 +718,7 @@ function DataCard({ productionId, perms }: { productionId: string; perms: Settin
 // 危险区域 card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DangerCard({ productionId, productionName, isArchived, perms }: {
+export function DangerCard({ productionId, productionName, isArchived, perms }: {
   productionId: string;
   productionName: string;
   isArchived: boolean;

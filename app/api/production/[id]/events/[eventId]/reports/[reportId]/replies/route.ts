@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import {
   getEventReport, getReportNote, getProductionEvent,
   listReportReplies, createReportReply,
@@ -10,6 +10,7 @@ import {
 import {
   loadEventPermContext,
   canReplyToReport, canReplyToReportNote, canReplyToReply,
+  hasEventDomainView,
 } from "@/lib/event-permissions";
 import { buildReplyMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
@@ -24,8 +25,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
+
+  const event = await getProductionEvent(eventId, productionId);
+  if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
+  const report = await getEventReport(reportId, eventId);
+  if (!report) return Response.json({ error: "报告不存在" }, { status: 404 });
 
   const replies = await listReportReplies(reportId);
   return Response.json({ replies });
@@ -39,9 +45,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
+  const event = await getProductionEvent(eventId, productionId);
+  if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
   const report = await getEventReport(reportId, eventId);
   if (!report) return Response.json({ error: "报告不存在" }, { status: 404 });
 
@@ -84,17 +92,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   });
 
   // Fire-and-forget: notify @mentioned users via unified interface (inbox + optional DM).
+  // 锚点/entityId 用 DB 返回的 reply.id（createReportReply 忽略传入 id，由 wiki_comment 生成 UUID）
   if (mentions.length > 0) {
-    const replyPath = `${SERVER_URL}/production/${productionId}/reports/${reportId}#reply-${id}`;
+    const replyPath = `${SERVER_URL}/production/${productionId}/reports/${reportId}#reply-${reply.id}`;
     const mentionUserIds = [...new Set(mentions.map(m => m.userId))];
-    const eventRow = await getProductionEvent(eventId, productionId).catch(() => null);
-    const eventTitle = eventRow?.title ?? "";
+    const eventTitle = event.title ?? "";
     void notifyUsers({
       userIds: mentionUserIds,
       kind: "comment_mention",
       productionId,
       entityType: "report_reply",
-      entityId: id,
+      entityId: reply.id,
       title: `${session.name} 在报告「${report.title}」中提到了你`,
       body: body.content.trim(),
       viewHref: replyPath,

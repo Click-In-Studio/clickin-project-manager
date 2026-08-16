@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
+import PageHeader from "@/components/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionName } from "@/lib/db";
+import { toActor, hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/event-permissions";
+import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
+import { listProductionEvents, listEventDepartments, listProductionTechReqs, listMyTechReqsFull } from "@/lib/event-db";
+import PlanningClient, { type PlanningTask } from "@/components/PlanningClient";
 
 export const metadata: Metadata = { title: "计划与日程" };
 
@@ -12,19 +17,54 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const name = await getProductionName(id);
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) redirect(`/unauthorized?id=${id}`);
+  if (!(await hasEventDomainView(toActor(session, access.permCtx), id)))
+    redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
+
+  const [name, allEvents, milestones, departments, canViewAllTasks] = await Promise.all([
+    getProductionName(id),
+    listProductionEvents(id),
+    listMilestones(id),
+    listEventDepartments(id),
+    hasEffectiveGrant(toActor(session, access.permCtx), id, "task", "*", "*", "view"),
+  ]);
   if (!name) notFound();
 
+  // draft 可见性与事件页同门（共享 helper，防规则分叉）
+  const events = await filterDraftVisibleEvents(access.permCtx, id, allEvents);
+
+  // 任务视图与任务页同门：全量视图需 task/*@view，否则退化为与我相关的任务
+  const tasks: PlanningTask[] = canViewAllTasks
+    ? (await listProductionTechReqs(id)).map(t => ({
+        id: t.id, title: t.title, status: t.status,
+        departmentId: t.departmentId, departmentName: t.departmentName,
+        eventId: t.eventId, eventTitle: t.eventTitle,
+        startTime: t.startTime, endTime: t.endTime,
+        effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
+        isBlocked: t.isBlocked,
+      }))
+    : (await listMyTechReqsFull(session.userId))
+        .filter(t => t.productionId === id)
+        .map(t => ({
+          id: t.id, title: t.title, status: t.status,
+          departmentId: t.departmentId, departmentName: t.departmentName,
+          eventId: t.eventId, eventTitle: t.eventTitle,
+          startTime: null, endTime: null,
+          effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
+          isBlocked: false,
+        }));
+
   return (
-    <div className="px-8 py-10">
-      <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-[#667676] mb-1">舞台侧 · {name}</p>
-      <h1 className="font-serif text-3xl font-medium text-[#182a2a] tracking-tight mb-8" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>
-        计划与日程
-      </h1>
-      <div className="rounded-2xl border border-[#dfe5e2] bg-white px-8 py-10 text-center max-w-sm">
-        <p className="text-sm font-medium text-[#182a2a] mb-1">功能即将上线</p>
-        <p className="text-xs text-[#667676]">日历 · 甘特 · 执行表 正在开发中</p>
-      </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <PageHeader eyebrow={`Planning · ${name}`} title="计划与日程" side="stage" />
+      <PlanningClient
+        productionId={id}
+        events={events}
+        tasks={tasks}
+        milestones={milestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }))}
+        departments={departments.map(d => ({ id: d.id, name: d.name }))}
+      />
     </div>
   );
 }

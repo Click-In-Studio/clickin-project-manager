@@ -6,7 +6,9 @@ import {
   hasListAccess, listProductionDepts,
 } from "@/lib/db";
 import { listCueListGrants, listCueListDeptAccess } from "@/lib/resource-grant-db";
-import { hasPermission, hasScopedPermission, type PermissionContext } from "@/lib/permissions";
+import { canAccessNode } from "@/lib/grant-template";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { type PermissionContext } from "@/lib/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -21,8 +23,10 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   const { id, cueListId } = await ctx.params;
   const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!permCtx || !hasPermission("cue_list:view", permCtx))
-    return Response.json({ error: "无权访问" }, { status: 403 });
+  if (!permCtx) return Response.json({ error: "无权访问" }, { status: 403 });
+  // 批A 三态：目录行可见性（meta view）在前，内容/管理各看各的行
+  const metaAccess = await canAccessNode(permCtx, id, "cue_list", cueListId, "meta", "view");
+  if (!metaAccess.allowed) return Response.json({ error: "无权访问" }, { status: 403 });
 
   const [cueList, canEdit] = await Promise.all([
     getCueList(cueListId, id),
@@ -30,8 +34,10 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   ]);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const isCreator = cueList.createdBy === session.userId;
-  const canManage = hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx);
+  const canManage = await hasEffectiveGrant(
+    toActor(session, permCtx),
+    id, "cue_list", cueListId, "grants", "edit",
+  );
 
   const [grants, deptAccess, productionDepts] = await Promise.all([
     canManage ? listCueListGrants(cueListId) : Promise.resolve([]),
@@ -83,8 +89,9 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
 
   const cueList = await getCueList(cueListId, id);
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
-  const isCreator = cueList.createdBy === session.userId;
-  if (!hasScopedPermission("cue_list:manage_permissions", "cue_list:manage_permissions_any", isCreator, permCtx))
+  // 批A：实例节点 delete 动词行（创建者自动行集/管理员通配/迁移拆解行）
+  const delAccess = await canAccessNode(permCtx, id, "cue_list", cueListId, "*", "delete");
+  if (!delAccess.allowed)
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteCueList(cueListId, id);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import PageHeader from "@/components/PageHeader";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
@@ -182,23 +183,52 @@ export default function ProductionAnnouncementsClient({ productionId, production
   }
 
   return (
-    <div style={{ padding: "34px clamp(22px, 4vw, 62px) 72px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Header — 与「我的工作」统一 */}
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>{productionName}</p>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-          <h1 className={styles.pageTitle}>项目公告</h1>
-          {unreadCount > 0 && (
-            <span style={{
-              fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-              background: "var(--script)", color: "#fff",
-            }}>
-              {unreadCount} 条未读
-            </span>
-          )}
-        </div>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      {/* Header（v3 统一页头） */}
+      <PageHeader
+        eyebrow={productionName}
+        title={
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 12 }}>
+            项目公告
+            {unreadCount > 0 && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                background: "var(--script)", color: "#fff", fontFamily: "system-ui, sans-serif",
+              }}>
+                {unreadCount} 条未读
+              </span>
+            )}
+          </span>
+        }
+        side="stage"
+      />
+
+      {/* ── 摘要统计（统一语汇）── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(initialAnnouncements.length), "全部公告", "本项目累计"],
+          [String(unreadCount), "未读", "待你查看"],
+          [String(initialAnnouncements.filter(a => a.isPinned).length), "置顶", "重点公告"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{
+            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
+            background: "var(--surface)",
+          }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
       </div>
 
+      {/* ── Panel（统一定高）── */}
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       {initialAnnouncements.length === 0 ? (
         <div className={styles.emptyState} style={{ paddingTop: 60 }}>
           暂无公告
@@ -252,8 +282,8 @@ export default function ProductionAnnouncementsClient({ productionId, production
           </div>
 
           {/* ── Desktop: master-detail ── */}
-          <div className={styles.desktopOnly}>
-            <div className={styles.splitLayout}>
+          <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+            <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
               {/* Left: list */}
               <div className={`${styles.splitPane} ${styles.splitList}`}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 16 }}>
@@ -273,6 +303,7 @@ export default function ProductionAnnouncementsClient({ productionId, production
           </div>
         </>
       )}
+      </section>
     </div>
   );
 }

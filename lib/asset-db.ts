@@ -16,7 +16,7 @@ export type MountType =
   | "scene" | "scene_snapshot"
   | "block" | "block_snapshot"
   | "cue" | "cue_revision"
-  | "comment" | "event" | "event_schedule" | "event_tech_req" | "event_report";
+  | "comment" | "event" | "event_schedule" | "task" | "event_report";
 
 export type MountMode = "inherit" | "tracking" | "version_only";
 
@@ -29,6 +29,7 @@ export type Asset = {
   fileName: string;
   mimeType: string | null;
   isUniversal: boolean;
+  isPublic: boolean;
   storageType: StorageType;
   feishuUrl: string | null;
   createdAt: string;
@@ -62,14 +63,14 @@ export type AssetMount = {
 type AssetRow = {
   id: string; production_id: string; uploader_user_id: string;
   asset_type: string; name: string | null; file_name: string; mime_type: string | null;
-  is_universal: boolean; storage_type: string; feishu_url: string | null;
+  is_universal: boolean; is_public: boolean; storage_type: string; feishu_url: string | null;
   created_at: Date;
 };
 function rowToAsset(r: AssetRow): Asset {
   return {
     id: r.id, productionId: r.production_id, uploaderUserId: r.uploader_user_id,
     assetType: r.asset_type as AssetType, name: r.name, fileName: r.file_name, mimeType: r.mime_type,
-    isUniversal: r.is_universal, storageType: r.storage_type as StorageType,
+    isUniversal: r.is_universal, isPublic: r.is_public, storageType: r.storage_type as StorageType,
     feishuUrl: r.feishu_url, createdAt: r.created_at.toISOString(),
   };
 }
@@ -112,6 +113,7 @@ export async function createAsset(params: {
   fileName: string;
   mimeType: string | null;
   isUniversal: boolean;
+  isPublic?: boolean;
   storageType: StorageType;
   feishuUrl?: string | null;
   r2Key?: string | null;
@@ -126,10 +128,34 @@ export async function createAsset(params: {
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO asset (id, production_id, uploader_user_id, asset_type, name, file_name, mime_type,
-         is_universal, storage_type, feishu_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         is_universal, is_public, storage_type, feishu_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [assetId, params.productionId, params.uploaderUserId, params.assetType, params.name ?? null,
-       params.fileName, params.mimeType, params.isUniversal, params.storageType, params.feishuUrl ?? null]
+       params.fileName, params.mimeType, params.isUniversal, params.isPublic ?? false,
+       params.storageType, params.feishuUrl ?? null]
+    );
+    // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
+    // own 键（rename/overwrite/mount/…）已退役，由此行集承担；存续按 §0.6 person 覆盖。
+    await client.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT $1, $2, 'asset', $3, s.sub, s.verb, 'self_confirmed', $2
+       FROM (VALUES ('meta', 'view'), ('file', 'view'),
+                    ('publication', 'view'), ('publication', 'create'), ('publication', 'delete'),
+                    ('meta', 'edit'), ('file', 'create'),
+                    ('*', 'delete'), ('shares', 'create'), ('grants', 'edit')) AS s(sub, verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [params.productionId, params.uploaderUserId, assetId],
+    );
+    await client.query(
+      `INSERT INTO resource_person_manage
+         (production_id, user_id, resource_type, resource_id, resource_sub, established_by)
+       VALUES ($1, $2, 'asset', $3, '*', $2)
+       ON CONFLICT DO NOTHING`,
+      [params.productionId, params.uploaderUserId, assetId],
     );
     const fileRes = await client.query<AssetFileRow>(
       `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)

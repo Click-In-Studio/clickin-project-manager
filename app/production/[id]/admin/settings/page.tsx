@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-export const metadata: Metadata = { title: "项目管理" };
+import { hasGrant } from "@/lib/grant-check";
+export const metadata: Metadata = { title: "项目信息" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
 import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/AdminSettingsClient";
@@ -26,23 +26,24 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   const isArchived = access?.isArchived ?? false;
 
   const perms = {
-    canRename: !!permCtx && hasPermission("production:rename", permCtx),
-    canChangeAvatar: !!permCtx && hasPermission("production:change_avatar", permCtx),
-    canEditDescription: !!permCtx && hasPermission("production:edit_description", permCtx),
-    canChangeType: !!permCtx && hasPermission("production:change_type", permCtx),
-    canChangeLanguage: !!permCtx && hasPermission("production:change_language", permCtx),
-    canArchive: !!permCtx && hasPermission("production:archive", permCtx),
-    canDelete: !!permCtx && hasPermission("production:delete", permCtx),
-    canImportContacts: !!permCtx && hasPermission("contacts:import", permCtx),
-    canImportScript: !!permCtx && hasPermission("script:import", permCtx),
-    canImportScenes: !!permCtx && hasPermission("dramaturgy:import", permCtx),
-    canManageTags: !!permCtx && hasPermission("members:change_role", permCtx),
+    canRename: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/name", "edit")),
+    canChangeAvatar: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/avatar", "edit")),
+    canEditDescription: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/description", "edit")),
+    canChangeType: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/type", "edit")),
+    canChangeLanguage: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/language", "edit")),
+    canArchive: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "archival", "create")),
+    canDelete: !!permCtx && (permCtx.isAdmin || permCtx.isOwner),
+    canImportContacts: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "member", "*", "imports", "create")),
+    canImportScript: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "imports", "create")),
+    canImportScenes: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
+    canManageTags: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
+    canToggleWatermark: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "config", "edit")),
   };
 
   return (
     <AdminSettingsClient
       productionId={id}
-      initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null }}
+      initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null, watermarkEnabled: false }}
       isArchived={isArchived}
       perms={perms}
     />

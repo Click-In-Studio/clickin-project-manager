@@ -64,14 +64,16 @@ export async function getSheetValues(
   sheetId: string,
   userToken: string,
   maxRow?: number,
+  maxColumn?: number,
 ): Promise<string[][]> {
   const allRows: string[][] = [];
   let start = 1;
   const t0 = Date.now();
+  const endColumn = maxColumn && maxColumn > 0 ? colLetter(maxColumn - 1) : "ZZ";
 
   for (let page = 0; page < 50; page++) {
     const end = maxRow ? Math.min(start + PAGE_SIZE - 1, maxRow) : start + PAGE_SIZE - 1;
-    const range = `${sheetId}!A${start}:ZZ${end}`;
+    const range = `${sheetId}!A${start}:${endColumn}${end}`;
     console.log(`[feishu-sheet] page ${page + 1}: fetching range ${range}`);
     const pt = Date.now();
 

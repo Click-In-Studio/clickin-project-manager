@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listTagGroups, createTagGroup } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { hasGrant } from "@/lib/grant-check";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("script:view", permCtx)) {
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const groups = await listTagGroups(id);
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!hasPermission("scene:rename", permCtx)) {
+  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "tag_group", "*", "*", "create")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

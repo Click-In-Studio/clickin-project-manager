@@ -1,9 +1,10 @@
 import { type NextRequest } from "next/server";
+import { hasEventDomainView } from "@/lib/event-permissions";
+import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
-import { getProductionEvent, listEventReports, createEventReport } from "@/lib/event-db";
-import { hasResourceGrantLevel } from "@/lib/resource-grant-db";
+import { getProductionEvent, listEventReports, createEventReport, mountWikiAsReport } from "@/lib/event-db";
+import { canShareWiki } from "@/lib/wiki-perm";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("event:follow", permCtx))
+  if (!(await hasEventDomainView(toActor(session, permCtx), productionId)))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const event = await getProductionEvent(eventId, productionId);
@@ -40,14 +41,34 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
 
   // Creating a report requires edit-level on the event
-  if (!permCtx.isAdmin && !await hasResourceGrantLevel(session.userId, productionId, "event", eventId, "edit"))
+  // attach 语义：给 event 挂报告 = event 子集合操作（批B 已发放 reports@create 行）
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "reports", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {
     title?: string; reportType?: string; body?: string;
+    /** 文档树自定义挂载（W5 透传）：缺省=默认树、null=不挂、string=自定义父文档 */
+    parentWikiId?: string | null;
+    /** W5：挂载文档库既有文档为报告（与新建互斥；挂载让渡可见性=分享行为，
+     *  双门：宿主 reports@create ∧ 该文档 grants@edit——批D 双门同构） */
+    wikiId?: string;
   };
+
+  if (body.wikiId) {
+    if (!await canShareWiki(toActor(session, permCtx), productionId, body.wikiId))
+      return Response.json({ error: "权限不足（需要该文档的分享权）" }, { status: 403 });
+    const report = await mountWikiAsReport({
+      id: uid(), eventId, wikiId: body.wikiId,
+      reportType: body.reportType ?? "rehearsal", createdBy: session.userId,
+    });
+    if (!report) return Response.json({ error: "文档不存在" }, { status: 404 });
+    return Response.json({ report }, { status: 201 });
+  }
+
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
+  if (body.parentWikiId !== undefined && body.parentWikiId !== null && typeof body.parentWikiId !== "string")
+    return Response.json({ error: "无效的挂载位置" }, { status: 400 });
 
   const report = await createEventReport({
     id: uid(),
@@ -56,6 +77,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     title,
     body: body.body ?? "",
     createdBy: session.userId,
+    ...(body.parentWikiId !== undefined ? { parentWikiId: body.parentWikiId } : {}),
   });
   return Response.json({ report }, { status: 201 });
 }

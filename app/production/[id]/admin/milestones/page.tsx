@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
+import { hasGrant } from "@/lib/grant-check";
 export const metadata: Metadata = { title: "里程碑" };
 
 import { requireAdminAccess } from "@/lib/admin-guard";
-import { getProductionPermissionContext, listMilestones } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminMilestonesClient from "@/components/AdminMilestonesClient";
@@ -15,8 +15,9 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [milestones, access] = await Promise.all([
+  const [milestones, name, access] = await Promise.all([
     listMilestones(id),
+    getProductionName(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
@@ -27,15 +28,16 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
   return (
     <AdminMilestonesClient
       productionId={id}
+      productionName={name ?? ""}
       initialMilestones={milestones.map(m => ({
         id: m.id,
         name: m.name,
         endDate: m.endDate,
         sortOrder: m.sortOrder,
       }))}
-      canCreate={!!permCtx && hasPermission("milestone:create", permCtx)}
-      canManage={!!permCtx && hasPermission("milestone:manage", permCtx)}
-      canDelete={!!permCtx && hasPermission("milestone:delete", permCtx)}
+      canCreate={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "create"))}
+      canManage={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "edit"))}
+      canDelete={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "milestone", "*", "*", "delete"))}
     />
   );
 }

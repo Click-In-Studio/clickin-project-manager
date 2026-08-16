@@ -350,7 +350,7 @@ export async function confirmCallTime(
  * Called on every notification list fetch so the inbox stays clean without a background job.
  *
  * Covered entity types:
- *   tech_req  — event_tech_req (CASCADE-deleted when production_event is deleted)
+ *   tech_req  — task（production 删除 CASCADE；event 删除仅解绑不删）
  *   call_time — event_call_time (CASCADE-deleted when production_event is deleted)
  */
 export async function autoCompleteDeadNotifications(userId: string): Promise<void> {
@@ -363,7 +363,7 @@ export async function autoCompleteDeadNotifications(userId: string): Promise<voi
        AND action_required = true
        AND acted_at        IS NULL
        AND (
-         (entity_type = 'tech_req'  AND NOT EXISTS (SELECT 1 FROM event_tech_req  WHERE id = user_notification.entity_id))
+         (entity_type = 'tech_req'  AND NOT EXISTS (SELECT 1 FROM task            WHERE id = user_notification.entity_id))
          OR
          (entity_type = 'call_time' AND NOT EXISTS (SELECT 1 FROM event_call_time WHERE id = user_notification.entity_id))
        )`,

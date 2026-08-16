@@ -4,8 +4,8 @@ export const metadata: Metadata = { title: "场景" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
+import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import ScenesManager from "@/components/ScenesManager";
 
 export default async function ScenesPage({
@@ -20,10 +20,12 @@ export default async function ScenesPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!hasPermission("scene:view", access.permCtx)) redirect(`/unauthorized?resource=scene%3Aview&id=${id}`);
+  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
+    redirect(`/unauthorized?resource=node%3Ascene%2F*%2Fmeta%40view&id=${id}`);
 
-  const canEdit = hasPermission("scene:rename", access.permCtx);
-  const canImport = hasPermission("dramaturgy:import", access.permCtx);
+  const canEdit = access.permCtx.isAdmin || access.permCtx.isOwner  // owner 旁路（#228 漏网）
+    || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
+  const canImport = (access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "dramaturgy", "*", "imports", "create"));
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
   const [name, versions] = await Promise.all([getProductionName(id), listVersions(id)]);

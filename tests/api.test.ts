@@ -43,6 +43,7 @@ import {
   GET as getScriptHandler,
   PATCH as patchScriptHandler,
 } from "@/app/api/script/[id]/route";
+import { POST as createScriptCommentHandler } from "@/app/api/script/[id]/comments/route";
 import {
   GET as listMembersHandler,
   POST as addMemberHandler,
@@ -818,15 +819,16 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
 
   beforeAll(async () => {
     await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
-    await addProductionMember(SCRIPT_PERM_PROD, TEST_USER); // no 编剧 / 制作人 role
+    await addProductionMember(SCRIPT_PERM_PROD, TEST_USER);
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
-    // Grant script:view so the user passes the view check and hits the script:edit gate.
-    // (MEMBER_BASE_PERMISSIONS bypass was removed in #158 — view perms now require explicit grants.)
+    // 批E2 行化：blocks@view 穿读门；comments@create 供下方评论测试（原 script:comment）
     await getPool().query(
-      `INSERT INTO atomic_permission_grant
-         (production_id, user_id, permission_key, grant_source, confirmed_by)
-       VALUES ($1, $2, 'script:view', 'direct', $2)
-       ON CONFLICT DO NOTHING`,
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'script', '*', 'blocks', 'view', 'direct'),
+              ($1, $2, 'script', '*', 'comments', 'create', 'direct')
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false DO NOTHING`,
       [SCRIPT_PERM_PROD, TEST_USER],
     );
   });
@@ -854,6 +856,21 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/script:edit/);
+    expect(body.error).toMatch(/node:script/);
+  });
+
+  it("member without a script-editing role can publish a comment", async () => {
+    const res = await createScriptCommentHandler(
+      req(`/api/script/${SCRIPT_PERM_PROD}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ blockId: "test-comment-block", body: "测试评论" }),
+        session: userSession(),
+      }),
+      ctx({ id: SCRIPT_PERM_PROD }),
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { comment: { body: string; userId: string } };
+    expect(body.comment).toMatchObject({ body: "测试评论", userId: TEST_USER });
   });
 });

@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
 import { getAsset, resolveAssetFile } from "@/lib/asset-db";
+import { canViewAsset } from "@/lib/asset-perm";
 import { getR2Object } from "@/lib/r2";
 
 async function validateVersion(productionId: string, versionId?: string | null) {
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return new Response("不存在", { status: 404 });
+  if (!await canViewAsset(access.permCtx, id, asset, "meta")) return new Response("权限不足", { status: 403 });
   if (asset.storageType !== "r2") return new Response("非 R2 文件", { status: 400 });
 
   const versionId = req.nextUrl.searchParams.get("v") ?? undefined;

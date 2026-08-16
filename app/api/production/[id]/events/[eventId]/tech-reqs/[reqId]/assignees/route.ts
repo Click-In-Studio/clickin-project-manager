@@ -4,6 +4,7 @@ import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db"
 import { getProductionEvent, getEventTechReq, setTechReqAssignees } from "@/lib/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { canAssignTechReq } from "@/lib/event-permissions";
+import { notifyTaskAssigned } from "@/lib/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 
@@ -25,7 +26,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const req_ = await getEventTechReq(reqId, eventId);
   if (!req_) return Response.json({ error: "技术需求不存在" }, { status: 404 });
 
-  if (!await canAssignTechReq(permCtx, reqId, eventId, productionId))
+  if (!await canAssignTechReq(permCtx, reqId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { assignees?: unknown };
@@ -45,11 +46,22 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   await setTechReqAssignees(reqId, body.assignees as { userId: string; name: string }[]);
   const updated = await getEventTechReq(reqId, eventId);
 
-  if (updated?.chatId) {
-    const newUserIds = (body.assignees as { userId: string }[])
-      .map(a => a.userId)
-      .filter(id => !prevAssignees.has(id));
-    if (newUserIds.length) {
+  const newUserIds = (body.assignees as { userId: string }[])
+    .map(a => a.userId)
+    .filter(id => !prevAssignees.has(id));
+
+  if (newUserIds.length && updated) {
+    // 指派通知（老板派活语义：纯告知，act=打开详情）
+    void notifyTaskAssigned({
+      productionId,
+      taskId: reqId,
+      taskTitle: updated.title,
+      eventTitle: event.title,
+      assignedBy: session.userId,
+      userIds: newUserIds,
+    }).catch(e => console.error("[task-assign] notify failed:", e));
+
+    if (updated.chatId) {
       // Convert user_ids to Feishu open_ids for addChatMembers
       batchGetFeishuOpenIds(newUserIds).then(m => {
         const openIds = newUserIds.map(uid => m.get(uid)).filter((v): v is string => !!v);

@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
   const session = getSession(req.cookies);
@@ -60,12 +60,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     language?: string | null;
     type?: string | null;
     typeLabel?: string | null;
+    watermarkEnabled?: boolean;
   };
 
   const jobs: Promise<void>[] = [];
 
   if (body.name !== undefined) {
-    if (!hasPermission("production:rename", access.permCtx)) {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/name", "edit"))) {
       return Response.json({ error: "无权修改名称" }, { status: 403 });
     }
     if (!body.name.trim()) return Response.json({ error: "名称不能为空" }, { status: 400 });
@@ -73,28 +74,35 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   }
 
   if ("description" in body) {
-    if (!hasPermission("production:edit_description", access.permCtx)) {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/description", "edit"))) {
       return Response.json({ error: "无权修改项目简介" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { description: body.description }));
   }
 
   if ("avatarUrl" in body) {
-    if (!hasPermission("production:change_avatar", access.permCtx)) {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/avatar", "edit"))) {
       return Response.json({ error: "无权修改项目头像" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { avatarUrl: body.avatarUrl }));
   }
 
   if ("language" in body) {
-    if (!hasPermission("production:change_language", access.permCtx)) {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/language", "edit"))) {
       return Response.json({ error: "无权修改项目语言" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { language: body.language }));
   }
 
+  if (typeof body.watermarkEnabled === "boolean") {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "config", "edit"))) {
+      return Response.json({ error: "无权修改水印配置" }, { status: 403 });
+    }
+    jobs.push(updateProductionMeta(id, { watermarkEnabled: body.watermarkEnabled }));
+  }
+
   if ("type" in body || "typeLabel" in body) {
-    if (!hasPermission("production:change_type", access.permCtx)) {
+    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/type", "edit"))) {
       return Response.json({ error: "无权修改项目类型" }, { status: 403 });
     }
     jobs.push(updateProductionType(id, body.type ?? null, body.typeLabel ?? null));
@@ -112,7 +120,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
 
   const { id } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !hasPermission("production:delete", access.permCtx)) {
+  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner)) {
     return Response.json({ error: "无权限，仅项目所有者可删除" }, { status: 403 });
   }
 

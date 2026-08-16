@@ -35,9 +35,12 @@ jobs:
       # ── 4. Bundle ────────────────────────────────────────────────────────────
       - name: Bundle standalone output
         run: |
-          # Next standalone needs static/ and public/ copied in manually
-          cp -r .next/static .next/standalone/.next/static
-          cp -r public       .next/standalone/public
+          # Next standalone needs static/ and public/ copied in manually.
+          # 用 dir/. 语法拷内容——目标目录已存在时 `cp -r public target/public`
+          # 会嵌套成 public/public/（线上字体 404 的元凶之一）
+          mkdir -p .next/standalone/.next/static .next/standalone/public
+          cp -r .next/static/. .next/standalone/.next/static/
+          cp -r public/.       .next/standalone/public/
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
 
       # ── 5. Setup SSH ─────────────────────────────────────────────────────────
@@ -143,7 +146,12 @@ jobs:
               # `read -r FILEPATH` for the same fd and can silently swallow the next
               # line(s), dropping migrations from a run with 2+ pending files without
               # any error (this is exactly what happened to migrate-cue-list-role.sql).
-              ssh prod "sudo -u postgres psql -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null
+              # ON_ERROR_STOP：脚本错误即非零退出（此前 psql -f 出错仍退 0，失败被
+              # 静默记入 db-applied.txt——批A 部署事故）。显式 || exit 1 确保记账
+              # 语句不会在失败后执行，不依赖外层 shell 的 -e 隐式行为。
+              # 失败时 /tmp/migration.sql 留在服务器上供排查（有意为之）。
+              ssh prod "sudo -u postgres psql -v ON_ERROR_STOP=1 -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null \
+                || { echo "MIGRATION FAILED: $FILENAME — aborting deploy, NOT recorded in manifest"; exit 1; }
               # Record in manifest
               ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
               echo "$FILENAME" >> /tmp/db-applied.txt

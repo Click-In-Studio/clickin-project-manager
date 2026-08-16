@@ -1,4 +1,4 @@
-import type { Permission } from "./permissions";
+type Permission = string;
 
 /**
  * Per-page atomic permission scopes for the self-confirm gate.
@@ -10,152 +10,54 @@ import type { Permission } from "./permissions";
  * go through the same role→selfConfirm→grant path as all other permissions.
  */
 export const PAGE_PERMISSION_SCOPES = {
-  base: new Set<Permission>([
-    "scene:view",
-    "character:view",
-    "script:view",
-    "cue_list:view",
-    "cue:view",
-    "contacts:view",
-    "event:follow",
-    "asset:view",
-    "asset:download",
-    "asset:share",
+  base: new Set<string>([
+    // 批A：cue 域读权限改为树节点键（node:<type>/<id>[/<sub>]@<verb>）
+    "node:cue_list/*/meta@view",
+    "node:cue_list/*/cues@view",
+    "node:cue_list/*/cues/comments@create",
+    // 批B：event 域读取+订阅（原 event:follow 两职拆分）
+    "node:event/*/meta@view",
+    "node:event/*/details@view",
+    "node:event/*/followers@create",
   ]),
   script: new Set<Permission>([
-    "script:import",
-    "script:manage",
-    "script:edit",
-    "script:annotate",
-    "script:comment",
-    "script:create_block",
-    "script:delete_block",
-    "script:edit_block",
-    "script:set_character",
-    "script:set_type",
-    "script:set_tag",
-    "script:reorder",
-    "script:mount",
-    "script:edit_comment_any",
-    "script:delete_comment_any",
-    "rehearsal_mark:create",
-    "rehearsal_mark:edit",
-    "rehearsal_mark:delete",
-    "rehearsal_mark:move",
   ]),
 
   dramaturgy: new Set<Permission>([
-    "scene:create",
-    "scene:delete",
-    "scene:rename",
-    "scene:renumber",
-    "scene:change_type",
-    "scene:edit_synopsis",
-    "scene:edit_action_line",
-    "scene:edit_music",
-    "scene:edit_stage_notes",
-    "scene:edit_expected_duration",
-    "scene:mount",
-    "dramaturgy:import",
-    "dramaturgy_view:create",
-    "dramaturgy_view:delete",
-    "dramaturgy_view:overwrite",
-    "dramaturgy_view:create_public",
-    "dramaturgy_view:delete_public",
-    "dramaturgy_view:overwrite_public",
-    "tag_group:create",
-    "tag_group:delete",
-    "tag_group:rename",
-    "tag_group:edit_range_config",
-    "tag_group:set_default_option",
-    "tag_group:set_lyric_split",
-    "tag_group:reorder",
-    "tag_option:create",
-    "tag_option:delete",
-    "tag_option:rename",
-    "tag_option:edit_color",
-    "tag_option:reorder",
   ]),
 
   characters: new Set<Permission>([
-    "character:create",
-    "character:delete",
-    "character:rename",
-    "character:change_type",
-    "character:set_members",
-    "character:edit_gender",
-    "character:edit_biography",
-    "character:edit_role_type",
   ]),
 
-  // Atomic cue_list/cue management permissions. Per-list resource grants
-  // (cue_list:edit, cue_list:manage_permissions) are handled separately by CuePage.
-  cuelists: new Set<Permission>([
-    "cue_list:create",
-    "cue_list:delete",
-    "cue_list:rename",
-    "cue_list:reorder",
-    "cue_list:edit_abbr",
-    "cue_list:edit_description",
-    "cue_list:create_any",
-    "cue_list:delete_any",
-    "cue_list:rename_any",
-    "cue_list:reorder_any",
-    "cue_list:edit_abbr_any",
-    "cue_list:edit_description_any",
-    "cue_list:manage_permissions_any",
-    "cue:create",
-    "cue:delete",
-    "cue:renumber",
-    "cue:rename",
-    "cue:edit_description",
-    "cue:move",
-    "cue:mount",
-    "cue:comment",
-    "cue:create_any",
-    "cue:delete_any",
-    "cue:renumber_any",
-    "cue:rename_any",
-    "cue:edit_description_any",
-    "cue:move_any",
-    "cue:mount_any",
-    "cue:edit_comment_any",
-    "cue:delete_comment_any",
+  // 批A：cue 域激活面全部走树节点键。集合 create 是唯一需要页面级激活的
+  // 生产级能力；每表写权限由 CuePage 的 per-list access 流处理（zone self-confirm）。
+  cuelists: new Set<string>([
+    "node:cue_list/*@create",
   ]),
 
-  events: new Set<Permission>([
-    "event:create",
-    "event:view_call_sheet_any",
-    "task:view",
-    "task:view_any",
-    "task:delete_any",
+  events: new Set<string>([
+    // 批B：事件管理激活面（原 event:create/view_call_sheet_any/task:* 原子键）
+    "node:event/*@create",
+    "node:event/*/chat@create",
+    "node:event/*/call_sheet@view",
+    "node:task/*@view",
+    "node:task/*@delete",
   ]),
 
-  reports: new Set<Permission>([
-    "report:create",
-    "report:reply",
-    "report:edit_comment_any",
-    "report:delete_comment_any",
+  reports: new Set<string>([
+    // 批C：报告挂接与评论管理走树节点键
+    "node:event/*/reports@create",
+    "node:report/*/replies@create",
+    "node:report/*/replies@edit",
+    "node:report/*/replies@delete",
+  ]),
+
+  wiki: new Set<string>([
+    // wiki 文档库 W2：文档创建（实例面 view/edit 走分享/挂载推导，不设页面激活）
+    "node:wiki/*@create",
   ]),
 
   assets: new Set<Permission>([
-    "asset:rename",
-    "asset:overwrite",
-    "asset:change_type",
-    "asset:delete",
-    "asset:mount",
-    "asset:unmount",
-    "asset:view_any",
-    "asset:delete_any",
-    "asset:rename_any",
-    "asset:change_type_any",
-    "asset:overwrite_any",
-    "asset:mount_any",
-    "asset:unmount_any",
-    "asset:download_any",
-    "asset:share_downloadable",
-    "asset:share_any",
-    "asset:share_any_downloadable",
   ]),
 } as const;
 

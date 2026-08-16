@@ -1,649 +1,420 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useMemo, useState } from "react";
+import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import Badge from "@/components/Badge";
+import AdminModal from "@/components/AdminModal";
+import MemberPickerModal, { type PickerDept } from "@/components/MemberPickerModal";
+import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import type { ProductionRole } from "@/lib/db";
 
-// ─── Permission groups (excludes ROLE_TEMPLATE_EXCLUDED perms) ────────────────
+type Role = { id: string; name: string };
 
-type PermGroup = { label: string; perms: string[] };
+type Member = {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  photoUrl: string | null;
+  roles: string[];
+  tags: string[];
+  email: string | null;
+  phone: string | null;
+  status: "active" | "suspended";
+};
 
-const PERM_GROUPS: PermGroup[] = [
-  {
-    label: "成员管理",
-    perms: ["members:invite", "members:kick", "members:change_role", "members:manage_overrides"],
-  },
-  {
-    label: "部门管理",
-    perms: [
-      "dept:create", "dept:dismiss", "dept:rename", "dept:change_type",
-      "dept:add_member", "dept:delete_member", "dept:set_poc", "dept:unset_poc",
-    ],
-  },
-  {
-    label: "项目配置",
-    perms: ["production:manage_config", "production:mount", "production:unmount"],
-  },
-  {
-    label: "里程碑",
-    perms: ["milestone:create", "milestone:manage", "milestone:delete"],
-  },
-  {
-    label: "通知公告",
-    perms: ["announcement:create", "announcement:edit", "announcement:delete"],
-  },
-  {
-    label: "剧本操作",
-    perms: [
-      "script:import", "script:manage", "script:edit", "script:annotate",
-      "script:create_block", "script:delete_block", "script:edit_block",
-      "script:set_character", "script:set_type", "script:set_tag", "script:reorder", "script:mount",
-      "rehearsal_mark:create", "rehearsal_mark:edit", "rehearsal_mark:delete", "rehearsal_mark:move",
-    ],
-  },
-  {
-    label: "场次 & 构作",
-    perms: [
-      "scene:create", "scene:delete", "scene:rename", "scene:renumber", "scene:change_type",
-      "scene:edit_synopsis", "scene:edit_action_line", "scene:edit_music",
-      "scene:edit_stage_notes", "scene:edit_expected_duration", "scene:mount",
-      "dramaturgy:import",
-      "dramaturgy_view:create", "dramaturgy_view:delete", "dramaturgy_view:overwrite",
-      "dramaturgy_view:create_public", "dramaturgy_view:delete_public", "dramaturgy_view:overwrite_public",
-    ],
-  },
-  {
-    label: "角色人物",
-    perms: [
-      "character:create", "character:rename", "character:change_type",
-      "character:set_members", "character:edit_gender", "character:edit_biography",
-      "character:edit_role_type", "character:delete",
-    ],
-  },
-  {
-    label: "Cue 表（个人）",
-    perms: [
-      "cue_list:create", "cue_list:delete", "cue_list:rename", "cue_list:reorder",
-      "cue_list:edit_abbr", "cue_list:edit_description", "cue_list:manage_permissions",
-      "cue:create", "cue:delete", "cue:renumber", "cue:rename",
-      "cue:edit_description", "cue:move", "cue:mount",
-    ],
-  },
-  {
-    label: "Cue 表（管理 _any）",
-    perms: [
-      "cue_list:create_any", "cue_list:delete_any", "cue_list:rename_any",
-      "cue_list:reorder_any", "cue_list:edit_abbr_any", "cue_list:edit_description_any",
-      "cue_list:manage_permissions_any",
-      "cue:create_any", "cue:delete_any", "cue:renumber_any", "cue:rename_any",
-      "cue:edit_description_any", "cue:move_any", "cue:mount_any",
-    ],
-  },
-  {
-    label: "事件 & 日程",
-    perms: [
-      "event:create",
-      "event:view_call_sheet_any", "event:follow",
-    ],
-  },
-  {
-    label: "任务",
-    perms: [
-      "task:view", "task:view_any", "task:delete_any",
-    ],
-  },
-  {
-    label: "报告",
-    perms: [
-      "report:create",
-    ],
-  },
-  {
-    label: "附件（个人）",
-    perms: [
-      "asset:create", "asset:rename", "asset:overwrite", "asset:change_type",
-      "asset:delete", "asset:mount", "asset:unmount",
-    ],
-  },
-  {
-    label: "附件（管理 _any）",
-    perms: [
-      "asset:view_any", "asset:delete_any", "asset:rename_any",
-      "asset:change_type_any", "asset:overwrite_any", "asset:mount_any", "asset:unmount_any",
-    ],
-  },
-  {
-    label: "标注体系",
-    perms: [
-      "tag_group:create", "tag_group:delete", "tag_group:rename", "tag_group:edit_range_config",
-      "tag_group:set_default_option", "tag_group:set_lyric_split", "tag_group:reorder",
-      "tag_option:create", "tag_option:delete", "tag_option:rename",
-      "tag_option:edit_color", "tag_option:reorder",
-    ],
-  },
-  {
-    label: "评论管理",
-    perms: [
-      "script:edit_comment_any", "script:delete_comment_any",
-      "cue:edit_comment_any", "cue:delete_comment_any",
-      "report:edit_comment_any", "report:delete_comment_any",
-    ],
-  },
-  {
-    label: "读权限",
-    perms: [
-      "contacts:view",
-      "script:view", "script:comment",
-      "scene:view", "character:view",
-      "cue_list:view", "cue:view", "cue:comment",
-      "event:view_call_sheet_any",
-      "event:follow",
-      "report:reply",
-      "asset:view", "asset:download", "asset:download_any",
-      "asset:share", "asset:share_downloadable", "asset:share_any", "asset:share_any_downloadable",
-      "org:assign_member", "org:recall_member",
-    ],
-  },
-];
+type Caps = { create: boolean; rename: boolean; remove: boolean; assign: boolean };
 
-// ─── InlineInput ──────────────────────────────────────────────────────────────
+type Props = {
+  productionId: string;
+  productionName: string;
+  initialRoles: Role[];
+  members: Member[];
+  depts: PickerDept[];
+  owner: { userId: string | null; name: string | null };
+  caps: Caps;
+};
 
-function InlineInput({
-  initial, placeholder, onConfirm, onCancel,
-}: {
-  initial: string; placeholder: string;
-  onConfirm: (v: string) => void; onCancel: () => void;
-}) {
-  const [val, setVal] = useState(initial);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  return (
-    <input
-      ref={ref}
-      value={val}
-      onChange={(e) => setVal(e.target.value)}
-      placeholder={placeholder}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") { e.preventDefault(); if (val.trim()) onConfirm(val.trim()); }
-        if (e.key === "Escape") onCancel();
-      }}
-      onBlur={() => { if (val.trim()) onConfirm(val.trim()); else onCancel(); }}
-      style={{
-        flex: 1, fontSize: 13, fontWeight: 600, color: "var(--ink)",
-        border: "none", borderBottom: "1.5px solid var(--ink)", outline: "none",
-        background: "transparent", padding: "0 0 1px",
-      }}
-    />
+const SECTION_LABEL: React.CSSProperties = {
+  margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
+  textTransform: "uppercase", color: "var(--stage)",
+};
+
+const PRODUCER = "制作人";
+
+function Avatar({ m, size }: { m: Member; size: number }) {
+  const url = m.photoUrl || m.avatarUrl;
+  return url ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={url} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+  ) : (
+    <span style={{
+      width: size, height: size, borderRadius: "50%", flexShrink: 0,
+      background: "var(--script-soft)", color: "var(--script)",
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      fontSize: size * 0.42, fontWeight: 700,
+    }}>
+      {m.name.slice(0, 1) || "?"}
+    </span>
   );
 }
-
-// ─── PermissionGroup (collapsible, search-aware) ──────────────────────────────
-
-function PermissionGroup({
-  group, activePerms, onToggle, saving, searchQ,
-}: {
-  group: PermGroup; activePerms: Set<string>;
-  onToggle: (perm: string) => void; saving: boolean; searchQ: string;
-}) {
-  const filtered = searchQ
-    ? group.perms.filter((p) => p.toLowerCase().includes(searchQ))
-    : group.perms;
-
-  const [open, setOpen] = useState(false);
-
-  // Auto-expand when search matches
-  useEffect(() => { if (searchQ && filtered.length > 0) setOpen(true); }, [searchQ, filtered.length]);
-  // Collapse when search cleared
-  useEffect(() => { if (!searchQ) setOpen(false); }, [searchQ]);
-
-  if (filtered.length === 0) return null;
-
-  const activeCount = filtered.filter((p) => activePerms.has(p)).length;
-
-  return (
-    <div style={{ borderBottom: "1px solid var(--line)" }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "10px 16px", background: "none", border: "none", cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>{group.label}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {activeCount > 0 && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, background: "var(--ink)", color: "#fff",
-              borderRadius: 10, padding: "1px 7px",
-            }}>
-              {activeCount}/{group.perms.length}
-            </span>
-          )}
-          <span style={{ fontSize: 9, color: "var(--muted)", opacity: 0.6 }}>{open ? "▲" : "▼"}</span>
-        </span>
-      </button>
-
-      {open && (
-        <div style={{ padding: "4px 16px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 8px" }}>
-          {filtered.map((perm) => {
-            const on = activePerms.has(perm);
-            return (
-              <label
-                key={perm}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6, padding: "4px 0",
-                  cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={on}
-                  disabled={saving}
-                  onChange={() => onToggle(perm)}
-                  style={{ width: 13, height: 13, cursor: "pointer", accentColor: "var(--ink)", flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 11, color: "var(--ink)", fontFamily: "monospace", lineHeight: 1.3 }}>
-                  {perm}
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── RoleDetail (right panel) ─────────────────────────────────────────────────
-
-function RoleDetail({
-  role, productionId, onUpdated, onDeleted, onMobileBack,
-}: {
-  role: ProductionRole; productionId: string;
-  onUpdated: (r: ProductionRole) => void; onDeleted: () => void;
-  onMobileBack?: () => void;
-}) {
-  const [activePerms, setActivePerms] = useState<Set<string>>(() => new Set(role.permissions));
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [searchQ, setSearchQ] = useState("");
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Reset when a different role is selected.
-  // key={role.id} on this component usually handles the remount;
-  // this effect is a safety net in case the instance is reused.
-  useEffect(() => {
-    setActivePerms(new Set(role.permissions));
-    setSearchQ("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role.id]);
-
-  const persistPermissions = async (perms: Set<string>) => {
-    setSaving(true);
-    try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/roles/${role.id}/permissions`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ permissions: [...perms] }),
-        },
-      );
-      const data = await res.json() as { permissions?: string[] };
-      if (data.permissions) {
-        const newPerms = new Set<string>(data.permissions);
-        setActivePerms(newPerms);
-        onUpdated({ ...role, permissions: [...newPerms] });
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleToggle = (perm: string) => {
-    const next = new Set(activePerms);
-    if (next.has(perm)) next.delete(perm); else next.add(perm);
-    setActivePerms(next);
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => persistPermissions(next), 400);
-  };
-
-  const handleDelete = async () => {
-    if (!confirm(`确定删除角色「${role.name}」？\n已被分配该角色的成员会失去对应权限，此操作无法撤销。`)) return;
-    setDeleting(true);
-    try {
-      await fetch(`${BASE_PATH}/api/production/${productionId}/roles/${role.id}`, { method: "DELETE" });
-      onDeleted();
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const totalActive = PERM_GROUPS.reduce((n, g) => n + g.perms.filter((p) => activePerms.has(p)).length, 0);
-  const q = searchQ.trim().toLowerCase();
-  const noSearchResults = q && PERM_GROUPS.every((g) => g.perms.every((p) => !p.toLowerCase().includes(q)));
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      {onMobileBack && (
-        <div className="sm:hidden" style={{ padding: "8px 20px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
-          <button onClick={onMobileBack} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
-            ← 返回
-          </button>
-        </div>
-      )}
-      {/* Header */}
-      <div style={{ padding: "20px 24px 14px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-          <div>
-            <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
-              Role
-            </p>
-            <h2 style={{ fontSize: 17, fontWeight: 700, color: "var(--ink)" }}>{role.name}</h2>
-            <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-              {saving ? "保存中…" : `已启用 ${totalActive} 项权限`}
-            </p>
-          </div>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            style={{
-              flexShrink: 0, fontSize: 12, color: "var(--muted)", background: "none",
-              border: "1px solid var(--line)", borderRadius: 7, padding: "4px 10px",
-              cursor: "pointer",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.borderColor = "#dc2626"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--muted)"; e.currentTarget.style.borderColor = "var(--line)"; }}
-          >
-            {deleting ? "删除中…" : "删除角色"}
-          </button>
-        </div>
-
-        {/* Search */}
-        <div style={{ marginTop: 12 }}>
-          <input
-            type="search"
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            placeholder="搜索权限（如 cue:create、script…）"
-            style={{
-              width: "100%", boxSizing: "border-box",
-              fontSize: 12, color: "var(--ink)", background: "var(--paper)",
-              border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px",
-              outline: "none",
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = "var(--ink)"; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = "var(--line)"; }}
-          />
-        </div>
-      </div>
-
-      {/* Permission groups */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {PERM_GROUPS.map((group) => (
-          <PermissionGroup
-            key={group.label}
-            group={group}
-            activePerms={activePerms}
-            onToggle={handleToggle}
-            saving={saving}
-            searchQ={q}
-          />
-        ))}
-        {noSearchResults && (
-          <p style={{ padding: "16px", fontSize: 12, color: "var(--muted)" }}>
-            未找到匹配「{q}」的权限
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── RoleRow (left panel item) ────────────────────────────────────────────────
-
-function RoleRow({
-  role, productionId, selected, onSelect, onRename, onCopy,
-}: {
-  role: ProductionRole; productionId: string; selected: boolean;
-  onSelect: () => void;
-  onRename: (name: string) => void;
-  onCopy: (name: string) => void;
-}) {
-  const [renaming, setRenaming] = useState(false);
-  const [copying, setCopying] = useState(false);
-
-  return (
-    <div
-      onClick={onSelect}
-      style={{
-        display: "flex", alignItems: "center", gap: 6,
-        padding: "0 8px", minHeight: 38, borderRadius: 8, cursor: "pointer",
-        background: selected ? "var(--surface)" : "transparent",
-        borderLeft: selected ? "3px solid var(--ink)" : "3px solid transparent",
-      }}
-      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = "rgba(0,0,0,.04)"; }}
-      onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = "transparent"; }}
-    >
-      {renaming ? (
-        <InlineInput
-          initial={role.name}
-          placeholder="角色名称"
-          onConfirm={async (name) => {
-            setRenaming(false);
-            await fetch(`${BASE_PATH}/api/production/${productionId}/roles/${role.id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name }),
-            });
-            onRename(name);
-          }}
-          onCancel={() => setRenaming(false)}
-        />
-      ) : copying ? (
-        <InlineInput
-          initial={`${role.name} (副本)`}
-          placeholder="新角色名称"
-          onConfirm={(name) => { setCopying(false); onCopy(name); }}
-          onCancel={() => setCopying(false)}
-        />
-      ) : (
-        <>
-          <span
-            style={{
-              flex: 1, fontSize: 13, fontWeight: selected ? 600 : 500, color: "var(--ink)",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}
-            onDoubleClick={(e) => { e.stopPropagation(); setRenaming(true); }}
-          >
-            {role.name}
-          </span>
-          <span style={{
-            flexShrink: 0, fontSize: 10, color: "var(--muted)",
-            background: "var(--paper)", borderRadius: 10, padding: "0 5px", lineHeight: "18px",
-          }}>
-            {role.permissions.length}
-          </span>
-          <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 1, flexShrink: 0 }}>
-            <button
-              onClick={() => setRenaming(true)}
-              title="改名"
-              style={{ fontSize: 10, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "2px 3px", borderRadius: 4 }}
-            >
-              改名
-            </button>
-            <button
-              onClick={() => setCopying(true)}
-              title="复制角色"
-              style={{ fontSize: 10, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "2px 3px", borderRadius: 4 }}
-            >
-              复制
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
-// Roles that are managed outside this UI (special permission tiers)
-const HIDDEN_ROLES = new Set(["制作人"]);
 
 export default function AdminRolesClient({
-  productionId,
-  initialRoles,
-}: {
-  productionId: string;
-  initialRoles: ProductionRole[];
-}) {
-  const [roles, setRoles] = useState<ProductionRole[]>(
-    initialRoles.filter((r) => !HIDDEN_ROLES.has(r.name)),
+  productionId, productionName, initialRoles, members: initialMembers, depts, owner, caps,
+}: Props) {
+  const [roles, setRoles] = useState<Role[]>(initialRoles);
+  const [members, setMembers] = useState<Member[]>(initialMembers);
+  // "owner" 是特殊选择态（系统身份，非 production_role 行）
+  const [selectedId, setSelectedId] = useState<string | "owner" | null>(
+    initialRoles.find(r => r.name === PRODUCER)?.id ?? initialRoles[0]?.id ?? null,
   );
-  const [selectedId, setSelectedId] = useState<string | null>(roles[0]?.id ?? null);
   const [creating, setCreating] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
+  const [newName, setNewName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const selected = roles.find((r) => r.id === selectedId) ?? null;
+  const selectedRole = selectedId !== "owner" ? roles.find(r => r.id === selectedId) ?? null : null;
+  const roleMembers = useMemo(
+    () => (selectedRole ? members.filter(m => m.roles.includes(selectedRole.name)) : []),
+    [members, selectedRole],
+  );
+  const countByRole = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of members) for (const r of m.roles) map.set(r, (map.get(r) ?? 0) + 1);
+    return map;
+  }, [members]);
 
-  const handleCreate = async (name: string) => {
-    setCreating(false);
-    setSaving(true);
+  const customRoles = roles.filter(r => r.name !== PRODUCER);
+  const producerRole = roles.find(r => r.name === PRODUCER) ?? null;
+
+  async function api(path: string, init: RequestInit): Promise<Record<string, unknown> | null> {
+    setBusy(true); setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/roles`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}${path}`, {
+        headers: { "Content-Type": "application/json" }, ...init,
       });
-      const data = await res.json() as { role?: ProductionRole };
-      if (data.role) {
-        setRoles((prev) => [...prev, data.role!]);
-        setSelectedId(data.role!.id);
-      }
-    } finally { setSaving(false); }
-  };
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) { setError(data.error ?? "操作失败"); return null; }
+      return data;
+    } catch { setError("网络错误"); return null; }
+    finally { setBusy(false); }
+  }
 
-  const handleCopy = async (sourceId: string, newName: string) => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/roles/${sourceId}/copy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName }),
-      });
-      const data = await res.json() as { role?: ProductionRole };
-      if (data.role) {
-        setRoles((prev) => [...prev, data.role!]);
-        setSelectedId(data.role!.id);
-      }
-    } finally { setSaving(false); }
-  };
+  async function createRole() {
+    const name = newName.trim();
+    if (!name) return;
+    const data = await api(`/roles`, { method: "POST", body: JSON.stringify({ name }) });
+    if (data?.role) {
+      const r = data.role as Role;
+      setRoles(prev => [...prev, { id: r.id, name: r.name }]);
+      setSelectedId(r.id);
+      setNewName(""); setCreating(false);
+    }
+  }
 
-  const handleDeleted = (id: string) => {
-    setRoles((prev) => {
-      const next = prev.filter((r) => r.id !== id);
-      setSelectedId((cur) => {
-        if (cur === id) { setMobileView("list"); return next[0]?.id ?? null; }
-        return cur;
-      });
-      return next;
-    });
-  };
+  async function renameRole(role: Role, name: string) {
+    if (await api(`/roles/${role.id}`, { method: "PATCH", body: JSON.stringify({ name }) })) {
+      setRoles(prev => prev.map(r => (r.id === role.id ? { ...r, name } : r)));
+      setMembers(prev => prev.map(m => ({
+        ...m,
+        roles: m.roles.map(rn => (rn === role.name ? name : rn)),
+      })));
+    }
+  }
+
+  async function deleteRole(role: Role) {
+    const n = countByRole.get(role.name) ?? 0;
+    if (!confirm(n > 0 ? `「${role.name}」仍有 ${n} 名成员，删除后将从这些成员移除该角色。确认删除？` : `确认删除「${role.name}」？`)) return;
+    if (await api(`/roles/${role.id}`, { method: "DELETE" })) {
+      setRoles(prev => prev.filter(r => r.id !== role.id));
+      setMembers(prev => prev.map(m => ({ ...m, roles: m.roles.filter(rn => rn !== role.name) })));
+      setSelectedId(prev => (prev === role.id ? null : prev));
+    }
+  }
+
+  async function toggleMember(role: Role, m: Member) {
+    const has = m.roles.includes(role.name);
+    const nextRoles = has ? m.roles.filter(r => r !== role.name) : [...m.roles, role.name];
+    if (await api(`/members`, { method: "PATCH", body: JSON.stringify({ userId: m.userId, roles: nextRoles }) })) {
+      setMembers(prev => prev.map(x => (x.userId === m.userId ? { ...x, roles: nextRoles } : x)));
+    }
+  }
+
+  async function assignMembers(role: Role, userIds: string[]) {
+    for (const userId of userIds) {
+      const m = members.find(x => x.userId === userId);
+      if (!m || m.roles.includes(role.name)) continue;
+      await toggleMember(role, m);
+    }
+  }
+
+  function roleRow(role: Role, opts: { system?: boolean } = {}) {
+    const active = selectedId === role.id;
+    return (
+      <button
+        key={role.id}
+        onClick={() => setSelectedId(role.id)}
+        style={{
+          display: "flex", alignItems: "center", gap: 8, width: "100%",
+          padding: "8px 10px", borderRadius: 9, border: "none", cursor: "pointer",
+          background: active ? "var(--ink)" : "transparent", textAlign: "left",
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: active ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {role.name}
+        </span>
+        {opts.system && <Badge tone="amber">系统</Badge>}
+        <span style={{ fontSize: 10, color: active ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
+          {countByRole.get(role.name) ?? 0} 人
+        </span>
+      </button>
+    );
+  }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--paper)" }}>
-      {/* Page header */}
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 0", flexShrink: 0 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-          Admin · Roles
-        </p>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", marginBottom: 20 }}>角色管理</h1>
+    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <PageHeader eyebrow={productionName} title="角色管理" side="stage" />
+
+      {/* 摘要 */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
+        background: "var(--line)", marginBottom: 18,
+      }}>
+        {[
+          [String(roles.length), "角色", "含系统角色"],
+          [String(members.filter(m => m.roles.length > 0).length), "已指派成员", `共 ${members.length} 名成员`],
+          [String(members.filter(m => m.roles.length === 0).length), "未指派", "无角色成员"],
+        ].map(([num, label, hint]) => (
+          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
+              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
+              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            </p>
+          </div>
+        ))}
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", padding: "0 clamp(18px, 3vw, 52px) 40px" }}>
-        {/* Left: role list */}
-        <div
-          className={`${mobileView === "detail" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} w-full sm:w-[220px] rounded-xl sm:rounded-r-none sm:!border-r-0 overflow-hidden`}
-          style={{
-            flexShrink: 0,
-            background: "white",
-            border: "1px solid var(--line)",
-          }}
-        >
-          {/* List header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 12px 6px", borderBottom: "1px solid var(--line)" }}>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
-              角色 ({roles.length})
-            </span>
-            <button
-              onClick={() => setCreating(true)}
-              disabled={saving}
-              style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px" }}
-            >
-              + 新建
-            </button>
-          </div>
+      {error && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--danger)", fontWeight: 700 }}>{error}</p>}
 
-          {/* Inline create */}
-          {creating && (
-            <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)" }}>
-              <InlineInput
-                initial=""
-                placeholder="角色名称"
-                onConfirm={handleCreate}
-                onCancel={() => setCreating(false)}
-              />
+      <section style={{
+        background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
+        height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column",
+      }}>
+        <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
+          <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
+            {/* 左：角色列表 */}
+            <div className={`${styles.splitPane} ${styles.splitList}`}>
+              <div style={{ paddingRight: 16 }}>
+                <p style={{ ...SECTION_LABEL, marginTop: 2 }}>系统角色</p>
+                {/* Owner 特殊行 */}
+                <button
+                  onClick={() => setSelectedId("owner")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%",
+                    padding: "8px 10px", borderRadius: 9, border: "none", cursor: "pointer",
+                    background: selectedId === "owner" ? "var(--ink)" : "transparent", textAlign: "left",
+                  }}
+                >
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: selectedId === "owner" ? "#fff" : "var(--ink)" }}>
+                    Owner
+                  </span>
+                  <Badge tone="amber">系统</Badge>
+                  <span style={{ fontSize: 10, color: selectedId === "owner" ? "rgba(255,255,255,.6)" : "var(--muted)" }}>1 人</span>
+                </button>
+                {producerRole && roleRow(producerRole, { system: true })}
+
+                <p style={{ ...SECTION_LABEL, marginTop: 14 }}>项目角色</p>
+                {customRoles.map(r => roleRow(r))}
+                {customRoles.length === 0 && (
+                  <p style={{ fontSize: 12, color: "var(--muted)", padding: "6px 10px" }}>暂无自定义角色</p>
+                )}
+
+                {caps.create && (
+                  <button style={{ ...SECONDARY_BTN, width: "100%", marginTop: 10 }} onClick={() => setCreating(true)}>
+                    ＋ 新建角色
+                  </button>
+                )}
+              </div>
             </div>
-          )}
 
-          {/* Role rows */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px 8px" }}>
-            {roles.length === 0 && !creating && (
-              <p style={{ fontSize: 12, color: "var(--muted)", padding: "8px 4px" }}>暂无角色</p>
-            )}
-            {roles.map((role) => (
-              <RoleRow
-                key={role.id}
-                role={role}
-                productionId={productionId}
-                selected={selectedId === role.id}
-                onSelect={() => { setSelectedId(role.id); setMobileView("detail"); }}
-                onRename={(name) => setRoles((prev) => prev.map((r) => r.id === role.id ? { ...r, name } : r))}
-                onCopy={(name) => handleCopy(role.id, name)}
-              />
-            ))}
+            {/* 右：详情 */}
+            <div className={`${styles.splitPane} ${styles.splitDetail}`}>
+              {selectedId === "owner" ? (
+                <OwnerDetail owner={owner} members={members} />
+              ) : selectedRole ? (
+                <RoleDetail
+                  key={selectedRole.id}
+                  role={selectedRole}
+                  isProducer={selectedRole.name === PRODUCER}
+                  members={members}
+                  depts={depts}
+                  roleMembers={roleMembers}
+                  caps={caps}
+                  busy={busy}
+                  onRename={renameRole}
+                  onDelete={deleteRole}
+                  onToggleMember={toggleMember}
+                  onAssignMembers={assignMembers}
+                />
+              ) : (
+                <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧角色查看详情</p>
+              )}
+            </div>
           </div>
         </div>
+      </section>
 
-        {/* Right: detail */}
-        <div
-          className={`${mobileView === "list" ? "hidden sm:flex sm:flex-col" : "flex flex-col"} rounded-xl sm:rounded-l-none`}
-          style={{
-            flex: 1, minWidth: 0,
-            background: "white",
-            border: "1px solid var(--line)",
-          }}
-        >
-          {selected ? (
-            <RoleDetail
-              key={selected.id}
-              role={selected}
-              productionId={productionId}
-              onUpdated={(updated) => setRoles((prev) => prev.map((r) => r.id === updated.id ? updated : r))}
-              onDeleted={() => handleDeleted(selected.id)}
-              onMobileBack={() => setMobileView("list")}
+      {creating && (
+        <AdminModal kicker="组织架构" title="新建角色" onClose={() => { setCreating(false); setNewName(""); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input
+              value={newName} onChange={e => setNewName(e.target.value)} placeholder="角色名称"
+              autoFocus
+              onKeyDown={e => { if (e.key === "Enter") createRole(); }}
+              style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
             />
-          ) : (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>
-              ← 选择一个角色查看权限
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={SECONDARY_BTN} onClick={() => { setCreating(false); setNewName(""); }}>取消</button>
+              <button style={PRIMARY_BTN} disabled={busy || !newName.trim()} onClick={createRole}>创建</button>
             </div>
+          </div>
+        </AdminModal>
+      )}
+    </div>
+  );
+}
+
+function OwnerDetail({ owner, members }: { owner: { userId: string | null; name: string | null }; members: Member[] }) {
+  const m = owner.userId ? members.find(x => x.userId === owner.userId) ?? null : null;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>Owner</h2>
+        <Badge tone="amber">系统角色 · 不可变更</Badge>
+      </div>
+      <p style={{ margin: "0 0 18px", fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
+        Owner 是项目的最终负责人，拥有全部权限（代码旁路，不走授权行）。
+        每个项目有且仅有一位 Owner；转让在「危险操作」中进行。
+      </p>
+      <p style={SECTION_LABEL}>当前 Owner</p>
+      {m ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Avatar m={m} size={36} />
+          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{m.name}</span>
+        </div>
+      ) : (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--ink)" }}>{owner.name ?? "（未设置）"}</p>
+      )}
+    </div>
+  );
+}
+
+function RoleDetail({
+  role, isProducer, members, depts, roleMembers, caps, busy, onRename, onDelete, onToggleMember, onAssignMembers,
+}: {
+  role: Role;
+  isProducer: boolean;
+  members: Member[];
+  depts: PickerDept[];
+  roleMembers: Member[];
+  caps: Caps;
+  busy: boolean;
+  onRename: (role: Role, name: string) => Promise<void>;
+  onDelete: (role: Role) => Promise<void>;
+  onToggleMember: (role: Role, m: Member) => Promise<void>;
+  onAssignMembers: (role: Role, userIds: string[]) => Promise<void>;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(role.name);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        {renaming && !isProducer ? (
+          <>
+            <input
+              value={nameDraft} onChange={e => setNameDraft(e.target.value)}
+              style={{ fontSize: 17, fontFamily: 'Georgia, "Noto Serif SC", serif', padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+            />
+            <button style={PRIMARY_BTN} disabled={busy || !nameDraft.trim()}
+              onClick={async () => { await onRename(role, nameDraft.trim()); setRenaming(false); }}>
+              保存
+            </button>
+            <button style={SECONDARY_BTN} onClick={() => { setNameDraft(role.name); setRenaming(false); }}>取消</button>
+          </>
+        ) : (
+          <>
+            <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>{role.name}</h2>
+            {isProducer && <Badge tone="amber">系统角色 · 不可改名/删除</Badge>}
+            {!isProducer && caps.rename && (
+              <button style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 11 }} onClick={() => setRenaming(true)}>改名</button>
+            )}
+          </>
+        )}
+      </div>
+
+      {isProducer && (
+        <p style={{ margin: "0 0 18px", fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
+          制作人是结构性系统角色（通配授权区间的宿主）。其权限配置与人事任免在「管理员设置」中进行。
+        </p>
+      )}
+
+      <p style={SECTION_LABEL}>成员（{roleMembers.length}）</p>
+      {roleMembers.map(m => (
+        <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+          <Avatar m={m} size={26} />
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: m.status === "suspended" ? "var(--muted)" : "var(--ink)", textDecoration: m.status === "suspended" ? "line-through" : undefined }}>
+            {m.name || "（未命名）"}
+          </span>
+          {!isProducer && caps.assign && (
+            <button
+              disabled={busy}
+              onClick={() => onToggleMember(role, m)}
+              style={{ ...SECONDARY_BTN, padding: "3px 9px", fontSize: 10, borderColor: "var(--danger)", color: "var(--danger)" }}
+            >
+              移除
+            </button>
           )}
         </div>
-      </div>
+      ))}
+      {roleMembers.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>暂无成员</p>}
+
+      {!isProducer && caps.assign && (
+        <button style={{ ...SECONDARY_BTN, marginTop: 12 }} onClick={() => setPickerOpen(true)}>
+          ＋ 指派角色
+        </button>
+      )}
+      {pickerOpen && (
+        <MemberPickerModal
+          kicker="组织架构"
+          title={`指派「${role.name}」`}
+          confirmLabel="指派角色"
+          members={members}
+          depts={depts}
+          excludeUserIds={roleMembers.map(m => m.userId)}
+          busy={busy}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={async (userIds) => {
+            await onAssignMembers(role, userIds);
+            setPickerOpen(false);
+          }}
+        />
+      )}
+
+      {!isProducer && caps.remove && (
+        <div style={{ marginTop: 24, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+          <p style={{ ...SECTION_LABEL, color: "var(--danger)" }}>危险区</p>
+          <button
+            disabled={busy}
+            onClick={() => onDelete(role)}
+            style={{ ...SECONDARY_BTN, borderColor: "var(--danger)", color: "var(--danger)" }}
+          >
+            删除角色
+          </button>
+        </div>
+      )}
     </div>
   );
 }

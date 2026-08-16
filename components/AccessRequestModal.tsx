@@ -5,43 +5,10 @@ import { useState, useEffect } from "react";
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
 export const PERMISSION_LABELS: Record<string, string> = {
-  "script:view":         "查看剧本",
-  "script:import":       "导入剧本",
-  "script:manage":       "管理剧本",
-  "script:edit":         "编辑剧本",
-  "script:annotate":     "注释剧本",
-  "script:mount":        "挂载剧本",
-  "scene:view":          "查看场次",
-  "scene:mount":         "挂载场次",
-  "scene:create":        "创建场次",
-  "scene:delete":        "删除场次",
-  "scene:rename":        "重命名场次",
-  "character:view":      "查看角色",
-  "character:create":    "创建角色",
-  "character:set_members": "分配角色成员",
-  "contacts:view":       "查看人员通讯录",
-  "event:follow":        "跟踪日程",
   "event:view":          "查看日程",
   "event:edit":          "编辑日程",
   "event:publish":       "发布日程",
   "event:manage":        "管理日程",
-  "event:create":        "创建日程",
-  "task:view":           "查看任务",
-  "task:view_any":       "查看所有任务",
-  "asset:view":          "查看附件",
-  "asset:download":      "下载附件",
-  "asset:share":         "分享附件",
-  "asset:rename":        "重命名附件",
-  "asset:delete":        "删除附件",
-  "cue_list:view":       "查看 Cue 表",
-  "cue_list:edit":       "编辑 Cue 表",
-  "cue_list:manage":     "管理 Cue 表",
-  "cue_list:create":     "创建 Cue 表",
-  "cue:view":            "查看 Cue",
-  "cue:create":          "创建 Cue",
-  "cue:edit":            "编辑 Cue",
-  "report:create":       "提交报告",
-  "report:reply":        "回复报告",
 };
 
 // ─── Resource selector options (free-form mode only) ─────────────────────────
@@ -68,9 +35,7 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     label: "章节/段落",
     levels: [
       { value: "view",   label: "查看" },
-      { value: "mount",  label: "挂载" },
       { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
     ],
   },
   {
@@ -89,7 +54,6 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     levels: [
       { value: "view",   label: "查看" },
       { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
     ],
   },
   {
@@ -100,7 +64,7 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     ],
   },
   {
-    type: "contacts",
+    type: "member",
     label: "人员通讯录",
     levels: [
       { value: "view",   label: "查看" },
@@ -111,8 +75,7 @@ export const RESOURCE_OPTIONS: ResourceOption[] = [
     label: "附件",
     levels: [
       { value: "view",     label: "查看" },
-      { value: "download", label: "下载" },
-      { value: "manage",   label: "管理" },
+      { value: "edit",     label: "编辑" },
     ],
   },
   {
@@ -131,7 +94,7 @@ type Props = {
   onClose: () => void;
   productionId: string;
   /**
-   * Atomic permission key that caused the 403 (e.g. "script:view", "event:follow").
+   * Atomic permission key that caused the 403 (e.g. ).
    * When set: the form is locked to this permission — user only fills in a reason.
    * When unset: free-form mode with resource type / level selectors.
    */
@@ -189,12 +152,20 @@ export default function AccessRequestModal({
   if (!open) return null;
 
   // ── Resolve resource type + level for POST body ──────────────────────────
+  // 终局（批G）：预填一律为 node: 节点键（403 redirect 已节点化）——解析为
+  // resource_access + sub/verb 提交；atomic_permission 类型已随原子键退役。
   let postResourceType: string;
+  let postResourceId = "*";
+  let postResourceSub: string | undefined;
   let postPermissionLevel: string;
-  if (permission) {
-    const colonIdx = permission.indexOf(":");
-    postResourceType    = colonIdx >= 0 ? permission.slice(0, colonIdx)    : permission;
-    postPermissionLevel = colonIdx >= 0 ? permission.slice(colonIdx + 1)   : "view";
+  const nodeMatch = permission
+    ? /^node:([^/]+)\/([^/@]+)(?:\/(.+))?@(\w+)$/.exec(permission)
+    : null;
+  if (nodeMatch) {
+    postResourceType = nodeMatch[1];
+    postResourceId = nodeMatch[2];
+    postResourceSub = nodeMatch[3];
+    postPermissionLevel = nodeMatch[4];
   } else {
     postResourceType    = resourceType;
     postPermissionLevel = permissionLevel;
@@ -217,8 +188,10 @@ export default function AccessRequestModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: permission ? "atomic_permission" : "resource_access",
+          type: "resource_access",
           resourceType: postResourceType,
+          resourceId: postResourceId,
+          resourceSub: postResourceSub,
           permissionLevel: postPermissionLevel,
           grantType: ttlOption === "permanent" ? "permanent" : "ttl",
           ttlDuration: ({ "30m": "30 minutes", "1h": "1 hour", "1d": "1 day", "1w": "7 days" } as Record<string, string>)[ttlOption] ?? null,
@@ -238,8 +211,29 @@ export default function AccessRequestModal({
     }
   }
 
+  const NODE_LABELS: Record<string, string> = {
+    "node:scene/*/meta@view": "查看章节/段落",
+    "node:script/*/blocks@view": "查看剧本",
+    "node:character/*/meta@view": "查看角色",
+    "node:member/*/meta@view": "查看人员通讯录",
+    "node:asset/*/meta@view": "查看附件",
+    "node:task/*/meta@view": "查看任务",
+    "node:event/*/meta@view": "查看事件",
+  };
+  // 实例级 node 键（node:task/<id>/*@edit）精确表匹配不到 → 按 type+verb 通用取名
+  const NODE_TYPE_LABELS: Record<string, string> = {
+    task: "任务", event: "事件", cue_list: "Cue 表", scene: "章节/段落",
+    character: "角色", script: "剧本", asset: "附件", member: "人员",
+    report: "报告", note: "备注", dept: "部门", production: "项目",
+  };
+  const NODE_VERB_LABELS: Record<string, string> = {
+    view: "查看", edit: "编辑", create: "创建", delete: "删除", manage: "管理", "*": "全部操作",
+  };
+  const genericNodeLabel = nodeMatch
+    ? `${NODE_VERB_LABELS[nodeMatch[4]] ?? nodeMatch[4]}${NODE_TYPE_LABELS[nodeMatch[1]] ?? nodeMatch[1]}${nodeMatch[2] !== "*" ? "（单个）" : ""}`
+    : null;
   const permLabel = permission
-    ? (PERMISSION_LABELS[permission] ?? permission)
+    ? (NODE_LABELS[permission] ?? PERMISSION_LABELS[permission] ?? genericNodeLabel ?? permission)
     : null;
 
   return (
@@ -329,14 +323,17 @@ export default function AccessRequestModal({
                   <p style={{ margin: "0 0 3px", fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
                     申请权限
                   </p>
-                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ink)", overflowWrap: "anywhere" }}>
                     {permLabel}
-                    <span style={{
-                      marginLeft: 8, fontFamily: "monospace", fontSize: 11,
-                      color: "var(--muted)", fontWeight: 400,
-                    }}>
-                      {permission}
-                    </span>
+                    {permLabel !== permission && (
+                      <span style={{
+                        marginLeft: 8, fontFamily: "monospace", fontSize: 11,
+                        color: "var(--muted)", fontWeight: 400,
+                        overflowWrap: "anywhere", wordBreak: "break-all",
+                      }}>
+                        {permission}
+                      </span>
+                    )}
                   </p>
                 </div>
               ) : (

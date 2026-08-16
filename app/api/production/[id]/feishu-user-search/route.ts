@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, searchFeishuUsers, listAllFeishuUsers } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { getProductionPermissionContext, searchUsersByName, listAllUsersWithContact } from "@/lib/db";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = getSession(req.cookies);
@@ -11,11 +11,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
     if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
     const { permCtx } = access;
-    if (!hasPermission("members:invite", permCtx))
+    if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "member", "*", "*", "create")))
       return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
   const q = req.nextUrl.searchParams.get("q")?.trim();
-  const users = q ? await searchFeishuUsers(q) : await listAllFeishuUsers();
+  const users = q ? await searchUsersByName(q) : await listAllUsersWithContact();
   return Response.json({ users });
 }

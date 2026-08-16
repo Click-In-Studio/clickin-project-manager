@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 import path from "path";
 
 export default defineConfig({
@@ -13,6 +13,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    // .next/standalone 里有构建时拷贝的旧测试文件，不能当真测试跑
+    exclude: [...configDefaults.exclude, ".next/**"],
     testTimeout: 15000,
     globalSetup: "./tests/global-setup.ts",
     setupFiles: ["./tests/setup.ts"],

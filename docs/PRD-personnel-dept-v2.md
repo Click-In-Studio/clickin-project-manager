@@ -52,10 +52,10 @@
 
 ### D7. 剧本（script）使用原子权限，行级控制通过 script_view 实现
 
-- script 是演出版本级单例（每个版本一份），无需 per-instance 分控，通过原子权限（`script:view`、`script:edit_content`、`script:edit_marker`）控制访问，**不使用 resource_grant**
+- script 是演出版本级单例（每个版本一份），无需 per-instance 分控，通过原子权限（`script:view`、`script:edit_content`、`script:edit_marker`）控制访问，**不使用 production_member_grant**
 - `script:view` 从 `MEMBER_BASE_PERMISSIONS` 中移除（#158 负责），默认不对外开放；成员访问剧本需主动发起申请
 - 编导组/SM 等部门通过 role/dept `permissions[]` 配置获得免审批区间；其他成员通过申请流获得
-- 行级访问控制（演员、顾问等只看部分 block）通过 `script_view` 资源实现——`script_view` 是 resource_grant 体系内的独立资源实体，每个视图是一个可独立 grant 的 instance
+- 行级访问控制（演员、顾问等只看部分 block）通过 `script_view` 资源实现——`script_view` 是 production_member_grant 体系内的独立资源实体，每个视图是一个可独立 grant 的 instance
 
 ### D8. 资源访问走"申请-访问"模型，不依赖管理员手动 override
 
@@ -76,7 +76,7 @@
 - 权限确认分三级触发（见「权限确认 UX」章节）：view 级权限通过 Level 1 进入演出时批量确认；edit/manage 级权限在首次进入对应编辑界面时由 Level 2-A 一次性确认；通配符/创建权限在进入资源总览页时由 Level 2-B 确认；不在免审批区间则进入审批流等待 POC 批准
 - 以下情况下接收方**无需任何确认**，grant 直接生效：①加入演出时的 3 条基础 grant（`grant_source='auto'`）；②`grant_source='assigned'` 的操作触发型 grant（见「操作触发型 Grant」章节）；③`grant_source='direct'` 的制作人直接授权
 - 制作人可将 role/dept 权限配置得极小（强管控模式）或极大（等同于当前系统行为）
-- 所有 grant 均写入 grant 表（`atomic_permission_grant` 或 `resource_grant`），提供完整审计记录
+- 所有 grant 均写入 grant 表（`atomic_permission_grant` 或 `production_member_grant`），提供完整审计记录
 
 真·基础权限（无需任何配置，加入即有）：
 - 知道自己是这个演出的成员
@@ -114,9 +114,9 @@ script_view:view#          # 某个 script 视图（见下方 script 专项）
 
 **稀疏性原则**：
 - **Scene**：保留所有路径层级的 grant 能力，但非通配符（per-instance）grant 应尽量稀疏。一个演出最多几十个 scene，且 scene 几乎不需要行级隐藏，主要用途是列级编辑权（`scene:*:column_name @ edit`）。
-- **Script**：**不使用 resource_grant**。script 本身通过原子权限控制（`script:view`、`script:edit_content`、`script:edit_marker`），行级访问通过 `script_view` 资源实现——`script_view` 是 resource_grant 体系内的独立实体（每个视图是一个可 grant 的 instance）。
+- **Script**：**不使用 production_member_grant**。script 本身通过原子权限控制（`script:view`、`script:edit_content`、`script:edit_marker`），行级访问通过 `script_view` 资源实现——`script_view` 是 production_member_grant 体系内的独立实体（每个视图是一个可 grant 的 instance）。
 
-**DB 存储**（`resource_grant` 表新增字段）：
+**DB 存储**（`production_member_grant` 表新增字段）：
 
 ```sql
 resource_type  TEXT NOT NULL,              -- 顶层类型：'scene' | 'cue_list' | 'script' | ...
@@ -131,7 +131,7 @@ resource_sub   TEXT NOT NULL DEFAULT '*',  -- 子类型/字段；'*' = 所有子
 
 ```sql
 -- 检查 user 对 scene:scene123:music 是否有 edit 权限
-SELECT 1 FROM resource_grant
+SELECT 1 FROM production_member_grant
 WHERE production_id = $1
   AND is_revoked = false
   AND (expires_at IS NULL OR expires_at > NOW())
@@ -149,7 +149,7 @@ LIMIT 1;
 
 ```sql
 SELECT resource_type, resource_id, resource_sub, permission_level
-FROM resource_grant
+FROM production_member_grant
 WHERE production_id = $1
   AND user_id = $user_id
   AND is_revoked = false
@@ -161,20 +161,20 @@ WHERE production_id = $1
 **索引**：
 
 ```sql
--- 主查询索引（替换原 resource_grant_resource_idx）
-CREATE INDEX resource_grant_lookup_idx
-  ON resource_grant (production_id, resource_type, resource_id, resource_sub, user_id)
+-- 主查询索引（替换原 production_member_grant_resource_idx）
+CREATE INDEX production_member_grant_lookup_idx
+  ON production_member_grant (production_id, resource_type, resource_id, resource_sub, user_id)
   WHERE is_revoked = false;
 
 -- UNIQUE 约束（见 Schema 章节 partial unique index）
--- resource_grant_active_unique_idx 已在 resource_grant 表定义中列出
+-- production_member_grant_active_unique_idx 已在 production_member_grant 表定义中列出
 ```
 
 ### 资源的域类型
 
 | 域类型 | 含义 | 例子 |
 |--------|------|------|
-| **dept-managed** | 管理权归部门（平权共管），通过 `resource_grant` 决定访问权，无单一 owner | cue_list、tech_req、note（写）、物料、预算、script_view |
+| **dept-managed** | 管理权归部门（平权共管），通过 `production_member_grant` 决定访问权，无单一 owner | cue_list、tech_req、note（写）、物料、预算、script_view |
 | **creator-owned** | 所有者 = 创建个人，分享是主动行为 | asset（数字资产） |
 | **production-wide** | 成员资格即基础访问，演出级别管理 | announcement |
 | **event-scoped** | 绑定特定排练/演出场次（基本已被 dept-managed 模型覆盖，暂作预留分类） | — |
@@ -183,7 +183,7 @@ CREATE INDEX resource_grant_lookup_idx
 
 dept-managed 类资源没有单一"owner 部门"，而是由多个部门共同对该资源负有管理责任，称为"共管方"。共管关系记录在 `resource_dept_manage` 表中（结构性关系，不是 grant）。
 
-**关键原则：所有 grant 都是个人 grant，`resource_grant` 表中不存在 dept-level 记录。**
+**关键原则：所有 grant 都是个人 grant，`production_member_grant` 表中不存在 dept-level 记录。**
 
 "某部门共管某资源"的含义 = **`resource_dept_manage` 中存在该部门对该资源的记录**，这使得：
 - 该部门的 POC 处于该资源 manage 级别的免审批区间（可随时 self-confirm）
@@ -193,7 +193,7 @@ dept-managed 类资源没有单一"owner 部门"，而是由多个部门共同�
 - POC：`resource_dept_manage` 命中 → 可 self-confirm manage grant
 - 普通成员：`resource_dept_manage` 命中 + `permissions[]` 包含操作 key → 可 self-confirm 对应级别
 
-**审批路由**：查询该资源的个人 manage grant 持有者（`resource_grant`）→ 若无，回退到 `resource_dept_manage` 中各部门的当前 POC → 向所有人发送审批通知（平权，first-action-wins）
+**审批路由**：查询该资源的个人 manage grant 持有者（`production_member_grant`）→ 若无，回退到 `resource_dept_manage` 中各部门的当前 POC → 向所有人发送审批通知（平权，first-action-wins）
 
 **`permission_level` 的语义**：
 
@@ -224,7 +224,7 @@ tech_req 在标准层级外额外保留 `assign`（分配人员/设备，区别�
 | 写入目标 | 写入内容 | 触发者 |
 |---------|---------|-------|
 | `resource_dept_manage`（结构性关系） | 哪些部门对该资源有管理权 | 系统，根据资源类型规则 |
-| `resource_grant`（个人 grant） | 创建者本人的 manage grant，`grant_source='self_confirmed'` | 创建行为本身即确认 |
+| `production_member_grant`（个人 grant） | 创建者本人的 manage grant，`grant_source='self_confirmed'` | 创建行为本身即确认 |
 
 创建者以外的共管部门 POC **不**自动获得 grant——他们处于免审批区间，需要自己点「申请」后立即 self-confirm。
 
@@ -245,7 +245,7 @@ tech_req 在标准层级外额外保留 `assign`（分配人员/设备，区别�
 
 **部门解散规则**：若某部门在 `resource_dept_manage` 中仍有记录，系统**阻止解散**，要求先将这些管理权转移至其他部门（制作人或 Production Owner 直接执行，免审批）。
 
-**新权限**：`resource:grant_manage` — 允许直接给个人写入 `manage` 级 resource_grant，归属于**普通管理**层（制作人默认拥有，无需审批）。
+**新权限**：`resource:grant_manage` — 允许直接给个人写入 `manage` 级 production_member_grant，归属于**普通管理**层（制作人默认拥有，无需审批）。
 
 ### 资源清单与域归属
 
@@ -256,12 +256,12 @@ tech_req 在标准层级外额外保留 `assign`（分配人员/设备，区别�
 | report | dept-managed | 创建者部门 + SM 部门（auto）；发布后全员 view | `view / edit / publish / edit_published / revoke / manage` | Phase 5b |
 | tech_req | dept-managed | 创建者部门（auto on create）；SM 部门有类型级 manage | `view / edit / assign / manage` | Phase 5c |
 | note | dept-managed（写）/ production-wide（读） | 创建者部门（auto on create）；SM/导演有 `note:create_any` | `view / edit / manage`；全员有原子 `note:view` | Phase 5d |
-| asset（数字资产） | creator-owned | 上传者控制分享目标（`asset_share` 表） | creator-owned 模型，不走 resource_grant | ✅ asset_share 已实现 |
+| asset（数字资产） | creator-owned | 上传者控制分享目标（`asset_share` 表） | creator-owned 模型，不走 production_member_grant | ✅ asset_share 已实现 |
 | 物料（实物资产） | dept-managed | 本 epic 范围外，流程待设计 | 待定 | 本 epic 范围外 |
 | budget / 财务 | dept-managed | 本 epic 范围外，流程待设计 | 待定 | 本 epic 范围外 |
-| script | 原子权限（不使用 resource_grant） | role/dept `permissions[]` 配置 | 原子 key：`script:view / edit_content / edit_marker / annotate / manage_views` | 原子权限已实现；key 整合随各 Phase 资源迁移逐步完成 |
-| script_view | dept-managed（resource_grant 独立实体） | 视图创建者（需 `script:manage_views` 原子权限） | `view / edit / manage` | 本 epic 范围外（建议另立计划） |
-| announcement | production-wide | 管理员 | 原子权限，不走 resource_grant | 已实现，本 epic 不动 |
+| script | 原子权限（不使用 production_member_grant） | role/dept `permissions[]` 配置 | 原子 key：`script:view / edit_content / edit_marker / annotate / manage_views` | 原子权限已实现；key 整合随各 Phase 资源迁移逐步完成 |
+| script_view | dept-managed（production_member_grant 独立实体） | 视图创建者（需 `script:manage_views` 原子权限） | `view / edit / manage` | 本 epic 范围外（建议另立计划） |
+| announcement | production-wide | 管理员 | 原子权限，不走 production_member_grant | 已实现，本 epic 不动 |
 
 ### `resource_dept_manage`（部门-资源结构性管理权）
 
@@ -281,16 +281,16 @@ CREATE TABLE resource_dept_manage (
 );
 ```
 
-**与 `resource_grant` 的分工**：
+**与 `production_member_grant` 的分工**：
 - `resource_dept_manage`：部门 D 有权管理资源 R → D 的 POC 和成员处于免审批区间
-- `resource_grant`：某个具体的人已经确认并持有该资源的某级别权限
+- `production_member_grant`：某个具体的人已经确认并持有该资源的某级别权限
 
 ### 核心 Grant 表（权限的单一权威）
 
-所有实际权限均来源于两张 grant 表：`resource_grant`（资源权限）和 `atomic_permission_grant`（原子权限）。`grant_source='auto'` **仅用于**加入演出时的 3 条基础 grant；其余所有 grant 均有明确的用户行为作为确认来源。
+所有实际权限均来源于两张 grant 表：`production_member_grant`（资源权限）和 `atomic_permission_grant`（原子权限）。`grant_source='auto'` **仅用于**加入演出时的 3 条基础 grant；其余所有 grant 均有明确的用户行为作为确认来源。
 
 ```sql
-resource_grant (
+production_member_grant (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   user_id         UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -319,8 +319,8 @@ resource_grant (
 
 -- partial unique index（取代 CONSTRAINT）
 -- 同时排除过期行：过期但未撤销的 grant 不应阻塞同组合的新 grant 写入
-CREATE UNIQUE INDEX resource_grant_active_unique_idx
-  ON resource_grant (production_id, user_id,
+CREATE UNIQUE INDEX production_member_grant_active_unique_idx
+  ON production_member_grant (production_id, user_id,
                      resource_type, resource_id, resource_sub, permission_level)
   WHERE is_revoked = false AND (expires_at IS NULL OR expires_at > NOW());
 ```
@@ -331,7 +331,7 @@ CREATE UNIQUE INDEX resource_grant_active_unique_idx
 
 #### `atomic_permission_grant`（原子权限的个人 grant 记录）
 
-与 `resource_grant` 平行的第二张 grant 表，存储原子权限 key 的个人授权记录。
+与 `production_member_grant` 平行的第二张 grant 表，存储原子权限 key 的个人授权记录。
 
 ```sql
 CREATE TABLE atomic_permission_grant (
@@ -360,7 +360,7 @@ CREATE UNIQUE INDEX atomic_permission_grant_active_unique_idx
   WHERE is_revoked = false;
 ```
 
-> **两表的结构差异**：两表的 grantee 均永远是个人（`user_id`）。`atomic_permission_grant` 的权限粒度编码在 `permission_key` 中（无 `permission_level`）；`resource_grant` 用 `permission_level` 表达同一资源的多级访问控制。资源权限的免审批区间由 `resource_dept_manage`（部门-资源结构性关系表）决定，**不通过任何 grant 记录**实现。
+> **两表的结构差异**：两表的 grantee 均永远是个人（`user_id`）。`atomic_permission_grant` 的权限粒度编码在 `permission_key` 中（无 `permission_level`）；`production_member_grant` 用 `permission_level` 表达同一资源的多级访问控制。资源权限的免审批区间由 `resource_dept_manage`（部门-资源结构性关系表）决定，**不通过任何 grant 记录**实现。
 
 ### 四种权限流程
 
@@ -382,11 +382,11 @@ CREATE UNIQUE INDEX atomic_permission_grant_active_unique_idx
 
 | 触发操作 | 自动写入的 grant | `confirmed_by` |
 |---------|----------------|----------------|
-| 将某人加入 event 参演名单（`assign_participants`） | `resource_grant(event, event_id, 'view')` | assigner |
-| 将某人加入 event 日程子参演（`assign_schedule_participants`） | `resource_grant(event, event_id, 'view')` | assigner |
-| 将某人设为 tech_req 执行人（`assign_tech_req`） | `resource_grant(tech_req, req_id, 'view')` | assigner |
-| 将某人显式添加为 cue list 协作者（制作人/POC 操作） | `resource_grant(cue_list, list_id, 'edit')` | creator/POC |
-| 将某人添加为某 script_view 的访问者 | `resource_grant(script_view, view_id, 'view')` | view 创建者 |
+| 将某人加入 event 参演名单（`assign_participants`） | `production_member_grant(event, event_id, 'view')` | assigner |
+| 将某人加入 event 日程子参演（`assign_schedule_participants`） | `production_member_grant(event, event_id, 'view')` | assigner |
+| 将某人设为 tech_req 执行人（`assign_tech_req`） | `production_member_grant(tech_req, req_id, 'view')` | assigner |
+| 将某人显式添加为 cue list 协作者（制作人/POC 操作） | `production_member_grant(cue_list, list_id, 'edit')` | creator/POC |
+| 将某人添加为某 script_view 的访问者 | `production_member_grant(script_view, view_id, 'view')` | view 创建者 |
 
 **撤销规则**：`assigned` grant 不随被指定人的 role/dept 变更自动撤销（因为授权来源是外部指定行为，不是个人免审批区间）。撤销需要操作执行人或制作人手动执行（`revoked_reason='manual'`），或当绑定的资源实例本身被删除/归档时随之撤销。
 
@@ -492,7 +492,7 @@ UI 只对常见组合做快捷入口（如"申请查看音乐 cue"），底层�
 ### 访问检查流程
 
 **心智模型**：
-- **个人 grant（`atomic_permission_grant` 或 `resource_grant`）是唯一真实权限**
+- **个人 grant（`atomic_permission_grant` 或 `production_member_grant`）是唯一真实权限**
 - role/dept `permissions[]` 是原子权限的免审批区间信号
 - `resource_dept_manage` 是资源权限的免审批区间信号（部门-资源结构性关系，非 grant）
 - 无论何种权限，用户均需主动点击「申请」或执行创建动作来触发授权流程
@@ -502,7 +502,7 @@ canAccess(user, action, resource):
 
   步骤 1: 查个人 grant（两张表）
     a. atomic_permission_grant(user_id=user.id, permission_key=action.key, is_revoked=false)
-    b. resource_grant(user_id=user.id, resource 匹配, permission_level >= 所需级别, is_revoked=false)
+    b. production_member_grant(user_id=user.id, resource 匹配, permission_level >= 所需级别, is_revoked=false)
     → 任一命中 → 直接放行
 
   步骤 2: 未命中
@@ -515,7 +515,7 @@ canAccess(user, action, resource):
        → 命中 → 立即写入 atomic_permission_grant(grant_source='self_confirmed') → 放行
     b. （资源权限）查 resource_dept_manage(dept_id IN user.dept_ids, resource 匹配)
        且 role/dept permissions[] 包含对应操作 key（如 cue_list:edit）
-       → 两条件均满足 → 立即写入 resource_grant(user_id=user.id, grant_source='self_confirmed') → 放行
+       → 两条件均满足 → 立即写入 production_member_grant(user_id=user.id, grant_source='self_confirmed') → 放行
        特殊：user 是该部门 POC，且 resource_dept_manage 命中 → 可 self-confirm manage 级别（无需 permissions[] 约束）
 
   步骤 4: 免审批区间无匹配
@@ -595,7 +595,7 @@ asset_share (
 第二层：实际持有权限（grant 表，是访问的唯一真实依据）
   实际权限 =
     atomic_permission_grant 中有效个人记录（user_id = 本人，未撤销，未过期）
-    ∪ resource_grant 中有效个人记录（user_id = 本人，未撤销，未过期）
+    ∪ production_member_grant 中有效个人记录（user_id = 本人，未撤销，未过期）
     其中 grant_source 为：
       'self_confirmed' — 用户申请，在免审批区间内立即通过
       'approval'       — 申请流审批通过后写入
@@ -614,12 +614,12 @@ asset_share (
 - `cue_list` **不新增** `owner_dept_id`——所有权通过 `resource_dept_manage` 平权共管表达
 - 创建 cue list 时，系统写入两类记录：
   1. `resource_dept_manage`：创建者所在部门 + `allowed_cue_types[]` 匹配的所有其他部门
-  2. `resource_grant(grant_source='self_confirmed', permission_level='manage')`：创建者本人（创建即确认）
-- 迁移：Phase B（见迁移计划）枚举现有演出的 role → dept 映射，手动确认后写入；现有 `cue_list_permission` 回填为 `resource_grant(source='direct')`
+  2. `production_member_grant(grant_source='self_confirmed', permission_level='manage')`：创建者本人（创建即确认）
+- 迁移：Phase B（见迁移计划）枚举现有演出的 role → dept 映射，手动确认后写入；现有 `cue_list_permission` 回填为 `production_member_grant(source='direct')`
 
 ### script 权限专项
 
-**访问机制**：script 通过原子权限控制，不使用 resource_grant（script 是演出版本级单例，无 per-instance 分控需求）。
+**访问机制**：script 通过原子权限控制，不使用 production_member_grant（script 是演出版本级单例，无 per-instance 分控需求）。
 
 **简化后的原子权限（合并原有细粒度 key）**：
 
@@ -633,7 +633,7 @@ asset_share (
 
 > 典型归属：编导组的 role/dept permissions[] 包含 `script:view + script:edit_content`；SM 包含 `script:view + script:edit_marker`。成员发起申请后在免审批区间内立即通过，写入 `atomic_permission_grant`。
 
-**行级访问控制：script_view（resource_grant 体系的独立实体）**
+**行级访问控制：script_view（production_member_grant 体系的独立实体）**
 
 需要给特定人员限定可见行（演员只看相关台词、导演为某人策划参考材料）时，使用 `script_view` 而非 per-block grant。
 
@@ -641,7 +641,7 @@ asset_share (
 - `script:view`（原子权限）：有资格访问剧本内容
 - `script:manage_views`（原子权限）：有资格创建和管理视图
 
-视图本身是独立的 resource_grant 资源，有自己的 grant：
+视图本身是独立的 production_member_grant 资源，有自己的 grant：
 - `script_view:view# @ view` → 只能看该视图包含的块
 - `script_view:view# @ edit` → 可编辑视图中标记为可编辑的块
 
@@ -685,8 +685,8 @@ CREATE TABLE script_view_block (
   └── 受限行级访问（演员、外聘顾问、参考材料）
         → 先给予 script:view（通过 role/dept permissions[] + 申请）
         → 创建 script_view（需持有 script:manage_views）
-        → 授予 resource_grant(script_view:view# @ view/edit)
-        → 不使用 per-block resource_grant
+        → 授予 production_member_grant(script_view:view# @ view/edit)
+        → 不使用 per-block production_member_grant
 ```
 
 ### note 的 domain 确认
@@ -710,7 +710,7 @@ CREATE TABLE script_view_block (
 ```
 用户申请访问某资源
   ↓
-查询该资源所有个人 manage grant 持有者（resource_grant 中 permission_level='manage', is_revoked=false）
+查询该资源所有个人 manage grant 持有者（production_member_grant 中 permission_level='manage', is_revoked=false）
   ↓
 向所有持有者同时发送审批通知（平权，任一人批准即生效）
   ↓
@@ -748,7 +748,7 @@ TTL 不触发自动拒绝，只触发升级。
 
 ### 可授予的权限组合
 
-所有授权结果统一写入 `resource_grant` 表（grantee 始终为个人 `user_id`）：
+所有授权结果统一写入 `production_member_grant` 表（grantee 始终为个人 `user_id`）：
 
 | 授权目标 | 授权时限 | 权限级别 | `grant_source` |
 |---------|---------|---------|---------------|
@@ -759,11 +759,11 @@ TTL 不触发自动拒绝，只触发升级。
 
 ### 批准后自动执行
 
-审批状态变为 `approved` 时，系统自动写入 `resource_grant`：
+审批状态变为 `approved` 时，系统自动写入 `production_member_grant`：
 
 ```
 approval_request.status → 'approved'
-  INSERT INTO resource_grant (
+  INSERT INTO production_member_grant (
     production_id, user_id,
     resource_type, resource_id,
     permission_level, grant_source='approval',
@@ -785,7 +785,7 @@ approval_request.status → 'approved'
 
 ### 新建表
 
-#### `resource_permission_level`（resource_grant 合法 level 的 lookup 表）
+#### `resource_permission_level`（production_member_grant 合法 level 的 lookup 表）
 
 ```sql
 CREATE TABLE resource_permission_level (
@@ -833,11 +833,11 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('asset',       'manage',         4);
 ```
 
-`resource_grant.permission_level` 通过 FK 引用此表：
+`production_member_grant.permission_level` 通过 FK 引用此表：
 
 ```sql
-ALTER TABLE resource_grant
-  ADD CONSTRAINT resource_grant_level_fk
+ALTER TABLE production_member_grant
+  ADD CONSTRAINT production_member_grant_level_fk
   FOREIGN KEY (resource_type, permission_level)
   REFERENCES resource_permission_level (resource_type, permission_level)
   DEFERRABLE INITIALLY DEFERRED;
@@ -931,9 +931,9 @@ CREATE TABLE approval_request (
 
   -- 资源访问申请专用字段（type = 'resource_access' 时非 NULL，DB CHECK 见下方）
   resource_type       TEXT NULL,      -- 'cue_list' | 'script' | 'note' | 'tech_req' | ...
-  resource_id         TEXT NULL,      -- 申请的实例 ID；统一用 '*' 表示通配符（与 resource_grant 一致）
-  resource_sub        TEXT NULL,      -- 申请的子类型；'*' 表示全部（与 resource_grant 一致）
-  permission_level    TEXT NULL,      -- 无枚举约束，与 resource_grant.permission_level 保持一致（含资源专属词汇如 publish/revoke）
+  resource_id         TEXT NULL,      -- 申请的实例 ID；统一用 '*' 表示通配符（与 production_member_grant 一致）
+  resource_sub        TEXT NULL,      -- 申请的子类型；'*' 表示全部（与 production_member_grant 一致）
+  permission_level    TEXT NULL,      -- 无枚举约束，与 production_member_grant.permission_level 保持一致（含资源专属词汇如 publish/revoke）
   -- 申请人即受益人（subject_id）；制作人主动给他人授权走 grant_source='direct' 直接授权，不经 approval_request
   CONSTRAINT approval_resource_fields_required
     CHECK (type != 'resource_access' OR (resource_type IS NOT NULL AND permission_level IS NOT NULL)),
@@ -986,11 +986,11 @@ ALTER TABLE production_member
 -- tags TEXT[] 字段：不新增，改用 production_member_tag_assignment 关联表
 ```
 
-#### `cue_list`（移除旧权限字段，权限迁移至 resource_grant）
+#### `cue_list`（移除旧权限字段，权限迁移至 production_member_grant）
 
 ```sql
--- cue_list 不新增 owner_dept_id；共管方通过 resource_grant 表表达。
--- Phase 4 废弃 cue_list_role、cue_list_permission 表，数据回填为 resource_grant 记录。
+-- cue_list 不新增 owner_dept_id；共管方通过 production_member_grant 表表达。
+-- Phase 4 废弃 cue_list_role、cue_list_permission 表，数据回填为 production_member_grant 记录。
 ```
 
 ---
@@ -1002,16 +1002,16 @@ ALTER TABLE production_member
 ### Phase 0（前置，无代码）
 - [ ] 确认 `allowed_cue_types` 枚举值与 `CUE_LIST_TEMPLATES` 的 key 对应
 - [ ] 整理现有 role 中助理类职位清单（`ASSISTANT_ROLE_MIGRATION`），准备拆分 migration
-- [ ] 确认 `resource_grant` 旧数据回填策略（现有 `cue_list_permission` + `production_member_permission` 如何转换为 grant 记录）
+- [ ] 确认 `production_member_grant` 旧数据回填策略（现有 `cue_list_permission` + `production_member_permission` 如何转换为 grant 记录）
 
 ### Phase 1（#158）✅ 已完成（commit ca5e7d7）权限体系基础设施
 **实际交付：**
-- `add-resource-grant.sql`：新建 `resource_grant` 表（含基础字段）
+- `add-resource-grant.sql`：新建 `production_member_grant` 表（含基础字段）
 - `lib/permissions.ts`：新增 `ResourceType`、`PermissionLevel`、`AccessResult` 类型；新增 `canAccess()` 函数（内部回落到 `hasPermission()`，用户无感知）；新增 `DEPT_ASSIGNABLE_PERMISSIONS`
-- `MEMBER_BASE_PERMISSIONS` 暂未缩减（保留至 Phase 4 resource_grant 完全接管后执行，确保无 UX 变化）
+- `MEMBER_BASE_PERMISSIONS` 暂未缩减（保留至 Phase 4 production_member_grant 完全接管后执行，确保无 UX 变化）
 
 **与 PRD 目标态的已知偏差（Phase 2c 修正）：**
-- `resource_grant` 使用 `grantee_type / grantee_id` 而非 `user_id`
+- `production_member_grant` 使用 `grantee_type / grantee_id` 而非 `user_id`
 - `permission_level` 沿用旧 3 级 CHECK 约束（`view/write/manage`），`write` 应为 `edit`；未建 FK → `resource_permission_level`
 - 缺少 `resource_sub` 列
 - `resource_id` 为 NULL（目标态应为 `NOT NULL DEFAULT '*'`）
@@ -1037,7 +1037,7 @@ ALTER TABLE production_member
 **无 UX 变化**
 
 ### Phase 2c（架构订正，无 UX）
-> **背景**：Phase 1+2 提前实现时 PRD 尚未定稿，导致部分 schema 与目标态偏差。本 Phase 在任何新功能开发前集中修正，确保 Phase 3 起的所有代码可以直接面向正确的 schema 编写。`resource_grant` 表无生产数据，所有变更均为纯 DDL + schema fix。
+> **背景**：Phase 1+2 提前实现时 PRD 尚未定稿，导致部分 schema 与目标态偏差。本 Phase 在任何新功能开发前集中修正，确保 Phase 3 起的所有代码可以直接面向正确的 schema 编写。`production_member_grant` 表无生产数据，所有变更均为纯 DDL + schema fix。
 
 **后端（文件清单）：**
 
@@ -1046,13 +1046,13 @@ ALTER TABLE production_member
   - 插入全量 seed 数据（见 Schema 章节）
 
 - `migrate-resource-grant-v2.sql`（**migrate**，需配套测试文件）
-  - 新增 `user_id UUID NOT NULL REFERENCES app_user(id)`（`resource_grant` 无历史行，直接加 NOT NULL 列）
+  - 新增 `user_id UUID NOT NULL REFERENCES app_user(id)`（`production_member_grant` 无历史行，直接加 NOT NULL 列）
   - DROP COLUMN `grantee_type`、`grantee_id`
   - 新增 `resource_sub TEXT NOT NULL DEFAULT '*'`
   - `resource_id` NULL → `NOT NULL DEFAULT '*'`（`UPDATE SET resource_id = '*' WHERE resource_id IS NULL` 后 ALTER）
   - DROP 旧 `permission_level` CHECK 约束，ADD FK → `resource_permission_level(resource_type, permission_level)` DEFERRABLE INITIALLY DEFERRED
   - 更新 `grant_source` CHECK 加入 `'auto'`、`'assigned'`
-  - 重建 `resource_grant_active_unique_idx`（新列，且需排除 expired 行：`WHERE is_revoked = false AND (expires_at IS NULL OR expires_at > NOW())`）
+  - 重建 `production_member_grant_active_unique_idx`（新列，且需排除 expired 行：`WHERE is_revoked = false AND (expires_at IS NULL OR expires_at > NOW())`）
 
 - `add-atomic-permission-grant.sql`（add）
   - 新建 `atomic_permission_grant` 表（完整字段，含 `revoked_reason` 含 `'poc_change'`）
@@ -1099,9 +1099,9 @@ ALTER TABLE production_member
 **后端：**
 - `add-cue-list-dept.sql`：`production_dept` 新增 `allowed_cue_types[]`（`cue_list` 不新增 `owner_dept_id`）
 - 枚举迁移：`production_role_cue_type` → `production_dept.allowed_cue_types`（**操作流程**：在生产服务器上分析现有 role，人工确认 role→dept 映射后，由 migration 脚本按确认结果写入；Phase 0 核对清单中应提前产出此映射表）
-- 回填：现有 `cue_list_permission` 和 `cue_list_role` 数据迁移为 `resource_grant` 记录（`grant_source='migrated'`，`confirmed_by=NULL`；不使用 `'direct'`，因历史记录无操作人信息）
-- 新建 cue list 时写入 `resource_dept_manage`（创建者部门 + allowed_cue_types 匹配部门）+ 创建者本人的 `resource_grant(grant_source='self_confirmed', permission_level='manage')`
-- `canAccess()` 对 cue_list 类型完全切换为 resource_grant 查询（移除 hasPermission 回落）
+- 回填：现有 `cue_list_permission` 和 `cue_list_role` 数据迁移为 `production_member_grant` 记录（`grant_source='migrated'`，`confirmed_by=NULL`；不使用 `'direct'`，因历史记录无操作人信息）
+- 新建 cue list 时写入 `resource_dept_manage`（创建者部门 + allowed_cue_types 匹配部门）+ 创建者本人的 `production_member_grant(grant_source='self_confirmed', permission_level='manage')`
+- `canAccess()` 对 cue_list 类型完全切换为 production_member_grant 查询（移除 hasPermission 回落）
 - 废弃 `cue_list_role`、`cue_list_permission` 表
 
 **UX（与后端同 Phase 交付）：**
@@ -1111,24 +1111,24 @@ ALTER TABLE production_member
 
 ### Phase 5 资源迁移（event / report / tech_req / note）
 
-> **排期依据**：Phase 6 审批流的路由逻辑（查 `resource_grant` manage 持有者 → 升级至 `resource_dept_manage` POC）依赖所有资源都已在 `resource_grant` 上；Phase 6（成员管理）的 DELETE 级联撤销也需要 `resource_grant` 覆盖所有资源才完整。因此在成员管理之前完成所有资源迁移。
+> **排期依据**：Phase 6 审批流的路由逻辑（查 `production_member_grant` manage 持有者 → 升级至 `resource_dept_manage` POC）依赖所有资源都已在 `production_member_grant` 上；Phase 6（成员管理）的 DELETE 级联撤销也需要 `production_member_grant` 覆盖所有资源才完整。因此在成员管理之前完成所有资源迁移。
 >
-> `script` 不在本 Phase 内（通过原子权限控制，不使用 `resource_grant`，设计已定稿）。`script_view` / 物料 / 财务 超出本 epic 范围，另立计划。
+> `script` 不在本 Phase 内（通过原子权限控制，不使用 `production_member_grant`，设计已定稿）。`script_view` / 物料 / 财务 超出本 epic 范围，另立计划。
 
 **各资源 PR 拆分（顺序执行）：**
 
 #### PR 5a — event
 
 **后端：**
-- `canAccess()` 对 `event` 类型完全切换为 `resource_grant` 查询，移除 `hasPermission` 回落
-- 新建 event 时写入 `resource_dept_manage`（创建者部门 + SM 部门）+ 创建者 `resource_grant(self_confirmed, manage)`；公开 event 同时写全员 `resource_grant(auto, view)`
-- 回填：现有 `event` 的权限状态转为 `resource_grant` 记录（`grant_source='direct'`，以最近一次显式授权操作人为 `confirmed_by`；无从追溯者 `confirmed_by = production.owner_id`）
-- 原子权限清理（折叠进 resource_grant，保留 `*_any` 管理员绕过）：
+- `canAccess()` 对 `event` 类型完全切换为 `production_member_grant` 查询，移除 `hasPermission` 回落
+- 新建 event 时写入 `resource_dept_manage`（创建者部门 + SM 部门）+ 创建者 `production_member_grant(self_confirmed, manage)`；公开 event 同时写全员 `production_member_grant(auto, view)`
+- 回填：现有 `event` 的权限状态转为 `production_member_grant` 记录（`grant_source='direct'`，以最近一次显式授权操作人为 `confirmed_by`；无从追溯者 `confirmed_by = production.owner_id`）
+- 原子权限清理（折叠进 production_member_grant，保留 `*_any` 管理员绕过）：
   - `event:edit / publish / create_schedule / edit_schedule / delete_schedule / assign_participants / assign_schedule_participants / edit_call / view_call_sheet` → `event:event# @ edit / publish`
   - `event:modify_published / revoke / delete` → `event:event# @ edit_published / revoke / manage`
   - `event:create_tech_req / edit_tech_req / view_tech_req / assign_tech_req / delete_tech_req` → `tech_req:req# @ view / edit / assign / manage`（与 PR 5c 协调）
   - `event:*_any` 保留为管理员绕过原子权限
-- 将某人加入 event 参演名单 → 自动写 `resource_grant(event, event_id, 'view', grant_source='assigned')`
+- 将某人加入 event 参演名单 → 自动写 `production_member_grant(event, event_id, 'view', grant_source='assigned')`
 
 **UX（与后端同 PR 交付）：**
 - Level 2-A modal：进入 event 编辑页时确认 edit / publish grant
@@ -1138,8 +1138,8 @@ ALTER TABLE production_member
 #### PR 5b — report
 
 **后端：**
-- `canAccess()` 对 `report` 类型切换为 `resource_grant` 查询
-- 新建 report 时写入 `resource_dept_manage`（创建者部门 + SM 部门）+ 创建者 manage grant；正式发布时自动写全员 `resource_grant(auto, view)`
+- `canAccess()` 对 `report` 类型切换为 `production_member_grant` 查询
+- 新建 report 时写入 `resource_dept_manage`（创建者部门 + SM 部门）+ 创建者 manage grant；正式发布时自动写全员 `production_member_grant(auto, view)`
 - 回填：同 event，`grant_source='direct'`，无法追溯时 `confirmed_by = production.owner_id`
 - 原子权限清理：
   - `report:edit / publish / delete / create_note / edit_note / delete_note` → `report:report# @ edit / publish / manage`
@@ -1152,9 +1152,9 @@ ALTER TABLE production_member
 #### PR 5c — tech_req
 
 **后端：**
-- `canAccess()` 对 `tech_req` 类型切换为 `resource_grant` 查询（`view / edit / assign / manage` 四级）
+- `canAccess()` 对 `tech_req` 类型切换为 `production_member_grant` 查询（`view / edit / assign / manage` 四级）
 - 新建 tech_req 时写入 `resource_dept_manage`（创建者部门；SM 部门有类型级 manage）+ 创建者 manage grant
-- 将某人设为 tech_req 执行人 → 自动写 `resource_grant(tech_req, req_id, 'view', grant_source='assigned')`
+- 将某人设为 tech_req 执行人 → 自动写 `production_member_grant(tech_req, req_id, 'view', grant_source='assigned')`
 - 原子权限清理：与 PR 5a `event:*_tech_req` 协调，统一迁移
 
 **UX：**
@@ -1166,7 +1166,7 @@ ALTER TABLE production_member
 > **特殊点**：note 读 production-wide（所有成员默认可见），写 dept-scoped。
 
 **后端：**
-- `canAccess()` 对 `note` 的写入路径切换为 `resource_grant`；读取路径保持 production-wide（加入演出时自动写 `resource_grant(note, *, 'view', grant_source='auto')`）
+- `canAccess()` 对 `note` 的写入路径切换为 `production_member_grant`；读取路径保持 production-wide（加入演出时自动写 `production_member_grant(note, *, 'view', grant_source='auto')`）
 - 新增原子权限：`note:create`（本部门 note）、`note:create_any`（跨部门，SM/导演）、`note:view`（production-wide，纳入 `MEMBER_BASE_PERMISSIONS`）
 - 新建 note 时写入 `resource_dept_manage`（创建者部门）+ 创建者 manage grant
 
@@ -1178,13 +1178,13 @@ ALTER TABLE production_member
 
 ### Phase 6（#165 + #138）标签 + 成员管理 API
 
-> **排期依据**：此时 `resource_grant` 已覆盖所有资源，DELETE /members 的 grant 级联撤销可以完整执行。
+> **排期依据**：此时 `production_member_grant` 已覆盖所有资源，DELETE /members 的 grant 级联撤销可以完整执行。
 
 **后端：**
 - migration：将现有 roles 中助理类复合职位拆分（role=原职位、tag=助理）；复合 role 行保留于 `production_role` 表（不 DROP，避免破坏历史 FK 引用），标记 `is_deprecated=true`（新增 boolean 列）
 - 补充标签 CRUD API：`GET/POST/DELETE /api/production/[id]/tags`（系统预设 tag 只读；自定义 tag 限本演出范围；删除自定义 tag 前检查是否有 assignment）
 - 重写 `PATCH /api/production/[id]/members` 路由：`supervisor_id`（含循环引用校验）/ `tags`（tag assignment 增删）/ `roles`（切换至 FK 路径）/ `dept`（dept 成员归属变更 + grant 级联撤销）
-- `DELETE /api/production/[id]/members/[userId]`：制作人权限检查（`hasPermission("production:manage_members", ctx)` 代理，真正 owner-only 检查待 #137 完整落地）；级联撤销该成员所有 `self_confirmed` grant（`resource_grant` + `atomic_permission_grant`）
+- `DELETE /api/production/[id]/members/[userId]`：制作人权限检查（`hasPermission("production:manage_members", ctx)` 代理，真正 owner-only 检查待 #137 完整落地）；级联撤销该成员所有 `self_confirmed` grant（`production_member_grant` + `atomic_permission_grant`）
 - `status` 字段：仅允许管理员通过 PATCH 设置 `suspended`（紧急操作）；`pending_exit / exited` 状态转换保留给 Phase 7 审批流，不在此 Phase 暴露
 
 **UX：**
@@ -1196,7 +1196,7 @@ ALTER TABLE production_member
 - `add-approval-request.sql`：新建 `approval_request` 表（含 resource_access type 及其专用字段）
 - Resource access 申请提交 API
 - 审批 API（POC 批准/拒绝，first-action-wins）
-- 批准后自动写 `resource_grant(source='approval')`
+- 批准后自动写 `production_member_grant(source='approval')`
 - Member exit 状态机（active → pending_exit → approved/disputed → exited/suspended）
 - Owner transfer 双向确认
 - TTL 升级计划任务（超时自动通知上级 POC，最终兜底 Production Owner）
@@ -1236,14 +1236,14 @@ ALTER TABLE production_member
 - [ ] **script_view 实现时机**：script_view 表和相关 API（CRUD 视图、视图内块管理）归入哪个 Phase？建议 Phase 7 UI 收尾时一并实现
 - [x] **asset_share 已实现**：asset 分享功能（`asset_share` 表及相关 API）已实现，不在本 epic 计划内
 - [ ] **manage grant 的转移 API**：部门解散时的 grant 转移操作，是在部门删除 API 内处理还是独立端点？
-- [x] **原子权限申请流的审批路由**：原子权限是类型级操作，无具体实例的 manage grant 持有者作为锚点。审批权上浮至对 `permissions[]` 有配置权的人：**制作人 → 无则兜底 Production Owner**。与 resource_grant 申请路由同一兜底，规则对称。
+- [x] **原子权限申请流的审批路由**：原子权限是类型级操作，无具体实例的 manage grant 持有者作为锚点。审批权上浮至对 `permissions[]` 有配置权的人：**制作人 → 无则兜底 Production Owner**。与 production_member_grant 申请路由同一兜底，规则对称。
 - [ ] **原子权限清理**（各条目已分配至对应 Phase，随 Phase 完成逐一划掉）：
-  - ✅ **Phase 4**：`cue_list:manage_permissions / _any` → resource_grant `manage` 级替代；`cue_list:delete/rename/edit_abbr/edit_description` → `cue_list:list# @ manage/edit`；`cue:create/.../move` → `cue_list:list# @ edit`；`cue:mount` → `cue_list:list# @ mount`
+  - ✅ **Phase 4**：`cue_list:manage_permissions / _any` → production_member_grant `manage` 级替代；`cue_list:delete/rename/edit_abbr/edit_description` → `cue_list:list# @ manage/edit`；`cue:create/.../move` → `cue_list:list# @ edit`；`cue:mount` → `cue_list:list# @ mount`
   - **Phase 5a**：`event:edit/publish/create_schedule/.../view_call_sheet` → `event:event# @ edit/publish`；`event:modify_published/revoke/delete` → `event:event# @ edit_published/revoke/manage`；`event:*_any` 保留；`event:*_tech_req` → `tech_req:req# @`（与 5c 协调）
   - **Phase 5b**：`report:edit/publish/delete/create_note/edit_note/delete_note` → `report:report# @ edit/publish/manage`；`report:modify_published/revoke` → `report:report# @ edit_published/revoke`；`report:*_any` 保留
   - **Phase 5c**：`event:*_tech_req` 系列完成迁移至 `tech_req:req# @ view/edit/assign/manage`
   - **Phase 5d**：新增原子权限 `note:create`、`note:create_any`、`note:view`（纳入 `MEMBER_BASE_PERMISSIONS`）
-  - **本 epic 范围外**：`script:manage` → `script:manage_views`；`script:create_block/...` → `script:edit_content`；`script:annotate / script:mount` 保留；`asset:mount_any/unmount_any` → resource_grant `mount` level
+  - **本 epic 范围外**：`script:manage` → `script:manage_views`；`script:create_block/...` → `script:edit_content`；`script:annotate / script:mount` 保留；`asset:mount_any/unmount_any` → production_member_grant `mount` level
 
 ---
 

@@ -4,6 +4,12 @@ import { useState, useEffect, type FormEvent } from "react";
 
 const AUTO_LOGIN_KEY = "feishu_auto_login_attempted";
 
+// 登录成功后的回跳目标（仅允许站内相对路径，防 open redirect）
+function loginDest(): string {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+}
+
 export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
   const [mode, setMode] = useState<"idle" | "email_sent" | "loading" | "otp_loading">("idle");
   const [email, setEmail] = useState("");
@@ -44,7 +50,7 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
             clearTimeout(fetchTimeout);
             if (r.ok) {
               sessionStorage.setItem(AUTO_LOGIN_KEY, "1");
-              window.location.href = "/";
+              window.location.href = loginDest();
             } else {
               setShowForm(true);
             }
@@ -106,7 +112,7 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
         body: JSON.stringify({ email: email.trim().toLowerCase(), code }),
       });
       if (res.ok) {
-        window.location.href = "/";
+        window.location.href = loginDest();
       } else {
         setMode("email_sent");
         setError("验证码错误或已过期");

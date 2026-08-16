@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
+import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, getMarkerLabelIndex, getVersion } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
 import { computePageMap } from "@/lib/script-page";
@@ -44,14 +44,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   );
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!hasPermission("script:view", permCtx))
-    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as ResolveInput;
   const { mentions, versionId: contextVersionId } = body;
   if (!Array.isArray(mentions) || mentions.length === 0) {
     return Response.json({ labels: [], urls: [] });
   }
+
+  // 剧本域 kinds 沿用 script blocks@view 门；wiki kind 不受此门约束——
+  // 标题=目录级信息沿引用流出（账本 §4.1），内容门在 wiki 页面/API 自身。
+  // 无剧本权限不再整请求 403（混合正文会连累 wiki/@ 解析）：剧本域 kinds
+  // 软跳过（labels/urls 留 null，客户端回退编辑期快照），wiki 恒可解析
+  const canResolveScript = permCtx.isAdmin || permCtx.isOwner
+    || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
+  const effectiveMentions = canResolveScript
+    ? mentions
+    : mentions.map(m => (m?.kind === "wiki" ? m : null));
 
   const pool = getPool();
   const effectiveVersionId = await resolveProductionVersion(productionId, contextVersionId);
@@ -141,10 +149,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // Group by kind for batch queries
   const byKind = new Map<string, number[]>();
-  for (let i = 0; i < mentions.length; i++) {
-    const key = mentions[i].kind;
-    if (!byKind.has(key)) byKind.set(key, []);
-    byKind.get(key)!.push(i);
+  for (let i = 0; i < effectiveMentions.length; i++) {
+    const m = effectiveMentions[i];
+    if (!m) continue; // 剧本域软跳过（无剧本权限）
+    if (!byKind.has(m.kind)) byKind.set(m.kind, []);
+    byKind.get(m.kind)!.push(i);
   }
 
   // ── page ──────────────────────────────────────────────────────────────────
@@ -289,6 +298,29 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         if (labels[i] === null) labels[i] = "#[未知版本]";
         urls[i] = `${base}/script`;
       }
+    }
+  }
+
+  // ── wiki ──────────────────────────────────────────────────────────────────
+  // 标题级解析（§4.1）：持有引用（即持有 id）即得标题；无权观看者点击后由
+  // wiki 页面呈现申请入口。production 归属校验防跨剧组解析。
+  if (byKind.has("wiki")) {
+    const wikiIdxs = byKind.get("wiki")!;
+    const UUID_RE = /^[0-9a-fA-F-]{36}$/;
+    const wikiIds = [...new Set(wikiIdxs.map(i => mentions[i].id).filter(id => UUID_RE.test(id)))];
+    const wikiMap = new Map<string, string | null>();
+    if (wikiIds.length > 0) {
+      const r = await pool.query<{ id: string; title: string | null }>(
+        `SELECT id::text AS id, title FROM wiki WHERE id = ANY($1::uuid[]) AND production_id = $2`,
+        [wikiIds, productionId],
+      );
+      for (const row of r.rows) wikiMap.set(row.id, row.title);
+    }
+    for (const i of wikiIdxs) {
+      const id = mentions[i].id.toLowerCase();
+      if (!wikiMap.has(id)) { labels[i] = "#[已删除]"; continue; }
+      labels[i] = wikiMap.get(id) ?? "#[无标题]";
+      urls[i] = `${base}/wiki/${id}`;
     }
   }
 

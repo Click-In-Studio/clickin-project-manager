@@ -276,12 +276,18 @@ assert.deepEqual(
   computePageMap(tallerAfterMarkerInsert, "a4", "center", true),
 );
 
-function assertScopedMatchesFull(previous: ScriptState, editedBlocks: Block[]): ScriptState {
+function assertScopedMatchesFull(
+  previous: ScriptState,
+  editedBlocks: Block[],
+  change?: ReturnType<typeof getMarkerChange>,
+): ScriptState {
   let fullId = 0;
   let scopedId = 0;
   const edited = { ...previous, blocks: editedBlocks };
   const full = normalizeMarkerState(edited, () => `oracle-${++fullId}`);
-  const scoped = normalizeMarkerStateAfterEdit(previous, edited, () => `oracle-${++scopedId}`);
+  const scoped = change
+    ? normalizeScriptMarkerInvariants(edited, () => `oracle-${++scopedId}`, { mode: "scoped", ...change })
+    : normalizeMarkerStateAfterEdit(previous, edited, () => `oracle-${++scopedId}`);
   assert.deepEqual(scoped, full);
   return scoped;
 }
@@ -431,6 +437,44 @@ sameOrderRehearsalMoveBlocks.splice(sameOrderRehearsalTarget, 0, sameOrderRehear
 assert.equal(getMarkerChange(leadingRepairBaseline.blocks, sameOrderRehearsalMoveBlocks).markerStructureChanged, false);
 const sameOrderRehearsalMoveResult = assertScopedMatchesFull(leadingRepairBaseline, sameOrderRehearsalMoveBlocks);
 assert.equal(sameOrderRehearsalMoveResult.scenes, leadingRepairBaseline.scenes);
+
+const crossSceneRehearsalMoveBaseline = normalizeMarkerState(state([
+  block("cache-move-c0", "chapter_marker"),
+  block("cache-move-opening", "dialogue", "opening", null),
+  block("cache-move-c1", "chapter_marker"),
+  block("cache-move-s11", "scene_marker"),
+  block("cache-move-r11a", "rehearsal_marker"), block("cache-move-t11a", "dialogue", "A", null),
+  block("cache-move-r11b", "rehearsal_marker"), block("cache-move-t11b", "dialogue", "B", null),
+  block("cache-move-r11c", "rehearsal_marker"), block("cache-move-t11c", "dialogue", "C", null),
+  block("cache-move-r11d", "rehearsal_marker"), block("cache-move-t11d", "dialogue", "D", null),
+  block("cache-move-s12", "scene_marker"),
+  block("cache-move-r12a", "rehearsal_marker"), block("cache-move-t12a", "dialogue", "A", null),
+  block("cache-move-r12b", "rehearsal_marker"), block("cache-move-t12b", "dialogue", "B", null),
+  block("cache-move-r12c", "rehearsal_marker"), block("cache-move-t12c", "dialogue", "C", null),
+]), createId);
+const crossSceneMovedIds = new Set([
+  "cache-move-r11d", "cache-move-t11d", "cache-move-s12", "cache-move-r12a", "cache-move-t12a",
+]);
+const crossSceneMovingBlocks = crossSceneRehearsalMoveBaseline.blocks.filter((item) => crossSceneMovedIds.has(item.id));
+const crossSceneMovedBlocks = crossSceneRehearsalMoveBaseline.blocks.filter((item) => !crossSceneMovedIds.has(item.id));
+const crossSceneInsertIndex = crossSceneMovedBlocks.findIndex((item) => item.id === "cache-move-t12b") + 1;
+crossSceneMovedBlocks.splice(crossSceneInsertIndex, 0, ...crossSceneMovingBlocks);
+const crossSceneMoveChange = getMarkerChange(
+  crossSceneRehearsalMoveBaseline.blocks,
+  crossSceneMovedBlocks,
+  crossSceneMovedIds,
+);
+assert.equal(crossSceneMoveChange.markerStructureChanged, true);
+const crossSceneMoveResult = assertScopedMatchesFull(
+  crossSceneRehearsalMoveBaseline,
+  crossSceneMovedBlocks,
+  crossSceneMoveChange,
+);
+const crossSceneMoveLabels = buildMarkerLabelIndex(crossSceneMoveResult.blocks).rehearsalLabelByMarkerId;
+assert.equal(crossSceneMoveLabels.get("cache-move-r12b"), "D");
+assert.equal(crossSceneMoveLabels.get("cache-move-r11d"), "E");
+assert.equal(crossSceneMoveLabels.get("cache-move-r12a"), "A");
+assert.equal(crossSceneMoveLabels.get("cache-move-r12c"), "B");
 assert.equal(forcedFirstScenesAcrossChapters.blocks[1]?.type, "scene_marker");
 const secondChapterIndex = forcedFirstScenesAcrossChapters.blocks.findIndex((item) => item.id === "c1");
 assert.equal(forcedFirstScenesAcrossChapters.blocks[secondChapterIndex + 1]?.type, "scene_marker");

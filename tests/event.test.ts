@@ -25,30 +25,32 @@ async function makeEv(prodId: string, createdBy: string, opts?: { status?: strin
   return id;
 }
 async function makeDept(prodId: string): Promise<string> {
-  const id = `d${shortId()}`;
-  await getPool().query(
-    `INSERT INTO event_department (id, production_id, name) VALUES ($1, $2, '测试部门')`,
-    [id, prodId],
+  const { rows } = await getPool().query<{ id: string }>(
+    `INSERT INTO production_dept (production_id, name) VALUES ($1, '测试部门') RETURNING id`,
+    [prodId],
   );
-  return id;
+  return rows[0].id;
 }
 async function makePocMember(deptId: string, userId: string): Promise<void> {
   await getPool().query(
-    `INSERT INTO event_department_member (department_id, user_id, is_poc) VALUES ($1, $2, true) ON CONFLICT DO NOTHING`,
+    `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc)
+     SELECT pd.production_id, $1, $2, true FROM production_dept pd WHERE pd.id = $1
+     ON CONFLICT DO NOTHING`,
     [deptId, userId],
   );
 }
 async function makeTechReq(eventId: string, deptId: string | null, status: string): Promise<string> {
   const id = `r${shortId()}`;
   await getPool().query(
-    `INSERT INTO event_tech_req (id, event_id, department_id, title, status) VALUES ($1, $2, $3, '测试需求', $4)`,
+    `INSERT INTO task (id, production_id, event_id, department_id, title, status)
+     SELECT $1, pe.production_id, $2, $3, '测试需求', $4 FROM production_event pe WHERE pe.id = $2`,
     [id, eventId, deptId, status],
   );
   return id;
 }
 async function makeAssignee(reqId: string, userId: string): Promise<void> {
   await getPool().query(
-    `INSERT INTO event_tech_assignee (req_id, user_id, name) VALUES ($1, $2, '测试') ON CONFLICT DO NOTHING`,
+    `INSERT INTO task_assignee (task_id, user_id, name) VALUES ($1, $2, '测试') ON CONFLICT DO NOTHING`,
     [reqId, userId],
   );
 }
@@ -56,9 +58,16 @@ async function makeReport(eventId: string, createdBy: string, opts?: { published
   const id = `rp${shortId()}`;
   const publishedSql = opts?.published !== false ? "now()" : "NULL";
   const mentionsJson = JSON.stringify((opts?.mentions ?? []).map(uid => ({ userId: uid })));
+  // 拆分模型：内容进 wiki 实体，边表挂 wiki_id
   await getPool().query(
-    `INSERT INTO event_report (id, event_id, title, created_by, published_at, mentions)
-     VALUES ($1, $2, '测试报告', $3, ${publishedSql}, $4)`,
+    `WITH w AS (
+       INSERT INTO wiki (production_id, title, mentions, created_by)
+       SELECT pe.production_id, '测试报告', $4::jsonb, $3
+       FROM production_event pe WHERE pe.id = $2
+       RETURNING id
+     )
+     INSERT INTO event_report (id, event_id, wiki_id, published_at)
+     SELECT $1, $2, w.id, ${publishedSql} FROM w`,
     [id, eventId, createdBy, mentionsJson],
   );
   return id;

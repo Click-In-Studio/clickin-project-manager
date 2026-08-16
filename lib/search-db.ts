@@ -15,8 +15,8 @@ export type TechReqSearchResult = {
   id: string;
   title: string;
   status: string;
-  eventId: string;
-  eventTitle: string;
+  eventId: string | null;
+  eventTitle: string | null;
   deptName: string | null;
 };
 
@@ -129,16 +129,16 @@ export async function searchProduction(
       `SELECT etr.id, etr.title, etr.status,
               pe.id AS event_id, pe.title AS event_title,
               ed.name AS dept_name
-       FROM event_tech_req etr
-       JOIN production_event pe ON pe.id = etr.event_id
-       LEFT JOIN event_department ed ON ed.id = etr.department_id
-       WHERE pe.production_id = $1
+       FROM task etr
+       LEFT JOIN production_event pe ON pe.id = etr.event_id
+       LEFT JOIN production_dept ed ON ed.id = etr.department_id
+       WHERE etr.production_id = $1
          AND (
            etr.title ILIKE $2
            OR ed.name ILIKE $2
            OR EXISTS (
-             SELECT 1 FROM event_tech_assignee eta
-             WHERE eta.req_id = etr.id AND eta.name ILIKE $2
+             SELECT 1 FROM task_assignee eta
+             WHERE eta.task_id = etr.id AND eta.name ILIKE $2
            )
          )
        LIMIT 5`,
@@ -147,14 +147,14 @@ export async function searchProduction(
 
     // ── Contacts (name / roles array / department name) ───────────────────────
     pool.query<{ user_id: string; name: string; roles: string[]; match_hint: string | null }>(
-      `SELECT pm.user_id, fu.name, pm.roles,
+      `SELECT pm.user_id, COALESCE(up.name, '') AS name, pm.roles,
               CASE
-                WHEN fu.name ILIKE $2 THEN NULL
+                WHEN up.name ILIKE $2 THEN NULL
                 WHEN EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2) THEN NULL
                 ELSE (
                   SELECT '部门: ' || ed.name
-                  FROM event_department_member edm
-                  JOIN event_department ed ON ed.id = edm.department_id
+                  FROM production_dept_member edm
+                  JOIN production_dept ed ON ed.id = edm.dept_id
                   WHERE edm.user_id = pm.user_id
                     AND ed.production_id = $1
                     AND ed.name ILIKE $2
@@ -162,20 +162,20 @@ export async function searchProduction(
                 )
               END AS match_hint
        FROM production_member pm
-       JOIN feishu_user fu ON fu.user_id = pm.user_id
+       LEFT JOIN user_profile up ON up.user_id = pm.user_id
        WHERE pm.production_id = $1
          AND (
-           fu.name ILIKE $2
+           up.name ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2)
            OR EXISTS (
-             SELECT 1 FROM event_department_member edm
-             JOIN event_department ed ON ed.id = edm.department_id
+             SELECT 1 FROM production_dept_member edm
+             JOIN production_dept ed ON ed.id = edm.dept_id
              WHERE edm.user_id = pm.user_id
                AND ed.production_id = $1
                AND ed.name ILIKE $2
            )
          )
-       ORDER BY fu.name
+       ORDER BY up.name NULLS LAST
        LIMIT 5`,
       [productionId, like],
     ),
@@ -250,7 +250,7 @@ export async function searchProduction(
   ]);
 
   type EventRow = { id: string; title: string; event_type: string; start_time: Date | null; location: string; status: string };
-  type TechReqRow = { id: string; title: string; status: string; event_id: string; event_title: string; dept_name: string | null };
+  type TechReqRow = { id: string; title: string; status: string; event_id: string | null; event_title: string | null; dept_name: string | null };
   type ContactRow = { user_id: string; name: string; roles: string[]; match_hint: string | null };
   type SceneRow = { id: string; name: string; match_hint: string | null };
   type CharRow = { id: string; name: string; match_hint: string | null };

@@ -70,13 +70,18 @@ export async function POST(req: NextRequest) {
   if (ikey) storeIdem(ikey, id);
 
   try {
-    const { updateProductionMeta, updateProductionType } = await import("@/lib/db");
-    await createProduction(id, name.trim(), session.userId);
+    const { updateProductionMeta } = await import("@/lib/db");
+    await createProduction(
+      id,
+      name.trim(),
+      session.userId,
+      type,
+      type === "other" ? (typeLabel?.trim() ?? null) : null,
+    );
     const metaFields: Parameters<typeof updateProductionMeta>[1] = {};
     if (description?.trim()) metaFields.description = description.trim();
     if (language?.trim()) metaFields.language = language.trim();
     if (Object.keys(metaFields).length) await updateProductionMeta(id, metaFields);
-    if (type) await updateProductionType(id, type, type === "other" ? (typeLabel?.trim() ?? null) : null);
     return Response.json({ id }, { status: 201 });
   } catch (err) {
     // Remove reservation so the client can retry with a fresh key.

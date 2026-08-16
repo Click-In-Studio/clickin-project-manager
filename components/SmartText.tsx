@@ -7,6 +7,7 @@ import {
   decodeMentionHref, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
+import { normalizeLegacyMentions } from "@/lib/mention-format";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -182,6 +183,7 @@ function renderMdInline(
   keyBase: string,
   members: MentionMember[],
   resolved: ResolvedMap,
+  pid?: string,
 ): React.ReactNode[] {
   const segments = text.split(MD_INLINE_SPLIT);
   const nodes: React.ReactNode[] = [];
@@ -200,17 +202,17 @@ function renderMdInline(
     }
     // Bold
     if (seg.startsWith("**") && seg.endsWith("**")) {
-      nodes.push(<strong key={key}>{renderMdInline(seg.slice(2, -2), `${key}-b`, members, resolved)}</strong>);
+      nodes.push(<strong key={key}>{renderMdInline(seg.slice(2, -2), `${key}-b`, members, resolved, pid)}</strong>);
       continue;
     }
     // Italic
     if (seg.startsWith("*") && seg.endsWith("*")) {
-      nodes.push(<em key={key}>{renderMdInline(seg.slice(1, -1), `${key}-i`, members, resolved)}</em>);
+      nodes.push(<em key={key}>{renderMdInline(seg.slice(1, -1), `${key}-i`, members, resolved, pid)}</em>);
       continue;
     }
     // Strikethrough
     if (seg.startsWith("~~") && seg.endsWith("~~")) {
-      nodes.push(<s key={key}>{renderMdInline(seg.slice(2, -2), `${key}-s`, members, resolved)}</s>);
+      nodes.push(<s key={key}>{renderMdInline(seg.slice(2, -2), `${key}-s`, members, resolved, pid)}</s>);
       continue;
     }
     // Link: content mention, legacy script ref, or regular link
@@ -218,11 +220,21 @@ function renderMdInline(
       const m = seg.match(/^\[([^\]]*)\]\(([^\s)"]+)(?:\s+"([^"]*)")?\)$/);
       if (m) {
         const [, linkText, href, title] = m;
+        // @成员：[@名](uid:x)（存量 @[名](uid:x) 已在入口归一化）
+        if (href.startsWith("uid:")) {
+          nodes.push(<MemberChip key={key} name={linkText.replace(/^@/, "")} members={members} />);
+          continue;
+        }
         if (href.startsWith(CM_HREF_PREFIX)) {
           const r = resolved.get(href);
           const label = r?.label ?? linkText;
-          const url = r?.url ? `${BASE_PATH}${r.url}` : null;
-          nodes.push(<ContentChip key={key} label={label} deleted={label === "#[已删除]"} href={url} />);
+          let url = r?.url ? `${BASE_PATH}${r.url}` : null;
+          // wiki 引用无需 resolve 即可直链（resolve 失败/未返回时兜底）
+          if (!url && pid) {
+            const attrs = decodeMentionHref(href);
+            if (attrs?.kind === "wiki") url = `${BASE_PATH}/production/${pid}/wiki/${attrs.id}`;
+          }
+          nodes.push(<ContentChip key={key} label={label.replace(/^#/, "") ? label : linkText} deleted={label === "#[已删除]"} href={url} />);
           continue;
         }
         if (linkText.startsWith("#") && !href.startsWith("http")) {
@@ -269,6 +281,7 @@ function renderMdBlock(
   idx: number,
   members: MentionMember[],
   resolved: ResolvedMap,
+  pid?: string,
 ): React.ReactNode {
   const lines = block.split("\n").filter(l => l.trim() !== "");
   if (!lines.length) return null;
@@ -280,14 +293,14 @@ function renderMdBlock(
       : level === 2 ? "text-lg font-semibold mt-3 mb-1"
       : "text-base font-semibold mt-2 mb-0.5";
     const Tag = `h${level}` as "h1" | "h2" | "h3";
-    return <Tag key={idx} className={cls}>{renderMdInline(headMatch[2], `${idx}-h`, members, resolved)}</Tag>;
+    return <Tag key={idx} className={cls}>{renderMdInline(headMatch[2], `${idx}-h`, members, resolved, pid)}</Tag>;
   }
 
   if (lines.every(l => /^[*-] /.test(l))) {
     return (
       <ul key={idx} className="list-disc pl-5 my-1 space-y-0.5">
         {lines.map((l, i) => (
-          <li key={i} className="text-sm">{renderMdInline(l.slice(2), `${idx}-ul-${i}`, members, resolved)}</li>
+          <li key={i} className="text-sm">{renderMdInline(l.slice(2), `${idx}-ul-${i}`, members, resolved, pid)}</li>
         ))}
       </ul>
     );
@@ -297,7 +310,7 @@ function renderMdBlock(
     return (
       <ol key={idx} className="list-decimal pl-5 my-1 space-y-0.5">
         {lines.map((l, i) => (
-          <li key={i} className="text-sm">{renderMdInline(l.replace(/^\d+\. /, ""), `${idx}-ol-${i}`, members, resolved)}</li>
+          <li key={i} className="text-sm">{renderMdInline(l.replace(/^\d+\. /, ""), `${idx}-ol-${i}`, members, resolved, pid)}</li>
         ))}
       </ol>
     );
@@ -307,7 +320,7 @@ function renderMdBlock(
   const hardParts = block.split(/\\\n/);
   const nodes: React.ReactNode[] = [];
   hardParts.forEach((part, i) => {
-    nodes.push(...renderMdInline(part, `${idx}-p-${i}`, members, resolved));
+    nodes.push(...renderMdInline(part, `${idx}-p-${i}`, members, resolved, pid));
     if (i < hardParts.length - 1) nodes.push(<br key={`${idx}-br-${i}`} />);
   });
   return <p key={idx} className="text-sm my-1">{nodes}</p>;
@@ -347,7 +360,7 @@ export default function SmartText({
 
   useEffect(() => {
     if (!productionId || resolveAttempted.current) return;
-    const items = markdown ? extractCmLinks(content) : extractPlainTokens(content);
+    const items = markdown ? extractCmLinks(normalizeLegacyMentions(content)) : extractPlainTokens(content);
     if (!items.length) return;
     resolveAttempted.current = true;
 
@@ -374,15 +387,25 @@ export default function SmartText({
   // ── Markdown mode ──────────────────────────────────────────────────────────
   if (markdown) {
     if (!content.trim()) return null;
-    const blocks = content.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+    const blocks = normalizeLegacyMentions(content).split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
     return (
       <div className={`text-zinc-800 ${className ?? ""}`}>
-        {blocks.map((block, i) => renderMdBlock(block, i, members, resolved))}
+        {blocks.map((block, i) => renderMdBlock(block, i, members, resolved, productionId))}
       </div>
     );
   }
 
   // ── Plain text mode ────────────────────────────────────────────────────────
+
+  // @ mention 完整 token：@[名](uid:x)——plain 模式编辑器的标准存储形态。
+  // 原 memberPlugin 只匹配裸 @名字，带 uid 的 token 一直渲染为原文（用户实测）
+  const atTokenPlugin: InlinePlugin = {
+    pattern: String.raw`@\[[^\]\n]+\]\(uid:[^)\s]+\)`,
+    render: (match, key) => {
+      const name = /@\[([^\]\n]+)\]/.exec(match)?.[1] ?? match;
+      return <MemberChip key={key} name={name} members={members} />;
+    },
+  };
 
   // Member mention plugin (with hover tooltip)
   const memberPlugin: InlinePlugin | null = members.length > 0 ? {
@@ -409,8 +432,10 @@ export default function SmartText({
     },
   };
 
-  // Order: member → extra (legacy) plugins → content mention (must come last — [#label] is a prefix of [#label](href))
+  // Order: @ 完整 token（必须先于裸 @名，避免被拆开）→ member → extra (legacy)
+  // → content mention (must come last — [#label] is a prefix of [#label](href))
   const allPlugins: InlinePlugin[] = [
+    atTokenPlugin,
     ...(memberPlugin ? [memberPlugin] : []),
     ...extraPlugins,
     cmPlugin,

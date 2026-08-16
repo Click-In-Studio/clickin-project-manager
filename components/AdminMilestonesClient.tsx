@@ -1,5 +1,7 @@
 "use client";
 
+import PageHeader from "@/components/PageHeader";
+
 import { useState, useCallback } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -11,6 +13,7 @@ type Milestone = {
 };
 
 type Props = {
+  productionName: string;
   productionId: string;
   initialMilestones: Milestone[];
   canCreate: boolean;
@@ -33,7 +36,7 @@ function daysDiff(endDate: string, today: string): number {
   return Math.ceil((end.getTime() - now.getTime()) / 86400000);
 }
 
-export default function AdminMilestonesClient({ productionId, initialMilestones, canCreate, canManage, canDelete }: Props) {
+export default function AdminMilestonesClient({ productionId, productionName, initialMilestones, canCreate, canManage, canDelete }: Props) {
   const today = new Date().toISOString().slice(0, 10);
   const [milestones, setMilestones] = useState<Milestone[]>(initialMilestones);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -118,7 +121,7 @@ export default function AdminMilestonesClient({ productionId, initialMilestones,
           border: isCurrent
             ? "1.5px solid var(--ink)"
             : isPast ? "1px solid var(--line)" : "1px solid var(--line)",
-          background: isCurrent ? "var(--ink)" : isPast ? "var(--surface)" : "white",
+          background: isCurrent ? "var(--ink)" : "var(--surface)",
           opacity: isPast ? 0.65 : 1,
           transition: "box-shadow .15s",
         }}
@@ -172,7 +175,7 @@ export default function AdminMilestonesClient({ productionId, initialMilestones,
                     fontSize: 11, fontWeight: 600,
                     color: isCurrent
                       ? (diff <= 7 ? "#fbbf24" : "rgba(255,255,255,.55)")
-                      : (diff <= 7 ? "#dc2626" : "var(--muted)"),
+                      : (diff <= 7 ? "var(--danger)" : "var(--muted)"),
                   }}>
                     {diff === 0 ? "今天截止" : diff < 0 ? `已过期 ${-diff} 天` : `${diff} 天后`}
                   </span>
@@ -192,10 +195,10 @@ export default function AdminMilestonesClient({ productionId, initialMilestones,
               {canDelete && (
                 <button
                   onClick={() => deleteMilestone(m.id, m.name)}
-                  style={{ fontSize: 12, color: isCurrent ? "rgba(255,255,255,.5)" : "#dc262640", background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 5 }}
+                  style={{ fontSize: 12, color: isCurrent ? "rgba(255,255,255,.5)" : "var(--danger)40", background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 5 }}
                   title="删除"
-                  onMouseEnter={e => (e.currentTarget.style.color = "#dc2626")}
-                  onMouseLeave={e => (e.currentTarget.style.color = isCurrent ? "rgba(255,255,255,.5)" : "#dc262640")}
+                  onMouseEnter={e => (e.currentTarget.style.color = "var(--danger)")}
+                  onMouseLeave={e => (e.currentTarget.style.color = isCurrent ? "rgba(255,255,255,.5)" : "var(--danger)40")}
                 >
                   删除
                 </button>
@@ -209,18 +212,14 @@ export default function AdminMilestonesClient({ productionId, initialMilestones,
 
   return (
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
-      <div style={{ padding: "24px clamp(20px, 3vw, 48px) 56px" }}>
-        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", marginBottom: 4 }}>
-          Admin · Milestones
-        </p>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", marginBottom: 24 }}>
-          里程碑
-        </h1>
+      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+        <PageHeader eyebrow={productionName} title="里程碑" side="stage" />
 
         {/* Add form */}
         {canCreate && (
-          <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "20px 24px", marginBottom: 24 }}>
-            <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 14 }}>新增里程碑</h2>
+          <div style={{ background: "var(--surface)", borderRadius: 13, border: "1px solid var(--line)", padding: 22, marginBottom: 18 }}>
+            <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)" }}>New Milestone</p>
+            <h2 style={{ margin: "0 0 14px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>新增里程碑</h2>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <input
                 value={newName}
@@ -252,7 +251,7 @@ export default function AdminMilestonesClient({ productionId, initialMilestones,
                 {adding ? "添加中…" : "添加"}
               </button>
             </div>
-            {addError && <p style={{ fontSize: 12, color: "#dc2626", marginTop: 8 }}>{addError}</p>}
+            {addError && <p style={{ fontSize: 12, color: "var(--danger)", marginTop: 8 }}>{addError}</p>}
           </div>
         )}
 
