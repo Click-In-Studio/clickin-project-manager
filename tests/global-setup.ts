@@ -110,6 +110,12 @@ import {
   WIKI_DEFAULT_TREE_SNAPSHOT_PATH,
   type WikiDefaultTreeSnapshot,
 } from "./wiki-default-tree-snapshot";
+import {
+  isWikiCreateBaselinePreMigrationSchema,
+  createWikiCreateBaselinePreMigrationData,
+  WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
+  type WikiCreateBaselineSnapshot,
+} from "./wiki-create-baseline-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -436,10 +442,37 @@ export async function setup() {
       await pool.query(sql);
     }
   }
+
+  // wiki 创建资格基线回填（W3 部署缺口：grant_template 零读取，存量 role 无键）
+  if (await isWikiCreateBaselinePreMigrationSchema(pool)) {
+    const baselineSnapshot = await createWikiCreateBaselinePreMigrationData(pool);
+    await writeFile(WIKI_CREATE_BASELINE_SNAPSHOT_PATH, JSON.stringify(baselineSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-create-baseline.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
   const pool = getPool();
+
+  // Clean up wiki-create-baseline migration factory data (migration path only).
+  {
+    let baselineSnapshot: WikiCreateBaselineSnapshot | null = null;
+    try {
+      baselineSnapshot = JSON.parse(
+        await readFile(WIKI_CREATE_BASELINE_SNAPSHOT_PATH, "utf8"),
+      ) as WikiCreateBaselineSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (baselineSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [baselineSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_CREATE_BASELINE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // Clean up wiki-default-tree migration factory data (migration path only).
   {
