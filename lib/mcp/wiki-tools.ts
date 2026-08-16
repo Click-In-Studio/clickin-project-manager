@@ -5,9 +5,10 @@
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import {
   listWikiLibrary, getWiki, listBacklinks, listOutgoingLinks, searchWiki,
-  extractWikiLinkTargets, createWiki, type WikiListEntry, type WikiRef,
+  extractWikiLinkTargets, createWiki, updateWiki, deleteWiki,
+  type WikiListEntry, type WikiRef,
 } from "@/lib/wiki-db";
-import { canViewWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { canViewWiki, canEditWiki, canDeleteWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
 import { hasEffectiveGrant, type GrantActor } from "@/lib/grant-check";
 import { getPool } from "@/lib/pg";
 import {
@@ -16,8 +17,12 @@ import {
 } from "@/lib/wiki-proposal-db";
 
 const DENIED_NOT_VISIBLE = "权限被拒绝：你看不到这篇文档。";
-/** wiki 创建门的 node 权限键——AccessRequestModal 的 permission prop 用同一字符串锁定表单。 */
+/** wiki 创建门的 node 权限键（域级，不带具体 id）——AccessRequestModal 的
+ *  permission prop 用同一字符串锁定表单。 */
 export const CREATE_PERMISSION_KEY = "node:wiki/*@create";
+/** 编辑/删除门是实例级的——权限键要点名具体 wikiId。 */
+export function editPermissionKey(wikiId: string): string { return `node:wiki/${wikiId}@edit`; }
+export function deletePermissionKey(wikiId: string): string { return `node:wiki/${wikiId}@delete`; }
 
 // ─── wiki.tree ──────────────────────────────────────────────────────────────
 
@@ -151,12 +156,14 @@ export async function wikiSearch(userId: string, productionId: string, query: st
   return visible.length === 0 ? "（没有匹配的文档）" : formatRefs(visible);
 }
 
-// ─── wiki.propose ───────────────────────────────────────────────────────────
-// 门控原则（project_ai_infra 记忆）：本工具只在插件确认门批准（allow-once）
-// 后才会真正被调用——这里再查一遍权限是真正的安全边界，不信任 /wiki-proposal
-// 预持久化时算出的 has_permission（那只是给确认卡片/预览 modal 用的展示值）。
+// ─── wiki.propose_* ─────────────────────────────────────────────────────────
+// 门控原则（project_ai_infra 记忆）：四个工具都只在插件确认门批准
+// （allow-once）后才会真正被调用——这里再查一遍权限是真正的安全边界，不信任
+// /wiki-proposal 预持久化时算出的 has_permission（那只是给确认卡片/预览
+// modal 用的展示值）。create 门是域级（能不能新建，不看具体哪篇），
+// update/delete/move 门是实例级（对这一篇具体文档有没有编辑/删除权限）。
 
-export async function wikiPropose(
+export async function wikiProposeCreate(
   userId: string, productionId: string, toolCallId: string,
   args: { parentId?: string | null; title: string; body?: string; summary: string },
 ): Promise<string> {
@@ -168,7 +175,7 @@ export async function wikiPropose(
   const allowed = await hasEffectiveGrant(resolved.actor, productionId, "wiki", "*", "*", "create");
 
   if (!allowed) {
-    if (proposal) await markWikiProposalBlocked(proposal.id);
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
     return "权限被拒绝：你没有在该制作新建文档的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
@@ -178,4 +185,89 @@ export async function wikiPropose(
   });
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
   return `已创建文档《${doc.title}》（id: ${doc.id}）。`;
+}
+
+export async function wikiProposeUpdate(
+  userId: string, productionId: string, toolCallId: string,
+  args: { wikiId: string; title?: string; body?: string; summary: string },
+): Promise<string> {
+  const resolved = await resolveProductionActor(userId, productionId);
+  if (!resolved) return DENIED_NOT_MEMBER;
+  if (resolved.isArchived) return "该制作已归档，无法修改文档。";
+
+  const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, userId);
+  const allowed = await canEditWiki(resolved.actor, productionId, args.wikiId);
+
+  if (!allowed) {
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
+    return "权限被拒绝：你没有编辑这篇文档的权限。已记录本次调用，需人工审批通过后才能重试。";
+  }
+  if (args.title === undefined && args.body === undefined) {
+    return "没有提供要修改的标题或正文，未做任何变更。";
+  }
+
+  const doc = await updateWiki(args.wikiId, productionId, { title: args.title, body: args.body, origin: "ai-proposed" }, userId);
+  if (!doc) return "没有找到该文档。";
+  if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
+  return `已更新文档《${doc.title}》（id: ${doc.id}）。`;
+}
+
+export async function wikiProposeDelete(
+  userId: string, productionId: string, toolCallId: string,
+  args: { wikiId: string; summary: string },
+): Promise<string> {
+  const resolved = await resolveProductionActor(userId, productionId);
+  if (!resolved) return DENIED_NOT_MEMBER;
+  if (resolved.isArchived) return "该制作已归档，无法删除文档。";
+
+  const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, userId);
+  const allowed = await canDeleteWiki(resolved.actor, productionId, args.wikiId);
+
+  if (!allowed) {
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
+    return "权限被拒绝：你没有删除这篇文档的权限。已记录本次调用，需人工审批通过后才能重试。";
+  }
+
+  const result = await deleteWiki(args.wikiId, productionId);
+  if (!result.ok) {
+    // 业务规则拦截，不是权限问题——proposal 标专门的状态，别让前端误显示
+    // "去申请权限"入口（申请了也没用）。
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
+    if (result.reason === "mounted") return "该文档被挂载（报告/备注引用它），无法删除。";
+    if (result.reason === "anchor") return "该文档是系统锚点目录（报告根/事件目录），无法删除。";
+    return "没有找到该文档。";
+  }
+  if (proposal) await markWikiProposalApplied(proposal.id, args.wikiId);
+  return "已删除该文档。";
+}
+
+export async function wikiProposeMove(
+  userId: string, productionId: string, toolCallId: string,
+  args: { wikiId: string; newParentId?: string | null; summary: string },
+): Promise<string> {
+  const resolved = await resolveProductionActor(userId, productionId);
+  if (!resolved) return DENIED_NOT_MEMBER;
+  if (resolved.isArchived) return "该制作已归档，无法移动文档。";
+
+  const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, userId);
+  const allowed = await canEditWiki(resolved.actor, productionId, args.wikiId);
+
+  if (!allowed) {
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
+    return "权限被拒绝：你没有编辑这篇文档的权限。已记录本次调用，需人工审批通过后才能重试。";
+  }
+
+  let doc;
+  try {
+    doc = await updateWiki(args.wikiId, productionId, { parentId: args.newParentId ?? null, origin: "ai-proposed" }, userId);
+  } catch (err) {
+    // validateParent 抛错（父不存在/成环）——不是权限问题，proposal 标业务规则状态。
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
+    return err instanceof Error ? err.message : "移动失败：目标父文档不合法。";
+  }
+  if (!doc) return "没有找到该文档。";
+  if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
+  return args.newParentId
+    ? `已把文档《${doc.title}》移动到新的父文档下。`
+    : `已把文档《${doc.title}》移动到文档库根。`;
 }

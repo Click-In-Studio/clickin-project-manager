@@ -2997,7 +2997,7 @@
     {
       "column": "title",
       "type": "text",
-      "nullable": false
+      "nullable": true
     },
     {
       "column": "body",
@@ -3041,6 +3041,17 @@
     {
       "column": "resolved_at",
       "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "action",
+      "type": "text",
+      "nullable": false,
+      "default": "'create'::text"
+    },
+    {
+      "column": "target_wiki_id",
+      "type": "uuid",
       "nullable": true
     }
   ],

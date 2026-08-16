@@ -22,18 +22,31 @@ export async function GET(req: NextRequest) {
     const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, auth.userId);
     if (!proposal) return NextResponse.json({ error: "未找到该提议" }, { status: 404 });
 
-    // 父文档标题按当前可见性门再查一遍——不能假设 propose 时刻的可见性
-    // 到预览时刻还成立（权限可能被收回），也不能假设 parentId 一定是调用者
-    // 真正看得到的文档（模型可能填了个它凭空编的/别处拿到的 id）。
+    // 父文档/目标文档标题+正文都按当前可见性门再查一遍——不能假设 propose
+    // 时刻的可见性到预览时刻还成立（权限可能被收回），也不能假设 id 一定是
+    // 调用者真正看得到的文档（模型可能填了个它拿到过、但发起者看不到的 id；
+    // canEditWiki/canDeleteWiki 和 canViewWiki 是独立的宽限，理论上可以有编辑
+    // 权限但没查看权限）。
+    const resolved = await resolveProductionActor(auth.userId, productionId);
+
     let parentTitle: string | null = null;
-    if (proposal.parentWikiId) {
-      const resolved = await resolveProductionActor(auth.userId, productionId);
-      if (resolved && await canViewWiki(resolved.actor, productionId, proposal.parentWikiId)) {
-        const parent = await getWiki(proposal.parentWikiId, productionId);
-        parentTitle = parent?.title ?? null;
-      }
+    if (proposal.parentWikiId && resolved && await canViewWiki(resolved.actor, productionId, proposal.parentWikiId)) {
+      parentTitle = (await getWiki(proposal.parentWikiId, productionId))?.title ?? null;
     }
+
+    let targetTitle: string | null = null;
+    let targetBody: string | null = null;
+    if (proposal.targetWikiId && resolved && await canViewWiki(resolved.actor, productionId, proposal.targetWikiId)) {
+      const target = await getWiki(proposal.targetWikiId, productionId);
+      targetTitle = target?.title ?? null;
+      targetBody = target?.body ?? null;
+    }
+
     return NextResponse.json({
+      action: proposal.action,
+      targetWikiId: proposal.targetWikiId,
+      targetTitle,
+      targetBody,
       parentTitle,
       title: proposal.title,
       body: proposal.body,

@@ -27,6 +27,13 @@ const DEFAULTS: Required<PluginConfig> = {
 };
 
 const MCP_TOOL_PREFIX = "clickin__";
+// wiki propose 四兄弟的暴露名 → /wiki-proposal 预持久化端点认的 action 值。
+const WIKI_PROPOSE_ACTIONS: Record<string, "create" | "update" | "delete" | "move"> = {
+  "production-wiki_propose_create": "create",
+  "production-wiki_propose_update": "update",
+  "production-wiki_propose_delete": "delete",
+  "production-wiki_propose_move": "move",
+};
 // webchat sessionKey（与后端 lib/mcp/session-identity.ts 同构）：
 //   个人        clickin:chat:<userId>:<sessionUuid>
 //   production  clickin:chat:<userId>:<productionId>:<sessionUuid>
@@ -123,12 +130,18 @@ async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<stri
 }
 
 // wiki propose 预持久化（确认卡片 description 硬上限 512 字符装不下完整
-// 提议内容，前端预览 modal 靠这行按 toolCallId 拉取全文）。失败/超时只是
-// 退化成旧版纯截断预览的确认文案——真正的安全边界是 production.wiki_propose
-// 工具函数批准后自己重新查一遍权限，这里挂不上不影响那条边界。
+// 提议内容，前端预览 modal 靠这行按 toolCallId 拉取全文）。覆盖
+// create/update/delete/move 四种动作——action 缺省时后端按 "create" 处理。
+// 失败/超时只是退化成旧版纯截断预览的确认文案——真正的安全边界是各
+// wiki_propose_* 工具函数批准后自己重新查一遍权限，这里挂不上不影响那条边界。
 async function postWikiProposal(
   mcpUrl: string,
-  body: { productionId: string; toolCallId: string; callerUserId: string; parentId?: string; title: string; body: string; summary: string },
+  body: {
+    productionId: string; toolCallId: string; callerUserId: string;
+    action?: "create" | "update" | "delete" | "move";
+    wikiId?: string; parentId?: string; newParentId?: string;
+    title?: string; body?: string; summary: string;
+  },
 ): Promise<{ hasPermission: boolean } | null> {
   try {
     const origin = new URL(mcpUrl).origin;
@@ -279,20 +292,21 @@ export default definePluginEntry({
     ): { title: string; description: string } {
       const str = (v: unknown, cap: number): string =>
         typeof v === "string" ? (v.length > cap ? `${v.slice(0, cap)}…` : v) : String(v ?? "（无）");
+      // 工具调用权限门原则：extra.hasPermission 来自 /wiki-proposal 预持久化
+      // 的展示值（不是安全边界，边界在各 wiki_propose_* 工具函数批准后自己
+      // 重查）；undefined = 预持久化没打通（超时/挂了），此时不虚构权限状态。
+      const permLine = (verb: string, extra?: { hasPermission?: boolean }): string | null =>
+        extra?.hasPermission === true
+          ? `✅ 你有${verb}这篇文档的权限，批准后会直接生效。`
+          : extra?.hasPermission === false
+            ? `⛔ 你目前没有${verb}这篇文档的权限——批准后调用会被拦截、不会真的生效，转入审批流。`
+            : null;
       switch (tool) {
-        case "production-wiki_propose": {
-          // 工具调用权限门原则：extra.hasPermission 来自 /wiki-proposal 预
-          // 持久化的展示值（不是安全边界，边界在工具函数批准后自己重查）；
-          // undefined = 预持久化没打通（超时/挂了），此时不虚构权限状态。
-          const permLine = extra?.hasPermission === true
-            ? "✅ 你有新建文档的权限，批准后会直接创建。"
-            : extra?.hasPermission === false
-              ? "⛔ 你目前没有新建文档的权限——批准后调用会被拦截、不会真的创建，转入审批流。"
-              : null;
+        case "production-wiki_propose_create":
           return {
             title: `提议新建文档：${str(params.title, 60)}`,
             description: [
-              permLine,
+              permLine("新建", extra),
               `📄 标题：${str(params.title, 80)}`,
               params.parentId ? `📂 父文档 id：${str(params.parentId, 60)}` : "📂 位置：文档库根",
               `📝 摘要：${str(params.summary, 100)}`,
@@ -300,7 +314,34 @@ export default definePluginEntry({
               str(params.body, 160),
             ].filter((l): l is string => l !== null).join("\n"),
           };
-        }
+        case "production-wiki_propose_update":
+          return {
+            title: `提议修改文档（id: ${str(params.wikiId, 40)}）`,
+            description: [
+              permLine("编辑", extra),
+              params.title !== undefined ? `📄 新标题：${str(params.title, 80)}` : "📄 标题不变",
+              `📝 摘要：${str(params.summary, 100)}`,
+              params.body !== undefined ? `新正文预览：\n${str(params.body, 160)}` : "正文不变",
+            ].filter((l): l is string => l !== null).join("\n"),
+          };
+        case "production-wiki_propose_delete":
+          return {
+            title: `提议删除文档（id: ${str(params.wikiId, 40)}）`,
+            description: [
+              permLine("删除", extra),
+              `📝 理由：${str(params.summary, 150)}`,
+              "⚠️ 若目标被报告/备注引用（挂载）或是系统锚点目录，即使有权限也无法删除，这不是权限问题。",
+            ].filter((l): l is string => l !== null).join("\n"),
+          };
+        case "production-wiki_propose_move":
+          return {
+            title: `提议移动文档（id: ${str(params.wikiId, 40)}）`,
+            description: [
+              permLine("编辑", extra),
+              params.newParentId ? `📂 新父文档 id：${str(params.newParentId, 60)}` : "📂 移到文档库根",
+              `📝 理由：${str(params.summary, 150)}`,
+            ].filter((l): l is string => l !== null).join("\n"),
+          };
         case "users-query_sensitive":
           return {
             title: `查询你的登记联系方式`,
@@ -368,20 +409,24 @@ export default definePluginEntry({
         const bareTool = e.toolName.slice(MCP_TOOL_PREFIX.length);
         const toolCallId = e.toolCallId;
 
-        // wiki propose 专属：确认卡片建好之前先把完整提议内容 + 权限判定
-        // 预持久化（供前端预览 modal 按 toolCallId 拉取全文，description
+        // wiki propose 四兄弟专属：确认卡片建好之前先把完整提议内容 + 权限
+        // 判定预持久化（供前端预览 modal 按 toolCallId 拉取全文，description
         // 512 字符装不下）。失败/超时 hasPermission 为 undefined——
         // describeToolCall 据此不虚构权限状态，仍照旧走确认门（工具函数
         // 批准后自己重新查权限，真正的安全边界不受这次预持久化成败影响）。
         let wikiHasPermission: boolean | undefined;
-        if (bareTool === "production-wiki_propose" && identity?.productionId && toolCallId) {
+        const wikiAction = WIKI_PROPOSE_ACTIONS[bareTool];
+        if (wikiAction && identity?.productionId && toolCallId) {
           const posted = await postWikiProposal(cfg.mcpUrl, {
             productionId: identity.productionId,
             toolCallId,
             callerUserId: identity.userId,
+            action: wikiAction,
+            wikiId: typeof e.params.wikiId === "string" ? e.params.wikiId : undefined,
             parentId: typeof e.params.parentId === "string" ? e.params.parentId : undefined,
-            title: typeof e.params.title === "string" ? e.params.title : "",
-            body: typeof e.params.body === "string" ? e.params.body : "",
+            newParentId: typeof e.params.newParentId === "string" ? e.params.newParentId : undefined,
+            title: typeof e.params.title === "string" ? e.params.title : undefined,
+            body: typeof e.params.body === "string" ? e.params.body : undefined,
             summary: typeof e.params.summary === "string" ? e.params.summary : "",
           });
           wikiHasPermission = posted?.hasPermission;

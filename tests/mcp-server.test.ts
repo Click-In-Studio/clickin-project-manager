@@ -24,7 +24,10 @@ describe("MCP server skeleton", () => {
       "production.my_role",
       "production.notifications",
       "production.wiki_backlinks",
-      "production.wiki_propose",
+      "production.wiki_propose_create",
+      "production.wiki_propose_delete",
+      "production.wiki_propose_move",
+      "production.wiki_propose_update",
       "production.wiki_read",
       "production.wiki_search",
       "production.wiki_tree",
@@ -51,7 +54,9 @@ describe("MCP server skeleton", () => {
     }
     // 写工具：非 readOnly → 插件 fail-closed 门控自动挂确认门（工具调用
     // 权限门原则①），不是这里手写判断的
-    expect(registry["production.wiki_propose"]?.annotations?.readOnlyHint).toBe(false);
+    for (const name of ["production.wiki_propose_create", "production.wiki_propose_update", "production.wiki_propose_delete", "production.wiki_propose_move"]) {
+      expect(registry[name]?.annotations?.readOnlyHint, name).toBe(false);
+    }
     // 敏感读取（即使查自己）刻意不标 readOnly——插件 fail-closed 门控
     // 据此自动挂确认门
     expect(registry["users.query_sensitive"]?.annotations?.readOnlyHint).toBeUndefined();

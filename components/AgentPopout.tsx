@@ -1,10 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
+
+/** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
+function lastSessionStorageKey(productionId: string | null): string {
+  return `clickin-ai-last-session:${productionId ?? "personal"}`;
+}
 
 type SessionSummary = {
   key: string;
@@ -51,11 +57,15 @@ export default function AgentPopout({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previewToolCallId, setPreviewToolCallId] = useState<string | null>(null);
   const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
+  const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeKeyRef = useRef<string | null>(null);
   activeKeyRef.current = activeKey;
+  const pathname = usePathname();
+  const router = useRouter();
 
   const inScope = useCallback(
     (key: string) => {
@@ -94,35 +104,40 @@ export default function AgentPopout({
     }
   }, [productionId, activeKey, inScope]);
 
-  // 附带当前文档 chip：换文档/离开文档页时重取标题、默认重新勾选附带。
+  // 按语境记住最后一次活跃的会话——重开 popout/刷新页面后自动接回去，
+  // 不用每次都从空白开始。恢复逻辑见下面依赖 openSession 的那个 effect。
   useEffect(() => {
-    if (!currentWikiId || !productionId) { setCurrentDocTitle(null); return; }
+    if (!activeKey) return;
+    try { localStorage.setItem(lastSessionStorageKey(productionId), activeKey); } catch { /* 配额满等，忽略 */ }
+  }, [activeKey, productionId]);
+
+  // 附带当前文档 chip：换文档/离开文档页时重取标题+tag、默认重新勾选附带。
+  // 只取标题/tag/id——不拉正文（下面注释解释为什么）。
+  useEffect(() => {
+    if (!currentWikiId || !productionId) { setCurrentDocTitle(null); setCurrentDocTags([]); return; }
     setDocAttached(true);
     let alive = true;
     fetch(`/api/production/${productionId}/wiki/${currentWikiId}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { wiki?: { title: string | null } } | null) => {
-        if (alive) setCurrentDocTitle(data?.wiki?.title ?? null);
+      .then((data: { wiki?: { title: string | null; tags?: string[] } } | null) => {
+        if (!alive) return;
+        setCurrentDocTitle(data?.wiki?.title ?? null);
+        setCurrentDocTags(data?.wiki?.tags ?? []);
       })
-      .catch(() => { if (alive) setCurrentDocTitle(null); });
+      .catch(() => { if (alive) { setCurrentDocTitle(null); setCurrentDocTags([]); } });
     return () => { alive = false; };
   }, [currentWikiId, productionId]);
 
+  // 点击 popout 外部不自动收起——和左侧剧本页折叠导航的浮出面板同一套交互
+  // 惯例，只能靠 ✕ 按钮或再点一次 AI 按钮关掉。Escape 仍保留（标准可访问性
+  // 惯例，和"点外面"是两回事，不在这次要去掉的范围内）。
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      if ((target as HTMLElement).closest?.("[data-ai-toggle]")) return;
-      onClose();
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", handler);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", handler);
       document.removeEventListener("keydown", onKey);
     };
   }, [open, onClose]);
@@ -130,6 +145,14 @@ export default function AgentPopout({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [bubbles, streaming]);
+
+  // 输入框随内容平滑长高（ChatGPT 等主流 webchat 的惯例），封顶后转内部滚动。
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
 
   // 读一条 NDJSON/SSE 聊天流进气泡列表——"发送" 和 "接回运行中会话" 共用。
   const consumeStream = useCallback(async (res: Response, forKey: string) => {
@@ -153,6 +176,8 @@ export default function AgentPopout({
     }, 5_000);
 
     let streamKey = forKey;
+    // 本轮是否调过 wiki_propose——用来决定收尾要不要刷新当前 wiki 页面。
+    let sawWikiWrite = false;
 
     const apply = (line: StreamLine) => {
       if (activeKeyRef.current !== streamKey) return;
@@ -183,6 +208,7 @@ export default function AgentPopout({
               }
               continue;
             }
+            if (line.type === "tool" && line.name?.includes("wiki_propose")) sawWikiWrite = true;
             apply(line);
           } catch {
             // skip malformed line
@@ -192,12 +218,17 @@ export default function AgentPopout({
     } finally {
       clearInterval(watchdog);
       setStreaming(false);
+      // AI 这一轮建/改过文档，且当前正停在 wiki 页面上——软刷新一下，不然
+      // 树/正文还停在调用前的状态，得手动 F5 才能看见 AI 刚写的东西。
+      if (sawWikiWrite && pathname && productionId && pathname.startsWith(`/production/${productionId}/wiki`)) {
+        router.refresh();
+      }
       setBubbles((prev) =>
         prev.map((b) => (b.kind === "assistant" && b.streaming ? { kind: "assistant", text: b.text } : b))
       );
       refreshSessions();
     }
-  }, [refreshSessions]);
+  }, [refreshSessions, pathname, productionId, router]);
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
@@ -227,6 +258,17 @@ export default function AgentPopout({
       consumeStream(res, key);
     }
   }, [consumeStream]);
+
+  // 恢复上次活跃会话：session 列表拉到、当前还没有 activeKey 时，若这个
+  // 语境存过一个还在（没被删/没过期出 scopedSessions）的会话 id，接回去。
+  useEffect(() => {
+    if (activeKey || sessions.length === 0) return;
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(lastSessionStorageKey(productionId)); } catch { /* 忽略 */ }
+    if (!stored) return;
+    const match = scopedSessions.find((s) => s.key === stored);
+    if (match) openSession(match.key, match.status);
+  }, [sessions, productionId, activeKey, scopedSessions, openSession]);
 
   const newSession = useCallback(async () => {
     setPickerOpen(false);
@@ -258,21 +300,14 @@ export default function AgentPopout({
     setInput("");
     setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
 
-    // 附带当前文档：现阶段就是把正文拼进实际发出的消息文本（未来计划经
-    // 插件做 system text 级注入，这里先用最直接的方式落地）。
+    // 附带当前文档：只注入标题/tag/id 这几个指针字段，不塞正文——AI 已经有
+    // wiki_read(id) 工具，需要正文自己按 id 取；把整篇文章暴力拼进每条消息
+    // 既浪费 token，文档一大还可能顶爆上下文。现阶段是字面文本注入（未来
+    // 计划经插件做 system text 级注入），先用最直接的方式落地。
     let message = raw;
-    if (docAttached && currentWikiId && productionId) {
-      try {
-        const docRes = await fetch(`/api/production/${productionId}/wiki/${currentWikiId}`);
-        if (docRes.ok) {
-          const data = (await docRes.json()) as { wiki?: { title: string | null; body: string } };
-          if (data.wiki) {
-            message = `[附带文档:《${data.wiki.title ?? "无标题"}》]\n${data.wiki.body}\n---\n${raw}`;
-          }
-        }
-      } catch {
-        // 附带失败就退化成不附带，别挡发送
-      }
+    if (docAttached && currentWikiId && currentDocTitle) {
+      const tagStr = currentDocTags.length > 0 ? `，标签：${currentDocTags.join("、")}` : "";
+      message = `[附带文档：《${currentDocTitle}》（id: ${currentWikiId}${tagStr}）——如需正文，用 wiki_read 读取该 id]\n${raw}`;
     }
 
     const res = await fetch("/api/agent/chat/stream", {
@@ -288,7 +323,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -626,6 +661,7 @@ export default function AgentPopout({
       <div className="shrink-0 border-t border-[var(--line)] p-3">
         <div className="flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -634,9 +670,9 @@ export default function AgentPopout({
                 send();
               }
             }}
-            rows={Math.min(6, Math.max(1, input.split("\n").length))}
+            rows={1}
             placeholder={streaming ? "回复中，输入消息将注入本轮…" : "输入消息，Enter 发送"}
-            className="max-h-40 flex-1 resize-none rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
           />
           {streaming ? (
             <button

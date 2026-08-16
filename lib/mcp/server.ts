@@ -187,10 +187,15 @@ export function buildMcpServer(): McpServer {
     return { content: [{ type: "text" as const, text: await wikiSearch(_caller_user_id, _caller_production_id, query) }] };
   });
 
-  s.registerTool("production.wiki_propose", {
-    // 非 readOnly → 插件门控挂确认门（工具调用权限门原则①：有权限键但敏感，
-    // 聊天栏确认后执行）。工具函数内部再查一遍权限——没有权限键的调用点
-    // （原则②）在这里被直接拦截，不建文档，交由前端的申请权限 modal 收尾。
+  // 四个写工具共用的门控原则（project_ai_infra 记忆）：非 readOnly → 插件
+  // 门控挂确认门（原则①：有权限键但敏感，聊天栏确认后执行）。工具函数内部
+  // 再查一遍权限——没有权限键的调用点（原则②）在这里被直接拦截，不执行，
+  // 交由前端的申请权限 modal 收尾。
+  const NO_TOOL_CALL_ID = {
+    content: [{ type: "text" as const, text: "拒绝：缺少调用 id（该工具只能经审批插件路径调用）。" }],
+  };
+
+  s.registerTool("production.wiki_propose_create", {
     description: `在某篇文档下（或在根下）提议新建一篇子文档，需要人工在聊天栏确认；` +
       `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
     inputSchema: {
@@ -204,11 +209,66 @@ export function buildMcpServer(): McpServer {
   }, async ({ parentId, title, body, summary, _caller_user_id, _caller_production_id, _tool_call_id }) => {
     if (!_caller_user_id) return NO_CALLER;
     if (!_caller_production_id) return NO_PRODUCTION;
-    if (!_tool_call_id) {
-      return { content: [{ type: "text" as const, text: "拒绝：缺少调用 id（该工具只能经审批插件路径调用）。" }] };
-    }
-    const { wikiPropose } = await import("./wiki-tools");
-    const text = await wikiPropose(_caller_user_id, _caller_production_id, _tool_call_id, { parentId, title, body, summary });
+    if (!_tool_call_id) return NO_TOOL_CALL_ID;
+    const { wikiProposeCreate } = await import("./wiki-tools");
+    const text = await wikiProposeCreate(_caller_user_id, _caller_production_id, _tool_call_id, { parentId, title, body, summary });
+    return { content: [{ type: "text" as const, text }] };
+  });
+
+  s.registerTool("production.wiki_propose_update", {
+    description: `提议修改一篇既有文档的标题和/或正文（只传要改的字段，不传的保持不变），` +
+      `需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
+    inputSchema: {
+      wikiId: z.string().describe("要修改的文档 id（来自 wiki_tree/wiki_search 的结果）"),
+      title: z.string().optional().describe("新标题；留空则不改标题"),
+      body: z.string().optional().describe("新正文（Markdown）；留空则不改正文"),
+      summary: z.string().describe("一句话说明这次提议改了什么、为什么"),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  }, async ({ wikiId, title, body, summary, _caller_user_id, _caller_production_id, _tool_call_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    if (!_tool_call_id) return NO_TOOL_CALL_ID;
+    const { wikiProposeUpdate } = await import("./wiki-tools");
+    const text = await wikiProposeUpdate(_caller_user_id, _caller_production_id, _tool_call_id, { wikiId, title, body, summary });
+    return { content: [{ type: "text" as const, text }] };
+  });
+
+  s.registerTool("production.wiki_propose_delete", {
+    description: "提议删除一篇既有文档，需要人工在聊天栏确认；确认后若你没有删除这篇文档的权限，" +
+      "调用会被直接拦截并转入审批流；被报告/备注引用（挂载）或系统锚点目录的文档无法删除（这不是权限问题）。",
+    inputSchema: {
+      wikiId: z.string().describe("要删除的文档 id（来自 wiki_tree/wiki_search 的结果）"),
+      summary: z.string().describe("一句话说明为什么要删除"),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  }, async ({ wikiId, summary, _caller_user_id, _caller_production_id, _tool_call_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    if (!_tool_call_id) return NO_TOOL_CALL_ID;
+    const { wikiProposeDelete } = await import("./wiki-tools");
+    const text = await wikiProposeDelete(_caller_user_id, _caller_production_id, _tool_call_id, { wikiId, summary });
+    return { content: [{ type: "text" as const, text }] };
+  });
+
+  s.registerTool("production.wiki_propose_move", {
+    description: "提议把一篇既有文档移动到另一篇文档下（或移到文档库根），需要人工在聊天栏确认；" +
+      "确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。",
+    inputSchema: {
+      wikiId: z.string().describe("要移动的文档 id"),
+      newParentId: z.string().optional().describe("移动到的新父文档 id；留空则移到文档库根"),
+      summary: z.string().describe("一句话说明为什么要移动"),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  }, async ({ wikiId, newParentId, summary, _caller_user_id, _caller_production_id, _tool_call_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    if (!_tool_call_id) return NO_TOOL_CALL_ID;
+    const { wikiProposeMove } = await import("./wiki-tools");
+    const text = await wikiProposeMove(_caller_user_id, _caller_production_id, _tool_call_id, { wikiId, newParentId, summary });
     return { content: [{ type: "text" as const, text }] };
   });
 
@@ -293,32 +353,47 @@ export function startMcpServer(): void {
   });
 
   // wiki propose 预持久化端点（供 clickin-memory 插件在 before_tool_call
-  // 构建确认卡片之前调用，仅对 production.wiki_propose）：把完整提议内容
-  // 落一行 wiki_proposal（确认卡片 description 硬上限 512 字符装不下全文，
-  // 前端预览 modal 按 tool_call_id 拉取这行）。这里算出的 hasPermission
-  // 只是给确认卡片/预览 modal 的展示值——真正的安全边界是
-  // production.wiki_propose 工具函数批准后自己重新查一遍权限，不信任这行。
+  // 构建确认卡片之前调用，覆盖 production.wiki_propose_create/update/delete/
+  // move 四个工具）：把完整提议内容落一行 wiki_proposal（确认卡片 description
+  // 硬上限 512 字符装不下全文，前端预览 modal 按 tool_call_id 拉取这行）。
+  // 这里算出的 hasPermission 只是给确认卡片/预览 modal 的展示值——真正的
+  // 安全边界是各 wiki_propose_* 工具函数批准后自己重新查一遍权限，不信任这行。
   app.post("/wiki-proposal", async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as {
-      productionId?: unknown; toolCallId?: unknown; callerUserId?: unknown;
-      parentId?: unknown; title?: unknown; body?: unknown; summary?: unknown;
+      productionId?: unknown; toolCallId?: unknown; callerUserId?: unknown; action?: unknown;
+      wikiId?: unknown; parentId?: unknown; newParentId?: unknown;
+      title?: unknown; body?: unknown; summary?: unknown;
     };
     const productionId = typeof body.productionId === "string" ? body.productionId : "";
     const toolCallId = typeof body.toolCallId === "string" ? body.toolCallId : "";
     const callerUserId = typeof body.callerUserId === "string" ? body.callerUserId : "";
-    const title = typeof body.title === "string" ? body.title : "";
-    if (!productionId || !toolCallId || !callerUserId || !title) {
+    const action = body.action === "update" || body.action === "delete" || body.action === "move"
+      ? body.action : "create";
+    const wikiId = typeof body.wikiId === "string" ? body.wikiId : "";
+    if (!productionId || !toolCallId || !callerUserId) {
       res.status(400).json({ error: "missing required fields" });
       return;
     }
-    const parentWikiId = typeof body.parentId === "string" ? body.parentId : null;
+    if (action === "create" && typeof body.title !== "string") {
+      res.status(400).json({ error: "missing required fields" });
+      return;
+    }
+    if (action !== "create" && !wikiId) {
+      res.status(400).json({ error: "missing required fields" });
+      return;
+    }
+    const title = typeof body.title === "string" ? body.title : null;
     const docBody = typeof body.body === "string" ? body.body : "";
     const summary = typeof body.summary === "string" ? body.summary : "";
+    const parentWikiId = action === "create" ? (typeof body.parentId === "string" ? body.parentId : null)
+      : action === "move" ? (typeof body.newParentId === "string" ? body.newParentId : null)
+      : null;
 
     try {
       const { resolveProductionActor } = await import("./production-tools");
-      const { CREATE_PERMISSION_KEY } = await import("./wiki-tools");
+      const { CREATE_PERMISSION_KEY, editPermissionKey, deletePermissionKey } = await import("./wiki-tools");
       const { hasEffectiveGrant } = await import("../grant-check");
+      const { canEditWiki, canDeleteWiki } = await import("../wiki-perm");
       const { insertWikiProposal } = await import("../wiki-proposal-db");
 
       let hasPermission = false;
@@ -328,14 +403,24 @@ export function startMcpServer(): void {
         reason = "not_member";
       } else if (resolved.isArchived) {
         reason = "archived";
-      } else {
+      } else if (action === "create") {
         hasPermission = await hasEffectiveGrant(resolved.actor, productionId, "wiki", "*", "*", "create");
-        if (!hasPermission) reason = "no_grant";
+      } else if (action === "delete") {
+        hasPermission = await canDeleteWiki(resolved.actor, productionId, wikiId);
+      } else {
+        // update / move 都是"编辑"这篇文档
+        hasPermission = await canEditWiki(resolved.actor, productionId, wikiId);
       }
+      if (resolved && !resolved.isArchived && !hasPermission) reason = "no_grant";
+
+      const permissionKey = action === "create" ? CREATE_PERMISSION_KEY
+        : action === "delete" ? deletePermissionKey(wikiId)
+        : editPermissionKey(wikiId);
 
       const proposal = await insertWikiProposal({
-        productionId, toolCallId, proposedBy: callerUserId, parentWikiId,
-        title, body: docBody, summary, hasPermission, permissionKey: CREATE_PERMISSION_KEY,
+        productionId, toolCallId, proposedBy: callerUserId, action,
+        targetWikiId: action === "create" ? null : wikiId, parentWikiId,
+        title, body: docBody, summary, hasPermission, permissionKey,
       });
       res.json({ id: proposal.id, hasPermission, reason });
     } catch (err) {

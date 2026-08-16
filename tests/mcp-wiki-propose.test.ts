@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { wikiPropose } from "@/lib/mcp/wiki-tools";
+import { wikiProposeCreate } from "@/lib/mcp/wiki-tools";
 import { getWikiProposalByToolCallId, insertWikiProposal } from "@/lib/wiki-proposal-db";
 
 // /wiki-proposal 走真 HTTP（同 tests/mcp-deny-reason.test.ts 的起真服务器套路）——
@@ -53,12 +53,12 @@ describe("wikiPropose：真正的安全边界（不信任预持久化的 has_per
   it("有权限（owner）→ 文档真建出来，proposal 行 applied 且 created_wiki_id 对得上", async () => {
     const toolCallId = `call_${shortId()}`;
     const pending = await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: null,
       title: "AI 提议的文档", body: "AI 写的正文", summary: "测试",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
 
-    const result = await wikiPropose(ownerId, prodId, toolCallId, { title: "AI 提议的文档", body: "AI 写的正文", summary: "测试" });
+    const result = await wikiProposeCreate(ownerId, prodId, toolCallId, { title: "AI 提议的文档", body: "AI 写的正文", summary: "测试" });
     expect(result).toContain("已创建文档");
 
     const updated = await getWikiProposalByToolCallId(prodId, toolCallId, ownerId);
@@ -75,12 +75,12 @@ describe("wikiPropose：真正的安全边界（不信任预持久化的 has_per
     const toolCallId = `call_${shortId()}`;
     // 刻意造一个"预持久化算错了"的场景，验证工具函数自己重新查权限、不信任这行
     const pending = await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: plainMemberId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: plainMemberId, action: "create", parentWikiId: null,
       title: "不该被创建的文档", body: "", summary: "测试",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
 
-    const result = await wikiPropose(plainMemberId, prodId, toolCallId, { title: "不该被创建的文档", summary: "测试" });
+    const result = await wikiProposeCreate(plainMemberId, prodId, toolCallId, { title: "不该被创建的文档", summary: "测试" });
     expect(result).toContain("权限被拒绝");
 
     const updated = await getWikiProposalByToolCallId(prodId, toolCallId, plainMemberId);
@@ -93,7 +93,7 @@ describe("wikiPropose：真正的安全边界（不信任预持久化的 has_per
 
   it("非成员 → 明确拒绝，不建文档", async () => {
     const outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `局外人${shortId()}`, null, false)).userId;
-    const result = await wikiPropose(outsiderId, prodId, `call_${shortId()}`, { title: "局外人建的文档", summary: "测试" });
+    const result = await wikiProposeCreate(outsiderId, prodId, `call_${shortId()}`, { title: "局外人建的文档", summary: "测试" });
     expect(result).toContain("权限被拒绝");
     const doc = await getPool().query("SELECT 1 FROM wiki WHERE title = $1", ["局外人建的文档"]);
     expect(doc.rows.length).toBe(0);
@@ -103,7 +103,7 @@ describe("wikiPropose：真正的安全边界（不信任预持久化的 has_per
     const { prodId: archivedProd } = await makeProduction(ownerId);
     try {
       await getPool().query("UPDATE production SET archived_at = now() WHERE id = $1", [archivedProd]);
-      const result = await wikiPropose(ownerId, archivedProd, `call_${shortId()}`, { title: "归档项目里的文档", summary: "测试" });
+      const result = await wikiProposeCreate(ownerId, archivedProd, `call_${shortId()}`, { title: "归档项目里的文档", summary: "测试" });
       expect(result).toContain("已归档");
       expect(result).not.toContain("权限被拒绝");
     } finally {
@@ -162,12 +162,12 @@ describe("insertWikiProposal 幂等（AI review #249：网关重试/重放同一
   it("同一 toolCallId 重复插入且仍 pending → 回填同一行，不是两行", async () => {
     const toolCallId = `call_${shortId()}`;
     const first = await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: null,
       title: "第一次预持久化", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
     const second = await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: null,
       title: "第二次预持久化（内容更新）", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
@@ -184,14 +184,14 @@ describe("insertWikiProposal 幂等（AI review #249：网关重试/重放同一
   it("已 resolve（applied）的行不会被重放的预持久化覆盖", async () => {
     const toolCallId = `call_${shortId()}`;
     const pending = await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: null,
       title: "将被应用的提议", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
-    await wikiPropose(ownerId, prodId, toolCallId, { title: "将被应用的提议", summary: "" });
+    await wikiProposeCreate(ownerId, prodId, toolCallId, { title: "将被应用的提议", summary: "" });
 
     const replay = await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: null,
       title: "重放不该生效的标题", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });

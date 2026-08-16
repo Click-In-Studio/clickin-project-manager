@@ -656,21 +656,27 @@ CREATE TABLE IF NOT EXISTS wiki_revision (
 
 CREATE INDEX IF NOT EXISTS wiki_revision_wiki_idx ON wiki_revision (wiki_id, created_at);
 
--- AI propose staging（add-wiki-proposal.sql）：production.wiki_propose 工具调用的落地凭证。
--- 不复用 wiki_revision.origin——该表是「已发生的真实历史」，没有拒绝/拦截态。
+-- AI propose staging（add-wiki-proposal.sql + add-wiki-proposal-actions.sql）：
+-- production.wiki_propose_* 工具调用的落地凭证，覆盖 create/update/delete/move
+-- 四种动作。不复用 wiki_revision.origin——该表是「已发生的真实历史」，没有
+-- 拒绝/拦截态。target_wiki_id=被操作的既有文档（create 没有）；
+-- parent_wiki_id 对 create/move 是「新父」，对 update/delete 不使用。
 CREATE TABLE IF NOT EXISTS wiki_proposal (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   tool_call_id    TEXT        NOT NULL,
   proposed_by     UUID        NOT NULL REFERENCES app_user(id),
+  action          TEXT        NOT NULL DEFAULT 'create'
+                    CHECK (action IN ('create', 'update', 'delete', 'move')),
+  target_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
   parent_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
-  title           TEXT        NOT NULL,
+  title           TEXT        NULL,
   body            TEXT        NOT NULL DEFAULT '',
   summary         TEXT        NOT NULL DEFAULT '',
   has_permission  BOOLEAN     NOT NULL,
   permission_key  TEXT        NOT NULL,
   status          TEXT        NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'applied', 'blocked_no_permission', 'rejected')),
+                    CHECK (status IN ('pending', 'applied', 'blocked_no_permission', 'blocked_business_rule', 'rejected')),
   created_wiki_id UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at     TIMESTAMPTZ NULL,
