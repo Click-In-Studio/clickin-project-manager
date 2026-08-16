@@ -8,6 +8,7 @@ import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
 import PageActivationGate from "./PageActivationGate";
+import AgentPopout from "./AgentPopout";
 import {
   PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID,
@@ -680,6 +681,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const router = useRouter();
   const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [aiPopoutOpen, setAiPopoutOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
@@ -1119,20 +1121,18 @@ export default function AppShell({ session, productions, children, initialUnread
             onOpenChange={hasProductionTopMenu ? handleProductionSearchOpenChange : undefined}
           />
 
-          {/* Notification bell: sm+ only */}
-          <Link
-            href={productionId ? `/production/${productionId}/notifications` : "/my/notifications"}
-            className={`relative ${productionHeaderStage >= 2 ? "hidden" : "flex"} w-9 h-9 rounded-full border border-[var(--line)] bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-sm shrink-0`}
-            title="通知"
-            onClick={() => setUnreadCount(0)}
+          {/* AI 助手：右侧浮动 popout 开关（原通知铃铛已迁至侧栏"通知提醒"，此处让位） */}
+          <button
+            type="button"
+            data-ai-toggle
+            onClick={() => setAiPopoutOpen((v) => !v)}
+            aria-label="AI 助手"
+            aria-expanded={aiPopoutOpen}
+            className={`relative ${productionHeaderStage >= 2 ? "hidden" : "hidden lg:flex"} w-9 h-9 rounded-full border ${aiPopoutOpen ? "border-[var(--ink)]" : "border-[var(--line)]"} bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-[10px] font-bold tracking-tight shrink-0`}
+            title="AI 助手"
           >
-            ◉
-            {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 rounded-full bg-[#c0392b] text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            )}
-          </Link>
+            AI
+          </button>
 
           {/* User avatar + dropdown: sm+ only */}
           <div className={`relative shrink-0 ${productionHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
@@ -1641,6 +1641,16 @@ export default function AppShell({ session, productions, children, initialUnread
           </div>
         </div>
       </BottomDrawer>
+
+      {/* AI 助手浮动 popout（对应左侧剧本页折叠导航的浮出样式，宽得多）——
+          项目视图外只看得到个人会话，项目视图内只看得到该项目会话，范围
+          由 productionId 决定。始终挂载，靠 CSS 隐藏，收起后台流不中断。 */}
+      <AgentPopout
+        open={aiPopoutOpen}
+        onClose={() => setAiPopoutOpen(false)}
+        productionId={productionId}
+        productionName={currentProduction?.name ?? null}
+      />
     </div>
     </ProductionToolbarContext.Provider>
     </ProductionToolbarStageContext.Provider>
