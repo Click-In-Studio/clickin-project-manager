@@ -5,6 +5,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
+import { TableKit } from "@tiptap/extension-table";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { PluginKey } from "@tiptap/pm/state";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -112,6 +114,37 @@ export function contentRefPlugin(productionId: string, versionId?: string | null
 
 export { contentRefPlugin as scriptRefDropPlugin };
 
+// ── Factory: [[wikilink ───────────────────────────────────────────────────────
+// wiki 文档库 W4：`[[` 触发文档补全。落节点 kind='wiki' 的 contentMention 语义，
+// markdown 序列化为 [#标题](/__cm__wiki:<id>)（存 id 不存标题——标题仅编辑期快照，
+// 渲染端逐观看者经 mention-resolve 刷新，账本 §4.1）。
+
+export function wikiLinkDropPlugin(productionId: string): DropPlugin {
+  return {
+    trigger: "[[",
+    emptyLabel: "无匹配文档",
+    search: async (query) => {
+      if (!query) return [];
+      try {
+        const res = await fetch(
+          `${BASE_PATH}/api/production/${productionId}/wiki?q=${encodeURIComponent(query)}`
+        );
+        const data = await res.json() as { results?: { id: string; title: string | null }[] };
+        return (data.results ?? []).map(r => ({ id: r.id, label: r.title ?? "（无标题）" }));
+      } catch {
+        return [];
+      }
+    },
+    renderItem: (item, active) => (
+      <span className={`text-sm font-medium ${active ? "text-sky-800" : "text-sky-600"}`}>
+        [[{item.label}]]
+      </span>
+    ),
+    format: (item) => `[#${item.label}](${CM_HREF_PREFIX}wiki:${item.id})`,
+    toNode: (item) => ({ id: item.id, label: item.label }),
+  };
+}
+
 // ── Toolbar (markdown mode only) ──────────────────────────────────────────────
 
 type TiptapEditor = ReturnType<typeof useEditor>;
@@ -143,8 +176,10 @@ function Toolbar({ editor }: { editor: TiptapEditor | null }) {
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="无序列表">≡</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="有序列表">1.</ToolbarBtn>
+      <ToolbarBtn onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="任务列表">☑</ToolbarBtn>
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
+      <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
     </div>
@@ -231,6 +266,28 @@ const MarkdownContentMentionExt = Mention.extend({
   },
 });
 
+// [[wikilink — markdown mode only: dedicated node so `[[` gets its own suggestion；
+// serialises identically to a kind='wiki' contentMention（重载时由
+// MarkdownContentMentionExt 的 a[href^=/__cm__] parse 承接，round-trip 稳定）
+const WikiLinkMentionExt = Mention.extend({
+  name: "wikiMention",
+  addAttributes() {
+    return {
+      id: { default: "" },
+      label: { default: null },
+    };
+  },
+  addStorage() {
+    return {
+      markdown: {
+        serialize(state: { write: (s: string) => void }, node: { attrs: { id: string; label?: string | null } }) {
+          state.write(`[#${node.attrs.label ?? "文档"}](${CM_HREF_PREFIX}wiki:${node.attrs.id})`);
+        },
+      },
+    };
+  },
+});
+
 // @ mention — works in both modes; adds markdown serialization for markdown mode
 const AtMentionExt = Mention.extend({
   name: "atMention",
@@ -284,6 +341,8 @@ export interface SmartTextareaProps {
   contentMention?: { productionId: string; versionId?: string | null };
   /** Enable markdown toolbar and serialisation */
   markdown?: boolean;
+  /** markdown 模式去外框（Notion 式整页编辑场景） */
+  frameless?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   placeholder?: string;
@@ -293,6 +352,10 @@ export interface SmartTextareaProps {
   onKeyDown?: (e: KeyboardEvent) => void;
   autoFocus?: boolean;
   readOnly?: boolean;
+  /** markdown 模式：编辑器就绪时回调"初始 value 解析后再序列化"的结果——
+   *  调用方对比原文可检测富文本模式无法无损保留的语法（不支持的方言会被
+   *  prosemirror-markdown 转义/规范化）。 */
+  onInitialRoundTrip?: (serialized: string) => void;
 }
 
 // ── SmartTextarea ─────────────────────────────────────────────────────────────
@@ -303,6 +366,7 @@ export default function SmartTextarea({
   memberMention,
   contentMention,
   markdown = false,
+  frameless = false,
   plugins: extraPlugins = [],
   placeholder,
   rows = 3,
@@ -311,7 +375,10 @@ export default function SmartTextarea({
   onKeyDown,
   autoFocus,
   readOnly = false,
+  onInitialRoundTrip,
 }: SmartTextareaProps) {
+  const onInitialRoundTripRef = useRef(onInitialRoundTrip);
+  onInitialRoundTripRef.current = onInitialRoundTrip;
   const [drop, setDrop] = useState<DropState>(null);
   const dropRef = useRef<DropState>(null);
   const lastEmittedRef = useRef(value);
@@ -340,6 +407,7 @@ export default function SmartTextarea({
 
   const hasHashPlugin = allPlugins.some(p => p.trigger === "#");
   const hasAtPlugin = allPlugins.some(p => p.trigger === "@");
+  const hasWikiPlugin = allPlugins.some(p => p.trigger === "[[");
 
   const suggHandlers = useRef({
     onStart(props: SuggestionProps<DropItem>, trigger: string) {
@@ -375,7 +443,7 @@ export default function SmartTextarea({
   function makeSuggestion(trigger: string, enabled: boolean) {
     return {
       char: trigger,
-      pluginKey: new PluginKey(trigger === "#" ? "contentMention" : "atMention"),
+      pluginKey: new PluginKey(trigger === "#" ? "contentMention" : trigger === "@" ? "atMention" : "wikiMention"),
       allow: () => enabled,
       items: ({ query }: { query: string }) =>
         allPluginsRef.current.find(p => p.trigger === trigger)?.search(query) ?? [],
@@ -406,6 +474,8 @@ export default function SmartTextarea({
       },
       renderHTML: ({ node }) => {
         const { kind, displayMode, id, aux, versionId, label } = node.attrs;
+        // wiki 引用（含重载回流的 [[链接]]）用 sky 色 [[标题]] 形态，与剧本域 # 区分
+        const isWiki = kind === "wiki";
         return [
           "span",
           {
@@ -416,12 +486,28 @@ export default function SmartTextarea({
             "data-id": id,
             "data-aux": aux ?? "",
             "data-version-id": versionId ?? "",
-            class: "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-default",
+            class: isWiki
+              ? "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-default"
+              : "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-default",
           },
-          `#${label ?? kind}`,
+          isWiki ? `[[${label ?? "文档"}]]` : `#${label ?? kind}`,
         ];
       },
       suggestion: makeSuggestion("#", hasHashPlugin),
+    });
+
+    const wikiMentionCfg = WikiLinkMentionExt.configure({
+      renderText: ({ node }) => `[#wiki:${node.attrs.id}]`,
+      renderHTML: ({ node }) => [
+        "span",
+        {
+          "data-type": "wikiMention",
+          "data-id": node.attrs.id,
+          class: "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-default",
+        },
+        `[[${node.attrs.label ?? "文档"}]]`,
+      ],
+      suggestion: makeSuggestion("[[", hasWikiPlugin),
     });
 
     const atMentionCfg = AtMentionExt.configure({
@@ -441,7 +527,12 @@ export default function SmartTextarea({
     ];
 
     return markdown
-      ? [base, Markdown.configure({ transformCopiedText: true }), ...commonExts]
+      // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）；
+      // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞
+      ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
+         TableKit.configure({ table: { resizable: false } }),
+         TaskList, TaskItem.configure({ nested: true }),
+         ...commonExts, wikiMentionCfg]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown]);
@@ -470,6 +561,12 @@ export default function SmartTextarea({
         }
         return false;
       },
+    },
+    onCreate: ({ editor }) => {
+      if (markdown && onInitialRoundTripRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onInitialRoundTripRef.current((editor.storage as any).markdown.getMarkdown());
+      }
     },
     onUpdate: ({ editor }) => {
       if (readOnly) return;
@@ -562,8 +659,13 @@ export default function SmartTextarea({
   );
 
   if (markdown) {
+    const frame = readOnly
+      ? "overflow-hidden"
+      : frameless
+        ? `overflow-hidden ${className}`
+        : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`;
     return (
-      <div className={readOnly ? "overflow-hidden" : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`}>
+      <div className={frame}>
         {!readOnly && <Toolbar editor={editor} />}
         {editorEl}
       </div>

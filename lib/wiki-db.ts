@@ -25,7 +25,11 @@ export type WikiDoc = {
   updatedAt: string;
 };
 
-export type WikiListEntry = Omit<WikiDoc, "body" | "mentions"> & { tags: string[] };
+export type WikiListEntry = Omit<WikiDoc, "body" | "mentions"> & {
+  tags: string[];
+  /** 系统锚点目录（默认树的根/event 目录）：可移动可改名，不可删除 */
+  isAnchor: boolean;
+};
 
 type WikiRow = {
   id: string; production_id: string; title: string | null; body: string;
@@ -46,11 +50,15 @@ function rowToWiki(r: WikiRow): WikiDoc {
 
 const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
 const WIKI_HREF_RE = /\(\/__cm__wiki:([0-9a-fA-F-]{36})(?:[?&][^)]*)?\)/g;
+// code fence / 行内码里的链接语法是"关于语法的文档"不是真引用（MindWeave
+// protectCodeSpans 同款教训）——提取前剥除代码上下文
+const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
 export function extractWikiLinkTargets(body: string): string[] {
+  const stripped = body.replace(CODE_SPAN_RE, "");
   const out = new Set<string>();
-  for (const m of body.matchAll(WIKI_TOKEN_RE)) out.add(m[1].toLowerCase());
-  for (const m of body.matchAll(WIKI_HREF_RE)) out.add(m[1].toLowerCase());
+  for (const m of stripped.matchAll(WIKI_TOKEN_RE)) out.add(m[1].toLowerCase());
+  for (const m of stripped.matchAll(WIKI_HREF_RE)) out.add(m[1].toLowerCase());
   return [...out];
 }
 
@@ -84,10 +92,12 @@ async function writeRevision(
 
 /** 文档库列表（note 的 wiki 行 title 恒 NULL，不进库面）。可见性过滤由调用方做。 */
 export async function listWikiLibrary(productionId: string): Promise<WikiListEntry[]> {
-  const res = await getPool().query<WikiRow & { tags: string[] | null }>(
+  const res = await getPool().query<WikiRow & { tags: string[] | null; is_anchor: boolean }>(
     `SELECT w.id::text AS id, w.production_id, w.title, w.created_by, w.parent_id::text AS parent_id,
             w.sort_key, w.is_public, w.created_at, w.updated_at, '' AS body, '[]'::jsonb AS mentions,
-            array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags
+            array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags,
+            (EXISTS (SELECT 1 FROM production_wiki_config c WHERE c.reports_root_wiki_id = w.id)
+             OR EXISTS (SELECT 1 FROM production_event pe WHERE pe.report_doc_wiki_id = w.id)) AS is_anchor
      FROM wiki w LEFT JOIN wiki_tag t ON t.wiki_id = w.id
      WHERE w.production_id = $1 AND w.title IS NOT NULL
      GROUP BY w.id
@@ -96,7 +106,7 @@ export async function listWikiLibrary(productionId: string): Promise<WikiListEnt
   );
   return res.rows.map(r => {
     const { body: _b, mentions: _m, ...rest } = rowToWiki(r);
-    return { ...rest, tags: r.tags ?? [] };
+    return { ...rest, tags: r.tags ?? [], isAnchor: r.is_anchor };
   });
 }
 
@@ -220,14 +230,23 @@ export async function updateWiki(
   return getWiki(id, productionId);
 }
 
-/** 被挂载（report/note 边引用）的 wiki 不可删；子文档提根由 FK SET NULL 承担。 */
+/** 被挂载（report/note 边引用）的 wiki 不可删；系统锚点目录（默认树的根/event
+ *  目录）不可删——移动无妨（锚认 id），删除会打散归档并触发重建震荡。
+ *  子文档提根由 FK SET NULL 承担。 */
 export async function deleteWiki(
   id: string, productionId: string,
-): Promise<{ ok: true } | { ok: false; reason: "mounted" | "not_found" }> {
+): Promise<{ ok: true } | { ok: false; reason: "mounted" | "anchor" | "not_found" }> {
   const pool = getPool();
   const exists = await pool.query(
     `SELECT 1 FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
   if (!exists.rows[0]) return { ok: false, reason: "not_found" };
+  const anchor = await pool.query(
+    `SELECT 1 FROM production_wiki_config WHERE reports_root_wiki_id = $1::uuid
+     UNION ALL
+     SELECT 1 FROM production_event WHERE report_doc_wiki_id = $1::uuid LIMIT 1`,
+    [id],
+  );
+  if (anchor.rows.length > 0) return { ok: false, reason: "anchor" };
   const mounted = await pool.query(
     `SELECT 1 FROM event_report WHERE wiki_id = $1::uuid
      UNION ALL
@@ -245,6 +264,125 @@ export async function deleteWiki(
   );
   await pool.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
   return { ok: true };
+}
+
+// ─── 默认文档树（2026-08-16 拍板，路线笔记 §4 第 9 项）─────────────────────────
+// 创建报告默认挂「报告」根目录 →「<event 标题>」事件目录之下；note 自动挂报告文档下。
+// 锚点是普通 wiki（可改名/移动，锚认 id 不认位置）；目录文档完全公开（is_public）——
+// 结构面推导，不发任何 grant 行。存量不迁移。
+
+export type WikiTreeConfig = {
+  enabled: boolean;
+  rootTitle: string;
+  rootWikiId: string | null;
+};
+
+export async function getWikiTreeConfig(productionId: string): Promise<WikiTreeConfig> {
+  const res = await getPool().query<{ reports_tree_enabled: boolean; reports_root_title: string; reports_root_wiki_id: string | null }>(
+    `SELECT reports_tree_enabled, reports_root_title, reports_root_wiki_id::text AS reports_root_wiki_id
+     FROM production_wiki_config WHERE production_id = $1`,
+    [productionId],
+  );
+  const r = res.rows[0];
+  return r
+    ? { enabled: r.reports_tree_enabled, rootTitle: r.reports_root_title, rootWikiId: r.reports_root_wiki_id }
+    : { enabled: true, rootTitle: "报告", rootWikiId: null };
+}
+
+/**
+ * 懒建报告树锚点（根目录文档 + event 目录文档），返回 event 目录 wiki id；
+ * 配置关闭时返回 null。并发安全：config 行与 event 行 FOR UPDATE 串行化，
+ * 锚点被删除时（FK SET NULL）自动重建。
+ */
+export async function ensureReportTreeAnchors(
+  productionId: string,
+  eventId: string,
+): Promise<string | null> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO production_wiki_config (production_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [productionId],
+    );
+    const cfg = await client.query<{ reports_tree_enabled: boolean; reports_root_title: string; reports_root_wiki_id: string | null }>(
+      `SELECT reports_tree_enabled, reports_root_title, reports_root_wiki_id::text AS reports_root_wiki_id
+       FROM production_wiki_config WHERE production_id = $1 FOR UPDATE`,
+      [productionId],
+    );
+    if (!cfg.rows[0]?.reports_tree_enabled) { await client.query("COMMIT"); return null; }
+
+    let rootId = cfg.rows[0].reports_root_wiki_id;
+    if (!rootId) {
+      const lastRoot = await client.query<{ sort_key: string | null }>(
+        `SELECT sort_key FROM wiki
+         WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL
+         ORDER BY sort_key DESC LIMIT 1`,
+        [productionId],
+      );
+      const rootRow = await client.query<{ id: string }>(
+        `INSERT INTO wiki (production_id, title, is_public, sort_key)
+         VALUES ($1, $2, true, $3) RETURNING id::text AS id`,
+        [productionId, cfg.rows[0].reports_root_title, keyBetween(lastRoot.rows[0]?.sort_key ?? null, null)],
+      );
+      rootId = rootRow.rows[0].id;
+      await client.query(
+        `UPDATE production_wiki_config SET reports_root_wiki_id = $2::uuid, updated_at = now()
+         WHERE production_id = $1`,
+        [productionId, rootId],
+      );
+    }
+
+    const ev = await client.query<{ report_doc_wiki_id: string | null; title: string }>(
+      `SELECT report_doc_wiki_id::text AS report_doc_wiki_id, title
+       FROM production_event WHERE id = $1 AND production_id = $2 FOR UPDATE`,
+      [eventId, productionId],
+    );
+    if (!ev.rows[0]) { await client.query("ROLLBACK"); return null; }
+
+    let eventDocId = ev.rows[0].report_doc_wiki_id;
+    if (!eventDocId) {
+      const lastChild = await client.query<{ sort_key: string | null }>(
+        `SELECT sort_key FROM wiki
+         WHERE parent_id = $1::uuid AND sort_key IS NOT NULL
+         ORDER BY sort_key DESC LIMIT 1`,
+        [rootId],
+      );
+      const docRow = await client.query<{ id: string }>(
+        `INSERT INTO wiki (production_id, title, is_public, parent_id, sort_key)
+         VALUES ($1, $2, true, $3::uuid, $4) RETURNING id::text AS id`,
+        [productionId, ev.rows[0].title, rootId, keyBetween(lastChild.rows[0]?.sort_key ?? null, null)],
+      );
+      eventDocId = docRow.rows[0].id;
+      await client.query(
+        `UPDATE production_event SET report_doc_wiki_id = $2::uuid WHERE id = $1`,
+        [eventId, eventDocId],
+      );
+    }
+
+    await client.query("COMMIT");
+    return eventDocId;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** 把 wiki 挂到指定父节点尾部（默认落位/收编共用）。parent 须同 production。 */
+export async function placeWikiUnder(
+  wikiId: string,
+  productionId: string,
+  parentWikiId: string,
+): Promise<void> {
+  const sortKey = await tailSortKey(productionId, parentWikiId);
+  await getPool().query(
+    `UPDATE wiki SET parent_id = $3::uuid, sort_key = $4, updated_at = now()
+     WHERE id = $1::uuid AND production_id = $2
+       AND EXISTS (SELECT 1 FROM wiki p WHERE p.id = $3::uuid AND p.production_id = $2)`,
+    [wikiId, productionId, parentWikiId, sortKey],
+  );
 }
 
 // ─── 分享面 ──────────────────────────────────────────────────────────────────

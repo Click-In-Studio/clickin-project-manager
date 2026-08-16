@@ -416,6 +416,7 @@ CREATE TABLE IF NOT EXISTS production_event (
   chat_id       TEXT,
   version_id    TEXT REFERENCES version(id) ON DELETE SET NULL
 );
+-- report_doc_wiki_id（event 目录文档锚点）在 Wiki 段落 ALTER 补列（wiki 表定义在后）
 
 CREATE INDEX IF NOT EXISTS production_event_production_idx ON production_event(production_id, start_time);
 
@@ -654,6 +655,21 @@ CREATE TABLE IF NOT EXISTS wiki_revision (
 );
 
 CREATE INDEX IF NOT EXISTS wiki_revision_wiki_idx ON wiki_revision (wiki_id, created_at);
+
+-- 默认文档树（add-wiki-default-tree.sql）：production 级 wiki 配置
+--（未来扩展：改配置=改根目录名/开关默认目录）；锚点是普通 wiki，锚认 id 不认位置
+CREATE TABLE IF NOT EXISTS production_wiki_config (
+  production_id        TEXT    PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
+  reports_tree_enabled BOOLEAN NOT NULL DEFAULT true,
+  reports_root_title   TEXT    NOT NULL DEFAULT '报告',
+  reports_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- event 目录文档锚点（production_event 定义在 wiki 之前，此处 ALTER 补 FK 列）
+ALTER TABLE production_event
+  ADD COLUMN IF NOT EXISTS report_doc_wiki_id UUID NULL REFERENCES wiki(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS wiki_comment (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

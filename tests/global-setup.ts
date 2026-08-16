@@ -104,6 +104,12 @@ import {
   TASK_STANDALONE_SNAPSHOT_PATH,
   type TaskStandaloneSnapshot,
 } from "./task-standalone-snapshot";
+import {
+  isWikiDefaultTreePreMigrationSchema,
+  createWikiDefaultTreePreMigrationData,
+  WIKI_DEFAULT_TREE_SNAPSHOT_PATH,
+  type WikiDefaultTreeSnapshot,
+} from "./wiki-default-tree-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -419,10 +425,38 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // wiki 默认文档树存量归位：依赖并表后 production_dept（note 赋题 join）与
+  // add-wiki-library 的树列，放全部老迁移之后
+  if (await isWikiDefaultTreePreMigrationSchema(pool)) {
+    const wikiTreeSnapshot = await createWikiDefaultTreePreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_DEFAULT_TREE_SNAPSHOT_PATH, JSON.stringify(wikiTreeSnapshot));
+    for (const file of ["db/add-wiki-default-tree.sql", "db/migrate-wiki-default-tree.sql"]) {
+      const sql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(sql);
+    }
+  }
 }
 
 export async function teardown() {
   const pool = getPool();
+
+  // Clean up wiki-default-tree migration factory data (migration path only).
+  {
+    let wikiTreeSnapshot: WikiDefaultTreeSnapshot | null = null;
+    try {
+      wikiTreeSnapshot = JSON.parse(
+        await readFile(WIKI_DEFAULT_TREE_SNAPSHOT_PATH, "utf8"),
+      ) as WikiDefaultTreeSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (wikiTreeSnapshot) {
+      // production 删除级联 wiki/config/event 全家族
+      await pool.query("DELETE FROM production WHERE id = $1", [wikiTreeSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_DEFAULT_TREE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // Clean up task-standalone migration factory data (migration path only).
   {
