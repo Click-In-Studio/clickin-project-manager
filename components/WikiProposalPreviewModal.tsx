@@ -5,16 +5,18 @@ import { createPortal } from "react-dom";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import AccessRequestModal from "@/components/AccessRequestModal";
 
-type ProposalAction = "create" | "update" | "delete" | "move";
+type ProposalAction = "create" | "update" | "delete" | "move" | "tag";
 
 type ProposalPreview = {
   action: ProposalAction;
   targetWikiId: string | null;
   targetTitle: string | null;
   targetBody: string | null;
+  targetTags: string[] | null;
   parentTitle: string | null;
   title: string | null;
   body: string;
+  tags: string[] | null;
   summary: string;
   hasPermission: boolean;
   permissionKey: string;
@@ -22,13 +24,14 @@ type ProposalPreview = {
 };
 
 const ACTION_LABEL: Record<ProposalAction, string> = {
-  create: "新建文档", update: "修改文档", delete: "删除文档", move: "移动文档",
+  create: "新建文档", update: "修改文档", delete: "删除文档", move: "移动文档", tag: "设置标签",
 };
-// 权限键动词——create 是"在该项目新建文档"（域级），其余三个是对准
-// 具体这一篇文档的"编辑/删除"（实例级），措辞要对得上 AccessRequestModal
-// 里 permission prop 锁定的那把键，不能一刀切写"新建"。
+// 权限键动词——create 是"在该项目新建文档"（域级），其余是对准具体这一篇
+// 文档的"编辑/删除"（实例级），措辞要对得上 AccessRequestModal 里
+// permission prop 锁定的那把键，不能一刀切写"新建"。
 const ACTION_PERMISSION_VERB: Record<ProposalAction, string> = {
-  create: "在该项目新建文档", update: "编辑这篇文档", delete: "删除这篇文档", move: "编辑这篇文档（移动也算编辑）",
+  create: "在该项目新建文档", update: "编辑这篇文档", delete: "删除这篇文档",
+  move: "编辑这篇文档（移动也算编辑）", tag: "编辑这篇文档（设置标签也算编辑）",
 };
 
 // AI propose 的完整预览——聊天栏确认卡片 description 硬上限 512 字符装不下
@@ -167,6 +170,20 @@ export default function WikiProposalPreviewModal({
                     </h3>
                     <p style={{ fontSize: 13, color: "var(--ink)", margin: "0 0 4px" }}>
                       新位置：{data.parentTitle ? `《${data.parentTitle}》下` : "文档库根"}
+                    </p>
+                  </>
+                )}
+                {data.action === "tag" && (
+                  <>
+                    <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 4px" }}>正在设置标签</p>
+                    <h3 style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", margin: "0 0 4px" }}>
+                      《{data.targetTitle ?? "（你看不到这篇文档的当前内容）"}》
+                    </h3>
+                    <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 4px" }}>
+                      旧标签：{data.targetTags && data.targetTags.length > 0 ? data.targetTags.join("、") : "（无）"}
+                    </p>
+                    <p style={{ fontSize: 13, color: "var(--ink)", margin: "0 0 4px" }}>
+                      新标签（整体替换）：{data.tags && data.tags.length > 0 ? data.tags.join("、") : "（清空）"}
                     </p>
                   </>
                 )}

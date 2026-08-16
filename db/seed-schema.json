@@ -3053,6 +3053,11 @@
       "column": "target_wiki_id",
       "type": "uuid",
       "nullable": true
+    },
+    {
+      "column": "tags",
+      "type": "ARRAY",
+      "nullable": true
     }
   ],
   "wiki_revision": [

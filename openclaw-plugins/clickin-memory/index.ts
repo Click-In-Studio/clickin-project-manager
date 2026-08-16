@@ -27,12 +27,13 @@ const DEFAULTS: Required<PluginConfig> = {
 };
 
 const MCP_TOOL_PREFIX = "clickin__";
-// wiki propose 四兄弟的暴露名 → /wiki-proposal 预持久化端点认的 action 值。
-const WIKI_PROPOSE_ACTIONS: Record<string, "create" | "update" | "delete" | "move"> = {
+// wiki propose 五兄弟的暴露名 → /wiki-proposal 预持久化端点认的 action 值。
+const WIKI_PROPOSE_ACTIONS: Record<string, "create" | "update" | "delete" | "move" | "tag"> = {
   "production-wiki_propose_create": "create",
   "production-wiki_propose_update": "update",
   "production-wiki_propose_delete": "delete",
   "production-wiki_propose_move": "move",
+  "production-wiki_propose_tag": "tag",
 };
 // webchat sessionKey（与后端 lib/mcp/session-identity.ts 同构）：
 //   个人        clickin:chat:<userId>:<sessionUuid>
@@ -131,16 +132,16 @@ async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<stri
 
 // wiki propose 预持久化（确认卡片 description 硬上限 512 字符装不下完整
 // 提议内容，前端预览 modal 靠这行按 toolCallId 拉取全文）。覆盖
-// create/update/delete/move 四种动作——action 缺省时后端按 "create" 处理。
+// create/update/delete/move/tag 五种动作——action 缺省时后端按 "create" 处理。
 // 失败/超时只是退化成旧版纯截断预览的确认文案——真正的安全边界是各
 // wiki_propose_* 工具函数批准后自己重新查一遍权限，这里挂不上不影响那条边界。
 async function postWikiProposal(
   mcpUrl: string,
   body: {
     productionId: string; toolCallId: string; callerUserId: string;
-    action?: "create" | "update" | "delete" | "move";
+    action?: "create" | "update" | "delete" | "move" | "tag";
     wikiId?: string; parentId?: string; newParentId?: string;
-    title?: string; body?: string; summary: string;
+    title?: string; body?: string; tags?: string[]; summary: string;
   },
 ): Promise<{ hasPermission: boolean } | null> {
   try {
@@ -342,6 +343,17 @@ export default definePluginEntry({
               `📝 理由：${str(params.summary, 150)}`,
             ].filter((l): l is string => l !== null).join("\n"),
           };
+        case "production-wiki_propose_tag": {
+          const tagList = Array.isArray(params.tags) ? params.tags.join("、") : str(params.tags, 100);
+          return {
+            title: `提议设置文档标签（id: ${str(params.wikiId, 40)}）`,
+            description: [
+              permLine("编辑", extra),
+              `🏷️ 新标签（整体替换）：${tagList || "（清空）"}`,
+              `📝 理由：${str(params.summary, 100)}`,
+            ].filter((l): l is string => l !== null).join("\n"),
+          };
+        }
         case "users-query_sensitive":
           return {
             title: `查询你的登记联系方式`,
@@ -409,7 +421,7 @@ export default definePluginEntry({
         const bareTool = e.toolName.slice(MCP_TOOL_PREFIX.length);
         const toolCallId = e.toolCallId;
 
-        // wiki propose 四兄弟专属：确认卡片建好之前先把完整提议内容 + 权限
+        // wiki propose 五兄弟专属：确认卡片建好之前先把完整提议内容 + 权限
         // 判定预持久化（供前端预览 modal 按 toolCallId 拉取全文，description
         // 512 字符装不下）。失败/超时 hasPermission 为 undefined——
         // describeToolCall 据此不虚构权限状态，仍照旧走确认门（工具函数
@@ -427,6 +439,7 @@ export default definePluginEntry({
             newParentId: typeof e.params.newParentId === "string" ? e.params.newParentId : undefined,
             title: typeof e.params.title === "string" ? e.params.title : undefined,
             body: typeof e.params.body === "string" ? e.params.body : undefined,
+            tags: Array.isArray(e.params.tags) ? e.params.tags.filter((t): t is string => typeof t === "string") : undefined,
             summary: typeof e.params.summary === "string" ? e.params.summary : "",
           });
           wikiHasPermission = posted?.hasPermission;

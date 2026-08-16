@@ -237,7 +237,8 @@ export async function wikiProposeDelete(
     if (result.reason === "anchor") return "该文档是系统锚点目录（报告根/事件目录），无法删除。";
     return "没有找到该文档。";
   }
-  if (proposal) await markWikiProposalApplied(proposal.id, args.wikiId);
+  // created_wiki_id 传 null——被删的文档已经不在 wiki 表里了，FK 没法指向它。
+  if (proposal) await markWikiProposalApplied(proposal.id, null);
   return "已删除该文档。";
 }
 
@@ -270,4 +271,30 @@ export async function wikiProposeMove(
   return args.newParentId
     ? `已把文档《${doc.title}》移动到新的父文档下。`
     : `已把文档《${doc.title}》移动到文档库根。`;
+}
+
+export async function wikiProposeTag(
+  userId: string, productionId: string, toolCallId: string,
+  args: { wikiId: string; tags: string[]; summary: string },
+): Promise<string> {
+  const resolved = await resolveProductionActor(userId, productionId);
+  if (!resolved) return DENIED_NOT_MEMBER;
+  if (resolved.isArchived) return "该制作已归档，无法修改文档标签。";
+
+  const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, userId);
+  const allowed = await canEditWiki(resolved.actor, productionId, args.wikiId);
+
+  if (!allowed) {
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
+    return "权限被拒绝：你没有编辑这篇文档的权限。已记录本次调用，需人工审批通过后才能重试。";
+  }
+
+  // updateWiki 的 tags patch 是整体替换（先删全部再按新集合插入），不是增量
+  // 追加——工具描述里也要把这点说清楚，别让模型以为传一个词就是"再加一个"。
+  const doc = await updateWiki(args.wikiId, productionId, { tags: args.tags }, userId);
+  if (!doc) return "没有找到该文档。";
+  if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
+  return args.tags.length > 0
+    ? `已把文档《${doc.title}》的标签设为：${args.tags.join("、")}。`
+    : `已清空文档《${doc.title}》的标签。`;
 }

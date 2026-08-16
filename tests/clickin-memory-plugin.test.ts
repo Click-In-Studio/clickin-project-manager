@@ -255,6 +255,28 @@ describe("wiki_propose 确认卡片：权限状态预持久化（工具调用权
     expect(gated?.requireApproval?.description).not.toContain("⛔");
   });
 
+  it("wiki_propose_tag 同样按 hasPermission 出 severity，description 带标签列表", async () => {
+    const { createWiki } = await import("@/lib/wiki-db");
+    const doc = await createWiki({ productionId: prodId, title: "插件测试标签目标文档", createdBy: ownerId });
+    const handler = hooks.get("before_tool_call")!;
+
+    const tagGated = (await handler(
+      { toolName: "clickin__production-wiki_propose_tag", params: { wikiId: doc.id, tags: ["剧本", "重要"], summary: "" }, toolCallId: `call_${shortId()}`, context: { pluginConfig: PLUGIN_CONFIG } },
+      prodSessionCtx(ownerId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(tagGated?.requireApproval?.severity).toBe("warning");
+    expect(tagGated?.requireApproval?.description).toContain("✅");
+    expect(tagGated?.requireApproval?.description).toContain("剧本、重要");
+
+    const tagGatedNoPerm = (await handler(
+      { toolName: "clickin__production-wiki_propose_tag", params: { wikiId: doc.id, tags: [], summary: "" }, toolCallId: `call_${shortId()}`, context: { pluginConfig: PLUGIN_CONFIG } },
+      prodSessionCtx(plainMemberId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(tagGatedNoPerm?.requireApproval?.severity).toBe("critical");
+    expect(tagGatedNoPerm?.requireApproval?.description).toContain("⛔");
+    expect(tagGatedNoPerm?.requireApproval?.description).toContain("（清空）");
+  });
+
   it("wiki_propose_update/_delete/_move 三兄弟同样按 hasPermission 出 severity（实例级门，不是 create 的域级门）", async () => {
     const { createWiki } = await import("@/lib/wiki-db");
     const doc = await createWiki({ productionId: prodId, title: "插件测试目标文档", createdBy: ownerId });
