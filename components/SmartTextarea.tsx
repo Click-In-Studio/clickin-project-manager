@@ -23,7 +23,8 @@ import {
   encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { parseLine, parseToDoc, serializeAtMention } from "@/lib/mention-format";
+import { parseLine, parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
+export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -294,19 +295,39 @@ function insertWikiMentionAt(editor: any, range: { from: number; to: number } | 
   editor.chain().focus().insertContentAt(range, content).run();
 }
 
-// @ mention — works in both modes; adds markdown serialization for markdown mode
+// @ mention — works in both modes; adds markdown serialization for markdown mode.
+// markdown 形态 [@名](uid:id)（@ 收进链接文本）：原 @[名](uid:id) 只有序列化没有
+// 反序列化（被 StarterKit Link 抢走），重载即失真 → 保真警告 → 源码保存毁 chip
 const AtMentionExt = Mention.extend({
   name: "atMention",
+  parseHTML() {
+    return [
+      { tag: 'span[data-type="atMention"]' },
+      {
+        tag: "a",
+        priority: 1001,
+        getAttrs(el) {
+          if (typeof el === "string") return false;
+          const href = el.getAttribute("href") ?? "";
+          if (!href.startsWith("uid:")) return false;
+          const label = (el.textContent ?? "").replace(/^@/, "");
+          return { id: href.slice(4) || null, label };
+        },
+      },
+    ];
+  },
   addStorage() {
     return {
       markdown: {
         serialize(state: { write: (s: string) => void }, node: { attrs: { id: string | null; label: string } }) {
-          state.write(serializeAtMention(node.attrs.id, node.attrs.label));
+          const { id, label } = node.attrs;
+          state.write(id ? `[@${label}](uid:${id})` : `@${label}`);
         },
       },
     };
   },
 });
+
 
 // ── Plain-text serialisation (non-markdown mode) ───────────────────────────────
 
@@ -600,7 +621,7 @@ export default function SmartTextarea({
     immediatelyRender: false,
     editable: !readOnly,
     extensions,
-    content: markdown ? value : parseToDoc(value),
+    content: markdown ? normalizeLegacyMentions(value) : parseToDoc(value),
     autofocus: autoFocus,
     editorProps: {
       attributes: {
@@ -728,7 +749,7 @@ export default function SmartTextarea({
     if (!editor || editor.isDestroyed) return;
     if (value === lastEmittedRef.current) return;
     lastEmittedRef.current = value;
-    const newContent = markdown ? value : parseToDoc(value);
+    const newContent = markdown ? normalizeLegacyMentions(value) : parseToDoc(value);
     const { from, to } = editor.state.selection;
     editor.commands.setContent(newContent, { emitUpdate: false });
     // 协作合并回灌时保留本端选区（钳到新文档尺寸内）

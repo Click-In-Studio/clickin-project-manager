@@ -52,11 +52,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   // 剧本域 kinds 沿用 script blocks@view 门；wiki kind 不受此门约束——
-  // 标题=目录级信息沿引用流出（账本 §4.1），内容门在 wiki 页面/API 自身
-  const hasScriptDomainKinds = mentions.some(m => m?.kind !== "wiki");
-  if (hasScriptDomainKinds
-      && !(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view")))
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  // 标题=目录级信息沿引用流出（账本 §4.1），内容门在 wiki 页面/API 自身。
+  // 无剧本权限不再整请求 403（混合正文会连累 wiki/@ 解析）：剧本域 kinds
+  // 软跳过（labels/urls 留 null，客户端回退编辑期快照），wiki 恒可解析
+  const canResolveScript = permCtx.isAdmin || permCtx.isOwner
+    || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
+  const effectiveMentions = canResolveScript
+    ? mentions
+    : mentions.map(m => (m?.kind === "wiki" ? m : null));
 
   const pool = getPool();
   const effectiveVersionId = await resolveProductionVersion(productionId, contextVersionId);
@@ -146,10 +149,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // Group by kind for batch queries
   const byKind = new Map<string, number[]>();
-  for (let i = 0; i < mentions.length; i++) {
-    const key = mentions[i].kind;
-    if (!byKind.has(key)) byKind.set(key, []);
-    byKind.get(key)!.push(i);
+  for (let i = 0; i < effectiveMentions.length; i++) {
+    const m = effectiveMentions[i];
+    if (!m) continue; // 剧本域软跳过（无剧本权限）
+    if (!byKind.has(m.kind)) byKind.set(m.kind, []);
+    byKind.get(m.kind)!.push(i);
   }
 
   // ── page ──────────────────────────────────────────────────────────────────

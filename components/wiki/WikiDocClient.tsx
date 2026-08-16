@@ -9,7 +9,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime } from "@/lib/tz";
-import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
+import SmartTextarea, { wikiLinkDropPlugin, normalizeLegacyMentions, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import WikiPrintOverlay from "@/components/wiki/WikiPrintOverlay";
 import AdminModal from "@/components/AdminModal";
@@ -69,7 +69,8 @@ export default function WikiDocClient({
   const [lossy, setLossy] = useState(false);
   const lossyOverrideRef = useRef(false);
   const normalizeForCompare = (s: string) =>
-    s.replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
+    normalizeLegacyMentions(s) // 存量/损坏 mention 形态等价（编辑器载入已同步修复）
+      .replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
   function handleRoundTrip(serialized: string) {
     if (lossyOverrideRef.current) return;
     if (normalizeForCompare(serialized) !== normalizeForCompare(body)) {

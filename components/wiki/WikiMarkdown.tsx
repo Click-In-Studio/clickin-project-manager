@@ -16,6 +16,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import {
   decodeMentionHref, CM_HREF_PREFIX, type ContentMentionAttrs,
 } from "@/lib/mention-types";
+import { normalizeLegacyMentions } from "@/lib/mention-format";
 
 type Resolved = { label: string | null; url: string | null };
 
@@ -38,6 +39,8 @@ function preprocessRawWikilinks(md: string): { text: string; titles: string[] } 
   const parts: string[] = [];
   let t = md.replace(RAW_CODE_RE, m => { parts.push(m); return `\u0000C${parts.length - 1}\u0000`; });
   const titles = new Set<string>();
+  // 存量/损坏 mention 抢救（共享归一化）
+  t = normalizeLegacyMentions(t);
   const sub = (_m: string, title: string) => {
     const tt = title.trim();
     if (!tt) return _m;
