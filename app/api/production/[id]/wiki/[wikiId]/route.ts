@@ -83,13 +83,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
     if (body.isPublic !== undefined) await setWikiPublic(wikiId, productionId, body.isPublic);
     const fresh = await getWiki(wikiId, productionId);
-    // 协作广播（内容/标题变化才推）
-    if (fresh && (body.body !== undefined || body.title !== undefined)) {
+    // 协作广播（内容/标题/标签变化才推；标签帧缺省=本帧没动标签）
+    if (fresh && (body.body !== undefined || body.title !== undefined || body.tags !== undefined)) {
       broadcastWikiUpdate(wikiId, {
         byClientId: body.clientId ?? null,
         title: fresh.title,
         body: fresh.body,
         updatedAt: fresh.updatedAt,
+        ...(body.tags !== undefined ? { tags: fresh.tags } : {}),
       });
     }
     return Response.json({ wiki: fresh });

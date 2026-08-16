@@ -1,6 +1,7 @@
 import { getPool } from "./pg";
 import { keyBetween } from "./lex-order";
 import { writeWikiGrants } from "./resource-grant-db";
+import { broadcastWikiLibraryChange } from "./wiki-collab";
 import type { Mention } from "./event-db";
 
 // ─── wiki 文档库 W3：wiki 首次成为一等主体（此前只经 report/note 边消费）────────
@@ -180,6 +181,10 @@ export async function createWiki(params: {
   await writeWikiGrants(id, params.productionId, params.createdBy);
   await writeRevision(id, params.title, body, [], params.createdBy, params.origin ?? "user");
   await syncWikiLinks(id, params.productionId, body);
+  // 结构变化推给同制作在线的页面（左侧树）——放在 db 层而非各调用处，
+  // 是为了让所有写入来源（REST 路由 / MCP 工具 / 报告归档管线）自动同步，
+  // 不必每加一个入口就记得补一次广播。无监听者时是纯 no-op。
+  broadcastWikiLibraryChange(params.productionId, { kind: "created", wikiId: id });
   return (await getWiki(id, params.productionId))!;
 }
 
@@ -253,6 +258,13 @@ export async function updateWiki(
     }
   }
 
+  // 结构变化（标题/父/排序/标签）才推库级帧——正文 autosave 每几秒一次，
+  // 让它触发全树刷新等于给所有在线页面加一个高频抖动源。
+  if (patch.title !== undefined || patch.parentId !== undefined
+      || patch.sortKey !== undefined || patch.tags !== undefined) {
+    broadcastWikiLibraryChange(productionId, { kind: "updated", wikiId: id });
+  }
+
   // 内容变化才落 revision / 重建链接
   if (patch.title !== undefined || patch.body !== undefined || patch.mentions !== undefined) {
     const next = await getWiki(id, productionId);
@@ -297,6 +309,9 @@ export async function deleteWiki(
     [productionId, id],
   );
   await pool.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
+  // 正开着这篇的人要靠这一帧离场——否则下一次软刷新会撞进 notFound()，
+  // 整个人被弹出工程环境（见 WikiDocClient 的 library 监听）。
+  broadcastWikiLibraryChange(productionId, { kind: "deleted", wikiId: id });
   return { ok: true };
 }
 

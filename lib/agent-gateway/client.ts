@@ -7,6 +7,7 @@ import { GATEWAY_URL, getGatewayToken, isGatewayConfigured } from "./config";
 import * as device from "./device";
 import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./types";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
+import { stripUiContext } from "@/lib/agent-ui-context";
 
 /**
  * Server-only singleton Gateway connection (globalThis-cached so it survives
@@ -633,7 +634,9 @@ export async function getChatHistory(sessionKey: string): Promise<ChatTranscript
   const entries: ChatTranscriptEntry[] = [];
   for (const m of history.messages) {
     if (m.role === "user") {
-      const content = blocksToText(m.content);
+      // 客户端附加的界面上下文信封只喂模型，不进展示——实时气泡本来就渲染
+      // 用户原文，历史回放不剥就会露出一段用户没打过的字。
+      const content = stripUiContext(blocksToText(m.content));
       if (content) entries.push({ role: "user", content });
       continue;
     }
@@ -661,7 +664,9 @@ interface SessionRow {
 // derivedTitle looks like "[Tue 2026-08-04 14:55 GMT+8] <first message>…" —
 // strip the timestamp bracket; updatedAt already carries that information.
 function cleanDerivedTitle(title: string | undefined): string | undefined {
-  return title?.replace(/^\[[^\]]*\]\s*/, "").trim() || undefined;
+  // 时间戳方括号在前、界面上下文信封在后（gateway 用首条用户消息派生标题，
+  // 信封不剥的话每个会话都叫「<clickin-ui-context>…」）。
+  return stripUiContext(title?.replace(/^\[[^\]]*\]\s*/, "") ?? "").trim() || undefined;
 }
 
 /** Lists ONLY the given user's sessions — the search filter is the per-user
@@ -689,7 +694,7 @@ export async function listChatSessions(userId: string): Promise<ChatSessionSumma
     .map((row) => ({
       key: row.key,
       title: row.label || cleanDerivedTitle(row.derivedTitle) || "新对话",
-      lastMessagePreview: row.lastMessagePreview,
+      lastMessagePreview: row.lastMessagePreview && stripUiContext(row.lastMessagePreview),
       updatedAt: row.updatedAt ?? undefined,
       status: row.status,
     }))
