@@ -1,13 +1,14 @@
 "use client";
 
-// wiki 文档库 W4：文档树侧栏骨架（两页共用：库首页 / 文档页）。
-// 树逻辑沿 TreePickerModal 的邻接表→DFS 展开 + 搜索保留祖先链，另加展开/折叠态。
+// wiki 文档库 W4（Notion 式改版）：文档树侧栏承载全部文档操作——
+// 新建（根/子文档，行悬停 ＋）、移动、删除（行悬停 ⋯ 菜单）、树导航。
+// 树逻辑：邻接表→DFS 展开 + 搜索保留祖先链 + 展开/折叠态。
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
-import { PRIMARY_BTN } from "@/components/PageHeader";
+import TreePickerModal from "@/components/TreePickerModal";
 import type { WikiListEntry } from "@/lib/wiki-db";
 
 type Node = { entry: WikiListEntry; depth: number; hasChildren: boolean };
@@ -28,19 +29,32 @@ export default function WikiShell({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [creating, setCreating] = useState(false);
+  // 新建：creatingUnder = null 未在建 / "" 根级 / <id> 子文档
+  const [creatingUnder, setCreatingUnder] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const { flat, ancestorsOfSelected } = useMemo(() => {
+  useEffect(() => {
+    if (!menuFor) return;
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node)) setMenuFor(null);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuFor]);
+
+  const byId = useMemo(() => new Map(wikis.map(w => [w.id, w])), [wikis]);
+
+  const flat = useMemo(() => {
     const ids = new Set(wikis.map(w => w.id));
     const byParent = new Map<string | null, WikiListEntry[]>();
-    const byId = new Map(wikis.map(w => [w.id, w]));
     for (const w of wikis) {
       const key = w.parentId && ids.has(w.parentId) ? w.parentId : null;
       byParent.set(key, [...(byParent.get(key) ?? []), w]);
     }
-    // 搜索：命中项 + 祖先链保留
     let visible: Set<string> | null = null;
     const q = query.trim().toLowerCase();
     if (q) {
@@ -56,24 +70,20 @@ export default function WikiShell({
         }
       }
     }
-    const flat: Node[] = [];
+    const out: Node[] = [];
     const walk = (parent: string | null, depth: number) => {
       for (const w of byParent.get(parent) ?? []) {
         if (visible && !visible.has(w.id)) continue;
         const hasChildren = (byParent.get(w.id) ?? []).length > 0;
-        flat.push({ entry: w, depth, hasChildren });
+        out.push({ entry: w, depth, hasChildren });
         if (!collapsed.has(w.id) || q) walk(w.id, depth + 1);
       }
     };
     walk(null, 0);
-    // 选中项的祖先链（用于高亮路径；折叠态由用户手动控制）
-    const anc = new Set<string>();
-    let cur = selectedId ? byId.get(selectedId) : undefined;
-    while (cur?.parentId) { anc.add(cur.parentId); cur = byId.get(cur.parentId); }
-    return { flat, ancestorsOfSelected: anc };
-  }, [wikis, query, collapsed, selectedId]);
+    return out;
+  }, [wikis, query, collapsed, byId]);
 
-  async function create() {
+  async function create(parentId: string | null) {
     const title = newTitle.trim();
     if (!title || busy) return;
     setBusy(true);
@@ -81,12 +91,13 @@ export default function WikiShell({
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, parentId: parentId || null }),
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error ?? "创建失败"); return; }
-      setCreating(false);
+      setCreatingUnder(null);
       setNewTitle("");
+      if (parentId) setCollapsed(prev => { const n = new Set(prev); n.delete(parentId); return n; });
       router.push(`/production/${productionId}/wiki/${data.wiki.id}`);
       router.refresh();
     } finally {
@@ -94,80 +105,187 @@ export default function WikiShell({
     }
   }
 
+  async function remove(id: string) {
+    const doc = byId.get(id);
+    if (!confirm(`确认删除「${doc?.title ?? "该文档"}」？子文档将提升为顶层。`)) return;
+    setMenuFor(null);
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, { method: "DELETE" });
+    if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }
+    if (id === selectedId) router.push(`/production/${productionId}/wiki`);
+    router.refresh();
+  }
+
+  async function move(id: string, targetIds: string[]) {
+    setMovingId(null);
+    const target = targetIds[0];
+    if (target === undefined) return;
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId: target === "__root__" ? null : target }),
+    });
+    if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
+    router.refresh();
+  }
+
+  // 移动候选：排除自身与后代（防环；服务端另有校验）
+  function moveItemsFor(id: string) {
+    const descendants = new Set([id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const w of wikis) {
+        if (w.parentId && descendants.has(w.parentId) && !descendants.has(w.id)) {
+          descendants.add(w.id); grew = true;
+        }
+      }
+    }
+    return [
+      { id: "__root__", label: "（移到顶层）" },
+      ...wikis.filter(w => !descendants.has(w.id)).map(w => ({
+        id: w.id, label: w.title ?? "（无标题）", parentId: w.parentId,
+      })),
+    ];
+  }
+
+  const newDocInput = (parentId: string, depth: number) => (
+    <div className="flex gap-1 py-1 pr-2" style={{ paddingLeft: 8 + depth * 14 + 18 }}>
+      <input
+        autoFocus
+        value={newTitle}
+        onChange={e => setNewTitle(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "Enter") create(parentId || null);
+          if (e.key === "Escape") { setCreatingUnder(null); setNewTitle(""); }
+        }}
+        onBlur={() => { if (!newTitle.trim()) { setCreatingUnder(null); setNewTitle(""); } }}
+        placeholder="标题，回车创建"
+        className="flex-1 min-w-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[13px] outline-none focus:border-zinc-500"
+      />
+    </div>
+  );
+
   return (
     <div className="flex gap-6 items-start">
-      <aside className="w-[260px] shrink-0 rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <div className="p-3 border-b border-zinc-100 space-y-2">
+      <aside className="w-[264px] shrink-0 rounded-xl border border-zinc-200 bg-white overflow-visible">
+        <div className="p-2.5 border-b border-zinc-100">
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="搜索文档 / 标签…"
             className="w-full rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm outline-none focus:border-zinc-400"
           />
-          {canCreate && (creating ? (
-            <div className="flex gap-1.5">
-              <input
-                autoFocus
-                value={newTitle}
-                onChange={e => setNewTitle(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") create(); if (e.key === "Escape") setCreating(false); }}
-                placeholder="文档标题，回车创建"
-                className="flex-1 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-sm outline-none focus:border-zinc-500"
-              />
-              <button type="button" onClick={create} disabled={busy} style={{ ...PRIMARY_BTN, padding: "6px 10px" }}>
-                建
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="w-full rounded-lg border border-dashed border-zinc-300 px-2.5 py-1.5 text-sm text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 text-left"
-            >
-              ＋ 新建文档
-            </button>
-          ))}
         </div>
-        <nav className="py-1.5 max-h-[70vh] overflow-y-auto">
-          {flat.length === 0 && (
+        <nav className="py-1 max-h-[70vh] overflow-y-auto">
+          {flat.length === 0 && !creatingUnder && (
             <p className="px-3 py-3 text-sm text-zinc-400">{query ? "无匹配文档" : "还没有可见的文档"}</p>
           )}
           {flat.map(({ entry, depth, hasChildren }) => {
             const active = entry.id === selectedId;
-            const onPath = ancestorsOfSelected.has(entry.id);
             return (
-              <div
-                key={entry.id}
-                className={`flex items-center gap-1 pr-2 ${active ? "bg-sky-50" : "hover:bg-zinc-50"}`}
-                style={{ paddingLeft: 8 + depth * 14 }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setCollapsed(prev => {
-                    const next = new Set(prev);
-                    if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id);
-                    return next;
-                  })}
-                  className={`w-4 text-[10px] text-zinc-400 ${hasChildren ? "" : "invisible"}`}
-                  aria-label="展开/折叠"
-                >
-                  {collapsed.has(entry.id) ? "▸" : "▾"}
-                </button>
-                <Link
-                  href={`/production/${productionId}/wiki/${entry.id}`}
-                  className={`flex-1 truncate py-1.5 text-sm ${
-                    active ? "font-semibold text-sky-800" : onPath ? "text-zinc-700 font-medium" : "text-zinc-600"
+              <div key={entry.id}>
+                <div
+                  className={`group relative flex items-center gap-0.5 pr-1.5 rounded-md mx-1 ${
+                    active ? "bg-sky-50" : "hover:bg-zinc-50"
                   }`}
+                  style={{ paddingLeft: 4 + depth * 14 }}
                 >
-                  {entry.title ?? "（无标题）"}
-                </Link>
-                {entry.isPublic && <span className="text-[10px] text-zinc-300" title="已公开给全体成员">◍</span>}
+                  <button
+                    type="button"
+                    onClick={() => setCollapsed(prev => {
+                      const next = new Set(prev);
+                      if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id);
+                      return next;
+                    })}
+                    className={`w-4 shrink-0 text-[10px] text-zinc-400 hover:text-zinc-600 ${hasChildren ? "" : "invisible"}`}
+                    aria-label="展开/折叠"
+                  >
+                    {collapsed.has(entry.id) ? "▸" : "▾"}
+                  </button>
+                  <Link
+                    href={`/production/${productionId}/wiki/${entry.id}`}
+                    className={`flex-1 min-w-0 truncate py-1.5 text-[13px] ${
+                      active ? "font-semibold text-sky-800" : "text-zinc-600"
+                    }`}
+                    title={entry.title ?? undefined}
+                  >
+                    {entry.title ?? "（无标题）"}
+                  </Link>
+                  {entry.isPublic && (
+                    <span className="shrink-0 text-[10px] text-zinc-300 group-hover:hidden" title="已公开给全体成员">◍</span>
+                  )}
+                  {/* 悬停操作区：＋ 新建子文档 / ⋯ 菜单 */}
+                  <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                    {canCreate && (
+                      <button
+                        type="button"
+                        title="新建子文档"
+                        onClick={() => { setCreatingUnder(entry.id); setNewTitle(""); setMenuFor(null); }}
+                        className="w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 text-sm leading-none"
+                      >
+                        ＋
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="更多操作"
+                      onClick={() => setMenuFor(menuFor === entry.id ? null : entry.id)}
+                      className="w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 text-sm leading-none"
+                    >
+                      ⋯
+                    </button>
+                  </div>
+                  {menuFor === entry.id && (
+                    <div
+                      ref={menuRef}
+                      className="absolute right-0 top-full z-30 mt-0.5 w-32 rounded-lg border border-zinc-200 bg-white shadow-lg py-1"
+                    >
+                      <button
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                        onClick={() => { setMenuFor(null); setMovingId(entry.id); }}
+                      >
+                        移动到…
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
+                        onClick={() => remove(entry.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {creatingUnder === entry.id && newDocInput(entry.id, depth + 1)}
               </div>
             );
           })}
+          {creatingUnder === "" && newDocInput("", 0)}
         </nav>
+        {canCreate && (
+          <button
+            type="button"
+            onClick={() => { setCreatingUnder(""); setNewTitle(""); }}
+            className="w-full border-t border-zinc-100 px-3 py-2 text-left text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50"
+          >
+            ＋ 新建文档
+          </button>
+        )}
       </aside>
       <main className="flex-1 min-w-0">{children}</main>
+
+      {movingId && (
+        <TreePickerModal
+          kicker="Wiki"
+          title={`移动「${byId.get(movingId)?.title ?? ""}」到…`}
+          items={moveItemsFor(movingId)}
+          preselected={[]}
+          single
+          onConfirm={ids => move(movingId, ids)}
+          onClose={() => setMovingId(null)}
+        />
+      )}
     </div>
   );
 }

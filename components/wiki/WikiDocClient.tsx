@@ -1,20 +1,19 @@
 "use client";
 
-// wiki 文档库 W4：文档页（阅读/编辑/tag/移动/分享/backlinks）。
-// 编辑器 = SmartTextarea markdown 模式 + `[[` 文档补全 + @成员 + #剧本引用；
-// 阅读 = WikiMarkdown（react-markdown 管线）。
+// wiki 文档库 W4（Notion 式改版）：有编辑权即默认可编辑（无 编辑/保存 切换），
+// 标题/正文/标签 就地编辑 + 防抖自动保存；文档操作（新建/移动/删除）归左侧栏
+// （WikiShell），本区只留 分享。无编辑权 → 只读渲染（WikiMarkdown）。
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
-import TreePickerModal from "@/components/TreePickerModal";
 import AdminModal from "@/components/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import type { WikiDoc, WikiListEntry, WikiRef } from "@/lib/wiki-db";
+import type { WikiDoc, WikiRef } from "@/lib/wiki-db";
 import type { Mention } from "@/lib/event-db";
 
 type ShareLevel = "view" | "edit" | "manage";
@@ -26,12 +25,12 @@ type ShareState = {
 
 const LEVEL_LABELS: Record<ShareLevel, string> = { view: "可阅读", edit: "可编辑", manage: "可管理" };
 
+type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+
 export default function WikiDocClient({
   productionId,
   wiki,
-  wikis,
   canEdit,
-  canDelete,
   canShare,
   members,
   departments,
@@ -40,9 +39,7 @@ export default function WikiDocClient({
 }: {
   productionId: string;
   wiki: WikiDoc & { tags: string[] };
-  wikis: WikiListEntry[];
   canEdit: boolean;
-  canDelete: boolean;
   canShare: boolean;
   members: MentionMember[];
   departments: { id: string; name: string }[];
@@ -52,63 +49,88 @@ export default function WikiDocClient({
   const router = useRouter();
   const api = `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}`;
 
-  const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(wiki.title ?? "");
   const [body, setBody] = useState(wiki.body);
   const [tagsInput, setTagsInput] = useState(wiki.tags.join(" "));
-  const [mentions, setMentions] = useState<Mention[]>(wiki.mentions);
-  const [busy, setBusy] = useState(false);
-  const [moving, setMoving] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>("idle");
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareAddUser, setShareAddUser] = useState("");
   const [shareAddLevel, setShareAddLevel] = useState<ShareLevel>("view");
 
+  const mentionsRef = useRef<Mention[]>(wiki.mentions);
+  const savedRef = useRef({ title: wiki.title ?? "", body: wiki.body, tags: wiki.tags.join(" ") });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingRef = useRef(false);
+  // effect 闭包会捕获旧渲染的值，卸载兜底保存必须经 ref 取最新
+  const latestRef = useRef({ title, body, tags: tagsInput });
+  latestRef.current = { title, body, tags: tagsInput };
+
   const memberName = (userId: string) => members.find(m => m.userId === userId)?.name ?? userId.slice(0, 8);
 
-  async function save() {
-    if (busy) return;
-    if (!title.trim()) { alert("标题不能为空"); return; }
-    setBusy(true);
+  // 换文档时重置本地态（同组件复用于不同 wikiId 的导航）
+  useEffect(() => {
+    setTitle(wiki.title ?? "");
+    setBody(wiki.body);
+    setTagsInput(wiki.tags.join(" "));
+    mentionsRef.current = wiki.mentions;
+    savedRef.current = { title: wiki.title ?? "", body: wiki.body, tags: wiki.tags.join(" ") };
+    setStatus("idle");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wiki.id]);
+
+  async function saveNow(next?: { title?: string; body?: string; tags?: string }) {
+    if (savingRef.current) return;
+    const t = (next?.title ?? title).trim();
+    const b = next?.body ?? body;
+    const tg = next?.tags ?? tagsInput;
+    if (!t) return; // 空标题不落库，等用户补
+    const prev = savedRef.current;
+    if (t === prev.title && b === prev.body && tg === prev.tags) { setStatus(s => s === "dirty" ? "saved" : s); return; }
+    savingRef.current = true;
+    setStatus("saving");
     try {
       const res = await fetch(api, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: title.trim(),
-          body,
-          mentions,
-          tags: tagsInput.split(/[\s,，]+/).filter(Boolean),
+          title: t,
+          body: b,
+          mentions: mentionsRef.current,
+          tags: tg.split(/[\s,，]+/).filter(Boolean),
         }),
       });
-      if (!res.ok) { alert((await res.json()).error ?? "保存失败"); return; }
-      setEditing(false);
-      router.refresh();
+      if (!res.ok) { setStatus("error"); return; }
+      const structuralChange = t !== prev.title || tg !== prev.tags;
+      savedRef.current = { title: t, body: b, tags: tg };
+      setStatus("saved");
+      // 标题/标签变化会影响侧栏树与搜索，刷新服务端数据；正文变化不刷（不打断输入）
+      if (structuralChange) router.refresh();
+    } catch {
+      setStatus("error");
     } finally {
-      setBusy(false);
+      savingRef.current = false;
     }
   }
 
-  async function remove() {
-    if (!confirm(`确认删除「${wiki.title}」？子文档将提升为顶层。`)) return;
-    const res = await fetch(api, { method: "DELETE" });
-    if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }
-    router.push(`/production/${productionId}/wiki`);
-    router.refresh();
+  function schedule() {
+    setStatus("dirty");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => saveNow(), 1200);
   }
 
-  async function move(targetIds: string[]) {
-    const target = targetIds[0];
-    setMoving(false);
-    const parentId = target === "__root__" ? null : target;
-    const res = await fetch(api, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId }),
-    });
-    if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
-    router.refresh();
-  }
+  // 卸载/切文档前尽力落一笔（经 latestRef 取最新值，避免闭包捕获旧渲染）
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      const cur = latestRef.current;
+      const prev = savedRef.current;
+      if (cur.title.trim() && (cur.title.trim() !== prev.title || cur.body !== prev.body || cur.tags !== prev.tags)) {
+        void saveNow({ title: cur.title, body: cur.body, tags: cur.tags });
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wiki.id]);
 
   async function openShare() {
     setShareOpen(true);
@@ -130,51 +152,41 @@ export default function WikiDocClient({
     return true;
   }
 
-  // 移动目标：排除自己与后代（防环，服务端也会校验）
-  const descendants = new Set<string>([wiki.id]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const w of wikis) {
-      if (w.parentId && descendants.has(w.parentId) && !descendants.has(w.id)) {
-        descendants.add(w.id); grew = true;
-      }
-    }
-  }
-  const moveItems = [
-    { id: "__root__", label: "（移到顶层）" },
-    ...wikis.filter(w => !descendants.has(w.id)).map(w => ({
-      id: w.id, label: w.title ?? "（无标题）", parentId: w.parentId,
-    })),
-  ];
+  const statusLabel =
+    status === "saving" ? "保存中…"
+    : status === "dirty" ? "编辑中…"
+    : status === "error" ? "保存失败（继续输入将重试）"
+    : status === "saved" ? "已保存"
+    : `更新于 ${fmtDateTime(wiki.updatedAt)}`;
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white">
       {/* 标题区 */}
-      <div className="px-6 pt-5 pb-4 border-b border-zinc-100">
+      <div className="px-8 pt-6 pb-3">
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
-            {editing ? (
+            {canEdit ? (
               <input
                 value={title}
-                onChange={e => setTitle(e.target.value)}
-                className="w-full text-xl font-bold text-zinc-900 outline-none border-b border-dashed border-zinc-300 focus:border-zinc-500 pb-1"
-                placeholder="文档标题"
+                onChange={e => { setTitle(e.target.value); schedule(); }}
+                className="w-full text-2xl font-bold text-zinc-900 outline-none placeholder:text-zinc-300"
+                placeholder="无标题"
               />
             ) : (
-              <h1 className="text-xl font-bold text-zinc-900 truncate">{wiki.title}</h1>
+              <h1 className="text-2xl font-bold text-zinc-900 truncate">{wiki.title}</h1>
             )}
             <p className="mt-1.5 text-xs text-zinc-400">
-              更新于 {fmtDateTime(wiki.updatedAt)}
+              {statusLabel}
+              {status === "error" && null}
               {wiki.isPublic && <span className="ml-2 text-emerald-600">· 全体可见</span>}
+              {!canEdit && <span className="ml-2">· 只读</span>}
             </p>
-            {/* tags */}
-            {editing ? (
+            {canEdit ? (
               <input
                 value={tagsInput}
-                onChange={e => setTagsInput(e.target.value)}
-                placeholder="标签（空格分隔，自由手写）"
-                className="mt-2 w-full rounded-lg border border-zinc-200 px-2.5 py-1 text-xs outline-none focus:border-zinc-400"
+                onChange={e => { setTagsInput(e.target.value); schedule(); }}
+                placeholder="＃ 标签（空格分隔，自由手写）"
+                className="mt-2 w-full text-xs text-zinc-500 outline-none placeholder:text-zinc-300"
               />
             ) : wiki.tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -184,51 +196,39 @@ export default function WikiDocClient({
               </div>
             )}
           </div>
-          <div className="flex gap-2 shrink-0">
-            {editing ? (
-              <>
-                <button type="button" style={SECONDARY_BTN} onClick={() => {
-                  setEditing(false); setTitle(wiki.title ?? ""); setBody(wiki.body); setTagsInput(wiki.tags.join(" "));
-                }}>取消</button>
-                <button type="button" style={PRIMARY_BTN} onClick={save} disabled={busy}>
-                  {busy ? "保存中…" : "保存"}
-                </button>
-              </>
-            ) : (
-              <>
-                {canShare && <button type="button" style={SECONDARY_BTN} onClick={openShare}>分享</button>}
-                {canEdit && <button type="button" style={SECONDARY_BTN} onClick={() => setMoving(true)}>移动</button>}
-                {canDelete && <button type="button" style={{ ...SECONDARY_BTN, color: "#b91c1c", borderColor: "#b91c1c" }} onClick={remove}>删除</button>}
-                {canEdit && <button type="button" style={PRIMARY_BTN} onClick={() => setEditing(true)}>编辑</button>}
-              </>
-            )}
-          </div>
+          {canShare && (
+            <button type="button" style={SECONDARY_BTN} onClick={openShare} className="shrink-0">分享</button>
+          )}
         </div>
       </div>
 
-      {/* 正文 */}
-      <div className="px-6 py-5">
-        {editing ? (
+      {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存 */}
+      <div className={canEdit ? "px-5 pb-6" : "px-8 pb-6"}>
+        {canEdit ? (
           <SmartTextarea
             value={body}
-            onChange={setBody}
+            onChange={v => { setBody(v); schedule(); }}
             markdown
-            minHeight={320}
-            placeholder="正文（markdown）。输入 [[ 引用文档、@ 提及成员、# 引用剧本内容"
-            memberMention={{ members, onMentionsChange: m => setMentions(m.map(x => ({ userId: x.userId, name: x.name }))) }}
+            frameless
+            minHeight={360}
+            placeholder="开始写作…（[[ 引用文档、@ 提及成员、# 引用剧本内容）"
+            memberMention={{
+              members,
+              onMentionsChange: m => { mentionsRef.current = m.map(x => ({ userId: x.userId, name: x.name })); },
+            }}
             contentMention={{ productionId }}
             plugins={[wikiLinkDropPlugin(productionId)]}
           />
         ) : wiki.body.trim() ? (
           <WikiMarkdown content={wiki.body} productionId={productionId} />
         ) : (
-          <p className="text-sm text-zinc-400">（空文档{canEdit ? "，点击右上角编辑" : ""}）</p>
+          <p className="text-sm text-zinc-400">（空文档）</p>
         )}
       </div>
 
       {/* 链接图面板：标题级列出（§4.1） */}
       {(backlinks.length > 0 || unlinked.length > 0) && (
-        <div className="px-6 py-4 border-t border-zinc-100 space-y-3">
+        <div className="px-8 py-4 border-t border-zinc-100 space-y-3">
           {backlinks.length > 0 && (
             <div>
               <p className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1.5">反向链接 {backlinks.length}</p>
@@ -258,22 +258,9 @@ export default function WikiDocClient({
         </div>
       )}
 
-      {/* 移动 */}
-      {moving && (
-        <TreePickerModal
-          kicker="Wiki"
-          title="移动到…"
-          items={moveItems}
-          preselected={[]}
-          single
-          onConfirm={move}
-          onClose={() => setMoving(false)}
-        />
-      )}
-
       {/* 分享 */}
       {shareOpen && (
-        <AdminModal title={`分享「${wiki.title}」`} onClose={() => setShareOpen(false)}>
+        <AdminModal title={`分享「${title || wiki.title || "文档"}」`} onClose={() => setShareOpen(false)}>
           {!share ? (
             <p className="text-sm text-zinc-400 py-4">加载中…</p>
           ) : (

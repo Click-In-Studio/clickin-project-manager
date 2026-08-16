@@ -337,6 +337,8 @@ export interface SmartTextareaProps {
   contentMention?: { productionId: string; versionId?: string | null };
   /** Enable markdown toolbar and serialisation */
   markdown?: boolean;
+  /** markdown 模式去外框（Notion 式整页编辑场景） */
+  frameless?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   placeholder?: string;
@@ -356,6 +358,7 @@ export default function SmartTextarea({
   memberMention,
   contentMention,
   markdown = false,
+  frameless = false,
   plugins: extraPlugins = [],
   placeholder,
   rows = 3,
@@ -634,8 +637,13 @@ export default function SmartTextarea({
   );
 
   if (markdown) {
+    const frame = readOnly
+      ? "overflow-hidden"
+      : frameless
+        ? `overflow-hidden ${className}`
+        : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`;
     return (
-      <div className={readOnly ? "overflow-hidden" : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`}>
+      <div className={frame}>
         {!readOnly && <Toolbar editor={editor} />}
         {editorEl}
       </div>

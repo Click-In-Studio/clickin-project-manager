@@ -8,7 +8,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listProductionMembers } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getWiki, listWikiLibrary, listBacklinks, listUnlinkedReferences } from "@/lib/wiki-db";
-import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { canViewWiki, canEditWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
 import { listEventDepartments } from "@/lib/event-db";
 import PageHeader from "@/components/PageHeader";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -62,9 +62,8 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const [canEdit, canDelete, canShare, backlinks, unlinked, members, allDepts] = await Promise.all([
+  const [canEdit, canShare, backlinks, unlinked, members, allDepts] = await Promise.all([
     canEditWiki(actor, productionId, wikiId),
-    canDeleteWiki(actor, productionId, wikiId),
     canShareWiki(actor, productionId, wikiId),
     listBacklinks(wikiId, productionId),
     listUnlinkedReferences(wikiId, productionId),
@@ -80,9 +79,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
           <WikiDocClient
             productionId={productionId}
             wiki={wiki}
-            wikis={wikis}
             canEdit={canEdit}
-            canDelete={canDelete}
             canShare={canShare}
             members={members.map(m => ({ userId: m.userId, name: m.name, avatarUrl: m.avatarUrl }))}
             departments={allDepts.filter(d => d.kind === "dept").map(d => ({ id: d.id, name: d.name }))}
