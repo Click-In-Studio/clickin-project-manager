@@ -135,6 +135,19 @@ describe("MCP 端点：上报与组装取件", () => {
     expect(data.markdown!).toContain("端点上报测试"); // 近期对话段
   });
 
+  // 界面上下文的载荷随每条用户消息走，规则常驻这里（静态、可缓存）。规则
+  // 若因"这个用户还没有任何记忆/档案"而整段不注入，就等于没有规则——所以
+  // buildInjectContext 恒返回非 null（原先"什么都没有就返回 null"的早退已撤）。
+  it("零记忆零档案的用户也拿得到界面上下文规则", async () => {
+    const blank = "00000000-1111-2222-3333-444444444444";
+    const inject = await fetch(`${BASE}/inject-context?userId=${blank}`);
+    const data = (await inject.json()) as { markdown: string | null };
+    expect(data.markdown).toBeTruthy();
+    expect(data.markdown!).toContain("## 界面上下文说明");
+    expect(data.markdown!).toContain("clickin-ui-context");
+    expect(data.markdown!).not.toContain("## 长期记忆摘要"); // 确实没有别的段可注
+  });
+
   it("MEMORY.md 内部二级标题注入时降级为三级（不与包裹标题同级）", async () => {
     const { writeMemory } = await import("@/lib/agent-memory/store");
     writeMemory(userId, "## 偏好与习惯\n- 喜欢先听结论\n# 顶级标题\n- x");
