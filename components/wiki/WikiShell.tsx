@@ -5,6 +5,7 @@
 // 树逻辑：邻接表→DFS 展开 + 搜索保留祖先链 + 展开/折叠态。
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
@@ -33,18 +34,24 @@ export default function WikiShell({
   const [creatingUnder, setCreatingUnder] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
+  // ⋯ 菜单经 portal 固定定位（nav 有 overflow-y-auto，绝对定位会被裁剪）
+  const [menu, setMenu] = useState<{ id: string; top: number; left: number } | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!menuFor) return;
+    if (!menu) return;
     const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node)) setMenuFor(null);
+      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node)) setMenu(null);
     };
+    const closeOnScroll = () => setMenu(null);
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuFor]);
+    document.addEventListener("scroll", closeOnScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("scroll", closeOnScroll, true);
+    };
+  }, [menu]);
 
   const byId = useMemo(() => new Map(wikis.map(w => [w.id, w])), [wikis]);
 
@@ -108,7 +115,7 @@ export default function WikiShell({
   async function remove(id: string) {
     const doc = byId.get(id);
     if (!confirm(`确认删除「${doc?.title ?? "该文档"}」？子文档将提升为顶层。`)) return;
-    setMenuFor(null);
+    setMenu(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, { method: "DELETE" });
     if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }
     if (id === selectedId) router.push(`/production/${productionId}/wiki`);
@@ -166,8 +173,8 @@ export default function WikiShell({
   );
 
   return (
-    <div className="flex gap-6 items-start">
-      <aside className="w-[264px] shrink-0 rounded-xl border border-zinc-200 bg-white overflow-visible">
+    <div className="flex gap-6 items-stretch min-h-[calc(100vh-210px)]">
+      <aside className="w-[264px] shrink-0 flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <div className="p-2.5 border-b border-zinc-100">
           <input
             value={query}
@@ -176,7 +183,7 @@ export default function WikiShell({
             className="w-full rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm outline-none focus:border-zinc-400"
           />
         </div>
-        <nav className="py-1 max-h-[70vh] overflow-y-auto">
+        <nav className="py-1 flex-1 overflow-y-auto">
           {flat.length === 0 && !creatingUnder && (
             <p className="px-3 py-3 text-sm text-zinc-400">{query ? "无匹配文档" : "还没有可见的文档"}</p>
           )}
@@ -185,7 +192,7 @@ export default function WikiShell({
             return (
               <div key={entry.id}>
                 <div
-                  className={`group relative flex items-center gap-0.5 pr-1.5 rounded-md mx-1 ${
+                  className={`group flex items-center gap-0.5 pr-1.5 rounded-md mx-1 ${
                     active ? "bg-sky-50" : "hover:bg-zinc-50"
                   }`}
                   style={{ paddingLeft: 4 + depth * 14 }}
@@ -220,7 +227,7 @@ export default function WikiShell({
                       <button
                         type="button"
                         title="新建子文档"
-                        onClick={() => { setCreatingUnder(entry.id); setNewTitle(""); setMenuFor(null); }}
+                        onClick={() => { setCreatingUnder(entry.id); setNewTitle(""); setMenu(null); }}
                         className="w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 text-sm leading-none"
                       >
                         ＋
@@ -229,33 +236,16 @@ export default function WikiShell({
                     <button
                       type="button"
                       title="更多操作"
-                      onClick={() => setMenuFor(menuFor === entry.id ? null : entry.id)}
+                      onClick={e => {
+                        if (menu?.id === entry.id) { setMenu(null); return; }
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setMenu({ id: entry.id, top: r.bottom + 2, left: Math.max(8, r.right - 128) });
+                      }}
                       className="w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 text-sm leading-none"
                     >
                       ⋯
                     </button>
                   </div>
-                  {menuFor === entry.id && (
-                    <div
-                      ref={menuRef}
-                      className="absolute right-0 top-full z-30 mt-0.5 w-32 rounded-lg border border-zinc-200 bg-white shadow-lg py-1"
-                    >
-                      <button
-                        type="button"
-                        className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                        onClick={() => { setMenuFor(null); setMovingId(entry.id); }}
-                      >
-                        移动到…
-                      </button>
-                      <button
-                        type="button"
-                        className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
-                        onClick={() => remove(entry.id)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  )}
                 </div>
                 {creatingUnder === entry.id && newDocInput(entry.id, depth + 1)}
               </div>
@@ -273,7 +263,31 @@ export default function WikiShell({
           </button>
         )}
       </aside>
-      <main className="flex-1 min-w-0">{children}</main>
+      <main className="flex-1 min-w-0 flex flex-col [&>*]:flex-1">{children}</main>
+
+      {menu && typeof document !== "undefined" && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menu.top, left: menu.left, zIndex: 9999 }}
+          className="w-32 rounded-lg border border-zinc-200 bg-white shadow-lg py-1"
+        >
+          <button
+            type="button"
+            className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+            onClick={() => { const id = menu.id; setMenu(null); setMovingId(id); }}
+          >
+            移动到…
+          </button>
+          <button
+            type="button"
+            className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
+            onClick={() => remove(menu.id)}
+          >
+            删除
+          </button>
+        </div>,
+        document.body,
+      )}
 
       {movingId && (
         <TreePickerModal

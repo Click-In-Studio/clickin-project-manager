@@ -47,7 +47,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
         <PageHeader eyebrow="Wiki" title="文档" side="stage" />
         <WikiShell productionId={productionId} wikis={wikis} canCreate={canCreate} selectedId={wikiId}>
-          <div className="rounded-xl border border-zinc-200 bg-white px-8 py-14 text-center">
+          <div className="rounded-xl border border-zinc-200 bg-white px-8 flex flex-col items-center justify-center text-center">
             <p className="text-lg font-bold text-zinc-800 mb-1">[[{wiki.title ?? "（无标题）"}]]</p>
             <p className="text-sm text-zinc-400 mb-6">你没有这篇文档的阅读权限</p>
             <Link
