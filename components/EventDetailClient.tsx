@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import TreePickerModal from "@/components/TreePickerModal";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
 import ChevronIcon from "@/components/ChevronIcon";
@@ -2598,7 +2599,7 @@ function ReportEditor({
       ) : (
         <div className="flex flex-col gap-2">
           {report.body
-            ? <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
+            ? <WikiMarkdown content={report.body} productionId={productionId} />
             : <p className="text-xs text-zinc-300">暂无正文</p>
           }
           {canWrite && !isPublished && (

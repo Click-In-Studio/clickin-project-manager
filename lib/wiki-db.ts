@@ -187,6 +187,9 @@ export async function updateWiki(
   patch: {
     title?: string; body?: string; mentions?: Mention[];
     parentId?: string | null; sortKey?: string; tags?: string[];
+    /** 协作：客户端 base 正文——与行内现值不同时在行锁事务内做行级三路合并
+     *（AI review：读取-合并-写回不加锁会被并发覆盖，合并保障失效） */
+    mergeBase?: string;
   },
   authorUserId: string,
 ): Promise<(WikiDoc & { tags: string[] }) | null> {
@@ -201,12 +204,39 @@ export async function updateWiki(
   const vals: unknown[] = [id, productionId];
   const push = (frag: string, v: unknown) => { vals.push(v); sets.push(`${frag}$${vals.length}`); };
   if (patch.title !== undefined) push("title = ", patch.title);
-  if (patch.body !== undefined) push("body = ", patch.body);
   if (patch.mentions !== undefined) push("mentions = ", JSON.stringify(patch.mentions));
   if (patch.parentId !== undefined) push("parent_id = ", patch.parentId);
   if (patch.sortKey !== undefined) push("sort_key = ", patch.sortKey);
-  await getPool().query(
-    `UPDATE wiki SET ${sets.join(", ")} WHERE id = $1::uuid AND production_id = $2`, vals);
+
+  if (patch.body !== undefined && patch.mergeBase !== undefined) {
+    // 行锁事务内合并写回：SELECT FOR UPDATE 排队并发保存者，各自基于最新现值合并
+    const { mergeLines } = await import("./line-merge");
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+      const cur = await client.query<{ body: string }>(
+        `SELECT body FROM wiki WHERE id = $1::uuid AND production_id = $2 FOR UPDATE`,
+        [id, productionId]);
+      if (!cur.rows[0]) { await client.query("ROLLBACK"); return null; }
+      const current = cur.rows[0].body;
+      const merged = current === patch.mergeBase
+        ? patch.body
+        : mergeLines(patch.mergeBase, patch.body, current);
+      vals.push(merged); sets.push(`body = $${vals.length}`);
+      await client.query(
+        `UPDATE wiki SET ${sets.join(", ")} WHERE id = $1::uuid AND production_id = $2`, vals);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } else {
+    if (patch.body !== undefined) push("body = ", patch.body);
+    await getPool().query(
+      `UPDATE wiki SET ${sets.join(", ")} WHERE id = $1::uuid AND production_id = $2`, vals);
+  }
 
   if (patch.tags !== undefined) {
     const tags = [...new Set(patch.tags.map(t => t.trim()).filter(Boolean))];

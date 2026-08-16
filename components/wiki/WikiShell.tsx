@@ -290,8 +290,9 @@ export default function WikiShell({
   );
 
   return (
-    <div className="flex gap-6 items-stretch min-h-[calc(100vh-210px)]">
-      <aside className="w-[264px] shrink-0 flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden">
+    // 侧栏 sticky 固定高度自滚，不随主体滚走（UI 修缮轮）；主体保持最小视口高
+    <div className="flex gap-6 items-start">
+      <aside className="w-[264px] shrink-0 sticky top-4 h-[calc(100vh-120px)] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <div className="p-2.5 border-b border-zinc-100">
           <input
             value={query}
@@ -312,7 +313,15 @@ export default function WikiShell({
               <div key={entry.id}>
                 <div
                   draggable
-                  onDragStart={e => { setDragId(entry.id); e.dataTransfer.effectAllowed = "move"; }}
+                  onDragStart={e => {
+                    setDragId(entry.id);
+                    e.dataTransfer.effectAllowed = "copyMove";
+                    // 拖进编辑器成为双向链接：富文本读 x-clickin-wiki（TipTap handleDrop），
+                    // 源码 textarea 靠 text/plain 走浏览器原生插入
+                    const label = entry.title ?? "（无标题）";
+                    e.dataTransfer.setData("application/x-clickin-wiki", JSON.stringify({ id: entry.id, label }));
+                    e.dataTransfer.setData("text/plain", `[#${label}](/__cm__wiki:${entry.id})`);
+                  }}
                   onDragEnd={() => { setDragId(null); setDropHint(null); }}
                   onDragOver={e => {
                     if (!droppable) return;
@@ -420,7 +429,7 @@ export default function WikiShell({
           </div>
         )}
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col [&>*]:flex-1">{children}</main>
+      <main className="flex-1 min-w-0 flex flex-col min-h-[calc(100vh-120px)] [&>*]:flex-1">{children}</main>
 
       {menu && typeof document !== "undefined" && createPortal(
         <div

@@ -9,13 +9,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime } from "@/lib/tz";
-import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
+import SmartTextarea, { wikiLinkDropPlugin, normalizeLegacyMentions, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import WikiPrintOverlay from "@/components/wiki/WikiPrintOverlay";
 import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import type { WikiDoc, WikiRef } from "@/lib/wiki-db";
+import type { WikiPeer } from "@/lib/wiki-collab";
+import { mergeLines } from "@/lib/line-merge";
 import type { Mention } from "@/lib/event-db";
 
 type ShareLevel = "view" | "edit" | "manage";
@@ -67,7 +69,8 @@ export default function WikiDocClient({
   const [lossy, setLossy] = useState(false);
   const lossyOverrideRef = useRef(false);
   const normalizeForCompare = (s: string) =>
-    s.replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
+    normalizeLegacyMentions(s) // 存量/损坏 mention 形态等价（编辑器载入已同步修复）
+      .replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
   function handleRoundTrip(serialized: string) {
     if (lossyOverrideRef.current) return;
     if (normalizeForCompare(serialized) !== normalizeForCompare(body)) {
@@ -95,6 +98,61 @@ export default function WikiDocClient({
   const latestRef = useRef({ title, body, tags: tagsInput });
   latestRef.current = { title, body, tags: tagsInput };
 
+  // ── 多人协作（SSE）：presence 头像/远端光标/内容广播合并 ────────────────────
+  const collabClientIdRef = useRef("");
+  const [peers, setPeers] = useState<WikiPeer[]>([]);
+  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // clientId 惰性生成（渲染期调 Math.random 违反 purity lint）
+    if (!collabClientIdRef.current) collabClientIdRef.current = Math.random().toString(36).slice(2);
+    const cid = collabClientIdRef.current;
+    const es = new EventSource(
+      `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/stream?cid=${cid}`);
+    es.addEventListener("presence", e => {
+      try {
+        const list = JSON.parse((e as MessageEvent).data) as WikiPeer[];
+        setPeers(list.filter(p => p.clientId !== cid));
+      } catch { /* 忽略坏帧 */ }
+    });
+    es.addEventListener("update", e => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as
+          { byClientId: string | null; title: string | null; body: string; updatedAt: string };
+        if (data.byClientId === cid) return; // 本端 PATCH 响应已处理
+        const base = savedRef.current.body;
+        const local = latestRef.current.body;
+        // 本地干净 → 直接采纳；本地有未存改动 → 行级三路合并（本地为 mine）
+        const nextBody = local === base ? data.body : mergeLines(base, local, data.body);
+        savedRef.current.body = data.body;
+        if (nextBody !== local) setBody(nextBody);
+        // 标题：本地干净才跟随
+        if (latestRef.current.title === savedRef.current.title) {
+          savedRef.current.title = data.title ?? "";
+          setTitle(data.title ?? "");
+        }
+      } catch { /* 忽略坏帧 */ }
+    });
+    return () => { es.close(); setPeers([]); };
+  }, [wiki.id, productionId]);
+
+  // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）
+  const pendingCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
+  function reportCursor(cursor: { blockIndex: number; offset: number }) {
+    pendingCursorRef.current = cursor;
+    if (presenceTimerRef.current) return;
+    presenceTimerRef.current = setTimeout(() => {
+      presenceTimerRef.current = null;
+      const latest = pendingCursorRef.current;
+      if (!latest) return;
+      void fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/presence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: collabClientIdRef.current, ...latest }),
+      }).catch(() => {});
+    }, 400);
+  }
+
   const memberName = (userId: string) => members.find(m => m.userId === userId)?.name ?? userId.slice(0, 8);
 
   // 换文档时重置本地态（同组件复用于不同 wikiId 的导航）
@@ -112,9 +170,13 @@ export default function WikiDocClient({
 
   async function saveNow(next?: { title?: string; body?: string; tags?: string }) {
     if (savingRef.current) return;
-    const t = (next?.title ?? title).trim();
-    const b = next?.body ?? body;
-    const tg = next?.tags ?? tagsInput;
+    // 必须经 latestRef 读最新值：schedule 的 setTimeout 捕获的是 arm 时那轮渲染的
+    // 闭包，直接读 state 会保存"本次操作之前"的内容——单次操作（[[ 补全选中、
+    // 拖放成链）会被整个丢掉（用户实测：刷新后只剩 [[x / 拖入内容消失）
+    const cur = latestRef.current;
+    const t = (next?.title ?? cur.title).trim();
+    const b = next?.body ?? cur.body;
+    const tg = next?.tags ?? cur.tags;
     if (!t) return; // 空标题不落库，等用户补
     const prev = savedRef.current;
     if (t === prev.title && b === prev.body && tg === prev.tags) { setStatus(s => s === "dirty" ? "saved" : s); return; }
@@ -129,11 +191,18 @@ export default function WikiDocClient({
           body: b,
           mentions: mentionsRef.current,
           tags: tg.split(/[\s,，]+/).filter(Boolean),
+          // 协作：带上本端 base，服务端被他人推进时做行级三路合并
+          baseBody: prev.body,
+          clientId: collabClientIdRef.current,
         }),
       });
       if (!res.ok) { setStatus("error"); return; }
+      const data = await res.json() as { wiki?: { body?: string } };
+      const serverBody = data.wiki?.body ?? b;
       const structuralChange = t !== prev.title || tg !== prev.tags;
-      savedRef.current = { title: t, body: b, tags: tg };
+      savedRef.current = { title: t, body: serverBody, tags: tg };
+      // 服务端合并产物 ≠ 本端提交 → 回灌（本端期间的新击键经下一轮 schedule 再保）
+      if (serverBody !== b && latestRef.current.body === b) setBody(serverBody);
       setStatus("saved");
       // 标题/标签变化会影响侧栏树与搜索，刷新服务端数据；正文变化不刷（不打断输入）
       if (structuralChange) router.refresh();
@@ -241,6 +310,29 @@ export default function WikiDocClient({
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* 协作在场者（飞书式头像堆叠；tooltip 含光标行） */}
+            {peers.length > 0 && (
+              <div className="flex items-center -space-x-1.5 mr-1">
+                {peers.slice(0, 5).map(p => (
+                  <span
+                    key={p.clientId}
+                    title={`${p.userName}${p.blockIndex != null ? ` · 第 ${p.blockIndex + 1} 段` : " · 正在查看"}`}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white overflow-hidden"
+                    style={{ background: p.color }}
+                  >
+                    {p.avatarUrl
+                      ? // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.avatarUrl} alt={p.userName} className="h-full w-full object-cover" />
+                      : (p.userName || "?").slice(0, 1)}
+                  </span>
+                ))}
+                {peers.length > 5 && (
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-zinc-300 text-[10px] font-bold text-white">
+                    +{peers.length - 5}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="relative">
               <button type="button" style={SECONDARY_BTN} onClick={() => setExportOpen(v => !v)}>导出</button>
               {exportOpen && <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />}
@@ -323,6 +415,10 @@ export default function WikiDocClient({
               contentMention={{ productionId }}
               plugins={[wikiLinkDropPlugin(productionId)]}
               onInitialRoundTrip={handleRoundTrip}
+              remoteCursors={peers
+                .filter(p => p.blockIndex != null)
+                .map(p => ({ name: p.userName, color: p.color, blockIndex: p.blockIndex as number, offset: p.offset ?? 0 }))}
+              onCursorChange={reportCursor}
             />
           )
         ) : wiki.body.trim() ? (

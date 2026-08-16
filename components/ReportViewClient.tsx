@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime as fmtDate } from "@/lib/tz";
 import type { MentionMember } from "./SmartTextarea";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import SmartTextarea from "./SmartTextarea";
 import SmartText from "./SmartText";
 import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/event-db";
@@ -411,7 +412,7 @@ export default function ReportViewClient({
         {/* Body */}
         {report.body ? (
           <div style={{ marginBottom: 20 }}>
-            <SmartText content={report.body} markdown memberMention={{ members }} contentMention={{ productionId }} />
+            <WikiMarkdown content={report.body} productionId={productionId} />
           </div>
         ) : (
           <p style={{ margin: "0 0 20px", textAlign: "center", fontSize: 13, color: "var(--muted)" }}>暂无正文</p>

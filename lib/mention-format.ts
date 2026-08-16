@@ -54,3 +54,13 @@ export function parseToDoc(text: string): JSONContent {
 }
 
 export { serializeMention, type ContentMentionAttrs };
+
+/** 存量/损坏 mention 归一化（读入渲染与保真对比共用）：
+ *  - 旧形态 @[名](uid:x) 与被旧 round-trip bug 转义毁掉的 @\[名\]\(uid:x\)
+ *    → 可 round-trip 的 [@名](uid:x)
+ *  - 被转义的 \[#标题\](/__cm__…) → 复原为链接形态 */
+export function normalizeLegacyMentions(md: string): string {
+  return md
+    .replace(/@\\*\[([^\\\]\n]+)\\*\]\\*\((uid:[^)\s\\]+)\\*\)/g, "[@$1]($2)")
+    .replace(/\\*\[(#[^\\\]\n]+)\\*\]\\*\((\/__cm__[^)\s\\]+)\\*\)/g, "[$1]($2)");
+}
