@@ -9,10 +9,10 @@
 // 职位/通知天然 self-scoped；里程碑成员可见）。未来需要更细权限键的
 // 工具（tech reqs 等）在 requireMember 之上再叠 hasPermission。
 
-import { getPool } from "@/lib/pg";
 import {
   getUserProfile,
   getProductionMeta,
+  getProductionOwnerInfo,
   getProductionPermissionContext,
   listProductionMembersWithRoles,
   listMyProductionsWithRoles,
@@ -20,12 +20,19 @@ import {
 } from "@/lib/db";
 import { listUserNotifications } from "@/lib/inbox-db";
 import { listProductionDepts } from "@/lib/dept-db";
-import { ADMIN_PANEL_PERMISSIONS } from "@/lib/permissions";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { isoToDateInput, isoToDatetimeLocal } from "@/lib/tz";
 
 export const DENIED_NOT_MEMBER = "权限被拒绝：你不是该制作的成员。";
 
-/** 项目工具统一前置门：成员资格。通过返回 null，拒绝返回给模型的文案。 */
+/**
+ * 项目工具统一前置门：成员资格。通过返回 null，拒绝返回给模型的文案。
+ *
+ * getProductionPermissionContext 内置 isAdmin/isOwner 旁路（与 production/[id] 等
+ * 线上 API 同一份口径，非本工具新增）——平台管理员/项目所有者即使不是
+ * production_member 行也会通过。这不是「成员资格」字面意义上的漏洞，而是
+ * 全站统一的 admin/owner 旁路惯例；见 tests 里 non-member admin passes 用例锁定。
+ */
 async function memberGate(userId: string, productionId: string): Promise<string | null> {
   const profile = await getUserProfile(userId);
   if (!profile) return DENIED_NOT_MEMBER;
@@ -41,12 +48,9 @@ export async function productionInfo(userId: string, productionId: string): Prom
   const meta = await getProductionMeta(productionId);
   if (!meta) return "没有找到该制作。";
 
-  const row = await getPool().query<{ owner_id: string | null; archived_at: Date | null }>(
-    "SELECT owner_id, archived_at FROM production WHERE id = $1",
-    [productionId],
-  );
-  const ownerId = row.rows[0]?.owner_id ?? null;
-  const archived = row.rows[0]?.archived_at != null;
+  const ownerInfo = await getProductionOwnerInfo(productionId);
+  const ownerId = ownerInfo?.ownerId ?? null;
+  const archived = ownerInfo?.archived ?? false;
   const ownerName = ownerId ? (await getUserProfile(ownerId))?.name ?? null : null;
 
   const members = await listProductionMembersWithRoles(productionId);
@@ -69,7 +73,7 @@ export async function productionMyRole(userId: string, productionId: string): Pr
   if (denied) return denied;
 
   const profile = await getUserProfile(userId);
-  const productions = await listMyProductionsWithRoles(userId, profile?.isAdmin ?? false, [...ADMIN_PANEL_PERMISSIONS]);
+  const productions = await listMyProductionsWithRoles(userId, profile?.isAdmin ?? false, [...ADMIN_PANEL_NODE_PREFIXES]);
   const prod = productions.find((p) => p.id === productionId);
   if (!prod) return DENIED_NOT_MEMBER;
 
@@ -77,6 +81,8 @@ export async function productionMyRole(userId: string, productionId: string): Pr
     `- 职位：${prod.roles?.length ? prod.roles.join("、") : "成员"}${prod.isOwner ? "（所有者）" : ""}`,
   ];
   if (prod.firstTag) lines.push(`- 标签：${prod.firstTag}`);
+  // 部门查询失败按「未分配」优雅降级而非抛错——职位工具的核心信息是 roles，
+  // 部门只是补充；单次 DB 抖动不该让整个 my_role 查询失败。
   const depts = await listProductionDepts(productionId).catch(() => []);
   const mine = depts.filter((d) => d.memberUserIds.includes(userId));
   if (mine.length > 0) {

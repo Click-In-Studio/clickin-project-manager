@@ -3642,6 +3642,15 @@ export type ProductionMeta = {
   watermarkEnabled: boolean;
 };
 
+export async function getProductionOwnerInfo(id: string): Promise<{ ownerId: string | null; archived: boolean } | null> {
+  const res = await getPool().query<{ owner_id: string | null; archived_at: Date | null }>(
+    "SELECT owner_id, archived_at FROM production WHERE id = $1",
+    [id],
+  );
+  if (!res.rows.length) return null;
+  return { ownerId: res.rows[0].owner_id, archived: res.rows[0].archived_at != null };
+}
+
 export async function getProductionMeta(id: string): Promise<ProductionMeta | null> {
   const res = await getPool().query<{
     name: string;

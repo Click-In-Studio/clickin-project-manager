@@ -16,12 +16,14 @@ import {
 let prodId: string;
 let memberId: string;
 let outsiderId: string;
+let adminOutsiderId: string;
 let memberName: string;
 
 beforeAll(async () => {
   memberName = `项目甲${shortId()}`;
   memberId = (await upsertFeishuUser(`test-open-${shortId()}`, memberName, null, false)).userId;
   outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `项目乙${shortId()}`, null, false)).userId;
+  adminOutsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `平台管理员${shortId()}`, null, true)).userId;
   ({ prodId } = await makeProduction(memberId));
   await addProductionMember(prodId, memberId);
 });
@@ -36,6 +38,16 @@ describe("权限门语义（非成员 = 明确拒绝，不是空结果）", () =
     expect(await productionMyRole(outsiderId, prodId)).toBe(DENIED_NOT_MEMBER);
     expect(await productionNotifications(outsiderId, prodId)).toBe(DENIED_NOT_MEMBER);
     expect(await productionMilestones(outsiderId, prodId)).toBe(DENIED_NOT_MEMBER);
+  });
+
+  // 锁定意图行为：getProductionPermissionContext 内置的 isAdmin 旁路与线上
+  // production/[id] 等 API 同一份口径，非本工具新增——平台管理员即使不是
+  // production_member 行也应通过门，而不是被误当成"非成员"拒绝。
+  it("platform admin who is not a member still passes the gate (site-wide admin bypass)", async () => {
+    expect(await productionInfo(adminOutsiderId, prodId)).not.toBe(DENIED_NOT_MEMBER);
+    expect(await productionMyRole(adminOutsiderId, prodId)).not.toBe(DENIED_NOT_MEMBER);
+    expect(await productionNotifications(adminOutsiderId, prodId)).not.toBe(DENIED_NOT_MEMBER);
+    expect(await productionMilestones(adminOutsiderId, prodId)).not.toBe(DENIED_NOT_MEMBER);
   });
 });
 
