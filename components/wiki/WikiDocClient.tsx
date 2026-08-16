@@ -11,6 +11,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
+import WikiPrintOverlay from "@/components/wiki/WikiPrintOverlay";
 import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
@@ -66,6 +67,8 @@ export default function WikiDocClient({
   }
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [shareAddUser, setShareAddUser] = useState("");
   const [shareAddLevel, setShareAddLevel] = useState<ShareLevel>("view");
 
@@ -143,6 +146,19 @@ export default function WikiDocClient({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wiki.id]);
 
+  // 导出 markdown：原样下载正文源码（含私有 href token，暴力导出与导入对称）
+  function exportMarkdown() {
+    setExportOpen(false);
+    const name = (title.trim() || wiki.title || "文档").replace(/[\\/:*?"<>|]/g, "_");
+    const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function openShare() {
     setShareOpen(true);
     if (share) return;
@@ -208,6 +224,28 @@ export default function WikiDocClient({
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <div className="relative">
+              <button type="button" style={SECONDARY_BTN} onClick={() => setExportOpen(v => !v)}>导出</button>
+              {exportOpen && <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />}
+              {exportOpen && (
+                <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                    onClick={exportMarkdown}
+                  >
+                    Markdown（.md）
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                    onClick={() => { setExportOpen(false); setPrinting(true); }}
+                  >
+                    PDF（打印页）
+                  </button>
+                </div>
+              )}
+            </div>
             {canEdit && (
               <div className="flex rounded-lg border border-zinc-200 overflow-hidden text-[11px] font-medium">
                 <button
@@ -299,6 +337,17 @@ export default function WikiDocClient({
             </div>
           )}
         </div>
+      )}
+
+      {/* 打印页（导出 PDF） */}
+      {printing && (
+        <WikiPrintOverlay
+          productionId={productionId}
+          title={title.trim() || wiki.title || "文档"}
+          body={body}
+          updatedAt={wiki.updatedAt}
+          onClose={() => setPrinting(false)}
+        />
       )}
 
       {/* 分享 */}

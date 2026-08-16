@@ -201,6 +201,15 @@ span[data-stage-inline] {
     display: none !important;
   }
 
+  /* wiki 文档打印页（同机制）：portal 到 body，打印时隐藏其余子树 */
+  body:has(.wiki-print-root) > *:not(.wiki-print-root) {
+    display: none !important;
+  }
+  .wiki-print-root {
+    position: static !important;
+    overflow: visible !important;
+  }
+
   body {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;

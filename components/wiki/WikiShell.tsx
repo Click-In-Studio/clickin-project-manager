@@ -194,6 +194,41 @@ export default function WikiShell({
     }
   }
 
+  // 导入 markdown（暴力导入：正文原样入库，不做链接解析/替换）；标题=文件名去后缀
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  async function importFiles(files: FileList | null) {
+    if (!files || files.length === 0 || importing) return;
+    setImporting(true);
+    try {
+      let firstId: string | null = null;
+      const errors: string[] = [];
+      for (const file of Array.from(files)) {
+        try {
+          const text = await file.text();
+          const title = file.name.replace(/\.(md|markdown|txt)$/i, "").trim() || "导入文档";
+          const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, body: text }),
+          });
+          const data = await res.json();
+          if (!res.ok) { errors.push(`${file.name}: ${data.error ?? "失败"}`); continue; }
+          firstId ??= data.wiki.id as string;
+        } catch {
+          errors.push(`${file.name}: 读取失败`);
+        }
+      }
+      if (errors.length > 0) alert(`部分导入失败：\n${errors.join("\n")}`);
+      if (firstId) router.push(`/production/${productionId}/wiki/${firstId}`);
+      router.refresh();
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }
+
   async function remove(id: string) {
     const doc = byId.get(id);
     if (!confirm(`确认删除「${doc?.title ?? "该文档"}」？子文档将提升为顶层。`)) return;
@@ -357,13 +392,32 @@ export default function WikiShell({
           {creatingUnder === "" && newDocInput("", 0)}
         </nav>
         {canCreate && (
-          <button
-            type="button"
-            onClick={() => { setCreatingUnder(""); setNewTitle(""); }}
-            className="w-full border-t border-zinc-100 px-3 py-2 text-left text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50"
-          >
-            ＋ 新建文档
-          </button>
+          <div className="flex border-t border-zinc-100">
+            <button
+              type="button"
+              onClick={() => { setCreatingUnder(""); setNewTitle(""); }}
+              className="flex-1 px-3 py-2 text-left text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50"
+            >
+              ＋ 新建文档
+            </button>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+              title="导入 markdown 文件（暴力导入：不做链接解析/替换）"
+              className="shrink-0 px-3 py-2 text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 border-l border-zinc-100"
+            >
+              {importing ? "导入中…" : "导入"}
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".md,.markdown,.txt"
+              multiple
+              className="hidden"
+              onChange={e => importFiles(e.target.files)}
+            />
+          </div>
         )}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col [&>*]:flex-1">{children}</main>
