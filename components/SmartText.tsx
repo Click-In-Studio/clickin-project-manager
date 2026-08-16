@@ -78,6 +78,32 @@ function ContentChip({ label, deleted, href }: { label: string; deleted?: boolea
   return <span className={cls}>{label}</span>;
 }
 
+// wiki 文档链接 chip——样式对齐 WikiMarkdown 的 [[标题]] sky 色处理（同一种引用，
+// 不能在报告预览这一处看起来像剧本域的 # 引用）
+function WikiChip({ label, href, state }: { label: string; href?: string | null; state?: "pending" | "failed" | "deleted" }) {
+  if (state === "pending" || state === "failed") {
+    return (
+      <span
+        title={state === "failed" ? "获取文档标题失败" : "解析中…"}
+        className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-zinc-50 text-zinc-400 border border-dashed border-zinc-300"
+      >
+        [[{state === "failed" ? "获取失败" : "…"}]]
+      </span>
+    );
+  }
+  if (state === "deleted") {
+    return (
+      <span className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-zinc-50 text-zinc-400 border border-zinc-200 no-underline">
+        [[已删除的文档]]
+      </span>
+    );
+  }
+  const cls = "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 no-underline hover:bg-sky-100";
+  return href
+    ? <a href={href} className={cls}>[[{label}]]</a>
+    : <span className={cls}>[[{label}]]</span>;
+}
+
 // ── Script chip (legacy [#label](href)) ──────────────────────────────────────
 
 function ScriptChip({ label, href, title }: { label: string; href: string; title?: string }) {
@@ -163,7 +189,10 @@ function extractPlainTokens(text: string): { key: string; attrs: ContentMentionA
 }
 
 function extractCmLinks(text: string): { key: string; attrs: ContentMentionAttrs }[] {
-  const pattern = /\[#[^\]]*\]\((cm:\/\/[^\s)"]+)\)/g;
+  // href 前缀恒为 CM_HREF_PREFIX（/__cm__），不是 cm://——这里曾经写错前缀，
+  // 导致 markdown 模式的 mention-resolve 请求永远抓不到任何链接（提取的正则
+  // 匹配不了任何真实存量内容，resolved 恒空，chip 卡死在 pending）。
+  const pattern = new RegExp(`\\[#[^\\]]*\\]\\((${CM_HREF_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\s)"]+)\\)`, "g");
   const out: { key: string; attrs: ContentMentionAttrs }[] = [];
   let m: RegExpExecArray | null;
   while ((m = pattern.exec(text)) !== null) {
@@ -183,6 +212,7 @@ function renderMdInline(
   keyBase: string,
   members: MentionMember[],
   resolved: ResolvedMap,
+  resolveFailed: boolean,
   pid?: string,
 ): React.ReactNode[] {
   const segments = text.split(MD_INLINE_SPLIT);
@@ -202,17 +232,17 @@ function renderMdInline(
     }
     // Bold
     if (seg.startsWith("**") && seg.endsWith("**")) {
-      nodes.push(<strong key={key}>{renderMdInline(seg.slice(2, -2), `${key}-b`, members, resolved, pid)}</strong>);
+      nodes.push(<strong key={key}>{renderMdInline(seg.slice(2, -2), `${key}-b`, members, resolved, resolveFailed, pid)}</strong>);
       continue;
     }
     // Italic
     if (seg.startsWith("*") && seg.endsWith("*")) {
-      nodes.push(<em key={key}>{renderMdInline(seg.slice(1, -1), `${key}-i`, members, resolved, pid)}</em>);
+      nodes.push(<em key={key}>{renderMdInline(seg.slice(1, -1), `${key}-i`, members, resolved, resolveFailed, pid)}</em>);
       continue;
     }
     // Strikethrough
     if (seg.startsWith("~~") && seg.endsWith("~~")) {
-      nodes.push(<s key={key}>{renderMdInline(seg.slice(2, -2), `${key}-s`, members, resolved, pid)}</s>);
+      nodes.push(<s key={key}>{renderMdInline(seg.slice(2, -2), `${key}-s`, members, resolved, resolveFailed, pid)}</s>);
       continue;
     }
     // Link: content mention, legacy script ref, or regular link
@@ -227,13 +257,25 @@ function renderMdInline(
         }
         if (href.startsWith(CM_HREF_PREFIX)) {
           const r = resolved.get(href);
-          const label = r?.label ?? linkText;
-          let url = r?.url ? `${BASE_PATH}${r.url}` : null;
-          // wiki 引用无需 resolve 即可直链（resolve 失败/未返回时兜底）
-          if (!url && pid) {
-            const attrs = decodeMentionHref(href);
-            if (attrs?.kind === "wiki") url = `${BASE_PATH}/production/${pid}/wiki/${attrs.id}`;
+          const attrs = decodeMentionHref(href);
+          // wiki 标题恒不信任正文快照——快照可能是改名前的旧标题，未 resolve 完成/
+          // 失败时只给中性占位，绝不拿 linkText 顶上去冒充"当前标题"（同 WikiMarkdown）。
+          if (attrs?.kind === "wiki") {
+            const directUrl = pid ? `${BASE_PATH}/production/${pid}/wiki/${attrs.id}` : null;
+            if (!r) {
+              nodes.push(<WikiChip key={key} label="" state={resolveFailed ? "failed" : "pending"} />);
+              continue;
+            }
+            if (r.label === "#[已删除]") {
+              nodes.push(<WikiChip key={key} label="" state="deleted" />);
+              continue;
+            }
+            const url = r.url ? `${BASE_PATH}${r.url}` : directUrl;
+            nodes.push(<WikiChip key={key} label={r.label} href={url} />);
+            continue;
           }
+          const label = r?.label ?? linkText;
+          const url = r?.url ? `${BASE_PATH}${r.url}` : null;
           nodes.push(<ContentChip key={key} label={label.replace(/^#/, "") ? label : linkText} deleted={label === "#[已删除]"} href={url} />);
           continue;
         }
@@ -281,6 +323,7 @@ function renderMdBlock(
   idx: number,
   members: MentionMember[],
   resolved: ResolvedMap,
+  resolveFailed: boolean,
   pid?: string,
 ): React.ReactNode {
   const lines = block.split("\n").filter(l => l.trim() !== "");
@@ -293,14 +336,14 @@ function renderMdBlock(
       : level === 2 ? "text-lg font-semibold mt-3 mb-1"
       : "text-base font-semibold mt-2 mb-0.5";
     const Tag = `h${level}` as "h1" | "h2" | "h3";
-    return <Tag key={idx} className={cls}>{renderMdInline(headMatch[2], `${idx}-h`, members, resolved, pid)}</Tag>;
+    return <Tag key={idx} className={cls}>{renderMdInline(headMatch[2], `${idx}-h`, members, resolved, resolveFailed, pid)}</Tag>;
   }
 
   if (lines.every(l => /^[*-] /.test(l))) {
     return (
       <ul key={idx} className="list-disc pl-5 my-1 space-y-0.5">
         {lines.map((l, i) => (
-          <li key={i} className="text-sm">{renderMdInline(l.slice(2), `${idx}-ul-${i}`, members, resolved, pid)}</li>
+          <li key={i} className="text-sm">{renderMdInline(l.slice(2), `${idx}-ul-${i}`, members, resolved, resolveFailed, pid)}</li>
         ))}
       </ul>
     );
@@ -310,7 +353,7 @@ function renderMdBlock(
     return (
       <ol key={idx} className="list-decimal pl-5 my-1 space-y-0.5">
         {lines.map((l, i) => (
-          <li key={i} className="text-sm">{renderMdInline(l.replace(/^\d+\. /, ""), `${idx}-ol-${i}`, members, resolved, pid)}</li>
+          <li key={i} className="text-sm">{renderMdInline(l.replace(/^\d+\. /, ""), `${idx}-ol-${i}`, members, resolved, resolveFailed, pid)}</li>
         ))}
       </ol>
     );
@@ -320,7 +363,7 @@ function renderMdBlock(
   const hardParts = block.split(/\\\n/);
   const nodes: React.ReactNode[] = [];
   hardParts.forEach((part, i) => {
-    nodes.push(...renderMdInline(part, `${idx}-p-${i}`, members, resolved, pid));
+    nodes.push(...renderMdInline(part, `${idx}-p-${i}`, members, resolved, resolveFailed, pid));
     if (i < hardParts.length - 1) nodes.push(<br key={`${idx}-br-${i}`} />);
   });
   return <p key={idx} className="text-sm my-1">{nodes}</p>;
@@ -356,6 +399,7 @@ export default function SmartText({
   const members = memberMention?.members ?? [];
 
   const [resolved, setResolved] = useState<ResolvedMap>(new Map());
+  const [resolveFailed, setResolveFailed] = useState(false);
   const resolveAttempted = useRef(false);
 
   useEffect(() => {
@@ -369,9 +413,10 @@ export default function SmartText({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mentions: items.map(t => t.attrs), versionId }),
     })
-      .then(r => r.json())
-      .then((data: { labels?: (string | null)[]; urls?: (string | null)[] }) => {
-        if (!data.labels) return;
+      .then(async (res) => {
+        if (!res.ok) { setResolveFailed(true); return; }
+        const data = await res.json() as { labels?: (string | null)[]; urls?: (string | null)[] };
+        if (!data.labels) { setResolveFailed(true); return; }
         const map: ResolvedMap = new Map();
         items.forEach((t, i) => {
           const label = data.labels![i];
@@ -379,7 +424,7 @@ export default function SmartText({
         });
         setResolved(map);
       })
-      .catch(() => {});
+      .catch(() => setResolveFailed(true));
   }, [content, productionId, versionId, markdown]);
 
   if (!content) return null;
@@ -390,7 +435,7 @@ export default function SmartText({
     const blocks = normalizeLegacyMentions(content).split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
     return (
       <div className={`text-zinc-800 ${className ?? ""}`}>
-        {blocks.map((block, i) => renderMdBlock(block, i, members, resolved, productionId))}
+        {blocks.map((block, i) => renderMdBlock(block, i, members, resolved, resolveFailed, productionId))}
       </div>
     );
   }

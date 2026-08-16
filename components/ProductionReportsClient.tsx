@@ -4,7 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import type { ProductionReportEntry } from "@/lib/event-db";
 import { fmtDate } from "@/lib/tz";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+// 正文渲染必须与报告详情页（ReportViewClient）走同一管线——SmartText 的手写正则
+// 解析器不认手写 [[标题]]、无表格/代码块/嵌套列表、单回车换行会被吞，同一段正文
+// 在列表预览和详情页会渲染出两个样子。
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/my-pages.module.css";
 
 type RelFilter = "all" | "mentioned" | "follower" | "participant" | "other";
@@ -194,7 +197,7 @@ export default function ProductionReportsClient({
                       )}
                       {r.body && (
                         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
-                          <SmartText content={r.body} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                          <WikiMarkdown content={r.body} productionId={productionId} />
                         </div>
                       )}
                       <Link
@@ -354,7 +357,7 @@ export default function ProductionReportsClient({
                 </div>
                 {visibleSelected.body && (
                   <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, marginBottom: 20 }}>
-                    <SmartText content={visibleSelected.body} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                    <WikiMarkdown content={visibleSelected.body} productionId={productionId} />
                   </div>
                 )}
                 <Link
