@@ -192,6 +192,8 @@ export async function updateWiki(
     /** 协作：客户端 base 正文——与行内现值不同时在行锁事务内做行级三路合并
      *（AI review：读取-合并-写回不加锁会被并发覆盖，合并保障失效） */
     mergeBase?: string;
+    /** revision provenance（如 "ai-proposed"）——默认 writeRevision 自己的 "user"。 */
+    origin?: string;
   },
   authorUserId: string,
 ): Promise<(WikiDoc & { tags: string[] }) | null> {
@@ -255,7 +257,7 @@ export async function updateWiki(
   if (patch.title !== undefined || patch.body !== undefined || patch.mentions !== undefined) {
     const next = await getWiki(id, productionId);
     if (next) {
-      await writeRevision(id, next.title, next.body, next.mentions, authorUserId);
+      await writeRevision(id, next.title, next.body, next.mentions, authorUserId, patch.origin ?? "user");
       if (patch.body !== undefined) await syncWikiLinks(id, productionId, next.body);
     }
   }

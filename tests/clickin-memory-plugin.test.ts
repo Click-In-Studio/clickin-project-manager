@@ -11,8 +11,9 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 // 复现并防回归 #202→#203 的这类"理由没到模型"缺陷。
 //
 // docs.read/docs.propose 已随 wiki 工具组退役——通用门控机制测试改用
-// production.wiki_backlinks（只读）/production.wiki_propose（写）打靶，
-// 语义等价（前者路径参数换成 wikiId，后者仍是唯一的非只读 clickin 工具）。
+// production.wiki_backlinks（只读）/production.wiki_propose_create（写）打靶，
+// 语义等价（前者路径参数换成 wikiId，后者是四个 propose 写工具之一，
+// update/delete/move 三个兄弟的专属覆盖见下面的 describe 块）。
 
 process.env.MCP_PORT = "3198"; // 端点测试专用端口（模块顶层求值，import 前设）
 const MCP_URL = "http://127.0.0.1:3198/mcp";
@@ -84,7 +85,7 @@ async function gateToolCall(toolCallId: string) {
   const handler = hooks.get("before_tool_call")!;
   return (await handler(
     {
-      toolName: "clickin__production-wiki_propose",
+      toolName: "clickin__production-wiki_propose_create",
       params: { title: "测试文档", body: "正文", summary: "测试" },
       toolCallId,
       context: { pluginConfig: PLUGIN_CONFIG },
@@ -220,7 +221,7 @@ describe("wiki_propose 确认卡片：权限状态预持久化（工具调用权
     const handler = hooks.get("before_tool_call")!;
     const gated = (await handler(
       {
-        toolName: "clickin__production-wiki_propose",
+        toolName: "clickin__production-wiki_propose_create",
         params: { title: "插件测试文档", body: "正文", summary: "摘要" },
         toolCallId: `call_${shortId()}`,
         context: { pluginConfig: PLUGIN_CONFIG },
@@ -235,7 +236,7 @@ describe("wiki_propose 确认卡片：权限状态预持久化（工具调用权
     const handler = hooks.get("before_tool_call")!;
     const gated = (await handler(
       {
-        toolName: "clickin__production-wiki_propose",
+        toolName: "clickin__production-wiki_propose_create",
         params: { title: "不该被建的文档", body: "", summary: "摘要" },
         toolCallId: `call_${shortId()}`,
         context: { pluginConfig: PLUGIN_CONFIG },
@@ -252,6 +253,33 @@ describe("wiki_propose 确认卡片：权限状态预持久化（工具调用权
     expect(gated?.requireApproval?.severity).toBe("warning"); // undefined → 不判定 critical
     expect(gated?.requireApproval?.description).not.toContain("✅");
     expect(gated?.requireApproval?.description).not.toContain("⛔");
+  });
+
+  it("wiki_propose_update/_delete/_move 三兄弟同样按 hasPermission 出 severity（实例级门，不是 create 的域级门）", async () => {
+    const { createWiki } = await import("@/lib/wiki-db");
+    const doc = await createWiki({ productionId: prodId, title: "插件测试目标文档", createdBy: ownerId });
+    const handler = hooks.get("before_tool_call")!;
+
+    const updateGated = (await handler(
+      { toolName: "clickin__production-wiki_propose_update", params: { wikiId: doc.id, title: "改标题", summary: "" }, toolCallId: `call_${shortId()}`, context: { pluginConfig: PLUGIN_CONFIG } },
+      prodSessionCtx(ownerId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(updateGated?.requireApproval?.severity).toBe("warning");
+    expect(updateGated?.requireApproval?.description).toContain("✅");
+
+    const deleteGatedNoPerm = (await handler(
+      { toolName: "clickin__production-wiki_propose_delete", params: { wikiId: doc.id, summary: "" }, toolCallId: `call_${shortId()}`, context: { pluginConfig: PLUGIN_CONFIG } },
+      prodSessionCtx(plainMemberId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(deleteGatedNoPerm?.requireApproval?.severity).toBe("critical");
+    expect(deleteGatedNoPerm?.requireApproval?.description).toContain("⛔");
+
+    const moveGated = (await handler(
+      { toolName: "clickin__production-wiki_propose_move", params: { wikiId: doc.id, summary: "" }, toolCallId: `call_${shortId()}`, context: { pluginConfig: PLUGIN_CONFIG } },
+      prodSessionCtx(ownerId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(moveGated?.requireApproval?.severity).toBe("warning");
+    expect(moveGated?.requireApproval?.description).toContain("✅");
   });
 });
 
@@ -274,7 +302,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
     // 3. middleware 拦截被拒结果 → 经真实 HTTP 端点取理由 → 追加
     const result = (await middleware!({
       toolCallId,
-      toolName: "clickin__production-wiki_propose",
+      toolName: "clickin__production-wiki_propose_create",
       result: { content: [{ type: "text", text: "Denied by user" }] },
     })) as { result: { content: Array<{ type?: string; text?: string }> } };
 
@@ -287,7 +315,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
   it("mark is consumed once — second result for same call passes untouched", async () => {
     const again = await middleware!({
       toolCallId: "call_deny_1",
-      toolName: "clickin__production-wiki_propose",
+      toolName: "clickin__production-wiki_propose_create",
       result: { content: [{ type: "text", text: "Denied by user" }] },
     });
     expect(again).toBeUndefined();
@@ -300,7 +328,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
 
     const result = await middleware!({
       toolCallId,
-      toolName: "clickin__production-wiki_propose",
+      toolName: "clickin__production-wiki_propose_create",
       result: { content: [{ type: "text", text: "Denied by user" }] },
     });
     expect(result).toBeUndefined();
@@ -313,7 +341,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
 
     const result = await middleware!({
       toolCallId,
-      toolName: "clickin__production-wiki_propose",
+      toolName: "clickin__production-wiki_propose_create",
       result: { content: [{ type: "text", text: "已创建文档" }] },
     });
     expect(result).toBeUndefined();

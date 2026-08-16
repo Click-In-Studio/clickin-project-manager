@@ -55,7 +55,7 @@ describe("GET /api/agent/wiki-proposal：parentTitle 过可见性门", () => {
   it("发起者对父文档没有 view 权限 → parentTitle 为 null，不泄露标题", async () => {
     const toolCallId = `call_${shortId()}`;
     await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: memberId, parentWikiId: privateDocId,
+      productionId: prodId, toolCallId, proposedBy: memberId, action: "create", parentWikiId: privateDocId,
       title: "子文档", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
@@ -69,7 +69,7 @@ describe("GET /api/agent/wiki-proposal：parentTitle 过可见性门", () => {
   it("发起者对父文档有 view 权限（owner）→ 正常返回标题", async () => {
     const toolCallId = `call_${shortId()}`;
     await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: privateDocId,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: privateDocId,
       title: "子文档", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
@@ -87,11 +87,40 @@ describe("GET /api/agent/wiki-proposal：parentTitle 过可见性门", () => {
     const outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `路由测试局外人${shortId()}`, null, false)).userId;
     const toolCallId = `call_${shortId()}`;
     await insertWikiProposal({
-      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentWikiId: null,
       title: "不是你的提议", body: "", summary: "",
       hasPermission: true, permissionKey: "node:wiki/*@create",
     });
     const res = await GET(makeReq(outsiderId, toolCallId));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/agent/wiki-proposal：update/delete/move 的 targetTitle 同样过可见性门", () => {
+  it("action=update，发起者对目标文档没有 view 权限 → targetTitle/targetBody 为 null", async () => {
+    const toolCallId = `call_${shortId()}`;
+    await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: memberId, action: "update", targetWikiId: privateDocId,
+      title: "新标题", body: "", summary: "",
+      hasPermission: true, permissionKey: `node:wiki/${privateDocId}@edit`,
+    });
+    const res = await GET(makeReq(memberId, toolCallId));
+    const data = (await res.json()) as { action: string; targetTitle: string | null; targetBody: string | null };
+    expect(data.action).toBe("update");
+    expect(data.targetTitle).toBeNull();
+    expect(data.targetBody).toBeNull();
+  });
+
+  it("action=delete，发起者对目标文档有 view 权限（owner）→ 正常返回 targetTitle", async () => {
+    const toolCallId = `call_${shortId()}`;
+    await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "delete", targetWikiId: privateDocId,
+      title: null, body: "", summary: "",
+      hasPermission: true, permissionKey: `node:wiki/${privateDocId}@delete`,
+    });
+    const res = await GET(makeReq(ownerId, toolCallId));
+    const data = (await res.json()) as { action: string; targetTitle: string | null };
+    expect(data.action).toBe("delete");
+    expect(data.targetTitle).toBe("路由测试私有父文档");
   });
 });
