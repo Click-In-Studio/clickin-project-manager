@@ -6,6 +6,7 @@ import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
 import { TableKit } from "@tiptap/extension-table";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { PluginKey } from "@tiptap/pm/state";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -175,6 +176,7 @@ function Toolbar({ editor }: { editor: TiptapEditor | null }) {
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="无序列表">≡</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="有序列表">1.</ToolbarBtn>
+      <ToolbarBtn onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="任务列表">☑</ToolbarBtn>
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
@@ -350,6 +352,10 @@ export interface SmartTextareaProps {
   onKeyDown?: (e: KeyboardEvent) => void;
   autoFocus?: boolean;
   readOnly?: boolean;
+  /** markdown 模式：编辑器就绪时回调"初始 value 解析后再序列化"的结果——
+   *  调用方对比原文可检测富文本模式无法无损保留的语法（不支持的方言会被
+   *  prosemirror-markdown 转义/规范化）。 */
+  onInitialRoundTrip?: (serialized: string) => void;
 }
 
 // ── SmartTextarea ─────────────────────────────────────────────────────────────
@@ -369,7 +375,10 @@ export default function SmartTextarea({
   onKeyDown,
   autoFocus,
   readOnly = false,
+  onInitialRoundTrip,
 }: SmartTextareaProps) {
+  const onInitialRoundTripRef = useRef(onInitialRoundTrip);
+  onInitialRoundTripRef.current = onInitialRoundTrip;
   const [drop, setDrop] = useState<DropState>(null);
   const dropRef = useRef<DropState>(null);
   const lastEmittedRef = useRef(value);
@@ -521,7 +530,9 @@ export default function SmartTextarea({
       // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）；
       // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞
       ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
-         TableKit.configure({ table: { resizable: false } }), ...commonExts, wikiMentionCfg]
+         TableKit.configure({ table: { resizable: false } }),
+         TaskList, TaskItem.configure({ nested: true }),
+         ...commonExts, wikiMentionCfg]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown]);
@@ -550,6 +561,12 @@ export default function SmartTextarea({
         }
         return false;
       },
+    },
+    onCreate: ({ editor }) => {
+      if (markdown && onInitialRoundTripRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onInitialRoundTripRef.current((editor.storage as any).markdown.getMarkdown());
+      }
     },
     onUpdate: ({ editor }) => {
       if (readOnly) return;

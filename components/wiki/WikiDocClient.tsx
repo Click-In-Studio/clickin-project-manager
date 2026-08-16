@@ -61,7 +61,22 @@ export default function WikiDocClient({
     const saved = localStorage.getItem("clickin-wiki-editor-mode");
     if (saved === "source" || saved === "wysiwyg") setEditorMode(saved);
   }, []);
+  // 保真检测：富文本挂载时对比"解析→再序列化"与原文——不支持的方言语法会被
+  // prosemirror-markdown 转义/规范化，一旦编辑保存正文即被污染。失真则本篇
+  // 自动落源码模式（不写入全局偏好）+ 提示；用户仍可手动切回（lossyOverride）。
+  const [lossy, setLossy] = useState(false);
+  const lossyOverrideRef = useRef(false);
+  const normalizeForCompare = (s: string) =>
+    s.replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
+  function handleRoundTrip(serialized: string) {
+    if (lossyOverrideRef.current) return;
+    if (normalizeForCompare(serialized) !== normalizeForCompare(body)) {
+      setLossy(true);
+      setEditorMode("source");
+    }
+  }
   function switchMode(m: "wysiwyg" | "source") {
+    if (m === "wysiwyg" && lossy) lossyOverrideRef.current = true;
     setEditorMode(m);
     localStorage.setItem("clickin-wiki-editor-mode", m);
   }
@@ -90,6 +105,8 @@ export default function WikiDocClient({
     mentionsRef.current = wiki.mentions;
     savedRef.current = { title: wiki.title ?? "", body: wiki.body, tags: wiki.tags.join(" ") };
     setStatus("idle");
+    setLossy(false);
+    lossyOverrideRef.current = false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wiki.id]);
 
@@ -275,6 +292,12 @@ export default function WikiDocClient({
 
       {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
       <div className={`flex-1 flex flex-col ${canEdit ? "px-5 pb-6" : "px-8 pb-6"}`}>
+        {lossy && canEdit && (
+          <p className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 print:hidden">
+            检测到富文本模式无法无损保留的语法（其他 markdown 方言等），已用源码模式打开——
+            切回富文本并编辑会转义/规范化这些内容。
+          </p>
+        )}
         {canEdit ? (
           editorMode === "source" ? (
             <textarea
@@ -286,6 +309,7 @@ export default function WikiDocClient({
             />
           ) : (
             <SmartTextarea
+              key={wiki.id}
               value={body}
               onChange={v => { setBody(v); schedule(); }}
               markdown
@@ -298,6 +322,7 @@ export default function WikiDocClient({
               }}
               contentMention={{ productionId }}
               plugins={[wikiLinkDropPlugin(productionId)]}
+              onInitialRoundTrip={handleRoundTrip}
             />
           )
         ) : wiki.body.trim() ? (
