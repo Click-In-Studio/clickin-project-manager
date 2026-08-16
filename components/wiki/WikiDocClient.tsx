@@ -99,11 +99,13 @@ export default function WikiDocClient({
   latestRef.current = { title, body, tags: tagsInput };
 
   // ── 多人协作（SSE）：presence 头像/远端光标/内容广播合并 ────────────────────
-  const collabClientIdRef = useRef(Math.random().toString(36).slice(2));
+  const collabClientIdRef = useRef("");
   const [peers, setPeers] = useState<WikiPeer[]>([]);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // clientId 惰性生成（渲染期调 Math.random 违反 purity lint）
+    if (!collabClientIdRef.current) collabClientIdRef.current = Math.random().toString(36).slice(2);
     const cid = collabClientIdRef.current;
     const es = new EventSource(
       `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/stream?cid=${cid}`);
@@ -132,7 +134,6 @@ export default function WikiDocClient({
       } catch { /* 忽略坏帧 */ }
     });
     return () => { es.close(); setPeers([]); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wiki.id, productionId]);
 
   // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）

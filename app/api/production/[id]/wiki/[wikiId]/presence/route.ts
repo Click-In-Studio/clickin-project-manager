@@ -16,7 +16,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!await canViewWiki(toActor(session, access.permCtx), productionId, wikiId))
     return Response.json({ error: "无权访问该文档" }, { status: 403 });
 
-  const body = await req.json() as { clientId?: string; blockIndex?: number | null; offset?: number | null };
+  let body: { clientId?: string; blockIndex?: number | null; offset?: number | null };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "无效请求体" }, { status: 400 });
+  }
   if (!body.clientId) return Response.json({ error: "缺 clientId" }, { status: 400 });
   updateWikiPresence(wikiId, body.clientId, {
     userId: session.userId, userName: session.name, avatarUrl: session.avatarUrl ?? null,

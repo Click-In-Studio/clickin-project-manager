@@ -4,7 +4,6 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki-perm";
-import { mergeLines } from "@/lib/line-merge";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic } from "@/lib/wiki-db";
@@ -69,16 +68,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "标题不能为空" }, { status: 400 });
 
   try {
-    // 协作行级合并：客户端带 baseBody 且服务端已被他人推进 → 三路合并
-    // （mine=本次提交，theirs=库中现值；重叠区间 mine 胜——保存者 LWW）
-    let effectiveBody = body.body;
-    if (body.body !== undefined && body.baseBody !== undefined && existing.body !== body.baseBody) {
-      effectiveBody = mergeLines(body.baseBody, body.body, existing.body);
-    }
     if (wantsContent) {
+      // 协作行级合并在 updateWiki 行锁事务内进行（AI review：路由层读取-合并-写回
+      // 无锁会被并发覆盖）；mergeBase=客户端 base，服务端被推进时三路合并
       await updateWiki(wikiId, productionId, {
         ...(body.title !== undefined ? { title: body.title.trim() } : {}),
-        ...(effectiveBody !== undefined ? { body: effectiveBody } : {}),
+        ...(body.body !== undefined ? { body: body.body } : {}),
+        ...(body.body !== undefined && body.baseBody !== undefined ? { mergeBase: body.baseBody } : {}),
         ...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
         ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
         ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),

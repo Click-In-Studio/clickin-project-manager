@@ -15,15 +15,13 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import { BASE_PATH } from "@/lib/base-path";
-import type { JSONContent } from "@tiptap/react";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
 import type { MentionSearchResult } from "@/lib/mention-types";
 import {
-  deserializeMention,
   encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { parseLine, parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
+import { parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
 export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
