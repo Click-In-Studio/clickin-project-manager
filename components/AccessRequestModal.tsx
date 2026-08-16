@@ -99,6 +99,8 @@ type Props = {
    * When unset: free-form mode with resource type / level selectors.
    */
   permission?: string;
+  /** 预填申请理由（如 AI 调用触发的固定文案）——预填但仍可编辑，不锁死。 */
+  initialNote?: string;
   onSubmitted?: () => void;
 };
 
@@ -119,6 +121,7 @@ export default function AccessRequestModal({
   onClose,
   productionId,
   permission,
+  initialNote,
   onSubmitted,
 }: Props) {
   // Free-form mode state (only used when permission is NOT set)
@@ -136,11 +139,11 @@ export default function AccessRequestModal({
     setResourceType(RESOURCE_OPTIONS[0].type);
     setPermissionLevel(RESOURCE_OPTIONS[0].levels[0].value);
     setTtlOption("permanent");
-    setNote("");
+    setNote(initialNote ?? "");
     setError(null);
     setDone(false);
     setSubmitting(false);
-  }, [open]);
+  }, [open, initialNote]);
 
   useEffect(() => {
     if (!open) return;
@@ -224,7 +227,7 @@ export default function AccessRequestModal({
   const NODE_TYPE_LABELS: Record<string, string> = {
     task: "任务", event: "事件", cue_list: "Cue 表", scene: "章节/段落",
     character: "角色", script: "剧本", asset: "附件", member: "人员",
-    report: "报告", note: "备注", dept: "部门", production: "项目",
+    report: "报告", note: "备注", dept: "部门", production: "项目", wiki: "文档",
   };
   const NODE_VERB_LABELS: Record<string, string> = {
     view: "查看", edit: "编辑", create: "创建", delete: "删除", manage: "管理", "*": "全部操作",

@@ -14,8 +14,6 @@ describe("MCP server skeleton", () => {
     const names = Object.keys(registry).sort();
     expect(names).toEqual([
       "approvals.list",
-      "docs.propose",
-      "docs.read",
       "my.call_times",
       "my.events",
       "my.milestones",
@@ -25,6 +23,11 @@ describe("MCP server skeleton", () => {
       "production.milestones",
       "production.my_role",
       "production.notifications",
+      "production.wiki_backlinks",
+      "production.wiki_propose",
+      "production.wiki_read",
+      "production.wiki_search",
+      "production.wiki_tree",
       "users.query_sensitive",
     ]);
     await server.close();
@@ -42,9 +45,13 @@ describe("MCP server skeleton", () => {
   it("read-only tools have readOnlyHint: true; gated tools do not", async () => {
     const server = buildMcpServer();
     const registry = server["_registeredTools"] as ToolRegistry;
-    expect(registry["docs.read"]?.annotations?.readOnlyHint).toBe(true);
     expect(registry["approvals.list"]?.annotations?.readOnlyHint).toBe(true);
-    expect(registry["docs.propose"]?.annotations?.readOnlyHint).toBe(false);
+    for (const name of ["production.wiki_tree", "production.wiki_backlinks", "production.wiki_read", "production.wiki_search"]) {
+      expect(registry[name]?.annotations?.readOnlyHint, name).toBe(true);
+    }
+    // 写工具：非 readOnly → 插件 fail-closed 门控自动挂确认门（工具调用
+    // 权限门原则①），不是这里手写判断的
+    expect(registry["production.wiki_propose"]?.annotations?.readOnlyHint).toBe(false);
     // 敏感读取（即使查自己）刻意不标 readOnly——插件 fail-closed 门控
     // 据此自动挂确认门
     expect(registry["users.query_sensitive"]?.annotations?.readOnlyHint).toBeUndefined();

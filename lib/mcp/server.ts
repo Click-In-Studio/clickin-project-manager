@@ -4,6 +4,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { z } from "zod";
 import http from "http";
 import type { Request, Response } from "express";
+import { WIKI_LINK_SYNTAX_NOTE } from "./wiki-link-syntax";
 
 const rawPort = Number(process.env.MCP_PORT ?? 3101);
 const MCP_PORT = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3101;
@@ -12,19 +13,15 @@ export function buildMcpServer(): McpServer {
   const s = new McpServer({ name: "clickin", version: "0.1.0" });
 
   // 所有 clickin 工具的 schema 都声明 caller 参数（插件对一切 clickin__*
-  // 调用强制覆写注入；schema 不声明的话严格校验模式下会拒参）
+  // 调用强制覆写注入；schema 不声明的话严格校验模式下会拒参）。
+  // _tool_call_id 只有 wiki_propose 这类写工具需要（OpenClaw 网关层的
+  // toolCallId，插件在 before_tool_call 里同款强制覆写注入，见插件文件
+  // Level C 权限链注释）——放进共享 shape 图省事，读工具带着也无害。
   const callerShape = {
     _caller_user_id: z.string().optional().describe("系统注入的调用者身份，勿手动填写"),
     _caller_production_id: z.string().optional().describe("系统注入的制作语境，勿手动填写"),
+    _tool_call_id: z.string().optional().describe("系统注入的调用 id，勿手动填写"),
   };
-
-  s.registerTool("docs.read", {
-    description: "Read a vault document by path",
-    inputSchema: { path: z.string().describe("Vault-relative document path"), ...callerShape },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async ({ path }) => ({
-    content: [{ type: "text" as const, text: `[stub] docs.read → ${path}` }],
-  }));
 
   s.registerTool("approvals.list", {
     description: "List pending approval requests for a production",
@@ -141,6 +138,80 @@ export function buildMcpServer(): McpServer {
     });
   }
 
+  // ─── wiki.* 项目工具（production.* 族的一部分）─────────────────────────
+  // 四个只读工具签名各不相同（tree/search 少一个 id，backlinks/read 多一个
+  // wikiId），塞不进上面那个 (userId, productionId) 单形状的循环——照抄
+  // users.query_sensitive 的手写内联判断风格，各自独立注册。
+
+  s.registerTool("production.wiki_tree", {
+    description: "查询当前对话关联制作的文档树（wiki 库），只列出当前用户有权限看到的文档（id/标题/tag）。",
+    inputSchema: { ...callerShape },
+    annotations: READ_ONLY,
+  }, async ({ _caller_user_id, _caller_production_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    const { wikiTree } = await import("./wiki-tools");
+    return { content: [{ type: "text" as const, text: await wikiTree(_caller_user_id, _caller_production_id) }] };
+  });
+
+  s.registerTool("production.wiki_backlinks", {
+    description: "查询一篇文档的双向链接：谁链接到它（backlinks）、它链接到谁（outgoing）。",
+    inputSchema: { wikiId: z.string().describe("文档 id（来自 wiki_tree/wiki_search 的结果）"), ...callerShape },
+    annotations: READ_ONLY,
+  }, async ({ wikiId, _caller_user_id, _caller_production_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    const { wikiBacklinks } = await import("./wiki-tools");
+    return { content: [{ type: "text" as const, text: await wikiBacklinks(_caller_user_id, _caller_production_id, wikiId) }] };
+  });
+
+  s.registerTool("production.wiki_read", {
+    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）。${WIKI_LINK_SYNTAX_NOTE}`,
+    inputSchema: { wikiId: z.string().describe("文档 id（来自 wiki_tree/wiki_search 的结果）"), ...callerShape },
+    annotations: READ_ONLY,
+  }, async ({ wikiId, _caller_user_id, _caller_production_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    const { wikiRead } = await import("./wiki-tools");
+    return { content: [{ type: "text" as const, text: await wikiRead(_caller_user_id, _caller_production_id, wikiId) }] };
+  });
+
+  s.registerTool("production.wiki_search", {
+    description: "全文搜索当前对话关联制作的文档库（标题+正文），只返回当前用户有权限看到的结果。",
+    inputSchema: { query: z.string().describe("搜索关键词"), ...callerShape },
+    annotations: READ_ONLY,
+  }, async ({ query, _caller_user_id, _caller_production_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    const { wikiSearch } = await import("./wiki-tools");
+    return { content: [{ type: "text" as const, text: await wikiSearch(_caller_user_id, _caller_production_id, query) }] };
+  });
+
+  s.registerTool("production.wiki_propose", {
+    // 非 readOnly → 插件门控挂确认门（工具调用权限门原则①：有权限键但敏感，
+    // 聊天栏确认后执行）。工具函数内部再查一遍权限——没有权限键的调用点
+    // （原则②）在这里被直接拦截，不建文档，交由前端的申请权限 modal 收尾。
+    description: `在某篇文档下（或在根下）提议新建一篇子文档，需要人工在聊天栏确认；` +
+      `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
+    inputSchema: {
+      parentId: z.string().optional().describe("父文档 id；留空则建在文档库根下"),
+      title: z.string().describe("新文档标题"),
+      body: z.string().optional().describe("新文档正文（Markdown）"),
+      summary: z.string().describe("一句话说明这次提议改了什么、为什么"),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  }, async ({ parentId, title, body, summary, _caller_user_id, _caller_production_id, _tool_call_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    if (!_tool_call_id) {
+      return { content: [{ type: "text" as const, text: "拒绝：缺少调用 id（该工具只能经审批插件路径调用）。" }] };
+    }
+    const { wikiPropose } = await import("./wiki-tools");
+    const text = await wikiPropose(_caller_user_id, _caller_production_id, _tool_call_id, { parentId, title, body, summary });
+    return { content: [{ type: "text" as const, text }] };
+  });
+
   s.registerTool("users.query_sensitive", {
     // 刻意不标 readOnlyHint: true —— 插件的 fail-closed 门控会因此把它
     // 当写工具挂确认门（"AI 想查询你的联系方式" → 用户批准/拒绝）。
@@ -155,20 +226,6 @@ export function buildMcpServer(): McpServer {
     const { querySelfSensitive } = await import("./user-context");
     return { content: [{ type: "text" as const, text: await querySelfSensitive(_caller_user_id) }] };
   });
-
-  s.registerTool("docs.propose", {
-    // TODO(Phase 5): add shared-secret header check before touching real data
-    description: "Propose a document change — requires human approval before taking effect",
-    inputSchema: {
-      path: z.string().describe("Vault-relative document path"),
-      content: z.string().describe("Proposed full new content"),
-      summary: z.string().describe("Short description of what changed and why"),
-      ...callerShape,
-    },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-  }, async ({ path, summary }) => ({
-    content: [{ type: "text" as const, text: `[stub] docs.propose → path=${path} | "${summary}" — proposal queued` }],
-  }));
 
   return s;
 }
@@ -231,6 +288,58 @@ export function startMcpServer(): void {
       res.json({ ok: true });
     } catch (err) {
       console.error("[mcp] /memory-run error:", err);
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  // wiki propose 预持久化端点（供 clickin-memory 插件在 before_tool_call
+  // 构建确认卡片之前调用，仅对 production.wiki_propose）：把完整提议内容
+  // 落一行 wiki_proposal（确认卡片 description 硬上限 512 字符装不下全文，
+  // 前端预览 modal 按 tool_call_id 拉取这行）。这里算出的 hasPermission
+  // 只是给确认卡片/预览 modal 的展示值——真正的安全边界是
+  // production.wiki_propose 工具函数批准后自己重新查一遍权限，不信任这行。
+  app.post("/wiki-proposal", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as {
+      productionId?: unknown; toolCallId?: unknown; callerUserId?: unknown;
+      parentId?: unknown; title?: unknown; body?: unknown; summary?: unknown;
+    };
+    const productionId = typeof body.productionId === "string" ? body.productionId : "";
+    const toolCallId = typeof body.toolCallId === "string" ? body.toolCallId : "";
+    const callerUserId = typeof body.callerUserId === "string" ? body.callerUserId : "";
+    const title = typeof body.title === "string" ? body.title : "";
+    if (!productionId || !toolCallId || !callerUserId || !title) {
+      res.status(400).json({ error: "missing required fields" });
+      return;
+    }
+    const parentWikiId = typeof body.parentId === "string" ? body.parentId : null;
+    const docBody = typeof body.body === "string" ? body.body : "";
+    const summary = typeof body.summary === "string" ? body.summary : "";
+
+    try {
+      const { resolveProductionActor } = await import("./production-tools");
+      const { CREATE_PERMISSION_KEY } = await import("./wiki-tools");
+      const { hasEffectiveGrant } = await import("../grant-check");
+      const { insertWikiProposal } = await import("../wiki-proposal-db");
+
+      let hasPermission = false;
+      let reason: "not_member" | "archived" | "no_grant" | null = null;
+      const resolved = await resolveProductionActor(callerUserId, productionId);
+      if (!resolved) {
+        reason = "not_member";
+      } else if (resolved.isArchived) {
+        reason = "archived";
+      } else {
+        hasPermission = await hasEffectiveGrant(resolved.actor, productionId, "wiki", "*", "*", "create");
+        if (!hasPermission) reason = "no_grant";
+      }
+
+      const proposal = await insertWikiProposal({
+        productionId, toolCallId, proposedBy: callerUserId, parentWikiId,
+        title, body: docBody, summary, hasPermission, permissionKey: CREATE_PERMISSION_KEY,
+      });
+      res.json({ id: proposal.id, hasPermission, reason });
+    } catch (err) {
+      console.error("[mcp] /wiki-proposal error:", err);
       res.status(500).json({ error: "internal error" });
     }
   });

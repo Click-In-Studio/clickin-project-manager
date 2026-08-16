@@ -22,6 +22,7 @@ import { listUserNotifications } from "@/lib/inbox-db";
 import { listProductionDepts } from "@/lib/dept-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { isoToDateInput, isoToDatetimeLocal } from "@/lib/tz";
+import { toActor, type GrantActor } from "@/lib/grant-check";
 
 export const DENIED_NOT_MEMBER = "权限被拒绝：你不是该制作的成员。";
 
@@ -38,6 +39,22 @@ async function memberGate(userId: string, productionId: string): Promise<string 
   if (!profile) return DENIED_NOT_MEMBER;
   const access = await getProductionPermissionContext(userId, profile.isAdmin, productionId);
   return access ? null : DENIED_NOT_MEMBER;
+}
+
+/**
+ * 同一套 getUserProfile → getProductionPermissionContext 序列，但带出
+ * GrantActor（isOwner）+ isArchived——供需要实例级权限判定（wiki 等，
+ * lib/*-perm.ts 的 hasGrant/hasEffectiveGrant 系列）的 production.* 工具复用，
+ * 而不是只有 memberGate 的 null/拒绝文案两态。
+ */
+export async function resolveProductionActor(
+  userId: string, productionId: string,
+): Promise<{ actor: GrantActor; isArchived: boolean } | null> {
+  const profile = await getUserProfile(userId);
+  if (!profile) return null;
+  const access = await getProductionPermissionContext(userId, profile.isAdmin, productionId);
+  if (!access) return null;
+  return { actor: toActor({ userId }, access.permCtx), isArchived: access.isArchived };
 }
 
 /** production.info：项目详情（成员内公开信息，无需细分权限）。 */

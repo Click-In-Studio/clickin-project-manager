@@ -122,6 +122,31 @@ async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<stri
   }
 }
 
+// wiki propose 预持久化（确认卡片 description 硬上限 512 字符装不下完整
+// 提议内容，前端预览 modal 靠这行按 toolCallId 拉取全文）。失败/超时只是
+// 退化成旧版纯截断预览的确认文案——真正的安全边界是 production.wiki_propose
+// 工具函数批准后自己重新查一遍权限，这里挂不上不影响那条边界。
+async function postWikiProposal(
+  mcpUrl: string,
+  body: { productionId: string; toolCallId: string; callerUserId: string; parentId?: string; title: string; body: string; summary: string },
+): Promise<{ hasPermission: boolean } | null> {
+  try {
+    const origin = new URL(mcpUrl).origin;
+    const res = await fetch(`${origin}/wiki-proposal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { hasPermission?: unknown };
+    return typeof data.hasPermission === "boolean" ? { hasPermission: data.hasPermission } : null;
+  } catch (err) {
+    console.error("[clickin-memory] postWikiProposal error:", err);
+    return null;
+  }
+}
+
 // gateway 与 Next.js（MCP server）在 CD 后几乎同时启动——gateway_start
 // 拉取时 3101 可能还没监听。失败不能永久 fail closed 到下次重启：
 // before_tool_call 里按需惰性重试（30s 节流），成功一次即缓存。
@@ -249,20 +274,33 @@ export default definePluginEntry({
     // 按工具生成人类可读的确认文案（gateway 的 approval 只带 title/description
     // 两个字符串，description 上限 512——所以美化在这里做，前端只管按换行
     // 渲染；未知工具回退 JSON 预览）。字符串截断都留给调用处的 slice。
-    function describeToolCall(tool: string, params: Record<string, unknown>): { title: string; description: string } {
+    function describeToolCall(
+      tool: string, params: Record<string, unknown>, extra?: { hasPermission?: boolean },
+    ): { title: string; description: string } {
       const str = (v: unknown, cap: number): string =>
         typeof v === "string" ? (v.length > cap ? `${v.slice(0, cap)}…` : v) : String(v ?? "（无）");
       switch (tool) {
-        case "docs-propose":
+        case "production-wiki_propose": {
+          // 工具调用权限门原则：extra.hasPermission 来自 /wiki-proposal 预
+          // 持久化的展示值（不是安全边界，边界在工具函数批准后自己重查）；
+          // undefined = 预持久化没打通（超时/挂了），此时不虚构权限状态。
+          const permLine = extra?.hasPermission === true
+            ? "✅ 你有新建文档的权限，批准后会直接创建。"
+            : extra?.hasPermission === false
+              ? "⛔ 你目前没有新建文档的权限——批准后调用会被拦截、不会真的创建，转入审批流。"
+              : null;
           return {
-            title: `提议修改文档：${str(params.path, 60)}`,
+            title: `提议新建文档：${str(params.title, 60)}`,
             description: [
-              `📄 目标：${str(params.path, 80)}`,
-              `📝 摘要：${str(params.summary, 120)}`,
+              permLine,
+              `📄 标题：${str(params.title, 80)}`,
+              params.parentId ? `📂 父文档 id：${str(params.parentId, 60)}` : "📂 位置：文档库根",
+              `📝 摘要：${str(params.summary, 100)}`,
               `内容预览：`,
-              str(params.content, 220),
-            ].join("\n"),
+              str(params.body, 160),
+            ].filter((l): l is string => l !== null).join("\n"),
           };
+        }
         case "users-query_sensitive":
           return {
             title: `查询你的登记联系方式`,
@@ -302,10 +340,15 @@ export default definePluginEntry({
         const params: Record<string, unknown> = { ...e.params };
         delete params._caller_user_id;
         delete params._caller_production_id;
+        delete params._tool_call_id;
         if (identity) {
           params._caller_user_id = identity.userId;
           if (identity.productionId) params._caller_production_id = identity.productionId;
         }
+        // 同款强制覆写：toolCallId 只在插件收到的这个事件里有（MCP 工具
+        // handler 自己的 requestId 是另一层，拿不到），写工具（wiki_propose）
+        // 靠这个字段回填自己那行 wiki_proposal。
+        if (e.toolCallId) params._tool_call_id = e.toolCallId;
 
         if (!cfg.approvalEnabled) return { params };
         // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。
@@ -322,8 +365,29 @@ export default definePluginEntry({
         // 只读直通也要带上身份覆写。
         if (annotationsLoaded && readOnlyTools.has(e.toolName)) return { params };
 
-        const pretty = describeToolCall(e.toolName.slice(MCP_TOOL_PREFIX.length), e.params ?? {});
+        const bareTool = e.toolName.slice(MCP_TOOL_PREFIX.length);
         const toolCallId = e.toolCallId;
+
+        // wiki propose 专属：确认卡片建好之前先把完整提议内容 + 权限判定
+        // 预持久化（供前端预览 modal 按 toolCallId 拉取全文，description
+        // 512 字符装不下）。失败/超时 hasPermission 为 undefined——
+        // describeToolCall 据此不虚构权限状态，仍照旧走确认门（工具函数
+        // 批准后自己重新查权限，真正的安全边界不受这次预持久化成败影响）。
+        let wikiHasPermission: boolean | undefined;
+        if (bareTool === "production-wiki_propose" && identity?.productionId && toolCallId) {
+          const posted = await postWikiProposal(cfg.mcpUrl, {
+            productionId: identity.productionId,
+            toolCallId,
+            callerUserId: identity.userId,
+            parentId: typeof e.params.parentId === "string" ? e.params.parentId : undefined,
+            title: typeof e.params.title === "string" ? e.params.title : "",
+            body: typeof e.params.body === "string" ? e.params.body : "",
+            summary: typeof e.params.summary === "string" ? e.params.summary : "",
+          });
+          wikiHasPermission = posted?.hasPermission;
+        }
+
+        const pretty = describeToolCall(bareTool, e.params ?? {}, { hasPermission: wikiHasPermission });
         return {
           // 身份覆写在批准后应用（gateway 语义：approval 时快照 params，
           // 批准成功才生效）
@@ -331,7 +395,7 @@ export default definePluginEntry({
           requireApproval: {
             title: pretty.title.slice(0, 80),
             description: pretty.description.slice(0, 512),
-            severity: "warning" as const,
+            severity: wikiHasPermission === false ? "critical" as const : "warning" as const,
             // v1 不做 allow-always 持久化（OpenClaw 不自动记，插件自存是
             // Phase 4 后续项），所以只提供一次性放行
             allowedDecisions: ["allow-once", "deny"] as Array<"allow-once" | "deny">,

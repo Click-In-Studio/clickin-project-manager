@@ -2967,6 +2967,83 @@
       "nullable": false
     }
   ],
+  "wiki_proposal": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tool_call_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "proposed_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "parent_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "summary",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "has_permission",
+      "type": "boolean",
+      "nullable": false
+    },
+    {
+      "column": "permission_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'pending'::text"
+    },
+    {
+      "column": "created_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "resolved_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "wiki_revision": [
     {
       "column": "id",
