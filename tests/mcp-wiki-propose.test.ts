@@ -157,3 +157,46 @@ describe("POST /wiki-proposal 预持久化端点", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("insertWikiProposal 幂等（AI review #249：网关重试/重放同一 toolCallId 不该堆孤儿行）", () => {
+  it("同一 toolCallId 重复插入且仍 pending → 回填同一行，不是两行", async () => {
+    const toolCallId = `call_${shortId()}`;
+    const first = await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      title: "第一次预持久化", body: "", summary: "",
+      hasPermission: true, permissionKey: "node:wiki/*@create",
+    });
+    const second = await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      title: "第二次预持久化（内容更新）", body: "", summary: "",
+      hasPermission: true, permissionKey: "node:wiki/*@create",
+    });
+    expect(second.id).toBe(first.id); // 同一行，不是新行
+    expect(second.title).toBe("第二次预持久化（内容更新）"); // pending 时内容可刷新
+
+    const count = await getPool().query(
+      "SELECT count(*)::int AS n FROM wiki_proposal WHERE production_id = $1 AND tool_call_id = $2",
+      [prodId, toolCallId],
+    );
+    expect(count.rows[0].n).toBe(1);
+  });
+
+  it("已 resolve（applied）的行不会被重放的预持久化覆盖", async () => {
+    const toolCallId = `call_${shortId()}`;
+    const pending = await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      title: "将被应用的提议", body: "", summary: "",
+      hasPermission: true, permissionKey: "node:wiki/*@create",
+    });
+    await wikiPropose(ownerId, prodId, toolCallId, { title: "将被应用的提议", summary: "" });
+
+    const replay = await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: ownerId, parentWikiId: null,
+      title: "重放不该生效的标题", body: "", summary: "",
+      hasPermission: true, permissionKey: "node:wiki/*@create",
+    });
+    expect(replay.id).toBe(pending.id);
+    expect(replay.status).toBe("applied"); // 没被打回 pending
+    expect(replay.title).toBe("将被应用的提议"); // 内容没被重放覆盖
+  });
+});

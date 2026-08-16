@@ -39,6 +39,9 @@ function rowToProposal(r: WikiProposalRow): WikiProposal {
   };
 }
 
+/** upsert：插件 before_tool_call 若因网关重试/重放对同一 toolCallId 再调一次
+ *（AI review #249），幂等回填同一行而不是堆出孤儿 pending 行——只在仍是
+ *  pending 时刷新内容，已经 resolve 过的行（applied/blocked/rejected）不倒退。 */
 export async function insertWikiProposal(params: {
   productionId: string; toolCallId: string; proposedBy: string;
   parentWikiId?: string | null; title: string; body: string; summary: string;
@@ -49,6 +52,11 @@ export async function insertWikiProposal(params: {
        (production_id, tool_call_id, proposed_by, parent_wiki_id, title, body, summary,
         has_permission, permission_key)
      VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9)
+     ON CONFLICT (production_id, tool_call_id) DO UPDATE SET
+       parent_wiki_id = EXCLUDED.parent_wiki_id, title = EXCLUDED.title, body = EXCLUDED.body,
+       summary = EXCLUDED.summary, has_permission = EXCLUDED.has_permission,
+       permission_key = EXCLUDED.permission_key
+       WHERE wiki_proposal.status = 'pending'
      RETURNING id::text AS id, production_id, tool_call_id, proposed_by::text AS proposed_by,
                parent_wiki_id::text AS parent_wiki_id, title, body, summary,
                has_permission, permission_key, status, created_wiki_id::text AS created_wiki_id,
@@ -59,7 +67,12 @@ export async function insertWikiProposal(params: {
       params.hasPermission, params.permissionKey,
     ],
   );
-  return rowToProposal(res.rows[0]);
+  // WHERE 子句在冲突且已 resolve 时不更新——RETURNING 该情况下为空，
+  // 回退查一次已有行（保持函数总有返回值的契约不变）。
+  if (res.rows[0]) return rowToProposal(res.rows[0]);
+  const existing = await getWikiProposalByToolCallId(params.productionId, params.toolCallId, params.proposedBy);
+  if (!existing) throw new Error("wiki_proposal upsert 冲突但查不到已有行（不该发生）");
+  return existing;
 }
 
 /** 自范围：只认 proposedBy 自己发起的那一行——预览/审批入口都不该看到别人的调用详情。 */

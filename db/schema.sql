@@ -673,10 +673,9 @@ CREATE TABLE IF NOT EXISTS wiki_proposal (
                     CHECK (status IN ('pending', 'applied', 'blocked_no_permission', 'rejected')),
   created_wiki_id UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  resolved_at     TIMESTAMPTZ NULL
+  resolved_at     TIMESTAMPTZ NULL,
+  CONSTRAINT wiki_proposal_production_tool_call_uniq UNIQUE (production_id, tool_call_id)
 );
-
-CREATE INDEX IF NOT EXISTS wiki_proposal_tool_call_idx ON wiki_proposal (tool_call_id);
 
 -- 默认文档树（add-wiki-default-tree.sql）：production 级 wiki 配置
 --（未来扩展：改配置=改根目录名/开关默认目录）；锚点是普通 wiki，锚认 id 不认位置

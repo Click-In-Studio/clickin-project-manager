@@ -31,9 +31,10 @@ CREATE TABLE IF NOT EXISTS wiki_proposal (
                     CHECK (status IN ('pending', 'applied', 'blocked_no_permission', 'rejected')),
   created_wiki_id UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  resolved_at     TIMESTAMPTZ NULL
+  resolved_at     TIMESTAMPTZ NULL,
+  -- 插件 before_tool_call 重试/网关重放同一个 toolCallId 时幂等回填这一行，
+  -- 而不是堆出孤儿 pending 行（AI review #249 指出）。
+  CONSTRAINT wiki_proposal_production_tool_call_uniq UNIQUE (production_id, tool_call_id)
 );
-
-CREATE INDEX IF NOT EXISTS wiki_proposal_tool_call_idx ON wiki_proposal (tool_call_id);
 
 COMMIT;
