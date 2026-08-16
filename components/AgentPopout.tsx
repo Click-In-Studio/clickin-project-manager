@@ -51,6 +51,7 @@ export default function AgentPopout({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previewToolCallId, setPreviewToolCallId] = useState<string | null>(null);
   const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
+  const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -94,17 +95,20 @@ export default function AgentPopout({
     }
   }, [productionId, activeKey, inScope]);
 
-  // 附带当前文档 chip：换文档/离开文档页时重取标题、默认重新勾选附带。
+  // 附带当前文档 chip：换文档/离开文档页时重取标题+tag、默认重新勾选附带。
+  // 只取标题/tag/id——不拉正文（下面注释解释为什么）。
   useEffect(() => {
-    if (!currentWikiId || !productionId) { setCurrentDocTitle(null); return; }
+    if (!currentWikiId || !productionId) { setCurrentDocTitle(null); setCurrentDocTags([]); return; }
     setDocAttached(true);
     let alive = true;
     fetch(`/api/production/${productionId}/wiki/${currentWikiId}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { wiki?: { title: string | null } } | null) => {
-        if (alive) setCurrentDocTitle(data?.wiki?.title ?? null);
+      .then((data: { wiki?: { title: string | null; tags?: string[] } } | null) => {
+        if (!alive) return;
+        setCurrentDocTitle(data?.wiki?.title ?? null);
+        setCurrentDocTags(data?.wiki?.tags ?? []);
       })
-      .catch(() => { if (alive) setCurrentDocTitle(null); });
+      .catch(() => { if (alive) { setCurrentDocTitle(null); setCurrentDocTags([]); } });
     return () => { alive = false; };
   }, [currentWikiId, productionId]);
 
@@ -258,21 +262,14 @@ export default function AgentPopout({
     setInput("");
     setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
 
-    // 附带当前文档：现阶段就是把正文拼进实际发出的消息文本（未来计划经
-    // 插件做 system text 级注入，这里先用最直接的方式落地）。
+    // 附带当前文档：只注入标题/tag/id 这几个指针字段，不塞正文——AI 已经有
+    // wiki_read(id) 工具，需要正文自己按 id 取；把整篇文章暴力拼进每条消息
+    // 既浪费 token，文档一大还可能顶爆上下文。现阶段是字面文本注入（未来
+    // 计划经插件做 system text 级注入），先用最直接的方式落地。
     let message = raw;
-    if (docAttached && currentWikiId && productionId) {
-      try {
-        const docRes = await fetch(`/api/production/${productionId}/wiki/${currentWikiId}`);
-        if (docRes.ok) {
-          const data = (await docRes.json()) as { wiki?: { title: string | null; body: string } };
-          if (data.wiki) {
-            message = `[附带文档:《${data.wiki.title ?? "无标题"}》]\n${data.wiki.body}\n---\n${raw}`;
-          }
-        }
-      } catch {
-        // 附带失败就退化成不附带，别挡发送
-      }
+    if (docAttached && currentWikiId && currentDocTitle) {
+      const tagStr = currentDocTags.length > 0 ? `，标签：${currentDocTags.join("、")}` : "";
+      message = `[附带文档：《${currentDocTitle}》（id: ${currentWikiId}${tagStr}）——如需正文，用 wiki_read 读取该 id]\n${raw}`;
     }
 
     const res = await fetch("/api/agent/chat/stream", {
@@ -288,7 +285,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
