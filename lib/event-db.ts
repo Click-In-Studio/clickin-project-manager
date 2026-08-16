@@ -1,5 +1,7 @@
 import { getPool } from "./pg";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants } from "./resource-grant-db";
+import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki-db";
+import { keyBetween } from "./lex-order";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1452,36 +1454,47 @@ export async function getReportByProduction(id: string, productionId: string): P
 export async function createEventReport(data: {
   id: string; eventId: string; reportType: string;
   title: string; body: string; createdBy: string;
+  /** 文档树落位：undefined=默认树（报告/<event>/ 之下）、null=不挂、string=自定义父文档 */
+  parentWikiId?: string | null;
 }): Promise<EventReport> {
   // 拆分模型：wiki=内容实体、event_report=挂载边（id 即边 id）
   const client = await getPool().connect();
   let row: ReportRow;
+  let productionId: string;
+  let wikiId: string;
   try {
     await client.query("BEGIN");
     const prodRow = await client.query<{ production_id: string }>(
       "SELECT production_id FROM production_event WHERE id = $1", [data.eventId]
     );
     if (!prodRow.rows[0]) throw new Error(`event not found: ${data.eventId}`);
+    productionId = prodRow.rows[0].production_id;
     const wikiRow = await client.query<{ id: string }>(
       `INSERT INTO wiki (production_id, title, body, created_by)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [prodRow.rows[0].production_id, data.title, data.body, data.createdBy]
+       VALUES ($1, $2, $3, $4) RETURNING id::text AS id`,
+      [productionId, data.title, data.body, data.createdBy]
     );
+    wikiId = wikiRow.rows[0].id;
     const res = await client.query<ReportRow>(
       `INSERT INTO event_report (id, event_id, report_type, wiki_id)
-       VALUES ($1,$2,$3,$4)
+       VALUES ($1,$2,$3,$4::uuid)
        RETURNING id, event_id, report_type, created_at, updated_at, published_at`,
-      [data.id, data.eventId, data.reportType, wikiRow.rows[0].id]
+      [data.id, data.eventId, data.reportType, wikiId]
     );
     await client.query("COMMIT");
     row = { ...res.rows[0], title: data.title, body: data.body, created_by: data.createdBy, mentions: [] } as ReportRow;
-    await writeReportGrants(data.id, prodRow.rows[0].production_id, data.createdBy, data.eventId);
+    await writeReportGrants(data.id, productionId, data.createdBy, data.eventId);
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
   } finally {
     client.release();
   }
+  // 默认文档树落位（拍板 §4-9）：自定义挂载除外（null=不挂）；配置关闭时 ensure 返回 null
+  const parent = data.parentWikiId === undefined
+    ? await ensureReportTreeAnchors(productionId, data.eventId)
+    : data.parentWikiId;
+  if (parent) await placeWikiUnder(wikiId, productionId, parent);
   return rowToReport(row);
 }
 
@@ -1520,10 +1533,13 @@ export async function updateEventReport(
 }
 
 export async function deleteEventReport(id: string, eventId: string): Promise<void> {
-  // 边删除 + 内容实体删除（wiki 独立文档库上线前，report 内容随边生灭）
+  // 边删除 + 内容实体删除（report 内容随边生灭）。
+  // note 的 wiki 一并删除：note 边随 report 边 FK 级联，但 note wiki 不清理会成
+  // 孤儿——默认文档树后它们有标题有父节点，父被删即飘根（可见垃圾）
   await getPool().query(
-    `WITH edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
-     DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge)`,
+    `WITH note_wikis AS (SELECT wiki_id FROM event_report_note WHERE report_id = $1),
+          edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
+     DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge UNION SELECT wiki_id FROM note_wikis WHERE EXISTS (SELECT 1 FROM edge))`,
     [id, eventId]
   );
 }
@@ -1548,17 +1564,28 @@ export async function createReportNote(data: {
   content: string; authorUserId: string; authorName: string;
   mentions?: Mention[]; createdVia: "dept" | "wildcard" | "moderator";
 }): Promise<EventReportNote> {
-  // 拆分模型：note 内容进 wiki 实体，边表只存 (report, wiki, dept) 联合关系
+  // 拆分模型：note 内容进 wiki 实体，边表只存 (report, wiki, dept) 联合关系。
+  // 默认文档树（拍板 §4-9）：note wiki 赋题「<部门> · 备注」并自动挂在报告文档下
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const tail = await client.query<{ sort_key: string | null }>(
+      `SELECT w.sort_key FROM wiki w
+       WHERE w.parent_id = (SELECT wiki_id FROM event_report WHERE id = $1)
+         AND w.sort_key IS NOT NULL
+       ORDER BY w.sort_key DESC LIMIT 1`,
+      [data.reportId]
+    );
     const wikiRow = await client.query<{ id: string }>(
-      `INSERT INTO wiki (production_id, body, mentions, created_by)
-       SELECT pe.production_id, $1, $2, $3
-       FROM event_report er JOIN production_event pe ON pe.id = er.event_id
+      `INSERT INTO wiki (production_id, title, body, mentions, created_by, parent_id, sort_key)
+       SELECT pe.production_id, pd.name || ' · 备注', $1, $2, $3, er.wiki_id, $5
+       FROM event_report er
+       JOIN production_event pe ON pe.id = er.event_id
+       JOIN production_dept pd ON pd.id = $6::uuid
        WHERE er.id = $4
        RETURNING id`,
-      [data.content, JSON.stringify(data.mentions ?? []), data.authorUserId, data.reportId]
+      [data.content, JSON.stringify(data.mentions ?? []), data.authorUserId, data.reportId,
+       keyBetween(tail.rows[0]?.sort_key ?? null, null), data.departmentId]
     );
     await client.query(
       `INSERT INTO event_report_note (id, report_id, department_id, wiki_id, created_via)
