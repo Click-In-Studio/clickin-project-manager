@@ -587,22 +587,35 @@ export async function updateProductionEvent(
   if ("versionId" in fields)            sets.push(`version_id  = $${vals.push(fields.versionId ?? null)}`);
   if (!sets.length) return getProductionEvent(id, productionId);
   sets.push(`updated_at = now()`);
-  const res = await getPool().query<EventRow>(
-    `UPDATE production_event SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2
-     RETURNING id, production_id, title, event_type, location,
-               start_time, end_time, status, description, chat_id, version_id,
-               created_by, created_at, updated_at`,
-    vals
-  );
-  // W5 拍板：event 改名同步文档树的事件目录标题（锚定语义——目录名跟 event 走）
-  if (fields.title !== undefined && res.rows[0]) {
-    await getPool().query(
-      `UPDATE wiki SET title = $3, updated_at = now()
-       WHERE id = (SELECT report_doc_wiki_id FROM production_event WHERE id = $1 AND production_id = $2)`,
-      [id, productionId, fields.title],
+  // W5 拍板：event 改名同步文档树的事件目录标题（锚定语义——目录名跟 event 走）；
+  // 与 event 更新同事务（AI review #4：分开写失败会留改名/目录名脱钩半态）
+  const client = await getPool().connect();
+  let row: EventRow | undefined;
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<EventRow>(
+      `UPDATE production_event SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2
+       RETURNING id, production_id, title, event_type, location,
+                 start_time, end_time, status, description, chat_id, version_id,
+                 created_by, created_at, updated_at`,
+      vals
     );
+    row = res.rows[0];
+    if (fields.title !== undefined && row) {
+      await client.query(
+        `UPDATE wiki SET title = $3, updated_at = now()
+         WHERE id = (SELECT report_doc_wiki_id FROM production_event WHERE id = $1 AND production_id = $2)`,
+        [id, productionId, fields.title],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
-  return res.rows[0] ? rowToEvent(res.rows[0]) : null;
+  return row ? rowToEvent(row) : null;
 }
 
 export async function deleteProductionEvent(id: string, productionId: string): Promise<void> {
@@ -1514,17 +1527,29 @@ export async function createEventReport(data: {
 export async function mountWikiAsReport(data: {
   id: string; eventId: string; wikiId: string; reportType: string; createdBy: string;
 }): Promise<EventReport | null> {
-  const pool = getPool();
-  const res = await pool.query<{ id: string; production_id: string }>(
-    `INSERT INTO event_report (id, event_id, report_type, wiki_id)
-     SELECT $1, $2, $3, w.id
-     FROM wiki w JOIN production_event pe ON pe.production_id = w.production_id
-     WHERE w.id = $4::uuid AND pe.id = $2
-     RETURNING id, (SELECT production_id FROM production_event WHERE id = $2) AS production_id`,
-    [data.id, data.eventId, data.reportType, data.wikiId]
-  );
-  if (!res.rows[0]) return null;
-  await writeReportGrants(data.id, res.rows[0].production_id, data.createdBy, data.eventId);
+  // 非法 uuid 直接判不存在（AI review #3：裸 ::uuid cast 会 22P02 打成 500）
+  if (!/^[0-9a-fA-F-]{36}$/.test(data.wikiId)) return null;
+  // 边插入 + 挂载者行集同事务（AI review #2：行集写失败不留无主挂载边）
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<{ id: string; production_id: string }>(
+      `INSERT INTO event_report (id, event_id, report_type, wiki_id)
+       SELECT $1, $2, $3, w.id
+       FROM wiki w JOIN production_event pe ON pe.production_id = w.production_id
+       WHERE w.id = $4::uuid AND pe.id = $2
+       RETURNING id, (SELECT production_id FROM production_event WHERE id = $2) AS production_id`,
+      [data.id, data.eventId, data.reportType, data.wikiId]
+    );
+    if (!res.rows[0]) { await client.query("ROLLBACK"); return null; }
+    await writeReportGrants(data.id, res.rows[0].production_id, data.createdBy, data.eventId, client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
   return getEventReport(data.id, data.eventId);
 }
 
@@ -1580,32 +1605,41 @@ export async function deleteEventReport(id: string, eventId: string): Promise<vo
   // 收缩。作者行集接管（§0.9 定式 C-7）：报告权限锚在边节点、边亡即失效，
   // 不补 wiki 行集则连作者都失访——对 report/note wiki 的 created_by 发
   // wiki manage 行集。文档本体此后在文档库删除（deleteWiki）。
-  const pool = getPool();
-  const owners = await pool.query<{ wiki_id: string; production_id: string; created_by: string | null }>(
-    `SELECT w.id::text AS wiki_id, w.production_id, w.created_by::text AS created_by
-     FROM event_report er JOIN wiki w ON w.id = er.wiki_id
-     WHERE er.id = $1 AND er.event_id = $2
-     UNION ALL
-     SELECT w.id::text, w.production_id, w.created_by::text
-     FROM event_report_note n
-     JOIN event_report er ON er.id = n.report_id
-     JOIN wiki w ON w.id = n.wiki_id
-     WHERE n.report_id = $1 AND er.event_id = $2`,
-    [id, eventId]
-  );
-  const res = await pool.query(
-    `DELETE FROM event_report WHERE id = $1 AND event_id = $2`, [id, eventId]);
-  if (res.rowCount === 0) return;
-  for (const o of owners.rows) {
-    if (o.created_by) await writeWikiGrants(o.wiki_id, o.production_id, o.created_by);
+  // 单事务（AI review #1/#5）：DELETE...RETURNING 原子取 owner（无 TOCTOU 窗口），
+  // 行集接管与死行清理同事务——任一步失败整体回滚，不留"边亡且作者失访"半态
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const owners = await client.query<{ wiki_id: string; production_id: string; created_by: string | null }>(
+      `WITH note_wikis AS (SELECT wiki_id FROM event_report_note WHERE report_id = $1),
+            edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
+       SELECT w.id::text AS wiki_id, w.production_id, w.created_by::text AS created_by
+       FROM wiki w
+       WHERE w.id IN (
+         SELECT wiki_id FROM edge
+         UNION
+         SELECT nw.wiki_id FROM note_wikis nw WHERE EXISTS (SELECT 1 FROM edge)
+       )`,
+      [id, eventId]
+    );
+    if (owners.rows.length === 0) { await client.query("COMMIT"); return; }
+    for (const o of owners.rows) {
+      if (o.created_by) await writeWikiGrants(o.wiki_id, o.production_id, o.created_by, client);
+    }
+    // 边节点权限行清理（resource_id=边 id，边亡即死行）
+    await client.query(
+      `DELETE FROM production_member_grant WHERE resource_type = 'report' AND resource_id = $1`, [id]);
+    await client.query(
+      `DELETE FROM resource_dept_manage WHERE resource_type = 'report' AND resource_id = $1`, [id]);
+    await client.query(
+      `DELETE FROM resource_person_manage WHERE resource_type = 'report' AND resource_id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
-  // 边节点权限行清理（resource_id=边 id，边亡即死行）
-  await pool.query(
-    `DELETE FROM production_member_grant WHERE resource_type = 'report' AND resource_id = $1`, [id]);
-  await pool.query(
-    `DELETE FROM resource_dept_manage WHERE resource_type = 'report' AND resource_id = $1`, [id]);
-  await pool.query(
-    `DELETE FROM resource_person_manage WHERE resource_type = 'report' AND resource_id = $1`, [id]);
 }
 
 // ─── Report Notes ─────────────────────────────────────────────────────────────

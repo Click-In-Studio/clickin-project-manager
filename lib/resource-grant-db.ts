@@ -9,6 +9,10 @@
  *   - manage 级：user 是上述 dept 的 POC
  */
 import { getPool } from "./pg";
+import type { Pool, PoolClient } from "pg";
+
+/** 可注入连接：调用方在事务内传 client，缺省用池（W5 AI review——多步写点须同事务） */
+type Queryable = Pool | PoolClient;
 
 // ─── Generic resource grant helpers ──────────────────────────────────────────
 
@@ -495,8 +499,9 @@ export async function writeReportGrants(
   productionId: string,
   createdBy: string,
   eventId: string,
+  db: Queryable = getPool(),
 ): Promise<void> {
-  const pool = getPool();
+  const pool = db;
   // 批C：创建者获 REPORT manage 行集（动词行取代 manage 单行）
   for (const [sub, verb] of REPORT_LEVEL_ROW_SETS.manage) {
     await pool.query(
@@ -541,8 +546,9 @@ export async function writeWikiGrants(
   wikiId: string,
   productionId: string,
   createdBy: string,
+  db: Queryable = getPool(),
 ): Promise<void> {
-  const pool = getPool();
+  const pool = db;
   for (const [sub, verb] of WIKI_LEVEL_ROW_SETS.manage) {
     await pool.query(
       `INSERT INTO production_member_grant
