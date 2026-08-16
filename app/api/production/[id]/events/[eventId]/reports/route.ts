@@ -46,9 +46,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const body = (await req.json()) as {
     title?: string; reportType?: string; body?: string;
+    /** 文档树自定义挂载（W5 透传）：缺省=默认树、null=不挂、string=自定义父文档 */
+    parentWikiId?: string | null;
   };
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
+  if (body.parentWikiId !== undefined && body.parentWikiId !== null && typeof body.parentWikiId !== "string")
+    return Response.json({ error: "无效的挂载位置" }, { status: 400 });
 
   const report = await createEventReport({
     id: uid(),
@@ -57,6 +61,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     title,
     body: body.body ?? "",
     createdBy: session.userId,
+    ...(body.parentWikiId !== undefined ? { parentWikiId: body.parentWikiId } : {}),
   });
   return Response.json({ report }, { status: 201 });
 }

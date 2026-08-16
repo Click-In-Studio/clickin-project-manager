@@ -392,6 +392,18 @@ export default function ReportViewClient({
         <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--muted)" }}>
           {REPORT_TYPE_LABELS[report.reportType] ?? report.reportType}
           {report.publishedAt && ` · ${fmtDate(report.publishedAt)}`}
+          {/* W5 统一日：报告=挂载在 event 的 wiki 文档，给出文档库入口 */}
+          {report.wikiId && (
+            <>
+              {" · "}
+              <Link
+                href={`/production/${productionId}/wiki/${report.wikiId}`}
+                style={{ color: "#0369a1", textDecoration: "none" }}
+              >
+                在文档库中打开 ↗
+              </Link>
+            </>
+          )}
         </p>
 
         <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "0 0 20px" }} />

@@ -174,9 +174,10 @@ describe("default report tree", () => {
     expect(list.some(w => !w.isAnchor)).toBe(true);
   });
 
-  it("deleting a report removes its note wikis (no orphans floating to root)", async () => {
+  it("deleting a report unmounts (edge dies, docs survive; author takes over via wiki rows)", async () => {
+    // W5 统一日：删除=解除挂载≠删文档；作者行集接管（§0.9 C-7）
     const reportId = `rp${shortId()}`;
-    await createEventReport({ id: reportId, eventId: eventB, reportType: "rehearsal", title: "将被删除", body: "x", createdBy: creator });
+    await createEventReport({ id: reportId, eventId: eventB, reportType: "rehearsal", title: "将被解除挂载", body: "x", createdBy: creator });
     const noteId = `rn${shortId()}`;
     await createReportNote({
       id: noteId, reportId, departmentId: deptId,
@@ -187,8 +188,35 @@ describe("default report tree", () => {
     const rWikiId = await reportWikiId(reportId);
 
     await deleteEventReport(reportId, eventB);
-    const remain = await getPool().query(
-      `SELECT 1 FROM wiki WHERE id = ANY($1::uuid[])`, [[rWikiId, noteWikiId]]);
-    expect(remain.rows.length).toBe(0);
+
+    // 边亡
+    const edges = await getPool().query(
+      `SELECT 1 FROM event_report WHERE id = $1 UNION ALL SELECT 1 FROM event_report_note WHERE id = $2`,
+      [reportId, noteId]);
+    expect(edges.rows.length).toBe(0);
+    // 文档存（树位置保留：note wiki 仍是报告文档的子文档）
+    const noteRow = await wikiRow(noteWikiId);
+    expect((await wikiRow(rWikiId))).not.toBeNull();
+    expect(noteRow?.parent_id).toBe(rWikiId);
+    // 作者行集接管：creator 获 wiki manage 行（含 grants@edit 保留段）
+    const grants = await getPool().query(
+      `SELECT 1 FROM production_member_grant
+       WHERE resource_type = 'wiki' AND resource_id = $1 AND user_id = $2
+         AND resource_sub = 'grants' AND permission_level = 'edit' AND NOT is_revoked`,
+      [rWikiId, creator]);
+    expect(grants.rows.length).toBe(1);
+    // 边节点权限死行清理
+    const deadRows = await getPool().query(
+      `SELECT 1 FROM production_member_grant WHERE resource_type = 'report' AND resource_id = $1`,
+      [reportId]);
+    expect(deadRows.rows.length).toBe(0);
+  });
+
+  it("event rename propagates to its report-tree directory doc title", async () => {
+    const eventDocId = await ensureReportTreeAnchors(prodId, eventA);
+    const { updateProductionEvent } = await import("@/lib/event-db");
+    await updateProductionEvent(eventA, prodId, { title: "八一四联排（改）" });
+    expect((await wikiRow(eventDocId!))?.title).toBe("八一四联排（改）");
+    await updateProductionEvent(eventA, prodId, { title: "八一四联排" });
   });
 });
