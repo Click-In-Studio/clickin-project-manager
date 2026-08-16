@@ -656,6 +656,27 @@ CREATE TABLE IF NOT EXISTS wiki_revision (
 
 CREATE INDEX IF NOT EXISTS wiki_revision_wiki_idx ON wiki_revision (wiki_id, created_at);
 
+-- AI propose staging（add-wiki-proposal.sql）：production.wiki_propose 工具调用的落地凭证。
+-- 不复用 wiki_revision.origin——该表是「已发生的真实历史」，没有拒绝/拦截态。
+CREATE TABLE IF NOT EXISTS wiki_proposal (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  tool_call_id    TEXT        NOT NULL,
+  proposed_by     UUID        NOT NULL REFERENCES app_user(id),
+  parent_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  title           TEXT        NOT NULL,
+  body            TEXT        NOT NULL DEFAULT '',
+  summary         TEXT        NOT NULL DEFAULT '',
+  has_permission  BOOLEAN     NOT NULL,
+  permission_key  TEXT        NOT NULL,
+  status          TEXT        NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'applied', 'blocked_no_permission', 'rejected')),
+  created_wiki_id UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at     TIMESTAMPTZ NULL,
+  CONSTRAINT wiki_proposal_production_tool_call_uniq UNIQUE (production_id, tool_call_id)
+);
+
 -- 默认文档树（add-wiki-default-tree.sql）：production 级 wiki 配置
 --（未来扩展：改配置=改根目录名/开关默认目录）；锚点是普通 wiki，锚认 id 不认位置
 CREATE TABLE IF NOT EXISTS production_wiki_config (

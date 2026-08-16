@@ -7,6 +7,10 @@ export type ApprovalInfo = {
   description: string;
   severity: "info" | "warning" | "critical";
   allowedDecisions: string[];
+  // 关联的 MCP 工具调用 id——同一字段名/来源同 client.ts 的 ApprovalRequest，
+  // 已经随 relay 原样 JSON 序列化过来了，这里补声明才能让前端读它（如
+  // WikiProposalPreviewModal 按它拉取完整提议详情）。
+  toolCallId?: string;
 };
 
 export type Bubble =

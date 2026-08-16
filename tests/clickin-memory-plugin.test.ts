@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { EventEmitter } from "node:events";
+import { makeProduction, cleanupProduction, shortId } from "./factories";
+import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 
 // clickin-memory 插件的确认门 + 拒绝理由链路集成测试。
 // openclaw SDK import 由 vitest alias 换成身份包装替身（tests/mocks/），
@@ -7,6 +9,10 @@ import { EventEmitter } from "node:events";
 //   before_tool_call → requireApproval → onResolution("deny") 标记
 //   → middleware 拦被拒结果 → 经真实 MCP HTTP 端点取理由 → 追加 content
 // 复现并防回归 #202→#203 的这类"理由没到模型"缺陷。
+//
+// docs.read/docs.propose 已随 wiki 工具组退役——通用门控机制测试改用
+// production.wiki_backlinks（只读）/production.wiki_propose（写）打靶，
+// 语义等价（前者路径参数换成 wikiId，后者仍是唯一的非只读 clickin 工具）。
 
 process.env.MCP_PORT = "3198"; // 端点测试专用端口（模块顶层求值，import 前设）
 const MCP_URL = "http://127.0.0.1:3198/mcp";
@@ -44,7 +50,7 @@ beforeAll(async () => {
     pendingSteers: new Map(),
   };
 
-  // 起真实 MCP server：/deny-reason 端点 + tools/list（annotations 加载也走真请求）
+  // 起真实 MCP server：/deny-reason、/wiki-proposal 端点 + tools/list（annotations 加载也走真请求）
   const { startMcpServer } = await import("@/lib/mcp/server");
   startMcpServer();
   await new Promise((r) => setTimeout(r, 150));
@@ -78,14 +84,14 @@ async function gateToolCall(toolCallId: string) {
   const handler = hooks.get("before_tool_call")!;
   return (await handler(
     {
-      toolName: "clickin__docs-propose",
-      params: { path: "test.md", content: "x", summary: "测试" },
+      toolName: "clickin__production-wiki_propose",
+      params: { title: "测试文档", body: "正文", summary: "测试" },
       toolCallId,
       context: { pluginConfig: PLUGIN_CONFIG },
     },
     SESSION_CTX,
   )) as
-    | { params?: Record<string, unknown>; requireApproval?: { onResolution?: (d: string) => unknown } }
+    | { params?: Record<string, unknown>; requireApproval?: { severity?: string; description?: string; onResolution?: (d: string) => unknown } }
     | undefined;
 }
 
@@ -103,12 +109,17 @@ describe("clickin-memory 确认门", () => {
     expect(gated?.params?._caller_user_id).toBe(CALLER_ID);
   });
 
-  it("read-only docs-read passes with caller-id injected (annotations loaded live)", async () => {
+  it("write tool also gets _tool_call_id param override (wiki_propose 回填 proposal 行要用)", async () => {
+    const gated = await gateToolCall("call_gate_tcid");
+    expect(gated?.params?._tool_call_id).toBe("call_gate_tcid");
+  });
+
+  it("read-only production.wiki_backlinks passes with caller-id injected (annotations loaded live)", async () => {
     const handler = hooks.get("before_tool_call")!;
     const readResult = (await handler(
       {
-        toolName: "clickin__docs-read",
-        params: { path: "a.md" },
+        toolName: "clickin__production-wiki_backlinks",
+        params: { wikiId: "some-wiki-id" },
         toolCallId: "call_read_1",
         context: { pluginConfig: PLUGIN_CONFIG },
       },
@@ -116,15 +127,15 @@ describe("clickin-memory 确认门", () => {
     )) as { params?: Record<string, unknown>; requireApproval?: unknown };
     expect(readResult?.requireApproval).toBeUndefined(); // 只读不弹卡
     expect(readResult?.params?._caller_user_id).toBe(CALLER_ID); // 但身份已注入
-    expect(readResult?.params?.path).toBe("a.md"); // 原参数保留
+    expect(readResult?.params?.wikiId).toBe("some-wiki-id"); // 原参数保留
   });
 
   it("model-forged _caller_user_id is overwritten by the real session identity", async () => {
     const handler = hooks.get("before_tool_call")!;
     const result = (await handler(
       {
-        toolName: "clickin__docs-read",
-        params: { path: "a.md", _caller_user_id: "99999999-9999-9999-9999-999999999999" },
+        toolName: "clickin__production-wiki_backlinks",
+        params: { wikiId: "x", _caller_user_id: "99999999-9999-9999-9999-999999999999" },
         toolCallId: "call_forge",
         context: { pluginConfig: PLUGIN_CONFIG },
       },
@@ -137,7 +148,7 @@ describe("clickin-memory 确认门", () => {
     const handler = hooks.get("before_tool_call")!;
     const prodCtx = { sessionKey: `agent:team:clickin:chat:${CALLER_ID}:t3k9xa1b:11111111-2222-3333-4444-555555555555` };
     const prodResult = (await handler(
-      { toolName: "clickin__docs-read", params: { path: "a.md" }, toolCallId: "call_prod", context: { pluginConfig: PLUGIN_CONFIG } },
+      { toolName: "clickin__production-wiki_backlinks", params: { wikiId: "x" }, toolCallId: "call_prod", context: { pluginConfig: PLUGIN_CONFIG } },
       prodCtx,
     )) as { params?: Record<string, unknown> };
     expect(prodResult?.params?._caller_user_id).toBe(CALLER_ID);
@@ -145,8 +156,8 @@ describe("clickin-memory 确认门", () => {
 
     const personal = (await handler(
       {
-        toolName: "clickin__docs-read",
-        params: { path: "a.md", _caller_production_id: "forged123" },
+        toolName: "clickin__production-wiki_backlinks",
+        params: { wikiId: "x", _caller_production_id: "forged123" },
         toolCallId: "call_personal",
         context: { pluginConfig: PLUGIN_CONFIG },
       },
@@ -160,8 +171,8 @@ describe("clickin-memory 确认门", () => {
     const handler = hooks.get("before_tool_call")!;
     const result = (await handler(
       {
-        toolName: "clickin__docs-read",
-        params: { path: "a.md", _caller_user_id: "99999999-9999-9999-9999-999999999999" },
+        toolName: "clickin__production-wiki_backlinks",
+        params: { wikiId: "x", _caller_user_id: "99999999-9999-9999-9999-999999999999" },
         toolCallId: "call_cron",
         context: { pluginConfig: PLUGIN_CONFIG },
       },
@@ -185,6 +196,65 @@ describe("clickin-memory 确认门", () => {
   });
 });
 
+describe("wiki_propose 确认卡片：权限状态预持久化（工具调用权限门原则）", () => {
+  let prodId: string;
+  let ownerId: string;
+  let plainMemberId: string;
+
+  beforeAll(async () => {
+    ownerId = (await upsertFeishuUser(`test-open-${shortId()}`, `插件测试所有者${shortId()}`, null, false)).userId;
+    plainMemberId = (await upsertFeishuUser(`test-open-${shortId()}`, `插件测试零权限成员${shortId()}`, null, false)).userId;
+    ({ prodId } = await makeProduction(ownerId));
+    await addProductionMember(prodId, plainMemberId);
+  });
+
+  afterAll(async () => {
+    await cleanupProduction(prodId).catch(() => {});
+  });
+
+  function prodSessionCtx(userId: string) {
+    return { sessionKey: `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555` };
+  }
+
+  it("有权限的调用者 → 确认卡片 severity=warning，description 带正向权限提示", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const gated = (await handler(
+      {
+        toolName: "clickin__production-wiki_propose",
+        params: { title: "插件测试文档", body: "正文", summary: "摘要" },
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      prodSessionCtx(ownerId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(gated?.requireApproval?.severity).toBe("warning");
+    expect(gated?.requireApproval?.description).toContain("✅");
+  });
+
+  it("无权限的调用者 → 确认卡片 severity=critical，description 明确提示没有权限", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const gated = (await handler(
+      {
+        toolName: "clickin__production-wiki_propose",
+        params: { title: "不该被建的文档", body: "", summary: "摘要" },
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      prodSessionCtx(plainMemberId),
+    )) as { requireApproval?: { severity?: string; description?: string } };
+    expect(gated?.requireApproval?.severity).toBe("critical");
+    expect(gated?.requireApproval?.description).toContain("⛔");
+  });
+
+  it("个人会话（无 productionId）→ 不打预持久化端点，仍照旧走确认门（不虚构权限状态）", async () => {
+    const gated = await gateToolCall(`call_${shortId()}`);
+    expect(gated?.requireApproval).toBeTruthy();
+    expect(gated?.requireApproval?.severity).toBe("warning"); // undefined → 不判定 critical
+    expect(gated?.requireApproval?.description).not.toContain("✅");
+    expect(gated?.requireApproval?.description).not.toContain("⛔");
+  });
+});
+
 describe("拒绝理由同帧注入（mark → middleware → append）", () => {
   it("denied call with stored reason gets it appended to model-visible content", async () => {
     const toolCallId = "call_deny_1";
@@ -204,7 +274,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
     // 3. middleware 拦截被拒结果 → 经真实 HTTP 端点取理由 → 追加
     const result = (await middleware!({
       toolCallId,
-      toolName: "clickin__docs-propose",
+      toolName: "clickin__production-wiki_propose",
       result: { content: [{ type: "text", text: "Denied by user" }] },
     })) as { result: { content: Array<{ type?: string; text?: string }> } };
 
@@ -217,7 +287,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
   it("mark is consumed once — second result for same call passes untouched", async () => {
     const again = await middleware!({
       toolCallId: "call_deny_1",
-      toolName: "clickin__docs-propose",
+      toolName: "clickin__production-wiki_propose",
       result: { content: [{ type: "text", text: "Denied by user" }] },
     });
     expect(again).toBeUndefined();
@@ -230,7 +300,7 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
 
     const result = await middleware!({
       toolCallId,
-      toolName: "clickin__docs-propose",
+      toolName: "clickin__production-wiki_propose",
       result: { content: [{ type: "text", text: "Denied by user" }] },
     });
     expect(result).toBeUndefined();
@@ -243,8 +313,8 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
 
     const result = await middleware!({
       toolCallId,
-      toolName: "clickin__docs-propose",
-      result: { content: [{ type: "text", text: "[stub] docs.propose → ok" }] },
+      toolName: "clickin__production-wiki_propose",
+      result: { content: [{ type: "text", text: "已创建文档" }] },
     });
     expect(result).toBeUndefined();
   });

@@ -235,6 +235,14 @@ function extractProductionId(pathname: string): string | null {
   return m ? m[1] : null;
 }
 
+/** 仅匹配文档详情页 /production/{id}/wiki/{wikiId}——不匹配文档库根页
+ *  /production/{id}/wiki（那个没有具体文档可附带）。驱动 AI popout 的
+ *  「附带当前文档」chip。 */
+function extractCurrentWikiId(pathname: string, productionId: string): string | null {
+  const m = pathname.match(new RegExp(`^/production/${productionId}/wiki/([^/]+)`));
+  return m ? m[1] : null;
+}
+
 function extractModule(pathname: string, productionId: string): string {
   const base = `/production/${productionId}`;
   if (pathname === base || pathname === base + "/") return "";
@@ -996,6 +1004,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const activeModule = productionId && pathname.startsWith(`/production/${productionId}`)
     ? extractModule(pathname, productionId)
     : null;
+  const currentWikiId = productionId ? extractCurrentWikiId(pathname, productionId) : null;
   const hasProductionTopMenu = !!activeModule && ["script", "dramaturgy", "characters", "cues", "cuelists"].includes(activeModule);
   const isHome = pathname === "/";
   const currentProduction = productionId
@@ -1650,6 +1659,7 @@ export default function AppShell({ session, productions, children, initialUnread
         onClose={() => setAiPopoutOpen(false)}
         productionId={productionId}
         productionName={currentProduction?.name ?? null}
+        currentWikiId={currentWikiId}
       />
     </div>
     </ProductionToolbarContext.Provider>

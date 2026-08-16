@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "@/components/Markdown";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
 
 type SessionSummary = {
   key: string;
@@ -31,11 +32,14 @@ export default function AgentPopout({
   onClose,
   productionId,
   productionName,
+  currentWikiId,
 }: {
   open: boolean;
   onClose: () => void;
   productionId: string | null;
   productionName: string | null;
+  /** 当前所在的 wiki 文档页 id（非文档页/文档库根页为 null）——驱动"附带当前文档" chip。 */
+  currentWikiId: string | null;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
@@ -45,6 +49,9 @@ export default function AgentPopout({
   const [streaming, setStreaming] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [previewToolCallId, setPreviewToolCallId] = useState<string | null>(null);
+  const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
+  const [docAttached, setDocAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const activeKeyRef = useRef<string | null>(null);
@@ -86,6 +93,20 @@ export default function AgentPopout({
       setBubbles([]);
     }
   }, [productionId, activeKey, inScope]);
+
+  // 附带当前文档 chip：换文档/离开文档页时重取标题、默认重新勾选附带。
+  useEffect(() => {
+    if (!currentWikiId || !productionId) { setCurrentDocTitle(null); return; }
+    setDocAttached(true);
+    let alive = true;
+    fetch(`/api/production/${productionId}/wiki/${currentWikiId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { wiki?: { title: string | null } } | null) => {
+        if (alive) setCurrentDocTitle(data?.wiki?.title ?? null);
+      })
+      .catch(() => { if (alive) setCurrentDocTitle(null); });
+    return () => { alive = false; };
+  }, [currentWikiId, productionId]);
 
   useEffect(() => {
     if (!open) return;
@@ -221,8 +242,8 @@ export default function AgentPopout({
   }, [productionId]);
 
   const send = useCallback(async () => {
-    const message = input.trim();
-    if (!message) return;
+    const raw = input.trim();
+    if (!raw) return;
     let key = activeKey;
     if (!key) {
       const res = await fetch("/api/agent/sessions", {
@@ -235,7 +256,24 @@ export default function AgentPopout({
       setActiveKey(key);
     }
     setInput("");
-    setBubbles((prev) => [...prev, { kind: "user", text: message }]);
+    setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
+
+    // 附带当前文档：现阶段就是把正文拼进实际发出的消息文本（未来计划经
+    // 插件做 system text 级注入，这里先用最直接的方式落地）。
+    let message = raw;
+    if (docAttached && currentWikiId && productionId) {
+      try {
+        const docRes = await fetch(`/api/production/${productionId}/wiki/${currentWikiId}`);
+        if (docRes.ok) {
+          const data = (await docRes.json()) as { wiki?: { title: string | null; body: string } };
+          if (data.wiki) {
+            message = `[附带文档:《${data.wiki.title ?? "无标题"}》]\n${data.wiki.body}\n---\n${raw}`;
+          }
+        }
+      } catch {
+        // 附带失败就退化成不附带，别挡发送
+      }
+    }
 
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
@@ -250,7 +288,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -470,6 +508,16 @@ export default function AgentPopout({
                   {b.approval.description && (
                     <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">{b.approval.description}</p>
                   )}
+                  {/* 不是所有 approval 都对应一个 wiki proposal（未来会有别的写工具）——
+                      按钮始终渲染，找不到详情让 modal 自己兜底，省一次预探测往返。 */}
+                  {b.approval.toolCallId && productionId && (
+                    <button
+                      onClick={() => setPreviewToolCallId(b.approval.toolCallId!)}
+                      className="mt-1.5 text-[11px] font-medium text-zinc-500 underline hover:text-zinc-800"
+                    >
+                      查看详情
+                    </button>
+                  )}
                   {b.decision ? (
                     <p className="mt-2 text-xs font-medium text-zinc-600">
                       {b.decision.startsWith("allow") ? "✓ 已允许" : b.decision === "deny" ? "✕ 已拒绝" : `已处理（${b.decision}）`}
@@ -556,6 +604,24 @@ export default function AgentPopout({
           })()}
       </div>
 
+      {/* 附带当前文档：仅在文档页出现，默认勾选、可点掉 */}
+      {currentWikiId && currentDocTitle && (
+        <div className="flex shrink-0 items-center border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setDocAttached((v) => !v)}
+            title={docAttached ? "点击取消附带" : "点击重新附带"}
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+              docAttached
+                ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                : "border-[var(--line)] text-[var(--muted)] line-through"
+            }`}
+          >
+            📎 附带《{currentDocTitle}》
+          </button>
+        </div>
+      )}
+
       {/* 输入区 */}
       <div className="shrink-0 border-t border-[var(--line)] p-3">
         <div className="flex items-end gap-2">
@@ -589,6 +655,15 @@ export default function AgentPopout({
           </button>
         </div>
       </div>
+
+      {previewToolCallId && productionId && (
+        <WikiProposalPreviewModal
+          open={!!previewToolCallId}
+          onClose={() => setPreviewToolCallId(null)}
+          productionId={productionId}
+          toolCallId={previewToolCallId}
+        />
+      )}
     </div>
   );
 }

@@ -161,6 +161,8 @@ async function tailSortKey(productionId: string, parentId: string | null): Promi
 export async function createWiki(params: {
   productionId: string; title: string; body?: string;
   parentId?: string | null; createdBy: string;
+  /** revision provenance（如 "ai-proposed"）——默认 writeRevision 自己的 "user"。 */
+  origin?: string;
 }): Promise<WikiDoc & { tags: string[] }> {
   const parentId = params.parentId ?? null;
   if (parentId && !await validateParent(params.productionId, null, parentId)) {
@@ -176,7 +178,7 @@ export async function createWiki(params: {
   const id = res.rows[0].id;
   // §0.9 C-6：创建者 manage 行集 + person 归属
   await writeWikiGrants(id, params.productionId, params.createdBy);
-  await writeRevision(id, params.title, body, [], params.createdBy);
+  await writeRevision(id, params.title, body, [], params.createdBy, params.origin ?? "user");
   await syncWikiLinks(id, params.productionId, body);
   return (await getWiki(id, params.productionId))!;
 }
@@ -452,6 +454,18 @@ export async function listBacklinks(wikiId: string, productionId: string): Promi
     `SELECT w.id::text AS id, w.title FROM wiki_link l
      JOIN wiki w ON w.id = l.source_wiki_id
      WHERE l.target_wiki_id = $1::uuid AND w.production_id = $2
+     ORDER BY w.updated_at DESC`,
+    [wikiId, productionId],
+  );
+  return res.rows;
+}
+
+/** 出链（该文档链接到谁）——与 listBacklinks 对称，同一张已同步好的 wiki_link 边表。 */
+export async function listOutgoingLinks(wikiId: string, productionId: string): Promise<WikiRef[]> {
+  const res = await getPool().query<{ id: string; title: string | null }>(
+    `SELECT w.id::text AS id, w.title FROM wiki_link l
+     JOIN wiki w ON w.id = l.target_wiki_id
+     WHERE l.source_wiki_id = $1::uuid AND w.production_id = $2
      ORDER BY w.updated_at DESC`,
     [wikiId, productionId],
   );
