@@ -201,6 +201,8 @@ span[data-stage-inline] {
     display: none !important;
   }
 
+  .wiki-remote-cursor { display: none !important; }
+
   /* wiki 文档打印页（同机制）：portal 到 body，打印时隐藏其余子树 */
   body:has(.wiki-print-root) > *:not(.wiki-print-root) {
     display: none !important;
@@ -283,4 +285,29 @@ span[data-stage-inline] {
 
 .print-preview-scale-percent::-webkit-inner-spin-button {
   margin-left: 6px;
+}
+
+/* wiki 协作：远端光标小旗（Decoration.widget，颜色经 --rc-color 注入） */
+.wiki-remote-cursor {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  vertical-align: text-bottom;
+  border-left: 2px solid var(--rc-color, #3182CE);
+}
+.wiki-remote-cursor::after {
+  content: attr(data-name);
+  position: absolute;
+  top: -1.15em;
+  left: -2px;
+  padding: 0 4px;
+  border-radius: 3px 3px 3px 0;
+  background: var(--rc-color, #3182CE);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
 }

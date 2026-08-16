@@ -9,7 +9,8 @@ import { Mention } from "@tiptap/extension-mention";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import Suggestion from "@tiptap/suggestion";
-import { PluginKey } from "@tiptap/pm/state";
+import { PluginKey, Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
@@ -361,6 +362,10 @@ export interface SmartTextareaProps {
    *  调用方对比原文可检测富文本模式无法无损保留的语法（不支持的方言会被
    *  prosemirror-markdown 转义/规范化）。 */
   onInitialRoundTrip?: (serialized: string) => void;
+  /** 协作：远端光标（顶层块索引+块内偏移=精确位）；变化即重绘装饰 */
+  remoteCursors?: { name: string; color: string; blockIndex: number; offset: number }[];
+  /** 协作：本端光标位置变化回调（块索引+块内字符偏移，去重后触发） */
+  onCursorChange?: (cursor: { blockIndex: number; offset: number }) => void;
 }
 
 // ── SmartTextarea ─────────────────────────────────────────────────────────────
@@ -381,9 +386,16 @@ export default function SmartTextarea({
   autoFocus,
   readOnly = false,
   onInitialRoundTrip,
+  remoteCursors,
+  onCursorChange,
 }: SmartTextareaProps) {
   const onInitialRoundTripRef = useRef(onInitialRoundTrip);
   onInitialRoundTripRef.current = onInitialRoundTrip;
+  const remoteCursorsRef = useRef(remoteCursors ?? []);
+  remoteCursorsRef.current = remoteCursors ?? [];
+  const onCursorChangeRef = useRef(onCursorChange);
+  onCursorChangeRef.current = onCursorChange;
+  const lastCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
   const [drop, setDrop] = useState<DropState>(null);
   const dropRef = useRef<DropState>(null);
   const lastEmittedRef = useRef(value);
@@ -465,6 +477,42 @@ export default function SmartTextarea({
     };
   }
 
+  // 协作远端光标：装饰器读 ref（cursors 变化由外层 ping 空事务触发重算）
+  const remoteCursorExt = useMemo(() => {
+    const cursorsRef = remoteCursorsRef;
+    return Extension.create({
+      name: "remoteCursors",
+      addProseMirrorPlugins() {
+        return [new Plugin({
+          key: new PluginKey("remoteCursorsDeco"),
+          props: {
+            decorations(state) {
+              const cursors = cursorsRef.current;
+              if (!cursors.length) return DecorationSet.empty;
+              const decos: Decoration[] = [];
+              for (const c of cursors) {
+                if (c.blockIndex == null || c.blockIndex < 0 || c.blockIndex >= state.doc.childCount) continue;
+                let pos = 0;
+                for (let i = 0; i < c.blockIndex; i++) pos += state.doc.child(i).nodeSize;
+                // 精确位：块内容起点 + 偏移（钳到块内容尺寸——远端文档可能略有出入）
+                const block = state.doc.child(c.blockIndex);
+                const offset = Math.min(Math.max(0, c.offset ?? 0), block.content.size);
+                decos.push(Decoration.widget(pos + 1 + offset, () => {
+                  const el = document.createElement("span");
+                  el.className = "wiki-remote-cursor";
+                  el.style.setProperty("--rc-color", c.color);
+                  el.setAttribute("data-name", c.name);
+                  return el;
+                }, { side: -1 }));
+              }
+              return DecorationSet.create(state.doc, decos);
+            },
+          },
+        })];
+      },
+    });
+  }, []);
+
   const ContentMentionExt = markdown ? MarkdownContentMentionExt : PlainContentMentionExt;
 
   const extensions = useMemo(() => {
@@ -539,10 +587,10 @@ export default function SmartTextarea({
       ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
          TableKit.configure({ table: { resizable: false } }),
          TaskList, TaskItem.configure({ nested: true }),
-         ...commonExts, wikiTriggerCfg]
+         ...commonExts, wikiTriggerCfg, remoteCursorExt]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown]);
+  }, [markdown, remoteCursorExt]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`
@@ -587,6 +635,22 @@ export default function SmartTextarea({
           return false;
         }
       },
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const cb = onCursorChangeRef.current;
+      if (!cb) return;
+      try {
+        const $head = editor.state.selection.$head;
+        if ($head.depth < 1) return;
+        const blockIndex = $head.index(0);
+        // 块内偏移：绝对 pos - 顶层块内容起点（跨嵌套结构展平计数）
+        const offset = Math.max(0, $head.pos - $head.start(1));
+        const last = lastCursorRef.current;
+        if (!last || last.blockIndex !== blockIndex || last.offset !== offset) {
+          lastCursorRef.current = { blockIndex, offset };
+          cb({ blockIndex, offset });
+        }
+      } catch { /* selection 在非常规位置时忽略 */ }
     },
     onCreate: ({ editor }) => {
       if (markdown && onInitialRoundTripRef.current) {
@@ -640,8 +704,18 @@ export default function SmartTextarea({
     if (value === lastEmittedRef.current) return;
     lastEmittedRef.current = value;
     const newContent = markdown ? value : parseToDoc(value);
+    const { from, to } = editor.state.selection;
     editor.commands.setContent(newContent, { emitUpdate: false });
+    // 协作合并回灌时保留本端选区（钳到新文档尺寸内）
+    const max = editor.state.doc.content.size;
+    editor.commands.setTextSelection({ from: Math.min(from, max), to: Math.min(to, max) });
   }, [value, editor, markdown]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta("remoteCursorsPing", true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(remoteCursors ?? []), editor]);
 
   const rect = drop?.clientRect?.();
 

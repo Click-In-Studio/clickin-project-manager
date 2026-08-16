@@ -4,6 +4,8 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki-perm";
+import { mergeLines } from "@/lib/line-merge";
+import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic } from "@/lib/wiki-db";
 
@@ -48,6 +50,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     title?: string; body?: string; mentions?: Mention[];
     parentId?: string | null; sortKey?: string; tags?: string[];
     isPublic?: boolean;
+    /** 协作：客户端上次确认的服务端正文——与库中现值不同时做行级三路合并 */
+    baseBody?: string;
+    /** 协作：发起端 SSE clientId（广播自过滤） */
+    clientId?: string;
   };
 
   const wantsContent = body.title !== undefined || body.body !== undefined
@@ -63,10 +69,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "标题不能为空" }, { status: 400 });
 
   try {
+    // 协作行级合并：客户端带 baseBody 且服务端已被他人推进 → 三路合并
+    // （mine=本次提交，theirs=库中现值；重叠区间 mine 胜——保存者 LWW）
+    let effectiveBody = body.body;
+    if (body.body !== undefined && body.baseBody !== undefined && existing.body !== body.baseBody) {
+      effectiveBody = mergeLines(body.baseBody, body.body, existing.body);
+    }
     if (wantsContent) {
       await updateWiki(wikiId, productionId, {
         ...(body.title !== undefined ? { title: body.title.trim() } : {}),
-        ...(body.body !== undefined ? { body: body.body } : {}),
+        ...(effectiveBody !== undefined ? { body: effectiveBody } : {}),
         ...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
         ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
         ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),
@@ -74,7 +86,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       }, session.userId);
     }
     if (body.isPublic !== undefined) await setWikiPublic(wikiId, productionId, body.isPublic);
-    return Response.json({ wiki: await getWiki(wikiId, productionId) });
+    const fresh = await getWiki(wikiId, productionId);
+    // 协作广播（内容/标题变化才推）
+    if (fresh && (body.body !== undefined || body.title !== undefined)) {
+      broadcastWikiUpdate(wikiId, {
+        byClientId: body.clientId ?? null,
+        title: fresh.title,
+        body: fresh.body,
+        updatedAt: fresh.updatedAt,
+      });
+    }
+    return Response.json({ wiki: fresh });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "更新失败" }, { status: 400 });
   }
