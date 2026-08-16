@@ -547,8 +547,8 @@ export default function SmartTextarea({
             "data-aux": aux ?? "",
             "data-version-id": versionId ?? "",
             class: isWiki
-              ? "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-default"
-              : "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-default",
+              ? "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-pointer hover:bg-sky-100"
+              : "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100",
           },
           isWiki ? `[[${label ?? "文档"}]]` : `#${label ?? kind}`,
         ];
@@ -615,6 +615,31 @@ export default function SmartTextarea({
           return event.defaultPrevented;
         }
         return false;
+      },
+      // 富文本 chip 点击跳转（wiki 直跳文档页；剧本域 chip 经 mention-resolve 取 url）。
+      // chip 是原子节点，点击导航是自然语义（飞书/Notion 同款）
+      handleClickOn: (_view, _pos, node) => {
+        if (node.type.name !== "contentMention") return false;
+        const pid = contentMentionRef.current?.productionId;
+        if (!pid) return false;
+        const { kind, id, aux, versionId, displayMode } = node.attrs as ContentMentionAttrs;
+        if (kind === "wiki") {
+          window.location.assign(`${BASE_PATH}/production/${pid}/wiki/${id}`);
+          return true;
+        }
+        void (async () => {
+          try {
+            const res = await fetch(`${BASE_PATH}/api/production/${pid}/mention-resolve`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ mentions: [{ kind, displayMode, id, aux, versionId }] }),
+            });
+            if (!res.ok) return;
+            const data = await res.json() as { urls: (string | null)[] };
+            if (data.urls?.[0]) window.location.assign(`${BASE_PATH}${data.urls[0]}`);
+          } catch { /* 解析失败不跳 */ }
+        })();
+        return true;
       },
       // 从文档树拖文档进编辑器 → 自动成为双向链接 chip（UI 修缮轮）
       handleDrop: (view, event) => {
