@@ -9,6 +9,7 @@ import {
   type WikiListEntry, type WikiRef,
 } from "@/lib/wiki-db";
 import { canViewWiki, canEditWiki, canDeleteWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import { hasEffectiveGrant, type GrantActor } from "@/lib/grant-check";
 import { getPool } from "@/lib/pg";
 import {
@@ -209,6 +210,13 @@ export async function wikiProposeUpdate(
   const doc = await updateWiki(args.wikiId, productionId, { title: args.title, body: args.body, origin: "ai-proposed" }, userId);
   if (!doc) return "没有找到该文档。";
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
+  // 推给正开着这篇文档的编辑器（同 PATCH 路由的协作广播）。少了这一步，AI
+  // 改完正文屏幕上纹丝不动：WikiDocClient 的 title/body 是 useState 初值，
+  // router.refresh() 送来新 props 也不覆盖，非手动刷新不可。byClientId 传
+  // null——发起方不是任何一个浏览器端，谁都不该自过滤掉这一帧。
+  broadcastWikiUpdate(doc.id, {
+    byClientId: null, title: doc.title, body: doc.body, updatedAt: doc.updatedAt,
+  });
   return `已更新文档《${doc.title}》（id: ${doc.id}）。`;
 }
 
@@ -294,6 +302,10 @@ export async function wikiProposeTag(
   const doc = await updateWiki(args.wikiId, productionId, { tags: args.tags }, userId);
   if (!doc) return "没有找到该文档。";
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
+  // 同 update：标签也是 useState 初值，不推这一帧就得手动刷新才看得见
+  broadcastWikiUpdate(doc.id, {
+    byClientId: null, title: doc.title, body: doc.body, updatedAt: doc.updatedAt, tags: doc.tags,
+  });
   return args.tags.length > 0
     ? `已把文档《${doc.title}》的标签设为：${args.tags.join("、")}。`
     : `已清空文档《${doc.title}》的标签。`;

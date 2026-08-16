@@ -102,6 +102,7 @@ export default function WikiDocClient({
   const collabClientIdRef = useRef("");
   const [peers, setPeers] = useState<WikiPeer[]>([]);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // clientId 惰性生成（渲染期调 Math.random 违反 purity lint）
@@ -118,7 +119,7 @@ export default function WikiDocClient({
     es.addEventListener("update", e => {
       try {
         const data = JSON.parse((e as MessageEvent).data) as
-          { byClientId: string | null; title: string | null; body: string; updatedAt: string };
+          { byClientId: string | null; title: string | null; body: string; updatedAt: string; tags?: string[] };
         if (data.byClientId === cid) return; // 本端 PATCH 响应已处理
         const base = savedRef.current.body;
         const local = latestRef.current.body;
@@ -131,10 +132,37 @@ export default function WikiDocClient({
           savedRef.current.title = data.title ?? "";
           setTitle(data.title ?? "");
         }
+        // 标签：同上，本地干净才跟随（省略字段=本帧没动标签）
+        if (data.tags !== undefined && latestRef.current.tags === savedRef.current.tags) {
+          savedRef.current.tags = data.tags.join(" ");
+          setTagsInput(savedRef.current.tags);
+        }
       } catch { /* 忽略坏帧 */ }
     });
-    return () => { es.close(); setPeers([]); };
-  }, [wiki.id, productionId]);
+    // 库级结构变化（同一条流，见 lib/wiki-collab.ts 的 library topic）。
+    // 本篇被删 → 立刻退到文档库首页：软刷新会撞进服务端的 notFound()，
+    // 把人从工程环境里弹到 404 页，比"文档没了"本身更难受。
+    // 其余结构变化（别人新建/改名/移动/换标签）软刷新一下，左树跟着变。
+    es.addEventListener("library", e => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as { kind: string; wikiId: string };
+        if (data.kind === "deleted" && data.wikiId === wiki.id) {
+          router.replace(`/production/${productionId}/wiki`);
+          return;
+        }
+        if (refreshTimerRef.current) return; // 批量结构变更（如 AI 连写几篇）合并成一次
+        refreshTimerRef.current = setTimeout(() => {
+          refreshTimerRef.current = null;
+          router.refresh();
+        }, 300);
+      } catch { /* 忽略坏帧 */ }
+    });
+    return () => {
+      es.close();
+      setPeers([]);
+      if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
+    };
+  }, [wiki.id, productionId, router]);
 
   // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）
   const pendingCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);

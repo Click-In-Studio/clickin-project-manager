@@ -186,6 +186,20 @@ describe("tree constraints & delete", () => {
     await expect(updateWiki(a.id, prodId, { parentId: b.id }, creator)).rejects.toThrow();
   });
 
+  // 父 id 直接进 $n::uuid，空串会炸成 invalid input syntax for type uuid——
+  // 而"没有父文档"最自然的写法恰恰是空串（MCP 工具那边模型真这么传）。
+  it("空串父 id 当作根目录，不炸 uuid 语法", async () => {
+    const root = await createWiki({ productionId: prodId, title: "空串父", parentId: "", createdBy: creator });
+    expect(root.parentId).toBeNull();
+
+    const parent = await createWiki({ productionId: prodId, title: "真父", createdBy: creator });
+    const child = await createWiki({ productionId: prodId, title: "子", parentId: parent.id, createdBy: creator });
+    expect(child.parentId).toBe(parent.id);
+    // 空串移动 = 移回根
+    const moved = await updateWiki(child.id, prodId, { parentId: "" }, creator);
+    expect(moved?.parentId).toBeNull();
+  });
+
   it("mounted wiki cannot be deleted; standalone delete revokes grants", async () => {
     const eventId = `ev${shortId()}`;
     await getPool().query(

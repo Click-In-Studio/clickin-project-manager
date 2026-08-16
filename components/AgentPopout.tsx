@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { buildUiContextMessage } from "@/lib/agent-ui-context";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
@@ -176,8 +177,22 @@ export default function AgentPopout({
     }, 5_000);
 
     let streamKey = forKey;
-    // 本轮是否调过 wiki_propose——用来决定收尾要不要刷新当前 wiki 页面。
+    // 本轮调过、但还没收到 tool-end 的 wiki_propose 调用 id。刷新挂在每个
+    // 工具**结束**的那一刻（此时写库已提交），而不是整轮流关闭时——否则
+    // AI 还在往下说，页面就一直停在调用前的样子。
+    const pendingWikiWrites = new Set<string>();
+    // tool-end 一个都没来（流被掐断/事件缺 id）时的收尾兜底。
     let sawWikiWrite = false;
+
+    // 兜底路径，不是主路径：正文/标签/树结构的同步都走 wiki 协作 SSE
+    // （lib/wiki-collab.ts，任何来源的写入都推，不止 AI）。但文档库首页
+    // 没有打开任何文档、也就没有那条 SSE 连接，AI 在那儿建文档只能靠这里
+    // 刷；流被掐断丢帧时同理。刷新幂等，多刷一次不出问题。
+    const refreshWikiPage = () => {
+      if (!pathname || !productionId) return;
+      if (!pathname.startsWith(`/production/${productionId}/wiki`)) return;
+      router.refresh();
+    };
 
     const apply = (line: StreamLine) => {
       if (activeKeyRef.current !== streamKey) return;
@@ -208,7 +223,16 @@ export default function AgentPopout({
               }
               continue;
             }
-            if (line.type === "tool" && line.name?.includes("wiki_propose")) sawWikiWrite = true;
+            if (line.type === "tool" && line.name?.includes("wiki_propose")) {
+              sawWikiWrite = true;
+              if (line.id) pendingWikiWrites.add(line.id);
+            }
+            // 被拒/失败的调用同样有 tool-end，会白刷一次——刷新幂等且便宜，
+            // 不值得为此再去后端 join 一次调用结果。
+            if (line.type === "tool-end" && line.id && pendingWikiWrites.delete(line.id)) {
+              sawWikiWrite = false;
+              refreshWikiPage();
+            }
             apply(line);
           } catch {
             // skip malformed line
@@ -218,11 +242,9 @@ export default function AgentPopout({
     } finally {
       clearInterval(watchdog);
       setStreaming(false);
-      // AI 这一轮建/改过文档，且当前正停在 wiki 页面上——软刷新一下，不然
-      // 树/正文还停在调用前的状态，得手动 F5 才能看见 AI 刚写的东西。
-      if (sawWikiWrite && pathname && productionId && pathname.startsWith(`/production/${productionId}/wiki`)) {
-        router.refresh();
-      }
+      // 兜底：tool-end 没到（流被掐断、事件缺 id）时，收尾再刷一次。正常
+      // 路径上每个 wiki 写工具结束时就刷过了，这里不会重复触发。
+      if (sawWikiWrite || pendingWikiWrites.size > 0) refreshWikiPage();
       setBubbles((prev) =>
         prev.map((b) => (b.kind === "assistant" && b.streaming ? { kind: "assistant", text: b.text } : b))
       );
@@ -300,15 +322,16 @@ export default function AgentPopout({
     setInput("");
     setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
 
-    // 附带当前文档：只注入标题/tag/id 这几个指针字段，不塞正文——AI 已经有
+    // 附带当前文档：只带标题/tag/id 这几个指针字段，不塞正文——AI 已经有
     // wiki_read(id) 工具，需要正文自己按 id 取；把整篇文章暴力拼进每条消息
-    // 既浪费 token，文档一大还可能顶爆上下文。现阶段是字面文本注入（未来
-    // 计划经插件做 system text 级注入），先用最直接的方式落地。
-    let message = raw;
-    if (docAttached && currentWikiId && currentDocTitle) {
-      const tagStr = currentDocTags.length > 0 ? `，标签：${currentDocTags.join("、")}` : "";
-      message = `[附带文档：《${currentDocTitle}》（id: ${currentWikiId}${tagStr}）——如需正文，用 wiki_read 读取该 id]\n${raw}`;
-    }
+    // 既浪费 token，文档一大还可能顶爆上下文。信封形态与"为什么挂在用户
+    // 消息上而不是 system prompt"见 lib/agent-ui-context.ts。
+    const message = buildUiContextMessage(
+      raw,
+      docAttached && currentWikiId && currentDocTitle
+        ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
+        : null,
+    );
 
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
