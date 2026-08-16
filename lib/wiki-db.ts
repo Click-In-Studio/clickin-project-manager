@@ -159,13 +159,21 @@ async function tailSortKey(productionId: string, parentId: string | null): Promi
   return keyBetween(res.rows[0]?.sort_key ?? null, null);
 }
 
+/** 空串 → null（=根目录）。父 id 直接进 $n::uuid，空串会炸成
+ *  "invalid input syntax for type uuid"——而"没有父文档"最自然的表达
+ *  恰恰是空串，MCP 工具那边模型就这么传（人也一样）。在 db 层收口，
+ *  所有写入来源（REST / MCP / 归档管线）一次性受益。 */
+function normalizeParentId(v: string | null | undefined): string | null {
+  return typeof v === "string" && v.trim() === "" ? null : (v ?? null);
+}
+
 export async function createWiki(params: {
   productionId: string; title: string; body?: string;
   parentId?: string | null; createdBy: string;
   /** revision provenance（如 "ai-proposed"）——默认 writeRevision 自己的 "user"。 */
   origin?: string;
 }): Promise<WikiDoc & { tags: string[] }> {
-  const parentId = params.parentId ?? null;
+  const parentId = normalizeParentId(params.parentId);
   if (parentId && !await validateParent(params.productionId, null, parentId)) {
     throw new Error("父文档不存在");
   }
@@ -205,8 +213,10 @@ export async function updateWiki(
   const existing = await getWiki(id, productionId);
   if (!existing) return null;
 
-  if (patch.parentId !== undefined && patch.parentId !== null) {
-    if (!await validateParent(productionId, id, patch.parentId)) throw new Error("非法的父文档（不存在或成环）");
+  // 空串按"移到根"处理（同 createWiki，见 normalizeParentId）
+  const nextParentId = patch.parentId !== undefined ? normalizeParentId(patch.parentId) : undefined;
+  if (nextParentId) {
+    if (!await validateParent(productionId, id, nextParentId)) throw new Error("非法的父文档（不存在或成环）");
   }
 
   const sets: string[] = ["updated_at = now()"];
@@ -214,7 +224,7 @@ export async function updateWiki(
   const push = (frag: string, v: unknown) => { vals.push(v); sets.push(`${frag}$${vals.length}`); };
   if (patch.title !== undefined) push("title = ", patch.title);
   if (patch.mentions !== undefined) push("mentions = ", JSON.stringify(patch.mentions));
-  if (patch.parentId !== undefined) push("parent_id = ", patch.parentId);
+  if (nextParentId !== undefined) push("parent_id = ", nextParentId);
   if (patch.sortKey !== undefined) push("sort_key = ", patch.sortKey);
 
   if (patch.body !== undefined && patch.mergeBase !== undefined) {

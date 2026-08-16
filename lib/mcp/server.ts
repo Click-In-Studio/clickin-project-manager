@@ -199,7 +199,7 @@ export function buildMcpServer(): McpServer {
     description: `在某篇文档下（或在根下）提议新建一篇子文档，需要人工在聊天栏确认；` +
       `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
     inputSchema: {
-      parentId: z.string().optional().describe("父文档 id；留空则建在文档库根下"),
+      parentId: z.string().optional().describe("父文档 id；建在文档库根下就整个省略这个字段，不要传空字符串"),
       title: z.string().describe("新文档标题"),
       body: z.string().optional().describe("新文档正文（Markdown）"),
       summary: z.string().describe("一句话说明这次提议改了什么、为什么"),
@@ -220,8 +220,8 @@ export function buildMcpServer(): McpServer {
       `需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
     inputSchema: {
       wikiId: z.string().describe("要修改的文档 id（来自 wiki_tree/wiki_search 的结果）"),
-      title: z.string().optional().describe("新标题；留空则不改标题"),
-      body: z.string().optional().describe("新正文（Markdown）；留空则不改正文"),
+      title: z.string().optional().describe("新标题；不改标题就整个省略这个字段"),
+      body: z.string().optional().describe("新正文（Markdown）；不改正文就整个省略这个字段"),
       summary: z.string().describe("一句话说明这次提议改了什么、为什么"),
       ...callerShape,
     },
@@ -258,7 +258,7 @@ export function buildMcpServer(): McpServer {
       "确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。",
     inputSchema: {
       wikiId: z.string().describe("要移动的文档 id"),
-      newParentId: z.string().optional().describe("移动到的新父文档 id；留空则移到文档库根"),
+      newParentId: z.string().optional().describe("移动到的新父文档 id；移到文档库根就整个省略这个字段，不要传空字符串"),
       summary: z.string().describe("一句话说明为什么要移动"),
       ...callerShape,
     },
