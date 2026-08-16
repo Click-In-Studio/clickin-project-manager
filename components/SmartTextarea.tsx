@@ -249,7 +249,9 @@ const MarkdownContentMentionExt = Mention.extend({
           if (!href.startsWith(CM_HREF_PREFIX)) return false;
           const attrs = decodeMentionHref(href);
           if (!attrs) return false;
-          const label = (el.textContent ?? "").replace(/^#/, "");
+          // wiki 链接文本恒为占位 "#"（见下方 serialize），textContent 剥完前缀后是
+          // 空串——归一化成 null 而不是 ""，renderHTML 的 label ?? "文档" 才接得住
+          const label = (el.textContent ?? "").replace(/^#/, "") || null;
           return { ...attrs, label };
         },
       },
@@ -261,7 +263,10 @@ const MarkdownContentMentionExt = Mention.extend({
         serialize(state: { write: (s: string) => void }, node: { attrs: ContentMentionAttrs & { label?: string } }) {
           const { kind, displayMode, id, aux, versionId, label } = node.attrs;
           const href = encodeMentionHref({ kind, displayMode, id, aux, versionId });
-          state.write(`[#${label ?? kind}](${href})`);
+          // wiki 标题不落存量文字——label 只是 chip 展示用的活刷新快照，写回正文
+          // 只会留一段迟早过期的旧标题（同 wiki-link-syntax.ts 教模型的写法一致）
+          const text = kind === "wiki" ? "#" : `#${label ?? kind}`;
+          state.write(`[${text}](${href})`);
         },
       },
     };
@@ -702,7 +707,10 @@ export default function SmartTextarea({
         onInitialRoundTripRef.current((editor.storage as any).markdown.getMarkdown());
       }
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
+      // 标题活刷新的静默 transaction（见下方 wiki mention 标题活刷新 effect）——
+      // 纯展示刷新，不算真实编辑，不触发 onChange/自动保存
+      if (transaction.getMeta("wikiLabelRefresh")) return;
       if (readOnly) return;
       let text: string;
       if (markdown) {
@@ -760,6 +768,58 @@ export default function SmartTextarea({
     editor.view.dispatch(editor.state.tr.setMeta("remoteCursorsPing", true));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(remoteCursors ?? []), editor]);
+
+  // wiki mention 标题活刷新：contentMention chip 的 label attr 只是解析/插入时的
+  // 快照（同 WikiMarkdown/SmartText 一样不可信——目标文档改名后会长期挂着旧标题）。
+  // 只读渲染那两处天生走 mention-resolve 逐次覆盖；这里手动补一次，用静默
+  // transaction（wikiLabelRefresh meta，onUpdate 见上方）落地，不触发自动保存。
+  const wikiLabelSigRef = useRef("");
+  useEffect(() => {
+    if (!markdown || !editor || editor.isDestroyed) return;
+    const pid = contentMentionRef.current?.productionId;
+    if (!pid) return;
+    const ids = new Set<string>();
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "contentMention" && node.attrs.kind === "wiki" && node.attrs.id) {
+        ids.add(node.attrs.id as string);
+      }
+    });
+    if (ids.size === 0) return;
+    const idList = [...ids].sort();
+    const sig = idList.join(",");
+    if (wikiLabelSigRef.current === sig) return;
+    wikiLabelSigRef.current = sig;
+    (async () => {
+      try {
+        const mentions = idList.map(id => ({ kind: "wiki", displayMode: null, id, aux: null, versionId: null }));
+        const res = await fetch(`${BASE_PATH}/api/production/${pid}/mention-resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mentions }),
+        });
+        if (!res.ok || editor.isDestroyed) return;
+        const data = await res.json() as { labels: (string | null)[] };
+        const labelById = new Map<string, string>();
+        idList.forEach((id, i) => { if (data.labels[i]) labelById.set(id, data.labels[i]!); });
+        if (labelById.size === 0) return;
+        const tr = editor.state.tr;
+        let changed = false;
+        editor.state.doc.descendants((node, pos) => {
+          if (node.type.name !== "contentMention" || node.attrs.kind !== "wiki") return;
+          const fresh = labelById.get(node.attrs.id as string);
+          if (fresh && fresh !== node.attrs.label) {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, label: fresh });
+            changed = true;
+          }
+        });
+        if (changed) {
+          tr.setMeta("addToHistory", false);
+          tr.setMeta("wikiLabelRefresh", true);
+          editor.view.dispatch(tr);
+        }
+      } catch { /* 静默失败，chip 保留旧快照 */ }
+    })();
+  }, [markdown, editor, value]);
 
   const rect = drop?.clientRect?.();
 

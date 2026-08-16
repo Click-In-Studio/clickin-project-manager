@@ -121,6 +121,7 @@ export default function WikiMarkdown({
   }, [content]);
 
   const [resolved, setResolved] = useState<Map<string, Resolved>>(new Map());
+  const [resolveFailed, setResolveFailed] = useState(false);
   const attemptedRef = useRef("");
 
   useEffect(() => {
@@ -128,6 +129,7 @@ export default function WikiMarkdown({
     const sig = mentionAttrs.map(attrsKey).join("|");
     if (attemptedRef.current === sig) return;
     attemptedRef.current = sig;
+    setResolveFailed(false);
     (async () => {
       try {
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/mention-resolve`, {
@@ -135,12 +137,12 @@ export default function WikiMarkdown({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mentions: mentionAttrs }),
         });
-        if (!res.ok) return;
+        if (!res.ok) { setResolveFailed(true); return; }
         const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[] };
         const next = new Map<string, Resolved>();
         mentionAttrs.forEach((a, i) => next.set(attrsKey(a), { label: data.labels[i], url: data.urls[i] }));
         setResolved(next);
-      } catch { /* 保持编辑期快照 label */ }
+      } catch { setResolveFailed(true); }
     })();
   }, [mentionAttrs, productionId]);
 
@@ -195,9 +197,19 @@ export default function WikiMarkdown({
               const r = resolved.get(attrsKey(attrs));
               const snapshot = String(children ?? "").replace(/^#/, "");
               if (attrs.kind === "wiki") {
-                const label = r?.label ?? snapshot;
-                const url = r?.url ?? `/production/${productionId}/wiki/${attrs.id}`;
-                const deleted = r && r.label === "#[已删除]";
+                // 标题恒不信任正文快照——不管快照是不是最新的，一律以 resolve 结果为准；
+                // resolve 未完成/失败时给中性占位，不能拿旧快照顶上去冒充"当前标题"。
+                if (!r) {
+                  return (
+                    <span
+                      title={resolveFailed ? "获取文档标题失败" : "解析中…"}
+                      className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-zinc-50 text-zinc-400 border border-dashed border-zinc-300"
+                    >
+                      [[{resolveFailed ? "获取失败" : "…"}]]
+                    </span>
+                  );
+                }
+                const deleted = r.label === "#[已删除]";
                 if (deleted) {
                   return (
                     <span className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-zinc-50 text-zinc-400 border border-zinc-200 no-underline">
@@ -205,12 +217,13 @@ export default function WikiMarkdown({
                     </span>
                   );
                 }
+                const url = r.url ?? `/production/${productionId}/wiki/${attrs.id}`;
                 return (
                   <Link
                     href={url}
                     className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 no-underline hover:bg-sky-100"
                   >
-                    [[{label}]]
+                    [[{r.label}]]
                   </Link>
                 );
               }

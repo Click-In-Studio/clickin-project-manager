@@ -395,7 +395,7 @@ export default function WikiDocClient({
             <textarea
               value={body}
               onChange={e => { setBody(e.target.value); schedule(); }}
-              placeholder="markdown 源码…（[[链接]] 请写 [#标题](/__cm__wiki:<id>) 或切回富文本插入）"
+              placeholder="markdown 源码…（[[链接]] 请写 [#](/__cm__wiki:<id>)，方括号内文字不影响显示，或切回富文本插入）"
               spellCheck={false}
               className="w-full flex-1 min-h-[360px] resize-none px-3 py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg"
             />
