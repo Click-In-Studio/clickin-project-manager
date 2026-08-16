@@ -12,6 +12,7 @@ import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import AdminModal from "@/components/AdminModal";
+import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import type { WikiDoc, WikiRef } from "@/lib/wiki-db";
 import type { Mention } from "@/lib/event-db";
@@ -318,50 +319,63 @@ export default function WikiDocClient({
 
               <div>
                 <p className="font-medium mb-1.5">分享给部门</p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                  {departments.map(d => (
-                    <label key={d.id} className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={share.deptIds.includes(d.id)}
-                        onChange={e => {
-                          const next = e.target.checked
-                            ? [...share.deptIds, d.id]
-                            : share.deptIds.filter(x => x !== d.id);
-                          putShare({ deptIds: next });
-                        }}
-                      />
-                      <span>{d.name}</span>
-                    </label>
-                  ))}
-                  {departments.length === 0 && <span className="text-zinc-400">（无部门）</span>}
-                </div>
+                {departments.length === 0 ? (
+                  <span className="text-zinc-400">（无部门）</span>
+                ) : (
+                  <>
+                    <DropdownPicker
+                      multi
+                      items={departments.map(d => ({ id: d.id, label: d.name }))}
+                      values={new Set(share.deptIds)}
+                      placeholder="选择部门…"
+                      searchPlaceholder="搜索部门"
+                      multiCountLabel={n => n === 0 ? "选择部门…" : `已分享 ${n} 个部门`}
+                      onChange={() => {}}
+                      onToggle={deptId => {
+                        const next = share.deptIds.includes(deptId)
+                          ? share.deptIds.filter(x => x !== deptId)
+                          : [...share.deptIds, deptId];
+                        putShare({ deptIds: next });
+                      }}
+                    />
+                    {share.deptIds.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {share.deptIds.map(id => (
+                          <span key={id} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-600">
+                            {departments.find(d => d.id === id)?.name ?? id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               <div>
                 <p className="font-medium mb-1.5">分享给个人</p>
-                <div className="flex gap-1.5 mb-2">
-                  <select
-                    value={shareAddUser}
-                    onChange={e => setShareAddUser(e.target.value)}
-                    className="flex-1 rounded-lg border border-zinc-200 px-2 py-1.5 outline-none"
-                  >
-                    <option value="">选择成员…</option>
-                    {members
-                      .filter(m => !share.people.some(p => p.userId === m.userId))
-                      .map(m => <option key={m.userId} value={m.userId}>{m.name}</option>)}
-                  </select>
+                <div className="flex gap-1.5 mb-2 items-start">
+                  <div className="flex-1 min-w-0">
+                    <DropdownPicker
+                      items={members
+                        .filter(m => !share.people.some(p => p.userId === m.userId))
+                        .map(m => ({ id: m.userId, label: m.name }))}
+                      value={shareAddUser || null}
+                      placeholder="选择成员…"
+                      searchPlaceholder="搜索成员"
+                      onChange={id => setShareAddUser(id ?? "")}
+                    />
+                  </div>
                   <select
                     value={shareAddLevel}
                     onChange={e => setShareAddLevel(e.target.value as ShareLevel)}
-                    className="rounded-lg border border-zinc-200 px-2 py-1.5 outline-none"
+                    className="rounded-lg border border-zinc-200 px-2 py-[9px] text-xs outline-none"
                   >
                     {(Object.keys(LEVEL_LABELS) as ShareLevel[]).map(l =>
                       <option key={l} value={l}>{LEVEL_LABELS[l]}</option>)}
                   </select>
                   <button
                     type="button"
-                    style={{ ...PRIMARY_BTN, padding: "6px 10px" }}
+                    style={{ ...PRIMARY_BTN, padding: "8px 10px" }}
                     disabled={!shareAddUser}
                     onClick={async () => {
                       if (await putShare({ addPerson: { userId: shareAddUser, level: shareAddLevel } })) {
