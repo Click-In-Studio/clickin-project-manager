@@ -1508,6 +1508,26 @@ export async function createEventReport(data: {
   return rowToReport(row);
 }
 
+/** W5：把文档库既有文档挂载为报告（挂载≠创建内容；文档树位置不动——自定义挂载
+ *  语义）。挂载者获 report 边行集（可发布/解除）；wiki 内容权限不变。
+ *  wiki 须与 event 同 production；不存在/跨剧组返回 null。 */
+export async function mountWikiAsReport(data: {
+  id: string; eventId: string; wikiId: string; reportType: string; createdBy: string;
+}): Promise<EventReport | null> {
+  const pool = getPool();
+  const res = await pool.query<{ id: string; production_id: string }>(
+    `INSERT INTO event_report (id, event_id, report_type, wiki_id)
+     SELECT $1, $2, $3, w.id
+     FROM wiki w JOIN production_event pe ON pe.production_id = w.production_id
+     WHERE w.id = $4::uuid AND pe.id = $2
+     RETURNING id, (SELECT production_id FROM production_event WHERE id = $2) AS production_id`,
+    [data.id, data.eventId, data.reportType, data.wikiId]
+  );
+  if (!res.rows[0]) return null;
+  await writeReportGrants(data.id, res.rows[0].production_id, data.createdBy, data.eventId);
+  return getEventReport(data.id, data.eventId);
+}
+
 export async function updateEventReport(
   id: string, eventId: string,
   fields: {

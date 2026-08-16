@@ -3,7 +3,8 @@ import { hasEventDomainView } from "@/lib/event-permissions";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, listEventReports, createEventReport } from "@/lib/event-db";
+import { getProductionEvent, listEventReports, createEventReport, mountWikiAsReport } from "@/lib/event-db";
+import { canShareWiki } from "@/lib/wiki-perm";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -48,7 +49,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     title?: string; reportType?: string; body?: string;
     /** 文档树自定义挂载（W5 透传）：缺省=默认树、null=不挂、string=自定义父文档 */
     parentWikiId?: string | null;
+    /** W5：挂载文档库既有文档为报告（与新建互斥；挂载让渡可见性=分享行为，
+     *  双门：宿主 reports@create ∧ 该文档 grants@edit——批D 双门同构） */
+    wikiId?: string;
   };
+
+  if (body.wikiId) {
+    if (!await canShareWiki(toActor(session, permCtx), productionId, body.wikiId))
+      return Response.json({ error: "权限不足（需要该文档的分享权）" }, { status: 403 });
+    const report = await mountWikiAsReport({
+      id: uid(), eventId, wikiId: body.wikiId,
+      reportType: body.reportType ?? "rehearsal", createdBy: session.userId,
+    });
+    if (!report) return Response.json({ error: "文档不存在" }, { status: 404 });
+    return Response.json({ report }, { status: 201 });
+  }
+
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
   if (body.parentWikiId !== undefined && body.parentWikiId !== null && typeof body.parentWikiId !== "string")

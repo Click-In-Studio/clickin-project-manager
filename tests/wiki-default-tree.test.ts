@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { createEventReport, createReportNote, deleteEventReport } from "@/lib/event-db";
+import { createEventReport, createReportNote, deleteEventReport, mountWikiAsReport } from "@/lib/event-db";
+import { createWiki } from "@/lib/wiki-db";
 import { getWikiTreeConfig, ensureReportTreeAnchors, deleteWiki, listWikiLibrary } from "@/lib/wiki-db";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
@@ -210,6 +211,30 @@ describe("default report tree", () => {
       `SELECT 1 FROM production_member_grant WHERE resource_type = 'report' AND resource_id = $1`,
       [reportId]);
     expect(deadRows.rows.length).toBe(0);
+  });
+
+  it("mounting an existing library doc as report keeps its tree position (W5)", async () => {
+    const doc = await createWiki({ productionId: prodId, title: "既有文档", body: "内容", createdBy: creator });
+    const before = await wikiRow(doc.id);
+    const reportId = `rp${shortId()}`;
+    const mounted = await mountWikiAsReport({
+      id: reportId, eventId: eventA, wikiId: doc.id, reportType: "rehearsal", createdBy: creator,
+    });
+    expect(mounted?.wikiId).toBe(doc.id);
+    expect(mounted?.title).toBe("既有文档");
+    // 文档树位置不动（自定义挂载语义：不被默认树搬走）
+    const after = await wikiRow(doc.id);
+    expect(after?.parent_id).toBe(before?.parent_id);
+    // 跨 production 拒绝
+    const { prodId: otherProd } = await makeProduction();
+    try {
+      const foreign = await createWiki({ productionId: otherProd, title: "外部文档", createdBy: creator });
+      expect(await mountWikiAsReport({
+        id: `rp${shortId()}`, eventId: eventA, wikiId: foreign.id, reportType: "rehearsal", createdBy: creator,
+      })).toBeNull();
+    } finally {
+      await cleanupProduction(otherProd).catch(() => {});
+    }
   });
 
   it("event rename propagates to its report-tree directory doc title", async () => {
