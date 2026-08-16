@@ -9,8 +9,11 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import { keyBetween } from "@/lib/lex-order";
 import TreePickerModal from "@/components/TreePickerModal";
 import type { WikiListEntry } from "@/lib/wiki-db";
+
+type DropZone = "before" | "after" | "inside";
 
 type Node = { entry: WikiListEntry; depth: number; hasChildren: boolean };
 
@@ -55,13 +58,68 @@ export default function WikiShell({
 
   const byId = useMemo(() => new Map(wikis.map(w => [w.id, w])), [wikis]);
 
-  const flat = useMemo(() => {
+  // 同层有序邻接表（wikis 已按服务端 sort_key NULLS LAST, created_at 排序，分组后保持相对序）
+  const byParent = useMemo(() => {
     const ids = new Set(wikis.map(w => w.id));
-    const byParent = new Map<string | null, WikiListEntry[]>();
+    const m = new Map<string | null, WikiListEntry[]>();
     for (const w of wikis) {
       const key = w.parentId && ids.has(w.parentId) ? w.parentId : null;
-      byParent.set(key, [...(byParent.get(key) ?? []), w]);
+      m.set(key, [...(m.get(key) ?? []), w]);
     }
+    return m;
+  }, [wikis]);
+
+  // ── 拖拽调层级（Notion 式：行上/下缘=同级排序，行中部=成为子文档）──────────
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ id: string; zone: DropZone } | null>(null);
+
+  const dragDescendants = useMemo(() => {
+    if (!dragId) return new Set<string>();
+    const set = new Set([dragId]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const w of wikis) {
+        if (w.parentId && set.has(w.parentId) && !set.has(w.id)) { set.add(w.id); grew = true; }
+      }
+    }
+    return set;
+  }, [dragId, wikis]);
+
+  async function performDrop(targetId: string, zone: DropZone) {
+    const id = dragId;
+    setDragId(null);
+    setDropHint(null);
+    if (!id || id === targetId || dragDescendants.has(targetId)) return;
+    const target = byId.get(targetId);
+    if (!target) return;
+
+    let parentId: string | null;
+    let sortKey: string;
+    if (zone === "inside") {
+      parentId = targetId;
+      const children = (byParent.get(targetId) ?? []).filter(w => w.id !== id);
+      sortKey = keyBetween(children.at(-1)?.sortKey ?? null, null);
+    } else {
+      parentId = target.parentId ?? null;
+      const siblings = (byParent.get(parentId) ?? []).filter(w => w.id !== id);
+      const idx = siblings.findIndex(w => w.id === targetId);
+      const prev = zone === "before" ? siblings[idx - 1] : siblings[idx];
+      const next = zone === "before" ? siblings[idx] : siblings[idx + 1];
+      sortKey = keyBetween(prev?.sortKey ?? null, next?.sortKey ?? null);
+    }
+
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId, sortKey }),
+    });
+    if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
+    if (zone === "inside") setCollapsed(prev => { const n = new Set(prev); n.delete(targetId); return n; });
+    router.refresh();
+  }
+
+  const flat = useMemo(() => {
     let visible: Set<string> | null = null;
     const q = query.trim().toLowerCase();
     if (q) {
@@ -88,7 +146,7 @@ export default function WikiShell({
     };
     walk(null, 0);
     return out;
-  }, [wikis, query, collapsed, byId]);
+  }, [wikis, query, collapsed, byId, byParent]);
 
   async function create(parentId: string | null) {
     const title = newTitle.trim();
@@ -189,13 +247,34 @@ export default function WikiShell({
           )}
           {flat.map(({ entry, depth, hasChildren }) => {
             const active = entry.id === selectedId;
+            const hint = dropHint?.id === entry.id ? dropHint.zone : null;
+            const droppable = dragId && dragId !== entry.id && !dragDescendants.has(entry.id);
             return (
               <div key={entry.id}>
                 <div
+                  draggable
+                  onDragStart={e => { setDragId(entry.id); e.dataTransfer.effectAllowed = "move"; }}
+                  onDragEnd={() => { setDragId(null); setDropHint(null); }}
+                  onDragOver={e => {
+                    if (!droppable) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const y = (e.clientY - r.top) / r.height;
+                    const zone: DropZone = y < 0.25 ? "before" : y > 0.75 ? "after" : "inside";
+                    setDropHint(prev => prev?.id === entry.id && prev.zone === zone ? prev : { id: entry.id, zone });
+                  }}
+                  onDragLeave={() => setDropHint(prev => (prev?.id === entry.id ? null : prev))}
+                  onDrop={e => { e.preventDefault(); if (droppable && hint) performDrop(entry.id, hint); }}
                   className={`group flex items-center gap-0.5 pr-1.5 rounded-md mx-1 ${
-                    active ? "bg-sky-50" : "hover:bg-zinc-50"
-                  }`}
-                  style={{ paddingLeft: 4 + depth * 14 }}
+                    hint === "inside" ? "bg-sky-100 ring-1 ring-sky-300"
+                    : active ? "bg-sky-50" : "hover:bg-zinc-50"
+                  } ${dragId === entry.id ? "opacity-40" : ""}`}
+                  style={{
+                    paddingLeft: 4 + depth * 14,
+                    boxShadow: hint === "before" ? "inset 0 2px 0 0 #38bdf8"
+                      : hint === "after" ? "inset 0 -2px 0 0 #38bdf8" : undefined,
+                  }}
                 >
                   <button
                     type="button"

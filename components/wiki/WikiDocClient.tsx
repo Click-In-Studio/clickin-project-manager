@@ -53,6 +53,16 @@ export default function WikiDocClient({
   const [body, setBody] = useState(wiki.body);
   const [tagsInput, setTagsInput] = useState(wiki.tags.join(" "));
   const [status, setStatus] = useState<SaveStatus>("idle");
+  // 编辑面双模：所见即所得（TipTap）/ markdown 源码（纯 textarea）；偏好持久化
+  const [editorMode, setEditorMode] = useState<"wysiwyg" | "source">("wysiwyg");
+  useEffect(() => {
+    const saved = localStorage.getItem("clickin-wiki-editor-mode");
+    if (saved === "source" || saved === "wysiwyg") setEditorMode(saved);
+  }, []);
+  function switchMode(m: "wysiwyg" | "source") {
+    setEditorMode(m);
+    localStorage.setItem("clickin-wiki-editor-mode", m);
+  }
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareAddUser, setShareAddUser] = useState("");
@@ -196,29 +206,61 @@ export default function WikiDocClient({
               </div>
             )}
           </div>
-          {canShare && (
-            <button type="button" style={SECONDARY_BTN} onClick={openShare} className="shrink-0">分享</button>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {canEdit && (
+              <div className="flex rounded-lg border border-zinc-200 overflow-hidden text-[11px] font-medium">
+                <button
+                  type="button"
+                  onClick={() => switchMode("wysiwyg")}
+                  className={`px-2 py-1.5 ${editorMode === "wysiwyg" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-50"}`}
+                  title="所见即所得编辑"
+                >
+                  富文本
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMode("source")}
+                  className={`px-2 py-1.5 ${editorMode === "source" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-50"}`}
+                  title="markdown 源码编辑"
+                >
+                  源码
+                </button>
+              </div>
+            )}
+            {canShare && (
+              <button type="button" style={SECONDARY_BTN} onClick={openShare}>分享</button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存 */}
+      {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
       <div className={canEdit ? "px-5 pb-6" : "px-8 pb-6"}>
         {canEdit ? (
-          <SmartTextarea
-            value={body}
-            onChange={v => { setBody(v); schedule(); }}
-            markdown
-            frameless
-            minHeight={360}
-            placeholder="开始写作…（[[ 引用文档、@ 提及成员、# 引用剧本内容）"
-            memberMention={{
-              members,
-              onMentionsChange: m => { mentionsRef.current = m.map(x => ({ userId: x.userId, name: x.name })); },
-            }}
-            contentMention={{ productionId }}
-            plugins={[wikiLinkDropPlugin(productionId)]}
-          />
+          editorMode === "source" ? (
+            <textarea
+              value={body}
+              onChange={e => { setBody(e.target.value); schedule(); }}
+              placeholder="markdown 源码…（[[链接]] 请写 [#标题](/__cm__wiki:<id>) 或切回富文本插入）"
+              spellCheck={false}
+              className="w-full min-h-[420px] resize-y px-3 py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg"
+            />
+          ) : (
+            <SmartTextarea
+              value={body}
+              onChange={v => { setBody(v); schedule(); }}
+              markdown
+              frameless
+              minHeight={360}
+              placeholder="开始写作…（[[ 引用文档、@ 提及成员、# 引用剧本内容）"
+              memberMention={{
+                members,
+                onMentionsChange: m => { mentionsRef.current = m.map(x => ({ userId: x.userId, name: x.name })); },
+              }}
+              contentMention={{ productionId }}
+              plugins={[wikiLinkDropPlugin(productionId)]}
+            />
+          )
         ) : wiki.body.trim() ? (
           <WikiMarkdown content={wiki.body} productionId={productionId} />
         ) : (
