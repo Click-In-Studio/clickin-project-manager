@@ -50,11 +50,15 @@ function rowToWiki(r: WikiRow): WikiDoc {
 
 const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
 const WIKI_HREF_RE = /\(\/__cm__wiki:([0-9a-fA-F-]{36})(?:[?&][^)]*)?\)/g;
+// code fence / 行内码里的链接语法是"关于语法的文档"不是真引用（MindWeave
+// protectCodeSpans 同款教训）——提取前剥除代码上下文
+const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
 export function extractWikiLinkTargets(body: string): string[] {
+  const stripped = body.replace(CODE_SPAN_RE, "");
   const out = new Set<string>();
-  for (const m of body.matchAll(WIKI_TOKEN_RE)) out.add(m[1].toLowerCase());
-  for (const m of body.matchAll(WIKI_HREF_RE)) out.add(m[1].toLowerCase());
+  for (const m of stripped.matchAll(WIKI_TOKEN_RE)) out.add(m[1].toLowerCase());
+  for (const m of stripped.matchAll(WIKI_HREF_RE)) out.add(m[1].toLowerCase());
   return [...out];
 }
 

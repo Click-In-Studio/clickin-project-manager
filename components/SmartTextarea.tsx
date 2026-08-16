@@ -5,6 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
+import { TableKit } from "@tiptap/extension-table";
 import { PluginKey } from "@tiptap/pm/state";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -176,6 +177,7 @@ function Toolbar({ editor }: { editor: TiptapEditor | null }) {
       <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="有序列表">1.</ToolbarBtn>
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
+      <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
     </div>
@@ -516,7 +518,10 @@ export default function SmartTextarea({
     ];
 
     return markdown
-      ? [base, Markdown.configure({ transformCopiedText: true }), ...commonExts, wikiMentionCfg]
+      // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）；
+      // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞
+      ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
+         TableKit.configure({ table: { resizable: false } }), ...commonExts, wikiMentionCfg]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown]);

@@ -153,6 +153,13 @@ describe("link graph", () => {
     expect(extractWikiLinkTargets(body).sort()).toEqual([a, b].sort());
   });
 
+  it("ignores link syntax inside code fences and inline code (documentation, not references)", () => {
+    const a = "11111111-2222-3333-4444-555555555555";
+    const b = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const body = "语法示例：`[#wiki:" + a + "]`\n```\n[引用](/__cm__wiki:" + b + ")\n```\n真引用 [#wiki:" + a + "]";
+    expect(extractWikiLinkTargets(body)).toEqual([a]);
+  });
+
   it("save syncs wiki_link; backlinks and unlinked references work", async () => {
     const target = await createWiki({ productionId: prodId, title: "目标文档甲", createdBy: creator });
     const source = await createWiki({
