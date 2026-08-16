@@ -2,11 +2,13 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { Extension } from "@tiptap/core";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
+import Suggestion from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -266,27 +268,30 @@ const MarkdownContentMentionExt = Mention.extend({
   },
 });
 
-// [[wikilink — markdown mode only: dedicated node so `[[` gets its own suggestion；
-// serialises identically to a kind='wiki' contentMention（重载时由
-// MarkdownContentMentionExt 的 a[href^=/__cm__] parse 承接，round-trip 稳定）
-const WikiLinkMentionExt = Mention.extend({
-  name: "wikiMention",
-  addAttributes() {
-    return {
-      id: { default: "" },
-      label: { default: null },
-    };
+// [[wikilink 触发器（UI 修缮轮重构）：不再用独立 node——插入走已验证的
+// contentMention(kind='wiki') 管线（序列化/重载/chip 渲染全部现成）。
+// 独立 Suggestion 插件而非 Mention 内建：可设 allowedPrefixes=null——
+// 默认只在空格/行首后触发，CJK 文本后直接敲 [[ 原本根本不弹补全（首版 bug 根因）。
+const WikiLinkTrigger = Extension.create<{ suggestion: Record<string, unknown> }>({
+  name: "wikiLinkTrigger",
+  addOptions() {
+    return { suggestion: {} };
   },
-  addStorage() {
-    return {
-      markdown: {
-        serialize(state: { write: (s: string) => void }, node: { attrs: { id: string; label?: string | null } }) {
-          state.write(`[#${node.attrs.label ?? "文档"}](${CM_HREF_PREFIX}wiki:${node.attrs.id})`);
-        },
-      },
-    };
+  addProseMirrorPlugins() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return [Suggestion({ editor: this.editor, ...(this.options.suggestion as any) })];
   },
 });
+
+/** 在指定位置插入 wiki 引用 chip（补全选中与拖放共用） */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function insertWikiMentionAt(editor: any, range: { from: number; to: number } | number, props: { id: string; label: string }) {
+  const content = [
+    { type: "contentMention", attrs: { kind: "wiki", displayMode: null, id: props.id, aux: null, versionId: null, label: props.label } },
+    { type: "text", text: " " },
+  ];
+  editor.chain().focus().insertContentAt(range, content).run();
+}
 
 // @ mention — works in both modes; adds markdown serialization for markdown mode
 const AtMentionExt = Mention.extend({
@@ -496,18 +501,16 @@ export default function SmartTextarea({
       suggestion: makeSuggestion("#", hasHashPlugin),
     });
 
-    const wikiMentionCfg = WikiLinkMentionExt.configure({
-      renderText: ({ node }) => `[#wiki:${node.attrs.id}]`,
-      renderHTML: ({ node }) => [
-        "span",
-        {
-          "data-type": "wikiMention",
-          "data-id": node.attrs.id,
-          class: "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-default",
+    const wikiTriggerCfg = WikiLinkTrigger.configure({
+      suggestion: {
+        ...makeSuggestion("[[", hasWikiPlugin),
+        startOfLine: false,
+        // CJK 关键：默认 allowedPrefixes=[' '] 导致中文后敲 [[ 不触发
+        allowedPrefixes: null,
+        command: ({ editor, range, props }: { editor: unknown; range: { from: number; to: number }; props: { id: string; label: string } }) => {
+          insertWikiMentionAt(editor, range, props);
         },
-        `[[${node.attrs.label ?? "文档"}]]`,
-      ],
-      suggestion: makeSuggestion("[[", hasWikiPlugin),
+      },
     });
 
     const atMentionCfg = AtMentionExt.configure({
@@ -532,7 +535,7 @@ export default function SmartTextarea({
       ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
          TableKit.configure({ table: { resizable: false } }),
          TaskList, TaskItem.configure({ nested: true }),
-         ...commonExts, wikiMentionCfg]
+         ...commonExts, wikiTriggerCfg]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown]);
@@ -560,6 +563,25 @@ export default function SmartTextarea({
           return event.defaultPrevented;
         }
         return false;
+      },
+      // 从文档树拖文档进编辑器 → 自动成为双向链接 chip（UI 修缮轮）
+      handleDrop: (view, event) => {
+        const raw = event.dataTransfer?.getData("application/x-clickin-wiki");
+        if (!raw) return false;
+        try {
+          const { id, label } = JSON.parse(raw) as { id: string; label: string };
+          if (!id) return false;
+          event.preventDefault();
+          const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+            ?? view.state.selection.to;
+          const node = view.state.schema.nodes.contentMention.create({
+            kind: "wiki", displayMode: null, id, aux: null, versionId: null, label: label ?? "文档",
+          });
+          view.dispatch(view.state.tr.insert(pos, [node, view.state.schema.text(" ")]));
+          return true;
+        } catch {
+          return false;
+        }
       },
     },
     onCreate: ({ editor }) => {
