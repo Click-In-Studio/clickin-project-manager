@@ -1,5 +1,5 @@
 import { getPool } from "./pg";
-import { writeEventGrants, writeReportGrants, writeTechReqGrants } from "./resource-grant-db";
+import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "./resource-grant-db";
 import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki-db";
 import { keyBetween } from "./lex-order";
 
@@ -114,6 +114,8 @@ export type EventReport = {
   id: string;
   eventId: string;
   reportType: string;
+  /** 内容实体 id（W5 暴露：报告页跳文档库入口） */
+  wikiId: string;
   title: string;
   body: string;
   createdBy: string;
@@ -208,7 +210,7 @@ const TASK_SELECT_COLS = `
 type TechAssigneeRow = { task_id: string; user_id: string; name: string };
 
 type ReportRow = {
-  id: string; event_id: string; report_type: string; title: string;
+  id: string; event_id: string; report_type: string; wiki_id: string; title: string;
   body: string; created_by: string; created_at: Date; updated_at: Date;
   published_at: Date | null; mentions: Mention[];
 };
@@ -296,7 +298,7 @@ function rowToTechReq(
 
 function rowToReport(r: ReportRow): EventReport {
   return {
-    id: r.id, eventId: r.event_id, reportType: r.report_type,
+    id: r.id, eventId: r.event_id, reportType: r.report_type, wikiId: r.wiki_id,
     title: r.title, body: r.body, createdBy: r.created_by,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
     publishedAt: r.published_at?.toISOString() ?? null,
@@ -585,14 +587,35 @@ export async function updateProductionEvent(
   if ("versionId" in fields)            sets.push(`version_id  = $${vals.push(fields.versionId ?? null)}`);
   if (!sets.length) return getProductionEvent(id, productionId);
   sets.push(`updated_at = now()`);
-  const res = await getPool().query<EventRow>(
-    `UPDATE production_event SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2
-     RETURNING id, production_id, title, event_type, location,
-               start_time, end_time, status, description, chat_id, version_id,
-               created_by, created_at, updated_at`,
-    vals
-  );
-  return res.rows[0] ? rowToEvent(res.rows[0]) : null;
+  // W5 拍板：event 改名同步文档树的事件目录标题（锚定语义——目录名跟 event 走）；
+  // 与 event 更新同事务（AI review #4：分开写失败会留改名/目录名脱钩半态）
+  const client = await getPool().connect();
+  let row: EventRow | undefined;
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<EventRow>(
+      `UPDATE production_event SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2
+       RETURNING id, production_id, title, event_type, location,
+                 start_time, end_time, status, description, chat_id, version_id,
+                 created_by, created_at, updated_at`,
+      vals
+    );
+    row = res.rows[0];
+    if (fields.title !== undefined && row) {
+      await client.query(
+        `UPDATE wiki SET title = $3, updated_at = now()
+         WHERE id = (SELECT report_doc_wiki_id FROM production_event WHERE id = $1 AND production_id = $2)`,
+        [id, productionId, fields.title],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+  return row ? rowToEvent(row) : null;
 }
 
 export async function deleteProductionEvent(id: string, productionId: string): Promise<void> {
@@ -1418,7 +1441,7 @@ export async function setTechReqAssignees(
 
 export async function listEventReports(eventId: string): Promise<EventReport[]> {
   const res = await getPool().query<ReportRow>(
-    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+    `SELECT er.id, er.event_id, er.report_type, er.wiki_id::text AS wiki_id, w.title, w.body, w.created_by,
             er.created_at, er.updated_at, er.published_at, w.mentions
      FROM event_report er JOIN wiki w ON w.id = er.wiki_id
      WHERE er.event_id = $1 ORDER BY er.created_at`,
@@ -1429,7 +1452,7 @@ export async function listEventReports(eventId: string): Promise<EventReport[]> 
 
 export async function getEventReport(id: string, eventId: string): Promise<EventReport | null> {
   const res = await getPool().query<ReportRow>(
-    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+    `SELECT er.id, er.event_id, er.report_type, er.wiki_id::text AS wiki_id, w.title, w.body, w.created_by,
             er.created_at, er.updated_at, er.published_at, w.mentions
      FROM event_report er JOIN wiki w ON w.id = er.wiki_id
      WHERE er.id = $1 AND er.event_id = $2`,
@@ -1440,7 +1463,7 @@ export async function getEventReport(id: string, eventId: string): Promise<Event
 
 export async function getReportByProduction(id: string, productionId: string): Promise<EventReport | null> {
   const res = await getPool().query<ReportRow>(
-    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+    `SELECT er.id, er.event_id, er.report_type, er.wiki_id::text AS wiki_id, w.title, w.body, w.created_by,
             er.created_at, er.updated_at, er.published_at, w.mentions
      FROM event_report er
      JOIN wiki w ON w.id = er.wiki_id
@@ -1482,7 +1505,7 @@ export async function createEventReport(data: {
       [data.id, data.eventId, data.reportType, wikiId]
     );
     await client.query("COMMIT");
-    row = { ...res.rows[0], title: data.title, body: data.body, created_by: data.createdBy, mentions: [] } as ReportRow;
+    row = { ...res.rows[0], wiki_id: wikiId, title: data.title, body: data.body, created_by: data.createdBy, mentions: [] } as ReportRow;
     await writeReportGrants(data.id, productionId, data.createdBy, data.eventId);
   } catch (e) {
     await client.query("ROLLBACK");
@@ -1496,6 +1519,38 @@ export async function createEventReport(data: {
     : data.parentWikiId;
   if (parent) await placeWikiUnder(wikiId, productionId, parent);
   return rowToReport(row);
+}
+
+/** W5：把文档库既有文档挂载为报告（挂载≠创建内容；文档树位置不动——自定义挂载
+ *  语义）。挂载者获 report 边行集（可发布/解除）；wiki 内容权限不变。
+ *  wiki 须与 event 同 production；不存在/跨剧组返回 null。 */
+export async function mountWikiAsReport(data: {
+  id: string; eventId: string; wikiId: string; reportType: string; createdBy: string;
+}): Promise<EventReport | null> {
+  // 非法 uuid 直接判不存在（AI review #3：裸 ::uuid cast 会 22P02 打成 500）
+  if (!/^[0-9a-fA-F-]{36}$/.test(data.wikiId)) return null;
+  // 边插入 + 挂载者行集同事务（AI review #2：行集写失败不留无主挂载边）
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<{ id: string; production_id: string }>(
+      `INSERT INTO event_report (id, event_id, report_type, wiki_id)
+       SELECT $1, $2, $3, w.id
+       FROM wiki w JOIN production_event pe ON pe.production_id = w.production_id
+       WHERE w.id = $4::uuid AND pe.id = $2
+       RETURNING id, (SELECT production_id FROM production_event WHERE id = $2) AS production_id`,
+      [data.id, data.eventId, data.reportType, data.wikiId]
+    );
+    if (!res.rows[0]) { await client.query("ROLLBACK"); return null; }
+    await writeReportGrants(data.id, res.rows[0].production_id, data.createdBy, data.eventId, client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+  return getEventReport(data.id, data.eventId);
 }
 
 export async function updateEventReport(
@@ -1516,32 +1571,75 @@ export async function updateEventReport(
   if (fields.body     !== undefined) wikiSets.push(`body     = $${wikiVals.push(fields.body)}`);
   if (fields.mentions !== undefined) wikiSets.push(`mentions = $${wikiVals.push(JSON.stringify(fields.mentions))}`);
   if (!edgeSets.length && !wikiSets.length) return getEventReport(id, eventId);
-  if (edgeSets.length) {
-    edgeSets.push(`updated_at = now()`);
-    await getPool().query(
-      `UPDATE event_report SET ${edgeSets.join(", ")} WHERE id = $1 AND event_id = $2`, edgeVals,
-    );
-  }
-  if (wikiSets.length) {
-    wikiSets.push(`updated_at = now()`);
-    await getPool().query(
-      `UPDATE wiki SET ${wikiSets.join(", ")}
-       WHERE id = (SELECT wiki_id FROM event_report WHERE id = $1 AND event_id = $2)`, wikiVals,
-    );
+  // W5：边+wiki 双写同事务（原两条独立语句，中途失败会留半更新态）
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (edgeSets.length) {
+      edgeSets.push(`updated_at = now()`);
+      await client.query(
+        `UPDATE event_report SET ${edgeSets.join(", ")} WHERE id = $1 AND event_id = $2`, edgeVals,
+      );
+    }
+    if (wikiSets.length) {
+      wikiSets.push(`updated_at = now()`);
+      await client.query(
+        `UPDATE wiki SET ${wikiSets.join(", ")}
+         WHERE id = (SELECT wiki_id FROM event_report WHERE id = $1 AND event_id = $2)`, wikiVals,
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
   return getEventReport(id, eventId);
 }
 
 export async function deleteEventReport(id: string, eventId: string): Promise<void> {
-  // 边删除 + 内容实体删除（report 内容随边生灭）。
-  // note 的 wiki 一并删除：note 边随 report 边 FK 级联，但 note wiki 不清理会成
-  // 孤儿——默认文档树后它们有标题有父节点，父被删即飘根（可见垃圾）
-  await getPool().query(
-    `WITH note_wikis AS (SELECT wiki_id FROM event_report_note WHERE report_id = $1),
-          edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
-     DELETE FROM wiki WHERE id IN (SELECT wiki_id FROM edge UNION SELECT wiki_id FROM note_wikis WHERE EXISTS (SELECT 1 FROM edge))`,
-    [id, eventId]
-  );
+  // W5 统一日：删除报告 = 解除挂载 ≠ 删文档（§0.10 承诺兑现）。
+  // 边亡文档存：report/note 的 wiki 留在文档树归档位（note 边随 FK 级联，
+  // note wiki 成为报告文档的普通子文档）；published 状态随边消失，沿边可见性
+  // 收缩。作者行集接管（§0.9 定式 C-7）：报告权限锚在边节点、边亡即失效，
+  // 不补 wiki 行集则连作者都失访——对 report/note wiki 的 created_by 发
+  // wiki manage 行集。文档本体此后在文档库删除（deleteWiki）。
+  // 单事务（AI review #1/#5）：DELETE...RETURNING 原子取 owner（无 TOCTOU 窗口），
+  // 行集接管与死行清理同事务——任一步失败整体回滚，不留"边亡且作者失访"半态
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const owners = await client.query<{ wiki_id: string; production_id: string; created_by: string | null }>(
+      `WITH note_wikis AS (SELECT wiki_id FROM event_report_note WHERE report_id = $1),
+            edge AS (DELETE FROM event_report WHERE id = $1 AND event_id = $2 RETURNING wiki_id)
+       SELECT w.id::text AS wiki_id, w.production_id, w.created_by::text AS created_by
+       FROM wiki w
+       WHERE w.id IN (
+         SELECT wiki_id FROM edge
+         UNION
+         SELECT nw.wiki_id FROM note_wikis nw WHERE EXISTS (SELECT 1 FROM edge)
+       )`,
+      [id, eventId]
+    );
+    if (owners.rows.length === 0) { await client.query("COMMIT"); return; }
+    for (const o of owners.rows) {
+      if (o.created_by) await writeWikiGrants(o.wiki_id, o.production_id, o.created_by, client);
+    }
+    // 边节点权限行清理（resource_id=边 id，边亡即死行）
+    await client.query(
+      `DELETE FROM production_member_grant WHERE resource_type = 'report' AND resource_id = $1`, [id]);
+    await client.query(
+      `DELETE FROM resource_dept_manage WHERE resource_type = 'report' AND resource_id = $1`, [id]);
+    await client.query(
+      `DELETE FROM resource_person_manage WHERE resource_type = 'report' AND resource_id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Report Notes ─────────────────────────────────────────────────────────────
@@ -1610,15 +1708,26 @@ export async function updateReportNote(
   if (mentions !== undefined) {
     sets.push(`mentions = $${vals.push(JSON.stringify(mentions))}`);
   }
-  await getPool().query(
-    `UPDATE wiki SET ${sets.join(", ")}
-     WHERE id = (SELECT wiki_id FROM event_report_note WHERE id = $2 AND report_id = $3)`,
-    vals
-  );
-  await getPool().query(
-    `UPDATE event_report_note SET updated_at = now() WHERE id = $1 AND report_id = $2`,
-    [id, reportId]
-  );
+  // W5：wiki+边双写同事务
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE wiki SET ${sets.join(", ")}
+       WHERE id = (SELECT wiki_id FROM event_report_note WHERE id = $2 AND report_id = $3)`,
+      vals
+    );
+    await client.query(
+      `UPDATE event_report_note SET updated_at = now() WHERE id = $1 AND report_id = $2`,
+      [id, reportId]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
   return getReportNote(id, reportId);
 }
 
@@ -2169,7 +2278,7 @@ export async function listProductionReports(
     event_title: string; event_start_time: string | null; event_status: string;
     is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
   }>(
-    `SELECT er.id, er.event_id, er.report_type, w.title, w.body, w.created_by,
+    `SELECT er.id, er.event_id, er.report_type, er.wiki_id::text AS wiki_id, w.title, w.body, w.created_by,
             er.created_at, er.updated_at, er.published_at, w.mentions,
             pe.title AS event_title, pe.start_time AS event_start_time, pe.status AS event_status,
             (w.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,

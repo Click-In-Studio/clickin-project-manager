@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
+import TreePickerModal from "@/components/TreePickerModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
 import ChevronIcon from "@/components/ChevronIcon";
@@ -2320,8 +2321,41 @@ function ReportsTab({
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
+  // W5：从文档库挂载既有文档为报告
+  const [mountPicking, setMountPicking] = useState(false);
+  const [mountItems, setMountItems] = useState<{ id: string; label: string; parentId?: string | null }[] | null>(null);
 
   const base = `${BASE_PATH}/api/production/${productionId}/events/${eventId}/reports`;
+
+  async function openMountPicker() {
+    setMountPicking(true);
+    if (mountItems) return;
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`);
+      const data = await res.json() as { wikis?: { id: string; title: string | null; parentId: string | null; isAnchor: boolean }[] };
+      const mounted = new Set(reports.map(r => r.wikiId));
+      setMountItems((data.wikis ?? [])
+        .filter(w => !w.isAnchor && !mounted.has(w.id))
+        .map(w => ({ id: w.id, label: w.title ?? "（无标题）", parentId: w.parentId })));
+    } catch {
+      setMountItems([]);
+    }
+  }
+
+  async function mountWiki(ids: string[]) {
+    setMountPicking(false);
+    const wikiId = ids[0];
+    if (!wikiId) return;
+    const res = await fetch(base, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wikiId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error ?? "挂载失败"); return; }
+    onReportsChange([...reports, data.report]);
+    setMountItems(null);
+  }
 
   async function saveRename(id: string) {
     if (!renameTitle.trim()) return;
@@ -2457,11 +2491,30 @@ function ReportsTab({
             </div>
           </div>
         ) : (
-          <button onClick={() => setAdding(true)}
-            className="rounded-xl border-2 border-dashed border-zinc-200 py-3 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors">
-            + 新建记录
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setAdding(true)}
+              className="flex-1 rounded-xl border-2 border-dashed border-zinc-200 py-3 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors">
+              + 新建记录
+            </button>
+            <button onClick={openMountPicker}
+              title="把文档库中的既有文档挂载为本事件的报告（需要该文档的分享权）"
+              className="flex-1 rounded-xl border-2 border-dashed border-zinc-200 py-3 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors">
+              ⧉ 从文档库挂载
+            </button>
+          </div>
         )
+      )}
+
+      {mountPicking && (
+        <TreePickerModal
+          kicker="Wiki"
+          title="挂载文档为报告"
+          items={mountItems ?? []}
+          preselected={[]}
+          single
+          onConfirm={mountWiki}
+          onClose={() => setMountPicking(false)}
+        />
       )}
     </div>
   );
@@ -2505,7 +2558,16 @@ function ReportEditor({
       {/* Body: editable only when canWrite and not yet published */}
       {canWrite && !isPublished ? (
         <div className="flex flex-col gap-2">
-          <label className="text-xs text-zinc-400">正文</label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-zinc-400">正文</label>
+            {/* W5 统一日：报告=挂载的 wiki 文档，可去文档视图编辑（全屏/树上下文） */}
+            {report.wikiId && (
+              <Link href={`/production/${productionId}/wiki/${report.wikiId}`}
+                className="text-xs text-sky-700 hover:underline">
+                在文档视图中编辑 ↗
+              </Link>
+            )}
+          </div>
           <MarkdownEditor
             content={body}
             onChange={setBody}

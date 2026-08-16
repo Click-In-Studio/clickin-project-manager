@@ -11,7 +11,7 @@ import {
   listEventCallTimes,
   listEventTechReqs,
   listEventReports,
-  createEventReport,
+
   listEventDepartments,
   getSelfParticipantRole,
 } from "@/lib/event-db";
@@ -73,16 +73,9 @@ export default async function EventDetailPage({
       listVersions(productionId),
     ]);
 
-  let reports = rawReports;
-  if (reports.length === 0) {
-    // eslint-disable-next-line react-hooks/purity -- Server Component, not subject to render purity rules
-    const seq = `rpt${Date.now().toString(36)}`;
-    const defaultReport = await createEventReport({
-      id: seq, eventId, reportType: "rehearsal",
-      title: "排练记录", body: "", createdBy: session.userId,
-    });
-    reports = [defaultReport];
-  }
+  // W5：默认报告懒建已移除（浏览即建会在文档树留足迹）——空态由
+  // EventDetailClient 的显式创建流承担（暂无记录 + 添加按钮）
+  const reports = rawReports;
 
   // Derive capability booleans from the access result
   const hasEditGrant = accessResult.canAccess &&
