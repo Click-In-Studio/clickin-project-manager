@@ -170,7 +170,7 @@ export default function WikiDocClient({
     : `更新于 ${fmtDateTime(wiki.updatedAt)}`;
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white">
+    <div className="rounded-xl border border-zinc-200 bg-white flex flex-col">
       {/* 标题区 */}
       <div className="px-8 pt-6 pb-3">
         <div className="flex items-start gap-3">
@@ -235,7 +235,7 @@ export default function WikiDocClient({
       </div>
 
       {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
-      <div className={canEdit ? "px-5 pb-6" : "px-8 pb-6"}>
+      <div className={`flex-1 flex flex-col ${canEdit ? "px-5 pb-6" : "px-8 pb-6"}`}>
         {canEdit ? (
           editorMode === "source" ? (
             <textarea
@@ -243,7 +243,7 @@ export default function WikiDocClient({
               onChange={e => { setBody(e.target.value); schedule(); }}
               placeholder="markdown 源码…（[[链接]] 请写 [#标题](/__cm__wiki:<id>) 或切回富文本插入）"
               spellCheck={false}
-              className="w-full min-h-[420px] resize-y px-3 py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg"
+              className="w-full flex-1 min-h-[360px] resize-none px-3 py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg"
             />
           ) : (
             <SmartTextarea
