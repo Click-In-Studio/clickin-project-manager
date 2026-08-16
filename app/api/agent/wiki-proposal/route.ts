@@ -36,10 +36,12 @@ export async function GET(req: NextRequest) {
 
     let targetTitle: string | null = null;
     let targetBody: string | null = null;
+    let targetTags: string[] | null = null;
     if (proposal.targetWikiId && resolved && await canViewWiki(resolved.actor, productionId, proposal.targetWikiId)) {
       const target = await getWiki(proposal.targetWikiId, productionId);
       targetTitle = target?.title ?? null;
       targetBody = target?.body ?? null;
+      targetTags = target?.tags ?? null;
     }
 
     return NextResponse.json({
@@ -47,9 +49,11 @@ export async function GET(req: NextRequest) {
       targetWikiId: proposal.targetWikiId,
       targetTitle,
       targetBody,
+      targetTags,
       parentTitle,
       title: proposal.title,
       body: proposal.body,
+      tags: proposal.tags,
       summary: proposal.summary,
       hasPermission: proposal.hasPermission,
       permissionKey: proposal.permissionKey,
