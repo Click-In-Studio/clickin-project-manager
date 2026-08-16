@@ -69,7 +69,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   for (const perm of needed) {
     // E1 过渡双制：node: 前缀键走行判定，其余仍走原子键（E2 收敛）
     if (perm.startsWith("node:")) {
-      if (permCtx.isAdmin) continue;
+      if (permCtx.isAdmin || permCtx.isOwner) continue;
       const m = /^node:([^/]+)\/([^/@]+)(?:\/(.+))?@(\w+)$/.exec(perm);
       if (!m || !await hasGrant(permCtx.userId, id, m[1], m[2], m[3] ?? "*", m[4] as "view" | "create" | "edit" | "delete")) {
         return Response.json({ error: `权限不足：${perm}` }, { status: 403 });

@@ -7458,9 +7458,30 @@ export async function submitAccessRequest(
   const supervisorId = supervisorRes.rows[0]?.supervisor_id ?? null;
 
   const initialStatus = supervisorId ? "pending_supervisor" : "pending_resource";
+  const requestType = params.type ?? "resource_access";
+
+  // 覆盖式申请自动完成（2026-08-16 用户反馈）：同人同目标同级别的旧 pending 申请
+  // 被新申请取代（如先申 1 天 TTL 又申 30 天）——自动 cancel 并过期其待办通知，
+  // 否则旧申请的审批待办永远挂着，审批人收件箱堆积
+  const superseded = await getPool().query<{ id: string }>(
+    `UPDATE approval_request
+     SET status = 'cancelled', resolved_at = now()
+     WHERE production_id = $1 AND subject_id = $2 AND type = $3
+       AND resource_type = $4 AND resource_id = $5 AND resource_sub = $6
+       AND permission_level = $7
+       AND status IN ('pending_supervisor', 'pending_resource')
+     RETURNING id`,
+    [productionId, userId, requestType, params.resourceType, resourceId, resourceSub, params.permissionLevel],
+  );
+  for (const r of superseded.rows) {
+    await getPool().query(
+      `UPDATE user_notification SET expired_at = now()
+       WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+      [r.id],
+    );
+  }
 
   // Insert the request
-  const requestType = params.type ?? "resource_access";
   const insertRes = await getPool().query<ApprovalRow>(
     `INSERT INTO approval_request
        (production_id, subject_id, type,

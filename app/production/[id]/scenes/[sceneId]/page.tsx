@@ -33,10 +33,10 @@ export default async function SceneDetailPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!access.permCtx.isAdmin && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
+  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Ascene%2F*%2Fmeta%40view&id=${id}`);
 
-  const canEdit = access.permCtx.isAdmin
+  const canEdit = access.permCtx.isAdmin || access.permCtx.isOwner  // owner 旁路（#228 漏网）
     || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
