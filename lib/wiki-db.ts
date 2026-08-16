@@ -25,7 +25,11 @@ export type WikiDoc = {
   updatedAt: string;
 };
 
-export type WikiListEntry = Omit<WikiDoc, "body" | "mentions"> & { tags: string[] };
+export type WikiListEntry = Omit<WikiDoc, "body" | "mentions"> & {
+  tags: string[];
+  /** 系统锚点目录（默认树的根/event 目录）：可移动可改名，不可删除 */
+  isAnchor: boolean;
+};
 
 type WikiRow = {
   id: string; production_id: string; title: string | null; body: string;
@@ -84,10 +88,12 @@ async function writeRevision(
 
 /** 文档库列表（note 的 wiki 行 title 恒 NULL，不进库面）。可见性过滤由调用方做。 */
 export async function listWikiLibrary(productionId: string): Promise<WikiListEntry[]> {
-  const res = await getPool().query<WikiRow & { tags: string[] | null }>(
+  const res = await getPool().query<WikiRow & { tags: string[] | null; is_anchor: boolean }>(
     `SELECT w.id::text AS id, w.production_id, w.title, w.created_by, w.parent_id::text AS parent_id,
             w.sort_key, w.is_public, w.created_at, w.updated_at, '' AS body, '[]'::jsonb AS mentions,
-            array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags
+            array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags,
+            (EXISTS (SELECT 1 FROM production_wiki_config c WHERE c.reports_root_wiki_id = w.id)
+             OR EXISTS (SELECT 1 FROM production_event pe WHERE pe.report_doc_wiki_id = w.id)) AS is_anchor
      FROM wiki w LEFT JOIN wiki_tag t ON t.wiki_id = w.id
      WHERE w.production_id = $1 AND w.title IS NOT NULL
      GROUP BY w.id
@@ -96,7 +102,7 @@ export async function listWikiLibrary(productionId: string): Promise<WikiListEnt
   );
   return res.rows.map(r => {
     const { body: _b, mentions: _m, ...rest } = rowToWiki(r);
-    return { ...rest, tags: r.tags ?? [] };
+    return { ...rest, tags: r.tags ?? [], isAnchor: r.is_anchor };
   });
 }
 
@@ -220,14 +226,23 @@ export async function updateWiki(
   return getWiki(id, productionId);
 }
 
-/** 被挂载（report/note 边引用）的 wiki 不可删；子文档提根由 FK SET NULL 承担。 */
+/** 被挂载（report/note 边引用）的 wiki 不可删；系统锚点目录（默认树的根/event
+ *  目录）不可删——移动无妨（锚认 id），删除会打散归档并触发重建震荡。
+ *  子文档提根由 FK SET NULL 承担。 */
 export async function deleteWiki(
   id: string, productionId: string,
-): Promise<{ ok: true } | { ok: false; reason: "mounted" | "not_found" }> {
+): Promise<{ ok: true } | { ok: false; reason: "mounted" | "anchor" | "not_found" }> {
   const pool = getPool();
   const exists = await pool.query(
     `SELECT 1 FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
   if (!exists.rows[0]) return { ok: false, reason: "not_found" };
+  const anchor = await pool.query(
+    `SELECT 1 FROM production_wiki_config WHERE reports_root_wiki_id = $1::uuid
+     UNION ALL
+     SELECT 1 FROM production_event WHERE report_doc_wiki_id = $1::uuid LIMIT 1`,
+    [id],
+  );
+  if (anchor.rows.length > 0) return { ok: false, reason: "anchor" };
   const mounted = await pool.query(
     `SELECT 1 FROM event_report WHERE wiki_id = $1::uuid
      UNION ALL

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { createEventReport, createReportNote, deleteEventReport } from "@/lib/event-db";
-import { getWikiTreeConfig, ensureReportTreeAnchors } from "@/lib/wiki-db";
+import { getWikiTreeConfig, ensureReportTreeAnchors, deleteWiki, listWikiLibrary } from "@/lib/wiki-db";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // 默认文档树（拍板 §4-9）：报告默认挂「报告」/「<event>」之下、note 挂报告文档下、
@@ -158,6 +158,20 @@ describe("default report tree", () => {
     } finally {
       await cleanupProduction(prod2).catch(() => {});
     }
+  });
+
+  it("anchor docs (root/event dir) cannot be deleted and are flagged in library list", async () => {
+    const eventDocId = await ensureReportTreeAnchors(prodId, eventA);
+    const cfg = await getWikiTreeConfig(prodId);
+    expect(await deleteWiki(cfg.rootWikiId!, prodId)).toEqual({ ok: false, reason: "anchor" });
+    expect(await deleteWiki(eventDocId!, prodId)).toEqual({ ok: false, reason: "anchor" });
+
+    const list = await listWikiLibrary(prodId);
+    const byId = new Map(list.map(w => [w.id, w]));
+    expect(byId.get(cfg.rootWikiId!)?.isAnchor).toBe(true);
+    expect(byId.get(eventDocId!)?.isAnchor).toBe(true);
+    // 普通文档不带锚点标记
+    expect(list.some(w => !w.isAnchor)).toBe(true);
   });
 
   it("deleting a report removes its note wikis (no orphans floating to root)", async () => {

@@ -95,6 +95,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const result = await deleteWiki(wikiId, productionId);
   if (!result.ok) {
     if (result.reason === "not_found") return Response.json({ error: "文档不存在" }, { status: 404 });
+    if (result.reason === "anchor")
+      return Response.json({ error: "系统目录文档（报告归档锚点）不可删除，可移动或改名" }, { status: 409 });
     return Response.json(
       { error: "该文档被 report/note 挂载引用，不可直接删除（先解除挂载）" }, { status: 409 });
   }

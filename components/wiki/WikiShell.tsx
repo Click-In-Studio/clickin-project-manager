@@ -32,7 +32,33 @@ export default function WikiShell({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const byId = useMemo(() => new Map(wikis.map(w => [w.id, w])), [wikis]);
+  const byIdRef = useRef(byId);
+  byIdRef.current = byId;
+
+  // 默认全收起；展开状态按 production 持久化 localStorage
+  const storageKey = `clickin-wiki-tree-expanded:${productionId}`;
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const hydratedRef = useRef(false);
+
+  // 挂载后读回持久化状态（避免 SSR 水合不一致），并展开选中文档的祖先链
+  useEffect(() => {
+    let saved: string[] = [];
+    try { saved = JSON.parse(localStorage.getItem(storageKey) ?? "[]") as string[]; } catch { /* 忽略坏数据 */ }
+    setExpanded(prev => {
+      const next = new Set([...prev, ...saved]);
+      let cur = selectedId ? byIdRef.current.get(selectedId) : undefined;
+      while (cur?.parentId) { next.add(cur.parentId); cur = byIdRef.current.get(cur.parentId); }
+      return next;
+    });
+    hydratedRef.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, selectedId]);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try { localStorage.setItem(storageKey, JSON.stringify([...expanded])); } catch { /* 配额满等，忽略 */ }
+  }, [expanded, storageKey]);
   // 新建：creatingUnder = null 未在建 / "" 根级 / <id> 子文档
   const [creatingUnder, setCreatingUnder] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -55,8 +81,6 @@ export default function WikiShell({
       document.removeEventListener("scroll", closeOnScroll, true);
     };
   }, [menu]);
-
-  const byId = useMemo(() => new Map(wikis.map(w => [w.id, w])), [wikis]);
 
   // 同层有序邻接表（wikis 已按服务端 sort_key NULLS LAST, created_at 排序，分组后保持相对序）
   const byParent = useMemo(() => {
@@ -115,7 +139,7 @@ export default function WikiShell({
       body: JSON.stringify({ parentId, sortKey }),
     });
     if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
-    if (zone === "inside") setCollapsed(prev => { const n = new Set(prev); n.delete(targetId); return n; });
+    if (zone === "inside") setExpanded(prev => new Set([...prev, targetId]));
     router.refresh();
   }
 
@@ -141,12 +165,12 @@ export default function WikiShell({
         if (visible && !visible.has(w.id)) continue;
         const hasChildren = (byParent.get(w.id) ?? []).length > 0;
         out.push({ entry: w, depth, hasChildren });
-        if (!collapsed.has(w.id) || q) walk(w.id, depth + 1);
+        if (expanded.has(w.id) || q) walk(w.id, depth + 1);
       }
     };
     walk(null, 0);
     return out;
-  }, [wikis, query, collapsed, byId, byParent]);
+  }, [wikis, query, expanded, byId, byParent]);
 
   async function create(parentId: string | null) {
     const title = newTitle.trim();
@@ -162,7 +186,7 @@ export default function WikiShell({
       if (!res.ok) { alert(data.error ?? "创建失败"); return; }
       setCreatingUnder(null);
       setNewTitle("");
-      if (parentId) setCollapsed(prev => { const n = new Set(prev); n.delete(parentId); return n; });
+      if (parentId) setExpanded(prev => new Set([...prev, parentId]));
       router.push(`/production/${productionId}/wiki/${data.wiki.id}`);
       router.refresh();
     } finally {
@@ -278,7 +302,7 @@ export default function WikiShell({
                 >
                   <button
                     type="button"
-                    onClick={() => setCollapsed(prev => {
+                    onClick={() => setExpanded(prev => {
                       const next = new Set(prev);
                       if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id);
                       return next;
@@ -286,7 +310,7 @@ export default function WikiShell({
                     className={`w-4 shrink-0 text-[10px] text-zinc-400 hover:text-zinc-600 ${hasChildren ? "" : "invisible"}`}
                     aria-label="展开/折叠"
                   >
-                    {collapsed.has(entry.id) ? "▸" : "▾"}
+                    {expanded.has(entry.id) ? "▾" : "▸"}
                   </button>
                   <Link
                     href={`/production/${productionId}/wiki/${entry.id}`}
@@ -357,13 +381,18 @@ export default function WikiShell({
           >
             移动到…
           </button>
-          <button
-            type="button"
-            className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
-            onClick={() => remove(menu.id)}
-          >
-            删除
-          </button>
+          {/* 系统锚点目录（报告归档）不可删除——服务端亦有 409 拦截 */}
+          {byId.get(menu.id)?.isAnchor ? (
+            <p className="px-3 py-1.5 text-[12px] text-zinc-400">系统目录，不可删除</p>
+          ) : (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
+              onClick={() => remove(menu.id)}
+            >
+              删除
+            </button>
+          )}
         </div>,
         document.body,
       )}
