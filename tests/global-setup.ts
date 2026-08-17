@@ -86,6 +86,11 @@ import {
   CUE_DOMAIN_REST_SNAPSHOT_PATH,
   type CueDomainRestSnapshot,
 } from "./cue-domain-rest-snapshot";
+import {
+  isSceneFieldGatesPreMigrationSchema,
+  createSceneFieldGatesPreMigrationData,
+  SCENE_FIELD_GATES_SNAPSHOT_PATH,
+} from "./scene-field-gates-snapshot";
 
 import {
   isLocalScriptDataPreMigrationSchema,
@@ -383,6 +388,17 @@ export async function setup() {
       );
       await pool.query(migrationSql);
     }
+  }
+
+  if (await isSceneFieldGatesPreMigrationSchema(pool)) {
+    // scene 字段门对齐（2026-08-17）：PRE 判据=编剧模板尚无 meta/name@edit。
+    const sfgSnapshot = await createSceneFieldGatesPreMigrationData(pool);
+    await writeFile(SCENE_FIELD_GATES_SNAPSHOT_PATH, JSON.stringify(sfgSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-scene-field-gates.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
   }
 
   if (await isLocalScriptDataPreMigrationSchema(pool)) {

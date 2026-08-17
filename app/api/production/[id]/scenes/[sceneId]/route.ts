@@ -5,6 +5,7 @@ import {
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasGrant } from "@/lib/grant-check";
+import { SCENE_FIELD_SUBS, touchedSceneFields } from "@/lib/scene-field-perms";
 import { diffState } from "@/lib/script-ops";
 import {
   convertMarker, executeMarkerDeletion, planMarkerDeletion, projectMarkers, resolveMarkerId,
@@ -35,9 +36,9 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   if (!auth.access) return { error: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = auth.access;
   if (isArchived) return { error: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
-  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, productionId, "scene", "*", "meta/name", "edit")) {
-    return { error: Response.json({ error: "权限不足" }, { status: 403 }) };
-  }
+  // 权限判定不在这里：PATCH 逐字段查（SCENE_FIELD_SUBS），DELETE 查自己的
+  // delete 门。原先共用的 meta/name 总钥匙对 DELETE 也是错的——删场次不该
+  // 要求改名权。
   const resolved = await resolveProductionVersion(productionId, requestedVersionId);
   if (resolved.error) return resolved;
   if (resolved.version.status !== "editing") {
@@ -55,6 +56,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   if ("error" in current) return current.error;
   if (!resolveMarkerId(current.result.state, sceneId)) {
     return Response.json({ error: "未找到章节" }, { status: 404 });
+  }
+  // 逐字段判权限：任一字段无权即整体 403。不做「静默丢弃无权字段」——
+  // 前端会以为保存成功，实际内容没落库。
+  const touched = touchedSceneFields(body);
+  if (!current.permCtx.isAdmin && !current.permCtx.isOwner) {
+    for (const field of touched) {
+      const sub = SCENE_FIELD_SUBS[field];
+      if (!await hasGrant(current.permCtx.userId, id, "scene", "*", sub, "edit")) {
+        return Response.json(
+          { error: `权限不足：node:scene/*/${sub}@edit` },
+          { status: 403 },
+        );
+      }
+    }
   }
   let next = current.result.state;
   if (body.kind === "chapter" || body.kind === "scene") {

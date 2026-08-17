@@ -5,6 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
+import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import ScriptEditor from "@/components/ScriptEditor";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -30,6 +31,12 @@ export default async function ProductionScriptPage({
   if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
     redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
 
+  // scene 已拆到字段级门（lib/scene-field-perms）：canEditMetadata 是「值得显示
+  // 编辑态」的粗门，紧凑排版/config PUT 单独看 meta/name@edit。
+  const sceneFieldPerms = await getSceneFieldPerms(
+    session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,
+  );
+
   // Resolve initial version: URL param > cookie
   const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;
 
@@ -39,7 +46,8 @@ export default async function ProductionScriptPage({
         productionId={id}
         productionName={name ?? undefined}
         canEditText={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "blocks", "edit")}
-        canEditMetadata={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit")}
+        canEditMetadata={sceneFieldPerms.any}
+        canEditSceneName={sceneFieldPerms.name}
         canEditRehearsalMark={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "rehearsal_marks", "create")}
         canImport={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "imports", "create")}
         versionId={versionId}

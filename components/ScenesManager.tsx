@@ -9,6 +9,7 @@ import type { SceneDetail, Version } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
+import type { SceneFieldPerms } from "@/lib/scene-field-perms";
 import BoundaryActionMenu from "@/components/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
@@ -21,6 +22,8 @@ type Props = {
   productionName: string;
   initialScenes: MarkerProjection[];
   canEdit: boolean;
+  /** 逐字段编辑权限；canEdit 是「值得显示编辑态」的粗门 */
+  fieldPerms: SceneFieldPerms;
   embedded?: boolean;
   versions?: Version[];
   versionId?: string | null;
@@ -96,6 +99,7 @@ function SceneEditRow({
   marks,
   childScenes,
   canEdit,
+  fieldPerms,
   canDelete,
   productionId,
   versionId,
@@ -110,6 +114,7 @@ function SceneEditRow({
   marks: string[];
   childScenes?: MarkerProjection[];
   canEdit: boolean;
+  fieldPerms: SceneFieldPerms;
   canDelete: boolean;
   productionId: string;
   versionId: string | null;
@@ -191,9 +196,9 @@ function SceneEditRow({
             />
           ) : (
             <span
-              onClick={() => canEdit && setEditingName(true)}
-              data-scene-editable={canEdit ? "true" : undefined}
-              className={`text-sm ${indent ? "text-zinc-500" : "font-medium text-zinc-700"} ${canEdit ? "cursor-text hover:opacity-70" : ""}`}
+              onClick={() => canEdit && fieldPerms.name && setEditingName(true)}
+              data-scene-editable={canEdit && fieldPerms.name ? "true" : undefined}
+              className={`text-sm ${indent ? "text-zinc-500" : "font-medium text-zinc-700"} ${canEdit && fieldPerms.name ? "cursor-text hover:opacity-70" : ""}`}
             >
               {scene.name || <span className="italic text-zinc-300">未命名</span>}
             </span>
@@ -240,14 +245,14 @@ function SceneEditRow({
                 <label className="text-[10px] font-semibold tracking-widest text-zinc-400 uppercase">预期时长</label>
                 {chapterDurationDisplay ? (
                   <p className="min-h-[1.25rem] rounded border border-transparent px-2 py-1 text-xs text-zinc-600">
-                    {chapterDurationDisplay.hasMissingDuration && !canEdit
+                    {chapterDurationDisplay.hasMissingDuration && !(canEdit && fieldPerms.expectedDuration)
                       ? <span className="italic text-zinc-300">—</span>
                       : chapterDurationDisplay.text || <span className="italic text-zinc-300">—</span>}
                   </p>
                 ) : (
                   <DurationInput
                     value={parseDuration(scene.expectedDuration)}
-                    canEdit={canEdit}
+                    canEdit={canEdit && fieldPerms.expectedDuration}
                     onSave={async (seconds) => {
                       await onPatchMeta({
                         expectedDuration: seconds != null ? seconds.toString() : ""
@@ -261,28 +266,28 @@ function SceneEditRow({
                 label="简介"
                 value={scene.synopsis}
                 multiline
-                canEdit={canEdit}
+                canEdit={canEdit && fieldPerms.synopsis}
                 onSave={(v) => onPatchMeta({ synopsis: v })}
               />
               <MetaField
                 label="行动线"
                 value={scene.actionLine}
                 multiline
-                canEdit={canEdit}
+                canEdit={canEdit && fieldPerms.actionLine}
                 onSave={(v) => onPatchMeta({ actionLine: v })}
               />
               <MetaField
                 label="音乐"
                 value={scene.music}
                 multiline
-                canEdit={canEdit}
+                canEdit={canEdit && fieldPerms.music}
                 onSave={(v) => onPatchMeta({ music: v })}
               />
               <MetaField
                 label="舞台呈现"
                 value={scene.stageNotes}
                 multiline
-                canEdit={canEdit}
+                canEdit={canEdit && fieldPerms.stageNotes}
                 onSave={(v) => onPatchMeta({ stageNotes: v })}
               />
             </div>
@@ -438,7 +443,7 @@ function InsertSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, embedded, canImport, versions, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, fieldPerms, embedded, canImport, versions, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(versionId ?? null);
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
@@ -623,6 +628,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         marks={act.rehearsalMarks}
                         childScenes={children}
                         canEdit={effectiveCanEdit}
+                        fieldPerms={fieldPerms}
                         canDelete
                         productionId={productionId}
                         versionId={currentVersionId}
@@ -646,6 +652,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             indent={true}
                             marks={sub.rehearsalMarks}
                             canEdit={effectiveCanEdit}
+                            fieldPerms={fieldPerms}
                             canDelete
                             productionId={productionId}
                             versionId={currentVersionId}

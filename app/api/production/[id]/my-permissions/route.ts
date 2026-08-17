@@ -21,7 +21,7 @@ import { getPool } from "@/lib/pg";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
 import {
   parseNodeKey,
-  canAccessNode,
+  canAccessNodesBatch,
   selfConfirmTemplateNodes,
   type NodeKeyParts,
 } from "@/lib/grant-template";
@@ -46,20 +46,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
 
-  // 终局（批G G-2）：原子键退役——激活面只余树节点键管道
+  // 终局（批G G-2）：原子键退役——激活面只余树节点键管道。
+  // 批量判定：目录 40+ 键，逐键 canAccessNode 等于 160+ 次串行往返，且这条
+  // GET 挂在 AppShell 上、每进一次演出就跑一遍。
+  const parsed = NODE_KEYS
+    .map((key) => ({ key, node: parseNodeKey(key) }))
+    .filter((e): e is { key: string; node: NodeKeyParts } => e.node !== null);
+  const results = await canAccessNodesBatch(permCtx, productionId, parsed.map((e) => e.node));
+
   const permissions: Record<string, { granted: boolean; selfConfirmable: boolean }> = {};
-  for (const key of NODE_KEYS) {
-    const node = parseNodeKey(key);
-    if (!node) continue;
-    const result = await canAccessNode(
-      permCtx, productionId,
-      node.resourceType, node.resourceId, node.resourceSub, node.verb,
-    );
+  parsed.forEach(({ key }, i) => {
+    const result = results[i];
     permissions[key] = {
       granted: result.allowed,
       selfConfirmable: !result.allowed && result.reason === "needs_self_confirm",
     };
-  }
+  });
 
   return Response.json({ permissions });
 }
