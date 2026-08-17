@@ -1486,6 +1486,18 @@ INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:script/*/comments@create')
 ON CONFLICT DO NOTHING;
 
+-- scene 字段门对齐（2026-08-17，见 migrate-scene-field-gates.sql）：
+-- 判定端拆到字段级后，编剧 / 戏剧构作要逐字段持钥匙。meta@edit 是错配键
+-- （判定端查的是 meta/name），已在同批迁移里清除。
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, k.key
+FROM (VALUES ('编剧'), ('戏剧构作')) AS r(name),
+     (VALUES ('node:scene/*/meta/name@edit'),
+             ('node:scene/*/meta/type@edit'),
+             ('node:scene/*/meta/expected_duration@edit'),
+             ('node:scene/*@edit')) AS k(key)
+ON CONFLICT DO NOTHING;
+
 -- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:scene/*/meta@view'),
