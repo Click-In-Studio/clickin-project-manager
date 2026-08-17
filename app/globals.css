@@ -22,7 +22,10 @@
   --foreground: #171717;
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
   --font-stage: 'KaiTi', 'STKaiti', 'Kaiti SC', 'SourceHanSerif', 'Source Han Serif CN', serif;
-  --font-lyric: 'STZhongsong', '华文中宋', 'SourceHanSerif', 'Source Han Serif CN', serif;
+  /* 歌词：华文中宋是商业字体（随 Office / 旧版 macOS 分发），只能赌本机有，不能自托管。
+     兜底刻意绕开思源宋体——一旦落回它就跟台词同字体（f2cb8d8 埋的坑，20148a3 修好
+     字体 404 后线上显形）。末端兜到系统宋体，保证任何机器上歌词都与台词可区分。 */
+  --font-lyric: 'STZhongsong', '华文中宋', 'Songti SC', 'STSong', 'SimSun', '宋体', serif;
 
   /* ── Design tokens ────────────────────────────────────────────────────────── */
   --ink:          #182a2a;
