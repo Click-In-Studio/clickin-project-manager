@@ -63,6 +63,35 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── 路由切换骨架屏（配合各段 loading.tsx） ──────────────────────────────── */
+
+@keyframes skeleton-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+
+/* 延迟淡入：服务端够快时骨架来不及显形，避免快导航闪屏；
+   真的需要等待时才浮现。 */
+.skeleton-page {
+  animation: skeleton-in .22s ease-out .15s both;
+}
+
+.skeleton-bar {
+  background: rgba(24, 42, 42, .07);
+  border-radius: 6px;
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-page { animation: skeleton-in .01s .15s both; }
+  .skeleton-bar  { animation: none; }
+}
+
 /* Placeholder for contenteditable blocks */
 [contenteditable]:empty::before {
   content: attr(data-placeholder);
