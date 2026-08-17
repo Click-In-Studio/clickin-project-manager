@@ -9,9 +9,14 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 //   2. MCP 端点：POST /memory-run 上报 → GET /inject-context 组装取件
 //   3. 蒸馏：mock LLM，验证输入组装（旧摘要+新增量）与落盘+offset 提交
 
-// mock LLM（distill 经 @/agent/llm 调用）
+// mock LLM（distill 经 @/agent/llm 调用）。只替换 chat，保留真的
+// LlmBudgetError——distill 用 instanceof 分流"预算不够"与其他失败，
+// 换成假类会让分流逻辑在测试里恒假、测了个寂寞。
 const chatMock = vi.fn(async (..._args: unknown[]) => "## 偏好与习惯\n- mock 蒸馏产物");
-vi.mock("@/agent/llm", () => ({ chat: (...args: unknown[]) => chatMock(...args) }));
+vi.mock("@/agent/llm", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/agent/llm")>()),
+  chat: (...args: unknown[]) => chatMock(...args),
+}));
 
 process.env.MCP_PORT = "3196";
 const BASE = "http://127.0.0.1:3196";
@@ -205,6 +210,7 @@ describe("蒸馏管线（mock LLM）", () => {
 
     const result = await distillUser(userId);
     expect(result.status).toBe("distilled");
+    expect(result.shrunk).toBe(false);  // 首档就成功，没降过
 
     // LLM 输入组装验证
     const callArgs = chatMock.mock.calls.at(-1)! as unknown[];
@@ -217,6 +223,65 @@ describe("蒸馏管线（mock LLM）", () => {
     expect(readMemory(userId, 4000)).toContain("mock 蒸馏产物");
     const again = await distillUser(userId);
     expect(again.status).toBe("no-new-data");
+  });
+
+  // 2026-08-17 线上：推理模型把 max_tokens 当 CoT+正文总预算，蒸馏每次都撞
+  // finish_reason=length。若只在输出侧加预算（有模型上限），注定超预算的那批
+  // 会天天以同样方式失败、offset 永不推进 —— 该用户记忆永久停更。所以撞预算
+  // 时要缩**输入**。
+  it("预算不够 → 降档缩小输入重试，成功后照常提交 offset", async () => {
+    const { appendRunRecord } = await import("@/lib/agent-memory/store");
+    const { distillUser } = await import("@/lib/agent-memory/distill");
+    const { LlmBudgetError } = await import("@/agent/llm");
+    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "降档批", lastAssistant: "y" });
+
+    // 首档（24000）超预算，降到 12000 成功
+    chatMock.mockRejectedValueOnce(new LlmBudgetError("empty (finish_reason=length)", false));
+    const result = await distillUser(userId);
+    expect(result.status).toBe("distilled");
+    expect(result.inputChars).toBe(12_000);
+    // shrunk 由 distill 模块判定（档位表在那边），路由只数这个布尔
+    expect(result.shrunk).toBe(true);
+    expect(chatMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    // offset 已推进：同批数据不会被再吃一次
+    const again = await distillUser(userId);
+    expect(again.status).toBe("no-new-data");
+  });
+
+  it("每档都超预算 → 跳过该条并推进 offset，不把后续蒸馏永久堵死", async () => {
+    const { appendRunRecord } = await import("@/lib/agent-memory/store");
+    const { distillUser } = await import("@/lib/agent-memory/distill");
+    const { LlmBudgetError } = await import("@/agent/llm");
+    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "毒丸批", lastAssistant: "z" });
+
+    chatMock.mockRejectedValue(new LlmBudgetError("empty (finish_reason=length)", false));
+    const stuck = await distillUser(userId);
+    expect(stuck.status).toBe("skipped");
+    expect(stuck.error).toMatch(/finish_reason=length/);
+
+    // 关键：偏移推进了，下一轮不会再撞同一条
+    chatMock.mockReset();
+    chatMock.mockResolvedValue("## 偏好与习惯\n- mock 蒸馏产物");
+    const next = await distillUser(userId);
+    expect(next.status).toBe("no-new-data");
+  });
+
+  it("非预算失败不缩输入、不跳过：只打一次且不提交 offset", async () => {
+    const { appendRunRecord } = await import("@/lib/agent-memory/store");
+    const { distillUser } = await import("@/lib/agent-memory/distill");
+    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "网络抖动批", lastAssistant: "w" });
+
+    chatMock.mockReset();
+    chatMock.mockRejectedValue(new Error("provider down"));
+    const failed = await distillUser(userId);
+    expect(failed.status).toBe("error");
+    expect(chatMock.mock.calls).toHaveLength(1);  // 不该逐档重试
+
+    chatMock.mockReset();
+    chatMock.mockResolvedValue("## 偏好与习惯\n- mock 蒸馏产物");
+    const retried = await distillUser(userId);
+    expect(retried.status).toBe("distilled");  // 同批数据未丢
   });
 
   it("LLM 失败 → error 状态且不提交 offset（下次重试同批数据）", async () => {

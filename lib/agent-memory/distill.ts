@@ -5,11 +5,23 @@
 // LLM 走 agent/llm.ts（OpenAI-compatible，LLM_PROVIDER=deepseek/openai）。
 // 团队记忆（Phase B）将作为本管线的第二个输出目标扩展（内容级安全 gate）。
 
-import { chat } from "@/agent/llm";
+import { chat, LlmBudgetError } from "@/agent/llm";
 import { commitDistill, listUserIds, readMemory, readRunsSinceLastDistill, writeMemory, type RunRecord } from "./store";
 
-const DISTILL_INPUT_MAX_CHARS = 24_000; // 单次蒸馏消费的 episodic 上限，超出留到下次
 const CURRENT_MEMORY_MAX_CHARS = 8_000;
+
+/**
+ * 单次蒸馏消费的 episodic 上限，从大往小退。
+ *
+ * 输出预算有模型上限（8K），输入没有——所以撞上"预算不够"时唯一能降的是输入。
+ * 若只在输出侧硬顶，某轮注定超预算的批次会天天以同样的方式失败、offset 永不
+ * 推进（commitDistill 只在成功后跑），这个用户的记忆就永久停更了。
+ * 逐档缩小则每轮都能吃下一部分，积压慢慢消化。
+ *
+ * 末档 1：store.readRunsSinceLastDistill 保证"至少消费一条"，所以最后一档
+ * 恒等于"只喂一条"，是能推进偏移的最小单位。
+ */
+const DISTILL_INPUT_STEPS = [24_000, 12_000, 6_000, 3_000, 1] as const;
 
 const SYSTEM_PROMPT = `你是 Click-In 演艺制作平台 AI 助手的记忆整理器。任务：把用户既有的长期记忆摘要与新增对话记录合并，输出**新的完整长期记忆摘要**（Markdown）。
 
@@ -31,30 +43,76 @@ function formatEntries(entries: RunRecord[]): string {
     .join("\n---\n");
 }
 
-export type DistillResult = { userId: string; status: "distilled" | "no-new-data" | "error"; entries?: number; error?: string };
+export type DistillResult = {
+  userId: string;
+  /** skipped = 单条记录都超预算，跳过它以免永久堵住该用户后续蒸馏。 */
+  status: "distilled" | "no-new-data" | "error" | "skipped";
+  entries?: number;
+  /** 实际生效的输入档位（诊断用）。 */
+  inputChars?: number;
+  /** 是否降过档才成功。由本模块判定——档位表在这里，别让调用方拿常量比对。 */
+  shrunk?: boolean;
+  error?: string;
+};
 
 export async function distillUser(userId: string): Promise<DistillResult> {
   try {
-    const { entries, nextOffset } = readRunsSinceLastDistill(userId, DISTILL_INPUT_MAX_CHARS);
-    if (entries.length === 0) return { userId, status: "no-new-data" };
-
     const current = readMemory(userId, CURRENT_MEMORY_MAX_CHARS);
-    const userPrompt = [
-      current ? `【现有长期记忆摘要】\n${current}` : "【现有长期记忆摘要】\n（尚无）",
-      `【新增对话记录】\n${formatEntries(entries)}`,
-    ].join("\n\n");
 
-    const next = await chat(
-      [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-      ],
-      { maxTokens: 2000, temperature: 0.3 },
-    );
+    for (let i = 0; i < DISTILL_INPUT_STEPS.length; i++) {
+      const maxChars = DISTILL_INPUT_STEPS[i];
+      const isLastStep = i === DISTILL_INPUT_STEPS.length - 1;
+      // 每档都从**同一个 offset** 重读（上一档没成功就没 commit），只是少喂一些
+      const { entries, nextOffset } = readRunsSinceLastDistill(userId, maxChars);
+      if (entries.length === 0) return { userId, status: "no-new-data" };
 
-    writeMemory(userId, next.trim());
-    commitDistill(userId, nextOffset);
-    return { userId, status: "distilled", entries: entries.length };
+      const userPrompt = [
+        current ? `【现有长期记忆摘要】\n${current}` : "【现有长期记忆摘要】\n（尚无）",
+        `【新增对话记录】\n${formatEntries(entries)}`,
+      ].join("\n\n");
+
+      try {
+        // rejectTruncated：输出会**覆盖** MEMORY.md，半截摘要写进去等于把长期
+        // 记忆换成残文。maxTokens 直接给上限：推理模型上它是 CoT+正文的总预算，
+        // 按正文估会被思维链吃光（线上 deepseek-v4-pro 实测 CoT 占 94%）。
+        const next = await chat(
+          [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userPrompt },
+          ],
+          { maxTokens: 8000, temperature: 0.3, rejectTruncated: true },
+        );
+
+        writeMemory(userId, next.trim());
+        commitDistill(userId, nextOffset);
+        return {
+          userId, status: "distilled", entries: entries.length,
+          inputChars: maxChars, shrunk: i > 0,
+        };
+      } catch (err) {
+        if (!(err instanceof LlmBudgetError)) throw err;
+
+        if (!isLastStep) {
+          console.warn(
+            `[distill] ${userId} 在 ${maxChars} 字符档超预算（${err.message}），降档重试`,
+          );
+          continue;
+        }
+        // 末档 = 只喂一条仍超预算：这条记录本身有毒。推进偏移把它跳过——
+        // 不跳的话它会永远堵住这个用户之后的全部蒸馏（offset 停在它前面）。
+        // 代价是这条 episodic 不进长期记忆，记在日志里以便追查。
+        console.error(
+          `[distill] ${userId} 单条记录仍超预算，跳过并推进偏移至 ${nextOffset}：${err.message}`,
+        );
+        commitDistill(userId, nextOffset);
+        return {
+          userId, status: "skipped", entries: entries.length, inputChars: maxChars,
+          shrunk: true, error: err.message,
+        };
+      }
+    }
+
+    return { userId, status: "no-new-data" };
   } catch (err) {
     return { userId, status: "error", error: err instanceof Error ? err.message : String(err) };
   }
