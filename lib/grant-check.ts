@@ -6,10 +6,11 @@
  *   动词闭集 view/create/edit/delete；权限非线性——本模块不做任何等级比较，
  *   一行 grant 只命中它自己的 (节点, 动词)，蕴含由授权时发多行表达。
  *
- * 双入口契约：资源访问 = 行入口 ∪ 免审批区间入口，两边权限等级表达一致。
+ * 双入口契约：资源访问 = 行入口 ∪ 免审批区间入口，两边权限词汇一致。
  *   - 行入口：本模块（production_member_grant 表）
- *   - 区间入口：resource-grant-db.ts 的 checkResourceFreeApprovalZone（dept 面），
- *     其词汇（dept.permissions[] 键）随各批迁移与动词词汇同步更换
+ *   - 区间入口：grant-template.ts 的 canAccessNode 六步链（三张区间表），
+ *     实例档另有 resource-grant-db.ts 的 checkNodeFreeApprovalZone（dept 面）——
+ *     两者读的都是 production_dept_permission 节点键，与行键时刻同词汇
  *
  * 通配语义：
  *   - resource_id = '*'：全实例；对 create 动词读作集合本身（实例 create 无定义，无歧义）
