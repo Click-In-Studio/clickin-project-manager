@@ -54,6 +54,32 @@ describe("棘轮不变量", () => {
     expect(offenders, "退役键仍被源码引用").toEqual([]);
   });
 
+  /**
+   * schema.sql 也得扫（2026-08-17 补）。
+   *
+   * 源码扫描盯不住 SQL：批E-2 退役 script:comment 时清了各库的数据行，却漏了
+   * schema.sql 里的 seed——生产库干净，但**任何从 schema.sql 新建的库都会重新
+   * 长出这个退役键**，CI 就是这么中招的。退役不只是「代码不再引用」，还得
+   * 「建库脚本不再种下」。
+   *
+   * 只扫 schema.sql：它是新库的最终状态。历史 migrate-*.sql 里出现退役键是
+   * 正当的（映射表要靠它把老键翻成节点键、DELETE 要靠它把老行删掉），而且
+   * 已 commit 的迁移按规约不得改动。
+   */
+  it("schema.sql 不再 seed 任何已退役的原子键", () => {
+    const sql = fs.readFileSync(path.join(ROOT, "db", "schema.sql"), "utf8");
+    const offenders: string[] = [];
+    // 逐条 INSERT 语句检查（注释里提到老键名是说明历史，不算种下）
+    for (const stmt of sql.split(";")) {
+      if (!/\bINSERT\s+INTO\b/i.test(stmt)) continue;
+      const code = stmt.replace(/--[^\n]*/g, "");
+      for (const key of RETIRED_PERMISSION_KEYS) {
+        if (code.includes(`'${key}'`)) offenders.push(`schema.sql → ${key}`);
+      }
+    }
+    expect(offenders, "退役键仍被 seed 进新库").toEqual([]);
+  });
+
   it("退役键与待迁账本无交集", () => {
     const ledger = new Set(Object.keys(PERMISSION_MIGRATION_LEDGER));
     expect(RETIRED_PERMISSION_KEYS.filter((k) => ledger.has(k))).toEqual([]);

@@ -390,6 +390,23 @@ export async function setup() {
     }
   }
 
+  {
+    // 角色模板对齐 + 退役键清理（2026-08-17）：PRE 判据=编剧模板尚无 blocks@edit。
+    // 必须在字段门迁移之前跑——它清 grant_template 的退役键残留，字段门那支
+    // 随后往同一张表补字段级键。
+    const pre = await pool.query(
+      `SELECT 1 FROM grant_template
+       WHERE role_name = '编剧' AND permission_key = 'node:script/*/blocks@edit'`,
+    );
+    if (pre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-role-template-seed.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
   if (await isSceneFieldGatesPreMigrationSchema(pool)) {
     // scene 字段门对齐（2026-08-17）：PRE 判据=编剧模板尚无 meta/name@edit。
     const sfgSnapshot = await createSceneFieldGatesPreMigrationData(pool);

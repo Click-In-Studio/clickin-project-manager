@@ -1302,10 +1302,6 @@ CREATE TABLE IF NOT EXISTS grant_template (
 CREATE UNIQUE INDEX IF NOT EXISTS grant_template_unique_idx
   ON grant_template (COALESCE(production_type, ''), role_name, permission_key);
 
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'script:comment')
-ON CONFLICT DO NOTHING;
-
 -- 全局通用模板种子（批A cue 域，保真迁移；见 add-grant-template.sql）
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:cue_list/*/meta@view'),
@@ -1484,6 +1480,126 @@ ON CONFLICT DO NOTHING;
 INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:script/*/blocks@view'),
   ('*', 'node:script/*/comments@create')
+ON CONFLICT DO NOTHING;
+
+-- 角色模板 seed 对齐线上（2026-08-17，见 migrate-role-template-seed.sql）：
+-- 线上 69 行手工配置固化回仓库，让 db/ 重新成为模板的单一事实源。
+-- 缺了它们，新建演出的创作组开箱即残（编剧连 blocks@edit 都没有）。
+-- *（2 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('*', 'node:announcement/*@view'),
+  ('*', 'node:milestone/*@view')
+ON CONFLICT DO NOTHING;
+
+-- 制作助理（7 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('制作助理', 'node:announcement/*@create'),
+  ('制作助理', 'node:announcement/*@delete'),
+  ('制作助理', 'node:announcement/*@edit'),
+  ('制作助理', 'node:milestone/*@create'),
+  ('制作助理', 'node:milestone/*@delete'),
+  ('制作助理', 'node:milestone/*@edit'),
+  ('制作助理', 'node:task/*@view')
+ON CONFLICT DO NOTHING;
+
+-- 编剧（26 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('编剧', 'node:character/*@create'),
+  ('编剧', 'node:character/*@delete'),
+  ('编剧', 'node:character/*@edit'),
+  ('编剧', 'node:scene/*/action_line@edit'),
+  ('编剧', 'node:scene/*/stage_notes@edit'),
+  ('编剧', 'node:scene/*/synopsis@edit'),
+  ('编剧', 'node:scene/*@create'),
+  ('编剧', 'node:scene/*@delete'),
+  ('编剧', 'node:script/*/blocks/character@edit'),
+  ('编剧', 'node:script/*/blocks/position@edit'),
+  ('编剧', 'node:script/*/blocks/tags@edit'),
+  ('编剧', 'node:script/*/blocks/type@edit'),
+  ('编剧', 'node:script/*/blocks@create'),
+  ('编剧', 'node:script/*/blocks@delete'),
+  ('编剧', 'node:script/*/blocks@edit'),
+  ('编剧', 'node:script/*/mounts@create'),
+  ('编剧', 'node:script/*/rehearsal_marks/position@edit'),
+  ('编剧', 'node:script/*/rehearsal_marks@create'),
+  ('编剧', 'node:script/*/rehearsal_marks@delete'),
+  ('编剧', 'node:script/*/rehearsal_marks@edit'),
+  ('编剧', 'node:script/*/rehearsal_marks@view'),
+  ('编剧', 'node:tag_group/*/options@create'),
+  ('编剧', 'node:tag_group/*/options@delete'),
+  ('编剧', 'node:tag_group/*@create'),
+  ('编剧', 'node:tag_group/*@delete'),
+  ('编剧', 'node:tag_group/*@edit')
+ON CONFLICT DO NOTHING;
+
+-- 戏剧构作（13 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('戏剧构作', 'node:character/*@create'),
+  ('戏剧构作', 'node:character/*@delete'),
+  ('戏剧构作', 'node:character/*@edit'),
+  ('戏剧构作', 'node:scene/*/action_line@edit'),
+  ('戏剧构作', 'node:scene/*/stage_notes@edit'),
+  ('戏剧构作', 'node:scene/*/synopsis@edit'),
+  ('戏剧构作', 'node:scene/*@create'),
+  ('戏剧构作', 'node:scene/*@delete'),
+  ('戏剧构作', 'node:tag_group/*/options@create'),
+  ('戏剧构作', 'node:tag_group/*/options@delete'),
+  ('戏剧构作', 'node:tag_group/*@create'),
+  ('戏剧构作', 'node:tag_group/*@delete'),
+  ('戏剧构作', 'node:tag_group/*@edit')
+ON CONFLICT DO NOTHING;
+
+-- 导演（10 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('导演', 'node:event/*/publication@view'),
+  ('导演', 'node:scene/*/action_line@edit'),
+  ('导演', 'node:scene/*/music@edit'),
+  ('导演', 'node:scene/*/stage_notes@edit'),
+  ('导演', 'node:scene/*/synopsis@edit'),
+  ('导演', 'node:script/*/rehearsal_marks/position@edit'),
+  ('导演', 'node:script/*/rehearsal_marks@create'),
+  ('导演', 'node:script/*/rehearsal_marks@delete'),
+  ('导演', 'node:script/*/rehearsal_marks@edit'),
+  ('导演', 'node:script/*/rehearsal_marks@view')
+ON CONFLICT DO NOTHING;
+
+-- 音乐导演（6 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('音乐导演', 'node:scene/*/music@edit'),
+  ('音乐导演', 'node:script/*/rehearsal_marks/position@edit'),
+  ('音乐导演', 'node:script/*/rehearsal_marks@create'),
+  ('音乐导演', 'node:script/*/rehearsal_marks@delete'),
+  ('音乐导演', 'node:script/*/rehearsal_marks@edit'),
+  ('音乐导演', 'node:script/*/rehearsal_marks@view')
+ON CONFLICT DO NOTHING;
+
+-- 作曲（1 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('作曲', 'node:scene/*/music@edit')
+ON CONFLICT DO NOTHING;
+
+-- 编曲（1 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('编曲', 'node:scene/*/music@edit')
+ON CONFLICT DO NOTHING;
+
+-- 后台舞台监督（3 枚）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('后台舞台监督', 'node:event/*/publication@create'),
+  ('后台舞台监督', 'node:event/*/publication@delete'),
+  ('后台舞台监督', 'node:event/*@view')
+ON CONFLICT DO NOTHING;
+
+-- scene 字段门对齐（2026-08-17，见 migrate-scene-field-gates.sql）：
+-- 判定端拆到字段级后，编剧 / 戏剧构作要逐字段持钥匙。meta@edit 是错配键
+-- （判定端查的是 meta/name），已在同批迁移里清除。
+INSERT INTO grant_template (role_name, permission_key)
+SELECT r.name, k.key
+FROM (VALUES ('编剧'), ('戏剧构作')) AS r(name),
+     (VALUES ('node:scene/*/meta/name@edit'),
+             ('node:scene/*/meta/type@edit'),
+             ('node:scene/*/meta/expected_duration@edit'),
+             ('node:scene/*@edit')) AS k(key)
 ON CONFLICT DO NOTHING;
 
 -- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）
