@@ -8018,16 +8018,26 @@ export async function listPendingApprovals(
   });
 }
 
+/** production_approval_config.ttl_hours 的列默认值——缺配置行时按此计时。
+ *  与 db/add-approval-config-backfill.sql 里插入的 24 是同一个值，改要同改。 */
+const DEFAULT_APPROVAL_TTL_HOURS = 24;
+
 /** Called by the internal cron endpoint — 当前级超时未响应即升级到阶梯下一级。 */
 export async function escalateExpiredApprovals(): Promise<{ escalated: number }> {
   // 计时起点是「当前级被通知的时刻」（链末条 notifiedAt），不是申请创建时刻——
   // 否则五级阶梯会在同一个 TTL 里被连着跳完。
+  //
+  // LEFT JOIN + COALESCE 而非 INNER JOIN：production_approval_config 是 Phase 3
+  // 才加的表，建表 SQL 没有回填，早于它的演出一行都没有。INNER JOIN 会让这些
+  // 演出的申请**永远**匹配不上、一次也升不了级（线上 8 个演出全部缺行，整条
+  // 升级链自 Phase 7 起就是死的）。缺配置=按列默认值计时，不是"不升级"。
   const { rows } = await getPool().query<ApprovalRow>(
     `SELECT ar.* FROM approval_request ar
-     JOIN production_approval_config pac ON pac.production_id = ar.production_id
+     LEFT JOIN production_approval_config pac ON pac.production_id = ar.production_id
      WHERE ar.status IN ('pending_supervisor', 'pending_resource')
        AND COALESCE((ar.escalation_chain -> -1 ->> 'notifiedAt')::timestamptz, ar.created_at)
-           < now() - (pac.ttl_hours || ' hours')::INTERVAL`,
+           < now() - (COALESCE(pac.ttl_hours, $1) || ' hours')::INTERVAL`,
+    [DEFAULT_APPROVAL_TTL_HOURS],
   );
 
   let escalated = 0;
