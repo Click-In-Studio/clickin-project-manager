@@ -2,10 +2,12 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getPool } from "@/lib/pg";
-import { getWiki, setWikiPublic, setWikiDeptShares, listWikiDeptShares } from "@/lib/wiki-db";
+import {
+  getWiki, setWikiPublic, setWikiDeptShares, listWikiDeptShares,
+  listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson,
+} from "@/lib/wiki-db";
 import { canShareWiki } from "@/lib/wiki-perm";
-import { WIKI_LEVEL_ROW_SETS, type WikiLevel } from "@/lib/resource-grant-db";
+import { type WikiLevel } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 
@@ -42,20 +44,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (g.err !== undefined) return g.err;
   const { productionId, wikiId, wiki } = g;
 
-  const people = await getPool().query<{ user_id: string; subs: string[] }>(
-    `SELECT user_id::text AS user_id, array_agg(resource_sub || '@' || permission_level) AS subs
-     FROM production_member_grant
-     WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2
-       AND NOT is_revoked AND (expires_at IS NULL OR expires_at > NOW())
-     GROUP BY user_id`,
-    [productionId, wikiId],
-  );
-  const levelOf = (subs: string[]): WikiLevel =>
-    subs.includes("grants@edit") ? "manage" : subs.includes("*@edit") ? "edit" : "view";
   return Response.json({
     isPublic: wiki.isPublic,
     deptIds: await listWikiDeptShares(wikiId),
-    people: people.rows.map(p => ({ userId: p.user_id, level: levelOf(p.subs) })),
+    people: await listWikiSharePeople(wikiId, productionId),
   });
 }
 
@@ -77,35 +69,13 @@ export async function PUT(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   if (body.addPerson) {
     const { userId, level } = body.addPerson;
-    const rows = WIKI_LEVEL_ROW_SETS[level];
-    if (!rows) return Response.json({ error: "无效的分享级别" }, { status: 400 });
-    const member = await getPool().query(
-      `SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2::uuid`,
-      [productionId, userId],
-    );
-    if (!member.rows[0]) return Response.json({ error: "对方不是本项目成员" }, { status: 400 });
-    for (const [sub, verb] of rows) {
-      await getPool().query(
-        `INSERT INTO production_member_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by)
-         VALUES ($1, $2::uuid, 'wiki', $3, $4, $5, 'direct', $6::uuid)
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [productionId, userId, wikiId, sub, verb, session.userId],
-      );
-    }
+    const r = await addWikiSharePerson(wikiId, productionId, { userId, level, confirmedBy: session.userId });
+    if (r === "invalid_level") return Response.json({ error: "无效的分享级别" }, { status: 400 });
+    if (r === "not_member") return Response.json({ error: "对方不是本项目成员" }, { status: 400 });
   }
 
   if (body.removePersonUserId) {
-    await getPool().query(
-      `UPDATE production_member_grant
-       SET is_revoked = true, revoked_reason = 'manual'
-       WHERE production_id = $1 AND user_id = $2::uuid
-         AND resource_type = 'wiki' AND resource_id = $3 AND NOT is_revoked`,
-      [productionId, body.removePersonUserId, wikiId],
-    );
+    await removeWikiSharePerson(wikiId, productionId, body.removePersonUserId);
   }
 
   return Response.json({ ok: true });

@@ -6,9 +6,14 @@ import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import {
   listWikiLibrary, getWiki, listBacklinks, listOutgoingLinks, searchWiki,
   extractWikiLinkTargets, createWiki, updateWiki, deleteWiki,
+  setWikiPublic, setWikiDeptShares, listWikiDeptShares,
+  listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson,
   type WikiListEntry, type WikiRef,
 } from "@/lib/wiki-db";
-import { canViewWiki, canEditWiki, canDeleteWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { listProductionDepts } from "@/lib/dept-db";
+import { listProductionMembers } from "@/lib/db";
+import type { WikiLevel } from "@/lib/resource-grant-db";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import { hasEffectiveGrant, type GrantActor } from "@/lib/grant-check";
 import { getPool } from "@/lib/pg";
@@ -24,6 +29,8 @@ export const CREATE_PERMISSION_KEY = "node:wiki/*@create";
 /** 编辑/删除门是实例级的——权限键要点名具体 wikiId。 */
 export function editPermissionKey(wikiId: string): string { return `node:wiki/${wikiId}@edit`; }
 export function deletePermissionKey(wikiId: string): string { return `node:wiki/${wikiId}@delete`; }
+/** 分享面走保留段 grants@edit（'*' 不覆盖），键形如 node:wiki/<id>/grants@edit。 */
+export function sharePermissionKey(wikiId: string): string { return `node:wiki/${wikiId}/grants@edit`; }
 
 // ─── wiki.tree ──────────────────────────────────────────────────────────────
 
@@ -309,4 +316,112 @@ export async function wikiProposeTag(
   return args.tags.length > 0
     ? `已把文档《${doc.title}》的标签设为：${args.tags.join("、")}。`
     : `已清空文档《${doc.title}》的标签。`;
+}
+
+// ─── wiki.set_grant（分享面写工具）───────────────────────────────────────────
+// 门 = canShareWiki（保留段 grants@edit，'*' 不覆盖）——**不是** edit 门：能改
+// 正文的人未必能改谁看得见。三个面与 share 路由同一份实现（lib/wiki-db 的
+// setWikiPublic / setWikiDeptShares / addWikiSharePerson…），口径不许分叉。
+//
+// 与 propose 五兄弟的差别：这里不预持久化 wiki_proposal——参数都很短，确认
+// 卡片装得下全文，没有"512 字符装不下"的问题；无权限时也不落审批行，直接
+// 把权限键回给模型，由用户走 /unauthorized 申请。插件的 fail-closed 门控
+// （非 readOnly → 确认门）照旧适用，本函数内的权限判定才是安全边界。
+
+export type WikiSetGrantArgs = {
+  wikiId: string;
+  isPublic?: boolean;
+  deptIds?: string[];
+  addPeople?: { userId: string; level: WikiLevel }[];
+  removePeopleUserIds?: string[];
+  summary: string;
+};
+
+const SHARE_LEVELS: WikiLevel[] = ["view", "edit", "manage"];
+const LEVEL_LABEL: Record<WikiLevel, string> = { view: "可阅读", edit: "可编辑", manage: "可管理" };
+
+/** 改完之后把三个面回读成一段人类可读的现状，供模型复述给用户。 */
+async function shareStateText(wikiId: string, productionId: string): Promise<string> {
+  const [doc, deptIds, people, depts, members] = await Promise.all([
+    getWiki(wikiId, productionId),
+    listWikiDeptShares(wikiId),
+    listWikiSharePeople(wikiId, productionId),
+    listProductionDepts(productionId).catch(() => []),
+    listProductionMembers(productionId),
+  ]);
+  const deptName = new Map(depts.map((d) => [d.id, d.name]));
+  const memberName = new Map(members.map((m) => [m.userId, m.name || "（未命名）"]));
+  return [
+    `当前分享设置（文档《${doc?.title ?? "（无标题）"}》）：`,
+    `- 全体成员可见：${doc?.isPublic ? "是" : "否"}`,
+    `- 分享给部门：${deptIds.length > 0 ? deptIds.map((id) => deptName.get(id) ?? id).join("、") : "（无）"}`,
+    `- 单独分享给：${people.length > 0
+      ? people.map((p) => `${memberName.get(p.userId) ?? p.userId}（${LEVEL_LABEL[p.level]}）`).join("、")
+      : "（无）"}`,
+  ].join("\n");
+}
+
+export async function wikiSetGrant(
+  userId: string, productionId: string, args: WikiSetGrantArgs,
+): Promise<string> {
+  const resolved = await resolveProductionActor(userId, productionId);
+  if (!resolved) return DENIED_NOT_MEMBER;
+  if (resolved.isArchived) return "该制作已归档，无法修改分享设置。";
+
+  const doc = await getWiki(args.wikiId, productionId);
+  if (!doc) return "没有找到该文档。";
+  if (!await canShareWiki(resolved.actor, productionId, args.wikiId)) {
+    return `权限被拒绝：你没有这篇文档的分享权限（需要 ${sharePermissionKey(args.wikiId)}）。` +
+      "能编辑正文不等于能改谁看得见——请让用户在「申请访问」入口申请该权限后重试。";
+  }
+
+  // ── 先整体校验再落库：宁可一条都不改，也不要改一半留下半套分享设置 ──
+  const addPeople = args.addPeople ?? [];
+  const removeIds = args.removePeopleUserIds ?? [];
+
+  const badLevel = addPeople.find((p) => !SHARE_LEVELS.includes(p.level));
+  if (badLevel) return `无效的分享级别「${badLevel.level}」，只能是 view / edit / manage。`;
+
+  const conflicted = addPeople.find((p) => removeIds.includes(p.userId));
+  if (conflicted) return `同一个人（id: ${conflicted.userId}）既在 addPeople 又在 removePeopleUserIds 里，无法判断意图，未做任何修改。`;
+
+  if (args.deptIds !== undefined) {
+    const depts = await listProductionDepts(productionId);
+    const byId = new Map(depts.map((d) => [d.id, d]));
+    const unknown = args.deptIds.filter((id) => !byId.has(id));
+    if (unknown.length > 0) {
+      return `以下 id 不是本制作的部门：${unknown.join("、")}。请先用 production.department_list 取得正确的部门 id，未做任何修改。`;
+    }
+    // 人类界面的部门分享栏只列 kind='dept'（用户组是选人用的），AI 视角跟齐。
+    const groups = args.deptIds.filter((id) => byId.get(id)!.kind === "group");
+    if (groups.length > 0) {
+      return `以下是用户组不是部门，文档分享只支持部门：${groups.map((id) => byId.get(id)!.name).join("、")}。未做任何修改。`;
+    }
+  }
+
+  const changes: string[] = [];
+  if (args.isPublic !== undefined) {
+    await setWikiPublic(args.wikiId, productionId, args.isPublic);
+    changes.push(args.isPublic ? "已设为全体成员可见" : "已取消全体成员可见");
+  }
+  if (args.deptIds !== undefined) {
+    // 整体替换（不是增量追加）——工具描述里也写明了这点。
+    await setWikiDeptShares(args.wikiId, productionId, args.deptIds);
+    changes.push(args.deptIds.length > 0 ? `部门分享已设为 ${args.deptIds.length} 个部门` : "已清空部门分享");
+  }
+  for (const p of addPeople) {
+    const r = await addWikiSharePerson(args.wikiId, productionId, { userId: p.userId, level: p.level, confirmedBy: userId });
+    changes.push(r === "ok"
+      ? `已把文档分享给 ${p.userId}（${LEVEL_LABEL[p.level]}）`
+      : `未能分享给 ${p.userId}：对方不是本项目成员`);
+  }
+  for (const uid of removeIds) {
+    await removeWikiSharePerson(args.wikiId, productionId, uid);
+    changes.push(`已撤销 ${uid} 的单独分享`);
+  }
+
+  if (changes.length === 0) {
+    return ["没有提供任何要修改的分享设置，未做变更。", "", await shareStateText(args.wikiId, productionId)].join("\n");
+  }
+  return [...changes.map((c) => `- ${c}`), "", await shareStateText(args.wikiId, productionId)].join("\n");
 }
