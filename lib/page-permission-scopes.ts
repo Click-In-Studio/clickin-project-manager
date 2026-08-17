@@ -48,6 +48,17 @@ export const PAGE_PERMISSION_SCOPES = {
     // 这一层——挂在 AppShell 上，进任何页面都能激活。
     "node:member/*/meta@view",
     "node:member/*/contact@view",
+    // 批F：公告 / 里程碑。读面是全员门票；写面（制作助理模板）也放这里——
+    // 这两个域散在 announcements / planning / admin 三处页面，与其挂三个
+    // scope 不如收在 base，反正判定端是演出级 CRUD 而非实例面。
+    "node:announcement/*@view",
+    "node:announcement/*@create",
+    "node:announcement/*@edit",
+    "node:announcement/*@delete",
+    "node:milestone/*@view",
+    "node:milestone/*@create",
+    "node:milestone/*@edit",
+    "node:milestone/*@delete",
   ]),
 
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /

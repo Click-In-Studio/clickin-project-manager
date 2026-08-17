@@ -30,6 +30,23 @@ import { parseNodeKey, isSensitiveNode, isRootNode } from "@/lib/grant-template"
  * base scope 里去。
  */
 const KNOWN_UNCONSUMED: readonly string[] = [
+  // ── 剧本域：模板已表达字段级意图，判定端尚未拆门 ────────────────────────
+  // requiredPermissions 对 blocks 的插入 / 更新 / 删除一律给 blocks@edit，
+  // 排练标记的四个动词也一律给 rehearsal_marks@create。模板发得比判定端细，
+  // 与 scene 拆门前是同一种欠账（见 lib/scene-field-perms.ts 的由来）。
+  // 哪天照 scene 的样子把 script 也拆到字段级，这些就该从豁免表移进
+  // PAGE_PERMISSION_SCOPES.script。
+  "node:script/*/blocks@create",
+  "node:script/*/blocks@delete",
+  "node:script/*/blocks/character@edit",
+  "node:script/*/blocks/type@edit",
+  "node:script/*/blocks/tags@edit",
+  "node:script/*/blocks/position@edit",
+  "node:script/*/rehearsal_marks@view",
+  "node:script/*/rehearsal_marks@edit",
+  "node:script/*/rehearsal_marks@delete",
+  "node:script/*/rehearsal_marks/position@edit",
+  // ── 三态内容面：只有 meta@view 是门票，内容面 view 判定端不查 ───────────
   "node:scene/*/synopsis@view",
   "node:scene/*/action_line@view",
   "node:scene/*/music@view",
