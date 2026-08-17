@@ -1,8 +1,8 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
-import Link from "next/link";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, createContext, useContext } from "react";
+import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
@@ -262,6 +262,17 @@ function extractAdminModule(pathname: string, productionId: string): string {
   return rest.split("/")[0];
 }
 
+/**
+ * 导航 pending 广播。
+ *
+ * 侧栏高亮由 usePathname() 推导，而 pathname 要等服务端 RSC payload 回来
+ * 才变——点击后一段时间内高亮纹丝不动，用户以为没点上就反复点（每点一次
+ * 都会让服务端把那页的权限 + DB 查询重跑一遍）。这里把「正在去哪」提前
+ * 广播出来：目标项立刻拿到 active 视觉，原项立刻失活。
+ */
+type NavPendingBus = { href: string | null; report: (href: string, pending: boolean) => void };
+const NavPendingContext = createContext<NavPendingBus>({ href: null, report: () => {} });
+
 function NavItem({
   href,
   symbol,
@@ -287,6 +298,9 @@ function NavItem({
   folded?: boolean;
 }) {
   const foldedBadge = folded ? Math.max(badge ?? 0, warningBadge ?? 0) : 0;
+  // 有项在途时，高亮完全交给它；否则回落到 pathname 推导的 active。
+  const { href: pendingHref } = useContext(NavPendingContext);
+  const effectiveActive = pendingHref !== null ? pendingHref === href : active;
 
   return (
     <Link
@@ -297,20 +311,12 @@ function NavItem({
       className={`flex min-h-[46px] items-center rounded-[9px] px-2.5 py-1.5 transition-colors ${
         folded ? "relative justify-center" : "gap-2.5 overflow-hidden"
       } ${
-        active
+        effectiveActive
           ? "bg-[var(--surface)] shadow-[inset_3px_0_0_#182a2a]"
           : "hover:bg-white/50"
       }`}
     >
-      <span className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[7px] border text-[11px] leading-none ${
-        side === "script"
-          ? "border-[#bfd4d6] bg-[#edf5f5] text-[#2f6670]"
-          : side === "stage"
-          ? "border-[#e3c9b9] bg-[#f8eee7] text-[#a55c32]"
-          : "border-[#cbd2cf] text-[#667676]"
-      }`}>
-        {symbol}
-      </span>
+      <NavItemSymbol href={href} symbol={symbol} side={side} />
       {folded ? (
         foldedBadge > 0 && (
           <span className={`absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white ${
@@ -338,6 +344,40 @@ function NavItem({
         </span>
       )}
     </Link>
+  );
+}
+
+/**
+ * NavItem 的符号方块。单独拆出来只为一件事：useLinkStatus 必须在 <Link>
+ * 后代里调用。在途时符号换成转圈，并把 href 上报给 NavPendingContext。
+ */
+function NavItemSymbol({ href, symbol, side }: { href: string; symbol: string; side?: "script" | "stage" }) {
+  const { pending } = useLinkStatus();
+  const { report } = useContext(NavPendingContext);
+
+  useEffect(() => {
+    report(href, pending);
+    // 卸载（如抽屉关闭）时撤回，免得 pending 态卡死高亮。
+    return () => report(href, false);
+  }, [href, pending, report]);
+
+  return (
+    <span className={`flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[7px] border text-[11px] leading-none ${
+      side === "script"
+        ? "border-[#bfd4d6] bg-[#edf5f5] text-[#2f6670]"
+        : side === "stage"
+        ? "border-[#e3c9b9] bg-[#f8eee7] text-[#a55c32]"
+        : "border-[#cbd2cf] text-[#667676]"
+    }`}>
+      {pending ? (
+        <span
+          className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent"
+          aria-hidden
+        />
+      ) : (
+        symbol
+      )}
+    </span>
   );
 }
 
@@ -730,6 +770,19 @@ export default function AppShell({ session, productions, children, initialUnread
     setHasStoredControls: setProductionToolbarHasStoredControls,
   }), [productionToolbarStage, productionToolbarHasStoredControls, topOverflowOpen, closeTopOverflow]);
 
+  // 侧栏在途项（见 NavPendingContext）。连点时后点的会顶掉先点的：
+  // 先点项撤回时 prev 已是后点项，不误清。
+  const [navPendingHref, setNavPendingHref] = useState<string | null>(null);
+  const reportNavPending = useCallback((href: string, pending: boolean) => {
+    setNavPendingHref((prev) => (pending ? href : prev === href ? null : prev));
+  }, []);
+  const navPendingBus = useMemo<NavPendingBus>(
+    () => ({ href: navPendingHref, report: reportNavPending }),
+    [navPendingHref, reportNavPending],
+  );
+  // 导航落地即交还给 pathname 推导的 active。
+  useEffect(() => { setNavPendingHref(null); }, [pathname]);
+
   useLayoutEffect(() => {
     const syncHeaderStage = () => setProductionHeaderStage(productionHeaderStageForWidth(window.innerWidth));
     syncHeaderStage();
@@ -1070,6 +1123,7 @@ export default function AppShell({ session, productions, children, initialUnread
   return (
     <ProductionToolbarStageContext.Provider value={productionToolbarStage}>
     <ProductionToolbarContext.Provider value={productionToolbarContext}>
+    <NavPendingContext.Provider value={navPendingBus}>
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
       <header ref={topbarRef} className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-50">
@@ -1662,6 +1716,7 @@ export default function AppShell({ session, productions, children, initialUnread
         currentWikiId={currentWikiId}
       />
     </div>
+    </NavPendingContext.Provider>
     </ProductionToolbarContext.Provider>
     </ProductionToolbarStageContext.Provider>
   );
