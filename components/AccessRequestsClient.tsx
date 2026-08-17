@@ -246,7 +246,7 @@ function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
 
       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
         申请于 {fmtDate(req.createdAt)}
-        {req.ttlDuration && <span style={{ marginLeft: 8 }}>· 时效 {req.ttlDuration}</span>}
+        {req.ttlDurationLabel && <span style={{ marginLeft: 8 }}>· 时效 {req.ttlDurationLabel}</span>}
       </p>
 
       {/* Note */}

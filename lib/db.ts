@@ -7259,7 +7259,12 @@ export type ApprovalRequest = {
   resourceSub: string | null;
   permissionLevel: string | null;
   grantType: "permanent" | "ttl" | null;
-  ttlDuration: string | null;
+  /**
+   * 展示用中文串（"7天"），仅供渲染。**不是**提交侧的线格式——
+   * SubmitAccessRequestParams.ttlDuration 要的是 Postgres INTERVAL 字面量
+   * （"7 days"），两者不可互相回灌。要算剩余时长请用 expiresAt。
+   */
+  ttlDurationLabel: string | null;
   note: string | null;
   status: "pending_supervisor" | "pending_resource" | "approved" | "rejected" | "cancelled";
   escalationChain: ApprovalChainEntry[];
@@ -7309,9 +7314,12 @@ export type PgInterval = {
   hours?: number; minutes?: number; seconds?: number; milliseconds?: number;
 };
 
+// 必须覆盖 PgInterval 的每个字段：漏一个就是静默丢数据。
+// 例：'1.5 seconds'::interval → { seconds: 1, milliseconds: 500 }，
+// 漏掉 milliseconds 会渲染成 "1秒"；'500 ms' 更会整条塌成 null。
 const INTERVAL_UNITS: [keyof PgInterval, string][] = [
   ["years", "年"], ["months", "个月"], ["days", "天"],
-  ["hours", "小时"], ["minutes", "分钟"], ["seconds", "秒"],
+  ["hours", "小时"], ["minutes", "分钟"], ["seconds", "秒"], ["milliseconds", "毫秒"],
 ];
 
 export function formatPgInterval(v: PgInterval | string | null | undefined): string | null {
@@ -7334,7 +7342,7 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     resourceSub: r.resource_sub,
     permissionLevel: r.permission_level,
     grantType: (r.grant_type as "permanent" | "ttl" | null),
-    ttlDuration: formatPgInterval(r.ttl_duration),
+    ttlDurationLabel: formatPgInterval(r.ttl_duration),
     note: r.note,
     status: r.status as ApprovalRequest["status"],
     escalationChain: r.escalation_chain ?? [],
