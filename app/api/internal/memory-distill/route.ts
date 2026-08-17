@@ -23,6 +23,10 @@ export async function POST(req: NextRequest) {
   const summary = {
     distilled: results.filter((r) => r.status === "distilled").length,
     noNewData: results.filter((r) => r.status === "no-new-data").length,
+    // 降过档才成功的：输入超预算，说明积压在变大或单条记录变长，值得留意
+    shrunk: results.filter((r) => r.status === "distilled" && r.inputChars !== undefined && r.inputChars < 24_000).length,
+    // 单条都塞不下、被跳过的记录——该条 episodic 永久不进长期记忆
+    skipped: results.filter((r) => r.status === "skipped"),
     errors: results.filter((r) => r.status === "error"),
   };
   console.log("[memory-distill]", JSON.stringify(summary));
