@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { TTL_OPTIONS, type TtlOptionValue } from "@/lib/approval-ttl";
 
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ export default function AccessRequestModal({
   const [resourceType,    setResourceType]    = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
 
-  const [ttlOption,  setTtlOption]  = useState<"permanent" | "30m" | "1h" | "1d" | "1w">("permanent");
+  const [ttlOption,  setTtlOption]  = useState<TtlOptionValue>("permanent");
   const [note,       setNote]       = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -197,7 +198,7 @@ export default function AccessRequestModal({
           resourceSub: postResourceSub,
           permissionLevel: postPermissionLevel,
           grantType: ttlOption === "permanent" ? "permanent" : "ttl",
-          ttlDuration: ({ "30m": "30 minutes", "1h": "1 hour", "1d": "1 day", "1w": "7 days" } as Record<string, string>)[ttlOption] ?? null,
+          ttlDuration: TTL_OPTIONS.find((o) => o.value === ttlOption)?.interval ?? null,
           note: note.trim() || null,
         }),
       });
@@ -374,14 +375,12 @@ export default function AccessRequestModal({
                 <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
                 <select
                   value={ttlOption}
-                  onChange={(e) => setTtlOption(e.target.value as typeof ttlOption)}
+                  onChange={(e) => setTtlOption(e.target.value as TtlOptionValue)}
                   style={fieldStyle}
                 >
-                  <option value="permanent">长期</option>
-                  <option value="30m">30 分钟</option>
-                  <option value="1h">1 小时</option>
-                  <option value="1d">1 天</option>
-                  <option value="1w">1 周</option>
+                  {TTL_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
 

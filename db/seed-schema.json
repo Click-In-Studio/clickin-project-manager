@@ -127,6 +127,23 @@
       "column": "expires_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "current_stage",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "current_stage_depth",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "current_approver_ids",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::uuid[]"
     }
   ],
   "asset": [
