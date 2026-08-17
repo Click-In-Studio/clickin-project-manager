@@ -125,6 +125,19 @@ export function buildMcpServer(): McpServer {
       description: "查询当前对话关联制作的全部里程碑（含已过与未来）。",
       fn: async (uid, pid) => (await import("./production-tools")).productionMilestones(uid, pid),
     },
+    {
+      name: "production.contact_list",
+      description: "列出当前对话关联制作的全部成员：姓名、用户 id、职位、部门（含是否负责人）、标签。" +
+        "需要用户 id 的工具（如 wiki_set_grant 的分享对象）从这里取。" +
+        "不含邮箱/电话——联系方式是敏感信息，只有本人经 users.query_sensitive 确认后才能读取。",
+      fn: async (uid, pid) => (await import("./production-tools")).productionContactList(uid, pid),
+    },
+    {
+      name: "production.department_list",
+      description: "列出当前对话关联制作的部门/用户组树（树状缩进，含部门 id、负责人、成员数）。" +
+        "需要部门 id 的工具（如 wiki_set_grant 的 deptIds）从这里取。",
+      fn: async (uid, pid) => (await import("./production-tools")).productionDepartmentList(uid, pid),
+    },
   ];
   for (const t of productionTools) {
     s.registerTool(t.name, {
@@ -288,6 +301,39 @@ export function buildMcpServer(): McpServer {
     if (!_tool_call_id) return NO_TOOL_CALL_ID;
     const { wikiProposeTag } = await import("./wiki-tools");
     const text = await wikiProposeTag(_caller_user_id, _caller_production_id, _tool_call_id, { wikiId, tags, summary });
+    return { content: [{ type: "text" as const, text }] };
+  });
+
+  // 分享面写工具：门是 grants@edit（保留段），与上面五个 propose 工具的
+  // edit/delete 门是两回事——所以它不叫 propose_*，也不落 wiki_proposal
+  // （参数短，确认卡片装得下；无权限直接回权限键，不进审批流）。
+  s.registerTool("production.wiki_set_grant", {
+    description: "修改一篇文档的分享设置：全体成员可见开关、分享给哪些部门（整体替换）、" +
+      "单独分享/撤销给某些人（view=可阅读 / edit=可编辑 / manage=可管理）。需要人工在聊天栏确认；" +
+      "确认后若你没有这篇文档的分享权限（grants@edit，与编辑权限是两回事），调用会被拒绝。" +
+      "用户 id 从 production.contact_list 取，部门 id 从 production.department_list 取。",
+    inputSchema: {
+      wikiId: z.string().describe("要修改分享设置的文档 id（来自 wiki_tree/wiki_search 的结果）"),
+      isPublic: z.boolean().optional().describe("是否对制作全体成员可见；不改就整个省略这个字段"),
+      deptIds: z.array(z.string()).optional().describe(
+        "完整的部门分享列表（整体替换，不是增量追加——传空数组等于清空部门分享）；不改就整个省略这个字段"),
+      addPeople: z.array(z.object({
+        userId: z.string().describe("被分享人的用户 id（来自 production.contact_list）"),
+        level: z.enum(["view", "edit", "manage"]).describe("分享级别：view=可阅读，edit=可编辑，manage=可管理（含再分享）"),
+      })).optional().describe("要新增分享的人；不加人就整个省略这个字段"),
+      removePeopleUserIds: z.array(z.string()).optional().describe("要撤销单独分享的用户 id；不撤销就整个省略这个字段"),
+      summary: z.string().describe("一句话说明这次为什么要改分享设置"),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  }, async ({ wikiId, isPublic, deptIds, addPeople, removePeopleUserIds, summary, _caller_user_id, _caller_production_id, _tool_call_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    if (!_tool_call_id) return NO_TOOL_CALL_ID;
+    const { wikiSetGrant } = await import("./wiki-tools");
+    const text = await wikiSetGrant(_caller_user_id, _caller_production_id, {
+      wikiId, isPublic, deptIds, addPeople, removePeopleUserIds, summary,
+    });
     return { content: [{ type: "text" as const, text }] };
   });
 

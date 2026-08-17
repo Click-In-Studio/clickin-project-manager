@@ -1,6 +1,6 @@
 import { getPool } from "./pg";
 import { keyBetween } from "./lex-order";
-import { writeWikiGrants } from "./resource-grant-db";
+import { writeWikiGrants, WIKI_LEVEL_ROW_SETS, type WikiLevel } from "./resource-grant-db";
 import { broadcastWikiLibraryChange } from "./wiki-collab";
 import type { Mention } from "./event-db";
 
@@ -470,6 +470,68 @@ export async function listWikiDeptShares(id: string): Promise<string[]> {
   const res = await getPool().query<{ dept_id: string }>(
     `SELECT dept_id::text AS dept_id FROM wiki_dept_share WHERE wiki_id = $1::uuid`, [id]);
   return res.rows.map(r => r.dept_id);
+}
+
+// 个人分享面（grant 行集）——share 路由与 MCP 的 wiki_set_grant 共用这一份实现，
+// 别把 production_member_grant 的 SQL 抄第二遍：档位行集口径分叉了就是权限事故。
+
+export type WikiSharePerson = { userId: string; level: WikiLevel };
+
+/** 反推分享档：grants@edit → manage，*@edit → edit，否则 view（与 WIKI_LEVEL_ROW_SETS 对偶）。 */
+export async function listWikiSharePeople(wikiId: string, productionId: string): Promise<WikiSharePerson[]> {
+  const res = await getPool().query<{ user_id: string; subs: string[] }>(
+    `SELECT user_id::text AS user_id, array_agg(resource_sub || '@' || permission_level) AS subs
+     FROM production_member_grant
+     WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2
+       AND NOT is_revoked AND (expires_at IS NULL OR expires_at > NOW())
+     GROUP BY user_id`,
+    [productionId, wikiId],
+  );
+  return res.rows.map(r => ({
+    userId: r.user_id,
+    level: (r.subs.includes("grants@edit") ? "manage" : r.subs.includes("*@edit") ? "edit" : "view") as WikiLevel,
+  }));
+}
+
+/** 发行个人分享行集。对方不是本项目成员 → 不发行任何行（分享面不越过成员门）。 */
+export async function addWikiSharePerson(
+  wikiId: string, productionId: string,
+  args: { userId: string; level: WikiLevel; confirmedBy: string },
+): Promise<"ok" | "not_member" | "invalid_level"> {
+  const rows = WIKI_LEVEL_ROW_SETS[args.level];
+  if (!rows) return "invalid_level";
+  const pool = getPool();
+  const member = await pool.query(
+    `SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2::uuid`,
+    [productionId, args.userId],
+  );
+  if (!member.rows[0]) return "not_member";
+  for (const [sub, verb] of rows) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2::uuid, 'wiki', $3, $4, $5, 'direct', $6::uuid)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, args.userId, wikiId, sub, verb, args.confirmedBy],
+    );
+  }
+  return "ok";
+}
+
+/** 撤销某人在这篇文档上的全部个人分享行（结构面的部门/公开分享不受影响）。 */
+export async function removeWikiSharePerson(
+  wikiId: string, productionId: string, userId: string,
+): Promise<void> {
+  await getPool().query(
+    `UPDATE production_member_grant
+     SET is_revoked = true, revoked_reason = 'manual'
+     WHERE production_id = $1 AND user_id = $2::uuid
+       AND resource_type = 'wiki' AND resource_id = $3 AND NOT is_revoked`,
+    [productionId, userId, wikiId],
+  );
 }
 
 // ─── 链接图（标题级列出——§4.1，内容点击处过门）───────────────────────────────

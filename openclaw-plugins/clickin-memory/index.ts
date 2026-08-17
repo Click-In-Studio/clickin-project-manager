@@ -354,6 +354,32 @@ export default definePluginEntry({
             ].filter((l): l is string => l !== null).join("\n"),
           };
         }
+        case "production-wiki_set_grant": {
+          // 分享面 = 谁能看见这篇文档，改错了是泄密——卡片把三个面逐条列清楚，
+          // 别让用户对着一坨 JSON 点批准。权限行不写：这里没有预持久化的
+          // hasPermission（分享工具不落 wiki_proposal），不虚构权限状态。
+          const people = Array.isArray(params.addPeople)
+            ? params.addPeople.map((p: unknown) => {
+                const o = (p ?? {}) as { userId?: unknown; level?: unknown };
+                return `${str(o.userId, 40)}（${str(o.level, 10)}）`;
+              }).join("、")
+            : "";
+          const removed = Array.isArray(params.removePeopleUserIds) ? params.removePeopleUserIds.join("、") : "";
+          const depts = Array.isArray(params.deptIds) ? params.deptIds : null;
+          return {
+            title: `修改文档分享设置（id: ${str(params.wikiId, 40)}）`,
+            description: [
+              "🔐 这会改变谁能看见这篇文档。",
+              params.isPublic === undefined ? null
+                : params.isPublic ? "🌐 设为：制作全体成员可见" : "🌐 取消：全体成员可见",
+              depts === null ? null
+                : depts.length > 0 ? `🏢 部门分享（整体替换）：${str(depts.join("、"), 120)}` : "🏢 清空全部部门分享",
+              people ? `👤 新增分享给：${str(people, 120)}` : null,
+              removed ? `🚫 撤销分享：${str(removed, 120)}` : null,
+              `📝 理由：${str(params.summary, 100)}`,
+            ].filter((l): l is string => l !== null).join("\n"),
+          };
+        }
         case "users-query_sensitive":
           return {
             title: `查询你的登记联系方式`,
