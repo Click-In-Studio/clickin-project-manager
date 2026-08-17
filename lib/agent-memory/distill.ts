@@ -48,8 +48,10 @@ export type DistillResult = {
   /** skipped = 单条记录都超预算，跳过它以免永久堵住该用户后续蒸馏。 */
   status: "distilled" | "no-new-data" | "error" | "skipped";
   entries?: number;
-  /** 实际生效的输入档位（小于首档即发生过缩量重试）。 */
+  /** 实际生效的输入档位（诊断用）。 */
   inputChars?: number;
+  /** 是否降过档才成功。由本模块判定——档位表在这里，别让调用方拿常量比对。 */
+  shrunk?: boolean;
   error?: string;
 };
 
@@ -83,7 +85,10 @@ export async function distillUser(userId: string): Promise<DistillResult> {
 
         writeMemory(userId, next.trim());
         commitDistill(userId, nextOffset);
-        return { userId, status: "distilled", entries: entries.length, inputChars: maxChars };
+        return {
+          userId, status: "distilled", entries: entries.length,
+          inputChars: maxChars, shrunk: i > 0,
+        };
       } catch (err) {
         if (!(err instanceof LlmBudgetError)) throw err;
 
@@ -102,7 +107,7 @@ export async function distillUser(userId: string): Promise<DistillResult> {
         commitDistill(userId, nextOffset);
         return {
           userId, status: "skipped", entries: entries.length, inputChars: maxChars,
-          error: err.message,
+          shrunk: true, error: err.message,
         };
       }
     }

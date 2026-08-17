@@ -210,6 +210,7 @@ describe("蒸馏管线（mock LLM）", () => {
 
     const result = await distillUser(userId);
     expect(result.status).toBe("distilled");
+    expect(result.shrunk).toBe(false);  // 首档就成功，没降过
 
     // LLM 输入组装验证
     const callArgs = chatMock.mock.calls.at(-1)! as unknown[];
@@ -239,6 +240,8 @@ describe("蒸馏管线（mock LLM）", () => {
     const result = await distillUser(userId);
     expect(result.status).toBe("distilled");
     expect(result.inputChars).toBe(12_000);
+    // shrunk 由 distill 模块判定（档位表在那边），路由只数这个布尔
+    expect(result.shrunk).toBe(true);
     expect(chatMock.mock.calls.length).toBeGreaterThanOrEqual(2);
 
     // offset 已推进：同批数据不会被再吃一次
