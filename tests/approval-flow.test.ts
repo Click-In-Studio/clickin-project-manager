@@ -1304,6 +1304,53 @@ describe("escalateExpiredApprovals", () => {
     await cancelRows([req.id]);
   });
 
+  // 线上教训（2026-08-17）：production_approval_config 是 Phase 3 才加的表，
+  // 建表 SQL 没回填，早于它的演出一行都没有——线上 8 个演出全部缺行。原先的
+  // INNER JOIN 让这些演出的申请永远匹配不上，整条升级链从未生效过。
+  //
+  // 这条用例必须**显式删掉配置行**才测得到：工厂造的演出恒有配置行
+  // （createProduction 会插），fixture 再插一遍，两层都把线上的真实前提盖住了。
+  it("演出没有审批配置行时，按列默认值 24h 计时而非永不升级", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await getPool().query(
+      `DELETE FROM production_approval_config WHERE production_id = $1`, [prodId]);
+    try {
+      await backdateCurrentStage(req.id, 25);
+      await escalateExpiredApprovals();
+
+      const row = await getPool().query<{ current_stage: string }>(
+        `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+      expect(row.rows[0].current_stage).toBe("dept_poc");
+    } finally {
+      await getPool().query(
+        `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+         VALUES ($1, 24, $2) ON CONFLICT DO NOTHING`, [prodId, U_OWNER]);
+      await cancelRows([req.id]);
+    }
+  });
+
+  it("缺配置行且未超过默认 24h 的申请不动", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await getPool().query(
+      `DELETE FROM production_approval_config WHERE production_id = $1`, [prodId]);
+    try {
+      await backdateCurrentStage(req.id, 2);
+      await escalateExpiredApprovals();
+      const row = await getPool().query<{ current_stage: string }>(
+        `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+      expect(row.rows[0].current_stage).toBe("supervisor");
+    } finally {
+      await getPool().query(
+        `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+         VALUES ($1, 24, $2) ON CONFLICT DO NOTHING`, [prodId, U_OWNER]);
+      await cancelRows([req.id]);
+    }
+  });
+
   it("未超时的申请不动", async () => {
     const req = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list", permissionLevel: "view",
