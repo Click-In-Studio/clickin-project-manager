@@ -44,11 +44,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // Self-managed effects (approve/reject access requests) manage their own
     // transactions internally. Run them outside the pool-client transaction so
     // there is no false expectation that a ROLLBACK on client would undo them.
-    const SELF_MANAGED_EFFECTS = [
-      "approve_access_request", "reject_access_request", "escalate_access_request",
-    ] as const;
-    const isSelfManaged = (e: ActionEffect) =>
-      (SELF_MANAGED_EFFECTS as readonly string[]).includes(e.type);
+    // 类型谓词而非 string[] 断言：断言会把字面量类型抹平，打错的 effect 名
+    // 会静默不匹配而不是编译期报错。
+    type SelfManagedEffect = Extract<ActionEffect, {
+      type: "approve_access_request" | "reject_access_request" | "escalate_access_request";
+    }>;
+    const isSelfManaged = (e: ActionEffect): e is SelfManagedEffect =>
+      e.type === "approve_access_request"
+      || e.type === "reject_access_request"
+      || e.type === "escalate_access_request";
     const selfManaged = action.effects.filter(isSelfManaged);
     const transactional = action.effects.filter((e) => !isSelfManaged(e));
 

@@ -33,16 +33,32 @@ CREATE INDEX IF NOT EXISTS approval_request_current_approvers_idx
 
 -- 存量 pending 行回填：escalation_chain 末条即当时通知的那一级。
 -- （已 resolved 的行不回填——current_* 只对 pending 有意义。）
+--
+-- 旧链只有 supervisor / resource 两种 phase，holder、ancestor_poc、producer
+-- 这几级此前并不存在，所以不会有存量行落在它们上面。resource 级的旧人选有
+-- POC / 制作人 / owner 三种兜底：审批人恰为 owner 的按 owner 级回填（否则它
+-- 会被当成 dept_poc，升级时再把同一个 owner 通知一遍），其余按 dept_poc。
+WITH pending AS (
+  SELECT ar.id,
+         ar.escalation_chain -> -1 ->> 'phase' AS phase,
+         p.owner_id,
+         COALESCE((
+           SELECT array_agg(DISTINCT x::uuid)
+           FROM jsonb_array_elements_text(ar.escalation_chain -> -1 -> 'approverIds') AS x
+         ), '{}') AS approvers
+  FROM approval_request ar
+  JOIN production p ON p.id = ar.production_id
+  WHERE ar.status IN ('pending_supervisor', 'pending_resource')
+    AND ar.current_approver_ids = '{}'
+    AND jsonb_typeof(ar.escalation_chain -> -1 -> 'approverIds') = 'array'
+)
 UPDATE approval_request ar
 SET current_stage = CASE
-      WHEN ar.escalation_chain -> -1 ->> 'phase' = 'supervisor' THEN 'supervisor'
+      WHEN pending.phase = 'supervisor'                  THEN 'supervisor'
+      WHEN pending.approvers = ARRAY[pending.owner_id]   THEN 'owner'
       ELSE 'dept_poc'
     END,
     current_stage_depth = 0,
-    current_approver_ids = COALESCE((
-      SELECT array_agg(DISTINCT x::uuid)
-      FROM jsonb_array_elements_text(ar.escalation_chain -> -1 -> 'approverIds') AS x
-    ), '{}')
-WHERE ar.status IN ('pending_supervisor', 'pending_resource')
-  AND ar.current_approver_ids = '{}'
-  AND jsonb_typeof(ar.escalation_chain -> -1 -> 'approverIds') = 'array';
+    current_approver_ids = pending.approvers
+FROM pending
+WHERE pending.id = ar.id;

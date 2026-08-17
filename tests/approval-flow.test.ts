@@ -225,6 +225,48 @@ describe("buildApprovalLadder — 阶梯顺序与成员", () => {
     }
   });
 
+  it("上级链成环时不会无限展开（申请人 → A → 申请人）", async () => {
+    // U_REQUESTER 的上级是 U_SUPERVISOR，再把 U_SUPERVISOR 的上级设回申请人
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $1 WHERE production_id = $2 AND user_id = $3`,
+      [U_REQUESTER, prodId, U_SUPERVISOR],
+    );
+    try {
+      const ladder = await buildApprovalLadder(target());
+      const supervisorStages = ladder.filter((s) => s.stage === "supervisor");
+      expect(supervisorStages).toHaveLength(1);
+      expect(supervisorStages[0].approverIds).toEqual([U_SUPERVISOR]);
+      // 环没有把申请人本人拉进审批人集合
+      expect(ladder.flatMap((s) => s.approverIds)).not.toContain(U_REQUESTER);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUPERVISOR],
+      );
+    }
+  });
+
+  it("多级上级链逐跳展开，每跳一级", async () => {
+    // U_REQUESTER → U_SUPERVISOR → U_HOLDER
+    await addProductionMember(prodId, U_HOLDER);
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $1 WHERE production_id = $2 AND user_id = $3`,
+      [U_HOLDER, prodId, U_SUPERVISOR],
+    );
+    try {
+      const ladder = await buildApprovalLadder(target());
+      const sup = ladder.filter((s) => s.stage === "supervisor");
+      expect(sup.map((s) => [s.depth, s.approverIds])).toEqual([
+        [0, [U_SUPERVISOR]], [1, [U_HOLDER]],
+      ]);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUPERVISOR],
+      );
+    }
+  });
+
   it("SENSITIVE 节点跳过整条链，直达 owner", async () => {
     expect(classifyApprovalNode("production", "meta", "edit")).toBe("sensitive");
     const ladder = await buildApprovalLadder(
@@ -824,6 +866,12 @@ describe("escalateAccessRequest — 向上转交", () => {
     if (!result.ok) expect(result.reason).toBe("no_next_stage");
 
     await cancelRows([req.id]);
+  });
+
+  it("not_found: 转交不存在的申请", async () => {
+    const result = await escalateAccessRequest("00000000-0000-0000-0000-deadbeef0002", U_SUPERVISOR);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
   });
 
   it("conflict: 已 resolve 的申请不能转交", async () => {
