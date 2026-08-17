@@ -828,11 +828,24 @@ CREATE TABLE IF NOT EXISTS approval_request (
 
   escalation_chain  JSONB NOT NULL DEFAULT '[]',
 
+  -- #140 审批阶梯位置（add-approval-ladder.sql）：路由由 lib/approval-routing.ts
+  -- 单点算出后写在这里，收件箱与鉴权只读 current_approver_ids，不再各自重算。
+  current_stage        TEXT    NULL CHECK (current_stage IS NULL OR current_stage IN (
+                         'supervisor', 'holder', 'dept_poc', 'ancestor_poc', 'producer', 'owner'
+                       )),
+  current_stage_depth  INTEGER NOT NULL DEFAULT 0,
+  current_approver_ids UUID[]  NOT NULL DEFAULT '{}',
+
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   resolved_at     TIMESTAMPTZ NULL,
   resolved_by     UUID NULL REFERENCES app_user(id),
   granted_at      TIMESTAMPTZ NULL,
-  expires_at      TIMESTAMPTZ NULL
+  expires_at      TIMESTAMPTZ NULL,
+
+  -- #256（add-approval-ttl-check.sql）：'ttl' 必须带时长，否则 expires_at 落 NULL
+  -- = 永久权限，与申请人/审批人看到的「临时」相反。
+  CONSTRAINT approval_request_ttl_duration_required
+    CHECK (grant_type IS DISTINCT FROM 'ttl' OR ttl_duration IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS approval_request_production_status_idx
@@ -840,6 +853,10 @@ CREATE INDEX IF NOT EXISTS approval_request_production_status_idx
 
 CREATE INDEX IF NOT EXISTS approval_request_subject_idx
   ON approval_request (subject_id, production_id);
+
+CREATE INDEX IF NOT EXISTS approval_request_current_approvers_idx
+  ON approval_request USING GIN (current_approver_ids)
+  WHERE status IN ('pending_supervisor', 'pending_resource');
 
 -- ── Notifications ─────────────────────────────────────────────────────────────
 
