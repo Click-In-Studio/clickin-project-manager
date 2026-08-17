@@ -3,10 +3,10 @@
  *
  * 支持 cue_list / event / report / tech_req / note 等资源类型。
  *
- * 免审批区间（自我确认条件）：
- *   - edit 级：user 是某个 resource_dept_manage 管理该资源的 dept 的成员，
- *              且该 dept 的 permissions[] 含 '<resource_type>:edit'，或 user 是该 dept 的 POC
- *   - manage 级：user 是上述 dept 的 POC
+ * 免审批区间（自我确认条件，checkNodeFreeApprovalZone / checkCueListFreeApprovalZone）：
+ *   - edit 级：user 所在 dept 持有该实例的节点区间键（production_dept_permission，
+ *              含 `node:<type>/*@edit` 通配），或 user 是管理该资源（rdm）的 dept 的 POC
+ *   - manage 级：user 是管理该资源的 dept 的 POC（代码规则，总表 §0.8 已知例外）
  */
 import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
@@ -15,114 +15,15 @@ import type { Pool, PoolClient } from "pg";
 type Queryable = Pool | PoolClient;
 
 // ─── Generic resource grant helpers ──────────────────────────────────────────
-
-/**
- * Returns the highest active permission level for a user on any resource instance,
- * or null if no active grant exists.
- */
-export async function getResourceGrantLevel(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-): Promise<string | null> {
-  const { rows } = await getPool().query<{ permission_level: string }>(
-    `SELECT rg.permission_level
-     FROM production_member_grant rg
-     JOIN resource_permission_level rpl
-       ON rpl.resource_type = rg.resource_type
-       AND rpl.permission_level = rg.permission_level
-     WHERE rg.production_id = $1
-       AND rg.user_id = $2
-       AND rg.resource_type = $3
-       AND rg.resource_id = $4
-       AND NOT rg.is_revoked
-       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-     ORDER BY rpl.sort_order DESC
-     LIMIT 1`,
-    [productionId, userId, resourceType, resourceId],
-  );
-  return rows[0]?.permission_level ?? null;
-}
-
-/**
- * Checks if the user's highest active level on a resource meets or exceeds the required level.
- * sort_order defines the ordering (higher = more permissive).
- */
-export async function hasResourceGrantLevel(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-  requiredLevel: string,
-): Promise<boolean> {
-  const { rows } = await getPool().query<{ ok: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM production_member_grant rg
-       JOIN resource_permission_level rpl
-         ON rpl.resource_type = rg.resource_type
-         AND rpl.permission_level = rg.permission_level
-       JOIN resource_permission_level rpl_req
-         ON rpl_req.resource_type = $3
-         AND rpl_req.permission_level = $5
-       WHERE rg.production_id = $1
-         AND rg.user_id = $2
-         AND rg.resource_type = $3
-         AND rg.resource_id = $4
-         AND NOT rg.is_revoked
-         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-         AND rpl.sort_order >= rpl_req.sort_order
-     ) AS ok`,
-    [productionId, userId, resourceType, resourceId, requiredLevel],
-  );
-  return rows[0]?.ok ?? false;
-}
-
-/**
- * Checks whether user is in the free-approval zone for a resource.
- * permKey: the permission key that must appear in dept.permissions[]
- *   (e.g. 'event:edit', 'report:edit', 'tech_req:edit')
- * For manage level, only POC qualifies; for edit level, POC or dept-permission qualifies.
- */
-export async function checkResourceFreeApprovalZone(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-  permKey: string,
-  level: "edit" | "manage",
-): Promise<boolean> {
-  if (level === "manage") {
-    const { rows } = await getPool().query(
-      `SELECT 1
-       FROM resource_dept_manage rdm
-       JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-       WHERE rdm.production_id = $1
-         AND rdm.resource_type = $2
-         AND rdm.resource_id = $3
-         AND pdm.user_id = $4
-         AND pdm.is_poc = true
-       LIMIT 1`,
-      [productionId, resourceType, resourceId, userId],
-    );
-    return rows.length > 0;
-  }
-  const { rows } = await getPool().query(
-    `SELECT 1
-     FROM resource_dept_manage rdm
-     JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE rdm.production_id = $1
-       AND rdm.resource_type = $2
-       AND rdm.resource_id = $3
-       AND pdm.user_id = $4
-       AND (pdm.is_poc = true OR $5 = ANY(pd.permissions))
-     LIMIT 1`,
-    [productionId, resourceType, resourceId, userId, permKey],
-  );
-  return rows.length > 0;
-}
+//
+// 已退役（2026-08-17，随 checkResourceFreeApprovalZone 一并清理）：
+//   getResourceGrantLevel / hasResourceGrantLevel —— 按 resource_permission_level.sort_order
+//     做等级比较，与非线性不变量（总表 §0.1「权限=原子行的集合，无任何蕴含」）正面冲突，
+//     且全库零消费点。判定一律走 hasGrant（行精确命中）。
+//   checkResourceFreeApprovalZone —— dept 区间查 dept.permissions[] 数组 + 伪键
+//     （'report:edit' 等）。伪键随批C 清零、数组列随 PR #229 并表批 DROP，函数却留着，
+//     报告自确认路由的 edit 档因此必 500。通用替代：checkNodeFreeApprovalZone（下方，
+//     查 production_dept_permission 节点键）。
 
 /**
  * Writes a self_confirmed production_member_grant for any resource type.
