@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, createContext, useContext } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import { nextNavPendingHref } from "@/lib/nav-pending";
 import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
@@ -770,11 +771,11 @@ export default function AppShell({ session, productions, children, initialUnread
     setHasStoredControls: setProductionToolbarHasStoredControls,
   }), [productionToolbarStage, productionToolbarHasStoredControls, topOverflowOpen, closeTopOverflow]);
 
-  // 侧栏在途项（见 NavPendingContext）。连点时后点的会顶掉先点的：
-  // 先点项撤回时 prev 已是后点项，不误清。
+  // 侧栏在途项（见 NavPendingContext）。归约规则连同连点竞态的说明
+  // 见 lib/nav-pending.ts。
   const [navPendingHref, setNavPendingHref] = useState<string | null>(null);
   const reportNavPending = useCallback((href: string, pending: boolean) => {
-    setNavPendingHref((prev) => (pending ? href : prev === href ? null : prev));
+    setNavPendingHref((prev) => nextNavPendingHref(prev, href, pending));
   }, []);
   const navPendingBus = useMemo<NavPendingBus>(
     () => ({ href: navPendingHref, report: reportNavPending }),
