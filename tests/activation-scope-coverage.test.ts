@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync } from "fs";
+import { join } from "path";
 import { getPool } from "@/lib/pg";
+import { SCENE_FIELD_SUBS } from "@/lib/scene-field-perms";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
 import { parseNodeKey, isSensitiveNode, isRootNode } from "@/lib/grant-template";
 
@@ -63,6 +66,62 @@ const scopeUnion = new Set<string>(
   Object.values(PAGE_PERMISSION_SCOPES).flatMap((s) => [...s] as string[]),
 );
 
+/**
+ * 判定端把 (sub, verb) 经变量传进 hasGrant 的地方——静态扫描抓不到，逐条记明
+ * 门在哪。加条目要附文件位置，「盲区表不藏死键」那条会盯着它不许沉淀成垃圾。
+ */
+const GUARD_LOOKUP_BLIND_SPOTS: readonly string[] = [
+  // app/api/production/[id]/events/[eventId]/route.ts 的 REQ_NODE 映射：
+  // publish → publication@create、revoke → publication@delete，
+  // 经 [reqSub, reqVerb] 解构后传入 hasEffectiveGrant
+  "node:event/*/publication@create",
+  "node:event/*/publication@delete",
+  // lib/asset-perm.ts canViewAsset(face)：face 变量 = "meta" | "file"
+  "node:asset/*/file@view",
+];
+
+const GUARD_SOURCE_DIRS = ["app", "lib"];
+
+function readGuardSources(): string {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.tsx?$/.test(entry.name)) continue;
+      // 激活面自身不是判定端，否则这条棘轮会自我满足
+      if (full.includes("page-permission-scopes")) continue;
+      out.push(readFileSync(full, "utf8"));
+    }
+  };
+  for (const dir of GUARD_SOURCE_DIRS) walk(dir);
+  return out.join("\n");
+}
+
+/** 从源码里提取判定端真正查过的节点键。 */
+function collectGuardedKeys(): Set<string> {
+  const src = readGuardSources();
+  const keys = new Set<string>();
+  const add = (type: string, sub: string, verb: string): void => {
+    keys.add(`node:${type}/*${sub === "*" ? "" : `/${sub}`}@${verb}`);
+  };
+  // hasGrant(user, prod, "type", <id>, "sub", "verb")
+  for (const m of src.matchAll(/"([a-z_]+)",\s*[^,)]+,\s*"([^"]*)",\s*"(view|create|edit|delete)"/g)) {
+    add(m[1], m[2], m[3]);
+  }
+  // hasAnyGrant(user, prod, "type", ["a", "b"], "verb")
+  for (const m of src.matchAll(/"([a-z_]+)",\s*\[([^\]]*)\],\s*"(view|create|edit|delete)"/g)) {
+    for (const s of m[2].matchAll(/"([^"]+)"/g)) add(m[1], s[1], m[3]);
+  }
+  // 源码里直接写死的节点串（lib/script-ops.ts 的 requiredPermissions 等）
+  for (const m of src.matchAll(/"(node:[a-z_*]+\/[^"@]*@(?:view|create|edit|delete))"/g)) {
+    keys.add(m[1]);
+  }
+  // scene 字段门经 SCENE_FIELD_SUBS 间接消费（lib/scene-field-perms.ts）
+  for (const sub of Object.values(SCENE_FIELD_SUBS)) add("scene", sub, "edit");
+  return keys;
+}
+
 describe("activation scope coverage", () => {
   it("模板发的每个可自确认键都有激活面入口", async () => {
     const { rows } = await getPool().query<{ role_name: string; permission_key: string }>(
@@ -93,6 +152,43 @@ describe("activation scope coverage", () => {
   it("激活面里的键都是合法节点串（能被 parseNodeKey 解析）", () => {
     const bad = [...scopeUnion].filter((k) => parseNodeKey(k) === null);
     expect(bad).toEqual([]);
+  });
+
+  /**
+   * 反向棘轮：**激活面里的每个键，判定端都得真有一道门去查。**
+   *
+   * 正向那条（模板 → 激活面）防的是「区间落不成行」；这条防的是反面——
+   * 激活面收了一个没人查的键，弹窗就会让用户勾选一个不存在的能力，而且
+   * 键名拼错了也永远不会有人发现（拼错的键既不会报错，也不会生效）。
+   *
+   * 判据分两档，对应判定端两种写法：
+   *   - sub 具体（如 blocks@view）：要求源码里出现精确的 (type, sub, verb)
+   *   - sub 通配（如 event/*@view）：整树通配区间，判定端查的是具体 sub，
+   *     故只要求该 resource_type 在判定端出现过
+   */
+  it("激活面里的每个键，判定端都有对应的门", () => {
+    const consumed = collectGuardedKeys();
+    const consumedTypes = new Set([...consumed].map((k) => parseNodeKey(k)?.resourceType));
+
+    const orphans = [...scopeUnion].filter((key) => {
+      if (GUARD_LOOKUP_BLIND_SPOTS.includes(key)) return false;
+      const n = parseNodeKey(key)!;
+      return n.resourceSub === "*"
+        ? !consumedTypes.has(n.resourceType)
+        : !consumed.has(key);
+    });
+
+    expect(orphans).toEqual([]);
+  });
+
+  it("盲区表不藏死键：每条都还在源码里有痕迹", () => {
+    const src = readGuardSources();
+    const stale = GUARD_LOOKUP_BLIND_SPOTS.filter((key) => {
+      const n = parseNodeKey(key)!;
+      // 至少 resource_type 与 sub 的字面量还在源码里出现（防止豁免表沉淀成垃圾）
+      return !(src.includes(`"${n.resourceType}"`) && src.includes(`"${n.resourceSub}"`));
+    });
+    expect(stale).toEqual([]);
   });
 
   it("激活面不含 SENSITIVE / ROOT 键（自确认管道会静默跳过它们）", () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
 import { templateKeysForRole } from "@/lib/grant-template";
 import { makeProduction, cleanupProduction } from "./factories";
@@ -105,6 +106,21 @@ describe("新建演出的角色开箱即用", () => {
     ]) {
       expect(keys).toContain(need);
     }
+  });
+});
+
+describe("seed 文件幂等", () => {
+  it("重复执行不产生重复行", async () => {
+    const sql = readFileSync("db/add-role-template-seed.sql", "utf8");
+    const count = async (): Promise<number> =>
+      (await getPool().query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM grant_template",
+      )).rows[0].n;
+
+    const before = await count();
+    await getPool().query(sql);
+    const after = await count();
+    expect(after).toBe(before);
   });
 });
 
