@@ -5,6 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
+import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import { getProductionPermissionContext, getProductionName, listVersions, listMarkerProjectionByVersion } from "@/lib/db";
 import ScenesManager from "@/components/ScenesManager";
 
@@ -23,8 +24,12 @@ export default async function ScenesPage({
   if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Ascene%2F*%2Fmeta%40view&id=${id}`);
 
-  const canEdit = access.permCtx.isAdmin || access.permCtx.isOwner  // owner 旁路（#228 漏网）
-    || await hasGrant(session.userId, id, "scene", "*", "meta/name", "edit");
+  // 逐字段权限：scene 的每个字段各有一把钥匙（lib/scene-field-perms）。
+  // canEdit 只是「值得显示编辑态」的粗门。
+  const fieldPerms = await getSceneFieldPerms(
+    session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,  // owner 旁路（#228 漏网）
+  );
+  const canEdit = fieldPerms.any;
   const canImport = (access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "dramaturgy", "*", "imports", "create"));
 
   const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
@@ -50,6 +55,7 @@ export default async function ScenesPage({
       productionName={name}
       initialScenes={scenes}
       canEdit={canEdit}
+      fieldPerms={fieldPerms}
       canImport={canImport}
       versions={versions}
       versionId={resolvedVersionId}

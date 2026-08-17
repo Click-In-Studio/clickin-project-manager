@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
+import type { SceneFieldPerms } from "@/lib/scene-field-perms";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import { parseDuration, formatDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
@@ -76,6 +77,8 @@ export type SceneTableViewProps = {
   productionId: string;
   scenes: MarkerProjection[];
   canEdit: boolean;
+  /** 逐字段编辑权限；canEdit 是「值得显示编辑态」的粗门，字段能不能改看这个 */
+  fieldPerms: SceneFieldPerms;
   versionId: string | null;
   viewConfig: TableViewConfigData;
   onViewConfigChange: (config: TableViewConfigData) => void;
@@ -312,6 +315,7 @@ export default function SceneTableView({
   productionId,
   scenes,
   canEdit,
+  fieldPerms,
   versionId,
   viewConfig,
   onViewConfigChange,
@@ -412,7 +416,7 @@ export default function SceneTableView({
           <div className={isChapter ? "font-medium text-zinc-700" : "text-zinc-600"}>
             <SceneNameCell
               scene={scene}
-              canEdit={canEdit}
+              canEdit={canEdit && fieldPerms.name}
               onUpdate={(name) => onUpdateScene(scene.id, name)}
             />
           </div>
@@ -422,7 +426,7 @@ export default function SceneTableView({
         return (
           <MetaCell
             value={scene.synopsis ?? ""}
-            canEdit={canEdit}
+            canEdit={canEdit && fieldPerms.synopsis}
             multiline
             onSave={(v) => onPatchMeta(scene.id, { synopsis: v })}
           />
@@ -432,7 +436,7 @@ export default function SceneTableView({
         return (
           <MetaCell
             value={scene.actionLine ?? ""}
-            canEdit={canEdit}
+            canEdit={canEdit && fieldPerms.actionLine}
             multiline
             onSave={(v) => onPatchMeta(scene.id, { actionLine: v })}
           />
@@ -442,7 +446,7 @@ export default function SceneTableView({
         return (
           <MetaCell
             value={scene.music ?? ""}
-            canEdit={canEdit}
+            canEdit={canEdit && fieldPerms.music}
             multiline
             onSave={(v) => onPatchMeta(scene.id, { music: v })}
           />
@@ -452,7 +456,7 @@ export default function SceneTableView({
         return (
           <MetaCell
             value={scene.stageNotes ?? ""}
-            canEdit={canEdit}
+            canEdit={canEdit && fieldPerms.stageNotes}
             multiline
             onSave={(v) => onPatchMeta(scene.id, { stageNotes: v })}
           />
@@ -464,7 +468,7 @@ export default function SceneTableView({
           return (
             <div className="text-xs text-zinc-500">
               {chapterDuration
-                ? (chapterDuration.hasMissingDuration && !canEdit
+                ? (chapterDuration.hasMissingDuration && !(canEdit && fieldPerms.expectedDuration)
                   ? <span className="italic text-zinc-300">—</span>
                   : chapterDuration.text || <span className="italic text-zinc-300">—</span>)
                 : <span className="italic text-zinc-300">—</span>}
@@ -474,7 +478,7 @@ export default function SceneTableView({
         return (
           <DurationCell
             value={scene.expectedDuration ?? ""}
-            canEdit={canEdit}
+            canEdit={canEdit && fieldPerms.expectedDuration}
             onSave={async (seconds) => {
               await onPatchMeta(scene.id, {
                 expectedDuration: seconds != null ? seconds.toString() : ""

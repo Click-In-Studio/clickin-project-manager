@@ -7409,6 +7409,7 @@ export default function ScriptEditor({
   productionName,
   canEditText: canEditTextProp = true,
   canEditMetadata: canEditMetadataProp = true,
+  canEditSceneName = true,
   canEditRehearsalMark = true,
   canImport = false,
   versionId: initialVersionId,
@@ -7419,6 +7420,10 @@ export default function ScriptEditor({
   productionName?: string;
   canEditText?: boolean;
   canEditMetadata?: boolean;
+  /** 剧本排版模式（紧凑排版）落在 scene 的 meta/name@edit 门上——与
+   *  app/api/script/[id]/config 的判定同一把钥匙。canEditMetadata 现在是
+   *  「任一 scene 字段可改」的粗门，不能拿来当排版开关的依据。 */
+  canEditSceneName?: boolean;
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
   versionId?: string | null;
@@ -7441,6 +7446,7 @@ export default function ScriptEditor({
   // Gate edit permissions by version status
   const baseCanEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
   const baseCanEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
+  const baseCanEditTextLayout = canEditSceneName && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || canEditRehearsalMark;
   const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
   const versionForcesLockedMode =
@@ -7572,8 +7578,11 @@ export default function ScriptEditor({
   const toolbarMenuCloseRef = useRef<() => void>(() => {});
   const closeToolbarMenu = useCallback(() => toolbarMenuCloseRef.current(), []);
 
+  // config PUT 的门是 scene 的 meta/name@edit（app/api/script/[id]/config），
+  // 与 baseCanEditTextLayout 同源；用粗门 baseCanEditMetadata 会让只有别的
+  // scene 字段权限的人白写一次再被 403。
   const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
-    if (!baseCanEditMetadata) return;
+    if (!baseCanEditTextLayout) return;
     const previous = scriptConfigRef.current;
     const next = { ...previous, ...patch };
     scriptConfigRef.current = next;
@@ -7588,10 +7597,10 @@ export default function ScriptEditor({
       scriptConfigRef.current = previous;
       setScriptConfig(previous);
     }
-  }, [activeVersionId, baseCanEditMetadata, effectiveScriptId]);
+  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
 
   const syncOpeningChapterMarkerId = useCallback((nextBlocks: Block[]) => {
-    if (!baseCanEditMetadata) return;
+    if (!baseCanEditTextLayout) return;
     const openingChapterMarkerId = nextBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;
     if (openingChapterMarkerId === scriptConfigRef.current.openingChapterMarkerId) return;
     const next = { ...scriptConfigRef.current, openingChapterMarkerId };
@@ -7609,7 +7618,7 @@ export default function ScriptEditor({
         body: JSON.stringify(scriptConfigRef.current),
       });
     }, 500);
-  }, [activeVersionId, baseCanEditMetadata, effectiveScriptId]);
+  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
 
   const requestStageDelimiterChange = useCallback((open: string, close: string) => {
     if (scriptConfig.stageDelimOpen === open && scriptConfig.stageDelimClose === close) {
@@ -11287,7 +11296,7 @@ export default function ScriptEditor({
         stageDelimOpen={scriptConfig.stageDelimOpen}
         stageDelimClose={scriptConfig.stageDelimClose}
         textLayoutMode={scriptConfig.textLayoutMode}
-        canEditTextLayout={baseCanEditMetadata}
+        canEditTextLayout={baseCanEditTextLayout}
         onTextLayoutModeChange={(mode) => saveScriptConfig({ textLayoutMode: mode })}
         onClose={() => setPrintPreview(false)}
       />
@@ -12003,17 +12012,17 @@ export default function ScriptEditor({
                 <div className="my-1 border-t border-zinc-50" />
                 <button
                   onClick={() => {
-                    if (!baseCanEditMetadata) return;
+                    if (!baseCanEditTextLayout) return;
                     pendingModeScrollAnchorRef.current = captureVirtualScrollAnchor();
                     saveScriptConfig({
                       textLayoutMode: scriptConfig.textLayoutMode === "compact" ? "center" : "compact",
                     });
                   }}
-                  disabled={!baseCanEditMetadata}
+                  disabled={!baseCanEditTextLayout}
                   className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
-                    baseCanEditMetadata ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
+                    baseCanEditTextLayout ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
                   }`}
-                  title={baseCanEditMetadata ? "保存为所有人共用的剧本排版模式" : "无权修改剧本排版模式"}
+                  title={baseCanEditTextLayout ? "保存为所有人共用的剧本排版模式" : "无权修改剧本排版模式"}
                 >
                   <span>紧凑排版</span>
                   <span className="flex items-center">
