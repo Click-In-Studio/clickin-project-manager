@@ -25,6 +25,7 @@ import {
   listMyAccessRequests,
   listPendingApprovals,
   escalateExpiredApprovals,
+  formatPgInterval,
 } from "@/lib/db";
 import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import { listUserNotifications } from "@/lib/inbox-db";
@@ -640,6 +641,45 @@ describe("listMyAccessRequests", () => {
       `UPDATE approval_request SET status='cancelled' WHERE id = ANY($1)`,
       [[r1.id, r2.id]],
     );
+  });
+
+  // 2026-08-17：ttl_duration 是 INTERVAL 列，node-postgres 会解析成
+  // postgres-interval 对象（'7 days' → { days: 7 }）。裸传到前端会让 React 抛
+  // "Objects are not valid as a React child (found: object with keys {days})"。
+  it("ttlDuration is a plain string, never a postgres-interval object", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+    });
+    expect(typeof req.ttlDuration).toBe("string");
+    expect(req.ttlDuration).toBe("7天");
+
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const found = mine.find((r) => r.id === req.id);
+    expect(typeof found?.ttlDuration).toBe("string");
+
+    await getPool().query(`UPDATE approval_request SET status='cancelled' WHERE id=$1`, [req.id]);
+  });
+});
+
+describe("formatPgInterval", () => {
+  it("renders each supported unit and composes multi-unit intervals", () => {
+    expect(formatPgInterval({ days: 7 })).toBe("7天");
+    expect(formatPgInterval({ minutes: 30 })).toBe("30分钟");
+    expect(formatPgInterval({ hours: 1 })).toBe("1小时");
+    expect(formatPgInterval({ years: 1, months: 2, days: 3 })).toBe("1年2个月3天");
+    expect(formatPgInterval({ days: 1, hours: 12, minutes: 30 })).toBe("1天12小时30分钟");
+  });
+
+  it("passes strings through and collapses empty/null to null", () => {
+    expect(formatPgInterval("7 days")).toBe("7 days");
+    expect(formatPgInterval(null)).toBeNull();
+    expect(formatPgInterval(undefined)).toBeNull();
+    expect(formatPgInterval("  ")).toBeNull();
+    expect(formatPgInterval({})).toBeNull();
+    expect(formatPgInterval({ days: 0 })).toBeNull();
   });
 });
 

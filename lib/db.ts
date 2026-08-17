@@ -7289,7 +7289,7 @@ type ApprovalRow = {
   resource_sub: string | null;
   permission_level: string | null;
   grant_type: string | null;
-  ttl_duration: string | null;
+  ttl_duration: PgInterval | string | null;
   note: string | null;
   status: string;
   escalation_chain: ApprovalChainEntry[];
@@ -7299,6 +7299,29 @@ type ApprovalRow = {
   granted_at: Date | null;
   expires_at: Date | null;
 };
+
+/**
+ * node-postgres 把 INTERVAL 列解析成 postgres-interval 对象（如 '7 days' → { days: 7 }），
+ * 不是字符串。裸传给前端会触发 "Objects are not valid as a React child"。
+ */
+export type PgInterval = {
+  years?: number; months?: number; days?: number;
+  hours?: number; minutes?: number; seconds?: number; milliseconds?: number;
+};
+
+const INTERVAL_UNITS: [keyof PgInterval, string][] = [
+  ["years", "年"], ["months", "个月"], ["days", "天"],
+  ["hours", "小时"], ["minutes", "分钟"], ["seconds", "秒"],
+];
+
+export function formatPgInterval(v: PgInterval | string | null | undefined): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.trim() || null;  // 兼容 type parser 被改回字符串的情况
+  const parts = INTERVAL_UNITS
+    .filter(([k]) => typeof v[k] === "number" && v[k] !== 0)
+    .map(([k, label]) => `${v[k]}${label}`);
+  return parts.join("") || null;
+}
 
 function rowToApproval(r: ApprovalRow): ApprovalRequest {
   return {
@@ -7311,7 +7334,7 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     resourceSub: r.resource_sub,
     permissionLevel: r.permission_level,
     grantType: (r.grant_type as "permanent" | "ttl" | null),
-    ttlDuration: r.ttl_duration,
+    ttlDuration: formatPgInterval(r.ttl_duration),
     note: r.note,
     status: r.status as ApprovalRequest["status"],
     escalationChain: r.escalation_chain ?? [],
@@ -7705,10 +7728,7 @@ export async function approveAccessRequest(
     }
   } else {
     // pending_resource → approved (first-action-wins)
-    const now = new Date();
-    const expiresAt = req.grant_type === "ttl" && req.ttl_duration
-      ? new Date(now.getTime()) // will be set in SQL
-      : null;
+    // expires_at 全程由下面的 SQL（now() + ttl_duration）算出，JS 侧不参与
 
     const updateRes = await getPool().query<{ id: string }>(
       `UPDATE approval_request
