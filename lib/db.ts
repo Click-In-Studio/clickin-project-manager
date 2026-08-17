@@ -7259,7 +7259,12 @@ export type ApprovalRequest = {
   resourceSub: string | null;
   permissionLevel: string | null;
   grantType: "permanent" | "ttl" | null;
-  ttlDuration: string | null;
+  /**
+   * 展示用中文串（"7天"），仅供渲染。**不是**提交侧的线格式——
+   * SubmitAccessRequestParams.ttlDuration 要的是 Postgres INTERVAL 字面量
+   * （"7 days"），两者不可互相回灌。要算剩余时长请用 expiresAt。
+   */
+  ttlDurationLabel: string | null;
   note: string | null;
   status: "pending_supervisor" | "pending_resource" | "approved" | "rejected" | "cancelled";
   escalationChain: ApprovalChainEntry[];
@@ -7289,7 +7294,7 @@ type ApprovalRow = {
   resource_sub: string | null;
   permission_level: string | null;
   grant_type: string | null;
-  ttl_duration: string | null;
+  ttl_duration: PgInterval | string | null;
   note: string | null;
   status: string;
   escalation_chain: ApprovalChainEntry[];
@@ -7299,6 +7304,32 @@ type ApprovalRow = {
   granted_at: Date | null;
   expires_at: Date | null;
 };
+
+/**
+ * node-postgres 把 INTERVAL 列解析成 postgres-interval 对象（如 '7 days' → { days: 7 }），
+ * 不是字符串。裸传给前端会触发 "Objects are not valid as a React child"。
+ */
+export type PgInterval = {
+  years?: number; months?: number; days?: number;
+  hours?: number; minutes?: number; seconds?: number; milliseconds?: number;
+};
+
+// 必须覆盖 PgInterval 的每个字段：漏一个就是静默丢数据。
+// 例：'1.5 seconds'::interval → { seconds: 1, milliseconds: 500 }，
+// 漏掉 milliseconds 会渲染成 "1秒"；'500 ms' 更会整条塌成 null。
+const INTERVAL_UNITS: [keyof PgInterval, string][] = [
+  ["years", "年"], ["months", "个月"], ["days", "天"],
+  ["hours", "小时"], ["minutes", "分钟"], ["seconds", "秒"], ["milliseconds", "毫秒"],
+];
+
+export function formatPgInterval(v: PgInterval | string | null | undefined): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.trim() || null;  // 兼容 type parser 被改回字符串的情况
+  const parts = INTERVAL_UNITS
+    .filter(([k]) => typeof v[k] === "number" && v[k] !== 0)
+    .map(([k, label]) => `${v[k]}${label}`);
+  return parts.join("") || null;
+}
 
 function rowToApproval(r: ApprovalRow): ApprovalRequest {
   return {
@@ -7311,7 +7342,7 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     resourceSub: r.resource_sub,
     permissionLevel: r.permission_level,
     grantType: (r.grant_type as "permanent" | "ttl" | null),
-    ttlDuration: r.ttl_duration,
+    ttlDurationLabel: formatPgInterval(r.ttl_duration),
     note: r.note,
     status: r.status as ApprovalRequest["status"],
     escalationChain: r.escalation_chain ?? [],
@@ -7705,10 +7736,7 @@ export async function approveAccessRequest(
     }
   } else {
     // pending_resource → approved (first-action-wins)
-    const now = new Date();
-    const expiresAt = req.grant_type === "ttl" && req.ttl_duration
-      ? new Date(now.getTime()) // will be set in SQL
-      : null;
+    // expires_at 全程由下面的 SQL（now() + ttl_duration）算出，JS 侧不参与
 
     const updateRes = await getPool().query<{ id: string }>(
       `UPDATE approval_request
