@@ -35,7 +35,8 @@ async function roleKeys(name: string): Promise<string[]> {
   return rows.map(r => r.permission_key);
 }
 
-describe("新建演出的角色开箱即用", () => {
+describe("invariance verification", () => {
+  // 不变量：模板行 → 演出创建 → 角色区间，这条链的产物必须能让人干活
   it("编剧拿得到剧本写权限与场次字段权限", async () => {
     const keys = await roleKeys("编剧");
     for (const need of [
@@ -109,9 +110,9 @@ describe("新建演出的角色开箱即用", () => {
   });
 });
 
-describe("seed 文件幂等", () => {
+describe("integrity verification", () => {
   it("重复执行不产生重复行", async () => {
-    const sql = readFileSync("db/add-role-template-seed.sql", "utf8");
+    const sql = readFileSync("db/migrate-role-template-seed.sql", "utf8");
     const count = async (): Promise<number> =>
       (await getPool().query<{ n: number }>(
         "SELECT count(*)::int AS n FROM grant_template",
@@ -124,7 +125,7 @@ describe("seed 文件幂等", () => {
   });
 });
 
-describe("模板本身的一致性", () => {
+describe("schema verification", () => {
   it("错配键 node:scene/*/meta@edit 不会随模板复活", async () => {
     for (const role of ["编剧", "戏剧构作"]) {
       const keys = await templateKeysForRole(role, null);

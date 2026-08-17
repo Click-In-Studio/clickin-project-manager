@@ -5,7 +5,7 @@ import { readFileSync } from "fs";
  * schema.sql 与 seed 迁移文件的防漂移。
  *
  * AGENTS.md：「db/schema.sql 始终是生产状态的完整快照」。模板 seed 因此有两份
- * 拷贝——`db/add-role-template-seed.sql`（存量库执行）与 schema.sql 里的同一段
+ * 拷贝——`db/migrate-role-template-seed.sql`（存量库执行）与 schema.sql 里的同一段
  * （新库建库时执行）。没有任何机制拴住这两份：改了一处忘了另一处，新库与存量库
  * 的模板就会静默分叉，而这正是本次事故的成因之一（线上手工配了 69 行，仓库
  * 一无所知，新建演出的创作组开箱即残）。
@@ -15,7 +15,7 @@ import { readFileSync } from "fs";
  */
 
 const SEED_FILES = [
-  "db/add-role-template-seed.sql",
+  "db/migrate-role-template-seed.sql",
   "db/migrate-scene-field-gates.sql",
 ];
 
@@ -60,7 +60,7 @@ describe("schema.sql 是 seed 的完整快照", () => {
   });
 
   it("seed 文件解析出的对不为空（防止正则失配导致空断言通过）", () => {
-    const pairs = extractTemplatePairs(readFileSync("db/add-role-template-seed.sql", "utf8"));
+    const pairs = extractTemplatePairs(readFileSync("db/migrate-role-template-seed.sql", "utf8"));
     expect(pairs.size).toBe(69);
   });
 });

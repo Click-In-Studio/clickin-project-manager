@@ -1482,7 +1482,7 @@ INSERT INTO grant_template (role_name, permission_key) VALUES
   ('*', 'node:script/*/comments@create')
 ON CONFLICT DO NOTHING;
 
--- 角色模板 seed 对齐线上（2026-08-17，见 add-role-template-seed.sql）：
+-- 角色模板 seed 对齐线上（2026-08-17，见 migrate-role-template-seed.sql）：
 -- 线上 69 行手工配置固化回仓库，让 db/ 重新成为模板的单一事实源。
 -- 缺了它们，新建演出的创作组开箱即残（编剧连 blocks@edit 都没有）。
 -- *（2 枚）
