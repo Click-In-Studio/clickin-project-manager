@@ -8018,7 +8018,8 @@ export async function listPendingApprovals(
   });
 }
 
-/** production_approval_config.ttl_hours 的列默认值——缺配置行时按此计时。 */
+/** production_approval_config.ttl_hours 的列默认值——缺配置行时按此计时。
+ *  与 db/add-approval-config-backfill.sql 里插入的 24 是同一个值，改要同改。 */
 const DEFAULT_APPROVAL_TTL_HOURS = 24;
 
 /** Called by the internal cron endpoint — 当前级超时未响应即升级到阶梯下一级。 */

@@ -14,6 +14,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFile } from "fs/promises";
+import path from "path";
 import { getPool } from "@/lib/pg";
 import {
   addProductionMember,
@@ -1366,7 +1368,54 @@ describe("escalateExpiredApprovals", () => {
   });
 });
 
-// ─── 12. 端到端 ───────────────────────────────────────────────────────────────
+// ─── 12. 回填脚本 ─────────────────────────────────────────────────────────────
+
+describe("add-approval-config-backfill.sql", () => {
+  /** 直接跑仓库里的那份 SQL——测的是要部署的文件本身，不是它的副本。 */
+  async function runBackfill() {
+    const sql = await readFile(path.join(process.cwd(), "db/add-approval-config-backfill.sql"), "utf8");
+    await getPool().query(sql);
+  }
+
+  it("补齐缺行的演出，重复执行不产生重复行", async () => {
+    await getPool().query(
+      `DELETE FROM production_approval_config WHERE production_id = $1`, [prodId]);
+
+    await runBackfill();
+    await runBackfill();  // 幂等：第二次不该炸也不该多插
+
+    const rows = await getPool().query<{ ttl_hours: number; updated_by: string | null }>(
+      `SELECT ttl_hours, updated_by FROM production_approval_config WHERE production_id = $1`,
+      [prodId]);
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].ttl_hours).toBe(24);
+    // updated_by 留 NULL = 从未被人工修改
+    expect(rows.rows[0].updated_by).toBeNull();
+  });
+
+  it("不覆盖已有配置：制作人调过的 TTL 必须原样保留", async () => {
+    await getPool().query(
+      `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+       VALUES ($1, 72, $2)
+       ON CONFLICT (production_id) DO UPDATE SET ttl_hours = 72, updated_by = EXCLUDED.updated_by`,
+      [prodId, U_OWNER]);
+
+    await runBackfill();
+
+    const rows = await getPool().query<{ ttl_hours: number; updated_by: string | null }>(
+      `SELECT ttl_hours, updated_by FROM production_approval_config WHERE production_id = $1`,
+      [prodId]);
+    expect(rows.rows[0].ttl_hours).toBe(72);
+    expect(rows.rows[0].updated_by).toBe(U_OWNER);
+
+    // 复原，免得影响后面按 24h 计时的用例
+    await getPool().query(
+      `UPDATE production_approval_config SET ttl_hours = 24, updated_by = $2 WHERE production_id = $1`,
+      [prodId, U_OWNER]);
+  });
+});
+
+// ─── 13. 端到端 ───────────────────────────────────────────────────────────────
 
 describe("full happy path — 上级转交 → POC 批准", () => {
   it("提交 → 上级转交 → POC 批准 → 授权行写入、通知齐备", async () => {
