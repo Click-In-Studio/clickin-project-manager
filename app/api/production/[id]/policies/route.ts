@@ -11,6 +11,7 @@
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/api-guard";
 import { listPolicies, setPolicies, listPolicyAudit } from "@/lib/policy-db";
+import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/policy-questions";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -24,8 +25,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (deny) return deny;
 
   const policies = await listPolicies(id);
-  if (req.nextUrl.searchParams.get("audit") !== "1") return Response.json({ policies });
-  return Response.json({ policies, audit: await listPolicyAudit(id) });
+
+  // 语义层：同一份数据的另一个视图（§6.4 纪律 1，不是两张表）。
+  // answerId=null ⇒ 第四态「自定义」——高级模式手改后组合可能不对应任何预设答案，
+  // **不许静默显示最接近的那个**，否则人会以为自己在 A、实际在 A′。
+  const current = new Map(policies.map((p) => [p.key, p.value]));
+  const questions = POLICY_QUESTIONS.map((q) => ({
+    id: q.id, group: q.group, title: q.title, help: q.help ?? null,
+    danger: q.danger ?? false,
+    answers: q.answers.map((a) => ({
+      id: a.id, label: a.label, values: a.values, disposition: a.disposition,
+    })),
+    answerId: matchAnswer(q, current)?.id ?? null,
+  }));
+  // 高级模式专属：未被任何题覆盖的键
+  const advancedOnly = policies.filter((p) => !QUESTION_COVERED_KEYS.has(p.key)).map((p) => p.key);
+
+  const body = { policies, questions, advancedOnly };
+  if (req.nextUrl.searchParams.get("audit") !== "1") return Response.json(body);
+  return Response.json({ ...body, audit: await listPolicyAudit(id) });
 }
 
 /**
