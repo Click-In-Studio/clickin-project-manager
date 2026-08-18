@@ -31,6 +31,8 @@ import {
 } from "@/lib/event-db";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
+import { setPolicies } from "@/lib/policy-db";
+import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
 import { getPool } from "@/lib/pg";
 import { DELETE as deleteTaskStandalone, PATCH as patchTask } from "@/app/api/production/[id]/tasks/[taskId]/route";
 import { DELETE as deleteTaskUnderEvent } from "@/app/api/production/[id]/events/[eventId]/tech-reqs/[reqId]/route";
@@ -111,9 +113,19 @@ describe("前提", () => {
     expect(await hasGrant(organizerId, prodId, "task", taskId, "*", "delete")).toBe(false);
   });
 
-  it("关联部门 POC 持本体键 task/<id>/*@delete（C-4 发行）", async () => {
+  it("explicit 路径：关联部门 POC **默认不持**本体删除键——V-1 原意（#236 起生效）", async () => {
+    // C-4 曾无条件发 `task/<id>/*@delete`，把路由第三分支的 created_via 上下文规则
+    // （V-1「organizer 显式创建的 task，部门 POC 无自动删除权」）盖成空转。
+    // 策略键 task.dept_poc:*@delete 默认关之后，本写点不再发这一行，V-1 复活。
+    const taskId = await makeTask();
+    expect(await hasGrant(pocId, prodId, "task", taskId, "*", "delete")).toBe(false);
+  });
+
+  it("打开 task.dept_poc:*@delete ⇒ C-4 才发本体删除键（「任务归执行部门」那一档）", async () => {
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_ON }, pocId);
     const taskId = await makeTask();
     expect(await hasGrant(pocId, prodId, "task", taskId, "*", "delete")).toBe(true);
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_OFF }, pocId);
   });
 });
 
@@ -150,13 +162,25 @@ describe("M-15(d)：边键不得作为本体删除的充分条件", () => {
 // ── ② 不误伤 ────────────────────────────────────────────────────────────────
 
 describe("本体键与既有上下文规则不受影响", () => {
-  it("持本体键的部门 POC → 200，task 真的没了", async () => {
+  it("持本体键的部门 POC → 200，task 真的没了（开关打开时）", async () => {
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_ON }, pocId);
+    const taskId = await makeTask();
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_OFF }, pocId);
+    const res = await deleteTaskStandalone(
+      makeReq(pocId), { params: Promise.resolve({ id: prodId, taskId }) },
+    );
+    // 关关掉不撤已发的行（铁律：开关不否决已存在的行）——所以这里仍是 200
+    expect(res.status).toBe(200);
+    expect(await getTechReqByProduction(taskId, prodId)).toBeNull();
+  });
+
+  it("explicit 路径 + 开关关 ⇒ POC 删不掉（V-1 端到端）", async () => {
     const taskId = await makeTask();
     const res = await deleteTaskStandalone(
       makeReq(pocId), { params: Promise.resolve({ id: prodId, taskId }) },
     );
-    expect(res.status).toBe(200);
-    expect(await getTechReqByProduction(taskId, prodId)).toBeNull();
+    expect(res.status).toBe(403);
+    expect(await getTechReqByProduction(taskId, prodId)).not.toBeNull();
   });
 
   it("dept_auto 路径的 POC 上下文规则仍在（V-1 的另一半）", async () => {

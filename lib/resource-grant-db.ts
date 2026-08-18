@@ -9,6 +9,7 @@
  *   - manage 级：user 是管理该资源的 dept 的 POC（代码规则，总表 §0.8 已知例外）
  */
 import { getPool } from "./pg";
+import { policyFilteredRows } from "./policy-db";
 import type { Pool, PoolClient } from "pg";
 
 /** 可注入连接：调用方在事务内传 client，缺省用池（W5 AI review——多步写点须同事务） */
@@ -336,8 +337,13 @@ export async function writeEventGrants(
   createdBy: string,
 ): Promise<void> {
   const pool = getPool();
-  // 批B：创建者获 EVENT manage 行集（动词行取代 manage 单行）
-  for (const [sub, verb] of EVENT_LEVEL_ROW_SETS.manage) {
+  // 批B：创建者获 EVENT manage 行集（动词行取代 manage 单行）。
+  // #236：行集先过一遍 production 级策略开关——**裁在写点，不裁在 EVENT_LEVEL_ROW_SETS**，
+  // 那张表同时是审批发行与「上级有没有这个权限」的定义（M-12），裁到表上会连带砍掉审批面。
+  const eventRows = await policyFilteredRows(
+    productionId, "event", "creator", EVENT_LEVEL_ROW_SETS.manage, pool,
+  );
+  for (const [sub, verb] of eventRows) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -403,8 +409,11 @@ export async function writeReportGrants(
   db: Queryable = getPool(),
 ): Promise<void> {
   const pool = db;
-  // 批C：创建者获 REPORT manage 行集（动词行取代 manage 单行）
-  for (const [sub, verb] of REPORT_LEVEL_ROW_SETS.manage) {
+  // 批C：创建者获 REPORT manage 行集。#236：先过策略开关（同 writeEventGrants 的理由）。
+  const reportRows = await policyFilteredRows(
+    productionId, "report", "creator", REPORT_LEVEL_ROW_SETS.manage, pool,
+  );
+  for (const [sub, verb] of reportRows) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -450,7 +459,12 @@ export async function writeWikiGrants(
   db: Queryable = getPool(),
 ): Promise<void> {
   const pool = db;
-  for (const [sub, verb] of WIKI_LEVEL_ROW_SETS.manage) {
+  // #236：先过策略开关。wiki 无外部归属信号，其 grants@edit 由 M-14 存在性子句强制
+  // 保留、根本不在词汇表里，故本行集只有 *@delete 可配。
+  const wikiRows = await policyFilteredRows(
+    productionId, "wiki", "creator", WIKI_LEVEL_ROW_SETS.manage, pool,
+  );
+  for (const [sub, verb] of wikiRows) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -489,19 +503,32 @@ export async function writeTechReqGrants(
 ): Promise<void> {
   const pool = getPool();
   if (eventDeptId) {
+    // #236：POC 行集先过策略开关。`task.dept_poc:*@delete` **默认关**，于是本写点
+    // 不再无条件发删除行——这正好把 V-1（「organizer 显式创建的 task，部门 POC 无
+    // 自动删除权」）从空转救活：路由第三分支的 created_via 上下文规则此前被这里发出
+    // 的行盖住，第一分支直接命中。
+    //
+    // 因此**不需要**在本写点按 created_via 分叉（原处方如此，已被更好的机制取代）：
+    //   开关关（默认）⇒ 谁都不发 *@delete 行，dept_auto 路径的 POC 仍由路由的上下文
+    //     分支恒可删 —— 与 V-1 完全等价
+    //   开关开        ⇒ 关联部门 POC 一律拿到删除行 —— 即「任务归执行部门」那一档
+    const pocRows = await policyFilteredRows(
+      productionId, "task", "dept_poc",
+      [["*", "view"], ["*", "edit"], ["assignees", "edit"], ["*", "delete"], ["grants", "edit"]],
+      pool,
+    );
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT DISTINCT $1, pdm.user_id, 'task', $2, s.sub, s.verb, 'direct', pdm.user_id
        FROM production_dept_member pdm
-       CROSS JOIN (VALUES ('*', 'view'), ('*', 'edit'), ('assignees', 'edit'),
-                          ('*', 'delete'), ('grants', 'edit')) AS s(sub, verb)
+       CROSS JOIN UNNEST($4::text[], $5::text[]) AS s(sub, verb)
        WHERE pdm.dept_id = $3 AND pdm.is_poc = true
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
-      [productionId, reqId, eventDeptId],
+      [productionId, reqId, eventDeptId, pocRows.map((r) => r[0]), pocRows.map((r) => r[1])],
     );
     await pool.query(
       `INSERT INTO resource_dept_manage

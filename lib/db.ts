@@ -1765,15 +1765,22 @@ async function seedCueListCreatorAccessInTx(
   client: PoolClient,
   data: { id: string; productionId: string; template: string | null; createdBy: string },
 ): Promise<void> {
+  // #236：创建者行集先过策略开关。注意 grant_source 虽写 self_confirmed，这是**创建
+  // 定式**发的、不是用户点「自我确认」，故属形状 A 的论域（真正的自确认写点不接开关）。
+  const { policyFilteredRows } = await import("./policy-db");
+  const cueRows = await policyFilteredRows(
+    data.productionId, "cue_list", "creator",
+    [["*", "view"], ["*", "edit"], ["*", "delete"],
+     ["cues", "create"], ["cues", "delete"], ["grants", "edit"]],
+    client,
+  );
   await client.query(
     `WITH creator_grants AS (
        INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $3, 'cue_list', $2, s.sub, s.verb, 'self_confirmed', $3
-       FROM (VALUES ('*', 'view'), ('*', 'edit'), ('*', 'delete'),
-                    ('cues', 'create'), ('cues', 'delete'),
-                    ('grants', 'edit')) AS s(sub, verb)
+       FROM UNNEST($5::text[], $6::text[]) AS s(sub, verb)
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING
@@ -1809,7 +1816,8 @@ async function seedCueListCreatorAccessInTx(
      SELECT $1, $3, 'cue_list', $2, $3
      WHERE NOT EXISTS (SELECT 1 FROM eligible_depts)
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-    [data.productionId, data.id, data.createdBy, data.template],
+    [data.productionId, data.id, data.createdBy, data.template,
+     cueRows.map((r) => r[0]), cueRows.map((r) => r[1])],
   );
 }
 
