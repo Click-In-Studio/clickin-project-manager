@@ -137,6 +137,10 @@ export const PAGE_PERMISSION_SCOPES = {
     // 批C-3 遗漏补齐（2026-08-17）：导演模板的 notes 通配（dept 首次成为树上
     // 资源类型），判定端在 lib/event-permissions.ts 有门
     "node:dept/*/notes@create",
+    // #236 张力 4a/4c（2026-08-18）：报告 DELETE 门改查 delete 动词后，
+    // node:report/*@delete 成为舞监的默认持钥键——模板发它，激活面就必须收它，
+    // 否则舞监永远激活不出行（激活面断层，见《权限系统-激活面断层与scene编辑权限失效》）。
+    "node:report/*@delete",
   ]),
 
   wiki: new Set<string>([

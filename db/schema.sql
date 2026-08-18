@@ -1492,6 +1492,16 @@ INSERT INTO grant_template (role_name, permission_key) VALUES
   ('助理舞台监督', 'node:event/*/publication@delete')
 ON CONFLICT DO NOTHING;
 
+-- #236 张力 4c（2026-08-18）：报告的默认持钥人＝舞监。此前 grant_template 里
+-- **没有任何 role 持 node:report/*@delete**，「舞监能删 report」从未实现——而两条
+-- DELETE 门同批已从 grants@edit 改查 delete 动词，故持钥人必须在位。
+-- （event 那条的默认持钥人是制作人，已有 node:*/*@* 全集，无需补。）
+INSERT INTO grant_template (role_name, permission_key) VALUES
+  ('舞台监督',     'node:report/*@delete'),
+  ('助理舞台监督', 'node:report/*@delete'),
+  ('后台舞台监督', 'node:report/*@delete')
+ON CONFLICT DO NOTHING;
+
 -- 批G G-1：制作人通配区间（收敛历史枚举 seed；主行+保留段四行=永久稳定全集；
 -- RESERVED_TYPES=production/producer 不被类型通配穿透）
 INSERT INTO grant_template (role_name, permission_key) VALUES
