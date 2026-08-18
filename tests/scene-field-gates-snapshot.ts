@@ -34,10 +34,11 @@ export async function isSceneFieldGatesPreMigrationSchema(pool: Pool): Promise<b
 
 export async function createSceneFieldGatesPreMigrationData(
   pool: Pool,
+  testUserId: string,
 ): Promise<SceneFieldGatesSnapshot> {
   const productionId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
-    productionId, `字段门迁移工厂-${faker.string.alphanumeric(4)}`,
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
+    productionId, `字段门迁移工厂-${faker.string.alphanumeric(4)}`, testUserId,
   ]);
 
   const mkRole = async (name: string, keys: string[]): Promise<string> => {

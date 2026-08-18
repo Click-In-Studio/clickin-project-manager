@@ -44,8 +44,8 @@ export async function createScriptRestPreMigrationData(
   testUserId: string,
 ): Promise<ScriptRestSnapshot> {
   const productionId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
-    productionId, `批E2迁移工厂-${faker.string.alphanumeric(4)}`,
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
+    productionId, `批E2迁移工厂-${faker.string.alphanumeric(4)}`, testUserId,
   ]);
 
   const editUserId = await makeUser(pool, "批E2-edit");

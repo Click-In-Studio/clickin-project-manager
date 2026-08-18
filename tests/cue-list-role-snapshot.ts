@@ -51,8 +51,8 @@ export async function createCueListRolePreMigrationData(
   const defaultEditRoles = ["灯光设计", "灯光设计助理"];
 
   await pool.query(
-    `INSERT INTO production (id, name) VALUES ($1, '迁移测试演出')`,
-    [productionId],
+    `INSERT INTO production (id, name, owner_id) VALUES ($1, '迁移测试演出', $2)`,
+    [productionId, testUserId],
   );
   // Use raw INSERT with old schema column (default_edit_roles still exists)
   await pool.query(

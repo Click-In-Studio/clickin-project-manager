@@ -6,6 +6,7 @@
  * Body: { wikiUrl: string; name: string }
  */
 import { type NextRequest } from "next/server";
+import { getSession } from "@/lib/session";
 import { getAppAccessToken } from "@/lib/platform/feishu/feishu-auth";
 import {
   parseWikiUrl,
@@ -27,6 +28,12 @@ function uid(): string {
 }
 
 export async function POST(req: NextRequest) {
+  // 本路由此前**完全不鉴权**（同目录另三条 admin 路由都查 session+isAdmin，只有它漏了），
+  // 于是任何人都能建演出并导入任意飞书数据；建出来的演出还没有 owner。补齐。
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
+
   const { wikiUrl, name } = (await req.json()) as { wikiUrl?: string; name?: string };
 
   if (!wikiUrl || !name?.trim()) {
@@ -71,7 +78,8 @@ export async function POST(req: NextRequest) {
   const charIdMap  = new Map<string, string>(state.characters.map(c => [c.id, uid()]));
 
   const productionId = uid();
-  await createProduction(productionId, name.trim());
+  // owner 必填（production.owner_id NOT NULL）：导入者即所有者，与 POST /api/productions 一致
+  await createProduction(productionId, name.trim(), session.userId);
 
   const dbScenes = state.scenes.map((s, i) => ({
     ...s,

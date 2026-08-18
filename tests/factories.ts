@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getPool } from "@/lib/pg";
 import {
   createProduction,
+  upsertFeishuUser,
   deleteProduction,
   getActiveVersionId,
   flushToDBVersioned,
@@ -21,11 +22,17 @@ export function shortId(): string {
 // ── Production ────────────────────────────────────────────────────────────────
 
 /**
- * Create a production and return its id + auto-created initial version id.
+ * 建一个演出，返回 id + 自动建出的初始 version id。
+ *
+ * `production.owner_id` 是 NOT NULL（owner 是 M-14(c) 责任链的终点，不存在无主演出），
+ * 故不传 owner 时**自动造一个专属 owner 用户**——调用方拿到的仍是"我不关心 owner"的
+ * 语义，但库里不会出现 NULL。要测 owner 旁路请显式传自己的 userId。
  */
 export async function makeProduction(ownerUserId?: string): Promise<{ prodId: string; versionId: string }> {
   const id = shortId();
-  await createProduction(id, faker.company.name(), ownerUserId);
+  const owner = ownerUserId
+    ?? (await upsertFeishuUser(`test-open-${shortId()}`, `工厂owner-${shortId()}`, null, false)).userId;
+  await createProduction(id, faker.company.name(), owner);
   const versionId = (await getActiveVersionId(id))!;
   return { prodId: id, versionId };
 }

@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS production (
   type              TEXT,
   type_label        TEXT,
   language          TEXT,
-  owner_id          UUID REFERENCES app_user(id),
+  owner_id          UUID NOT NULL REFERENCES app_user(id),
   watermark_enabled BOOLEAN NOT NULL DEFAULT false
 );
 

@@ -109,10 +109,13 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const task = await getTechReqByProduction(taskId, productionId);
   if (!task) return Response.json({ error: "任务不存在" }, { status: 404 });
 
+  // 边/本体删除单调性（M-15(d)）：`event/<id>/tasks@delete` 是**边键**——语义是「把这个
+  // task 从我的事件上摘下来」，不是「删掉它」。曾把它并进本门，于是持 event tasks@delete
+  // 的 organizer（C-2 创建者行集就发这一枚）能硬删部门的 task 本体，与「指派面独立」定谳
+  // （organizer 不能指派，任务分配归部门 POC）正面冲突：不能指派却能删除。
+  // 摘边走 PATCH { eventId: null }（门 canEditTechReq，含 event details@edit，organizer 有）。
   const canDelete =
     await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", taskId, "*", "delete")
-    || (task.eventId != null
-        && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", task.eventId, "tasks", "delete"))
     // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
     // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
     || (task.createdVia !== "explicit" && task.departmentId != null

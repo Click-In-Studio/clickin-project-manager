@@ -34,8 +34,8 @@ export async function createWikiSplitPreMigrationData(
   testUserId: string,
 ): Promise<WikiSplitSnapshot> {
   const productionId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
-    productionId, `批C拆分工厂-${faker.string.alphanumeric(4)}`,
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
+    productionId, `批C拆分工厂-${faker.string.alphanumeric(4)}`, testUserId,
   ]);
   const eventId = `ev_${faker.string.alphanumeric(8)}`;
   await pool.query(
