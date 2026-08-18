@@ -126,6 +126,10 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:event/*/publication@create",
     "node:event/*/publication@delete",
     "node:event/*/reports@view",
+    // #236：报告删除键同时挂 events scope——舞监的日常在事件页，从事件进报告时
+    // 不一定路过 /reports 列表页。同一个键出现在两个 scope 是允许的（激活面按
+    // scope 取交集弹窗），这样两条路径进来都能一键激活。
+    "node:report/*@delete",
   ]),
 
   reports: new Set<string>([
