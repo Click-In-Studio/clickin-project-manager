@@ -123,7 +123,11 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const existing = await getProductionEvent(eventId, productionId);
   if (!existing) return Response.json({ error: "事件不存在" }, { status: 404 });
 
-  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "grants", "edit"))
+  // #236 张力 4a：本门此前查 `grants@edit`（授权权），使 `event/<id>/*@delete` 成为
+  // 死动词，并造出一条违反 M-2 的隐式蕴含「能转授 ⟹ 能删」。改查 delete 动词后与
+  // 其余 17 条 DELETE 路由一致。默认持钥人＝制作人（node:*/*@* 全集）；创建者要不要
+  // 有，由策略键 event.creator:*@delete 决定（默认关，松的剧组可打开）。
+  if (!await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "*", "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteProductionEvent(eventId, productionId);

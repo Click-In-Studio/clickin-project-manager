@@ -1,4 +1,5 @@
 import { getPool } from "./pg";
+import { policyFilteredRows } from "./policy-db";
 
 let _seq = 0;
 function uid(prefix: string): string {
@@ -136,19 +137,27 @@ export async function createAsset(params: {
     );
     // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
     // own 键（rename/overwrite/mount/…）已退役，由此行集承担；存续按 §0.6 person 覆盖。
+    // #236：uploader 行集先过策略开关。asset 无外部归属信号，其 grants@edit 由 M-14
+    // 存在性子句强制保留、不在词汇表里；可配的是 *@delete / publication@c,d / shares@create。
+    const uploaderRows = await policyFilteredRows(
+      params.productionId, "asset", "uploader",
+      [["meta", "view"], ["file", "view"],
+       ["publication", "view"], ["publication", "create"], ["publication", "delete"],
+       ["meta", "edit"], ["file", "create"],
+       ["*", "delete"], ["shares", "create"], ["grants", "edit"]],
+      client,
+    );
     await client.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $2, 'asset', $3, s.sub, s.verb, 'self_confirmed', $2
-       FROM (VALUES ('meta', 'view'), ('file', 'view'),
-                    ('publication', 'view'), ('publication', 'create'), ('publication', 'delete'),
-                    ('meta', 'edit'), ('file', 'create'),
-                    ('*', 'delete'), ('shares', 'create'), ('grants', 'edit')) AS s(sub, verb)
+       FROM UNNEST($4::text[], $5::text[]) AS s(sub, verb)
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
-      [params.productionId, params.uploaderUserId, assetId],
+      [params.productionId, params.uploaderUserId, assetId,
+       uploaderRows.map((r) => r[0]), uploaderRows.map((r) => r[1])],
     );
     await client.query(
       `INSERT INTO resource_person_manage

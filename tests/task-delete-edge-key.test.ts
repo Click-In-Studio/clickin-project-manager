@@ -31,6 +31,8 @@ import {
 } from "@/lib/event-db";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
+import { setPolicies } from "@/lib/policy-db";
+import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
 import { getPool } from "@/lib/pg";
 import { DELETE as deleteTaskStandalone, PATCH as patchTask } from "@/app/api/production/[id]/tasks/[taskId]/route";
 import { DELETE as deleteTaskUnderEvent } from "@/app/api/production/[id]/events/[eventId]/tech-reqs/[reqId]/route";
@@ -111,9 +113,19 @@ describe("前提", () => {
     expect(await hasGrant(organizerId, prodId, "task", taskId, "*", "delete")).toBe(false);
   });
 
-  it("关联部门 POC 持本体键 task/<id>/*@delete（C-4 发行）", async () => {
+  it("explicit 路径：关联部门 POC **默认不持**本体删除键——V-1 原意（#236 起生效）", async () => {
+    // C-4 曾无条件发 `task/<id>/*@delete`，把路由第三分支的 created_via 上下文规则
+    // （V-1「organizer 显式创建的 task，部门 POC 无自动删除权」）盖成空转。
+    // 策略键 task.dept_poc:*@delete 默认关之后，本写点不再发这一行，V-1 复活。
+    const taskId = await makeTask();
+    expect(await hasGrant(pocId, prodId, "task", taskId, "*", "delete")).toBe(false);
+  });
+
+  it("打开 task.dept_poc:*@delete ⇒ C-4 才发本体删除键（「任务归执行部门」那一档）", async () => {
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_ON }, pocId);
     const taskId = await makeTask();
     expect(await hasGrant(pocId, prodId, "task", taskId, "*", "delete")).toBe(true);
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_OFF }, pocId);
   });
 });
 
@@ -150,13 +162,25 @@ describe("M-15(d)：边键不得作为本体删除的充分条件", () => {
 // ── ② 不误伤 ────────────────────────────────────────────────────────────────
 
 describe("本体键与既有上下文规则不受影响", () => {
-  it("持本体键的部门 POC → 200，task 真的没了", async () => {
+  it("持本体键的部门 POC → 200，task 真的没了（开关打开时）", async () => {
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_ON }, pocId);
+    const taskId = await makeTask();
+    await setPolicies(prodId, { "task.dept_poc:*@delete": POLICY_OFF }, pocId);
+    const res = await deleteTaskStandalone(
+      makeReq(pocId), { params: Promise.resolve({ id: prodId, taskId }) },
+    );
+    // 关关掉不撤已发的行（铁律：开关不否决已存在的行）——所以这里仍是 200
+    expect(res.status).toBe(200);
+    expect(await getTechReqByProduction(taskId, prodId)).toBeNull();
+  });
+
+  it("explicit 路径 + 开关关 ⇒ POC 删不掉（V-1 端到端）", async () => {
     const taskId = await makeTask();
     const res = await deleteTaskStandalone(
       makeReq(pocId), { params: Promise.resolve({ id: prodId, taskId }) },
     );
-    expect(res.status).toBe(200);
-    expect(await getTechReqByProduction(taskId, prodId)).toBeNull();
+    expect(res.status).toBe(403);
+    expect(await getTechReqByProduction(taskId, prodId)).not.toBeNull();
   });
 
   it("dept_auto 路径的 POC 上下文规则仍在（V-1 的另一半）", async () => {
@@ -231,5 +255,45 @@ describe("棘轮：硬删本体的路由不得接受宿主子集合键", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+// ── ④ M-15(c)：本体删除门 ⊒ 边删除门 ─────────────────────────────────────────
+//
+// 曾记为「(c) 违反」：边门＝report/<id>/grants@edit（现已改为 *@delete），本体门＝
+// wiki/<id>/*@delete，两把钥匙不可比 ⇒ 持 wiki 删除权者可绕过边门、删掉 wiki 让
+// 报告边随之消失。**复核发现不成立**：deleteWiki 在有 report/note 挂载边时直接
+// 拒绝（reason: "mounted"），本体压根删不掉，必须先解除挂载（走边门）再删。
+//
+// 实现给出的保证比 M-15(c) 要求的更强——不是「本体门 ⊒ 边门」，而是「有边禁止删
+// 本体」，顺序由数据层强制。但这条保证只由 deleteWiki 里那一个 mounted 检查撑着，
+// 拿掉它绕行就成真，故加棘轮。
+
+describe("M-15(c)：有挂载边时本体不可删", () => {
+  it("wiki 被 report 边引用 ⇒ deleteWiki 拒绝（reason=mounted），不是靠门拦而是靠数据层", async () => {
+    const { createEventReport } = await import("@/lib/event-db");
+    const { deleteWiki } = await import("@/lib/wiki-db");
+    const report = await createEventReport({
+      id: `rpt_${shortId()}`, eventId, reportType: "show",
+      title: `M15c${shortId()}`, body: "", createdBy: organizerId,
+    });
+    const { rows } = await getPool().query<{ wiki_id: string }>(
+      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [report.id],
+    );
+    expect(rows[0]?.wiki_id).toBeTruthy();
+
+    const res = await deleteWiki(rows[0].wiki_id, prodId);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("mounted");
+  });
+
+  it("棘轮：deleteWiki 必须保留挂载边检查（拿掉它 M-15(c) 的绕行就成真）", async () => {
+    const { readFileSync } = await import("fs");
+    const src = readFileSync("lib/wiki-db.ts", "utf8");
+    const i = src.indexOf("export async function deleteWiki");
+    const body = src.slice(i, i + 2000);
+    expect(body).toMatch(/event_report\b/);
+    expect(body).toMatch(/event_report_note\b/);
+    expect(body).toMatch(/reason:\s*"mounted"/);
   });
 });
