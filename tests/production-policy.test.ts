@@ -439,3 +439,42 @@ describe("棘轮：每个策略键都有消费点", () => {
     expect(orphans).toEqual([]);
   });
 });
+
+// ── ⑨ 语义层经 API 出来 ─────────────────────────────────────────────────────
+
+describe("GET /policies 的语义层视图", () => {
+  it("返回题目 + 当前命中的答案，且开箱即用不是「自定义」", async () => {
+    const res = await getPolicies(makeReq(editorId), ctx());
+    const body = await res.json() as {
+      questions: { id: string; answerId: string | null; danger: boolean }[];
+      advancedOnly: string[];
+    };
+    expect(body.questions.length).toBeGreaterThan(0);
+    expect(body.questions.filter((q) => q.answerId === null).map((q) => q.id)).toEqual([]);
+    expect(body.questions.find((q) => q.id === "share_token")!.danger).toBe(true);
+    expect(body.advancedOnly.length).toBeGreaterThan(0);
+  });
+
+  it("手改成混合态 ⇒ 该题 answerId 变 null（第四态「自定义」）", async () => {
+    await setPolicies(prodId, { "event.creator:assignees@create": POLICY_OFF }, editorId);
+    const res = await getPolicies(makeReq(editorId), ctx());
+    const body = await res.json() as { questions: { id: string; answerId: string | null }[] };
+    expect(body.questions.find((q) => q.id === "participant_list")!.answerId).toBeNull();
+    await setPolicies(prodId, { "event.creator:assignees@create": POLICY_ON }, editorId);
+  });
+
+  it("选中某答案 = 覆盖该题全部键（不做 merge）", async () => {
+    const { POLICY_QUESTIONS } = await import("@/lib/policy-questions");
+    const q = POLICY_QUESTIONS.find((x) => x.id === "participant_list")!;
+    const smOnly = q.answers.find((a) => a.id === "sm_only")!;
+    const res = await putPolicies(makeReq(editorId, { changes: smOnly.values }), ctx());
+    expect(res.status).toBe(200);
+
+    const after = await getPolicies(makeReq(editorId), ctx());
+    const body = await after.json() as { questions: { id: string; answerId: string | null }[] };
+    expect(body.questions.find((x) => x.id === "participant_list")!.answerId).toBe("sm_only");
+
+    const back = q.answers.find((a) => a.id === "creator_and_sm")!;
+    await setPolicies(prodId, back.values, editorId);
+  });
+});

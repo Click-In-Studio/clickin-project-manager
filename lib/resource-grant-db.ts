@@ -425,6 +425,32 @@ export async function writeReportGrants(
       [productionId, createdBy, reportId, sub, verb],
     );
   }
+  // 报告的**结构性**持钥方＝该 event 的跟组舞监（2026-08-18）。
+  // 此前只靠舞监 role 模版的 node:report/*@delete，而 role 不保证存在（ROLE_NAMES 是
+  // 默认模版名单不是白名单），剧组删了或改名就没有非兜底持钥方了。跟组舞监是
+  // per-event 结构数据（event_stage_manager），指派了就存在。role 模版行保留作便利。
+  const smRows = await policyFilteredRows(
+    productionId, "report", "stage_manager",
+    [["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+     ["*", "delete"]],
+    pool,
+  );
+  if (smRows.length > 0) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT DISTINCT $1, esm.user_id, 'report', $2, s.sub, s.verb, 'assigned', esm.user_id
+       FROM event_stage_manager esm
+       CROSS JOIN UNNEST($4::text[], $5::text[]) AS s(sub, verb)
+       WHERE esm.event_id = $3
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, reportId, eventId, smRows.map((r) => r[0]), smRows.map((r) => r[1])],
+    );
+  }
+
   // Inherit dept managers from parent event
   await pool.query(
     `INSERT INTO resource_dept_manage

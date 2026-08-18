@@ -530,12 +530,16 @@ export async function setEventStageManagers(
     // details/call_sheet/tasks 可见 + 本 event 报告 CRUD。
     // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
     // #236：定式 R-3 的十行集先过策略开关（event.stage_manager）。
+    // R-3 行集（2026-08-18 由 10 行扩到 12 行：加 assignees@create/delete）。
+    // 此前只有创建者能定参会名单，关掉那一档就只剩兜底——而跟组舞监是 per-event
+    // 结构数据，才是能立住的持钥方（role 不保证存在）。
     const smRows = await policyFilteredRows(
       productionId, "event", "stage_manager",
       [["meta", "view"], ["details", "view"], ["publication", "view"],
        ["call_sheet", "view"], ["call_sheet", "edit"],
        ["tasks", "view"], ["reports", "view"],
-       ["reports", "create"], ["reports", "edit"], ["reports", "delete"]],
+       ["reports", "create"], ["reports", "edit"], ["reports", "delete"],
+       ["assignees", "create"], ["assignees", "delete"]],
       client,
     );
     if (unique.length > 0 && smRows.length > 0) {
@@ -552,6 +556,32 @@ export async function setEventStageManagers(
         [productionId, unique.map(m => m.userId), eventId, assignedBy,
          smRows.map(r => r[0]), smRows.map(r => r[1])],
       );
+
+      // 该 event 已有的报告要补发——否则「先建报告、后设舞监」的顺序下舞监拿不到。
+      // 与 C-3 建报告时发给当时的跟组舞监互为两个方向，合起来与顺序无关。
+      const reportRows = await policyFilteredRows(
+        productionId, "report", "stage_manager",
+        [["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+         ["*", "delete"]],
+        client,
+      );
+      if (reportRows.length > 0) {
+        await client.query(
+          `INSERT INTO production_member_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by)
+           SELECT DISTINCT $1, u, 'report', er.id, s.sub, s.verb, 'assigned', $4::uuid
+           FROM event_report er
+           CROSS JOIN unnest($2::uuid[]) AS u
+           CROSS JOIN UNNEST($5::text[], $6::text[]) AS s(sub, verb)
+           WHERE er.event_id = $3
+           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+             WHERE is_revoked = false
+           DO NOTHING`,
+          [productionId, unique.map(m => m.userId), eventId, assignedBy,
+           reportRows.map(r => r[0]), reportRows.map(r => r[1])],
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (err) {

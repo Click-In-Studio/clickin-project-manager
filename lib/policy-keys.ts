@@ -126,7 +126,12 @@ const EVENT_OTHERS: PolicyKeyDef[] = [
      ["reports", "view"], ["reports", "create"], ["reports", "edit"], ["reports", "delete"]],
     POLICY_ON,
     (sub, verb) => `跟组舞监对事件的 ${sub}@${verb}`,
-    "定式 R-3。跟组舞监十行集，无需发布即生效。"),
+    "定式 R-3。跟组舞监行集，无需发布即生效。"),
+  ...aMany("event", "stage_manager", [["assignees", "create"], ["assignees", "delete"]], POLICY_ON,
+    () => "跟组舞监可增删参会名单",
+    "定式 R-3 扩充（2026-08-18）：此前只有创建者能定名单，关掉创建者那一档就只剩兜底。"
+    + "**跟组舞监是 per-event 结构数据（event_stage_manager），不是 role**——role 不保证"
+    + "存在（ROLE_NAMES 是默认模版名单不是白名单），拿它当持钥方是把保障建在流沙上。"),
 ];
 
 const REPORT_CREATOR: PolicyKeyDef[] = [
@@ -146,6 +151,28 @@ const REPORT_CREATOR: PolicyKeyDef[] = [
     "**撤的是边，不是文档**（M-15）：wiki 本体仍在、作者仍可访问。"
     + "默认关：报告是留档物，撤下应由舞监决定。",
   ),
+];
+
+/**
+ * 报告的**结构性**持钥方＝该报告所属 event 的跟组舞监（2026-08-18）。
+ *
+ * 为什么需要这一组：报告的发布 / 撤下若只有创建者与兜底，那么「创建者不能发」这一档
+ * 就只剩制作人。此前的修法是给舞监 role 补键（`add-report-delete-to-stage-managers.sql`），
+ * 但 role 不保证存在——剧组删了或改了名，该键就没有非兜底持钥方了。跟组舞监是
+ * per-event 结构数据，指派了就存在，才立得住。
+ *
+ * 原 role 模版行保留（role 存在时是便利：一次激活拿全项目的报告删除权），但**不再是
+ * 声明的持钥方**。
+ */
+const REPORT_STAGE_MANAGER: PolicyKeyDef[] = [
+  ...aMany("report", "stage_manager",
+    [["publication", "create"], ["publication", "edit"], ["publication", "delete"]], POLICY_ON,
+    (_s, v) => v === "create" ? "跟组舞监可发布本事件的报告"
+      : v === "edit" ? "跟组舞监可修订已发布的报告" : "跟组舞监可撤回已发布的报告",
+    "关掉后报告发布面只剩创建者（若 Q11 也关，就只剩兜底）。"),
+  a("report", "stage_manager", "*", "delete", POLICY_ON,
+    "跟组舞监可把报告从事件上撤下来",
+    "撤的是**边**不是文档（M-15(b)）：wiki 本体仍在、作者仍可访问。"),
 ];
 
 const TASK_DEPT_POC: PolicyKeyDef[] = [
@@ -264,7 +291,7 @@ const SHAPE_L: PolicyKeyDef[] = [
 // ─── 汇总 ─────────────────────────────────────────────────────────────────────
 
 export const POLICY_KEYS: readonly PolicyKeyDef[] = [
-  ...EVENT_CREATOR, ...EVENT_OTHERS, ...REPORT_CREATOR, ...TASK_DEPT_POC,
+  ...EVENT_CREATOR, ...EVENT_OTHERS, ...REPORT_CREATOR, ...REPORT_STAGE_MANAGER, ...TASK_DEPT_POC,
   ...ASSET_UPLOADER, ...WIKI_CUE_DEPT, ...SHAPE_C, ...SHAPE_L,
 ];
 
