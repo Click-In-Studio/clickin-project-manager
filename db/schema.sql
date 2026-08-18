@@ -1294,6 +1294,33 @@ CREATE INDEX IF NOT EXISTS rpm_production_resource_idx
 
 -- ── Production Approval Config（Phase 3）──────────────────────────────────────
 -- 演出级审批 TTL 配置，演出创建时自动写入默认行。
+-- ── 策略配置中心（#236）────────────────────────────────────────────────────────
+-- 【政策】类定式的 production 级开关。value 是 TEXT 不是 BOOLEAN（形状 C/L 有多档键）；
+-- 合法取值由 lib/policy-keys.ts 白名单校验，SQL 侧不设 CHECK（新增键零 migration）。
+-- 落全量键、不稀疏：缺行回落代码默认会让改默认值静默改变存量演出行为。
+CREATE TABLE IF NOT EXISTS production_policy (
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  policy_key    TEXT        NOT NULL,
+  value         TEXT        NOT NULL,
+  updated_by    UUID        NULL REFERENCES app_user(id),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (production_id, policy_key)
+);
+
+-- 策略改动是项目级、影响所有人的动作，比单条 grant 更需要留痕。
+CREATE TABLE IF NOT EXISTS production_policy_audit (
+  id            BIGSERIAL   PRIMARY KEY,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  policy_key    TEXT        NOT NULL,
+  old_value     TEXT        NOT NULL,
+  new_value     TEXT        NOT NULL,
+  changed_by    UUID        NULL REFERENCES app_user(id),
+  changed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS production_policy_audit_prod_time_idx
+  ON production_policy_audit (production_id, changed_at DESC);
+
 CREATE TABLE IF NOT EXISTS production_approval_config (
   production_id TEXT        PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
   ttl_hours     INTEGER     NOT NULL DEFAULT 24

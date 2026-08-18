@@ -2490,6 +2490,10 @@ export async function createProduction(
     "INSERT INTO production_approval_config (production_id, ttl_hours) VALUES ($1, 24) ON CONFLICT DO NOTHING",
     [id],
   );
+  // 策略键落全量（#236）：稀疏存储会让「改一次代码默认值」静默改变所有未显式配置过
+  // 该键的存量演出，且不留痕迹。物化那一刻即冻结当时的默认值。
+  const { ensureProductionPolicies } = await import("./policy-db");
+  await ensureProductionPolicies(id);
   await createInitialVersion(id);
   await seedProductionRoles(id);
 }
