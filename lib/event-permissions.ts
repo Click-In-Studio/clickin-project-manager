@@ -9,6 +9,7 @@
  */
 
 import { getPool } from "./pg";
+import { isPolicyOn } from "./policy-db";
 import { type PermissionContext } from "./permissions";
 import { hasGrant } from "./grant-check";
 
@@ -189,7 +190,9 @@ export async function canViewTechReq(
   //   - task 已确认（非 awaiting）且关联部门 → 部门全员可见
   const { isUserReqAssignee, isUserDeptMember, getTechReqByProduction } = await import("./event-db");
   if (await isUserReqAssignee(techReqId, permCtx.userId)) return true;
-  if (techReqDeptId) {
+  // #236 policy.task_dept_visibility：关掉后已确认任务只对指派人与 POC 可见，
+  // 部门其他成员看不到本部门在做什么。
+  if (techReqDeptId && await isPolicyOn(productionId, "policy.task_dept_visibility")) {
     const req = await getTechReqByProduction(techReqId, productionId);
     if (req && req.status !== "awaiting" && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
   }
@@ -216,7 +219,11 @@ export async function canWriteNote(
 ): Promise<NoteWriteChannel | null> {
   if (permCtx.isAdmin || permCtx.isOwner) return "moderator";
   if (permCtx.memberPermissions === null) return null;
-  if (participantDeptIds.includes(departmentId)) return "dept";
+  // #236 policy.note_create_requires_poc：打开后普通成员不能靠「本部门参与者」这个
+  // 上下文身份直接提 note，须由 POC 代提。POC 自己走下面的 dept/<D>/notes@create 行，
+  // 不受本开关影响。
+  const memberChannelOpen = !await isPolicyOn(productionId, "policy.note_create_requires_poc");
+  if (memberChannelOpen && participantDeptIds.includes(departmentId)) return "dept";
   if (await hasGrant(permCtx.userId, productionId, "dept", departmentId, "notes", "create")) {
     // 归因：POC = 本部门通道；其余（通配/被授实例行的非 POC）= wildcard。
     // 边界情形标 wildcard 只是更保守（POC 删不了那条 note），不放大权限。
@@ -229,7 +236,12 @@ export async function canWriteNote(
     );
     return pocRes.rows[0].exists ? "dept" : "wildcard";
   }
-  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return "moderator";
+  // V-3（#236 policy.organizer_moderates_notes）：event 编辑者可发任意部门的 note。
+  // 关掉后各部门的 note 只由本部门通道产生，organizer 不再蹭 details@edit 的蕴含。
+  if (await isPolicyOn(productionId, "policy.organizer_moderates_notes")
+      && await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) {
+    return "moderator";
+  }
   return null;
 }
 
@@ -246,7 +258,10 @@ export async function canEditNote(
   verb: "edit" | "delete",
 ): Promise<boolean> {
   if (permCtx.isAdmin || permCtx.isOwner) return true;
-  if (await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
+  // V-3 同上：管理任意 note 的那条蕴含也归 policy.organizer_moderates_notes 管，
+  // 发与管两侧必须同开同关，否则会出现「发得了、改不了」的半截状态。
+  if (await isPolicyOn(productionId, "policy.organizer_moderates_notes")
+      && await hasGrant(permCtx.userId, productionId, "event", eventId, "details", "edit")) return true;
   if (permCtx.userId === note.authorUserId && participantDeptIds.includes(note.departmentId)) return true;
   // 批C C3：POC（dept/<D>/notes@edit|delete 行）可管**本部门通道**提出的 note；
   // 导演（wildcard）/moderator 通道提出的不在此列（created_via 过滤，树无作者维度）
