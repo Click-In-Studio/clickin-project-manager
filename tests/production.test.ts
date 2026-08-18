@@ -9,7 +9,7 @@ import {
   unarchiveProduction,
   deleteProduction,
 } from "@/lib/db";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 import { shortId } from "./factories";
 
 const TEST_PROD_ID = `test-prod-${shortId()}`;
@@ -18,7 +18,7 @@ afterAll(() => deleteProduction(TEST_PROD_ID).catch(() => {}));
 
 describe("listProductions", () => {
   it("admin sees productions (no filter by membership)", async () => {
-    await createProduction(TEST_PROD_ID, "单元测试演出");
+    await createProduction(TEST_PROD_ID, "单元测试演出", TEST_OWNER);
     const list = await listProductions({ userId: TEST_USER, isAdmin: true });
     expect(list.some((p) => p.id === TEST_PROD_ID)).toBe(true);
   });

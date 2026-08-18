@@ -15,7 +15,7 @@ import {
   applyPatchToDB,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 import { initialKeys } from "@/lib/lex-order";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
@@ -143,9 +143,9 @@ describe("A: importScriptToVersion DB integration", () => {
   beforeAll(async () => {
     await forceDeleteProduction(PROD_A).catch(() => {});
     await forceDeleteProduction(PROD_A_ISO).catch(() => {});
-    await createProduction(PROD_A, "导入测试-剧本");
+    await createProduction(PROD_A, "导入测试-剧本", TEST_OWNER);
     versionId = (await getActiveVersionId(PROD_A))!;
-    await createProduction(PROD_A_ISO, "隔离用演出");
+    await createProduction(PROD_A_ISO, "隔离用演出", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -415,7 +415,7 @@ describe("B: flushToDBVersioned scene-only path", () => {
 
   beforeAll(async () => {
     await forceDeleteProduction(PROD_B).catch(() => {});
-    await createProduction(PROD_B, "导入测试-场景");
+    await createProduction(PROD_B, "导入测试-场景", TEST_OWNER);
     versionId = (await getActiveVersionId(PROD_B))!;
   });
 
@@ -698,7 +698,7 @@ describe("E: version-import hybrid — CoW block/cue isolation and GC", () => {
     // forceDeleteProduction handles that — just ensure no stale rows before recreating)
     await getPool().query("DELETE FROM cue_list WHERE id = $1", [CL_E_ID]).catch(() => {});
 
-    await createProduction(PROD_E, "混合测试演出");
+    await createProduction(PROD_E, "混合测试演出", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD_E))!;
 
     // ── Step 1: import B1, B2, B3 into v1 ─────────────────────────────────────

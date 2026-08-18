@@ -1252,7 +1252,7 @@
     {
       "column": "owner_id",
       "type": "uuid",
-      "nullable": true
+      "nullable": false
     },
     {
       "column": "watermark_enabled",

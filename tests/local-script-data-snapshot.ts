@@ -33,6 +33,7 @@ export async function isLocalScriptDataPreMigrationSchema(pool: Pool): Promise<b
 
 export async function createLocalScriptDataPreMigrationData(
   pool: Pool,
+  testUserId: string,
 ): Promise<LocalScriptDataSnapshot> {
   const suffix = faker.string.alphanumeric(8).toLowerCase();
   const productionIds = {
@@ -41,12 +42,12 @@ export async function createLocalScriptDataPreMigrationData(
     explicitFilm: `ls_film_${suffix}`,
   };
   await pool.query(
-    `INSERT INTO production (id, name, type, script_config) VALUES
-       ($1, 'Local script migration stage play', 'stage_play', '{}'::jsonb),
-       ($2, 'Local script migration musical', 'musical', '{}'::jsonb),
+    `INSERT INTO production (id, name, type, script_config, owner_id) VALUES
+       ($1, 'Local script migration stage play', 'stage_play', '{}'::jsonb, $4),
+       ($2, 'Local script migration musical', 'musical', '{}'::jsonb, $4),
        ($3, 'Local script migration explicit film', 'film',
-        '{"useRehearsalMarks": true, "pageLayout": "letter"}'::jsonb)`,
-    [productionIds.stagePlay, productionIds.musical, productionIds.explicitFilm],
+        '{"useRehearsalMarks": true, "pageLayout": "letter"}'::jsonb, $4)`,
+    [productionIds.stagePlay, productionIds.musical, productionIds.explicitFilm, testUserId],
   );
   const roleId = `ls_role_${suffix}`;
   await pool.query(

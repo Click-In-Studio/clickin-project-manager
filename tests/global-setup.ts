@@ -124,6 +124,7 @@ import {
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
+const TEST_OWNER = "00000000-0000-0000-0000-0000000000ff";
 
 export async function setup() {
   // Generate deterministic TEST_SEED for faker (workers inherit process.env).
@@ -152,6 +153,11 @@ export async function setup() {
   await pool.query(
     `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
     [TEST_USER],
+  );
+  // 建演出用的专用 owner（与 TEST_USER 分开，见 helpers.ts TEST_OWNER 注释）
+  await pool.query(
+    `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
+    [TEST_OWNER],
   );
   await pool.query(
     `INSERT INTO feishu_user (open_id, user_id, name, is_super_admin, created_at, updated_at)
@@ -409,7 +415,7 @@ export async function setup() {
 
   if (await isSceneFieldGatesPreMigrationSchema(pool)) {
     // scene 字段门对齐（2026-08-17）：PRE 判据=编剧模板尚无 meta/name@edit。
-    const sfgSnapshot = await createSceneFieldGatesPreMigrationData(pool);
+    const sfgSnapshot = await createSceneFieldGatesPreMigrationData(pool, TEST_USER);
     await writeFile(SCENE_FIELD_GATES_SNAPSHOT_PATH, JSON.stringify(sfgSnapshot));
     const migrationSql = await readFile(
       path.resolve(process.cwd(), "db/migrate-scene-field-gates.sql"),
@@ -419,7 +425,7 @@ export async function setup() {
   }
 
   if (await isLocalScriptDataPreMigrationSchema(pool)) {
-    const snapshot = await createLocalScriptDataPreMigrationData(pool);
+    const snapshot = await createLocalScriptDataPreMigrationData(pool, TEST_USER);
     await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));
     const migrationSql = await readFile(
       path.resolve(process.cwd(), "db/migrate-script-comment-rehearsal-defaults.sql"),
@@ -478,7 +484,7 @@ export async function setup() {
 
   // wiki 创建资格基线回填（W3 部署缺口：grant_template 零读取，存量 role 无键）
   if (await isWikiCreateBaselinePreMigrationSchema(pool)) {
-    const baselineSnapshot = await createWikiCreateBaselinePreMigrationData(pool);
+    const baselineSnapshot = await createWikiCreateBaselinePreMigrationData(pool, TEST_USER);
     await writeFile(WIKI_CREATE_BASELINE_SNAPSHOT_PATH, JSON.stringify(baselineSnapshot));
     const migrationSql = await readFile(
       path.resolve(process.cwd(), "db/migrate-wiki-create-baseline.sql"),

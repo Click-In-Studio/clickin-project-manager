@@ -172,11 +172,16 @@ describe("invariance verification", () => {
     const baseName = "导演";
     const tagName = "助理";
 
+    // owner_id NOT NULL：app_user 必须先于 production 存在（原本插在后面）
+    await pool.query(
+      "INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING",
+      [userId],
+    );
     // Create a minimal production + version
-    await pool.query("INSERT INTO production (id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
-      prodId,
-      "迁移测试演出-助理职位",
-    ]);
+    await pool.query(
+      "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [prodId, "迁移测试演出-助理职位", userId],
+    );
     await pool.query(
       "INSERT INTO version (id, production_id, name, created_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT DO NOTHING",
       [`${prodId}_v1`, prodId, "initial"],
@@ -186,11 +191,7 @@ describe("invariance verification", () => {
       [`${prodId}_v1`, prodId],
     );
 
-    // Create test user
-    await pool.query(
-      "INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING",
-      [userId],
-    );
+    // Create test user（app_user 已在 production 之前插入）
     await pool.query(
       `INSERT INTO feishu_user (open_id, user_id, name, is_super_admin, created_at, updated_at)
        VALUES ($1, $2, '迁移测试用户', false, NOW(), NOW()) ON CONFLICT DO NOTHING`,

@@ -9,7 +9,7 @@ import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId } from "@/lib/db";
 import { deleteProductionEvent } from "@/lib/event-db";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 import { makeProduction, makeBlocks, cleanupProduction } from "./factories";
 import { getPool } from "@/lib/pg";
 
@@ -269,7 +269,7 @@ describe("POST /api/production/[id]/cuelists — archived guard", () => {
   const ARCH_PROD = "test-api-arch-prod";
 
   beforeAll(async () => {
-    await createProduction(ARCH_PROD, "API归档测试演出");
+    await createProduction(ARCH_PROD, "API归档测试演出", TEST_OWNER);
     // Archive via the route handler (exercises the archive route too)
     await archiveProdHandler(
       req(`/api/production/${ARCH_PROD}/archive`, {
@@ -400,7 +400,7 @@ describe("DELETE /api/productions — happy path", () => {
   const DEL_PROD = "test-api-del-prod";
 
   beforeAll(async () => {
-    await createProduction(DEL_PROD, "API删除测试演出");
+    await createProduction(DEL_PROD, "API删除测试演出", TEST_OWNER);
   });
 
   it("admin deletes production → 200 and production is gone", async () => {
@@ -447,7 +447,7 @@ describe("PATCH /api/production/[id] — member without manage_permissions → 4
   const NOPERM_PROD = "test-api-noperm";
 
   beforeAll(async () => {
-    await createProduction(NOPERM_PROD, "无权限测试演出");
+    await createProduction(NOPERM_PROD, "无权限测试演出", TEST_OWNER);
     await addProductionMember(NOPERM_PROD, TEST_USER); // no "制作人" role assigned
   });
 
@@ -482,7 +482,7 @@ describe("PATCH /api/production/[id] — happy path", () => {
   const RENAME_PROD = "test-api-rename";
 
   beforeAll(async () => {
-    await createProduction(RENAME_PROD, "重命名测试演出（原名）");
+    await createProduction(RENAME_PROD, "重命名测试演出（原名）", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -564,7 +564,7 @@ describe("POST /api/production/[id]/versions — happy path", () => {
   const VER_PROD = "test-api-ver";
 
   beforeAll(async () => {
-    await createProduction(VER_PROD, "版本测试演出");
+    await createProduction(VER_PROD, "版本测试演出", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -657,7 +657,7 @@ describe("POST /api/production/[id]/members — happy path", () => {
   const MBR_PROD = "test-api-mbr";
 
   beforeAll(async () => {
-    await createProduction(MBR_PROD, "成员测试演出");
+    await createProduction(MBR_PROD, "成员测试演出", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -818,7 +818,7 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
   let scriptPermVersionId = "";
 
   beforeAll(async () => {
-    await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
+    await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出", TEST_OWNER);
     await addProductionMember(SCRIPT_PERM_PROD, TEST_USER);
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
     // 批E2 行化：blocks@view 穿读门；comments@create 供下方评论测试（原 script:comment）

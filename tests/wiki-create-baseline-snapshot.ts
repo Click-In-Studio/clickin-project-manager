@@ -35,10 +35,11 @@ export async function isWikiCreateBaselinePreMigrationSchema(pool: Pool): Promis
 
 export async function createWikiCreateBaselinePreMigrationData(
   pool: Pool,
+  testUserId: string,
 ): Promise<WikiCreateBaselineSnapshot> {
   const prodId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
-    prodId, faker.company.name(),
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
+    prodId, faker.company.name(), testUserId,
   ]);
   const roleId = `role${faker.string.alphanumeric(8).toLowerCase()}`;
   await pool.query(

@@ -18,7 +18,7 @@ import {
 } from "@/lib/db";
 import { listProductionEvents } from "@/lib/event-db";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 
 const BASE_PROD = "test-res-prod";
 const BASE_CL   = "test-res-cl";
@@ -28,13 +28,13 @@ const CAS_CL    = "test-res-cascade-cl";
 const CAS_CUE   = "test-res-cascade-cue";
 
 beforeAll(async () => {
-  await createProduction(BASE_PROD, "弹性测试演出");
+  await createProduction(BASE_PROD, "弹性测试演出", TEST_OWNER);
   await createCueList({
     id: BASE_CL, productionId: BASE_PROD, name: "弹性测试走位表",
     notes: "", abbr: null, template: null, createdBy: TEST_USER,
   });
   // cascade chain
-  await createProduction(CAS_PROD, "级联测试演出");
+  await createProduction(CAS_PROD, "级联测试演出", TEST_OWNER);
   await createCueList({
     id: CAS_CL, productionId: CAS_PROD, name: "级联走位表",
     notes: "", abbr: null, template: null, createdBy: TEST_USER,
@@ -56,7 +56,7 @@ describe("duplicate create handling", () => {
   const anchor = { kind: "gap" as const, afterBlockId: null };
 
   it("creating production with existing id throws and leaves original intact", async () => {
-    await expect(createProduction(BASE_PROD, "重复演出")).rejects.toThrow();
+    await expect(createProduction(BASE_PROD, "重复演出", TEST_OWNER)).rejects.toThrow();
     expect(await getProductionName(BASE_PROD)).toBe("弹性测试演出");
   });
 
@@ -85,8 +85,8 @@ describe("concurrent duplicate creates — exactly one wins", () => {
   it("two simultaneous createProduction with same id: one succeeds, one rejects", async () => {
     const id = "test-res-race-prod";
     const results = await Promise.allSettled([
-      createProduction(id, "并发A"),
-      createProduction(id, "并发B"),
+      createProduction(id, "并发A", TEST_OWNER),
+      createProduction(id, "并发B", TEST_OWNER),
     ]);
     await deleteProduction(id).catch(() => {});
     const successes = results.filter((r) => r.status === "fulfilled");

@@ -2468,7 +2468,8 @@ async function ensureEmptyScriptBlocksForEmptyScenesInTx(
 export async function createProduction(
   id: string,
   name: string,
-  ownerUserId?: string,
+  /** 必填：production.owner_id NOT NULL，且 owner 是 M-14(c) 责任链的终点，不允许无主演出。 */
+  ownerUserId: string,
   productionType?: string,
   productionTypeLabel?: string | null,
 ): Promise<void> {
@@ -2478,7 +2479,7 @@ export async function createProduction(
     [
       id,
       name,
-      ownerUserId ?? null,
+      ownerUserId,
       productionType ?? null,
       productionTypeLabel ?? null,
       JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
