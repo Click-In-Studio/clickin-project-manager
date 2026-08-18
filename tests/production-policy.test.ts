@@ -327,3 +327,48 @@ describe("棘轮：production_policy 不得出现词汇表以外的键", () => {
     expect(rows.map((r) => r.policy_key).filter((k) => !known.has(k))).toEqual([]);
   });
 });
+
+// ── ⑦ R 系写点端到端：开关真的作用到了定式上 ──────────────────────────────────
+
+describe("R 系定式接开关（端到端）", () => {
+  it("R-1 参与者行集：关掉 event.participant:details@view ⇒ 只发 meta@view", async () => {
+    const { createProductionEvent, setEventParticipants } = await import("@/lib/event-db");
+    const { hasGrant } = await import("@/lib/grant-check");
+    const guest = await makeUser("r1-guest");
+    await addProductionMember(prodId, guest);
+    await setPolicies(prodId, { "event.participant:details@view": POLICY_OFF }, editorId);
+
+    const ev = await createProductionEvent({
+      id: `ev_${shortId()}`, productionId: prodId, title: "R1", eventType: "rehearsal",
+      location: "", startTime: null, endTime: null, description: "", createdBy: ownerId,
+    });
+    await setEventParticipants(
+      ev.id, [{ userId: guest, name: "客", departmentId: null, role: "participant" }],
+      prodId, ownerId,
+    );
+    expect(await hasGrant(guest, prodId, "event", ev.id, "meta", "view")).toBe(true);
+    expect(await hasGrant(guest, prodId, "event", ev.id, "details", "view")).toBe(false);
+
+    await setPolicies(prodId, { "event.participant:details@view": POLICY_ON }, editorId);
+    await getPool().query("DELETE FROM production_event WHERE id = $1", [ev.id]);
+  });
+
+  it("R-6 POC notes 三行：关掉 delete ⇒ 上任只发 create/edit，但卸任撤销不受影响", async () => {
+    const { createProductionDept, setDeptMembers } = await import("@/lib/dept-db");
+    const { hasGrant } = await import("@/lib/grant-check");
+    const poc = await makeUser("r6-poc");
+    await addProductionMember(prodId, poc);
+    const dept = await createProductionDept({ productionId: prodId, name: `R6部门${shortId()}` });
+    await setPolicies(prodId, { "dept.poc:notes@delete": POLICY_OFF }, editorId);
+
+    await setDeptMembers(dept.id, prodId, [{ userId: poc, isPoc: true }]);
+    expect(await hasGrant(poc, prodId, "dept", dept.id, "notes", "create")).toBe(true);
+    expect(await hasGrant(poc, prodId, "dept", dept.id, "notes", "delete")).toBe(false);
+
+    // 卸任照撤——开关只裁上任发行那一侧，不该让「唯一收行定式」失效
+    await setDeptMembers(dept.id, prodId, []);
+    expect(await hasGrant(poc, prodId, "dept", dept.id, "notes", "create")).toBe(false);
+
+    await setPolicies(prodId, { "dept.poc:notes@delete": POLICY_ON }, editorId);
+  });
+});

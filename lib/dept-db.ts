@@ -12,6 +12,7 @@
  */
 
 import { getPool } from "./pg";
+import { policyFilteredRows } from "./policy-db";
 import type { Pool, PoolClient } from "pg";
 type Permission = string;
 
@@ -288,18 +289,26 @@ export async function setDeptMembers(
   // （auto 行不在 recompute 的 self_confirmed 扫描面内）。
   const promoted = newPocUserIds;
   const demoted = [...beforePocSet].filter((id) => !afterPocSet.has(id));
-  if (promoted.length > 0) {
+  // #236：定式 R-6 的三行先过策略开关（dept.poc）。**只裁上任发行这一侧**——
+  // 卸任撤销（下面那段）照撤不误：铁律说开关不否决已存在的行，反过来也一样，
+  // 开关不该让「唯一收行定式」失效。
+  const pocNoteRows = await policyFilteredRows(
+    productionId, "dept", "poc",
+    [["notes", "create"], ["notes", "edit"], ["notes", "delete"]], pool,
+  );
+  if (promoted.length > 0 && pocNoteRows.length > 0) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source)
-       SELECT $1, u, 'dept', $2, 'notes', v.verb, 'auto'
+       SELECT $1, u, 'dept', $2, s.sub, s.verb, 'auto'
        FROM unnest($3::uuid[]) AS u
-       CROSS JOIN (VALUES ('create'), ('edit'), ('delete')) AS v(verb)
+       CROSS JOIN UNNEST($4::text[], $5::text[]) AS s(sub, verb)
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
-      [productionId, deptId, promoted],
+      [productionId, deptId, promoted,
+       pocNoteRows.map((r) => r[0]), pocNoteRows.map((r) => r[1])],
     );
   }
   if (demoted.length > 0) {

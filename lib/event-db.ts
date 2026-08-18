@@ -1,4 +1,5 @@
 import { getPool } from "./pg";
+import { policyFilteredRows } from "./policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "./resource-grant-db";
 import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki-db";
 import { keyBetween } from "./lex-order";
@@ -397,24 +398,33 @@ export async function setEventParticipants(
     // 被指派自动授权：meta+details view（五层模型第②层——不用 '*' 通配，
     // 那会把 call_sheet/tasks/reports 层白送）。写入即独立事实：移除参与者
     // **不**自动撤行（撤销走 sweep/手动；模板只是模板）。
-    if (unique.length > 0) {
+    // #236：定式 R-1 的行集先过策略开关（event.participant）。
+    const participantRows = await policyFilteredRows(
+      productionId, "event", "participant", [["meta", "view"], ["details", "view"]], client,
+    );
+    if (unique.length > 0 && participantRows.length > 0) {
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
-         SELECT $1, u, 'event', $3, s.sub, 'view', 'assigned', $4
+         SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
          FROM unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
+         CROSS JOIN UNNEST($5::text[], $6::text[]) AS s(sub, verb)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
-        [productionId, unique.map(p => p.userId), eventId, assignedBy],
+        [productionId, unique.map(p => p.userId), eventId, assignedBy,
+         participantRows.map(r => r[0]), participantRows.map(r => r[1])],
       );
     }
     // 部门加入 event（批C C3）：参与部门的 POC 获得 draft report 可见
     // （event/<id>/reports@view）——发布前给本部门写 note 的前提，POC 本人无需在场。
     const deptIds = [...new Set(unique.map(p => p.departmentId).filter((d): d is string => d !== null))];
-    if (deptIds.length > 0) {
+    // #236：定式 R-2 单行（event.dept_poc:reports@view），开关关就整段不发。
+    const deptPocReports = (await policyFilteredRows(
+      productionId, "event", "dept_poc", [["reports", "view"]], client,
+    )).length > 0;
+    if (deptIds.length > 0 && deptPocReports) {
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -519,23 +529,28 @@ export async function setEventStageManagers(
     // 跟组舞监自动行集（用户规范，无需发布即生效）：
     // details/call_sheet/tasks 可见 + 本 event 报告 CRUD。
     // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
-    if (unique.length > 0) {
+    // #236：定式 R-3 的十行集先过策略开关（event.stage_manager）。
+    const smRows = await policyFilteredRows(
+      productionId, "event", "stage_manager",
+      [["meta", "view"], ["details", "view"], ["publication", "view"],
+       ["call_sheet", "view"], ["call_sheet", "edit"],
+       ["tasks", "view"], ["reports", "view"],
+       ["reports", "create"], ["reports", "edit"], ["reports", "delete"]],
+      client,
+    );
+    if (unique.length > 0 && smRows.length > 0) {
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
          FROM unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES
-           ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
-           ('call_sheet', 'view'), ('call_sheet', 'edit'),
-           ('tasks', 'view'), ('reports', 'view'),
-           ('reports', 'create'), ('reports', 'edit'), ('reports', 'delete')
-         ) AS s(sub, verb)
+         CROSS JOIN UNNEST($5::text[], $6::text[]) AS s(sub, verb)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
-        [productionId, unique.map(m => m.userId), eventId, assignedBy],
+        [productionId, unique.map(m => m.userId), eventId, assignedBy,
+         smRows.map(r => r[0]), smRows.map(r => r[1])],
       );
     }
     await client.query("COMMIT");
@@ -1412,21 +1427,37 @@ export async function setTechReqAssignees(
     // 排练时间地点）。不写 event_participant（名单是 organizer 的产品面）；
     // 移除 assignee 不撤行（行是独立事实）。
     if (assignees.length > 0) {
-      await client.query(
-        `INSERT INTO production_member_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by)
-         SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
-         FROM task etr
-         JOIN production_event pe ON pe.id = etr.event_id
-         CROSS JOIN unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES ('meta'), ('details'), ('publication')) AS s(sub)
-         WHERE etr.id = $1
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [reqId, assignees.map(a => a.userId)],
+      // #236：定式 R-4 先过策略开关（event.assignee）。本函数签名里没有 productionId，
+      // 原 SQL 从 task→event 推出来；开关要按演出读，故先查一次。
+      const { rows: pidRows } = await client.query<{ production_id: string }>(
+        `SELECT pe.production_id FROM task etr
+         JOIN production_event pe ON pe.id = etr.event_id WHERE etr.id = $1`,
+        [reqId],
       );
+      const assigneeRows = pidRows[0]
+        ? await policyFilteredRows(
+            pidRows[0].production_id, "event", "assignee",
+            [["meta", "view"], ["details", "view"], ["publication", "view"]], client,
+          )
+        : [];
+      if (assigneeRows.length > 0) {
+        await client.query(
+          `INSERT INTO production_member_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by)
+           SELECT pe.production_id, u, 'event', pe.id, s.sub, s.verb, 'assigned', u
+           FROM task etr
+           JOIN production_event pe ON pe.id = etr.event_id
+           CROSS JOIN unnest($2::uuid[]) AS u
+           CROSS JOIN UNNEST($3::text[], $4::text[]) AS s(sub, verb)
+           WHERE etr.id = $1
+           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+             WHERE is_revoked = false
+           DO NOTHING`,
+          [reqId, assignees.map(a => a.userId),
+           assigneeRows.map(r => r[0]), assigneeRows.map(r => r[1])],
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (err) {
