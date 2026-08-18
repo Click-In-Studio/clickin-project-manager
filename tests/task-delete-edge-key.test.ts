@@ -257,3 +257,43 @@ describe("棘轮：硬删本体的路由不得接受宿主子集合键", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// ── ④ M-15(c)：本体删除门 ⊒ 边删除门 ─────────────────────────────────────────
+//
+// 曾记为「(c) 违反」：边门＝report/<id>/grants@edit（现已改为 *@delete），本体门＝
+// wiki/<id>/*@delete，两把钥匙不可比 ⇒ 持 wiki 删除权者可绕过边门、删掉 wiki 让
+// 报告边随之消失。**复核发现不成立**：deleteWiki 在有 report/note 挂载边时直接
+// 拒绝（reason: "mounted"），本体压根删不掉，必须先解除挂载（走边门）再删。
+//
+// 实现给出的保证比 M-15(c) 要求的更强——不是「本体门 ⊒ 边门」，而是「有边禁止删
+// 本体」，顺序由数据层强制。但这条保证只由 deleteWiki 里那一个 mounted 检查撑着，
+// 拿掉它绕行就成真，故加棘轮。
+
+describe("M-15(c)：有挂载边时本体不可删", () => {
+  it("wiki 被 report 边引用 ⇒ deleteWiki 拒绝（reason=mounted），不是靠门拦而是靠数据层", async () => {
+    const { createEventReport } = await import("@/lib/event-db");
+    const { deleteWiki } = await import("@/lib/wiki-db");
+    const report = await createEventReport({
+      id: `rpt_${shortId()}`, eventId, reportType: "show",
+      title: `M15c${shortId()}`, body: "", createdBy: organizerId,
+    });
+    const { rows } = await getPool().query<{ wiki_id: string }>(
+      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [report.id],
+    );
+    expect(rows[0]?.wiki_id).toBeTruthy();
+
+    const res = await deleteWiki(rows[0].wiki_id, prodId);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("mounted");
+  });
+
+  it("棘轮：deleteWiki 必须保留挂载边检查（拿掉它 M-15(c) 的绕行就成真）", async () => {
+    const { readFileSync } = await import("fs");
+    const src = readFileSync("lib/wiki-db.ts", "utf8");
+    const i = src.indexOf("export async function deleteWiki");
+    const body = src.slice(i, i + 2000);
+    expect(body).toMatch(/event_report\b/);
+    expect(body).toMatch(/event_report_note\b/);
+    expect(body).toMatch(/reason:\s*"mounted"/);
+  });
+});
