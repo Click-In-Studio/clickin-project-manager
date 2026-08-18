@@ -372,3 +372,73 @@ describe("R 系定式接开关（端到端）", () => {
     await setPolicies(prodId, { "dept.poc:notes@delete": POLICY_ON }, editorId);
   });
 });
+
+// ── ⑧ 棘轮：每个策略键都必须有消费点 ─────────────────────────────────────────
+//
+// 「有定义无消费点」是这套机制最隐蔽的失效形态：配置中心会照常渲染出开关、
+// 用户会照常拨动它、审计会照常留痕，而判定端根本不读——**给出的是假承诺**。
+// 形状 A 的消费点是 policyFilteredRows（按 (type, actor) 查表，键名不出现在源码里），
+// 形状 C/L 的消费点是键名字符串，故两者判据不同。
+
+describe("棘轮：每个策略键都有消费点", () => {
+  it("形状 C / L：键名必须在 lib/ 或 app/ 里被引用（policy-keys.ts 自身除外）", async () => {
+    const { readdirSync, readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) { walk(full); continue; }
+        if (!/\.tsx?$/.test(e.name)) continue;
+        if (full.endsWith("lib/policy-keys.ts")) continue;
+        sources.push(readFileSync(full, "utf8"));
+      }
+    };
+    for (const root of ["lib", "app"]) walk(join(process.cwd(), root));
+    const blob = sources.join("\n");
+
+    // 唯一例外，**有意且分批**：形状 L 的孤儿处置不是「接线」而是「实现一个今天不
+    // 存在的功能」——task 失去最后一个宿主 event 时系统当前什么也不做。要做 M-15(e)
+    // 的唯一边判定（判据是宿主集合降为空，不是边计数归零）＋「被动过」判据
+    // （awaiting 且正文空）＋删边事务内执行，工作量比其余 6 个键加起来还大，故单独
+    // 一批。**这一行是欠账，实现后必须删掉**——留着它就等于关掉了这条棘轮的一半。
+    const PENDING_IMPLEMENTATION = new Set(["policy.orphan_task_disposition"]);
+
+    const orphans = POLICY_KEYS
+      .filter((d) => d.shape !== "A")
+      .filter((d) => !PENDING_IMPLEMENTATION.has(d.key))
+      .filter((d) => !blob.includes(d.key))
+      .map((d) => d.key);
+    expect(orphans).toEqual([]);
+
+    // 反向守卫：欠账清单里的键若已经接上了，就得把它从清单里删掉——否则这张
+    // 清单会悄悄变成永久豁免。
+    const stale = [...PENDING_IMPLEMENTATION].filter((k) => blob.includes(k));
+    expect(stale, "已接上的键请从 PENDING_IMPLEMENTATION 移除").toEqual([]);
+  });
+
+  it("形状 A：每个 (type, actor) 组合都被某个写点用 policyFilteredRows 裁过", async () => {
+    const { readdirSync, readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) { walk(full); continue; }
+        if (/\.tsx?$/.test(e.name)) sources.push(readFileSync(full, "utf8"));
+      }
+    };
+    for (const root of ["lib", "app"]) walk(join(process.cwd(), root));
+    const blob = sources.join("\n");
+
+    const pairs = new Set(
+      POLICY_KEYS.filter((d) => d.a).map((d) => `${d.a!.type}|${d.a!.actor}`),
+    );
+    const orphans = [...pairs].filter((p) => {
+      const [type, actor] = p.split("|");
+      // policyFilteredRows(prodId, "event", "creator", …) — 允许跨行与任意空白
+      return !new RegExp(`"${type}"\\s*,\\s*"${actor}"`).test(blob);
+    });
+    expect(orphans).toEqual([]);
+  });
+});

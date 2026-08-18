@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { setPolicies } from "@/lib/policy-db";
+import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
 import { createAsset } from "@/lib/asset-db";
 import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset-perm";
 import type { PermissionContext } from "@/lib/permissions";
@@ -125,7 +127,10 @@ describe("双门与分享规则", () => {
     expect(await canPublishAsset(ctxOf(member), prodId, privateAssetId, "create")).toBe(false);
   });
 
-  it("share 令牌：无 shares@create → 不允许；有票但无 file@view → 不可含下载", async () => {
+  it("share 令牌：项目出口开着时——无 shares@create → 不允许；有票但无 file@view → 不可含下载", async () => {
+    // #236：policy.share_token_enabled **默认关**（出口是全系统唯一把访问权发到权限
+    // 系统之外的动作）。本例测的是**能力票规则**，与项目开关串联，故先把出口打开。
+    await setPolicies(prodId, { "policy.share_token_enabled": POLICY_ON }, uploader);
     const noShare = await canCreateShareToken(ctxOf(member), prodId, { id: publicAssetId, isPublic: true });
     expect(noShare.allowed).toBe(false);  // member 没有 shares@create
 
@@ -139,5 +144,11 @@ describe("双门与分享规则", () => {
     const full = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId, isPublic: true });
     expect(full.allowed).toBe(true);
     expect(full.downloadable).toBe(true);
+
+    // 关掉出口 ⇒ 持全票的人也发不了（能力票 ∧ 项目开关，两者串联）
+    await setPolicies(prodId, { "policy.share_token_enabled": POLICY_OFF }, uploader);
+    const closed = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId, isPublic: true });
+    expect(closed.allowed).toBe(false);
+    expect(closed.downloadable).toBe(false);
   });
 });
