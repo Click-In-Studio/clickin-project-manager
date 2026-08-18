@@ -32,6 +32,9 @@
  *   - **制作人只作兜底，不作方案**：写「找制作人」会让剧组以为没有别的路，实际上
  *     他们自己配个角色区间就行。
  *   - **答案是展示层，模版存键值**：以后改措辞、拆题、加选项都不影响存量演出。
+ *   - **先是后否**：肯定式答案永远排在否定式之前，**与默认值无关**。默认是哪一档由
+ *     键值决定（`matchAnswer`），跟顺序没有关系；把「不能」摆在第一行会让人以为那是
+ *     推荐项。有棘轮盯着（`policy-questions.test.ts`）。
  */
 import { POLICY_ON, POLICY_OFF, ORPHAN_TASK_KEEP, ORPHAN_TASK_MIDDLE, ORPHAN_TASK_DELETE } from "./policy-keys";
 
@@ -103,14 +106,14 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
     help: "这只管创建者**自己创建**的事件；谁能发布任意事件由角色权限决定，不在此处。",
     answers: [
       {
-        id: "no", label: "不能——发布另行授权",
-        values: { "event.creator:publication@create": OFF },
-        disposition: [SCOPE("被授予事件发布权的角色 / 部门成员"), FALLBACK],
-      },
-      {
         id: "yes", label: "可以",
         values: { "event.creator:publication@create": ON },
         disposition: [ACTOR("事件创建者"), SCOPE("被授予事件发布权的角色 / 部门成员")],
+      },
+      {
+        id: "no", label: "不能——发布另行授权",
+        values: { "event.creator:publication@create": OFF },
+        disposition: [SCOPE("被授予事件发布权的角色 / 部门成员"), FALLBACK],
       },
     ],
   },
@@ -161,14 +164,14 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
     help: "事件有对外承诺性质，他人已按它安排行程。松的剧组可打开——建错了自己删。",
     answers: [
       {
-        id: "no", label: "不能",
-        values: { "event.creator:*@delete": OFF },
-        disposition: [SCOPE("被授予事件删除权的角色 / 部门成员"), FALLBACK],
-      },
-      {
         id: "yes", label: "可以",
         values: { "event.creator:*@delete": ON },
         disposition: [ACTOR("事件创建者")],
+      },
+      {
+        id: "no", label: "不能",
+        values: { "event.creator:*@delete": OFF },
+        disposition: [SCOPE("被授予事件删除权的角色 / 部门成员"), FALLBACK],
       },
     ],
   },
@@ -318,14 +321,14 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
     help: "撤下来的是**挂载关系**，报告文档仍在文档库里，作者仍可访问。",
     answers: [
       {
-        id: "no", label: "不能",
-        values: { "report.creator:*@delete": OFF },
-        disposition: [ACTOR("跟组舞监"), FALLBACK],
-      },
-      {
         id: "yes", label: "可以",
         values: { "report.creator:*@delete": ON },
         disposition: [ACTOR("报告创建者"), ACTOR("跟组舞监")],
+      },
+      {
+        id: "no", label: "不能",
+        values: { "report.creator:*@delete": OFF },
+        disposition: [ACTOR("跟组舞监"), FALLBACK],
       },
     ],
   },
@@ -385,15 +388,15 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
       + "使已发出的链接失效。关闭此项会**立即使所有已发出的链接失效**。",
     answers: [
       {
+        id: "yes", label: "允许",
+        values: { "policy.share_token_enabled": ON },
+        disposition: [ACTOR("素材上传者"), SCOPE("被授予分享权的角色 / 部门成员")],
+      },
+      {
         id: "no", label: "不允许",
         values: { "policy.share_token_enabled": OFF },
         // 唯一合法的「无去向」：关的是功能本身，不是把权柄挪给别人
         disposition: [CLOSES],
-      },
-      {
-        id: "yes", label: "允许",
-        values: { "policy.share_token_enabled": ON },
-        disposition: [ACTOR("素材上传者"), SCOPE("被授予分享权的角色 / 部门成员")],
       },
     ],
   },

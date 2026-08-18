@@ -71,6 +71,24 @@ describe("题库与键表对齐", () => {
     }
   });
 
+  it("先是后否：肯定式答案不得排在否定式之后", () => {
+    // 与默认值无关——默认是哪一档由键值决定（matchAnswer），跟顺序没关系。
+    // 把「不能」摆在第一行会让人以为那是推荐项。
+    const NEGATIVE = /^(不|否|禁止)/;
+    const bad: string[] = [];
+    for (const q of POLICY_QUESTIONS) {
+      const firstNegative = q.answers.findIndex((a) => NEGATIVE.test(a.label));
+      if (firstNegative < 0) continue;
+      const affirmativeAfter = q.answers
+        .slice(firstNegative + 1)
+        .filter((a) => !NEGATIVE.test(a.label));
+      if (affirmativeAfter.length > 0) {
+        bad.push(`${q.id}: 「${affirmativeAfter[0].label}」排在「${q.answers[firstNegative].label}」之后`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
   it("每题至少两个互斥答案", () => {
     for (const q of POLICY_QUESTIONS) expect(q.answers.length, q.id).toBeGreaterThanOrEqual(2);
   });
