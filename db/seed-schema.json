@@ -2596,6 +2596,11 @@
       "column": "end_time",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "orphaned_at",
+      "type": "timestamp with time zone",
+      "nullable": true
     }
   ],
   "task_assignee": [

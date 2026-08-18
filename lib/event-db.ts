@@ -634,10 +634,27 @@ export async function updateProductionEvent(
 }
 
 export async function deleteProductionEvent(id: string, productionId: string): Promise<void> {
-  await getPool().query(
-    "DELETE FROM production_event WHERE id = $1 AND production_id = $2",
-    [id, productionId]
-  );
+  // #236 形状 L：task.event_id 是 `ON DELETE SET NULL`——**数据库层会静默把关联 task
+  // 变成孤儿**，应用代码事后根本查不到它们。所以必须在删除**之前**把受影响的 task
+  // 捞出来，同一事务内按 policy.orphan_task_disposition 处置。
+  // 事务内而非异步：异步留窗口期，「删完还在列表里」的不一致直接暴露给用户。
+  const { tasksLosingHost, disposeOrphanedTasks } = await import("./task-orphan");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const orphans = await tasksLosingHost(client, productionId, id);
+    await client.query(
+      "DELETE FROM production_event WHERE id = $1 AND production_id = $2",
+      [id, productionId],
+    );
+    await disposeOrphanedTasks(client, productionId, orphans);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Schedule Items ───────────────────────────────────────────────────────────
@@ -1293,6 +1310,13 @@ export async function updateTaskByProduction(
       `UPDATE task SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2 RETURNING id`,
       vals
     );
+    // #236 形状 L：解绑 = 失去宿主（task.event_id 是单个 FK，宿主集合直接降为空，
+    // M-15(e) 的「唯一边」对 task 结构上白送）。同事务内按档位处置；重绑则清标记。
+    if (res.rows[0] && fields.eventId !== undefined) {
+      const { disposeOrphanedTasks, clearOrphanMark } = await import("./task-orphan");
+      if (fields.eventId === null) await disposeOrphanedTasks(client, productionId, [id]);
+      else await clearOrphanMark(client, productionId, id);
+    }
     await client.query("COMMIT");
     if (!res.rows[0]) return null;
   } catch (err) {

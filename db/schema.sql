@@ -546,11 +546,15 @@ CREATE TABLE IF NOT EXISTS task (
   chat_id        TEXT,
   created_via    TEXT NOT NULL DEFAULT 'explicit'
                  CHECK (created_via IN ('explicit', 'dept_auto', 'poc')),
+  -- #236 形状 L：失去最后一个宿主 event 的时刻（NULL=有宿主/从未失去）。
+  -- 与 status 正交——status 是工作进度，本列是结构状态；重新绑定事件时清空。
+  orphaned_at    TIMESTAMPTZ,
   CONSTRAINT task_time_order_check
     CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time)
 );
 
 CREATE INDEX IF NOT EXISTS task_event_idx ON task(event_id);
+CREATE INDEX IF NOT EXISTS task_orphaned_idx ON task(production_id) WHERE orphaned_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS task_production_idx ON task(production_id);
 
 -- 绑定 schedule item（多对多；应用层不变量：item 必须属于 task.event_id）

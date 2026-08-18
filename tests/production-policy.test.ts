@@ -397,12 +397,9 @@ describe("棘轮：每个策略键都有消费点", () => {
     for (const root of ["lib", "app"]) walk(join(process.cwd(), root));
     const blob = sources.join("\n");
 
-    // 唯一例外，**有意且分批**：形状 L 的孤儿处置不是「接线」而是「实现一个今天不
-    // 存在的功能」——task 失去最后一个宿主 event 时系统当前什么也不做。要做 M-15(e)
-    // 的唯一边判定（判据是宿主集合降为空，不是边计数归零）＋「被动过」判据
-    // （awaiting 且正文空）＋删边事务内执行，工作量比其余 6 个键加起来还大，故单独
-    // 一批。**这一行是欠账，实现后必须删掉**——留着它就等于关掉了这条棘轮的一半。
-    const PENDING_IMPLEMENTATION = new Set(["policy.orphan_task_disposition"]);
+    // 欠账清单：形状 L 的孤儿处置曾挂在这里（它不是「接线」而是「实现一个不存在的
+    // 功能」）。同批已实装（lib/task-orphan.ts），故清空——反向守卫会盯着它不再回来。
+    const PENDING_IMPLEMENTATION = new Set<string>();
 
     const orphans = POLICY_KEYS
       .filter((d) => d.shape !== "A")
