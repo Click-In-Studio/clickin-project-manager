@@ -23,6 +23,7 @@
  * seed 进 production_role_permission，之后演出自治。
  */
 import { getPool } from "./pg";
+import type { Pool, PoolClient } from "pg";
 import { hasGrant, isReservedSub, type GrantVerb } from "./grant-check";
 
 export type NodeKeyParts = {
@@ -392,8 +393,9 @@ export async function selfConfirmTemplateNodes(
 export async function templateKeysForRole(
   roleName: string,
   productionType: string | null,
+  db: Pool | PoolClient = getPool(),
 ): Promise<string[]> {
-  const { rows } = await getPool().query<{ permission_key: string }>(
+  const { rows } = await db.query<{ permission_key: string }>(
     `SELECT DISTINCT permission_key FROM grant_template
      WHERE role_name IN ($1, '*')
        AND (production_type = $2 OR (production_type IS NULL AND NOT EXISTS (
@@ -407,15 +409,17 @@ export async function templateKeysForRole(
   return rows.map((r) => r.permission_key);
 }
 
-/** 把全局模板键 seed 进指定角色的 production_role_permission（幂等）。 */
+/** 把全局模板键 seed 进指定角色的 production_role_permission（幂等）。
+ *  `db` 供项目模版在自己的事务里调用（`lib/template-seeders/roles.ts`）。 */
 export async function seedRoleFromTemplate(
   roleId: string,
   roleName: string,
   productionType: string | null,
+  db: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  const keys = await templateKeysForRole(roleName, productionType);
+  const keys = await templateKeysForRole(roleName, productionType, db);
   if (keys.length === 0) return;
-  await getPool().query(
+  await db.query(
     `INSERT INTO production_role_permission (role_id, permission_key)
      SELECT $1, unnest($2::text[])
      ON CONFLICT DO NOTHING`,

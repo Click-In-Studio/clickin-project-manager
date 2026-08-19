@@ -261,17 +261,5 @@ export async function deleteCueTemplateType(productionId: string, typeId: string
   return { ok: true };
 }
 
-/** 新项目 seed 内置类型（与 add-cue-template-type.sql 同源）。 */
-export async function seedCueTemplateTypes(productionId: string): Promise<void> {
-  const { DEFAULT_CUE_TEMPLATE_TYPES } = await import("./cue-list-types");
-  const pool = getPool();
-  for (let i = 0; i < DEFAULT_CUE_TEMPLATE_TYPES.length; i++) {
-    const t = DEFAULT_CUE_TEMPLATE_TYPES[i];
-    await pool.query(
-      `INSERT INTO production_cue_template_type (production_id, key, abbr_hint, creator_roles, display_order)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (production_id, key) DO NOTHING`,
-      [productionId, t.key, t.abbrHint, t.creatorRoles, i + 1],
-    );
-  }
-}
+// 新项目的内置类型 seed 已移交项目模版（lib/template-seeders/cue.ts）：
+// 类型清单是模版载荷的一部分，不再是本模块的硬编码行为。
