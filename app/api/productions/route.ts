@@ -41,10 +41,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// 建项目不是全局特权：任何登录用户都能建，建出来自己就是 owner（createProduction 把
+// session.userId 写进 production.owner_id，NOT NULL），项目内权限照常走树模型。
+//
+// 这里原本的门是 session.isAdmin。isAdmin 唯一来源是 feishu_user.is_super_admin，
+// 65e1a78 起飞书登录写死 false、db/add-strip-super-admin.sql 又把存量清零，于是这条门
+// 变成无人能过的孤门——线上所有人都建不了项目。收口「谁能建、能建几个」由用户等级承担，
+// 见 #280；不要退回 isAdmin（那是 hasPermission 时代的全站旁路，65e1a78 正是为砍它）。
 export async function POST(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const ikey = req.headers.get("Idempotency-Key");
   if (ikey) {
@@ -91,24 +97,14 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE(req: NextRequest) {
-  const session = getSession(req.cookies);
-  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
+// 这里没有 DELETE：删项目是 owner-only 的 root 操作，已由 DELETE /api/production/[id]
+// 承担（那条查 getProductionPermissionContext 后要求 isOwner）。本文件原有一条 isAdmin 门的
+// 复数版 DELETE，前端无任何调用点，是漏删的旧路由——两条门判定不同的删项目路径本身就是隐患，
+// 已移除。要删项目请走 /api/production/[id]。
 
-  const { id } = (await req.json()) as { id?: string };
-  if (!id) return Response.json({ error: "缺少 id" }, { status: 400 });
-
-  try {
-    const { deleteProduction } = await import("@/lib/db");
-    await deleteProduction(id);
-    return Response.json({ ok: true });
-  } catch (err) {
-    console.error("[productions] delete error:", err);
-    return Response.json({ error: "删除失败" }, { status: 500 });
-  }
-}
-
+// 排序写的是 production.sort_order —— 一个全局列，任何人重排都会改所有人看到的顺序。
+// 语义不成立，应迁到 per-user 排序表，见 #279。在那之前保持 isAdmin 门（=当前无人能过，
+// 前端也没有调用点），不放开：放开等于把「改所有人的顺序」开放给所有人。
 export async function PATCH(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });

@@ -17,7 +17,6 @@ import { getPool } from "@/lib/pg";
 import {
   GET as listProductionsHandler,
   POST as createProductionHandler,
-  DELETE as deleteProductionHandler,
 } from "@/app/api/productions/route";
 import {
   GET as listCueListsHandler,
@@ -141,15 +140,31 @@ describe("auth guard — GET /api/productions", () => {
 // ── POST /api/productions — authorization ──────────────────────────────────────
 
 describe("POST /api/productions — authorization", () => {
-  it("non-admin → 403", async () => {
+  it("未登录 → 401", async () => {
+    const res = await createProductionHandler(
+      req("/api/productions", { method: "POST", body: JSON.stringify({ name: "无会话不应创建" }) }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  // 建项目不是全局特权（#280 之前）。这条曾断言非 admin → 403：那道门在 isAdmin 恒 false
+  // 之后变成无人能过，线上没人建得了项目。红了说明门被退回 isAdmin —— 别改断言，改路由。
+  it("普通登录用户 → 201，且创建者即 owner", async () => {
     const res = await createProductionHandler(
       req("/api/productions", {
         method: "POST",
-        body: JSON.stringify({ name: "不应该创建" }),
+        body: JSON.stringify({ name: "普通用户建的项目" }),
         session: userSession(),
       }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    created.push({ type: "production", id });
+
+    const owner = await getPool().query<{ owner_id: string }>(
+      "SELECT owner_id FROM production WHERE id = $1", [id],
+    );
+    expect(owner.rows[0]?.owner_id).toBe(TEST_USER);
   });
 });
 
@@ -364,56 +379,6 @@ describe("POST /api/production/[id]/events — happy path", () => {
     expect(body.event.id).toBeTruthy();
     expect(body.event.title).toBe("API测试排练");
     created.push({ type: "event", id: body.event.id, prodId: AP_PROD });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/productions
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("DELETE /api/productions — auth guard", () => {
-  it("no cookie → 401", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: "x" }) }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("non-admin → 403", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: AP_PROD }), session: userSession() }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("DELETE /api/productions — input validation", () => {
-  it("missing id → 400", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({}), session: adminSession() }),
-    );
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("DELETE /api/productions — happy path", () => {
-  const DEL_PROD = "test-api-del-prod";
-
-  beforeAll(async () => {
-    await createProduction(DEL_PROD, "API删除测试演出", TEST_OWNER);
-  });
-
-  it("admin deletes production → 200 and production is gone", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: DEL_PROD }), session: adminSession() }),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
-    expect(body.ok).toBe(true);
-
-    const listRes = await listProductionsHandler(req("/api/productions", { session: adminSession() }));
-    const { productions } = (await listRes.json()) as { productions: { id: string }[] };
-    expect(productions.some((p) => p.id === DEL_PROD)).toBe(false);
   });
 });
 
