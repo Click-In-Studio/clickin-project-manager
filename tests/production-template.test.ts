@@ -16,6 +16,7 @@ import {
 import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
 import { MUSIC_TEMPLATE } from "@/lib/templates/music";
 import { FILM_TEMPLATE } from "@/lib/templates/film";
+import { SOLO_TEMPLATE } from "@/lib/templates/solo";
 import { policiesFromAnswers } from "@/lib/templates/shared";
 import { PRODUCTION_TYPES } from "@/lib/production-types";
 import { POLICY_KEYS } from "@/lib/policy-keys";
@@ -58,10 +59,8 @@ describe("① 棘轮：仓库内的模版常量", () => {
     expect(resolveTemplate("类型-不存在").key).toBe(DEFAULT_TEMPLATE_KEY);
   });
 
-  it("除「其他」外每个项目类型都有显式映射（新增类型必须当场决定套哪套）", () => {
-    const unmapped = PRODUCTION_TYPES
-      .map(t => t.value)
-      .filter(v => v !== "other" && !(v in TEMPLATE_BY_TYPE));
+  it("每个项目类型都有显式映射，一个不落（新增类型必须当场决定套哪套）", () => {
+    const unmapped = PRODUCTION_TYPES.map(t => t.value).filter(v => !(v in TEMPLATE_BY_TYPE));
     expect(unmapped).toEqual([]);
   });
 
@@ -70,6 +69,21 @@ describe("① 棘轮：仓库内的模版常量", () => {
       expect(t.roles.names, `${t.key}`).toContain("制作人");
       expect(t.roles.permissions["制作人"], `${t.key}`).toContain("node:*/*@*");
     }
+  });
+
+  it("空模版真的是空的，但守住 M-14(c) 的下限", () => {
+    expect(SOLO_TEMPLATE.deptTree).toEqual([]);
+    expect(SOLO_TEMPLATE.deptPermissions).toEqual({});
+    expect(SOLO_TEMPLATE.cueTemplateTypes).toEqual([]);
+    expect(SOLO_TEMPLATE.cueDeclarations).toEqual([]);
+    expect(SOLO_TEMPLATE.roles.baseline).toEqual([]);
+    // 下限是这一个角色：owner 是代码旁路，不能拿它充当不依赖旁路的兜底持有者
+    expect(SOLO_TEMPLATE.roles.names).toEqual(["制作人"]);
+    expect(SOLO_TEMPLATE.roles.permissions["制作人"]).toContain("node:*/*@*");
+    // 「一人项目」与「其他」是两个类型、同一套模版；「不指定」不指向它（懒得选 ≠ 要空项目）
+    expect(resolveTemplate("solo").key).toBe(SOLO_TEMPLATE.key);
+    expect(resolveTemplate("other").key).toBe(SOLO_TEMPLATE.key);
+    expect(resolveTemplate(null).key).not.toBe(SOLO_TEMPLATE.key);
   });
 
   it("影视类基线削掉了内容读面——这是这套模版存在的理由", () => {

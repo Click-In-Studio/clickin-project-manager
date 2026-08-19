@@ -43,6 +43,7 @@ import { MUSIC_TEMPLATE } from "./templates/music";
 import { MUSIC_VIDEO_TEMPLATE } from "./templates/music-video";
 import { RADIO_DRAMA_TEMPLATE } from "./templates/radio-drama";
 import { FILM_TEMPLATE } from "./templates/film";
+import { SOLO_TEMPLATE } from "./templates/solo";
 
 import { rolesSeeder, type RolesPayload } from "./template-seeders/roles";
 import {
@@ -146,10 +147,16 @@ export const PRODUCTION_TEMPLATES: Readonly<Record<string, ProductionTemplate>> 
   [MUSIC_VIDEO_TEMPLATE.key]: MUSIC_VIDEO_TEMPLATE,
   [RADIO_DRAMA_TEMPLATE.key]: RADIO_DRAMA_TEMPLATE,
   [FILM_TEMPLATE.key]: FILM_TEMPLATE,
+  [SOLO_TEMPLATE.key]: SOLO_TEMPLATE,
 };
 
-/** 未映射的类型（含「其他」与不指定）回落这套。戏剧类＝此前唯一的建项目行为，
- *  故回落它对存量语义是零变化。 */
+/**
+ * **不指定类型**时回落这套。戏剧类＝此前唯一的建项目行为，故回落它对存量语义是零变化。
+ *
+ * 注意不要把它换成空模版：「不指定」通常是懒得选，不是「我要一个空项目」——想要空的
+ * 人会选「其他」（→ solo）。给一个懒得选的剧组一个连通告都看不见的项目，比给他一套
+ * 用不上的部门树糟得多。
+ */
 export const DEFAULT_TEMPLATE_KEY = THEATRE_TEMPLATE.key;
 
 /**
@@ -178,6 +185,11 @@ export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
   short_film: FILM_TEMPLATE.key,
   film: FILM_TEMPLATE.key,
   tv_drama: FILM_TEMPLATE.key,
+
+  // 「一人项目」与「其他」在类型选择器里是两项（给人看的区别），底下是同一套空模版：
+  // 一个人干活不需要组织脚手架，而「其他」意味着我们猜不出他的建制、猜错不如不猜。
+  solo: SOLO_TEMPLATE.key,
+  other: SOLO_TEMPLATE.key,
 };
 
 export function resolveTemplate(productionType: string | null | undefined): ProductionTemplate {

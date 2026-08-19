@@ -18,6 +18,9 @@ export const PRODUCTION_TYPES = [
   { value: "music_video",    label: "音乐 MV" },
   { value: "radio_drama",    label: "广播剧" },
   { value: "album",          label: "专辑 / 单曲" },
+  // 「一人项目」与「其他」在选择器里分开是给人看的，底下是同一套空模版
+  // （见 TEMPLATE_BY_TYPE）。注意只有 "other" 会在建项目弹窗里要求填自定义类型名。
+  { value: "solo",           label: "一人项目" },
   { value: "other",          label: "其他" },
 ] as const;
 
