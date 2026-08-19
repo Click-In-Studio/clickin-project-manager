@@ -185,9 +185,15 @@ export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
   // 广播剧单独一套：它有完整的戏剧建制（编剧 / 戏剧构作 / 导演 / 监督），
   // 只是舞台那一整层不存在，同时带音乐类的录音线。见 templates/radio-drama.ts。
   radio_drama: RADIO_DRAMA_TEMPLATE.key,
+  // 有声书 / 播客＝广播剧的简化版（角色更少、管理更简单），共用同一套。
+  // 实际上这类项目绝大多数是一个人干的，那种情况选「一人项目」更合适。
+  audiobook: RADIO_DRAMA_TEMPLATE.key,
 
-  // 广告 / TVC 的建制与 MV 最近（一支片子、一个拍摄组、后期交付）
   music_video: MUSIC_VIDEO_TEMPLATE.key,
+  // ⚠ 广告 / TVC 是**权宜映射**：建制上与 MV 最近（一支片子、一个拍摄组、后期交付），
+  // 但广告业自己的规矩（客户 / AE / 比稿 / 审片流程）我们没有把握，没有照它设计过。
+  // 现状会让 TVC 项目拿到作曲 / 作词 / 母带 / 歌手 / 经纪人这些用不上的角色——
+  // 已知、可接受（剧组自己删），**不要**在没搞懂行业规矩前凭想象另开一套。
   commercial: MUSIC_VIDEO_TEMPLATE.key,
 
   short_film: FILM_TEMPLATE.key,
