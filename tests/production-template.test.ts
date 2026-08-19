@@ -216,6 +216,13 @@ describe("② 反例：每一类校验都必须真的会红", () => {
     expect(errs.join()).toMatch(/不接受取值/);
   });
 
+  it("权限键挂在名单外的角色上（拼错角色名 = 一组永远发不出去的死键）", () => {
+    const errs = bad({
+      roles: { names: ["导演"], baseline: [], permissions: { 倒演: ["node:task/*@view"] } },
+    });
+    expect(errs.join()).toMatch(/名单外的角色/);
+  });
+
   it("角色名重复 / 为空", () => {
     expect(bad({ roles: { names: ["导演", "导演"], baseline: [], permissions: {} } }).join()).toMatch(/重复/);
     expect(bad({ roles: { names: [" "], baseline: [], permissions: {} } }).join()).toMatch(/不能为空/);

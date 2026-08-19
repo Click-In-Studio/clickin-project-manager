@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
+import { makeProduction, cleanupProduction } from "./factories";
 import {
   GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
   type GrantTemplateRetireSnapshot,
@@ -79,11 +80,27 @@ describe("integrity verification", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("存量演出仍持有已 seed 的角色权限行（模板源删除不回收实例行）", async () => {
-    const { rows } = await getPool().query<{ n: string }>(
-      "SELECT COUNT(*) AS n FROM production_role_permission",
-    );
-    expect(Number(rows[0].n)).toBeGreaterThan(0);
+  // 模板源删除不回收实例行。用工厂造自己的演出——不能对全库 count 下断言
+  // （AGENTS.md：不依赖预加载数据；干净库里那个数就是 0，断言会假红）。
+  it("已 seed 的角色权限行不受迁移影响，且迁移可重复执行", async () => {
+    const { prodId } = await makeProduction();
+    try {
+      const count = async () => Number((await getPool().query<{ n: string }>(
+        `SELECT COUNT(*) AS n FROM production_role_permission prp
+         JOIN production_role pr ON pr.id = prp.role_id
+         WHERE pr.production_id = $1`,
+        [prodId],
+      )).rows[0].n);
+
+      const before = await count();
+      expect(before).toBeGreaterThan(0);
+
+      // 幂等：DROP TABLE IF EXISTS 可重放，且重放不碰实例行
+      await getPool().query(readFileSync("db/migrate-retire-grant-template.sql", "utf8"));
+      expect(await count()).toBe(before);
+    } finally {
+      await cleanupProduction(prodId).catch(() => {});
+    }
   });
 });
 

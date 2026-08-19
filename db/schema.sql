@@ -1424,5 +1424,3 @@ CREATE TABLE IF NOT EXISTS production_invite_claim (
 
 CREATE INDEX IF NOT EXISTS production_invite_claim_token_idx
   ON production_invite_claim (token);
-
-
