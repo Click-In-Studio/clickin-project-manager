@@ -1,17 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
+import { PRODUCTION_TEMPLATES } from "@/lib/production-template";
+import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
 
 /**
- * schema.sql 与 seed 迁移文件的防漂移。
+ * 模板 seed 的防漂移棘轮。
  *
- * AGENTS.md：「db/schema.sql 始终是生产状态的完整快照」。模板 seed 因此有两份
- * 拷贝——`db/migrate-role-template-seed.sql`（存量库执行）与 schema.sql 里的同一段
- * （新库建库时执行）。没有任何机制拴住这两份：改了一处忘了另一处，新库与存量库
- * 的模板就会静默分叉，而这正是本次事故的成因之一（线上手工配了 69 行，仓库
- * 一无所知，新建演出的创作组开箱即残）。
+ * 原形态盯的是「schema.sql 与 seed 迁移文件的两份拷贝不许分叉」。grant_template
+ * 退役后（#163）模板只剩一个源——项目模版常量，两份拷贝的问题消失，但**历史 seed
+ * 文件里配过的东西有没有在收编时掉进缝里**这个问题还在，而且更要紧：那 69 行手工
+ * 配置正是从这里回到仓库的（线上有、仓库无 → 新建演出的创作组开箱即残）。
  *
- * 这条测试拴住它们：seed 文件里的每一对 (role_name, permission_key) 都必须在
- * schema.sql 里出现。反向不要求相等——schema.sql 还含历次批次的 seed。
+ * 所以棘轮转向：seed 文件里的每一对 (role_name, permission_key)，都必须在戏剧类
+ * 模版里找得到。反向不要求相等——模版还含历次批次的 seed 与后续新增。
  */
 
 const SEED_FILES = [
@@ -41,22 +42,35 @@ function extractTemplatePairs(sql: string): Set<string> {
   return pairs;
 }
 
-describe("schema.sql 是 seed 的完整快照", () => {
-  const schema = readFileSync("db/schema.sql", "utf8");
-  const schemaPairs = extractTemplatePairs(schema);
+/** 有意不搬的两个角色：复合职位已由 migrate-assistant-roles.sql 拆成 base role + tag，
+ *  它们不在任何模版的角色名单里，模板行是发不出去的死键。 */
+const INTENTIONALLY_DROPPED = ["副导演", "助理舞台监督"];
 
-  it.each(SEED_FILES)("%s 的模板行都在 schema.sql 里", (file) => {
+describe("项目模版收下了历史 seed 的全部模板行", () => {
+  const templatePairs = new Set<string>();
+  for (const role of THEATRE_TEMPLATE.roles.names) {
+    for (const key of THEATRE_TEMPLATE.roles.permissions[role] ?? []) templatePairs.add(`${role}|${key}`);
+  }
+  for (const key of THEATRE_TEMPLATE.roles.baseline) templatePairs.add(`*|${key}`);
+
+  it.each(SEED_FILES)("%s 的模板行都在戏剧类模版里", (file) => {
     const sql = readFileSync(file, "utf8");
     const pairs = extractTemplatePairs(sql);
     // 迁移文件里可能只有 DELETE 没有 INSERT，那种情况下无对可查
-    const missing = [...pairs].filter((p) => !schemaPairs.has(p));
+    const missing = [...pairs].filter(
+      (p) => !templatePairs.has(p) && !INTENTIONALLY_DROPPED.includes(p.split("|")[0]),
+    );
     expect(missing).toEqual([]);
   });
 
-  it("被迁移清除的错配键不该留在 schema.sql 里", () => {
-    // migrate-scene-field-gates.sql 删掉了 node:scene/*/meta@edit；
-    // schema.sql 作为「迁移后的完整状态」不该再 seed 它
-    expect(schema).not.toContain("'node:scene/*/meta@edit'");
+  it("被迁移清除的错配键不该在任何模版里复活", () => {
+    // migrate-scene-field-gates.sql 删掉了 node:scene/*/meta@edit
+    const all = Object.values(PRODUCTION_TEMPLATES).flatMap((t) => [
+      ...t.roles.baseline,
+      ...Object.values(t.roles.permissions).flat(),
+      ...Object.values(t.deptPermissions).flat(),
+    ]);
+    expect(all).not.toContain("node:scene/*/meta@edit");
   });
 
   it("seed 文件解析出的对不为空（防止正则失配导致空断言通过）", () => {

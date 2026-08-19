@@ -7,11 +7,11 @@ import {
   upsertDeptCueTemplate,
   deleteDeptCueTemplate,
 } from "@/lib/cue-template-db";
-import { DEFAULT_CUE_TEMPLATE_TYPES } from "@/lib/cue-list-types";
+import { resolveTemplate } from "@/lib/production-template";
 import { createProductionDept } from "@/lib/dept-db";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
-// #227 Cue 模版类型注册表：新项目 seed 内置八类、自定义类型 CRUD、删除保护
+// #227 Cue 模版类型注册表：新项目按模版 seed 内置类型、自定义类型 CRUD、删除保护
 
 let prodId: string;
 let userId: string;
@@ -28,9 +28,10 @@ afterAll(async () => {
 });
 
 describe("seed", () => {
-  it("createProduction 自动灌入内置八类型（含 abbr 提示）", async () => {
+  it("createProduction 按项目模版灌入内置类型（含 abbr 提示）", async () => {
     const types = await listCueTemplateTypes(prodId);
-    expect(types.map(t => t.key)).toEqual(DEFAULT_CUE_TEMPLATE_TYPES.map(t => t.key));
+    // 类型清单是模版载荷（#163）：戏剧类十类，含 §3.2 声明组要用的抢妆 / 导播
+    expect(types.map(t => t.key)).toEqual(resolveTemplate(null).cueTemplateTypes.map(t => t.key));
     expect(types.find(t => t.key === "灯光")?.abbrHint).toBe("LQ");
   });
 });

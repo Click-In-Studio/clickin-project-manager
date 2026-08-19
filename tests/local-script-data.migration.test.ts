@@ -5,6 +5,7 @@ import {
   LOCAL_SCRIPT_DATA_SNAPSHOT_PATH,
   type LocalScriptDataSnapshot,
 } from "./local-script-data-snapshot";
+import { resolveTemplate } from "@/lib/production-template";
 
 let snapshot: LocalScriptDataSnapshot | null = null;
 try {
@@ -16,14 +17,9 @@ try {
 }
 
 describe("local script data migration", () => {
-  it("seeds the global script comment member template", async () => {
-    const { rows } = await getPool().query(
-      `SELECT 1 FROM grant_template
-       WHERE production_type IS NULL
-         AND role_name = '*'
-         AND permission_key = 'node:script/*/comments@create'`,
-    );
-    expect(rows).toHaveLength(1);
+  it("seeds the global script comment member template", () => {
+    // 模板源已移交项目模版常量（#163）：全员基线里必须有这枚
+    expect(resolveTemplate(null).roles.baseline).toContain("node:script/*/comments@create");
   });
 
   it.skipIf(!snapshot)("backfills comment eligibility", async () => {

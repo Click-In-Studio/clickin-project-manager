@@ -19,10 +19,11 @@
  * 词汇统一：permission 表的 permission_key 与激活面同格式——迁移期原子键与
  * 树节点串 `node:<type>/<id>[/<sub>]@<verb>` 同列共存；zone 键与 grant 键时刻一致。
  *
- * grant_template（全局模板）运行时零读取：仅在演出/角色创建时按 production_type
- * seed 进 production_role_permission，之后演出自治。
+ * 模板层不在这里：建演出 / 建角色时的 seed 读项目模版常量（lib/production-template.ts），
+ * 运行时零读取。原 grant_template 表已退役（#163）。
  */
 import { getPool } from "./pg";
+import type { Pool, PoolClient } from "pg";
 import { hasGrant, isReservedSub, type GrantVerb } from "./grant-check";
 
 export type NodeKeyParts = {
@@ -383,42 +384,9 @@ export async function selfConfirmTemplateNodes(
   return written;
 }
 
-// ─── 全局模板 seed（创建时注入，运行时零读取） ─────────────────────────────────
-
-/**
- * 按角色名（含 '*' 成员基础）取全局模板键：production_type 专属行优先，
- * 无则回落通用（production_type IS NULL）。
- */
-export async function templateKeysForRole(
-  roleName: string,
-  productionType: string | null,
-): Promise<string[]> {
-  const { rows } = await getPool().query<{ permission_key: string }>(
-    `SELECT DISTINCT permission_key FROM grant_template
-     WHERE role_name IN ($1, '*')
-       AND (production_type = $2 OR (production_type IS NULL AND NOT EXISTS (
-              SELECT 1 FROM grant_template t2
-              WHERE t2.role_name = grant_template.role_name
-                AND t2.permission_key = grant_template.permission_key
-                AND t2.production_type = $2
-            )))`,
-    [roleName, productionType],
-  );
-  return rows.map((r) => r.permission_key);
-}
-
-/** 把全局模板键 seed 进指定角色的 production_role_permission（幂等）。 */
-export async function seedRoleFromTemplate(
-  roleId: string,
-  roleName: string,
-  productionType: string | null,
-): Promise<void> {
-  const keys = await templateKeysForRole(roleName, productionType);
-  if (keys.length === 0) return;
-  await getPool().query(
-    `INSERT INTO production_role_permission (role_id, permission_key)
-     SELECT $1, unnest($2::text[])
-     ON CONFLICT DO NOTHING`,
-    [roleId, keys],
-  );
-}
+// ─── 全局模板 seed：已退役（#163）────────────────────────────────────────────
+//
+// templateKeysForRole / seedRoleFromTemplate 与 grant_template 表一同退役
+// （db/migrate-retire-grant-template.sql）。建演出与建角色时的 seed 现在读项目模版：
+//   lib/template-seeders/roles.ts 的 roleKeys（基线 ∪ 角色键）
+// 退役原因：那条 SQL 是并集取数，per-type 只能加不能减，多套模版要削基线。

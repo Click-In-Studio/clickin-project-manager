@@ -38,17 +38,25 @@ export type PolicyRowOut = {
 /**
  * 把词汇表里**缺行**的键按代码默认物化。已有行一律不动——物化那一刻就冻结了当时的
  * 默认值，此后改代码默认不会回溯任何演出，这正是「落全量」要买的东西。
+ *
+ * `overrides` 供项目模版建演出时改初始档位（`lib/template-seeders/policy.ts`）：它只
+ * 影响**这次物化写下的值**，对已有行同样不动。合法性由调用方保证（模版有 CI 棘轮）。
  */
 export async function ensureProductionPolicies(
   productionId: string,
   db: Queryable = getPool(),
+  overrides: Readonly<Record<string, string>> = {},
 ): Promise<void> {
   await db.query(
     `INSERT INTO production_policy (production_id, policy_key, value)
      SELECT $1, k.key, k.val
      FROM UNNEST($2::text[], $3::text[]) AS k(key, val)
      ON CONFLICT (production_id, policy_key) DO NOTHING`,
-    [productionId, POLICY_KEYS.map((d) => d.key), POLICY_KEYS.map((d) => d.defaultValue)],
+    [
+      productionId,
+      POLICY_KEYS.map((d) => d.key),
+      POLICY_KEYS.map((d) => overrides[d.key] ?? d.defaultValue),
+    ],
   );
 }
 

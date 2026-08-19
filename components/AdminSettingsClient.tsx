@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import { PRODUCTION_TYPES } from "@/lib/production-types";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
@@ -115,20 +116,6 @@ function useSave(productionId: string) {
 
 // ── Project type list ─────────────────────────────────────────────────────────
 
-const PRODUCTION_TYPES = [
-  { value: "stage_play", label: "话剧" },
-  { value: "theatre", label: "舞台剧" },
-  { value: "musical", label: "音乐剧" },
-  { value: "gala", label: "综合晚会" },
-  { value: "music_festival", label: "音乐节" },
-  { value: "concert", label: "音乐会" },
-  { value: "short_film", label: "短片" },
-  { value: "film", label: "电影" },
-  { value: "tv_drama", label: "电视剧" },
-  { value: "radio_drama", label: "广播剧" },
-  { value: "album", label: "专辑" },
-  { value: "other", label: "其他" },
-] as const;
 
 const SELECT_STYLE: React.CSSProperties = {
   ...INPUT,

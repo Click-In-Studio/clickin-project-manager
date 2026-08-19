@@ -14,9 +14,8 @@ export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-import { ROLE_NAMES } from "./permissions";
+// 角色名单（ROLE_NAMES）已上移为项目模版的一个 slot，见 lib/production-template.ts
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
-import { seedRoleFromTemplate } from "./grant-template";
 import {
   buildApprovalLadder, classifyApprovalNode, expandLevelRows, nextStage, stageAt, stageStatus,
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
@@ -2493,46 +2492,12 @@ export async function createProduction(
       JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
     ],
   );
-  // Phase 3: ensure approval config row exists (default 24h TTL)
-  await pool.query(
-    "INSERT INTO production_approval_config (production_id, ttl_hours) VALUES ($1, 24) ON CONFLICT DO NOTHING",
-    [id],
-  );
-  // 策略键落全量（#236）：稀疏存储会让「改一次代码默认值」静默改变所有未显式配置过
-  // 该键的存量演出，且不留痕迹。物化那一刻即冻结当时的默认值。
-  const { ensureProductionPolicies } = await import("./policy-db");
-  await ensureProductionPolicies(id);
   await createInitialVersion(id);
-  await seedProductionRoles(id);
-}
-
-/** Populate production_role + production_role_permission + production_role_cue_type from templates. */
-export async function seedProductionRoles(productionId: string): Promise<void> {
-  const pool = getPool();
-  const prodType = (await pool.query<{ type: string | null }>(
-    "SELECT type FROM production WHERE id = $1", [productionId],
-  )).rows[0]?.type ?? null;
-
-  // #227：cue 模版类型注册表随项目 seed（声明行/建表资格另走 §3.5 声明表）
-  const { seedCueTemplateTypes } = await import("./cue-template-db");
-  await seedCueTemplateTypes(productionId);
-
-  // 终局（批G G-2）：角色行从 ROLE_NAMES 结构名单建；权限内容全部经
-  // seedRoleFromTemplate 从 grant_template 表灌入（代码模板已退役）
-  for (const roleName of ROLE_NAMES) {
-    const roleId = `r_${productionId}_${encodeURIComponent(roleName)}`;
-    await pool.query(
-      `INSERT INTO production_role (id, production_id, name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (production_id, name) DO NOTHING`,
-      [roleId, productionId, roleName],
-    );
-    const roleRow = await pool.query<{ id: string }>(
-      "SELECT id FROM production_role WHERE production_id = $1 AND name = $2",
-      [productionId, roleName],
-    );
-    await seedRoleFromTemplate(roleRow.rows[0].id, roleName, prodType);
-  }
+  // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
+  // 策略档位、审批 TTL——统一由项目模版按类型灌入，整体一个事务。
+  // 见 lib/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
+  const { applyProductionTemplate } = await import("./production-template");
+  await applyProductionTemplate(id, productionType ?? null);
 }
 
 /** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
@@ -4656,11 +4621,21 @@ export async function createProductionRole(productionId: string, name: string): 
     [id, productionId, name],
   );
   const row = res.rows[0];
-  // 批A：自定义角色也获得成员基础模板键（'*'；若名字命中模板角色则一并 seed）
+  // 自定义角色也获得基线键；名字命中本项目模版里的角色则一并 seed 那份。
+  // 这仍是「创建时 seed」而非运行时读模版——判定端一行都不查模版。
   const prodType = (await getPool().query<{ type: string | null }>(
     "SELECT type FROM production WHERE id = $1", [productionId],
   )).rows[0]?.type ?? null;
-  await seedRoleFromTemplate(row.id, name, prodType);
+  const { resolveTemplate } = await import("./production-template");
+  const { roleKeys } = await import("./template-seeders/roles");
+  const keys = roleKeys(resolveTemplate(prodType).roles, name);
+  if (keys.length > 0) {
+    await getPool().query(
+      `INSERT INTO production_role_permission (role_id, permission_key)
+       SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+      [row.id, keys],
+    );
+  }
   const seeded = await getPool().query<{ permission_key: string }>(
     "SELECT permission_key FROM production_role_permission WHERE role_id = $1", [row.id],
   );
