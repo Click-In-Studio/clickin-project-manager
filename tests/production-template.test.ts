@@ -14,6 +14,10 @@ import {
   type ProductionTemplate,
 } from "@/lib/production-template";
 import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
+import { MUSIC_TEMPLATE } from "@/lib/templates/music";
+import { FILM_TEMPLATE } from "@/lib/templates/film";
+import { policiesFromAnswers } from "@/lib/templates/shared";
+import { PRODUCTION_TYPES } from "@/lib/production-types";
 import { POLICY_KEYS } from "@/lib/policy-keys";
 
 /** 未套过任何模版的空演出——建项目路径本身会套模版，测自定义模版必须从空的开始。 */
@@ -52,6 +56,56 @@ describe("① 棘轮：仓库内的模版常量", () => {
   it("未映射的类型（含 null）回落默认模版——类型是模版的唯一入口", () => {
     expect(resolveTemplate(null).key).toBe(DEFAULT_TEMPLATE_KEY);
     expect(resolveTemplate("类型-不存在").key).toBe(DEFAULT_TEMPLATE_KEY);
+  });
+
+  it("除「其他」外每个项目类型都有显式映射（新增类型必须当场决定套哪套）", () => {
+    const unmapped = PRODUCTION_TYPES
+      .map(t => t.value)
+      .filter(v => v !== "other" && !(v in TEMPLATE_BY_TYPE));
+    expect(unmapped).toEqual([]);
+  });
+
+  it("每套模版都带制作人，且持通配全集（M-14(c) 兜底持有者不可缺）", () => {
+    for (const t of Object.values(PRODUCTION_TEMPLATES)) {
+      expect(t.roles.names, `${t.key}`).toContain("制作人");
+      expect(t.roles.permissions["制作人"], `${t.key}`).toContain("node:*/*@*");
+    }
+  });
+
+  it("影视类基线削掉了内容读面——这是这套模版存在的理由", () => {
+    const base = FILM_TEMPLATE.roles.baseline;
+    for (const forbidden of [
+      "node:script/*/blocks@view",   // 剧本
+      "node:scene/*/synopsis@view",  // 场次
+      "node:character/*/meta@view",  // 角色
+      "node:asset/*/meta@view",      // 素材列表：有 role 的人才看得到
+      "node:asset/*/shares@create",  // 对外分享资格
+      "node:member/*/contact@view",  // 通讯方式
+    ]) {
+      expect(base, `影视基线不该含 ${forbidden}`).not.toContain(forbidden);
+    }
+    // 但「不看就没法参与」的那几枚必须在
+    for (const need of ["node:announcement/*@view", "node:event/*/meta@view", "node:member/*/meta@view"]) {
+      expect(base).toContain(need);
+    }
+  });
+
+  it("同名岗位跨模版不同级：音乐类的作曲严格大于戏剧类的作曲", () => {
+    const theatre = new Set(THEATRE_TEMPLATE.roles.permissions["作曲"]);
+    const music = new Set(MUSIC_TEMPLATE.roles.permissions["作曲"]);
+    // 音乐类的作曲兼了结构编辑（剧场里那是戏剧构作的活）
+    expect(music).toContain("node:scene/*@create");
+    expect(theatre).not.toContain("node:scene/*@create");
+    // 两者都有的那枚：曲目/场次的音乐面
+    expect(music).toContain("node:scene/*/music@edit");
+    expect(theatre).toContain("node:scene/*/music@edit");
+  });
+
+  it("策略按题作答：题 id / 答案 id 写错当场抛", () => {
+    expect(() => policiesFromAnswers({ 不存在的题: "yes" })).toThrow(/未知策略题/);
+    expect(() => policiesFromAnswers({ share_token: "maybe" })).toThrow(/没有答案/);
+    // 一道题可以同时定多个键（§6.4 纪律 3），这正是不逐键填的原因
+    expect(Object.keys(policiesFromAnswers({ uploader_powers: "no_share" })).length).toBeGreaterThan(1);
   });
 });
 
@@ -279,6 +333,33 @@ describe("③ 应用：建项目走模版", () => {
         [id, "会建出来的部门"],
       );
       expect(rowCount).toBe(0);
+    } finally {
+      await cleanupProduction(id).catch(() => {});
+    }
+  });
+
+  it("影视类项目建出来：演员能读剧本，摄影（零行）读不到", async () => {
+    const pool = getPool();
+    const id = shortId();
+    const { userId } = await upsertFeishuUser(`test-open-${shortId()}`, "影视测试 owner", null, false);
+    await pool.query(
+      "INSERT INTO production (id, name, owner_id, type) VALUES ($1, $2, $3, 'film')",
+      [id, `影视模版测试-${id}`, userId],
+    );
+    try {
+      await applyTemplate(id, FILM_TEMPLATE, "film");
+      const { rows } = await pool.query<{ name: string; keys: string[] }>(
+        `SELECT pr.name, array_agg(prp.permission_key) AS keys
+         FROM production_role pr
+         LEFT JOIN production_role_permission prp ON prp.role_id = pr.id
+         WHERE pr.production_id = $1 GROUP BY pr.name`,
+        [id],
+      );
+      const byName = new Map(rows.map(r => [r.name, r.keys ?? []]));
+      expect(byName.get("演员")).toContain("node:script/*/blocks@view");
+      expect(byName.get("摄影")).not.toContain("node:script/*/blocks@view");
+      // 零行角色拿到的恰好是那份极简基线
+      expect((byName.get("摄影") ?? []).sort()).toEqual([...FILM_TEMPLATE.roles.baseline].sort());
     } finally {
       await cleanupProduction(id).catch(() => {});
     }

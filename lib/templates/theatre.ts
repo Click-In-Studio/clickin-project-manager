@@ -11,6 +11,7 @@
  * 策略全取代码默认：#236 那批默认值本来就是照剧场调的（账本 §5.7）。
  */
 import type { ProductionTemplate } from "../production-template";
+import { OPEN_BASELINE, PRODUCER_KEYS } from "./shared";
 
 /** 五大组（组织树，区间宿主 + cue 类型归属）。 */
 const DEPT_TREE = [
@@ -137,44 +138,9 @@ export const THEATRE_TEMPLATE: ProductionTemplate = {
   label: "戏剧类（音乐剧 / 话剧 / 演出）",
   roles: {
     names: ROLE_NAMES,
-    baseline: [
-      "node:announcement/*@view",
-      "node:asset/*/file@view",
-      "node:asset/*/meta@view",
-      "node:asset/*/shares@create",
-      "node:character/*/biography@view",
-      "node:character/*/gender@view",
-      "node:character/*/members@view",
-      "node:character/*/meta@view",
-      "node:character/*/role_type@view",
-      "node:cue_list/*/cues@view",
-      "node:cue_list/*/cues/comments@create",
-      "node:cue_list/*/meta@view",
-      "node:event/*/details@view",
-      "node:event/*/followers@create",
-      "node:event/*/meta@view",
-      "node:member/*/contact@view",
-      "node:member/*/meta@view",
-      "node:milestone/*@view",
-      "node:production/*/meta@view",
-      "node:production/*/mounts@view",
-      "node:scene/*/action_line@view",
-      "node:scene/*/meta@view",
-      "node:scene/*/music@view",
-      "node:scene/*/stage_notes@view",
-      "node:scene/*/synopsis@view",
-      "node:script/*/blocks@view",
-      "node:script/*/comments@create",
-      "node:wiki/*@create",
-    ],
+    baseline: OPEN_BASELINE,
     permissions: {
-      "制作人": [
-        "node:*/*@*",
-        "node:*/*/assignees@*",
-        "node:*/*/grants@*",
-        "node:*/*/imports@create",
-        "node:*/*/publication@*",
-      ],
+      "制作人": PRODUCER_KEYS,
       "舞台监督": [
         "node:cue_list/*@create",
         "node:event/*@create",

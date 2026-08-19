@@ -39,6 +39,9 @@ import type { Pool, PoolClient } from "pg";
 
 import { PRODUCTION_TYPES } from "./production-types";
 import { THEATRE_TEMPLATE } from "./templates/theatre";
+import { MUSIC_TEMPLATE } from "./templates/music";
+import { MUSIC_VIDEO_TEMPLATE } from "./templates/music-video";
+import { FILM_TEMPLATE } from "./templates/film";
 
 import { rolesSeeder, type RolesPayload } from "./template-seeders/roles";
 import {
@@ -138,6 +141,9 @@ const SEEDERS: readonly BoundSeeder[] = [
 
 export const PRODUCTION_TEMPLATES: Readonly<Record<string, ProductionTemplate>> = {
   [THEATRE_TEMPLATE.key]: THEATRE_TEMPLATE,
+  [MUSIC_TEMPLATE.key]: MUSIC_TEMPLATE,
+  [MUSIC_VIDEO_TEMPLATE.key]: MUSIC_VIDEO_TEMPLATE,
+  [FILM_TEMPLATE.key]: FILM_TEMPLATE,
 };
 
 /** 未映射的类型（含「其他」与不指定）回落这套。戏剧类＝此前唯一的建项目行为，
@@ -158,6 +164,17 @@ export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
   gala: THEATRE_TEMPLATE.key,
   music_festival: THEATRE_TEMPLATE.key,
   concert: THEATRE_TEMPLATE.key,
+
+  // 音乐类：广播剧也走这套——它的主线是剧本 + 录音 / 混音 / 母带，没有舞台与 cue 表。
+  // （它缺「导演」这个岗，剧组自己加一个 role 即可；比套上追光 / 抢妆师那套更近。）
+  album: MUSIC_TEMPLATE.key,
+  radio_drama: MUSIC_TEMPLATE.key,
+
+  music_video: MUSIC_VIDEO_TEMPLATE.key,
+
+  short_film: FILM_TEMPLATE.key,
+  film: FILM_TEMPLATE.key,
+  tv_drama: FILM_TEMPLATE.key,
 };
 
 export function resolveTemplate(productionType: string | null | undefined): ProductionTemplate {

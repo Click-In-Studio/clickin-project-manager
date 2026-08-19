@@ -155,6 +155,12 @@ export const PAGE_PERMISSION_SCOPES = {
   // 批D：附件页写面。上传后的十行由创建者行集自动发（§0.9 C-5），此处是
   // 「能上传」与「能发分享令牌」两项能力本身。
   assets: new Set<Permission>([
+    // 新建素材条目。四条上传路由（route / presign / presign-part / presign-multipart）
+    // 查的都是 asset/*/*@create，而此前激活面只列了下面那枚 file@create（那是「给已有
+    // 素材加新版本」的门，app/api/.../assets/[assetId]/files）——两枚是不同的门，
+    // sub 不同互不命中。缺这一枚的后果：部门/角色拿到上传区间也永远激活不出行。
+    // 由项目模版的部门静态行（asset/*@create）触发棘轮暴露（#163）。
+    "node:asset/*@create",
     "node:asset/*/file@create",
     "node:asset/*/shares@create",
   ]),
