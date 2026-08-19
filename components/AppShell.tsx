@@ -215,6 +215,36 @@ function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | nu
   return `/api/user/avatar/${userId}`;
 }
 
+function UserAvatarContent({
+  src,
+  initial,
+  compact = false,
+}: {
+  src: string | null;
+  initial: string;
+  compact?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const sizeClass = compact ? "h-5 w-5 rounded-full" : "h-full w-full";
+
+  if (!src || failed) {
+    return (
+      <span className={`${sizeClass} flex items-center justify-center bg-[#182a2a] text-[9px] font-bold text-white`}>
+        {initial}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt=""
+      className={`${sizeClass} object-cover`}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function ProdAvatarIcon({ productionId, name }: { productionId: string; name: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -678,7 +708,6 @@ function ProjectSwitcher({
 
 export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [aiPopoutOpen, setAiPopoutOpen] = useState(false);
@@ -1041,17 +1070,7 @@ export default function AppShell({ session, productions, children, initialUnread
   const avatarSrc = resolveAvatarSrc(session.userId, session.avatarUrl);
   const avatarSymbol = (
     <span className="relative">
-      {avatarSrc ? (
-        <img
-          src={avatarSrc}
-          alt=""
-          className="w-5 h-5 rounded-full object-cover"
-        />
-      ) : (
-        <span className="w-5 h-5 rounded-full bg-[#182a2a] text-white text-[9px] font-bold flex items-center justify-center">
-          {userInitial}
-        </span>
-      )}
+      <UserAvatarContent src={avatarSrc} initial={userInitial} compact />
       {unreadCount > 0 && (
         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#c0392b] border border-[var(--paper)]" />
       )}
@@ -1142,11 +1161,7 @@ export default function AppShell({ session, productions, children, initialUnread
               aria-expanded={dropdownOpen}
               className="relative w-9 h-9 rounded-full border border-[var(--line)] overflow-hidden bg-[#182a2a] flex items-center justify-center hover:opacity-90 transition-opacity shrink-0"
             >
-              {avatarSrc ? (
-                <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-white text-[11px] font-bold">{userInitial}</span>
-              )}
+              <UserAvatarContent src={avatarSrc} initial={userInitial} />
               {unreadCount > 0 && (
                 <span className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-[#c0392b] border-2 border-[var(--surface)]" />
               )}
@@ -1157,11 +1172,7 @@ export default function AppShell({ session, productions, children, initialUnread
                 {/* ── 用户概要 ── */}
                 <div className="flex items-center gap-2.5 px-2 py-2 mb-1 border-b border-[var(--line)]">
                   <span className="w-9 h-9 rounded-full bg-[#182a2a] overflow-hidden shrink-0 flex items-center justify-center">
-                    {avatarSrc ? (
-                      <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-white text-[11px] font-bold">{userInitial}</span>
-                    )}
+                    <UserAvatarContent src={avatarSrc} initial={userInitial} />
                   </span>
                   <div className="flex flex-col min-w-0">
                     <span className="text-[11px] font-bold text-[#182a2a] truncate">{session.name}</span>
@@ -1567,11 +1578,7 @@ export default function AppShell({ session, productions, children, initialUnread
           {/* 用户概要 */}
           <div className="flex items-center gap-3 px-5 pt-1 pb-3">
             <span className="w-10 h-10 rounded-full bg-[#182a2a] overflow-hidden shrink-0 flex items-center justify-center">
-              {avatarSrc ? (
-                <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-white text-[13px] font-bold">{userInitial}</span>
-              )}
+              <UserAvatarContent src={avatarSrc} initial={userInitial} />
             </span>
             <span className="text-[14px] font-bold text-[#182a2a]">{session.name}</span>
           </div>

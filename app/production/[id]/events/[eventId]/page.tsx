@@ -3,7 +3,7 @@ import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles, listVersions } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles, listVersions } from "@/lib/db";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -11,6 +11,8 @@ import {
   listEventCallTimes,
   listEventTechReqs,
   listEventReports,
+  listEventMilestoneIds,
+  listProductionTechReqs,
 
   listEventDepartments,
   getSelfParticipantRole,
@@ -60,7 +62,7 @@ export default async function EventDetailPage({
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
-  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions] =
+  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions, relationTasks, milestoneOptions, eventMilestoneIds] =
     await Promise.all([
       listScheduleItemsWithParticipants(eventId),
       listEventPeople(eventId),
@@ -71,6 +73,9 @@ export default async function EventDetailPage({
       listProductionMembersWithRoles(productionId),
       getSelfParticipantRole(eventId, session.userId),
       listVersions(productionId),
+      listProductionTechReqs(productionId),
+      listMilestones(productionId),
+      listEventMilestoneIds(eventId, productionId),
     ]);
 
   // W5：默认报告懒建已移除（浏览即建会在文档树留足迹）——空态由
@@ -106,6 +111,9 @@ export default async function EventDetailPage({
       initialEventPeople={eventPeople}
       initialCallTimes={callTimes}
       initialTechReqs={techReqs}
+      relationTaskOptions={relationTasks.map(task => ({ id: task.id, title: task.title, status: task.status, eventId: task.eventId, eventTitle: task.eventTitle }))}
+      milestoneOptions={milestoneOptions.map(milestone => ({ id: milestone.id, name: milestone.name, endDate: milestone.endDate }))}
+      initialEventMilestoneIds={eventMilestoneIds}
       initialReports={reports}
       departments={departments}
       members={members}

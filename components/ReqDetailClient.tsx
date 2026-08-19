@@ -620,19 +620,8 @@ export default function ReqDetailClient({
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--paper)", padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-      {/* breadcrumb */}
-      <nav aria-label="breadcrumb" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, fontSize: 11, color: "var(--muted)" }}>
-        <Link href={`/production/${productionId}/tasks`} style={{ color: "var(--muted)", textDecoration: "none", fontWeight: 700 }}>
-          任务
-        </Link>
-        <span style={{ fontSize: 9 }}>›</span>
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ink)" }}>
-          任务详情：{displayTitle}
-        </span>
-      </nav>
-
       {/* 统一页头：eyebrow + serif 标题 + 徽章行 */}
-      <PageHeader eyebrow="Task Detail" title={displayTitle} side="stage">
+      <PageHeader eyebrow="Task · 信息与编辑" title={displayTitle} side="stage">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
           <span style={{ borderRadius: 6, padding: "3px 9px", fontSize: 11, fontWeight: 700, ...statusBadgeStyle(req.status) }}>
             {STATUS_LABELS[req.status] ?? req.status}
@@ -665,7 +654,7 @@ export default function ReqDetailClient({
                     color: "var(--ink)", cursor: "pointer", opacity: accessChecking ? 0.5 : 1,
                   }}
                 >
-                  {accessChecking ? "…" : "编辑"}
+                  {accessChecking ? "…" : "编辑任务信息"}
                 </button>
               )}
             </div>
@@ -977,6 +966,19 @@ export default function ReqDetailClient({
                 独立任务，未绑定事件。
               </p>
             )}
+            <button
+              type="button"
+              onClick={handleEditClick}
+              disabled={accessChecking || editMode}
+              style={{
+                width: "100%", marginBottom: 12, border: "1px solid var(--line)", borderRadius: 8,
+                padding: "8px 11px", background: "transparent", color: "var(--stage)",
+                fontSize: 11, fontWeight: 700, textAlign: "left", cursor: editMode ? "default" : "pointer",
+                opacity: accessChecking || editMode ? .55 : 1,
+              }}
+            >
+              {event ? "更换或解绑事件 →" : "绑定事件 →"}
+            </button>
 
             {/* 绑定的日程条目（只列绑定的；完整流程去事件日程页） */}
             {linkedItems.length > 0 && (

@@ -989,6 +989,15 @@ CREATE TABLE IF NOT EXISTS task_milestone (
 
 CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
 
+-- Event 里程碑关联（事件可关注 0..n 个项目里程碑）
+CREATE TABLE IF NOT EXISTS event_milestone (
+  event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, milestone_id)
+);
+
+CREATE INDEX IF NOT EXISTS event_milestone_milestone_idx ON event_milestone(milestone_id);
+
 -- ── Announcements ─────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS production_announcement (

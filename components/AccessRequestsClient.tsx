@@ -111,6 +111,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
   const [resourceType, setResourceType]       = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
   const [grantType, setGrantType]             = useState<"permanent" | "ttl">("permanent");
+  const [ttlDays, setTtlDays]                 = useState<15 | 30 | 90 | 180>(30);
   const [note, setNote]                       = useState("");
   const [submitting, setSubmitting]           = useState(false);
   const [error, setError]                     = useState<string | null>(null);
@@ -131,7 +132,13 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
       const res = await fetch(`/api/production/${productionId}/access-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resourceType, permissionLevel, grantType, note: note.trim() || null }),
+        body: JSON.stringify({
+          resourceType,
+          permissionLevel,
+          grantType,
+          ttlDuration: grantType === "ttl" ? `${ttlDays} days` : null,
+          note: note.trim() || null,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -178,6 +185,40 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
           </label>
         ))}
       </div>
+
+      {grantType === "ttl" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>权限有效期</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 7 }}>
+            {([15, 30, 90, 180] as const).map(days => {
+              const active = ttlDays === days;
+              return (
+                <button
+                  key={days}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setTtlDays(days)}
+                  style={{
+                    border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
+                    borderRadius: 8,
+                    padding: "9px 4px",
+                    background: active ? "var(--ink)" : "var(--paper)",
+                    color: active ? "#fff" : "var(--muted)",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {days} 天
+                </button>
+              );
+            })}
+          </div>
+          <small style={{ fontSize: 10, color: "var(--muted)" }}>
+            审批通过后开始计时，到期将自动失效。
+          </small>
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>申请理由（选填）</label>
@@ -243,6 +284,12 @@ function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
           </span>
         )}
       </h2>
+
+      {req.subjectName && (
+        <p style={{ margin: "-8px 0 0", fontSize: 12, color: "var(--muted)" }}>
+          申请人：<b style={{ color: "var(--ink)" }}>{req.subjectName}</b>
+        </p>
+      )}
 
       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
         申请于 {fmtDate(req.createdAt)}
@@ -397,7 +444,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
             color: isSelected ? "#fff" : "var(--ink)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
-            {resourceLabel(req)}
+            {canAct && req.subjectName ? `${req.subjectName} · ` : ""}{resourceLabel(req)}
           </p>
           <p style={{ margin: 0, fontSize: 11, color: isSelected ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
             {STATUS_LABELS[req.status]} · {fmtDate(req.createdAt)}

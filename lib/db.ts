@@ -7253,6 +7253,7 @@ export type ApprovalRequest = {
   id: string;
   productionId: string;
   subjectId: string;
+  subjectName?: string;
   type: string;
   resourceType: string | null;
   resourceId: string | null;
@@ -7283,6 +7284,7 @@ type ApprovalRow = {
   id: string;
   production_id: string;
   subject_id: string;
+  subject_name?: string | null;
   type: string;
   resource_type: string | null;
   resource_id: string | null;
@@ -7305,6 +7307,7 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     id: r.id,
     productionId: r.production_id,
     subjectId: r.subject_id,
+    subjectName: r.subject_name ?? undefined,
     type: r.type,
     resourceType: r.resource_type,
     resourceId: r.resource_id,
@@ -7936,9 +7939,11 @@ export async function listMyAccessRequests(
   userId: string,
 ): Promise<ApprovalRequest[]> {
   const res = await getPool().query<ApprovalRow>(
-    `SELECT * FROM approval_request
-     WHERE production_id = $1 AND subject_id = $2
-     ORDER BY created_at DESC`,
+    `SELECT ar.*, COALESCE(NULLIF(up.display_name, ''), up.name, '成员') AS subject_name
+     FROM approval_request ar
+     LEFT JOIN user_profile up ON up.user_id = ar.subject_id
+     WHERE ar.production_id = $1 AND ar.subject_id = $2
+     ORDER BY ar.created_at DESC`,
     [productionId, userId],
   );
   return res.rows.map(rowToApproval);
@@ -7954,7 +7959,9 @@ export async function listPendingApprovals(
     : "";
 
   const res = await getPool().query<ApprovalRow>(
-    `SELECT ar.* FROM approval_request ar
+    `SELECT ar.*, COALESCE(NULLIF(up.display_name, ''), up.name, '成员') AS subject_name
+     FROM approval_request ar
+     LEFT JOIN user_profile up ON up.user_id = ar.subject_id
      WHERE (
        -- Supervisor phase: I am the supervisor of the requester in this production
        (ar.status = 'pending_supervisor' AND EXISTS (

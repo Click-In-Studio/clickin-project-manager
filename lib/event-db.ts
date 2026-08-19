@@ -2192,6 +2192,88 @@ export async function listEventTaskCounts(productionId: string): Promise<Record<
   return Object.fromEntries(res.rows.map(r => [r.event_id, Number(r.count)]));
 }
 
+export async function listEventMilestoneIds(eventId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ milestone_id: string }>(
+    `SELECT em.milestone_id
+     FROM event_milestone em
+     JOIN production_event pe ON pe.id = em.event_id
+     JOIN milestone m ON m.id = em.milestone_id AND m.production_id = pe.production_id
+     WHERE em.event_id = $1 AND pe.production_id = $2
+     ORDER BY m.end_date, m.sort_order`,
+    [eventId, productionId],
+  );
+  return res.rows.map(row => row.milestone_id);
+}
+
+export async function setEventRelations(
+  eventId: string,
+  productionId: string,
+  taskIds: string[],
+  milestoneIds: string[],
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const event = await client.query(
+      "SELECT 1 FROM production_event WHERE id = $1 AND production_id = $2",
+      [eventId, productionId],
+    );
+    if (!event.rowCount) throw new Error("事件不存在");
+
+    if (taskIds.length) {
+      const tasks = await client.query<{ id: string; event_id: string | null }>(
+        "SELECT id, event_id FROM task WHERE production_id = $1 AND id = ANY($2::text[]) FOR UPDATE",
+        [productionId, taskIds],
+      );
+      if (tasks.rowCount !== taskIds.length) throw new Error("包含不存在的任务");
+      if (tasks.rows.some(task => task.event_id && task.event_id !== eventId)) {
+        throw new Error("不能从其他事件直接移入任务，请先在任务详情中解绑");
+      }
+    }
+
+    if (milestoneIds.length) {
+      const milestones = await client.query(
+        "SELECT id FROM milestone WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, milestoneIds],
+      );
+      if (milestones.rowCount !== milestoneIds.length) throw new Error("包含不存在的里程碑");
+    }
+
+    await client.query(
+      `DELETE FROM task_schedule_item
+       WHERE task_id IN (
+         SELECT id FROM task
+         WHERE production_id = $1 AND event_id = $2 AND NOT (id = ANY($3::text[]))
+       )`,
+      [productionId, eventId, taskIds],
+    );
+    await client.query(
+      "UPDATE task SET event_id = NULL WHERE production_id = $1 AND event_id = $2 AND NOT (id = ANY($3::text[]))",
+      [productionId, eventId, taskIds],
+    );
+    if (taskIds.length) {
+      await client.query(
+        "UPDATE task SET event_id = $1 WHERE production_id = $2 AND id = ANY($3::text[])",
+        [eventId, productionId, taskIds],
+      );
+    }
+    await client.query("DELETE FROM event_milestone WHERE event_id = $1", [eventId]);
+    if (milestoneIds.length) {
+      await client.query(
+        `INSERT INTO event_milestone (event_id, milestone_id)
+         SELECT $1, id FROM milestone WHERE production_id = $2 AND id = ANY($3::text[])`,
+        [eventId, productionId, milestoneIds],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
