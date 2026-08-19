@@ -13,6 +13,7 @@ import {
   DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH,
   type DeptPermissionSourceSnapshot,
 } from "./dept-permission-source-snapshot";
+import { makeProduction, cleanupProduction } from "./factories";
 
 let snapshot: DeptPermissionSourceSnapshot | null = null;
 try {
@@ -44,11 +45,27 @@ describe("schema verification", () => {
     `);
     expect(rows).toHaveLength(1);
     for (const v of ["manual", "template", "resource"]) expect(rows[0].def).toContain(v);
-    // 词汇之外的值必须写不进去（棘轮：将来加通道要同时改 CHECK 与词汇注释）
-    await expect(pool.query(
-      `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
-       SELECT production_id, id, 'node:asset/*@view', 'whatever' FROM production_dept LIMIT 1`,
-    )).rejects.toThrow();
+
+    // 词汇之外的值必须写不进去（棘轮：将来加通道要同时改 CHECK 与词汇注释）。
+    //
+    // 前提行自己造。原先这里是 `INSERT ... SELECT ... FROM production_dept LIMIT 1`——
+    // 库里恰好有部门行时才插得动，没有时 SELECT 返回 0 行、INSERT 插 0 行、CHECK 根本
+    // 不被触发，promise 直接 resolve，断言反而红。它靠的是别的测试文件此刻在库里留下的
+    // 部门行，所以红绿取决于 vitest 的文件调度顺序。按 AGENTS.md 工厂模式改为自造。
+    const { prodId } = await makeProduction();
+    try {
+      const dept = await pool.query<{ id: string }>(
+        `INSERT INTO production_dept (production_id, name) VALUES ($1, '棘轮部门') RETURNING id`,
+        [prodId],
+      );
+      await expect(pool.query(
+        `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+         VALUES ($1, $2, 'node:asset/*@view', 'whatever')`,
+        [prodId, dept.rows[0].id],
+      )).rejects.toThrow();
+    } finally {
+      await cleanupProduction(prodId).catch(() => {});
+    }
   });
 });
 
