@@ -4,9 +4,10 @@
  *   1. Schema     — grant_template 表已消失
  *   2. Integrity  — 已 seed 进各演出的 production_role_permission 行不受影响
  *                   （本迁移只删模板源，不碰实例行），且无孤儿 role_id
- *   3. Invariance — **收编等价性**：迁移前表里那份模板，必须在模版常量里一键不差地
- *                   重现。这是这支迁移唯一真正的风险面——DROP 本身不会丢业务数据，
- *                   丢的是「以后新建演出还能不能拿到同一份权限」。
+ *   3. Invariance — **收编等价性**：迁移前表里那份模板给出的每一枚资格，都必须仍被
+ *                   模版覆盖（按判定端的键形匹配，不是字符串相等——见 stillCovered）。
+ *                   这是这支迁移唯一真正的风险面：DROP 本身不会丢业务数据，丢的是
+ *                   「以后新建演出还能不能拿到同一份权限」。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -17,6 +18,7 @@ import {
 } from "./grant-template-retire-snapshot";
 import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
 import { roleKeys } from "@/lib/template-seeders/roles";
+import { parseNodeKey, nodeKeyCandidates } from "@/lib/grant-template";
 
 let snapshot: GrantTemplateRetireSnapshot | null = null;
 try {
@@ -32,6 +34,26 @@ try {
  * 它们不在任何模版的角色名单里，模板行是发不出去的死键。
  */
 const INTENTIONALLY_DROPPED = ["副导演", "助理舞台监督"];
+
+/**
+ * 迁移前的某枚键，是否仍被模版给出的键集覆盖。
+ *
+ * **不是字符串相等**：判定端认的是「能命中该节点的任一键形」（`nodeKeyCandidates`，
+ * 含通配区间）。制作人就是活例子——迁移前表里既有 G-1 的通配五行，又残留着七枚
+ * 早该被收敛掉的枚举行（`migrate-producer-wildcard.sql` DELETE 了它们，但当时
+ * schema.sql 的 seed 仍在，故任何从 schema.sql 新建的库都会重新长出来，而 G-1 的
+ * 重放判据「已有通配主行」又让迁移不再执行）。模版只带通配五行是**终局形态**，
+ * 那七枚枚举行被制作人的通配主行完全覆盖，资格一点没少。
+ *
+ * 本 PR 顺手清了病根：schema.sql 里的 grant_template seed 全部随表退役。
+ */
+function stillCovered(templateKeys: readonly string[], key: string): boolean {
+  if (templateKeys.includes(key)) return true;
+  const node = parseNodeKey(key);
+  // 通配键（如 node:*/*@*）parseNodeKey 认不了，只能按字面比——它本身就是最宽的形态
+  if (!node) return false;
+  return nodeKeyCandidates(node).some((c) => templateKeys.includes(c));
+}
 
 // ── 1. Schema verification ────────────────────────────────────────────────────
 
@@ -68,7 +90,7 @@ describe("integrity verification", () => {
 // ── 3. Invariance verification ────────────────────────────────────────────────
 
 describe("invariance verification", () => {
-  it.skipIf(!snapshot)("戏剧类模版一键不差地重现了迁移前的通用模板", () => {
+  it.skipIf(!snapshot)("戏剧类模版覆盖了迁移前通用模板的每一枚键（资格不缩小）", () => {
     const generic = snapshot!.generic;
     const names = new Set(THEATRE_TEMPLATE.roles.names);
 
@@ -85,18 +107,23 @@ describe("invariance verification", () => {
       }
       // 模版给该角色的最终键集 = 基线 ∪ 自己的键，正是旧 templateKeysForRole 的语义
       // （那条 SQL 取 role_name IN ($1, '*')）
-      const expected = [...new Set([...(generic["*"] ?? []), ...keys])].sort();
-      expect(roleKeys(THEATRE_TEMPLATE.roles, roleName).sort()).toEqual(expected);
+      const got = roleKeys(THEATRE_TEMPLATE.roles, roleName);
+      const lost = [...new Set([...(generic["*"] ?? []), ...keys])]
+        .filter((k) => !stillCovered(got, k));
+      expect(lost, `${roleName} 丢了资格`).toEqual([]);
     }
   });
 
-  it.skipIf(!snapshot)("零行角色拿到的正是基线", () => {
+  // 迁移前表里没有模板行的角色分两种：本来就零行的（执行族 / 卡司族），以及**本次新增**
+  // 的（编舞）。两者都只要求「至少拿到基线」——新增角色比基线多给是设计，不是回归。
+  it.skipIf(!snapshot)("迁移前无模板行的角色，至少拿到基线", () => {
     const generic = snapshot!.generic;
-    const zeroRow = THEATRE_TEMPLATE.roles.names.filter((n) => !generic[n]);
-    expect(zeroRow.length).toBeGreaterThan(0);
-    for (const name of zeroRow) {
-      expect(roleKeys(THEATRE_TEMPLATE.roles, name).sort())
-        .toEqual([...(generic["*"] ?? [])].sort());
+    const noRow = THEATRE_TEMPLATE.roles.names.filter((n) => !generic[n]);
+    expect(noRow.length).toBeGreaterThan(0);
+    for (const name of noRow) {
+      const got = roleKeys(THEATRE_TEMPLATE.roles, name);
+      const missing = (generic["*"] ?? []).filter((k) => !stillCovered(got, k));
+      expect(missing, `${name} 少了基线键`).toEqual([]);
     }
   });
 
