@@ -2493,6 +2493,14 @@ export async function createProduction(
       JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
     ],
   );
+  // owner 同时落一行 production_member：建项目的人当然在项目里。不给 roles——owner 的权限
+  // 走 isOwner 旁路（见 hasEffectiveGrant 族与 requireAdminAccess），这行只管「在不在项目里」，
+  // 不碰自动授权。以前建项目的人恒是 admin（列表走全量分支），少这行看不出来；创建放开后
+  // （#281）owner 建完就从自己的项目列表里消失了。
+  await pool.query(
+    "INSERT INTO production_member (production_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    [id, ownerUserId],
+  );
   await createInitialVersion(id);
   // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
   // 策略档位、审批 TTL——统一由项目模版按类型灌入，整体一个事务。
@@ -2564,10 +2572,14 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
       `SELECT ${PROD_COLS} FROM production ORDER BY ${orderBy}`
     );
   } else {
+    // owner 单列一条可见路径：owner 不必是成员（getProductionPermissionContext 就是
+    // isAdmin/isOwner/isMember 三取一），内连接 production_member 会把「owner 但没有成员行」
+    // 的项目整个藏掉。LEFT JOIN + OR owner_id 才与权限判定同口径。
     res = await getPool().query<ProductionRow>(
       `SELECT ${PROD_COLS_P} FROM production p
-       JOIN production_member pm ON pm.production_id = p.id
-       WHERE pm.user_id = $1 ORDER BY ${orderBy}`,
+       LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
+       WHERE pm.user_id IS NOT NULL OR p.owner_id = $1
+       ORDER BY ${orderBy}`,
       [opts.userId]
     );
   }
@@ -2612,7 +2624,7 @@ export async function listMyProductionsWithRoles(
             ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
-     WHERE ($2 OR pm.user_id IS NOT NULL)
+     WHERE ($2 OR pm.user_id IS NOT NULL OR p.owner_id = $1)
      ORDER BY ${orderBy}`,
     [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
   );
