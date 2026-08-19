@@ -9,7 +9,7 @@
  * 人员进出部门时区间自动伸缩）。例外是场记与 DIT，它们有明确的**内容**职责。
  */
 import type { ProductionTemplate } from "../production-template";
-import { OPEN_BASELINE, policiesFromAnswers } from "./shared";
+import { OPEN_BASELINE, ASSET_UPLOAD, ASSET_NEW_VERSION, policiesFromAnswers } from "./shared";
 import {
   MUSIC_DEPT_TREE, MUSIC_DEPT_PERMISSIONS, MUSIC_ROLES, MUSIC_ROLE_PERMISSIONS,
 } from "./music";
@@ -35,7 +35,7 @@ export const MUSIC_VIDEO_TEMPLATE: ProductionTemplate = {
       // 场记记的是「这一条拍成了什么」——落在场次的现场笔记面
       场记: ["node:scene/*/stage_notes@edit"],
       // 落卡与转码：DIT 不只是上传新条目，还要给同一条素材回传新版本
-      DIT: ["node:asset/*@create", "node:asset/*/file@create"],
+      DIT: [ASSET_UPLOAD, ASSET_NEW_VERSION],
       // 摄影 / 灯光 / 妆造 / 服装 / 道具：零行，走视频组区间
     },
   },
@@ -43,7 +43,7 @@ export const MUSIC_VIDEO_TEMPLATE: ProductionTemplate = {
   deptPermissions: {
     ...MUSIC_DEPT_PERMISSIONS,
     // 拍摄素材量最大的一组
-    视频组: ["node:asset/*@create"],
+    视频组: [ASSET_UPLOAD],
   },
   cueTemplateTypes: [],
   cueDeclarations: [],

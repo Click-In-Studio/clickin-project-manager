@@ -94,6 +94,10 @@ export const SCRIPT_READ: readonly string[] = [
 /** 素材列表可见（`meta`）与文件本体可取（`file`）是两枚键，收紧型模版按需分别给。 */
 export const ASSET_LIST_VIEW = "node:asset/*/meta@view";
 export const ASSET_FILE_VIEW = "node:asset/*/file@view";
+/** 建素材条目 / 给已有素材回传新版本 / 改素材元数据——**三道不同的门**，别混用。 */
+export const ASSET_UPLOAD = "node:asset/*@create";
+export const ASSET_NEW_VERSION = "node:asset/*/file@create";
+export const ASSET_META_EDIT = "node:asset/*/meta@edit";
 
 /** 结构编辑（原「戏剧构作」那套）：场次 / 角色 / 标签组的增删改。
  *  音乐类的作曲通常兼这套活——曲目表的结构就是他排的。 */
@@ -115,6 +119,15 @@ export const STRUCTURE_EDIT: readonly string[] = [
   "node:tag_group/*@edit",
   "node:tag_group/*/options@create",
   "node:tag_group/*/options@delete",
+];
+
+/** 排练 / 录制段落标记（剧场排练标记、录音棚的段落标记是同一套对象）。 */
+export const REHEARSAL_MARKS: readonly string[] = [
+  "node:script/*/rehearsal_marks@view",
+  "node:script/*/rehearsal_marks@create",
+  "node:script/*/rehearsal_marks@edit",
+  "node:script/*/rehearsal_marks@delete",
+  "node:script/*/rehearsal_marks/position@edit",
 ];
 
 /** 正文编辑（剧本 / 歌词 / 脚本本体，含分块字段与挂载）。 */

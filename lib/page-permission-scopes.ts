@@ -162,6 +162,10 @@ export const PAGE_PERMISSION_SCOPES = {
     // 由项目模版的部门静态行（asset/*@create）触发棘轮暴露（#163）。
     "node:asset/*@create",
     "node:asset/*/file@create",
+    // 改素材元数据（重命名 / 归档 / 补信息）：门在 assets/[assetId] 的 PATCH，
+    // 查 asset/<id>/meta@edit。与上面那枚同源的洞——此前没有任何角色/部门持有它，
+    // 故一直没人撞上；音乐类的「音乐制作」要做素材整理，需要它可激活。
+    "node:asset/*/meta@edit",
     "node:asset/*/shares@create",
   ]),
 } as const;

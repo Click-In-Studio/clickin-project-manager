@@ -17,10 +17,10 @@
  * 新功能带来独立权限键 / policy 键增删——**全是开发的事**。既然如此它就该是代码常量：
  * 改模版＝改代码＝走 PR＝有 review 有 CI 棘轮。
  *
- * `grant_template` 是反面教材：它同样是 bootstrap（运行时零读取、只在建演出时 seed），
- * 却被放进 DB 且没有界面，结果线上 108 行里 69 行仓库从没记录，新建演出的编剧连
- * `blocks@edit` 都没有，最后靠 `db/migrate-role-template-seed.sql` 把既成事实倒灌回仓库。
- * 角色权限键这一层暂时仍走那张表（本文件的 roles slot 只管角色名单），收编另起 PR。
+ * 已退役的 `grant_template` 是反面教材：它同样是 bootstrap（运行时零读取、只在建演出时
+ * seed），却被放进 DB 且没有界面，结果线上 108 行里 69 行仓库从没记录，新建演出的编剧
+ * 连 `blocks@edit` 都没有，最后靠 `db/migrate-role-template-seed.sql` 把既成事实倒灌
+ * 回仓库。角色权限键与全员基线已收编进模版（`roles` slot），那张表随之 DROP。
  *
  * ## 形状：模版不认识任何子系统的语义
  *
@@ -41,6 +41,7 @@ import { PRODUCTION_TYPES } from "./production-types";
 import { THEATRE_TEMPLATE } from "./templates/theatre";
 import { MUSIC_TEMPLATE } from "./templates/music";
 import { MUSIC_VIDEO_TEMPLATE } from "./templates/music-video";
+import { RADIO_DRAMA_TEMPLATE } from "./templates/radio-drama";
 import { FILM_TEMPLATE } from "./templates/film";
 
 import { rolesSeeder, type RolesPayload } from "./template-seeders/roles";
@@ -62,7 +63,7 @@ export type NameRefs = ReadonlyMap<string, ReadonlySet<string>>;
 
 export type SeedContext = {
   productionId: string;
-  /** `production.type`；角色权限键仍按它查 grant_template 的 per-type 行。 */
+  /** `production.type`——模版已由它选出，这里透给 seeder 只为留痕与兜底判断。 */
   productionType: string | null;
   /** 整个模版应用共用一个连接 —— 全程一个事务。 */
   db: PoolClient;
@@ -143,6 +144,7 @@ export const PRODUCTION_TEMPLATES: Readonly<Record<string, ProductionTemplate>> 
   [THEATRE_TEMPLATE.key]: THEATRE_TEMPLATE,
   [MUSIC_TEMPLATE.key]: MUSIC_TEMPLATE,
   [MUSIC_VIDEO_TEMPLATE.key]: MUSIC_VIDEO_TEMPLATE,
+  [RADIO_DRAMA_TEMPLATE.key]: RADIO_DRAMA_TEMPLATE,
   [FILM_TEMPLATE.key]: FILM_TEMPLATE,
 };
 
@@ -165,10 +167,11 @@ export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
   music_festival: THEATRE_TEMPLATE.key,
   concert: THEATRE_TEMPLATE.key,
 
-  // 音乐类：广播剧也走这套——它的主线是剧本 + 录音 / 混音 / 母带，没有舞台与 cue 表。
-  // （它缺「导演」这个岗，剧组自己加一个 role 即可；比套上追光 / 抢妆师那套更近。）
   album: MUSIC_TEMPLATE.key,
-  radio_drama: MUSIC_TEMPLATE.key,
+
+  // 广播剧单独一套：它有完整的戏剧建制（编剧 / 戏剧构作 / 导演 / 监督），
+  // 只是舞台那一整层不存在，同时带音乐类的录音线。见 templates/radio-drama.ts。
+  radio_drama: RADIO_DRAMA_TEMPLATE.key,
 
   music_video: MUSIC_VIDEO_TEMPLATE.key,
 

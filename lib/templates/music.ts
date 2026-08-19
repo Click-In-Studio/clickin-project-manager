@@ -11,8 +11,10 @@
  *      没有这个岗，曲目表的结构就是作曲排的。故音乐类的作曲 = 戏剧类的
  *      作曲 ∪ 戏剧构作，**比剧场里的同名岗位权限更大**——同名不同级，这正是角色
  *      权限键必须随模版走、不能留在一张全局表里的原因。
- *   2. **音乐制作 ≠ 制作人**。它是统筹位（约棚、排期、通告、任务），拿的是剧场里
- *      舞监 + 制作助理那套；制作人是治理位（授权、成员、通配全集），两者不混。
+ *   2. **音乐制作 ≠ 制作人**。它不是纯管理岗，而是半创意半管理：约棚监棚、素材整理
+ *      （传版本 / 改元数据）、排曲目顺序，都在它手上，所以权限面比剧场的舞监宽。
+ *      与制作人的分界不在宽窄而在**性质**——它一枚治理键都没有（授权、成员、角色
+ *      权限集全不碰），那些是制作人的通配全集。
  *
  * cue 类型注册表**留空**：音乐项目没有 cue 表这个概念。哪个项目要用，自己在配置中心
  * 建类型 + 配声明行即可（机制与剧场完全一样，零代码）。
@@ -20,6 +22,7 @@
 import type { ProductionTemplate } from "../production-template";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, STRUCTURE_EDIT, SCRIPT_EDIT, SCHEDULE_ADMIN,
+  ASSET_UPLOAD, ASSET_NEW_VERSION, ASSET_META_EDIT,
   policiesFromAnswers,
 } from "./shared";
 
@@ -32,11 +35,11 @@ export const MUSIC_DEPT_TREE = [
 
 export const MUSIC_DEPT_PERMISSIONS: Record<string, readonly string[]> = {
   // demo / 谱面 / 词稿
-  创作组: ["node:asset/*@create"],
+  创作组: [ASSET_UPLOAD],
   // 棚里出来的每一版都要能传，且能给同一条素材回传新版本（混音 v1..v9 是日常）
-  制作组: ["node:asset/*@create", "node:asset/*/file@create"],
+  制作组: [ASSET_UPLOAD, ASSET_NEW_VERSION],
   // 物料与成品
-  发行组: ["node:asset/*@create"],
+  发行组: [ASSET_UPLOAD],
   // 艺人组：基线足够（读曲目、读歌词、看通告、传自己的素材由创作组/制作组代管）
 };
 
@@ -52,7 +55,8 @@ export const MUSIC_ROLES = [
 export const MUSIC_ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   制作人: PRODUCER_KEYS,
 
-  // 统筹位：约棚（事件）、排期（节点）、通告、任务。不含授权与成员管理——那是制作人。
+  // 半创意半管理：约棚监棚（事件）、排期通告（节点）、素材整理（传 / 回传新版本 /
+  // 改元数据）、曲目结构与顺序。**不含授权与成员管理**——那才是制作人与它的分界。
   音乐制作: [
     "node:event/*@create",
     "node:event/*@view",
@@ -66,6 +70,8 @@ export const MUSIC_ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "node:task/*@view",
     "node:task/*@delete",
     ...SCHEDULE_ADMIN,
+    ASSET_UPLOAD, ASSET_NEW_VERSION, ASSET_META_EDIT,
+    ...STRUCTURE_EDIT, "node:scene/*/music@edit",
   ],
 
   // 曲目表的结构就是作曲排的（剧场里这活归戏剧构作）

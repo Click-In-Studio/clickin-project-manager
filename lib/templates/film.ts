@@ -22,7 +22,7 @@ import type { ProductionTemplate } from "../production-template";
 import {
   PRODUCER_KEYS, SCENE_VIEW, CHARACTER_VIEW, SCRIPT_READ, SCRIPT_EDIT,
   STRUCTURE_EDIT, SCHEDULE_ADMIN, ASSET_LIST_VIEW, ASSET_FILE_VIEW,
-  policiesFromAnswers,
+  ASSET_UPLOAD, ASSET_NEW_VERSION, policiesFromAnswers,
 } from "./shared";
 
 /** 极简基线：只留「不看就没法参与」的那几枚。对照 OPEN_BASELINE 少掉的是
@@ -41,9 +41,6 @@ const FILM_BASELINE: readonly string[] = [
 
 /** 素材列表可见 + 文件本体可取。分两枚是有意的：很多岗位只需要知道「有这个素材」。 */
 const ASSET_READ = [ASSET_LIST_VIEW, ASSET_FILE_VIEW];
-const ASSET_UPLOAD = "node:asset/*@create";
-/** 给已有素材回传新版本（与上面那枚是**两道不同的门**：一个建条目，一个加文件）。 */
-const ASSET_NEW_VERSION = "node:asset/*/file@create";
 
 /** 现场统筹（制片 / 执行制片共用的事件面）。 */
 const PRODUCTION_OFFICE: readonly string[] = [
