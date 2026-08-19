@@ -31,6 +31,7 @@ import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
 import { getPool } from "@/lib/pg";
 import { DELETE as deleteEvent } from "@/app/api/production/[id]/events/[eventId]/route";
 import { DELETE as deleteReport } from "@/app/api/production/[id]/events/[eventId]/reports/[reportId]/route";
+import { resolveTemplate } from "@/lib/production-template";
 
 let prodId: string;
 let ownerId: string;
@@ -155,21 +156,18 @@ describe("report DELETE 改查 delete 动词", () => {
 // ── ③ 持钥人真的存在（张力 4c）────────────────────────────────────────────────
 
 describe("持钥人在位", () => {
-  it("grant_template：舞监三个 role 都持 node:report/*@delete", async () => {
-    const { rows } = await getPool().query<{ role_name: string }>(
-      `SELECT role_name FROM grant_template
-       WHERE permission_key = 'node:report/*@delete' ORDER BY role_name`,
-    );
-    expect(rows.map((r) => r.role_name).sort())
-      .toEqual(["助理舞台监督", "后台舞台监督", "舞台监督"].sort());
+  it("戏剧类模版：舞监两个 role 都持 node:report/*@delete", async () => {
+    // 模板源已是项目模版常量（#163）。「助理舞台监督」不再出现——
+    // migrate-assistant-roles.sql 已把复合职位拆成 base role + tag，它不在角色名单里。
+    const { permissions } = resolveTemplate(null).roles;
+    const holders = Object.entries(permissions)
+      .filter(([, keys]) => keys.includes("node:report/*@delete"))
+      .map(([role]) => role);
+    expect(holders.sort()).toEqual(["后台舞台监督", "舞台监督"].sort());
   });
 
-  it("event 的默认持钥人＝制作人，靠 node:*/*@* 全集覆盖（无需单独补行）", async () => {
-    const { rows } = await getPool().query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM grant_template
-       WHERE role_name = '制作人' AND permission_key = 'node:*/*@*'`,
-    );
-    expect(Number(rows[0].n)).toBe(1);
+  it("event 的默认持钥人＝制作人，靠 node:*/*@* 全集覆盖（无需单独补行）", () => {
+    expect(resolveTemplate(null).roles.permissions["制作人"]).toContain("node:*/*@*");
   });
 
   it("棘轮：删**资源本体**的门不得拿 grants@edit 当删除权", async () => {

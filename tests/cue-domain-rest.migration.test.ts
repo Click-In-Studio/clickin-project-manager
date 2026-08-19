@@ -5,6 +5,7 @@ import {
   CUE_DOMAIN_REST_SNAPSHOT_PATH,
   type CueDomainRestSnapshot,
 } from "./cue-domain-rest-snapshot";
+import { resolveTemplate } from "@/lib/production-template";
 
 // 批A cue 域 REST 化迁移三层测试（migrate-cue-domain-rest.sql）。
 // invariance 层依赖 global-setup 在 PRE 库上创建的工厂快照（本地已迁移环境跳过）。
@@ -26,13 +27,14 @@ describe("schema verification", () => {
     expect(rows.map((r) => r.permission_level)).toEqual(["create", "delete", "edit", "view"]);
   });
 
-  it("grant_template is pure global (production_type × role_name × permission_key)", async () => {
-    const { rows } = await getPool().query<{ column_name: string }>(
-      `SELECT column_name FROM information_schema.columns
-       WHERE table_name = 'grant_template' AND column_name IN
-         ('production_type', 'role_name', 'permission_key')`,
+  // 原「grant_template 是纯全局模板」一条：那张表已退役（#163），模板职责移交
+  // 项目模版常量。这里改验它确实没了，别让残表活回来。
+  it("grant_template 已退役（模板职责在项目模版常量里）", async () => {
+    const { rows } = await getPool().query(
+      `SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'grant_template'`,
     );
-    expect(rows.length).toBe(3);
+    expect(rows).toHaveLength(0);
   });
 
   it("production_dept_permission table exists", async () => {
@@ -68,11 +70,8 @@ describe("integrity verification", () => {
   });
 
   it("global template seeds exist (member base + collection create)", async () => {
-    const { rows } = await getPool().query<{ n: string }>(
-      `SELECT count(*) AS n FROM grant_template
-       WHERE production_type IS NULL AND role_name = '*' AND permission_key LIKE 'node:cue_list%'`,
-    );
-    expect(Number(rows[0].n)).toBeGreaterThanOrEqual(3);
+    const base = resolveTemplate(null).roles.baseline.filter((k) => k.startsWith("node:cue_list"));
+    expect(base.length).toBeGreaterThanOrEqual(3);
   });
 });
 

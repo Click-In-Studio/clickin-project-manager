@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getPool } from "@/lib/pg";
+import { PRODUCTION_TEMPLATES } from "@/lib/production-template";
 
 // ─── 权限REST化 §0.5 终局判据（机器可判，非人的记忆）────────────────────────────
 // 2026-08-11 开工 → 批0/A/B/C/D/E/F/G 八批完毕。本文件是工程的最终验收：
@@ -49,10 +50,9 @@ describe("§0.5 终局判据", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("⑥ 制作人模板 = 通配区间（枚举时代终结）", async () => {
-    const { rows } = await getPool().query<{ permission_key: string }>(
-      `SELECT permission_key FROM grant_template WHERE role_name = '制作人' AND permission_key = 'node:*/*@*'`,
-    );
-    expect(rows).toHaveLength(1);
+  it("⑥ 制作人模板 = 通配区间（枚举时代终结）", () => {
+    for (const t of Object.values(PRODUCTION_TEMPLATES)) {
+      expect(t.roles.permissions["制作人"], `${t.key} 缺制作人通配全集`).toContain("node:*/*@*");
+    }
   });
 });

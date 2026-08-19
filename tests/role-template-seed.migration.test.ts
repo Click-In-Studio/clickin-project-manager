@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { templateKeysForRole } from "@/lib/grant-template";
+import { isGovernanceNodeKey } from "@/lib/grant-template";
+import { resolveTemplate } from "@/lib/production-template";
+import { roleKeys as templateRoleKeys } from "@/lib/template-seeders/roles";
 import { makeProduction, cleanupProduction } from "./factories";
 
 /**
@@ -110,34 +111,26 @@ describe("invariance verification", () => {
   });
 });
 
-describe("integrity verification", () => {
-  it("重复执行不产生重复行", async () => {
-    const sql = readFileSync("db/migrate-role-template-seed.sql", "utf8");
-    const count = async (): Promise<number> =>
-      (await getPool().query<{ n: number }>(
-        "SELECT count(*)::int AS n FROM grant_template",
-      )).rows[0].n;
+// 原 integrity 层「重复执行不产生重复行」随 grant_template 退役（#163）：那支迁移的
+// 目标表已不存在，幂等性无从谈起。模版侧的等价保障在 production-template.test.ts
+// 「幂等：重复应用同一模版不产生重复行」。
 
-    const before = await count();
-    await getPool().query(sql);
-    const after = await count();
-    expect(after).toBe(before);
-  });
-});
-
+// 模板源已从 grant_template 表搬进项目模版常量（#163），这两条改查常量。
 describe("schema verification", () => {
-  it("错配键 node:scene/*/meta@edit 不会随模板复活", async () => {
+  const template = resolveTemplate(null);
+
+  it("错配键 node:scene/*/meta@edit 不会随模板复活", () => {
     for (const role of ["编剧", "戏剧构作"]) {
-      const keys = await templateKeysForRole(role, null);
-      expect(keys).not.toContain("node:scene/*/meta@edit");
+      expect(templateRoleKeys(template.roles, role)).not.toContain("node:scene/*/meta@edit");
     }
   });
 
-  it("模板键全是合法节点串或通配区间键（无遗留原子键）", async () => {
-    const { rows } = await getPool().query<{ permission_key: string }>(
-      "SELECT DISTINCT permission_key FROM grant_template",
-    );
-    const stray = rows.map(r => r.permission_key).filter(k => !k.startsWith("node:"));
-    expect(stray).toEqual([]);
+  it("模板键全是合法节点串或通配区间键（无遗留原子键）", () => {
+    const all = [
+      ...template.roles.baseline,
+      ...Object.values(template.roles.permissions).flat(),
+      ...Object.values(template.deptPermissions).flat(),
+    ];
+    expect(all.filter(k => isGovernanceNodeKey(k) === null)).toEqual([]);
   });
 });

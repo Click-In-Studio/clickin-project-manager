@@ -5,6 +5,7 @@ import { getPool } from "@/lib/pg";
 import { SCENE_FIELD_SUBS } from "@/lib/scene-field-perms";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
 import { parseNodeKey, isSensitiveNode, isRootNode } from "@/lib/grant-template";
+import { PRODUCTION_TEMPLATES } from "@/lib/production-template";
 
 /**
  * 激活面覆盖棘轮。
@@ -124,9 +125,13 @@ function collectGuardedKeys(): Set<string> {
 
 describe("activation scope coverage", () => {
   it("模板发的每个可自确认键都有激活面入口", async () => {
-    const { rows } = await getPool().query<{ role_name: string; permission_key: string }>(
-      "SELECT DISTINCT role_name, permission_key FROM grant_template ORDER BY 1, 2",
-    );
+    // 模板源 = 项目模版常量（grant_template 已退役 #163）：全部模版 × 全部角色
+    const rows = Object.values(PRODUCTION_TEMPLATES).flatMap((t) => [
+      ...t.roles.baseline.map((k) => ({ role_name: `${t.key}/*`, permission_key: k })),
+      ...Object.entries(t.roles.permissions).flatMap(([role, keys]) =>
+        keys.map((k) => ({ role_name: `${t.key}/${role}`, permission_key: k })),
+      ),
+    ]);
 
     const missing: string[] = [];
     for (const { role_name, permission_key } of rows) {

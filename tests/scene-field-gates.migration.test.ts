@@ -6,6 +6,7 @@ import {
   SCENE_FIELD_GATES_SNAPSHOT_PATH,
   type SceneFieldGatesSnapshot,
 } from "./scene-field-gates-snapshot";
+import { PRODUCTION_TEMPLATES, resolveTemplate } from "@/lib/production-template";
 
 // scene 字段门对齐 三层迁移测试（schema / integrity / invariance）
 
@@ -26,21 +27,23 @@ const FIELD_KEYS = [
 ];
 
 describe("schema verification", () => {
-  it("编剧 / 戏剧构作模板持有四枚字段级键", async () => {
-    const { rows } = await getPool().query<{ role_name: string; permission_key: string }>(
-      `SELECT role_name, permission_key FROM grant_template
-       WHERE role_name IN ('编剧', '戏剧构作') AND permission_key = ANY($1)`,
-      [FIELD_KEYS],
-    );
+  it("编剧 / 戏剧构作模板持有四枚字段级键", () => {
+    // 模板源已移交项目模版常量（#163）
+    const { permissions } = resolveTemplate(null).roles;
     for (const role of ["编剧", "戏剧构作"]) {
-      const keys = rows.filter(r => r.role_name === role).map(r => r.permission_key).sort();
-      expect(keys).toEqual([...FIELD_KEYS].sort());
+      const keys = (permissions[role] ?? []).filter(k => (FIELD_KEYS as readonly string[]).includes(k));
+      expect(keys.sort()).toEqual([...FIELD_KEYS].sort());
     }
   });
 
-  it("空转的 node:scene/*/meta@edit 在四张表里绝迹", async () => {
+  it("空转的 node:scene/*/meta@edit 在三张区间表与模版里绝迹", async () => {
+    const inTemplates = Object.values(PRODUCTION_TEMPLATES).flatMap(tpl => [
+      ...tpl.roles.baseline,
+      ...Object.values(tpl.roles.permissions).flat(),
+      ...Object.values(tpl.deptPermissions).flat(),
+    ]).filter(k => k === "node:scene/*/meta@edit");
     const [t, r, d, m] = await Promise.all([
-      getPool().query("SELECT 1 FROM grant_template WHERE permission_key = 'node:scene/*/meta@edit' LIMIT 1"),
+      Promise.resolve({ rows: inTemplates }),
       getPool().query("SELECT 1 FROM production_role_permission WHERE permission_key = 'node:scene/*/meta@edit' LIMIT 1"),
       getPool().query("SELECT 1 FROM production_dept_permission WHERE permission_key = 'node:scene/*/meta@edit' LIMIT 1"),
       getPool().query("SELECT 1 FROM production_member_permission WHERE permission = 'node:scene/*/meta@edit' LIMIT 1"),
@@ -62,11 +65,12 @@ describe("integrity verification", () => {
   it("全库 scene 区间键都是判定端认得的形态（无裸 meta@edit 式父段写键）", async () => {
     const { rows } = await getPool().query<{ permission_key: string }>(
       `SELECT DISTINCT permission_key FROM production_role_permission
-       WHERE permission_key LIKE 'node:scene/%@edit'
-       UNION
-       SELECT DISTINCT permission_key FROM grant_template
        WHERE permission_key LIKE 'node:scene/%@edit'`,
     );
+    rows.push(...Object.values(PRODUCTION_TEMPLATES).flatMap(tpl => [
+      ...tpl.roles.baseline,
+      ...Object.values(tpl.roles.permissions).flat(),
+    ]).filter(k => /^node:scene\/.*@edit$/.test(k)).map(k => ({ permission_key: k })));
     // 判定端只查这些 sub：字段级 sub + 结构面 '*'。父段 'meta' 没有任何门。
     const allowed = new Set([
       "node:scene/*@edit",

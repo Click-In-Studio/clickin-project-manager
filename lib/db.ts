@@ -16,7 +16,6 @@ export type ProductionAccess = {
 };
 // 角色名单（ROLE_NAMES）已上移为项目模版的一个 slot，见 lib/production-template.ts
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
-import { seedRoleFromTemplate } from "./grant-template";
 import {
   buildApprovalLadder, classifyApprovalNode, expandLevelRows, nextStage, stageAt, stageStatus,
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
@@ -4622,11 +4621,21 @@ export async function createProductionRole(productionId: string, name: string): 
     [id, productionId, name],
   );
   const row = res.rows[0];
-  // 批A：自定义角色也获得成员基础模板键（'*'；若名字命中模板角色则一并 seed）
+  // 自定义角色也获得基线键；名字命中本项目模版里的角色则一并 seed 那份。
+  // 这仍是「创建时 seed」而非运行时读模版——判定端一行都不查模版。
   const prodType = (await getPool().query<{ type: string | null }>(
     "SELECT type FROM production WHERE id = $1", [productionId],
   )).rows[0]?.type ?? null;
-  await seedRoleFromTemplate(row.id, name, prodType);
+  const { resolveTemplate } = await import("./production-template");
+  const { roleKeys } = await import("./template-seeders/roles");
+  const keys = roleKeys(resolveTemplate(prodType).roles, name);
+  if (keys.length > 0) {
+    await getPool().query(
+      `INSERT INTO production_role_permission (role_id, permission_key)
+       SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+      [row.id, keys],
+    );
+  }
   const seeded = await getPool().query<{ permission_key: string }>(
     "SELECT permission_key FROM production_role_permission WHERE role_id = $1", [row.id],
   );

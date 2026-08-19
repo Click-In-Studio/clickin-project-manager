@@ -37,8 +37,8 @@
 import { getPool } from "./pg";
 import type { Pool, PoolClient } from "pg";
 
-import { ROLE_NAMES } from "./permissions";
-import { DEFAULT_CUE_TEMPLATE_TYPES } from "./cue-list-types";
+import { PRODUCTION_TYPES } from "./production-types";
+import { THEATRE_TEMPLATE } from "./templates/theatre";
 
 import { rolesSeeder, type RolesPayload } from "./template-seeders/roles";
 import {
@@ -104,7 +104,7 @@ function bind<P>(seeder: TemplateSeeder<P>, pick: (t: ProductionTemplate) => P):
 export type ProductionTemplate = {
   key: string;
   label: string;
-  /** ① 角色名单（权限键仍由 grant_template 按角色名灌，见文件头）。 */
+  /** ① 角色名单 + 全员基线 + 逐角色权限键。 */
   roles: RolesPayload;
   /** ② 部门树。 */
   deptTree: DeptTreePayload;
@@ -136,39 +136,29 @@ const SEEDERS: readonly BoundSeeder[] = [
 
 // ─── 模版清单 ─────────────────────────────────────────────────────────────────
 
-/**
- * 通用模版：**本 PR 是基建，这套模版的内容刻意等价于此前的建项目行为**——
- * 角色名单照旧、cue 类型照旧、策略全取代码默认、不建任何部门。
- *
- * 部门树 / 部门静态区间键 / cue 声明组的**具体内容是业务侧的事**（草案见 MindWeave
- * 《基础模版-音乐剧角色与部门》§3/§3.1/§3.2），定稿后往下面几个数组里填即可，
- * 不需要动任何机制代码。
- */
-const STANDARD_TEMPLATE: ProductionTemplate = {
-  key: "standard",
-  label: "通用模版",
-  roles: ROLE_NAMES,
-  deptTree: [],
-  deptPermissions: {},
-  cueTemplateTypes: DEFAULT_CUE_TEMPLATE_TYPES,
-  cueDeclarations: [],
-  policies: {},
-  approval: { ttlHours: 24 },
-};
-
 export const PRODUCTION_TEMPLATES: Readonly<Record<string, ProductionTemplate>> = {
-  [STANDARD_TEMPLATE.key]: STANDARD_TEMPLATE,
+  [THEATRE_TEMPLATE.key]: THEATRE_TEMPLATE,
 };
 
-export const DEFAULT_TEMPLATE_KEY = STANDARD_TEMPLATE.key;
+/** 未映射的类型（含「其他」与不指定）回落这套。戏剧类＝此前唯一的建项目行为，
+ *  故回落它对存量语义是零变化。 */
+export const DEFAULT_TEMPLATE_KEY = THEATRE_TEMPLATE.key;
 
 /**
- * `production.type` → 模版 key。**空表 = 所有类型都回落通用模版**，这是当前的有意状态：
- * 机制在位，等业务侧定稿再加映射行。类型是模版的**唯一入口**（UX 上不给「角色用 A、
+ * `production.type` → 模版 key。类型是模版的**唯一入口**（UX 上不给「角色用 A、
  * 部门用 B」的组合面——角色模版与部门模版并不真正正交：设计族 / 执行族 role 是零行，
  * 职能全压在部门声明上，拆开组合会配出设计师什么都干不了的项目）。
  */
-export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {};
+export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
+  // 演出类：音乐节 / 音乐会同属此列——它们有 cue 表、有舞监、有场次，
+  // 与「录音棚里做一张专辑」是两种工作方式
+  stage_play: THEATRE_TEMPLATE.key,
+  theatre: THEATRE_TEMPLATE.key,
+  musical: THEATRE_TEMPLATE.key,
+  gala: THEATRE_TEMPLATE.key,
+  music_festival: THEATRE_TEMPLATE.key,
+  concert: THEATRE_TEMPLATE.key,
+};
 
 export function resolveTemplate(productionType: string | null | undefined): ProductionTemplate {
   const key = (productionType && TEMPLATE_BY_TYPE[productionType]) || DEFAULT_TEMPLATE_KEY;
@@ -195,8 +185,14 @@ export function validateTemplate(t: ProductionTemplate): string[] {
 
 export function validateAllTemplates(): string[] {
   const errors = Object.values(PRODUCTION_TEMPLATES).flatMap(validateTemplate);
+  const knownTypes = new Set<string>(PRODUCTION_TYPES.map((t) => t.value));
   for (const [type, key] of Object.entries(TEMPLATE_BY_TYPE)) {
     if (!PRODUCTION_TEMPLATES[key]) errors.push(`[TEMPLATE_BY_TYPE] 类型 ${type} 指向不存在的模版 ${key}`);
+    // 类型名拼错 = 那套模版永远选不中，且没有任何报错——挡在这里
+    if (!knownTypes.has(type)) errors.push(`[TEMPLATE_BY_TYPE] ${type} 不在 PRODUCTION_TYPES 清单里`);
+  }
+  for (const [k, t] of Object.entries(PRODUCTION_TEMPLATES)) {
+    if (k !== t.key) errors.push(`[PRODUCTION_TEMPLATES] 键 ${k} 与模版自身的 key ${t.key} 不一致`);
   }
   if (!PRODUCTION_TEMPLATES[DEFAULT_TEMPLATE_KEY]) {
     errors.push(`[TEMPLATE_BY_TYPE] 默认模版 ${DEFAULT_TEMPLATE_KEY} 不存在`);

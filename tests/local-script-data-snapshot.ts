@@ -18,6 +18,12 @@ export type LocalScriptDataSnapshot = {
 };
 
 export async function isLocalScriptDataPreMigrationSchema(pool: Pool): Promise<boolean> {
+  // grant_template 已退役（#163）：表没了就说明库早已越过这支迁移。
+  const { rows: exists } = await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'grant_template'`,
+  );
+  if (exists.length === 0) return false;
   const { rows } = await pool.query<{ pending: boolean }>(
     `SELECT
        NOT EXISTS (

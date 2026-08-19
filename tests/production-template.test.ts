@@ -6,19 +6,33 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { makeProduction, cleanupProduction } from "./factories";
+import { makeProduction, cleanupProduction, shortId } from "./factories";
+import { upsertFeishuUser } from "@/lib/db";
 import {
   PRODUCTION_TEMPLATES, TEMPLATE_BY_TYPE, DEFAULT_TEMPLATE_KEY,
   resolveTemplate, validateTemplate, validateAllTemplates, applyTemplate,
   type ProductionTemplate,
 } from "@/lib/production-template";
-import { ROLE_NAMES } from "@/lib/permissions";
-import { DEFAULT_CUE_TEMPLATE_TYPES } from "@/lib/cue-list-types";
+import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
 import { POLICY_KEYS } from "@/lib/policy-keys";
+
+/** 未套过任何模版的空演出——建项目路径本身会套模版，测自定义模版必须从空的开始。 */
+async function makeBareProduction(): Promise<string> {
+  const id = shortId();
+  const { userId } = await upsertFeishuUser(`test-open-${shortId()}`, "模版测试 owner", null, false);
+  await getPool().query(
+    "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)",
+    [id, `模版测试-${id}`, userId],
+  );
+  return id;
+}
+
+const countDepts = (nodes: ProductionTemplate["deptTree"]): number =>
+  nodes.reduce((n, d) => n + 1 + countDepts(d.children ?? []), 0);
 
 const EMPTY: ProductionTemplate = {
   key: "test-empty", label: "测试空模版",
-  roles: [], deptTree: [], deptPermissions: {},
+  roles: { names: [], baseline: [], permissions: {} }, deptTree: [], deptPermissions: {},
   cueTemplateTypes: [], cueDeclarations: [], policies: {},
   approval: { ttlHours: 24 },
 };
@@ -104,8 +118,8 @@ describe("② 反例：每一类校验都必须真的会红", () => {
   });
 
   it("角色名重复 / 为空", () => {
-    expect(bad({ roles: ["导演", "导演"] }).join()).toMatch(/重复/);
-    expect(bad({ roles: [" "] }).join()).toMatch(/不能为空/);
+    expect(bad({ roles: { names: ["导演", "导演"], baseline: [], permissions: {} } }).join()).toMatch(/重复/);
+    expect(bad({ roles: { names: [" "], baseline: [], permissions: {} } }).join()).toMatch(/不能为空/);
   });
 
   it("审批 TTL 越界", () => {
@@ -125,7 +139,7 @@ describe("③ 应用：建项目走模版", () => {
     await cleanupProduction(prodId).catch(() => {});
   });
 
-  it("默认模版的初始状态等价于旧建项目路径", async () => {
+  it("默认模版（戏剧类）灌出完整初始状态", async () => {
     const pool = getPool();
     const [roles, cueTypes, policies, approval, depts] = await Promise.all([
       pool.query("SELECT 1 FROM production_role WHERE production_id = $1", [prodId]),
@@ -135,28 +149,47 @@ describe("③ 应用：建项目走模版", () => {
         "SELECT ttl_hours FROM production_approval_config WHERE production_id = $1", [prodId]),
       pool.query("SELECT 1 FROM production_dept WHERE production_id = $1", [prodId]),
     ]);
-    expect(roles.rowCount).toBe(ROLE_NAMES.length);
-    expect(cueTypes.rowCount).toBe(DEFAULT_CUE_TEMPLATE_TYPES.length);
+    expect(roles.rowCount).toBe(THEATRE_TEMPLATE.roles.names.length);
+    expect(cueTypes.rowCount).toBe(THEATRE_TEMPLATE.cueTemplateTypes.length);
     // 落全量、不稀疏（#236）：缺行回落代码默认会让改默认值静默改变存量演出行为
     expect(policies.rowCount).toBe(POLICY_KEYS.length);
     expect(approval.rows[0].ttl_hours).toBe(24);
-    // 当前通用模版不带部门树（内容待业务侧定稿；机制已在位）
-    expect(depts.rowCount).toBe(0);
+    expect(depts.rowCount).toBe(countDepts(THEATRE_TEMPLATE.deptTree));
   });
 
-  it("角色权限键随角色名从 grant_template 灌入", async () => {
-    const { rows } = await getPool().query<{ n: string }>(
-      `SELECT COUNT(*) AS n FROM production_role_permission prp
-       JOIN production_role pr ON pr.id = prp.role_id
-       WHERE pr.production_id = $1`,
+  it("每个角色拿到 基线 ∪ 自己的键；无角色成员拿到零", async () => {
+    const { rows } = await getPool().query<{ name: string; keys: string[] }>(
+      `SELECT pr.name, array_agg(prp.permission_key) AS keys
+       FROM production_role pr
+       LEFT JOIN production_role_permission prp ON prp.role_id = pr.id
+       WHERE pr.production_id = $1 GROUP BY pr.name`,
       [prodId],
     );
-    expect(Number(rows[0].n)).toBeGreaterThan(0);
+    const { baseline, permissions } = THEATRE_TEMPLATE.roles;
+    for (const row of rows) {
+      const expected = new Set([...baseline, ...(permissions[row.name] ?? [])]);
+      expect(new Set(row.keys)).toEqual(expected);
+    }
+    // 零行角色（执行族/卡司族）仍拿到基线——「零行」指的是基线之外没有额外键
+    expect(rows.find(r => r.name === "演员")!.keys.sort()).toEqual([...baseline].sort());
+  });
+
+  it("cue 声明行按部门名落到正确的部门上", async () => {
+    const { rows } = await getPool().query<{ name: string; template: string; can_create: boolean }>(
+      `SELECT pd.name, t.template, t.can_create
+       FROM dept_cue_list_template t JOIN production_dept pd ON pd.id = t.dept_id
+       WHERE t.production_id = $1`,
+      [prodId],
+    );
+    expect(rows).toHaveLength(THEATRE_TEMPLATE.cueDeclarations.length);
+    // 建表资格归设计侧，执行侧只受益
+    expect(rows.find(r => r.name === "音响设计" && r.template === "音效")!.can_create).toBe(true);
+    expect(rows.find(r => r.name === "音响部" && r.template === "音效")!.can_create).toBe(false);
   });
 
   it("跨 slot 的名字引用在 seed 期解析成 id：部门树 → 静态键 / cue 声明", async () => {
     const pool = getPool();
-    const { prodId: id } = await makeProduction();
+    const id = await makeBareProduction();
     try {
       await applyTemplate(id, {
         ...EMPTY, key: "test-tree",
@@ -208,11 +241,11 @@ describe("③ 应用：建项目走模版", () => {
 
   it("幂等：重复应用同一模版不产生重复行、不报错", async () => {
     const pool = getPool();
-    const { prodId: id } = await makeProduction();
+    const id = await makeBareProduction();
     try {
       const template: ProductionTemplate = {
         ...EMPTY, key: "test-idem",
-        roles: ["导演"],
+        roles: { names: ["导演"], baseline: [], permissions: {} },
         deptTree: [{ name: "创作组", children: [{ name: "剧本部门" }] }],
         deptPermissions: { 创作组: ["node:asset/*@create"] },
         cueTemplateTypes: [{ key: "音效", abbrHint: "SQ", creatorRoles: [] }],
@@ -233,7 +266,7 @@ describe("③ 应用：建项目走模版", () => {
 
   it("整体事务：任一 slot 失败则一行都不留", async () => {
     const pool = getPool();
-    const { prodId: id } = await makeProduction();
+    const id = await makeBareProduction();
     try {
       await expect(applyTemplate(id, {
         ...EMPTY, key: "test-rollback",

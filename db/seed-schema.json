@@ -1069,35 +1069,6 @@
       "nullable": false
     }
   ],
-  "grant_template": [
-    {
-      "column": "id",
-      "type": "uuid",
-      "nullable": false,
-      "default": "gen_random_uuid()"
-    },
-    {
-      "column": "production_type",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "role_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "permission_key",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    }
-  ],
   "milestone": [
     {
       "column": "id",

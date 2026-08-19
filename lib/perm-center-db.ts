@@ -56,8 +56,8 @@ export type PermissionVocabulary = {
   subs: Record<string, string[]>;
 };
 
-/** 权限键词汇：动词=resource_permission_level 闭集；sub 面从模版层+
- *  三区间表在用键聚合（提示性，picker 仍允许自由输入）。 */
+/** 权限键词汇：动词=resource_permission_level 闭集；sub 面从三张区间表在用键
+ *  聚合（提示性，picker 仍允许自由输入）。 */
 export async function getPermissionVocabulary(productionId: string): Promise<PermissionVocabulary> {
   const pool = getPool();
   const [levelRes, keysRes] = await Promise.all([
@@ -66,9 +66,9 @@ export async function getPermissionVocabulary(productionId: string): Promise<Per
        ORDER BY resource_type, sort_order`,
     ),
     pool.query<{ permission_key: string }>(
-      `SELECT DISTINCT permission_key FROM grant_template
-       UNION
-       SELECT DISTINCT prp.permission_key FROM production_role_permission prp
+      // 模板层不再入库（grant_template 已退役 #163）：sub 面提示改从演出内三张区间表
+      // 聚合。新演出建出来就带全套模版行，聚合结果与此前等价。
+      `SELECT DISTINCT prp.permission_key FROM production_role_permission prp
        JOIN production_role pr ON pr.id = prp.role_id WHERE pr.production_id = $1
        UNION
        SELECT DISTINCT permission_key FROM production_dept_permission WHERE production_id = $1
