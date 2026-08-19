@@ -1451,6 +1451,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": false,
+      "default": "'manual'::text"
     }
   ],
   "production_event": [

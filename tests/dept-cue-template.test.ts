@@ -76,6 +76,17 @@ describe("声明表机制", () => {
     const rdm = await getPool().query(
       "SELECT dept_id FROM resource_dept_manage WHERE resource_type='cue_list' AND resource_id=$1", [clId]);
     expect(rdm.rows.map((r: { dept_id: string }) => r.dept_id)).toContain(designDept);
+
+    // #274：这些行不是人在权限中心配的，必须自报家门，否则权限中心会把它们
+    // 当人管的平铺出来、并在下次全量替换时删空。
+    // 全部是 template 而没有 resource：建表定式发的那四枚（db.ts 的 eligible_depts
+    // 路径）与声明数组重叠，而声明通道用 DO UPDATE 升级——**声明是更具体的管家**，
+    // 撤声明时那些行本来就会被 removeCueTemplateGrants 按键形收走。
+    const src = await getPool().query<{ source: string }>(
+      `SELECT DISTINCT source FROM production_dept_permission
+       WHERE production_id = $1 AND permission_key LIKE $2`,
+      [prodId, `node:cue_list/${clId}%`]);
+    expect(src.rows.map(r => r.source).sort()).toEqual(["template"]);
   });
 
   it("声明变更传播：执行部门升档 → 存量表补键；撤销声明 → 收键", async () => {
@@ -84,6 +95,11 @@ describe("声明表机制", () => {
       [execDept]);
     const written = await propagateTemplateToExisting(prodId, execDept, "音效");
     expect(written).toBeGreaterThan(0);
+    // 传播补出来的键同样标 template（#274）
+    const propagated = await getPool().query<{ source: string }>(
+      `SELECT DISTINCT source FROM production_dept_permission
+       WHERE dept_id = $1 AND permission_key LIKE 'node:cue_list/%'`, [execDept]);
+    expect(propagated.rows).toEqual([{ source: "template" }]);
     const removed = await removeCueTemplateGrants(prodId, execDept, "音效");
     expect(removed).toBeGreaterThan(0);
     const left = await getPool().query(

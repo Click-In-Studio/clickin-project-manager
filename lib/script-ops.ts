@@ -183,7 +183,7 @@ export function patchAffectsMarkerProjection(patch: ScriptPatch, prevState: Scri
 //
 // scene 面逐字段（2026-08-17）：marker block 就是 scene 在剧本里的化身，改它的
 // markerMeta 等同于在构作页改同名字段。原先无论增删改一律给 `scene/*@edit`
-// 一把总钥匙，与 grant_template 的字段级键对不上（模板发 synopsis@edit，判定
+// 一把总钥匙，与项目模版的字段级键对不上（模板发 synopsis@edit，判定
 // 却查 scene/*@edit，两边永不相交）。此处与 SCENE_FIELD_SUBS 逐键对应。
 export type ScriptPermissionKey =
   | "node:script/*/blocks@edit"
