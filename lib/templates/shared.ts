@@ -152,6 +152,20 @@ export const SCHEDULE_ADMIN: readonly string[] = [
   "node:milestone/*@delete",
 ];
 
+// ─── cue 声明行的两档 ─────────────────────────────────────────────────────────
+
+/** 设计侧全档：建表 + 整表读写 + cue 增删 + 转授。 */
+export const CUE_OWNER_SET = ["@view", "@edit", "cues@create", "cues@delete", "grants@edit"] as const;
+/** 执行侧受益档：只读（评论已含全员基线）。运行期改 cue 走设计侧或申请流。 */
+export const CUE_VIEWER_SET = ["@view"] as const;
+
+/** 声明一行「本部门能建这类 cue 表」。 */
+export const own = (dept: string, template: string) =>
+  ({ dept, template, canCreate: true, permissions: CUE_OWNER_SET });
+/** 声明一行「本部门看得到这类 cue 表，但不建」。 */
+export const see = (dept: string, template: string) =>
+  ({ dept, template, canCreate: false, permissions: CUE_VIEWER_SET });
+
 // ─── 策略：按题作答，而不是逐键填 ─────────────────────────────────────────────
 
 import { POLICY_QUESTIONS } from "../policy-questions";

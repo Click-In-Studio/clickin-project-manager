@@ -11,7 +11,7 @@
  * 策略全取代码默认：#236 那批默认值本来就是照剧场调的（账本 §5.7）。
  */
 import type { ProductionTemplate } from "../production-template";
-import { OPEN_BASELINE, PRODUCER_KEYS } from "./shared";
+import { OPEN_BASELINE, PRODUCER_KEYS, REHEARSAL_MARKS, own, see } from "./shared";
 
 /** 五大组（组织树，区间宿主 + cue 类型归属）。 */
 const DEPT_TREE = [
@@ -33,13 +33,13 @@ const DEPT_TREE = [
       { name: "多媒体部" }, { name: "剧务部" }, { name: "服化部" }, { name: "外场部" },
     ],
   },
-  { name: "卡司组", children: [{ name: "演员" }, { name: "乐手" }, { name: "歌队" }] },
+  { name: "卡司组", children: [{ name: "演员" }, { name: "乐手" }, { name: "歌队" }, { name: "舞蹈队" }] },
   { name: "管理组", children: [{ name: "制作管理组" }, { name: "舞台监督组" }] },
 ] as const;
 
 /** §3.1 静态区间行。伞语义沿树向下生效，故只挂在最上层需要的那一级。
  *  零 call_sheet 通配（事件参与自动行 R-1/R-2 覆盖）；零 imports（制作人专属）。 */
-const DEPT_PERMISSIONS: Record<string, readonly string[]> = {
+export const THEATRE_DEPT_PERMISSIONS: Record<string, readonly string[]> = {
   // 创作资料上传；排练标记只读
   创作组: ["node:asset/*@create", "node:script/*/rehearsal_marks@view"],
   // 设计稿 / 图纸 / 模型上传
@@ -69,7 +69,7 @@ const DEPT_PERMISSIONS: Record<string, readonly string[]> = {
 };
 
 /** cue 模版类型。缩写是展示提示，命名规律 = 英文首字母 + Q。 */
-const CUE_TYPES = [
+export const THEATRE_CUE_TYPES = [
   { key: "灯光",     abbrHint: "LQ", creatorRoles: ["灯光设计"] },
   { key: "追光",     abbrHint: "FQ", creatorRoles: ["灯光设计"] },
   { key: "音效",     abbrHint: "SQ", creatorRoles: ["音响设计"] },
@@ -82,16 +82,6 @@ const CUE_TYPES = [
   { key: "抢妆",     abbrHint: "QQ", creatorRoles: ["服化设计"] },
   { key: "导播",     abbrHint: "DQ", creatorRoles: ["多媒体设计"] },
 ];
-
-/** 设计侧全档：建表 + 整表读写 + cue 增删 + 转授。 */
-const OWNER_SET = ["@view", "@edit", "cues@create", "cues@delete", "grants@edit"] as const;
-/** 执行侧受益档：只读（评论已含全员基线）。运行期改 cue 走设计侧或申请流。 */
-const VIEWER_SET = ["@view"] as const;
-
-const own = (dept: string, template: string) =>
-  ({ dept, template, canCreate: true, permissions: OWNER_SET });
-const see = (dept: string, template: string) =>
-  ({ dept, template, canCreate: false, permissions: VIEWER_SET });
 
 /** §3.2。执行侧受益不建表——「音响部 = 音效, 音乐」的旧语义是**看得到**，不是能建。 */
 const CUE_DECLARATIONS = [
@@ -125,7 +115,7 @@ const CUE_DECLARATIONS = [
  *  名单里被删。 */
 const ROLE_NAMES = [
   "制作人", "舞台监督", "后台舞台监督", "制作助理",
-  "编剧", "戏剧构作", "导演", "音乐导演", "作曲", "编曲",
+  "编剧", "戏剧构作", "导演", "音乐导演", "作曲", "编曲", "编舞",
   "音响设计", "灯光设计", "舞美设计", "服化设计", "道具设计", "多媒体设计",
   "音效执行", "A1", "A2", "灯光执行", "追光", "抢妆师", "化妆师",
   "多媒体执行", "定机", "游机", "摇臂", "导播", "舞台机械", "后场", "机动",
@@ -141,6 +131,13 @@ export const THEATRE_TEMPLATE: ProductionTemplate = {
     baseline: OPEN_BASELINE,
     permissions: {
       "制作人": PRODUCER_KEYS,
+      // 编舞：排舞用排练标记，走位落在场次的行动线上。音乐剧本来就有这个岗，
+      // 舞剧更是主创（舞剧类型也映射到本套模版）。
+      "编舞": [
+        ...REHEARSAL_MARKS,
+        "node:scene/*/action_line@edit",
+        "node:task/*@view",
+      ],
       "舞台监督": [
         "node:cue_list/*@create",
         "node:event/*@create",
@@ -271,8 +268,8 @@ export const THEATRE_TEMPLATE: ProductionTemplate = {
     },
   },
   deptTree: DEPT_TREE,
-  deptPermissions: DEPT_PERMISSIONS,
-  cueTemplateTypes: CUE_TYPES,
+  deptPermissions: THEATRE_DEPT_PERMISSIONS,
+  cueTemplateTypes: THEATRE_CUE_TYPES,
   cueDeclarations: CUE_DECLARATIONS,
   policies: {},
   approval: { ttlHours: 24 },

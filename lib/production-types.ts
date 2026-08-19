@@ -9,6 +9,7 @@ export const PRODUCTION_TYPES = [
   { value: "stage_play",     label: "话剧" },
   { value: "theatre",        label: "舞台剧" },
   { value: "musical",        label: "音乐剧" },
+  { value: "dance",          label: "舞剧 / 舞蹈作品" },
   { value: "gala",           label: "综合晚会" },
   { value: "music_festival", label: "音乐节" },
   { value: "concert",        label: "音乐会" },
@@ -16,6 +17,7 @@ export const PRODUCTION_TYPES = [
   { value: "film",           label: "电影" },
   { value: "tv_drama",       label: "电视剧" },
   { value: "music_video",    label: "音乐 MV" },
+  { value: "commercial",     label: "广告 / TVC" },
   { value: "radio_drama",    label: "广播剧" },
   { value: "album",          label: "专辑 / 单曲" },
   // 「一人项目」与「其他」在选择器里分开是给人看的，底下是同一套空模版

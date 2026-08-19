@@ -43,6 +43,7 @@ import { MUSIC_TEMPLATE } from "./templates/music";
 import { MUSIC_VIDEO_TEMPLATE } from "./templates/music-video";
 import { RADIO_DRAMA_TEMPLATE } from "./templates/radio-drama";
 import { FILM_TEMPLATE } from "./templates/film";
+import { PERFORMANCE_TEMPLATE } from "./templates/performance";
 import { SOLO_TEMPLATE } from "./templates/solo";
 
 import { rolesSeeder, type RolesPayload } from "./template-seeders/roles";
@@ -147,6 +148,7 @@ export const PRODUCTION_TEMPLATES: Readonly<Record<string, ProductionTemplate>> 
   [MUSIC_VIDEO_TEMPLATE.key]: MUSIC_VIDEO_TEMPLATE,
   [RADIO_DRAMA_TEMPLATE.key]: RADIO_DRAMA_TEMPLATE,
   [FILM_TEMPLATE.key]: FILM_TEMPLATE,
+  [PERFORMANCE_TEMPLATE.key]: PERFORMANCE_TEMPLATE,
   [SOLO_TEMPLATE.key]: SOLO_TEMPLATE,
 };
 
@@ -165,14 +167,18 @@ export const DEFAULT_TEMPLATE_KEY = THEATRE_TEMPLATE.key;
  * 职能全压在部门声明上，拆开组合会配出设计师什么都干不了的项目）。
  */
 export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
-  // 演出类：音乐节 / 音乐会同属此列——它们有 cue 表、有舞监、有场次，
-  // 与「录音棚里做一张专辑」是两种工作方式
+  // 戏剧类：话剧同属此列——八成话剧有原创音乐，音乐线不是音乐剧专属，不做减法。
+  // 舞剧同样走这套（编舞在名单里；用不上的编剧那条剧组自己删）。
   stage_play: THEATRE_TEMPLATE.key,
   theatre: THEATRE_TEMPLATE.key,
   musical: THEATRE_TEMPLATE.key,
-  gala: THEATRE_TEMPLATE.key,
-  music_festival: THEATRE_TEMPLATE.key,
-  concert: THEATRE_TEMPLATE.key,
+  dance: THEATRE_TEMPLATE.key,
+
+  // 演出类：无剧本创作线、导演即内容主创、音响执行走 FoH/Mon/OB、直播独立成组。
+  // 线上演出也归这里——它与线下演出的差别在直播那条产线的比重，不在建制。
+  gala: PERFORMANCE_TEMPLATE.key,
+  music_festival: PERFORMANCE_TEMPLATE.key,
+  concert: PERFORMANCE_TEMPLATE.key,
 
   album: MUSIC_TEMPLATE.key,
 
@@ -180,7 +186,9 @@ export const TEMPLATE_BY_TYPE: Readonly<Record<string, string>> = {
   // 只是舞台那一整层不存在，同时带音乐类的录音线。见 templates/radio-drama.ts。
   radio_drama: RADIO_DRAMA_TEMPLATE.key,
 
+  // 广告 / TVC 的建制与 MV 最近（一支片子、一个拍摄组、后期交付）
   music_video: MUSIC_VIDEO_TEMPLATE.key,
+  commercial: MUSIC_VIDEO_TEMPLATE.key,
 
   short_film: FILM_TEMPLATE.key,
   film: FILM_TEMPLATE.key,

@@ -17,6 +17,7 @@ import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
 import { MUSIC_TEMPLATE } from "@/lib/templates/music";
 import { FILM_TEMPLATE } from "@/lib/templates/film";
 import { SOLO_TEMPLATE } from "@/lib/templates/solo";
+import { PERFORMANCE_TEMPLATE } from "@/lib/templates/performance";
 import { policiesFromAnswers } from "@/lib/templates/shared";
 import { PRODUCTION_TYPES } from "@/lib/production-types";
 import { POLICY_KEYS } from "@/lib/policy-keys";
@@ -84,6 +85,36 @@ describe("① 棘轮：仓库内的模版常量", () => {
     expect(resolveTemplate("solo").key).toBe(SOLO_TEMPLATE.key);
     expect(resolveTemplate("other").key).toBe(SOLO_TEMPLATE.key);
     expect(resolveTemplate(null).key).not.toBe(SOLO_TEMPLATE.key);
+  });
+
+  it("演出类：无编剧 / 无作曲，导演接下内容主创位", () => {
+    const { names, permissions } = PERFORMANCE_TEMPLATE.roles;
+    for (const gone of ["编剧", "戏剧构作", "作曲"]) {
+      expect(names, `演出类不该有 ${gone}`).not.toContain(gone);
+    }
+    expect(names).toContain("编曲");
+    // 剧场里 script 正文归编剧、结构归戏剧构作；演出类两套都在导演手上
+    expect(permissions["导演"]).toContain("node:script/*/blocks@edit");
+    expect(permissions["导演"]).toContain("node:scene/*@create");
+    expect(THEATRE_TEMPLATE.roles.permissions["导演"]).not.toContain("node:script/*/blocks@edit");
+  });
+
+  it("演出类：音响执行是 FoH/Mon/OB，直播独立成组且自建导播表", () => {
+    const { names } = PERFORMANCE_TEMPLATE.roles;
+    for (const need of ["FoH", "Mon", "OB", "Camera Op", "导播"]) expect(names).toContain(need);
+    for (const gone of ["A1", "A2", "音效执行", "定机", "游机", "摇臂"]) {
+      expect(names, `演出类不该有剧场岗位 ${gone}`).not.toContain(gone);
+    }
+    const live = PERFORMANCE_TEMPLATE.cueDeclarations.filter(d => d.dept === "直播组");
+    expect(live.find(d => d.template === "导播")?.canCreate).toBe(true);
+    // 剧场里导播表归多媒体设计，演出里归直播组——同一张表、不同归属
+    expect(THEATRE_TEMPLATE.cueDeclarations.find(d => d.template === "导播")?.dept).toBe("多媒体设计");
+  });
+
+  it("编舞在戏剧类里（音乐剧本来就有，舞剧靠它）", () => {
+    expect(THEATRE_TEMPLATE.roles.names).toContain("编舞");
+    expect(THEATRE_TEMPLATE.roles.permissions["编舞"]).toContain("node:scene/*/action_line@edit");
+    expect(resolveTemplate("dance").key).toBe(THEATRE_TEMPLATE.key);
   });
 
   it("影视类基线削掉了内容读面——这是这套模版存在的理由", () => {
