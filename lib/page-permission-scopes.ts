@@ -18,7 +18,7 @@ type Permission = string;
  *
  * 2. **只放判定端真实消费的键。** 激活面的职责是把区间落成 grant 行；落一个
  *    没有任何门去查的行，等于在弹窗里让用户勾选一个不存在的能力。模板
- *    （grant_template）发了但判定端没门查的键属于另一类欠账（模板 > 判定的
+ *    （lib/templates/*.ts）发了但判定端没门查的键属于另一类欠账（模板 > 判定的
  *    粒度差），不在这里补齐。
  *
  * 批D/E 把 script/dramaturgy/characters/assets 清空后只删不填，整条自确认管道

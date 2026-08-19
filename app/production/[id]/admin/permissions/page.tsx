@@ -14,7 +14,7 @@ import {
   getAllPermissionOverrides,
 } from "@/lib/db";
 import { listProductionDepts } from "@/lib/dept-db";
-import { listDeptPermissionRows, getPermissionVocabulary } from "@/lib/perm-center-db";
+import { listDeptPermissionView, getPermissionVocabulary, type DeptPermissionView } from "@/lib/perm-center-db";
 import AdminPermissionCenterClient from "@/components/AdminPermissionCenterClient";
 
 export default async function PermissionCenterPage({ params }: { params: Promise<{ id: string }> }) {
@@ -47,7 +47,9 @@ export default async function PermissionCenterPage({ params }: { params: Promise
   const [name, depts, deptRows, roles, membersRaw, overrides, vocabulary] = await Promise.all([
     getProductionName(id),
     deptView ? listProductionDepts(id) : Promise.resolve([]),
-    deptView ? listDeptPermissionRows(id) : Promise.resolve({}),
+    // 显式标注类型：Promise.all 对异构数组会把这一格塌成 {}，塌了之后
+    // 下面传给 client 的 prop 类型就再也校验不到（改了数据形状 tsc 不会红）
+    deptView ? listDeptPermissionView(id) : Promise.resolve({} as Record<string, DeptPermissionView>),
     roleView ? listProductionRolesWithPermissions(id) : Promise.resolve([]),
     overrideView ? listProductionMembersWithRoles(id) : Promise.resolve([]),
     overrideView ? getAllPermissionOverrides(id) : Promise.resolve({}),

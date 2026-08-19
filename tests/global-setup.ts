@@ -116,6 +116,12 @@ import {
   type WikiDefaultTreeSnapshot,
 } from "./wiki-default-tree-snapshot";
 import {
+  isDeptPermissionSourcePreMigrationSchema,
+  createDeptPermissionSourcePreMigrationData,
+  DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH,
+  type DeptPermissionSourceSnapshot,
+} from "./dept-permission-source-snapshot";
+import {
   isGrantTemplateRetirePreMigrationSchema,
   createGrantTemplateRetirePreMigrationData,
   GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
@@ -505,6 +511,18 @@ export async function setup() {
     await pool.query(migrationSql);
   }
 
+  // 部门权限行来源分道（#274）：先造四种待回填的行（含「无声明无归属的实例键」那种，
+  // 它是回填判据的考点），再应用迁移，迁移测试比对回填结果。
+  if (await isDeptPermissionSourcePreMigrationSchema(pool)) {
+    const sourceSnapshot = await createDeptPermissionSourcePreMigrationData(pool, TEST_USER);
+    await writeFile(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH, JSON.stringify(sourceSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-dept-permission-source.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
   // grant_template 退役（#163）：先把表内容整份快照下来，迁移测试拿它验证
   // 项目模版常量一键不差地重现了这份模板，然后才 DROP。
   if (await isGrantTemplateRetirePreMigrationSchema(pool)) {
@@ -523,6 +541,22 @@ export async function teardown() {
 
   // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
   await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // 部门权限来源分道（#274）的工厂演出（migration path only）
+  {
+    let sourceSnapshot: DeptPermissionSourceSnapshot | null = null;
+    try {
+      sourceSnapshot = JSON.parse(
+        await readFile(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH, "utf8"),
+      ) as DeptPermissionSourceSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (sourceSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [sourceSnapshot.prodId]).catch(() => {});
+      await unlink(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // Clean up wiki-create-baseline migration factory data (migration path only).
   {

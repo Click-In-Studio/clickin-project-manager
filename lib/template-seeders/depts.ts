@@ -101,8 +101,9 @@ export const deptPermissionsSeeder: TemplateSeeder<DeptPermissionsPayload> = {
       if (!deptId) throw new Error(`[deptPermissions] 部门未建出：${deptName}`);
       if (keys.length === 0) continue;
       await ctx.db.query(
-        `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-         SELECT $1, $2, unnest($3::text[])
+        // source='manual'：模版灌的静态区间行是**给人管的初值**，此后在权限中心增删（#274）
+        `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+         SELECT $1, $2, unnest($3::text[]), 'manual'
          ON CONFLICT (dept_id, permission_key) DO NOTHING`,
         [ctx.productionId, deptId, [...new Set(keys)]],
       );

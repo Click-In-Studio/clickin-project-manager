@@ -1348,6 +1348,14 @@ CREATE TABLE IF NOT EXISTS production_dept_permission (
   production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   dept_id        UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   permission_key TEXT        NOT NULL,
+  -- 这一行由谁在管（#274）。按「要改它得去哪儿」划分，不是按谁创建的：
+  --   manual   人在权限中心配的 / 项目模版灌的静态区间行 —— 就在权限中心改
+  --   template cue 声明行实例化 —— 去权限模版页改声明
+  --   resource 资源自身的归属或分享面（建表定式 / cue 表分享 / 事件归属）—— 去该资源页改
+  -- 同一枚键只有一行（下方 UNIQUE），故自动通道用 DO UPDATE 升级 manual → template/resource：
+  -- 撤声明 / 撤分享时那一行本来就会被按键形收走，标成 manual 会让界面撒谎。
+  source         TEXT        NOT NULL DEFAULT 'manual'
+                             CHECK (source IN ('manual', 'template', 'resource')),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (dept_id, permission_key)
 );

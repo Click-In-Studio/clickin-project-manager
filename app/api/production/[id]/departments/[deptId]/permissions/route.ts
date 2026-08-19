@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/api-guard";
 import { getProductionDept } from "@/lib/dept-db";
-import { listDeptPermissionRows, setDeptPermissionRows } from "@/lib/perm-center-db";
+import { listDeptPermissionView, setDeptPermissionRows } from "@/lib/perm-center-db";
 import { isGovernanceNodeKey } from "@/lib/grant-template";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
@@ -18,11 +18,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (deny) return deny;
   const dept = await getProductionDept(deptId, id);
   if (!dept) return Response.json({ error: "部门不存在" }, { status: 404 });
-  const rows = await listDeptPermissionRows(id);
-  return Response.json({ keys: rows[deptId] ?? [] });
+  // 只回**人管的**那批（与 PUT 对称）；声明/归属在管的实例行分组在 groups 里，
+  // 编辑面不碰它们（#274）。
+  const rows = await listDeptPermissionView(id);
+  return Response.json({ keys: rows[deptId]?.manual ?? [], groups: rows[deptId]?.groups ?? [] });
 }
 
-/** PUT — 全量替换该部门的权限行。Body: { keys: string[] } */
+/** PUT — 全量替换该部门**人管的**权限行（source='manual'）。Body: { keys: string[] }
+ *  声明行实例化与资源归属发的行不受影响，见 setDeptPermissionRows 注释。 */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id, deptId } = await ctx.params;
   const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });

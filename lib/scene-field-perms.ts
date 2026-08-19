@@ -2,7 +2,7 @@
  * scene 字段门的单一事实源（2026-08-17）。
  *
  * 总表 §0「字段写权限挂 meta 下」：scene 的每个可写字段各有一把钥匙，
- * grant_template 也是逐字段发的。这里把「字段 → 节点 sub」的映射集中一处，
+ * 项目模版（原 grant_template）也是逐字段发的。这里把「字段 → 节点 sub」的映射集中一处，
  * 三个消费方共用，避免再次出现模板与判定各说各话：
  *
  *   - app/api/production/[id]/scenes/[sceneId]  构作页 REST 的逐字段门

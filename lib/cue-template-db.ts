@@ -47,7 +47,9 @@ export async function canCreateViaTemplate(
 }
 
 /** 建表定式（C-1 进化）：∀ (dept, template) 声明行 → permissions 实例化写入
- *  production_dept_permission（区间非 grant：自确认进入/伞语义下传/退出 recompute 撤销）。 */
+ *  production_dept_permission（区间非 grant：自确认进入/伞语义下传/退出 recompute 撤销）。
+ *  source='template'：这些行由声明表在管，权限中心折叠只读（#274）。撞上人手动发过的
+ *  同一枚键时**升级**它——撤声明时 removeCueTemplateGrants 按键形收走，标 manual 会撒谎。 */
 export async function applyCueTemplateGrants(
   client: Pool | PoolClient,
   productionId: string,
@@ -55,16 +57,17 @@ export async function applyCueTemplateGrants(
   template: string,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
      SELECT t.production_id, t.dept_id,
             CASE WHEN rel LIKE '@%'
                  THEN 'node:cue_list/' || $2 || rel
                  ELSE 'node:cue_list/' || $2 || '/' || rel
-            END
+            END,
+            'template'
      FROM dept_cue_list_template t
      CROSS JOIN LATERAL unnest(t.permissions) AS rel
      WHERE t.production_id = $1 AND t.template = $3
-     ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+     ON CONFLICT (dept_id, permission_key) DO UPDATE SET source = 'template'`,
     [productionId, cueListId, template],
   );
 }
@@ -84,19 +87,20 @@ export async function propagateTemplateToExisting(
   if (decl.rows.length === 0) return 0;
   // 单条 INSERT...SELECT：原子（review finding——循环逐行写入非原子）
   const res = await pool.query(
-    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
      SELECT $1, $2,
             CASE WHEN r.rel LIKE '@%'
                  THEN 'node:cue_list/' || cl.id || r.rel
                  ELSE 'node:cue_list/' || cl.id || '/' || r.rel
-            END
+            END,
+            'template'
      FROM cue_list cl
      CROSS JOIN (
        SELECT unnest(permissions) AS rel
        FROM dept_cue_list_template WHERE dept_id = $2 AND template = $3
      ) r
      WHERE cl.production_id = $1 AND cl.template = $3
-     ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+     ON CONFLICT (dept_id, permission_key) DO UPDATE SET source = 'template'`,
     [productionId, deptId, template],
   );
   return res.rowCount ?? 0;

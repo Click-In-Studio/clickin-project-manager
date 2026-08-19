@@ -368,8 +368,9 @@ export async function writeEventGrants(
     [productionId, eventId, createdBy],
   );
   await pool.query(
-    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-     SELECT $1, rdm.dept_id, k.key
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+     -- source='resource'：由事件的归属信号在管（#274）
+     SELECT $1, rdm.dept_id, k.key, 'resource'
      FROM resource_dept_manage rdm
      CROSS JOIN LATERAL (VALUES
        ('node:event/' || $2 || '@view'),
@@ -860,13 +861,14 @@ export async function addCueListDeptAccess(
     [productionId, deptId, cueListId, establishedBy],
   );
   await getPool().query(
-    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+     -- source='resource'：由该表的分享面在管（#274）
      SELECT $1, $2, unnest(ARRAY[
        'node:cue_list/' || $3 || '@view',
        'node:cue_list/' || $3 || '@edit',
        'node:cue_list/' || $3 || '/cues@create',
        'node:cue_list/' || $3 || '/cues@delete'
-     ]) ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+     ]), 'resource' ON CONFLICT (dept_id, permission_key) DO UPDATE SET source = 'resource'`,
     [productionId, deptId, cueListId],
   );
 }
@@ -887,8 +889,11 @@ export async function removeCueListDeptAccess(
   // 撤 zone 资格行，并对该 dept 成员立即重算存续（资格消失 → self_confirmed 行收走，
   // 不等下次偶然的 role/dept 变动）
   await getPool().query(
+    // 不碰 source='manual'：那是有人在权限中心显式发过的一枚，撤分享不该顺手抹掉
+    // 别人的决定（#274）。撤完在部门权限页仍可见、可删。
     `DELETE FROM production_dept_permission
-     WHERE dept_id = $1 AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
+     WHERE dept_id = $1 AND source <> 'manual'
+       AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
     [deptId, cueListId],
   );
   const { rows: members } = await getPool().query<{ user_id: string }>(

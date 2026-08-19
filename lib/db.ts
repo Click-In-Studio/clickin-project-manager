@@ -1799,8 +1799,9 @@ async function seedCueListCreatorAccessInTx(
        ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
        DO NOTHING
      ), dept_permissions AS (
-       INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-       SELECT $1, eligible_depts.dept_id, k.key
+       INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+       -- source='resource'：由该表的归属信号在管（#274），权限中心折叠只读
+       SELECT $1, eligible_depts.dept_id, k.key, 'resource'
        FROM eligible_depts
        CROSS JOIN (VALUES
          ('node:cue_list/' || $2 || '@view'),
