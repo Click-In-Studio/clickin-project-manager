@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
+import { datetimeLocalToIso, fmtDate, fmtTime, isoToDatetimeLocal } from "@/lib/tz";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 import type { PickerMember, PickerDept } from "@/components/MemberPickerModal";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
@@ -73,12 +74,9 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
 
 const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;
 
-function isoToLocalDateTime(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
+// 时间一律 CST，不跟浏览器时区走（全库口径见 lib/tz.ts）。原实现用
+// getTimezoneOffset 转成浏览器本地时间填进 datetime-local，非 CST 用户看到的
+// 是偏移过的时刻，改完保存又按本地时区解析写回去，读写两头都歪。
 
 // ─── 新建任务模态框 ───────────────────────────────────────────────────────────
 
@@ -216,8 +214,8 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
           description,
           departmentId: deptId || null,
           assignees: [...assignees.entries()].map(([userId, name]) => ({ userId, name })),
-          startTime: startTime ? new Date(startTime).toISOString() : null,
-          endTime: endTime ? new Date(endTime).toISOString() : null,
+          startTime: startTime ? datetimeLocalToIso(startTime) : null,
+          endTime: endTime ? datetimeLocalToIso(endTime) : null,
           milestoneIds: [...milestoneIds],
           eventId: eventId || null,
           scheduleItemIds: [...scheduleItemIds],
@@ -385,7 +383,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
               <DropdownPicker
                 items={options.events.map(ev => ({
                   id: ev.id,
-                  label: `${ev.startTime ? `${new Date(ev.startTime).getMonth() + 1}/${new Date(ev.startTime).getDate()} · ` : ""}${ev.title}`,
+                  label: `${ev.startTime ? `${fmtDate(ev.startTime)} · ` : ""}${ev.title}`,
                   sublabel: ev.requiresPocDept ? "需绑定你负责的部门（POC 路径）" : undefined,
                 }))}
                 value={eventId || null}
@@ -420,7 +418,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
                         style={CHIP_TOGGLE(active)}
                       >
                         {it.title}
-                        {it.startTime ? ` · ${new Date(it.startTime).getHours().toString().padStart(2, "0")}:${new Date(it.startTime).getMinutes().toString().padStart(2, "0")}` : ""}
+                        {it.startTime ? ` · ${fmtTime(it.startTime)}` : ""}
                       </button>
                     );
                   })}
@@ -591,8 +589,8 @@ export default function ProductionTasksClient({
   function beginDrawerEdit(task: ProductionTechReqEntry) {
     setDrawerTitle(task.title);
     setDrawerDescription(task.description);
-    setDrawerStart(isoToLocalDateTime(task.startTime));
-    setDrawerEnd(isoToLocalDateTime(task.endTime));
+    setDrawerStart(isoToDatetimeLocal(task.startTime));
+    setDrawerEnd(isoToDatetimeLocal(task.endTime));
     setDrawerEventId(task.eventId ?? "");
     setDrawerDeptId(task.departmentId ?? "");
     setDrawerError(null);
@@ -617,8 +615,8 @@ export default function ProductionTasksClient({
         body: JSON.stringify({
           title: drawerTitle.trim(),
           description: drawerDescription,
-          startTime: drawerStart ? new Date(drawerStart).toISOString() : null,
-          endTime: drawerEnd ? new Date(drawerEnd).toISOString() : null,
+          startTime: drawerStart ? datetimeLocalToIso(drawerStart) : null,
+          endTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : null,
           eventId: drawerEventId || null,
           departmentId: drawerDeptId || null,
         }),
@@ -636,10 +634,10 @@ export default function ProductionTasksClient({
         eventTitle,
         departmentId: drawerDeptId || null,
         departmentName,
-        startTime: drawerStart ? new Date(drawerStart).toISOString() : null,
-        endTime: drawerEnd ? new Date(drawerEnd).toISOString() : null,
-        effectiveStartTime: drawerStart ? new Date(drawerStart).toISOString() : data.task?.effectiveStartTime ?? task.effectiveStartTime,
-        effectiveEndTime: drawerEnd ? new Date(drawerEnd).toISOString() : data.task?.effectiveEndTime ?? task.effectiveEndTime,
+        startTime: drawerStart ? datetimeLocalToIso(drawerStart) : null,
+        endTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : null,
+        effectiveStartTime: drawerStart ? datetimeLocalToIso(drawerStart) : data.task?.effectiveStartTime ?? task.effectiveStartTime,
+        effectiveEndTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : data.task?.effectiveEndTime ?? task.effectiveEndTime,
       };
       setTasks(current => current.map(item => item.id === task.id ? patch : item));
       setSelected(patch);

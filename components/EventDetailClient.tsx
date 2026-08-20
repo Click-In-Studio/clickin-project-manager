@@ -3087,6 +3087,10 @@ function EventRelationsTab({
       if (!res.ok) { setMessage(data.error ?? "保存关联失败"); return; }
       onSaved(data.taskIds ?? [...selectedTasks], data.milestoneIds ?? [...selectedMilestones]);
       setMessage("关联已保存");
+    } catch (err) {
+      // 没有 catch 的话 fetch 抛出去，按钮从「保存中…」变回「保存关联」，
+      // 用户看不出成没成——而这个面改的是 task 的归属，静默失败代价很大
+      setMessage(err instanceof Error ? `保存关联失败：${err.message}` : "保存关联失败，请重试");
     } finally {
       setSaving(false);
     }

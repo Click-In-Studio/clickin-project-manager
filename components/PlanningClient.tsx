@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { dateTimeToIso, fmtDate, fmtTime, isoCSTDateStr, todayCSTStr } from "@/lib/tz";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
@@ -53,13 +54,24 @@ const TASK_STATUS_LABELS: Record<string, string> = {
 
 type QuickCreateKind = "event" | "task";
 
+// 时间一律 CST（UTC+8），不跟浏览器时区走——全库口径见 lib/tz.ts。
+// 原实现用 getFullYear/getHours 这类本地方法，非 CST 时区的用户会看到偏移过的
+// 时间，而且写回去时把本地时间当成 CST 存，把数据也写歪。
+
+/**
+ * 日历格子的 Date → "YYYY-MM-DD"。
+ *
+ * 格子 Date 一律用 Date.UTC 构造（见 CalendarView 的 cells），所以这里读 UTC 部件
+ * 就是那一天本身，**不能再 +8**——格子代表的是「CST 的某一天」这个概念，不是某个
+ * 时刻。事件落到哪一格另走 isoCSTDateStr（ISO 时刻 → CST 日期），两者对齐。
+ */
 function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
+/** ISO → CST 的 "HH:mm" */
 function hhmm(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return fmtTime(iso);
 }
 
 // ─── 项目日历 ─────────────────────────────────────────────────────────────────
@@ -94,8 +106,10 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
     if (!title.trim()) return;
     setSaving(true);
     setError(null);
-    const start = new Date(`${date}T${startTime}:00`).toISOString();
-    const end = new Date(`${date}T${endTime}:00`).toISOString();
+    // date 是 CST 日历格子的日期，startTime/endTime 是 CST 时刻——按 CST 解析，
+    // 不能交给 new Date() 按浏览器本地时区猜
+    const start = dateTimeToIso(date, startTime);
+    const end = dateTimeToIso(date, endTime);
     if (end <= start) {
       setError("结束时间必须晚于开始时间");
       setSaving(false);
@@ -349,9 +363,13 @@ function CalendarDetailDrawer({ productionId, selection, onClose }: {
 }
 
 function CalendarView({ productionId, events, tasks, milestones, departments }: Props) {
-  const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth());  // 0-based
+  // 「今天」按 CST 算，不按浏览器本地——跨时区的人不该看到不同的当月/今日高亮
+  const today = useMemo(() => {
+    const [y, m, d] = todayCSTStr().split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }, []);
+  const [year, setYear] = useState(today.getUTCFullYear());
+  const [month, setMonth] = useState(today.getUTCMonth());  // 0-based
   const [quickCreateDate, setQuickCreateDate] = useState<string | null>(null);
   const [selection, setSelection] = useState<CalendarSelection | null>(null);
 
@@ -369,10 +387,10 @@ function CalendarView({ productionId, events, tasks, milestones, departments }: 
     };
     for (const ev of events) {
       if (!ev.startTime || ev.status === "cancelled") continue;
-      entry(ymd(new Date(ev.startTime))).events.push(ev);
+      entry(isoCSTDateStr(ev.startTime)).events.push(ev);
     }
     for (const t of standaloneTasks) {
-      entry(ymd(new Date(t.effectiveStartTime!))).tasks.push(t);
+      entry(isoCSTDateStr(t.effectiveStartTime!)).tasks.push(t);
     }
     for (const m of milestones) {
       entry(m.endDate.slice(0, 10)).milestones.push(m);
@@ -382,20 +400,17 @@ function CalendarView({ productionId, events, tasks, milestones, departments }: 
 
   // 周一起始月网格（原型为 4 周静态；实装整月 6 周）
   const cells = useMemo(() => {
-    const first = new Date(year, month, 1);
-    const lead = (first.getDay() + 6) % 7;
-    const start = new Date(year, month, 1 - lead);
-    return Array.from({ length: 42 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      return d;
-    });
+    // 全部用 Date.UTC 构造：格子代表「CST 的某一天」，用本地构造会让 UTC+10 之类的
+    // 浏览器整体错一天（本地午夜换算成 CST 落到前一天）
+    const first = new Date(Date.UTC(year, month, 1));
+    const lead = (first.getUTCDay() + 6) % 7;
+    return Array.from({ length: 42 }, (_, i) => new Date(Date.UTC(year, month, 1 - lead + i)));
   }, [year, month]);
 
   const move = (delta: number) => {
-    const d = new Date(year, month + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
+    const d = new Date(Date.UTC(year, month + delta, 1));
+    setYear(d.getUTCFullYear());
+    setMonth(d.getUTCMonth());
   };
 
   const todayStr = ymd(today);
@@ -419,7 +434,7 @@ function CalendarView({ productionId, events, tasks, milestones, departments }: 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
-              onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); }}
+              onClick={() => { setYear(today.getUTCFullYear()); setMonth(today.getUTCMonth()); }}
               style={{ ...CAL_NAV_BTN, width: "auto", padding: "0 10px", fontSize: 10, fontWeight: 700 }}
             >
               定位至今天
@@ -454,7 +469,7 @@ function CalendarView({ productionId, events, tasks, milestones, departments }: 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)" }}>
         {cells.map((d) => {
           const date = ymd(d);
-          const inMonth = d.getMonth() === month;
+          const inMonth = d.getUTCMonth() === month;
           const day = byDate.get(date);
           const isToday = date === todayStr;
           const dayEntries: CalendarSelection[] = day ? [
@@ -479,7 +494,7 @@ function CalendarView({ productionId, events, tasks, milestones, departments }: 
               className={`${styles.calendarCell} ${isToday ? styles.calendarCellToday : ""}`}
               style={{ opacity: inMonth ? 1 : 0.45 }}
             >
-              <b style={{ fontSize: 9, color: "var(--muted)" }}>{d.getDate()}</b>
+              <b style={{ fontSize: 9, color: "var(--muted)" }}>{d.getUTCDate()}</b>
               {shownEntries.map(entry => {
                 const entryTitle = entry.kind === "event" ? entry.value.title : entry.kind === "task" ? entry.value.title : entry.value.name;
                 const prefix = entry.kind === "event" ? "事件 · " : entry.kind === "task" ? "任务 · " : "◆ ";
@@ -860,9 +875,10 @@ const ITEM_TONE: Record<string, { bg: string; border: string }> = {
   custom: { bg: "#dce9e9", border: "rgba(47,102,112,.28)" },
 };
 
+/** ISO → 当天 CST 的分钟数（时间轴定位用） */
 function minutesOfIso(iso: string): number {
-  const d = new Date(iso);
-  return d.getHours() * 60 + d.getMinutes();
+  const [h, m] = fmtTime(iso).split(":").map(Number);
+  return h * 60 + m;
 }
 
 function fmtMin(total: number): string {
@@ -914,11 +930,9 @@ type RundownDragEntry = RundownEntrySelection & { duration: number };
 
 const RUNDOWN_COLORS = ["#dce9e9", "#edf0e5", "#f2e3d6", "#eee5f0", "#e8e6f7", "#f5dfd8"];
 
+/** 保留 ISO 的 CST 日期，换成给定的 CST "HH:mm" → UTC ISO */
 function withTime(iso: string, value: string): string {
-  const [hour, minute] = value.split(":").map(Number);
-  const date = new Date(iso);
-  date.setHours(hour, minute, 0, 0);
-  return date.toISOString();
+  return dateTimeToIso(isoCSTDateStr(iso), value);
 }
 
 function RundownColumnEditor({ column, departments, members, roles, onChange, onRename, onToggleValue, onToggleRole, onDelete, onClose }: {
@@ -1503,7 +1517,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
           <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
-            {event?.startTime ? `${new Date(event.startTime).getMonth() + 1} 月 ${new Date(event.startTime).getDate()} 日` : "Rundown"}
+            {event?.startTime ? fmtDate(event.startTime) : "Rundown"}
           </p>
           <h2 style={{ margin: "5px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>
             Rundown / 现场执行表
@@ -1545,7 +1559,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
           <select value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} style={CONTROL_SELECT}>
             {timedEvents.map(e => (
               <option key={e.id} value={e.id}>
-                {e.startTime ? `${new Date(e.startTime).getMonth() + 1} 月 ${new Date(e.startTime).getDate()} 日 · ` : ""}{e.title}
+                {e.startTime ? `${fmtDate(e.startTime)} · ` : ""}{e.title}
               </option>
             ))}
           </select>
