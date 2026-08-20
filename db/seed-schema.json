@@ -810,6 +810,90 @@
       "nullable": true
     }
   ],
+  "event_group": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "location",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "color",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "order_index",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "poc_dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "poc_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "event_group_member": [
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "added_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "event_participant": [
     {
       "column": "id",
@@ -2272,6 +2356,18 @@
     },
     {
       "column": "dept_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
+  "schedule_item_group": [
+    {
+      "column": "item_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "group_id",
       "type": "uuid",
       "nullable": false
     }

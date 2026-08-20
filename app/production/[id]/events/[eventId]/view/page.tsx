@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasEventDomainView, loadEventPermContext } from "@/lib/event-permissions";
+import { canEnterEvent, loadEventPermContext } from "@/lib/event-permissions";
 import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
@@ -38,9 +38,11 @@ export default async function EventViewPage({
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) // event:follow 批B 两职拆分：订阅=followers@create、读取=meta/details@view——
-  // 此门是 hasEventDomainView（域 view），申请节点=meta@view 才与门一致（非 verb swap）
-  redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
+  // 门 = 域 view 行，或通过用户组参与了这个 event（后者是 Type B 上下文判定，
+  // 见 canEnterEvent）。批B 两职拆分：订阅=followers@create、读取=meta/details@view——
+  // 申请节点=meta@view 才与门一致（非 verb swap）
+  if (!(await canEnterEvent(toActor(session, prodPermCtx), productionId, eventId)))
+    redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();

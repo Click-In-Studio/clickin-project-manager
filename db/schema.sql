@@ -503,6 +503,53 @@ CREATE TABLE IF NOT EXISTS schedule_item_department (
   PRIMARY KEY (item_id, dept_id)
 );
 
+-- ── 用户组（add-event-group.sql）────────────────────────────────────────────────
+-- 部门 + 人的集合，自带 POC。两型由 event_id 是否为 NULL 判定：
+--   A 型（event 非空）该 event 专属，门 = hasEventContentEdit
+--   B 型（event 为空）项目级常驻编制，门 = node:user_group/*，设 POC 另需 poc@edit
+-- 与 schedule_item_participant / _department **并联**，不是串联——直挂人/部门的路保留。
+
+CREATE TABLE IF NOT EXISTS event_group (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  event_id      TEXT        REFERENCES production_event(id) ON DELETE CASCADE,
+  name          TEXT        NOT NULL,
+  location      TEXT        NOT NULL DEFAULT '',
+  color         TEXT,
+  order_index   INTEGER     NOT NULL DEFAULT 0,
+  poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
+  poc_user_id   UUID        REFERENCES app_user(id)        ON DELETE SET NULL,
+  created_by    UUID        NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT event_group_poc_single CHECK (num_nonnulls(poc_dept_id, poc_user_id) <= 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_name_unique_idx
+  ON event_group (production_id, COALESCE(event_id, ''), name);
+CREATE INDEX IF NOT EXISTS event_group_production_idx ON event_group (production_id);
+CREATE INDEX IF NOT EXISTS event_group_event_idx      ON event_group (event_id) WHERE event_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS event_group_member (
+  group_id UUID        NOT NULL REFERENCES event_group(id)  ON DELETE CASCADE,
+  dept_id  UUID        REFERENCES production_dept(id)       ON DELETE CASCADE,
+  user_id  UUID        REFERENCES app_user(id)              ON DELETE CASCADE,
+  added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT event_group_member_one_kind CHECK (num_nonnulls(dept_id, user_id) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_member_dept_idx
+  ON event_group_member (group_id, dept_id) WHERE dept_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_member_user_idx
+  ON event_group_member (group_id, user_id) WHERE user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS schedule_item_group (
+  item_id  TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
+  group_id UUID NOT NULL REFERENCES event_group(id)         ON DELETE CASCADE,
+  PRIMARY KEY (item_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS schedule_item_group_group_idx ON schedule_item_group (group_id);
+
 CREATE TABLE IF NOT EXISTS schedule_item_participant (
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,

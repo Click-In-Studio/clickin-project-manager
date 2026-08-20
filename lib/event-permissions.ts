@@ -83,6 +83,36 @@ export function hasEventDomainView(actor: GrantActor, productionId: string): Pro
   return hasAnyEffectiveGrant(actor, productionId, "event", EVENT_DOMAIN_VIEW_SUBS, "view");
 }
 
+/**
+ * 「在用户组里参加 = 原来的直接参加」——他是不是通过某个用户组参与了这个 event。
+ *
+ * Type B 上下文关系判定，**不落 grant 行**。这条是刻意的：组里放的「灯光部」是活
+ * 引用，灯光部后来加的人也该自动可见。若做成入组那刻 INSERT 一批 grant 行，那么
+ * 「部门加人」这个写点就得回溯给所有含该部门的组所在的每个 event 补发行——行同步
+ * 一定会漏。判定端实时算，部门加人下一次判定自动通过。
+ *
+ * 判定端新入口，已记入总表 §0.9。
+ */
+export async function isEventGroupParticipant(eventId: string, userId: string): Promise<boolean> {
+  const { userGroupIdsInEvent } = await import("./event-group-db");
+  return (await userGroupIdsInEvent(eventId, userId)).length > 0;
+}
+
+/**
+ * 进某个具体 event 的门：event 域 view 行，**或**通过用户组参与了这个 event。
+ *
+ * 与 hasEventDomainView 的区别是它认实例——组参与是「这一个 event」的关系，不是
+ * 整个域的资格。落到行为上：被 organizer 加进「进场对光小组」的音响负责人，即使
+ * 一行 event 域 view 都没有，也进得来看自己要干什么；但他仍然只到跟随视图
+ * （/events/<id>/view），详情页要实例行——参与不等于管理。
+ */
+export async function canEnterEvent(
+  actor: GrantActor, productionId: string, eventId: string,
+): Promise<boolean> {
+  if (await hasEventDomainView(actor, productionId)) return true;
+  return isEventGroupParticipant(eventId, actor.userId);
+}
+
 /** 事件内容写门（状态感知）：published → publication@edit；否则 details@edit。 */
 export function hasEventContentEdit(
   actor: GrantActor, productionId: string, eventId: string, status: string,
