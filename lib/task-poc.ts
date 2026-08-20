@@ -90,28 +90,48 @@ async function isDeptPoc(productionId: string, deptId: string, userId: string): 
   return res.rows[0].exists;
 }
 
-/** 候选责任主体的 POC 判定（task 尚未创建时用）。主体为 null 恒 false。 */
+/**
+ * 候选责任主体的 POC 判定（task 尚未创建时用）。主体为 null 恒 false。
+ *
+ * `eventId` 是**冻结语境**：组主体 + 该 event 已对这个组冻结 → POC 读快照里那位，
+ * 不读组的现任 POC。这是「POC 在冻结后分裂」的落实——追责认当时那个人，而且
+ * **权限不自动漂移**：他失效了也不会自动换人，要动这条 task 得有人显式接手
+ * （owner 旁路或申请通道）。谁来接手是 PSM 的判断，机器不做这个决定。
+ */
 export async function isSubjectPoc(
   productionId: string,
   subject: TaskSubject | null,
   userId: string,
+  eventId?: string | null,
 ): Promise<boolean> {
   if (!subject) return false;
   switch (subject.kind) {
     case "dept":
       return isDeptPoc(productionId, subject.id, userId);
-    case "group":
+    case "group": {
+      if (eventId) {
+        const { isGroupFrozenForEvent, frozenGroupPocUserIds } = await import("./event-group-freeze");
+        if (await isGroupFrozenForEvent(eventId, subject.id)) {
+          return (await frozenGroupPocUserIds(eventId, subject.id)).includes(userId);
+        }
+      }
       return isGroupPocScoped(productionId, subject.id, userId);
+    }
   }
 }
 
-/** 已存在 task 的 POC 判定。 */
+/**
+ * 已存在 task 的 POC 判定。
+ *
+ * 带上 task.eventId 一起传下去——组主体在已冻结的 event 里要读快照 POC（见
+ * {@link isSubjectPoc}）。传 task 整个对象而不是拆字段，就是为了不让调用点漏掉它。
+ */
 export function isTaskPoc(
   productionId: string,
-  task: { departmentId: string | null; groupId?: string | null },
+  task: { departmentId: string | null; groupId?: string | null; eventId?: string | null },
   userId: string,
 ): Promise<boolean> {
-  return isSubjectPoc(productionId, taskSubjectOf(task), userId);
+  return isSubjectPoc(productionId, taskSubjectOf(task), userId, task.eventId ?? null);
 }
 
 /** 便捷形式：调用点手里只有一个 groupId 字符串时用。 */

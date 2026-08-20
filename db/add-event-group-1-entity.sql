@@ -1,3 +1,6 @@
+-- 【用户组序列 1/3】实体本身。2/3（task 责任主体）有 FK 指向本文件建的 event_group，
+-- 必须先跑。文件名带序号是因为字母序里 `add-event-group-3-freeze` 会排到
+-- `add-event-group.sql` 前面（'-' < '.'），靠原名排序会把依赖序排反。
 -- 用户组（event_group）：由若干「部门」与「人」组成的集合，自带 POC。
 --
 -- 存在的理由：rundown 要能把「灯光部 + 一个助理舞监 + 几个外场 runner」当成

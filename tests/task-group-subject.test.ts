@@ -23,7 +23,8 @@ import {
   listMyTechReqsFull, updateTaskByProduction,
 } from "@/lib/event-db";
 import { canAssignTechReq, canEditTechReq, canViewTechReq, canEnterEvent } from "@/lib/event-permissions";
-import { createEventGroup, deleteEventGroup } from "@/lib/event-group-db";
+import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/event-group-db";
+import { freezeEventGroups, unfreezeEventGroups } from "@/lib/event-group-freeze";
 import { isTaskPoc, taskSubjectOf, parseTaskSubject } from "@/lib/task-poc";
 import { toActor } from "@/lib/grant-check";
 import type { PermissionContext } from "@/lib/permissions";
@@ -234,7 +235,7 @@ describe("7. 主体消失不连坐删 task", () => {
     expect(await isTaskPoc(prodId, after, deptPocId)).toBe(false);
   });
 
-  it("删组 → 引用它的 task 的 group_id 置空（ON DELETE SET NULL），task 不删", async () => {
+  it("被未冻结的 task 引用时删不掉；引用冻结后可删，task.group_id 置空但 task 还在", async () => {
     const g = await createEventGroup({
       productionId: prodId, eventId, name: `将被删${shortId()}`,
       members: [{ kind: "dept", id: deptId }], poc: { kind: "dept", id: deptId },
@@ -245,10 +246,18 @@ describe("7. 主体消失不连坐删 task", () => {
       title: "随组消失的活", description: "", presetMinutes: null,
       departmentId: null, groupId: g.id, assignees: [], createdBy: organizerId,
     });
+
+    // task 引用也是活引用：直接删会把这条 task 的责任主体静默清空，所以挡住
+    await expect(deleteEventGroup(g.id, prodId)).rejects.toThrow(EventGroupError);
+
+    // 冻结之后引用不再是活的（快照自带组名与 POC），放行
+    await freezeEventGroups(eventId, organizerId);
     await deleteEventGroup(g.id, prodId);
 
     const after = await getTechReqByProduction(t.id, prodId);
-    expect(after).not.toBeNull();
+    expect(after).not.toBeNull();          // ON DELETE SET NULL，不连坐删 task
     expect(after!.groupId).toBeNull();
+
+    await unfreezeEventGroups(eventId);
   });
 });

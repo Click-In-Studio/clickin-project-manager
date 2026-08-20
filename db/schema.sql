@@ -503,7 +503,7 @@ CREATE TABLE IF NOT EXISTS schedule_item_department (
   PRIMARY KEY (item_id, dept_id)
 );
 
--- ── 用户组（add-event-group.sql）────────────────────────────────────────────────
+-- ── 用户组（add-event-group-1-entity.sql）────────────────────────────────────────────────
 -- 部门 + 人的集合，自带 POC。两型由 event_id 是否为 NULL 判定：
 --   A 型（event 非空）该 event 专属，门 = hasEventContentEdit
 --   B 型（event 为空）项目级常驻编制，门 = node:user_group/*，设 POC 另需 poc@edit
@@ -550,6 +550,52 @@ CREATE TABLE IF NOT EXISTS schedule_item_group (
 
 CREATE INDEX IF NOT EXISTS schedule_item_group_group_idx ON schedule_item_group (group_id);
 
+-- ── 用户组冻结快照（add-event-group-3-freeze.sql）──────────────────────────────────
+-- 冻的是「event × group 的成员解析结果」，不是 group 本身——B 型组被 5 个 event 引用，
+-- 冻了 3 个，组本身照常改，只影响另外 2 个。故键含 event_id。
+-- 完整快照 = 人员 + 人员关系（via_dept_*，他当时以什么身份在场）+ 当时的 POC。
+-- 所有 *_name 是刻意的文本冗余：审计要「当时叫什么」，不随实体改名而漂。
+-- refreeze 追加不覆盖：unfreeze 置 released_at，再冻插新一版，历史全留。
+
+CREATE TABLE IF NOT EXISTS event_group_freeze (
+  event_id      TEXT        NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  -- 刻意不设 FK：快照自给自足，组行删掉后仍解析得出（CASCADE 会删审计，
+  -- SET NULL 与 PK 的 NOT NULL 冲突）
+  group_id      UUID        NOT NULL,
+  frozen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  released_at   TIMESTAMPTZ,
+  group_name    TEXT        NOT NULL,
+  location      TEXT        NOT NULL DEFAULT '',
+  poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
+  poc_dept_name TEXT,
+  poc_user_id   UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  poc_user_name TEXT,
+  frozen_by     UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  PRIMARY KEY (event_id, group_id, frozen_at)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_freeze_active_idx
+  ON event_group_freeze (event_id, group_id) WHERE released_at IS NULL;
+CREATE INDEX IF NOT EXISTS event_group_freeze_event_idx ON event_group_freeze (event_id);
+
+CREATE TABLE IF NOT EXISTS event_group_freeze_member (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id      TEXT        NOT NULL,
+  group_id      UUID        NOT NULL,
+  frozen_at     TIMESTAMPTZ NOT NULL,
+  user_id       UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  user_name     TEXT        NOT NULL,
+  via_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
+  via_dept_name TEXT,
+  FOREIGN KEY (event_id, group_id, frozen_at)
+    REFERENCES event_group_freeze (event_id, group_id, frozen_at) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS event_group_freeze_member_snapshot_idx
+  ON event_group_freeze_member (event_id, group_id, frozen_at);
+CREATE INDEX IF NOT EXISTS event_group_freeze_member_user_idx
+  ON event_group_freeze_member (user_id) WHERE user_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS schedule_item_participant (
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -586,7 +632,7 @@ CREATE TABLE IF NOT EXISTS task (
   description    TEXT NOT NULL DEFAULT '',
   preset_minutes INTEGER,
   department_id  UUID REFERENCES production_dept(id) ON DELETE SET NULL,
-  -- 责任主体的另一支（add-task-group.sql）：绑用户组而非部门。与 department_id
+  -- 责任主体的另一支（add-event-group-2-task-subject.sql）：绑用户组而非部门。与 department_id
   -- 互斥（task_subject_single），POC 从组的当前定义解析，见 lib/task-poc.ts。
   group_id       UUID REFERENCES event_group(id) ON DELETE SET NULL,
   status         TEXT NOT NULL DEFAULT 'pending',

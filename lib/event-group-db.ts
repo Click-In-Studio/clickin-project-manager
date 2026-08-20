@@ -215,6 +215,28 @@ export async function isGroupPoc(groupId: string, userId: string): Promise<boole
  * 事件可见性判定用它（Type B，不落 grant 行，部门加人自动跟踪）。
  */
 export async function userGroupIdsInEvent(eventId: string, userId: string): Promise<string[]> {
+  // 冻结分流：这个 event 对某些组已冻结的话，那些组读快照而不是实时解析——
+  // 冻结之后组再加人，加进去的人不该获得这个 event 的可见性（组「可以独立更改但是
+  // 不会影响到该 event」）。反过来，冻结时在组里的人即使后来退出部门也仍然可查。
+  const { frozenGroupIds } = await import("./event-group-freeze");
+  const frozen = await frozenGroupIds(eventId);
+  if (frozen.size) {
+    const res = await getPool().query<{ group_id: string }>(
+      `SELECT DISTINCT m.group_id
+         FROM event_group_freeze f
+         JOIN event_group_freeze_member m
+           ON m.event_id = f.event_id AND m.group_id = f.group_id AND m.frozen_at = f.frozen_at
+        WHERE f.event_id = $1 AND f.released_at IS NULL AND m.user_id = $2`,
+      [eventId, userId],
+    );
+    const live = await liveUserGroupIdsInEvent(eventId, userId);
+    return [...new Set([...res.rows.map(r => r.group_id), ...live.filter(id => !frozen.has(id))])];
+  }
+  return liveUserGroupIdsInEvent(eventId, userId);
+}
+
+/** 实时解析版（未冻结的组走这条）。 */
+async function liveUserGroupIdsInEvent(eventId: string, userId: string): Promise<string[]> {
   // 组进入一个 event 有两条通道，都要认：
   //   1. 挂在该 event 的流程项上（rundown 的列）
   //   2. 作为该 event 下某条 task 的责任主体（task.group_id）
@@ -434,12 +456,26 @@ export async function updateEventGroup(
  * 自带组名与 POC 快照，删掉组行也解析得出；挡的只是活引用。
  */
 export async function deleteEventGroup(groupId: string, productionId: string): Promise<void> {
+  // 只挡**活引用**：还挂在流程项上、或还是某条 task 的责任主体，且那个 event 没冻。
+  // 已冻结的引用不构成阻拦——快照自带 group_name / poc_*_name，组行删掉之后依然
+  // 解析得出，审计不断。全部引用都冻结之后这个组就可以删了。
   const inUse = await getPool().query<{ n: string }>(
-    "SELECT count(*)::text AS n FROM schedule_item_group WHERE group_id = $1",
+    `SELECT count(*)::text AS n FROM (
+       SELECT esi.event_id
+         FROM schedule_item_group sig
+         JOIN event_schedule_item esi ON esi.id = sig.item_id
+        WHERE sig.group_id = $1
+       UNION ALL
+       SELECT t.event_id FROM task t WHERE t.group_id = $1 AND t.event_id IS NOT NULL
+     ) refs
+     WHERE NOT EXISTS (
+       SELECT 1 FROM event_group_freeze f
+        WHERE f.event_id = refs.event_id AND f.group_id = $1 AND f.released_at IS NULL
+     )`,
     [groupId],
   );
   if (Number(inUse.rows[0].n) > 0)
-    throw new EventGroupError("in_use", "该组仍挂在流程项上，先从流程项上移除再删除");
+    throw new EventGroupError("in_use", "该组仍被未冻结的事件引用（流程项或任务），先解除引用再删除");
   await getPool().query("DELETE FROM event_group WHERE id = $1 AND production_id = $2", [groupId, productionId]);
 }
 
