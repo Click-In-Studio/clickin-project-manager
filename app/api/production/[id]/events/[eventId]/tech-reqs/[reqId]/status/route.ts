@@ -3,7 +3,8 @@ import { hasEventDomainView } from "@/lib/event-permissions";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventTechReq, updateTaskByProduction, isUserReqAssignee, isUserDeptPoc } from "@/lib/event-db";
+import { getProductionEvent, getEventTechReq, updateTaskByProduction, isUserReqAssignee } from "@/lib/event-db";
+import { isTaskPoc } from "@/lib/task-poc";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 
@@ -38,7 +39,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const [isAssignee, isPoc] = await Promise.all([
     isUserReqAssignee(reqId, session.userId),
-    existing.departmentId ? isUserDeptPoc(existing.departmentId, session.userId) : Promise.resolve(false),
+    isTaskPoc(productionId, existing, session.userId),
   ]);
   if (!isAssignee && !isPoc && !hasFullEdit)
     return Response.json({ error: "权限不足" }, { status: 403 });

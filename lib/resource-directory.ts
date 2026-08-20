@@ -34,6 +34,9 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   task: `SELECT etr.id, COALESCE(etr.title, etr.id) AS label
          FROM task etr
          WHERE etr.production_id = $1 ORDER BY etr.id DESC`,
+  // 只列项目级（B 型）组：A 型组绑死在某个 event 上，不该出现在项目级权限键的 id 位
+  user_group: `SELECT id::text AS id, name AS label FROM event_group
+               WHERE production_id = $1 AND event_id IS NULL ORDER BY order_index, name`,
 };
 
 /** 指定类型的 id → 名称。未支持的类型返回空 Map（调用方回落显示 id）。 */

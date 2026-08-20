@@ -3,10 +3,10 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canEditTechReq } from "@/lib/event-permissions";
+import { isTaskPoc } from "@/lib/task-poc";
 import {
   getProductionEvent,
   getTechReqByProduction,
-  isUserDeptPoc,
   listEventMilestoneIds,
   listEventTaskIds,
   setEventMilestones,
@@ -94,11 +94,12 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     if (task.eventId && task.eventId !== eventId) {
       return Response.json({ error: "任务已属于其他事件，请先在任务详情中解绑" }, { status: 400 });
     }
-    // 门 2（挂载资格）：与 PATCH /tasks/[taskId] 换绑事件同口径
+    // 门 2（挂载资格）：与 PATCH /tasks/[taskId] 换绑事件同口径。
+    // POC 判定走 isTaskPoc 而非直调 isUserDeptPoc——责任主体已泛化成
+    // 「部门 | 用户组」，直调只认部门（tests/task-poc-converge.test.ts 的棘轮挡这个）。
     const canAttach =
       await hasEffectiveGrant(actor, productionId, "event", eventId, "tasks", "create")
-      || (task.departmentId != null
-          && await isUserDeptPoc(task.departmentId, session.userId)
+      || (await isTaskPoc(productionId, task, session.userId)
           && await hasEffectiveGrant(actor, productionId, "event", eventId, "details", "view"));
     if (!canAttach) {
       return Response.json({ error: "对本事件没有任务挂载资格" }, { status: 403 });
