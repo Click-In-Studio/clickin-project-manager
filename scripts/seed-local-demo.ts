@@ -119,8 +119,8 @@ async function main() {
   ].map((member, index) => ({ ...member, roles: [projectRoles[index % projectRoles.length]] }));
 
   // owner 的 role 只是显示（权限走 isOwner 旁路），取项目名单的前几个即可。
-  // upsert 而不是 INSERT/UPDATE 二选一：当前 main 的 createProduction 不落 owner 的
-  // production_member 行，fix/owner-not-in-list 落——两种情形下这句都成立。
+  // upsert 而不是 INSERT/UPDATE 二选一：createProduction 现在自己会落 owner 的
+  // production_member 行（#282），裸 INSERT 会主键冲突，裸 UPDATE 在旧版上又是空转。
   const ownerRoles = projectRoles.slice(0, 4);
   await pool.query(
     `INSERT INTO production_member (production_id, user_id, roles, status)
