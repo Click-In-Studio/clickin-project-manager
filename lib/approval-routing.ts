@@ -110,6 +110,15 @@ export type ApprovalTarget = {
   permissionLevel: string;
 };
 
+/**
+ * production_approval_config.ttl_hours 的列默认值——缺配置行时按此计时。
+ *
+ * 放在路由模块而不是各自的 db 文件里：权限申请与支出审批共用同一套超时升级语义，
+ * 两处各存一份就会漂（原注释写的「改要同改」正是这个味道）。
+ * 与 db/add-approval-config-backfill.sql 里插入的 24 是同一个值。
+ */
+export const DEFAULT_APPROVAL_TTL_HOURS = 24;
+
 /** supervisor 链的最大跳数——防成环/防病态深链把通知打爆。 */
 const MAX_SUPERVISOR_HOPS = 8;
 
