@@ -295,17 +295,25 @@ jobs:
             // ── Post or update comment ─────────────────────────────────────────
             const now = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
             const actionsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/pr-automation.yml`;
+            // 横幅必须在**正文之前**：这个修复的前提就是"读者会在没察觉截断的
+            // 情况下读完并停下"，把提示放在（可能很长的）截断正文之后，等于重演
+            // 它要解决的那个问题。#289 的 AI review 抓到了这条。
+            const emptyResponse = aiResponse === '(empty response)';
+            const banner =
+              truncated && emptyResponse
+                // 30037e2 那个形态：思维链把预算吃光，正文一个字都没写出来
+                ? '> ⚠️ **模型的思维链吃光了输出预算，正文为空。** 需要提高 `max_tokens` 后用下面的链接重跑。'
+                : truncated
+                ? '> ⚠️ **本次 review 因输出预算截断，下面不是完整意见。** 提高 `max_tokens` 后用下面的链接重跑。'
+                : null;
+
             const body = [
               MARKER,
               '## 🤖 AI Code Review',
               '',
+              ...(banner ? [banner, ''] : []),
               aiResponse,
               '',
-              // 截断要在评论里说出来——否则读者会把"写到一半"当成"就这些意见"，
-              // 而后面没写出来的可能才是重要的那条
-              ...(truncated
-                ? ['> ⚠️ **本次 review 因输出预算截断，上面不是完整意见。** 提高 `max_tokens` 后用下面的链接重跑。', '']
-                : []),
               `---`,
               `_claude-sonnet-5 · ${now} · 重新触发: [Actions → Run workflow](${actionsUrl}) (pr\\_number=${prNumber})_`,
             ].join('\n');
