@@ -7,7 +7,7 @@
  *   ③ 执行日程 —— 按事件的多部门 rundown（schedule 条目 + 绑定 event 未绑 schedule 的任务）
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
@@ -869,23 +869,41 @@ function fmtMin(total: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/**
+ * 版面的一列。服务端由两张表拼出来：
+ *   event_rundown_column  → id / 顺序 / visible / frozen(is_pinned) / matchLocation
+ *   event_group           → name / 成员（部门 + 人）
+ *
+ * 没有 roleNames：role 是项目可配置表、会改名，落库会漂。角色 chip 保留在编辑器里，
+ * 但语义是「按角色批量勾选人员」，落库的是具体的人。
+ */
 type RundownColumn = {
+  /** 服务端 event_rundown_column.id；本地新建尚未保存时是 `new-*` */
   id: string;
+  /** people 列绑定的用户组 id；location 列为 null */
+  groupId: string | null;
   name: string;
   kind: "people" | "location";
   departmentIds: string[];
-  roleNames: string[];
   userIds: string[];
+  /** location 列的匹配值（对应 event_schedule_item.location） */
   location: string;
   visible: boolean;
+  /** 横向滚动时钉在左侧 → 服务端 is_pinned。与用户组的冻结快照无关。 */
   frozen: boolean;
 };
 
-type RundownLocationGroup = {
+type ServerUserGroup = {
   id: string;
   name: string;
-  details: string;
-  columnIds: string[];
+  members: { kind: "dept" | "user"; id: string }[];
+};
+type ServerRundownColumn = {
+  id: string; groupId: string | null; matchLocation: string | null;
+  orderIndex: number; isVisible: boolean; isPinned: boolean;
+};
+type ServerRundownPlacement = {
+  entryType: "item" | "task"; entryId: string; color: string | null; pinnedColumnIds: string[];
 };
 
 type RundownEntrySelection =
@@ -903,16 +921,22 @@ function withTime(iso: string, value: string): string {
   return date.toISOString();
 }
 
-function RundownColumnEditor({ column, departments, members, roles, onChange, onToggleValue, onDelete, onClose }: {
+function RundownColumnEditor({ column, departments, members, roles, onChange, onRename, onToggleValue, onToggleRole, onDelete, onClose }: {
   column: RundownColumn;
   departments: PlanningDept[];
   members: PlanningMember[];
   roles: string[];
+  /** 只改展示属性（显隐 / 粘性）——不落用户组 */
   onChange: (patch: Partial<RundownColumn>) => void;
-  onToggleValue: (key: "departmentIds" | "roleNames" | "userIds", value: string) => void;
+  /** 改名 = 改用户组，失焦时才发，不然每敲一个字打一次请求 */
+  onRename: (name: string) => void;
+  onToggleValue: (key: "departmentIds" | "userIds", value: string) => void;
+  onToggleRole: (role: string) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const [draftName, setDraftName] = useState(column.name);
+  useEffect(() => { setDraftName(column.name); }, [column.id, column.name]);
   return (
     <div className={styles.columnEditor} role="dialog" aria-label={`编辑人员组 ${column.name}`} onClick={event => event.stopPropagation()}>
       <div className={styles.inlineEditorHeader}>
@@ -920,39 +944,26 @@ function RundownColumnEditor({ column, departments, members, roles, onChange, on
         <button type="button" onClick={onClose} aria-label="关闭人员组编辑">×</button>
       </div>
       <label className={styles.inlineField}>人员组名称
-        <input value={column.name} onChange={event => onChange({ name: event.target.value })} />
+        <input
+          value={draftName}
+          onChange={event => setDraftName(event.target.value)}
+          onBlur={() => { if (draftName.trim() && draftName !== column.name) onRename(draftName.trim()); }}
+        />
       </label>
       <button type="button" className={styles.menuAction} onClick={() => onChange({ frozen: !column.frozen })}>
         <span>{column.frozen ? "▣" : "▢"}</span>
         <span><b>{column.frozen ? "取消冻结此列" : "冻结此列"}</b><small>横向滚动时保持在左侧</small></span>
       </button>
       <div className={styles.optionSection}><b>部门</b><div className={styles.multiPicker}>{departments.map(dept => <button key={dept.id} type="button" className={`${styles.toggleChip} ${column.departmentIds.includes(dept.id) ? styles.toggleChipActive : ""}`} onClick={() => onToggleValue("departmentIds", dept.id)}>{dept.name}</button>)}</div></div>
-      <div className={styles.optionSection}><b>角色</b><div className={styles.multiPicker}>{roles.map(role => <button key={role} type="button" className={`${styles.toggleChip} ${column.roleNames.includes(role) ? styles.toggleChipActive : ""}`} onClick={() => onToggleValue("roleNames", role)}>{role}</button>)}</div></div>
+      {/* 角色是「按角色批量勾人」的快捷方式，不落库——role 是项目可配置表，会改名。
+          chip 的高亮由「该角色的人是否都已在名单里」推导。 */}
+      <div className={styles.optionSection}><b>按角色批量选人</b><div className={styles.multiPicker}>{roles.map(role => {
+        const roleUserIds = members.filter(m => m.roles.includes(role)).map(m => m.userId);
+        const allIn = roleUserIds.length > 0 && roleUserIds.every(uid => column.userIds.includes(uid));
+        return <button key={role} type="button" className={`${styles.toggleChip} ${allIn ? styles.toggleChipActive : ""}`} onClick={() => onToggleRole(role)}>{role}</button>;
+      })}</div></div>
       <div className={styles.optionSection}><b>个人</b><div className={styles.multiPicker}>{members.map(member => <button key={member.userId} type="button" className={`${styles.toggleChip} ${column.userIds.includes(member.userId) ? styles.toggleChipActive : ""}`} onClick={() => onToggleValue("userIds", member.userId)}>{member.name}</button>)}</div></div>
       <button type="button" className={styles.deleteAction} onClick={onDelete}>删除此人员组</button>
-    </div>
-  );
-}
-
-function RundownLocationEditor({ group, columns, onChange, onToggleColumn, onDelete, onClose }: {
-  group: RundownLocationGroup;
-  columns: RundownColumn[];
-  onChange: (patch: Partial<RundownLocationGroup>) => void;
-  onToggleColumn: (columnId: string) => void;
-  onDelete: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className={styles.locationEditor} role="dialog" aria-label={`编辑地点 ${group.name}`}>
-      <div className={styles.inlineEditorHeader}><b>编辑地点信息</b><button type="button" onClick={onClose} aria-label="关闭地点编辑">×</button></div>
-      <label className={styles.inlineField}>地点名称<input value={group.name} onChange={event => onChange({ name: event.target.value })} /></label>
-      <label className={styles.inlineField}>地点说明<input value={group.details} placeholder="楼层、入口或集合说明" onChange={event => onChange({ details: event.target.value })} /></label>
-      <div className={styles.optionSection}><b>归入此地点的人员组（可多选）</b><div className={styles.multiPicker}>{columns.map(column => <button key={column.id} type="button" className={`${styles.toggleChip} ${group.columnIds.includes(column.id) ? styles.toggleChipActive : ""}`} onClick={() => onToggleColumn(column.id)}>{column.name}</button>)}</div></div>
-      <button type="button" className={styles.deleteAction} onClick={onDelete}>删除此地点行</button>
-      <div className={styles.locationEditorFooter}>
-        <small>更改已自动保存</small>
-        <button type="button" className={styles.primaryEditorAction} onClick={onClose}>确认</button>
-      </div>
     </div>
   );
 }
@@ -1026,45 +1037,54 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const [editMode, setEditMode] = useState(false);
   const [viewMode, setViewMode] = useState<"all" | "custom">("all");
   const [columns, setColumns] = useState<RundownColumn[]>([]);
-  const [locationGroups, setLocationGroups] = useState<RundownLocationGroup[]>([]);
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
-  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<RundownEntrySelection | null>(null);
   const [entryColors, setEntryColors] = useState<Record<string, string>>({});
   const [entryLaneOverrides, setEntryLaneOverrides] = useState<Record<string, string[]>>({});
+  const [layoutError, setLayoutError] = useState<string | null>(null);
   const dragColumnId = useRef<string | null>(null);
   const dragEntryRef = useRef<RundownDragEntry | null>(null);
   const resizeRef = useRef<{ selection: RundownEntrySelection; edge: "start" | "end"; startY: number; startIso: string; endIso: string; nextStart: string; nextEnd: string } | null>(null);
 
+  // 版面来自服务端，不再是每人一份的 localStorage——rundown 是 organizer 定好
+  // 大家遵守的东西。列 = event_rundown_column ⋈ event_group。
   useEffect(() => {
-    const fallback = departments.map(dept => ({ id: `dept-${dept.id}`, name: dept.name, kind: "people" as const, departmentIds: [dept.id], roleNames: [], userIds: [], location: "", visible: true, frozen: false }));
-    try {
-      const raw = window.localStorage.getItem(`planning-rundown-columns:${productionId}`);
-      const parsed = raw ? JSON.parse(raw) as Partial<RundownColumn>[] : fallback;
-      setColumns(parsed.map((column, index) => ({
-        id: column.id ?? `column-${index}`,
-        name: column.name ?? `人员组 ${index + 1}`,
-        kind: column.kind ?? "people",
-        departmentIds: column.departmentIds ?? [], roleNames: column.roleNames ?? [], userIds: column.userIds ?? [],
-        location: column.location ?? "", visible: column.visible ?? true, frozen: column.frozen ?? false,
-      })));
-      const groupRaw = window.localStorage.getItem(`planning-rundown-locations:${productionId}`);
-      const colorRaw = window.localStorage.getItem(`planning-rundown-colors:${productionId}`);
-      const laneRaw = window.localStorage.getItem(`planning-rundown-entry-lanes:${productionId}`);
-      setLocationGroups(groupRaw ? JSON.parse(groupRaw) as RundownLocationGroup[] : []);
-      setEntryColors(colorRaw ? JSON.parse(colorRaw) as Record<string, string> : {});
-      setEntryLaneOverrides(laneRaw ? JSON.parse(laneRaw) as Record<string, string[]> : {});
-    } catch { setColumns(fallback); }
-  }, [departments, productionId]);
-
-  useEffect(() => {
-    if (columns.length === 0) return;
-    window.localStorage.setItem(`planning-rundown-columns:${productionId}`, JSON.stringify(columns));
-  }, [columns, productionId]);
-
-  useEffect(() => { window.localStorage.setItem(`planning-rundown-locations:${productionId}`, JSON.stringify(locationGroups)); }, [locationGroups, productionId]);
-  useEffect(() => { window.localStorage.setItem(`planning-rundown-colors:${productionId}`, JSON.stringify(entryColors)); }, [entryColors, productionId]);
-  useEffect(() => { window.localStorage.setItem(`planning-rundown-entry-lanes:${productionId}`, JSON.stringify(entryLaneOverrides)); }, [entryLaneOverrides, productionId]);
+    if (!eventId) { setColumns([]); return; }
+    let cancelled = false;
+    Promise.all([
+      fetch(`${BASE_PATH}/api/production/${productionId}/user-groups?eventId=${eventId}`).then(r => r.json()).catch(() => ({})),
+      fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`).then(r => r.json()).catch(() => ({})),
+    ]).then(([groupRes, layoutRes]) => {
+      if (cancelled) return;
+      const groups = new Map<string, ServerUserGroup>(
+        ((groupRes.groups ?? []) as ServerUserGroup[]).map(g => [g.id, g]),
+      );
+      setColumns(((layoutRes.columns ?? []) as ServerRundownColumn[]).map(col => {
+        const group = col.groupId ? groups.get(col.groupId) : undefined;
+        return {
+          id: col.id,
+          groupId: col.groupId,
+          name: group?.name ?? col.matchLocation ?? "未命名",
+          kind: col.groupId ? "people" as const : "location" as const,
+          departmentIds: (group?.members ?? []).filter(m => m.kind === "dept").map(m => m.id),
+          userIds: (group?.members ?? []).filter(m => m.kind === "user").map(m => m.id),
+          location: col.matchLocation ?? "",
+          visible: col.isVisible,
+          frozen: col.isPinned,
+        };
+      }));
+      const colors: Record<string, string> = {};
+      const lanes: Record<string, string[]> = {};
+      for (const p of (layoutRes.placements ?? []) as ServerRundownPlacement[]) {
+        const key = `${p.entryType}:${p.entryId}`;
+        if (p.color) colors[key] = p.color;
+        if (p.pinnedColumnIds.length) lanes[key] = p.pinnedColumnIds;
+      }
+      setEntryColors(colors);
+      setEntryLaneOverrides(lanes);
+    });
+    return () => { cancelled = true; };
+  }, [productionId, eventId]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -1091,10 +1111,10 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const lanes = useMemo<RundownColumn[]>(() => {
     if (viewMode === "custom") {
       const active = columns.filter(column => column.visible);
-      return active.length ? active : [{ id: "__empty", name: "未选择列", kind: "people", departmentIds: [], roleNames: [], userIds: [], location: "", visible: true, frozen: false }];
+      return active.length ? active : [{ id: "__empty", groupId: null, name: "未选择列", kind: "people", departmentIds: [], userIds: [], location: "", visible: true, frozen: false }];
     }
-    const all = departments.map(dept => ({ id: `all-${dept.id}`, name: dept.name, kind: "people" as const, departmentIds: [dept.id], roleNames: [], userIds: [], location: "", visible: true, frozen: false }));
-    return all.length ? all : [{ id: "__all", name: "全体成员", kind: "people", departmentIds: [], roleNames: [], userIds: [], location: "", visible: true, frozen: false }];
+    const all = departments.map(dept => ({ id: `all-${dept.id}`, groupId: null, name: dept.name, kind: "people" as const, departmentIds: [dept.id], userIds: [], location: "", visible: true, frozen: false }));
+    return all.length ? all : [{ id: "__all", groupId: null, name: "全体成员", kind: "people", departmentIds: [], userIds: [], location: "", visible: true, frozen: false }];
   }, [columns, departments, viewMode]);
 
   // 人员选项：schedule 参与人 + 任务 assignee 聚合
@@ -1122,35 +1142,45 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const startMin = allStarts.length ? Math.floor(Math.min(...allStarts) / SLOT) * SLOT : 0;
   const endMin = allEnds.length ? Math.ceil(Math.max(...allEnds) / SLOT) * SLOT : 0;
   const slots = Array.from({ length: Math.max(0, (endMin - startMin) / SLOT) }, (_, i) => startMin + i * SLOT);
-  const hasLocationRow = editMode || locationGroups.length > 0;
+  /**
+   * 地点带从**事项自己的 location** 推导，不再是独立实体。
+   *
+   * 地点是 event_schedule_item.location（早就有），一列的人 9 点在主剧场、14 点在
+   * A3——在列上另存一份地点答不出这个，还会跟事项那份打架。这里显示的是「这一列
+   * 当前的事项都在哪儿」，改地点去改事项，单一真相。
+   */
+  const laneLocations = useMemo(() => lanes.map(lane => {
+    const locs = new Set(
+      items.filter(it => it.location.trim() && itemMatchesColumn(it, lane)).map(it => it.location.trim()),
+    );
+    return [...locs];
+  }), [lanes, items]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const hasLocationRow = laneLocations.some(l => l.length > 0);
   const headerRow = hasLocationRow ? 2 : 1;
   const bodyRowStart = headerRow + 1;
 
   const locationSegments = useMemo(() => {
-    if (!hasLocationRow) return [] as { key: string; group: RundownLocationGroup | null; columnIds: string[]; start: number; span: number }[];
-    const assignments = lanes.map(lane => locationGroups.find(group => group.columnIds.includes(lane.id)) ?? null);
-    const result: { key: string; group: RundownLocationGroup | null; columnIds: string[]; start: number; span: number }[] = [];
-    assignments.forEach((group, index) => {
+    if (!hasLocationRow) return [] as { key: string; label: string; start: number; span: number }[];
+    const result: { key: string; label: string; start: number; span: number }[] = [];
+    laneLocations.forEach((locs, index) => {
+      const label = locs.join(" / ");
       const previous = result[result.length - 1];
-      const key = group?.id ?? `unassigned-${index}`;
-      if (previous && previous.group?.id === group?.id) {
-        previous.span += 1;
-        previous.columnIds.push(lanes[index].id);
-      } else result.push({ key, group, columnIds: [lanes[index].id], start: index + 2, span: 1 });
+      if (previous && previous.label === label) previous.span += 1;
+      else result.push({ key: `loc-${index}`, label, start: index + 2, span: 1 });
     });
     return result;
-  }, [hasLocationRow, lanes, locationGroups]);
+  }, [hasLocationRow, laneLocations]);
 
   function itemMatchesColumn(item: EventScheduleItemWithParticipants, column: RundownColumn): boolean {
     if (column.kind === "location") return !!column.location && item.location.trim() === column.location.trim();
     if (viewMode === "all" && item.departmentIds.length === 0 && item.participants.length === 0) return true;
-    const hasRule = column.departmentIds.length + column.roleNames.length + column.userIds.length > 0;
+    const hasRule = column.departmentIds.length + column.userIds.length > 0;
     if (!hasRule) return true;
     if (item.departmentIds.some(id => column.departmentIds.includes(id))) return true;
     return item.participants.some(participant => {
       const member = memberById.get(participant.userId);
       return column.userIds.includes(participant.userId)
-        || !!member?.roles.some(role => column.roleNames.includes(role))
         || !!member?.departmentIds.some(id => column.departmentIds.includes(id));
     });
   }
@@ -1158,13 +1188,12 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   function taskMatchesColumn(task: EventTechReq, column: RundownColumn): boolean {
     if (column.kind === "location") return !!column.location && event?.location.trim() === column.location.trim();
     if (viewMode === "all" && !task.departmentId && task.assignees.length === 0) return true;
-    const hasRule = column.departmentIds.length + column.roleNames.length + column.userIds.length > 0;
+    const hasRule = column.departmentIds.length + column.userIds.length > 0;
     if (!hasRule) return true;
     if (task.departmentId && column.departmentIds.includes(task.departmentId)) return true;
     return task.assignees.some(assignee => {
       const member = memberById.get(assignee.userId);
       return column.userIds.includes(assignee.userId)
-        || !!member?.roles.some(role => column.roleNames.includes(role))
         || !!member?.departmentIds.some(id => column.departmentIds.includes(id));
     });
   }
@@ -1185,55 +1214,141 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     return { rowStart, rowSpan };
   }
 
+  /** 版面落库：顺序 / 显隐 / 粘性 / 地点列。列身份由服务端按 group|地点 认。 */
+  const saveLayout = useCallback(async (next: RundownColumn[]) => {
+    if (!eventId) return;
+    setLayoutError(null);
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        columns: next.map(c => c.kind === "location"
+          ? { matchLocation: c.location, isVisible: c.visible, isPinned: c.frozen }
+          : { groupId: c.groupId, isVisible: c.visible, isPinned: c.frozen }),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setLayoutError(data.error ?? "版面保存失败"); return; }
+    // 用服务端回来的 id 回填——新建的列在本地是 `new-*`，条目钉列要引用真实 id
+    setColumns(current => current.map((c, i) => {
+      const server = (data.columns ?? [])[i] as ServerRundownColumn | undefined;
+      return server ? { ...c, id: server.id } : c;
+    }));
+  }, [productionId, eventId]);
+
+  /** 条目表现落库：颜色 + 钉列。 */
+  const savePlacements = useCallback(async (
+    colors: Record<string, string>, lanes: Record<string, string[]>,
+  ) => {
+    if (!eventId) return;
+    const keys = [...new Set([...Object.keys(colors), ...Object.keys(lanes)])];
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        placements: keys.map(key => {
+          const [entryType, ...rest] = key.split(":");
+          return {
+            entryType, entryId: rest.join(":"),
+            color: colors[key] ?? null,
+            // 服务端只认本 event 版面里的列 id，本地未保存的 `new-*` 先滤掉
+            pinnedColumnIds: (lanes[key] ?? []).filter(id => !id.startsWith("new-") && !id.startsWith("all-") && !id.startsWith("__")),
+          };
+        }),
+      }),
+    });
+    if (!res.ok) setLayoutError((await res.json().catch(() => ({}))).error ?? "事项表现保存失败");
+  }, [productionId, eventId]);
+
+  /** 改列的展示属性（显隐 / 粘性）——只动版面，不动用户组。 */
   function updateColumn(id: string, patch: Partial<RundownColumn>) {
-    setColumns(current => current.map(column => column.id === id ? { ...column, ...patch } : column));
+    setColumns(current => {
+      const next = current.map(column => column.id === id ? { ...column, ...patch } : column);
+      void saveLayout(next);
+      return next;
+    });
   }
 
-  function toggleColumnValue(id: string, key: "departmentIds" | "roleNames" | "userIds", value: string) {
-    setColumns(current => current.map(column => {
-      if (column.id !== id) return column;
-      const values = column[key];
-      return { ...column, [key]: values.includes(value) ? values.filter(item => item !== value) : [...values, value] };
-    }));
+  /**
+   * 改列的名称 / 成员——那是**用户组**的属性，落到 /user-groups。
+   * 组是跨 event 共享的实体，所以这里改名会影响所有引用它的 rundown，这是有意的。
+   */
+  async function saveColumnGroup(column: RundownColumn, patch: { name?: string; departmentIds?: string[]; userIds?: string[] }) {
+    const name = patch.name ?? column.name;
+    const departmentIds = patch.departmentIds ?? column.departmentIds;
+    const userIds = patch.userIds ?? column.userIds;
+    const members = [
+      ...departmentIds.map(id => ({ kind: "dept" as const, id })),
+      ...userIds.map(id => ({ kind: "user" as const, id })),
+    ];
+    setLayoutError(null);
+
+    if (!column.groupId) {
+      // 新列：先建 A 型组（绑本 event），再把它排进版面
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/user-groups`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, name, members, poc: null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setLayoutError(data.error ?? "用户组创建失败"); return; }
+      const next = columns.map(c => c.id === column.id
+        ? { ...c, groupId: data.group.id as string, name, departmentIds, userIds } : c);
+      setColumns(next);
+      await saveLayout(next);
+      return;
+    }
+
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/user-groups/${column.groupId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, members }),
+    });
+    if (!res.ok) { setLayoutError((await res.json().catch(() => ({}))).error ?? "用户组保存失败"); return; }
+    setColumns(current => current.map(c => c.id === column.id ? { ...c, name, departmentIds, userIds } : c));
+  }
+
+  function toggleColumnValue(id: string, key: "departmentIds" | "userIds", value: string) {
+    const column = columns.find(c => c.id === id);
+    if (!column) return;
+    const values = column[key];
+    void saveColumnGroup(column, {
+      [key]: values.includes(value) ? values.filter(item => item !== value) : [...values, value],
+    });
+  }
+
+  /** 角色 chip：按角色批量勾/取消人员。role 不落库（可配置表会改名），落的是人。 */
+  function toggleColumnRole(id: string, role: string) {
+    const column = columns.find(c => c.id === id);
+    if (!column) return;
+    const roleUserIds = members.filter(m => m.roles.includes(role)).map(m => m.userId);
+    const allIn = roleUserIds.length > 0 && roleUserIds.every(uid => column.userIds.includes(uid));
+    void saveColumnGroup(column, {
+      userIds: allIn
+        ? column.userIds.filter(uid => !roleUserIds.includes(uid))
+        : [...new Set([...column.userIds, ...roleUserIds])],
+    });
   }
 
   function addColumn(kind: RundownColumn["kind"] = "people", insertAt = columns.length) {
     const suffix = columns.filter(column => column.kind === kind).length + 1;
     const nextColumn: RundownColumn = {
-      id: `custom-${Date.now()}-${suffix}`,
+      id: `new-${Date.now()}-${suffix}`,
+      groupId: null,
       name: kind === "people" ? `人员组 ${suffix}` : `地点 ${suffix}`,
       kind,
-      departmentIds: [], roleNames: [], userIds: [], location: "", visible: true, frozen: false,
+      departmentIds: [], userIds: [], location: "", visible: true, frozen: false,
     };
-    setColumns(current => {
-      const next = [...current];
-      next.splice(Math.max(0, Math.min(insertAt, next.length)), 0, nextColumn);
-      return next;
-    });
+    const next = [...columns];
+    next.splice(Math.max(0, Math.min(insertAt, next.length)), 0, nextColumn);
+    setColumns(next);
     setViewMode("custom");
     setEditingColumnId(nextColumn.id);
+    // people 列要等用户填了名称/成员才建组；location 列可以直接落库
+    if (kind === "location") void saveLayout(next);
   }
 
-  function addLocationGroup(columnIds: string[] = []) {
-    const group: RundownLocationGroup = { id: `location-${Date.now()}`, name: `地点 ${locationGroups.length + 1}`, details: "", columnIds };
-    setLocationGroups(current => [
-      ...current.map(item => ({ ...item, columnIds: item.columnIds.filter(id => !columnIds.includes(id)) })),
-      group,
-    ]);
+  function removeColumn(id: string) {
+    const next = columns.filter(c => c.id !== id);
+    setColumns(next);
     setEditingColumnId(null);
-    setSelectedEntry(null);
-    setEditingLocationId(group.id);
-  }
-
-  function updateLocationGroup(id: string, patch: Partial<RundownLocationGroup>) {
-    setLocationGroups(current => current.map(group => group.id === id ? { ...group, ...patch } : group));
-  }
-
-  function toggleLocationColumn(groupId: string, columnId: string) {
-    setLocationGroups(current => current.map(group => {
-      if (group.id === groupId) return { ...group, columnIds: group.columnIds.includes(columnId) ? group.columnIds.filter(id => id !== columnId) : [...group.columnIds, columnId] };
-      return { ...group, columnIds: group.columnIds.filter(id => id !== columnId) };
-    }));
+    void saveLayout(next);
   }
 
   function dropColumn(targetId: string) {
@@ -1247,6 +1362,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       if (from < 0 || to < 0) return current;
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
+      void saveLayout(next);
       return next;
     });
   }
@@ -1272,7 +1388,9 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     dragEntryRef.current = null;
     if (!dragging) return;
     const key = entryKey(dragging);
-    setEntryLaneOverrides(current => ({ ...current, [key]: [lane.id] }));
+    const nextLanes = { ...entryLaneOverrides, [key]: [lane.id] };
+    setEntryLaneOverrides(nextLanes);
+    void savePlacements(entryColors, nextLanes);
     if (dragging.kind === "item") {
       const item = items.find(entry => entry.id === dragging.id);
       if (!item?.startTime || !item.endTime) return;
@@ -1342,8 +1460,11 @@ function TimetableView({ productionId, events, departments, members }: Props) {
 
   async function saveSelectedEntry(selection: RundownEntrySelection, draft: { title: string; description: string; start: string; end: string; location: string; itemType: string; status: string; laneIds: string[]; color: string }) {
     const key = entryKey(selection);
-    setEntryColors(current => ({ ...current, [key]: draft.color }));
-    setEntryLaneOverrides(current => ({ ...current, [key]: draft.laneIds }));
+    const nextColors = { ...entryColors, [key]: draft.color };
+    const nextLanes = { ...entryLaneOverrides, [key]: draft.laneIds };
+    setEntryColors(nextColors);
+    setEntryLaneOverrides(nextLanes);
+    void savePlacements(nextColors, nextLanes);
     if (selection.kind === "item") {
       const item = items.find(entry => entry.id === selection.id);
       if (!item) return;
@@ -1369,7 +1490,6 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     }
   }
 
-  const editingLocation = locationGroups.find(group => group.id === editingLocationId) ?? null;
   const editingColumn = columns.find(column => column.id === editingColumnId) ?? null;
   const selectedItem = selectedEntry?.kind === "item" ? items.find(item => item.id === selectedEntry.id) ?? null : null;
   const selectedTask = selectedEntry?.kind === "task" ? eventTasks.find(task => task.id === selectedEntry.id) ?? null : null;
@@ -1396,11 +1516,23 @@ function TimetableView({ productionId, events, departments, members }: Props) {
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0, alignItems: "center", flexWrap: "wrap" }}>
             <Badge tone="blue">{items.length} 个条目</Badge>
             {eventTasks.length > 0 && <Badge tone="green">{eventTasks.length} 个任务</Badge>}
-            {editMode && <button type="button" onClick={() => addLocationGroup()} style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)", padding: "7px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>＋ 新增地点行</button>}
-            <button type="button" onClick={() => { setEditMode(value => { const next = !value; if (next) setViewMode("custom"); else { setEditingColumnId(null); setEditingLocationId(null); setSelectedEntry(null); } return next; }); }} style={{ border: "1px solid var(--ink)", borderRadius: 8, background: editMode ? "var(--ink)" : "transparent", color: editMode ? "#fff" : "var(--ink)", padding: "7px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>{editMode ? "完成编辑" : "编辑执行表"}</button>
+            {editMode && <button type="button" onClick={() => addColumn("location")} style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)", padding: "7px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>＋ 新增地点列</button>}
+            <button type="button" onClick={() => { setEditMode(value => { const next = !value; if (next) setViewMode("custom"); else { setEditingColumnId(null); setSelectedEntry(null); } return next; }); }} style={{ border: "1px solid var(--ink)", borderRadius: 8, background: editMode ? "var(--ink)" : "transparent", color: editMode ? "#fff" : "var(--ink)", padding: "7px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>{editMode ? "完成编辑" : "编辑执行表"}</button>
           </div>
         )}
       </div>
+
+      {/* 版面保存失败要看得见——原来存 localStorage 不会失败，现在会（权限不足、
+          归档项目、并发改动），静默吞掉的话 organizer 以为排好了其实没存上 */}
+      {layoutError && (
+        <p role="alert" style={{
+          margin: "0 0 12px", padding: "8px 11px", borderRadius: 8,
+          background: "#fdecea", color: "#8c2f22", fontSize: 11, fontWeight: 600,
+        }}>
+          {layoutError}
+          <button type="button" onClick={() => setLayoutError(null)} style={{ marginLeft: 10, border: 0, background: "transparent", color: "inherit", cursor: "pointer", fontWeight: 700 }}>×</button>
+        </p>
+      )}
 
       {/* rundownControls（原型：三格卡片行——事件选择 / 工作流筛选 / 当前人说明） */}
       <div style={{
@@ -1465,28 +1597,19 @@ function TimetableView({ productionId, events, departments, members }: Props) {
               {editMode && <button type="button" className={styles.firstInsertButton} aria-label="在第一列前插入人员组" onClick={() => addColumn("people", 0)}><span className={styles.insertColumnGlyph} aria-hidden="true">+</span></button>}
             </div>
             {hasLocationRow && locationSegments.map(segment => (
-              <button
+              <div
                 key={segment.key}
-                type="button"
-                disabled={!editMode}
-                onClick={() => {
-                  if (!editMode) return;
-                  setEditingColumnId(null);
-                  setSelectedEntry(null);
-                  if (segment.group) setEditingLocationId(segment.group.id);
-                  else addLocationGroup(segment.columnIds);
-                }}
                 style={{
                   gridColumn: `${segment.start} / span ${segment.span}`, gridRow: 1, position: "sticky", top: 0, zIndex: 16,
-                  border: 0, borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", padding: "5px 9px",
-                  background: segment.group ? "#d9e4e1" : "#edf0ed", color: "var(--ink)", textAlign: "left",
-                  cursor: editMode ? "pointer" : "default", overflow: "hidden",
+                  borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", padding: "5px 9px",
+                  background: segment.label ? "#d9e4e1" : "#edf0ed", color: "var(--ink)", overflow: "hidden",
                 }}
-                title={segment.group?.details || (editMode ? (segment.group ? "编辑地点信息" : "新建地点并归入这些人员组") : "")}
+                title={segment.label ? `这一列的事项在：${segment.label}` : "这一列的事项没有填地点"}
               >
-                <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 9 }}>{segment.group?.name ?? "未归入地点"}</b>
-                {segment.group?.details && <small style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 7, color: "var(--muted)" }}>{segment.group.details}</small>}
-              </button>
+                <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 9 }}>
+                  {segment.label || "未填地点"}
+                </b>
+              </div>
             ))}
             {/* 泳道表头（sticky top，ink 底白字） */}
             {lanes.map((lane, i) => {
@@ -1501,7 +1624,6 @@ function TimetableView({ productionId, events, departments, members }: Props) {
                   onDrop={() => dropColumn(lane.id)}
                   onDoubleClick={() => {
                     if (!editMode) return;
-                    setEditingLocationId(null);
                     setSelectedEntry(null);
                     setEditingColumnId(lane.id);
                   }}
@@ -1516,7 +1638,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
                 >
                   <b style={{ paddingRight: editMode ? 22 : 0, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lane.frozen ? "▣ " : ""}{lane.name}</b>
                   {editMode && <>
-                    <button type="button" draggable={false} className={styles.columnMenuButton} aria-label={`编辑人员组 ${lane.name}`} aria-expanded={editingColumnId === lane.id} onClick={event => { event.stopPropagation(); setEditingLocationId(null); setSelectedEntry(null); setEditingColumnId(current => current === lane.id ? null : lane.id); }}><span aria-hidden="true">⌄</span></button>
+                    <button type="button" draggable={false} className={styles.columnMenuButton} aria-label={`编辑人员组 ${lane.name}`} aria-expanded={editingColumnId === lane.id} onClick={event => { event.stopPropagation(); setSelectedEntry(null); setEditingColumnId(current => current === lane.id ? null : lane.id); }}><span aria-hidden="true">⌄</span></button>
                     <button type="button" draggable={false} className={styles.insertColumnButton} aria-label={`在 ${lane.name} 右侧插入人员组`} onClick={event => { event.stopPropagation(); addColumn("people", i + 1); }}><span className={styles.insertColumnGlyph} aria-hidden="true">+</span></button>
                   </>}
                 </div>
@@ -1644,16 +1766,26 @@ function TimetableView({ productionId, events, departments, members }: Props) {
           </div>
         </div>
       )}
-      {(editingColumn || editingLocation || (editMode && selectedEntry && (selectedItem || selectedTask))) && (
+      {(editingColumn || (editMode && selectedEntry && (selectedItem || selectedTask))) && (
         <button
           type="button"
           className={styles.editorBackdrop}
           aria-label="关闭编辑面板"
-          onClick={() => { setEditingColumnId(null); setEditingLocationId(null); setSelectedEntry(null); }}
+          onClick={() => { setEditingColumnId(null); setSelectedEntry(null); }}
         />
       )}
-      {editingColumn && <RundownColumnEditor column={editingColumn} departments={departments} members={members} roles={roleOptions} onChange={patch => updateColumn(editingColumn.id, patch)} onToggleValue={(key, value) => toggleColumnValue(editingColumn.id, key, value)} onDelete={() => { setColumns(current => current.filter(column => column.id !== editingColumn.id)); setEditingColumnId(null); }} onClose={() => setEditingColumnId(null)} />}
-      {editingLocation && <RundownLocationEditor group={editingLocation} columns={columns.filter(column => column.visible && column.kind === "people")} onChange={patch => updateLocationGroup(editingLocation.id, patch)} onToggleColumn={columnId => toggleLocationColumn(editingLocation.id, columnId)} onDelete={() => { setLocationGroups(current => current.filter(group => group.id !== editingLocation.id)); setEditingLocationId(null); }} onClose={() => setEditingLocationId(null)} />}
+      {editingColumn && <RundownColumnEditor
+        column={editingColumn}
+        departments={departments}
+        members={members}
+        roles={roleOptions}
+        onChange={patch => updateColumn(editingColumn.id, patch)}
+        onRename={name => void saveColumnGroup(editingColumn, { name })}
+        onToggleValue={(key, value) => toggleColumnValue(editingColumn.id, key, value)}
+        onToggleRole={role => toggleColumnRole(editingColumn.id, role)}
+        onDelete={() => removeColumn(editingColumn.id)}
+        onClose={() => setEditingColumnId(null)}
+      />}
       {editMode && selectedEntry && (selectedItem || selectedTask) && (
         <RundownEntryEditor
           key={entryKey(selectedEntry)}
