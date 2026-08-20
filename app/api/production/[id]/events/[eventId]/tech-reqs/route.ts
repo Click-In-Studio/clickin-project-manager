@@ -4,7 +4,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { createEventTechReq, getEventDepartment, getProductionEvent, listEventTechReqs } from "@/lib/event-db";
-import { isDeptSubjectPoc } from "@/lib/task-poc";
+import { isSubjectPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
@@ -49,15 +49,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   //（此前 clone 双重解析被 review 指为潜在分歧面）
   const body = (await req.json()) as {
     title?: string; description?: string; scheduleItemIds?: string[];
-    presetMinutes?: number | null; departmentId?: string | null;
+    presetMinutes?: number | null; departmentId?: string | null; groupId?: string | null;
     assignees?: { userId: string; name: string }[];
   };
-  const departmentId = typeof body.departmentId === "string" ? body.departmentId : null;
 
-  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
-  // 不先校验会被跨剧组部门 id 骗过 POC 各门 + 绑入跨剧组部门）
-  if (departmentId && !(await getEventDepartment(departmentId, productionId)))
-    return Response.json({ error: "部门不存在" }, { status: 400 });
+  // 责任主体 = 部门 | 用户组，二选一；解析同时校验属于本 production
+  const parsed = await parseTaskSubject(productionId, body);
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+  const subject = parsed.subject;
 
   // Creating a tech_req requires edit-level on the event
   // attach 语义：给 event 挂 task = event 子集合操作。
@@ -65,8 +64,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // **本部门**对可见 event 发起 task——可见性由成员基础 details@view 天然界定。
   // 路径三前提=对该 event 有 details 视图（"对看得见的东西反应"）：宽松剧组经
   // 成员模板通配行命中；严格剧组（模板撤掉 details@view）未被授视图的 POC 发不了
-  const viaPoc = departmentId !== null
-    && await isDeptSubjectPoc(productionId, departmentId, session.userId)
+  const viaPoc = subject !== null
+    && await isSubjectPoc(productionId, subject, session.userId)
     && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "details", "view");
   if (!viaPoc
       && !await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "create"))
@@ -80,9 +79,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if ((body.assignees?.length ?? 0) > 0) {
     const canDirectAssign =
       await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "assignees", "edit")
-      || (departmentId !== null && await isDeptSubjectPoc(productionId, departmentId, session.userId));
+      || await isSubjectPoc(productionId, subject, session.userId);
     if (!canDirectAssign)
-      return Response.json({ error: "你没有直接指派的权限——请绑定部门后交由部门 POC 分配" }, { status: 403 });
+      return Response.json({ error: "你没有直接指派的权限——请绑定部门或用户组后交由其 POC 分配" }, { status: 403 });
   }
 
   const techReq = await createEventTechReq({
@@ -93,7 +92,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     title,
     description: body.description ?? "",
     presetMinutes: body.presetMinutes ?? null,
-    departmentId,
+    ...subjectColumns(subject),
     assignees: body.assignees ?? [],
     createdBy: session.userId,
     createdVia: viaPoc ? "poc" : "explicit",

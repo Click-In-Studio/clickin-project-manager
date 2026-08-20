@@ -35,17 +35,48 @@ import { getPool } from "./pg";
 /**
  * task 的责任主体：谁为这条 task 负责，POC 从它推导。
  *
- * 单值语义是硬约束——POC 必须是责任单点，不能是集合，否则
- * 「指派归 POC」（2026-08-15 定谳）没有唯一答案。用户组进来后是
- * 多一个 kind（组自带 POC），不是让 task 同时挂多个主体。
+ * 单值语义是硬约束——POC 必须是责任单点，不能是集合，否则「指派归 POC」
+ * （2026-08-15 定谳）没有唯一答案。用户组是多一个 **kind**（组自带 POC，
+ * 见 event_group），不是让 task 同时挂多个主体：DB 的 task_subject_single
+ * CHECK 保证 department_id / group_id 至多一个非空。
  */
 export type TaskSubject =
-  | { kind: "dept"; id: string };
-  // 用户组落地后在此追加：| { kind: "group"; id: string }
+  | { kind: "dept"; id: string }
+  | { kind: "group"; id: string };
 
-/** 从 task 行取责任主体；无主体（独立任务未绑部门）返回 null。 */
-export function taskSubjectOf(task: { departmentId: string | null }): TaskSubject | null {
-  return task.departmentId ? { kind: "dept", id: task.departmentId } : null;
+/**
+ * 从 task 行取责任主体；无主体（独立任务未绑部门也未绑组）返回 null。
+ *
+ * 两者互斥由 DB 的 task_subject_single CHECK 保证，这里按 dept 优先只是防御性写法
+ * ——真出现两个都非空说明 CHECK 被绕过了，那是更严重的问题。
+ */
+export function taskSubjectOf(
+  task: { departmentId: string | null; groupId?: string | null },
+): TaskSubject | null {
+  if (task.departmentId) return { kind: "dept", id: task.departmentId };
+  if (task.groupId) return { kind: "group", id: task.groupId };
+  return null;
+}
+
+/**
+ * 组 POC：解析到「组当前定义」——user 型就是那个人，dept 型是该部门的**现任** POC。
+ *
+ * 与 isDeptPoc 一样是活引用（Type B）：部门换 POC、组改 POC，下一次判定自动跟随，
+ * 不需要回溯改任何行。production 作用域同样并进条件里。
+ */
+async function isGroupPocScoped(productionId: string, groupId: string, userId: string): Promise<boolean> {
+  const res = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM event_group eg
+        WHERE eg.id = $2 AND eg.production_id = $1
+          AND (eg.poc_user_id = $3
+               OR EXISTS (SELECT 1 FROM production_dept_member pdm
+                           WHERE pdm.dept_id = eg.poc_dept_id
+                             AND pdm.user_id = $3 AND pdm.is_poc = true))
+     ) AS exists`,
+    [productionId, groupId, userId],
+  );
+  return res.rows[0].exists;
 }
 
 async function isDeptPoc(productionId: string, deptId: string, userId: string): Promise<boolean> {
@@ -69,16 +100,27 @@ export async function isSubjectPoc(
   switch (subject.kind) {
     case "dept":
       return isDeptPoc(productionId, subject.id, userId);
+    case "group":
+      return isGroupPocScoped(productionId, subject.id, userId);
   }
 }
 
 /** 已存在 task 的 POC 判定。 */
 export function isTaskPoc(
   productionId: string,
-  task: { departmentId: string | null },
+  task: { departmentId: string | null; groupId?: string | null },
   userId: string,
 ): Promise<boolean> {
   return isSubjectPoc(productionId, taskSubjectOf(task), userId);
+}
+
+/** 便捷形式：调用点手里只有一个 groupId 字符串时用。 */
+export function isGroupSubjectPoc(
+  productionId: string,
+  groupId: string | null,
+  userId: string,
+): Promise<boolean> {
+  return isSubjectPoc(productionId, groupId ? { kind: "group", id: groupId } : null, userId);
 }
 
 /** 便捷形式：调用点手里只有一个 deptId 字符串时用，省去自己包 subject。 */
@@ -88,4 +130,58 @@ export function isDeptSubjectPoc(
   userId: string,
 ): Promise<boolean> {
   return isSubjectPoc(productionId, deptId ? { kind: "dept", id: deptId } : null, userId);
+}
+
+// ─── 请求体 → 责任主体 ────────────────────────────────────────────────────────
+
+export type SubjectParse =
+  | { ok: true; subject: TaskSubject | null }
+  | { ok: false; status: 400; error: string };
+
+/**
+ * 从请求体解析责任主体，并校验它属于本 production。
+ *
+ * 四个 task 写入口（tasks POST/PATCH、tech-reqs POST/PATCH）都要做同一件事，
+ * 抄四遍就会漂——尤其「跨剧组 id 不能骗过 POC 各门」这条防线，收敛前已经在
+ * tasks/route.ts 的注释里被点过一次名了。
+ *
+ * 两者互斥在这里就拒（DB 的 task_subject_single CHECK 是兜底，不是主门）——
+ * 让用户看到 400「部门与用户组只能二选一」，而不是一条约束违反的 500。
+ */
+export async function parseTaskSubject(
+  productionId: string,
+  body: { departmentId?: unknown; groupId?: unknown },
+): Promise<SubjectParse> {
+  const hasDept  = typeof body.departmentId === "string" && body.departmentId !== "";
+  const hasGroup = typeof body.groupId === "string" && body.groupId !== "";
+  if (hasDept && hasGroup)
+    return { ok: false, status: 400, error: "责任主体只能二选一：部门或用户组" };
+
+  if (hasDept) {
+    const { rows } = await getPool().query(
+      "SELECT 1 FROM production_dept WHERE id = $1 AND production_id = $2",
+      [body.departmentId, productionId],
+    );
+    if (!rows.length) return { ok: false, status: 400, error: "部门不存在" };
+    return { ok: true, subject: { kind: "dept", id: body.departmentId as string } };
+  }
+  if (hasGroup) {
+    const { rows } = await getPool().query(
+      "SELECT 1 FROM event_group WHERE id = $1 AND production_id = $2",
+      [body.groupId, productionId],
+    );
+    if (!rows.length) return { ok: false, status: 400, error: "用户组不存在" };
+    return { ok: true, subject: { kind: "group", id: body.groupId as string } };
+  }
+  return { ok: true, subject: null };
+}
+
+/** 把主体摊回 task 的两列（写入口用）。 */
+export function subjectColumns(subject: TaskSubject | null): {
+  departmentId: string | null; groupId: string | null;
+} {
+  return {
+    departmentId: subject?.kind === "dept"  ? subject.id : null,
+    groupId:      subject?.kind === "group" ? subject.id : null,
+  };
 }

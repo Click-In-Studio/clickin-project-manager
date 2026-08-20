@@ -224,9 +224,19 @@ export async function canViewTechReq(
   if (await isUserReqAssignee(techReqId, permCtx.userId)) return true;
   // #236 policy.task_dept_visibility：关掉后已确认任务只对指派人与 POC 可见，
   // 部门其他成员看不到本部门在做什么。
-  if (techReqDeptId && await isPolicyOn(productionId, "policy.task_dept_visibility")) {
+  //
+  // 责任主体泛化后这条对**用户组**同样成立：绑组的 task 已确认 → 组成员全体可见。
+  // 「这件事交给进场对光小组」之后组里的 runner 看不到这条 task 是说不通的——
+  // 与部门那一支同一个策略开关，同一条「已确认才可见」的门槛。
+  if (await isPolicyOn(productionId, "policy.task_dept_visibility")) {
     const req = await getTechReqByProduction(techReqId, productionId);
-    if (req && req.status !== "awaiting" && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
+    if (req && req.status !== "awaiting") {
+      if (techReqDeptId && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
+      if (req.groupId) {
+        const { isGroupMember } = await import("./event-group-db");
+        if (await isGroupMember(req.groupId, permCtx.userId)) return true;
+      }
+    }
   }
   return false;
 }

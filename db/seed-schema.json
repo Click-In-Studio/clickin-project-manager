@@ -2674,6 +2674,11 @@
       "column": "orphaned_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": true
     }
   ],
   "task_assignee": [

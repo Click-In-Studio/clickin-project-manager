@@ -2,8 +2,8 @@ import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventDepartment, getEventTechReq, updateTaskByProduction, deleteTaskByProduction } from "@/lib/event-db";
-import { isTaskPoc } from "@/lib/task-poc";
+import { getProductionEvent, getEventTechReq, updateTaskByProduction, deleteTaskByProduction } from "@/lib/event-db";
+import { isTaskPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
 import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -27,20 +27,24 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const body = (await req.json()) as {
     title?: string; description?: string;
-    presetMinutes?: number | null; departmentId?: string | null; status?: string;
+    presetMinutes?: number | null; departmentId?: string | null; groupId?: string | null;
+    status?: string;
   };
 
-  // departmentId 必须属于本 production——POC 判定已自带 production 作用域，
-  // 这道校验回更准的 400
-  if (typeof body.departmentId === "string"
-      && !(await getEventDepartment(body.departmentId, productionId)))
-    return Response.json({ error: "部门不存在" }, { status: 400 });
+  // 换责任主体（部门 ↔ 用户组）。都没给 = 不动
+  const touchesSubject = body.departmentId !== undefined || body.groupId !== undefined;
+  let subjectCols: { departmentId: string | null; groupId: string | null } | null = null;
+  if (touchesSubject) {
+    const parsed = await parseTaskSubject(productionId, body);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    subjectCols = subjectColumns(parsed.subject);
+  }
 
   const updated = await updateTaskByProduction(reqId, productionId, {
     title: body.title?.trim(),
     description: body.description,
     presetMinutes: body.presetMinutes,
-    departmentId: body.departmentId,
+    ...(subjectCols ?? {}),
     status: body.status,
   });
   return Response.json({ techReq: updated });

@@ -4,10 +4,9 @@ import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
-import { isDeptSubjectPoc } from "@/lib/task-poc";
+import { isSubjectPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
 import {
   createEventTechReq,
-  getEventDepartment,
   getProductionEvent,
   listMyTechReqsFull,
   listProductionTechReqs,
@@ -53,7 +52,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     title?: string; description?: string;
     eventId?: string | null; scheduleItemIds?: string[];
-    presetMinutes?: number | null; departmentId?: string | null;
+    presetMinutes?: number | null; departmentId?: string | null; groupId?: string | null;
     assignees?: { userId: string; name: string }[];
     startTime?: string | null; endTime?: string | null;
     milestoneIds?: string[];
@@ -62,19 +61,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
   const eventId = body.eventId ?? null;
 
-  // departmentId 必须属于本 production——POC 判定已自带 production 作用域，
-  // 这道校验留着是为了回更准的 400「部门不存在」，并挡住绑入跨剧组部门
-  if (typeof body.departmentId === "string"
-      && !(await getEventDepartment(body.departmentId, productionId)))
-    return Response.json({ error: "部门不存在" }, { status: 400 });
+  // 责任主体 = 部门 | 用户组，二选一。解析同时校验它属于本 production——POC 判定
+  // 虽已自带 production 作用域，这道校验回更准的 400，并挡住绑入跨剧组主体。
+  const parsed = await parseTaskSubject(productionId, body);
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+  const subject = parsed.subject;
 
   let viaPoc = false;
   if (eventId) {
     const event = await getProductionEvent(eventId, productionId);
     if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
-    // 路径三（部门 POC 对可见 event 主动发起本部门 task）：前提是对该 event 有 details 视图
-    viaPoc = typeof body.departmentId === "string"
-      && await isDeptSubjectPoc(productionId, body.departmentId, session.userId)
+    // 路径三（责任主体的 POC 对可见 event 主动发起本主体的 task）：前提是对该 event
+    // 有 details 视图。主体泛化后组 POC 同样走这条——组自带 POC 正是为此。
+    viaPoc = subject !== null
+      && await isSubjectPoc(productionId, subject, session.userId)
       && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "details", "view");
     if (!viaPoc
         && !await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "create"))
@@ -95,10 +95,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if ((body.assignees?.length ?? 0) > 0) {
     const canDirectAssign =
       await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "assignees", "edit")
-      || (typeof body.departmentId === "string"
-          && await isDeptSubjectPoc(productionId, body.departmentId, session.userId));
+      || await isSubjectPoc(productionId, subject, session.userId);
     if (!canDirectAssign)
-      return Response.json({ error: "你没有直接指派的权限——请绑定部门后交由部门 POC 分配" }, { status: 403 });
+      return Response.json({ error: "你没有直接指派的权限——请绑定部门或用户组后交由其 POC 分配" }, { status: 403 });
   }
 
   const techReq = await createEventTechReq({
@@ -109,7 +108,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     title,
     description: body.description ?? "",
     presetMinutes: body.presetMinutes ?? null,
-    departmentId: body.departmentId ?? null,
+    ...subjectColumns(subject),
     assignees: body.assignees ?? [],
     startTime: body.startTime ?? null,
     endTime: body.endTime ?? null,

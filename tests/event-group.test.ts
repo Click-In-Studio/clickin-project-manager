@@ -41,7 +41,7 @@ let deptId: string;
 
 async function actorOf(userId: string) {
   const access = await getProductionPermissionContext(userId, false, prodId);
-  return toActor({ userId, isAdmin: false }, access!.permCtx);
+  return toActor({ userId }, access!.permCtx);
 }
 
 beforeAll(async () => {
@@ -223,7 +223,7 @@ describe("6. A 型组不能被别的 event 引用", () => {
     const itemInOther = await createScheduleItem({
       id: `si_${shortId()}`, eventId: otherEventId, title: "别的场的流程项",
       itemType: "custom", startTime: null, endTime: null, location: "",
-      orderIndex: 0, notes: "",
+      orderIndex: 0, targetSceneId: null, targetBlockId: null, notes: "",
     });
 
     await expect(
@@ -243,7 +243,8 @@ describe("7. 在用户组里参加 = 原来的直接参加", () => {
     });
     const item = await createScheduleItem({
       id: `si_${shortId()}`, eventId, title: "对光", itemType: "custom",
-      startTime: null, endTime: null, location: "", orderIndex: 0, notes: "",
+      startTime: null, endTime: null, location: "", orderIndex: 0,
+      targetSceneId: null, targetBlockId: null, notes: "",
     });
 
     // 还没把组挂上流程项 → 不算参与
@@ -277,7 +278,8 @@ describe("8. 组 POC 没有 schedule assign 权", () => {
     });
     const item = await createScheduleItem({
       id: `si_${shortId()}`, eventId, title: "对光2", itemType: "custom",
-      startTime: null, endTime: null, location: "", orderIndex: 0, notes: "",
+      startTime: null, endTime: null, location: "", orderIndex: 0,
+      targetSceneId: null, targetBlockId: null, notes: "",
     });
     await setScheduleItemGroups(item.id, eventId, prodId, [g.id]);
 
@@ -297,7 +299,8 @@ describe("9. 解散守卫", () => {
     });
     const item = await createScheduleItem({
       id: `si_${shortId()}`, eventId, title: "占用", itemType: "custom",
-      startTime: null, endTime: null, location: "", orderIndex: 0, notes: "",
+      startTime: null, endTime: null, location: "", orderIndex: 0,
+      targetSceneId: null, targetBlockId: null, notes: "",
     });
     await setScheduleItemGroups(item.id, eventId, prodId, [g.id]);
 

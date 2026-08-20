@@ -11,6 +11,7 @@
 import { getPool } from "./pg";
 import { policyFilteredRows } from "./policy-db";
 import type { Pool, PoolClient } from "pg";
+import type { TaskSubject } from "./task-poc";
 
 /** 可注入连接：调用方在事务内传 client，缺省用池（W5 AI review——多步写点须同事务） */
 type Queryable = Pool | PoolClient;
@@ -521,14 +522,44 @@ export async function writeWikiGrants(
  *   - If neither assigned dept nor event depts exist, creator is written to resource_person_manage
  * eventDeptId is a production_dept.id（并表后单一 id 空间，name 映射 hack 已退役）.
  */
+/**
+ * task 的责任主体已泛化为「部门 | 用户组」（见 lib/task-poc.ts 的 TaskSubject）。
+ *
+ * 组绑定时把责任解析成**审批/管理链上的一个落点**再走原有两条路：
+ *   组 POC 是部门 → 与直接绑该部门同款（resource_dept_manage + 部门 POC 行集）
+ *   组 POC 是人   → resource_person_manage 落到那个人
+ *   组没设 POC     → 两条都不落，掉进下面的「继承 event 管理方 / 创建者兜底」
+ *
+ * 注意这里落的行只是**加速与审批路由**，不是权限的唯一保证：谁是 POC 的最终判定
+ * 走 lib/task-poc.ts 的 Type B 上下文判定，部门换 POC / 组换 POC 都自动跟随，
+ * 不依赖这里补写任何行。
+ */
+async function resolveSubjectManage(
+  subject: TaskSubject | null,
+  productionId: string,
+): Promise<{ deptId: string | null; userIds: string[] }> {
+  if (!subject) return { deptId: null, userIds: [] };
+  if (subject.kind === "dept") return { deptId: subject.id, userIds: [] };
+  const { rows } = await getPool().query<{ poc_dept_id: string | null; poc_user_id: string | null }>(
+    "SELECT poc_dept_id, poc_user_id FROM event_group WHERE id = $1 AND production_id = $2",
+    [subject.id, productionId],
+  );
+  const g = rows[0];
+  if (!g) return { deptId: null, userIds: [] };
+  if (g.poc_dept_id) return { deptId: g.poc_dept_id, userIds: [] };
+  if (g.poc_user_id) return { deptId: null, userIds: [g.poc_user_id] };
+  return { deptId: null, userIds: [] };
+}
+
 export async function writeTechReqGrants(
   reqId: string,
   productionId: string,
-  eventDeptId: string | null,
+  subject: TaskSubject | null,
   createdBy: string,
   eventId: string | null,
 ): Promise<void> {
   const pool = getPool();
+  const { deptId: eventDeptId, userIds: pocUserIds } = await resolveSubjectManage(subject, productionId);
   if (eventDeptId) {
     // #236：POC 行集先过策略开关。`task.dept_poc:*@delete` **默认关**，于是本写点
     // 不再无条件发删除行——这正好把 V-1（「organizer 显式创建的 task，部门 POC 无
@@ -563,6 +594,35 @@ export async function writeTechReqGrants(
        VALUES ($1, $3, 'task', $2, '*', $4::uuid)
        ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub) DO NOTHING`,
       [productionId, reqId, eventDeptId, createdBy],
+    );
+  }
+  // 组 POC 是个人（如「舞监助理带几个 runner」那种小组）：没有部门可挂，行直接发给
+  // 本人，管理链落 resource_person_manage。行集与部门 POC 同一份，走同一个策略开关。
+  if (pocUserIds.length) {
+    const pocRows = await policyFilteredRows(
+      productionId, "task", "dept_poc",
+      [["*", "view"], ["*", "edit"], ["assignees", "edit"], ["*", "delete"], ["grants", "edit"]],
+      pool,
+    );
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT DISTINCT $1, u.user_id, 'task', $2, s.sub, s.verb, 'direct', u.user_id
+       FROM UNNEST($3::uuid[]) AS u(user_id)
+       CROSS JOIN UNNEST($4::text[], $5::text[]) AS s(sub, verb)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, reqId, pocUserIds, pocRows.map((r) => r[0]), pocRows.map((r) => r[1])],
+    );
+    await pool.query(
+      `INSERT INTO resource_person_manage
+         (production_id, user_id, resource_type, resource_id, established_by)
+       SELECT $1, u.user_id, 'task', $2, $3::uuid
+       FROM UNNEST($4::uuid[]) AS u(user_id)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
+      [productionId, reqId, createdBy, pocUserIds],
     );
   }
   // Parent event's managing depts also manage the task (bound tasks only)

@@ -215,18 +215,45 @@ export async function isGroupPoc(groupId: string, userId: string): Promise<boole
  * 事件可见性判定用它（Type B，不落 grant 行，部门加人自动跟踪）。
  */
 export async function userGroupIdsInEvent(eventId: string, userId: string): Promise<string[]> {
+  // 组进入一个 event 有两条通道，都要认：
+  //   1. 挂在该 event 的流程项上（rundown 的列）
+  //   2. 作为该 event 下某条 task 的责任主体（task.group_id）
+  // 少认第 2 条的话，「这件事交给进场对光小组」之后组员看不见这个 event——正是
+  // 用户说的「不然他们怎么知道他们要干什么」。
   const res = await getPool().query<{ group_id: string }>(
-    `SELECT DISTINCT sig.group_id
-       FROM schedule_item_group sig
-       JOIN event_schedule_item esi ON esi.id = sig.item_id
-       JOIN event_group_member egm  ON egm.group_id = sig.group_id
+    `WITH event_groups AS (
+       SELECT sig.group_id
+         FROM schedule_item_group sig
+         JOIN event_schedule_item esi ON esi.id = sig.item_id
+        WHERE esi.event_id = $1
+       UNION
+       SELECT t.group_id
+         FROM task t
+        WHERE t.event_id = $1 AND t.group_id IS NOT NULL
+     )
+     SELECT DISTINCT eg.group_id
+       FROM event_groups eg
+       JOIN event_group_member egm ON egm.group_id = eg.group_id
        LEFT JOIN production_dept_member pdm
               ON pdm.dept_id = egm.dept_id AND pdm.user_id = $2
-      WHERE esi.event_id = $1
-        AND (egm.user_id = $2 OR pdm.user_id IS NOT NULL)`,
+      WHERE egm.user_id = $2 OR pdm.user_id IS NOT NULL`,
     [eventId, userId],
   );
   return res.rows.map(r => r.group_id);
+}
+
+/** 他是不是这个组的成员（含通过成员部门带入）。task 可见性判定用。 */
+export async function isGroupMember(groupId: string, userId: string): Promise<boolean> {
+  const res = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM event_group_member egm
+        LEFT JOIN production_dept_member pdm
+               ON pdm.dept_id = egm.dept_id AND pdm.user_id = $2
+        WHERE egm.group_id = $1 AND (egm.user_id = $2 OR pdm.user_id IS NOT NULL)
+     ) AS exists`,
+    [groupId, userId],
+  );
+  return res.rows[0].exists;
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────

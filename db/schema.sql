@@ -586,6 +586,9 @@ CREATE TABLE IF NOT EXISTS task (
   description    TEXT NOT NULL DEFAULT '',
   preset_minutes INTEGER,
   department_id  UUID REFERENCES production_dept(id) ON DELETE SET NULL,
+  -- 责任主体的另一支（add-task-group.sql）：绑用户组而非部门。与 department_id
+  -- 互斥（task_subject_single），POC 从组的当前定义解析，见 lib/task-poc.ts。
+  group_id       UUID REFERENCES event_group(id) ON DELETE SET NULL,
   status         TEXT NOT NULL DEFAULT 'pending',
   start_time     TIMESTAMPTZ,
   end_time       TIMESTAMPTZ,
@@ -597,8 +600,12 @@ CREATE TABLE IF NOT EXISTS task (
   -- 与 status 正交——status 是工作进度，本列是结构状态；重新绑定事件时清空。
   orphaned_at    TIMESTAMPTZ,
   CONSTRAINT task_time_order_check
-    CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time)
+    CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time),
+  -- 责任主体二选一：POC 必须是责任单点，否则「指派归 POC」没有唯一答案
+  CONSTRAINT task_subject_single CHECK (num_nonnulls(department_id, group_id) <= 1)
 );
+
+CREATE INDEX IF NOT EXISTS task_group_idx ON task (group_id) WHERE group_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS task_event_idx ON task(event_id);
 CREATE INDEX IF NOT EXISTS task_orphaned_idx ON task(production_id) WHERE orphaned_at IS NOT NULL;
