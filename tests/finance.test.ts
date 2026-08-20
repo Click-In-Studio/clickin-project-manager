@@ -17,8 +17,8 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { classifyApprovalNode, buildApprovalLadder } from "@/lib/approval-routing";
 import {
   approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,
-  FinanceError, getExpense, listBudgetCategories, listExpenses, listPendingExpenses,
-  rejectExpense, submitExpense, updateBudgetCategory,
+  escalateExpiredExpenses, FinanceError, getExpense, listBudgetCategories, listExpenses,
+  listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
 } from "@/lib/finance-db";
 
 let prodId: string;
@@ -226,6 +226,85 @@ describe("8. 删科目不连坐删支出", () => {
     expect(after).not.toBeNull();
     expect(after!.categoryId).toBeNull();
     expect(after!.amount).toBe("1200.00");
+  });
+});
+
+describe("9. 超时升级", () => {
+  /** 把链末条的 notifiedAt 往前推，模拟"当前级放着没动 N 小时"。 */
+  async function ageExpense(expenseId: string, hours: number) {
+    await getPool().query(
+      `UPDATE production_expense
+          SET escalation_chain = jsonb_set(
+                escalation_chain,
+                ARRAY[(jsonb_array_length(escalation_chain) - 1)::text, 'notifiedAt'],
+                to_jsonb((now() - ($2 || ' hours')::interval)::text))
+        WHERE id = $1`,
+      [expenseId, String(hours)],
+    );
+  }
+
+  it("**缺 production_approval_config 行时照样升级**（权限申请那边静默死过的坑）", async () => {
+    // 模拟「早于 production_approval_config 这张表的存量演出」——它们一行配置都没有。
+    // 权限申请那边就是这么静默死的：INNER JOIN 让这些演出永远匹配不上，
+    // 线上 8 个演出的整条升级链自 Phase 7 起是死的。缺行必须按列默认值 24h 计时。
+    await getPool().query(
+      "DELETE FROM production_approval_config WHERE production_id = $1", [prodId],
+    );
+    const { rows } = await getPool().query(
+      "SELECT 1 FROM production_approval_config WHERE production_id = $1", [prodId],
+    );
+    expect(rows).toHaveLength(0);
+
+    const cat = await makeCategory("超时升级");
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $3 WHERE production_id = $1 AND user_id = $2`,
+      [prodId, submitterId, strangerId],
+    );
+    const e = await submitExpense({
+      productionId: prodId, categoryId: cat.id, title: "放着没人管",
+      amount: "77.00", submittedBy: submitterId,
+    });
+    expect(e.currentStage).toBe("supervisor");
+
+    await ageExpense(e.id, 48);          // 超过默认 24h
+    const res = await escalateExpiredExpenses();
+    expect(res.escalated).toBeGreaterThan(0);
+
+    const after = (await getExpense(e.id, prodId))!;
+    expect(after.status).toBe("pending");
+    expect(after.currentStage).not.toBe("supervisor");   // 已经升到下一级
+    expect(after.currentApproverIds).not.toContain(strangerId);
+
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+      [prodId, submitterId],
+    );
+  });
+
+  it("没超时的不动", async () => {
+    const cat = await makeCategory("刚提交");
+    const e = await submitExpense({
+      productionId: prodId, categoryId: cat.id, title: "才提交",
+      amount: "5.00", submittedBy: submitterId,
+    });
+    const before = (await getExpense(e.id, prodId))!.currentStage;
+    await escalateExpiredExpenses();
+    expect((await getExpense(e.id, prodId))!.currentStage).toBe(before);
+  });
+
+  it("计时起点是当前级被通知的时刻，不是提交时刻——多级不会一个 TTL 里跳完", async () => {
+    const cat = await makeCategory("逐级计时");
+    const e = await submitExpense({
+      productionId: prodId, categoryId: cat.id, title: "逐级",
+      amount: "9.00", submittedBy: submitterId,
+    });
+    await ageExpense(e.id, 48);
+    await escalateExpiredExpenses();
+    const once = (await getExpense(e.id, prodId))!;
+
+    // 再跑一次：新一级的 notifiedAt 是刚写的，不该再跳
+    await escalateExpiredExpenses();
+    expect((await getExpense(e.id, prodId))!.currentStage).toBe(once.currentStage);
   });
 });
 

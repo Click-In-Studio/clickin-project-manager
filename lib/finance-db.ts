@@ -25,7 +25,7 @@
 import { getPool } from "./pg";
 import type { PoolClient } from "pg";
 import {
-  buildApprovalLadder, nextStage,
+  buildApprovalLadder, DEFAULT_APPROVAL_TTL_HOURS, nextStage,
   type ApprovalStage, type StagePosition,
 } from "./approval-routing";
 
@@ -480,4 +480,68 @@ export async function isExpenseApprover(
     [expenseId, productionId, actorId],
   );
   return res.rows[0].exists;
+}
+
+// ─── 超时升级 ─────────────────────────────────────────────────────────────────
+
+/**
+ * 当前级超时未响应即升级到阶梯下一级。由内部 cron 端点调用，与权限申请同一个节拍。
+ *
+ * 两处照抄 escalateExpiredApprovals 的口径，都是踩过的坑：
+ *
+ * 1. **计时起点是「当前级被通知的时刻」**（链末条 notifiedAt），不是提交时刻——
+ *    否则多级阶梯会在同一个 TTL 里被连着跳完。
+ * 2. **LEFT JOIN + COALESCE 而非 INNER JOIN**：production_approval_config 是后加的
+ *    表，建表 SQL 没有回填，早于它的演出一行都没有。INNER JOIN 会让这些演出的支出
+ *    **永远**匹配不上、一次也升不了级（权限申请那边就这么静默死过：线上 8 个演出
+ *    全部缺行，整条升级链自 Phase 7 起是死的）。缺配置 = 按列默认值计时，
+ *    不是「不升级」。
+ *
+ * 已在链顶（owner）的不再升级——只等人处理。
+ */
+export async function escalateExpiredExpenses(): Promise<{ escalated: number }> {
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    id: string; production_id: string; submitted_by: string; category_id: string | null;
+    current_stage: string | null; current_stage_depth: number;
+  }>(
+    `SELECT e.id, e.production_id, e.submitted_by, e.category_id,
+            e.current_stage, e.current_stage_depth
+       FROM production_expense e
+       LEFT JOIN production_approval_config pac ON pac.production_id = e.production_id
+      WHERE e.status = 'pending'
+        AND COALESCE((e.escalation_chain -> -1 ->> 'notifiedAt')::timestamptz, e.created_at)
+            < now() - (COALESCE(pac.ttl_hours, $1) || ' hours')::INTERVAL`,
+    [DEFAULT_APPROVAL_TTL_HOURS],
+  );
+
+  let escalated = 0;
+  for (const row of rows) {
+    const ladder = await buildApprovalLadder(
+      expenseTarget(row.production_id, row.submitted_by, row.category_id),
+    );
+    const next = nextStage(
+      ladder,
+      positionOf({ currentStage: row.current_stage }, row.current_stage_depth),
+    );
+    if (!next) continue;   // 已在链顶，只等人处理
+
+    const moved = await pool.query<{ id: string }>(
+      `UPDATE production_expense
+         SET current_stage = $2, current_stage_depth = $3,
+             current_approver_ids = $4::uuid[],
+             escalation_chain = escalation_chain || $5::jsonb,
+             updated_at = now()
+       WHERE id = $1 AND status = 'pending'
+         AND current_stage IS NOT DISTINCT FROM $6
+       RETURNING id`,
+      [
+        row.id, next.stage, next.depth, next.approverIds,
+        JSON.stringify([{ ...chainEntry(next), escalationReason: "timeout" }]),
+        row.current_stage,
+      ],
+    );
+    if (moved.rows[0]) escalated++;
+  }
+  return { escalated };
 }
