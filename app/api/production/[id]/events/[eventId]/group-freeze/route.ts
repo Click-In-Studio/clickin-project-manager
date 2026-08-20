@@ -43,6 +43,9 @@ async function gate(req: NextRequest, productionId: string, eventId: string) {
   if (!session) return { error: Response.json({ error: "未登录" }, { status: 401 }) };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { error: Response.json({ error: "无权访问" }, { status: 403 }) };
+  // 冻结/解冻是内容写入，与 rundown / 组绑定同类——归档项目一律不可改
+  if (access.isArchived)
+    return { error: Response.json({ error: "已归档的项目不可修改" }, { status: 403 }) };
   const event = await getProductionEvent(eventId, productionId);
   if (!event) return { error: Response.json({ error: "事件不存在" }, { status: 404 }) };
   if (!await hasEventContentEdit(toActor(session, access.permCtx), productionId, eventId, event.status))
