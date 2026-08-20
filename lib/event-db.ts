@@ -1,6 +1,7 @@
 import { getPool } from "./pg";
 import { policyFilteredRows } from "./policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "./resource-grant-db";
+import { taskSubjectOf } from "./task-poc";
 import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki-db";
 import { keyBetween } from "./lex-order";
 
@@ -96,7 +97,10 @@ export type EventTechReq = {
   title: string;
   description: string;
   presetMinutes: number | null;
+  /** 责任主体之一：绑定的部门。与 groupId 互斥（DB task_subject_single CHECK）。 */
   departmentId: string | null;
+  /** 责任主体之一：绑定的用户组。POC 从组的当前定义解析，见 lib/task-poc.ts。 */
+  groupId: string | null;
   status: string;
   assignees: EventTechReqAssignee[];
   chatId: string | null;
@@ -186,7 +190,8 @@ type CallTimeRow = {
 type TechReqRow = {
   id: string; production_id: string; event_id: string | null;
   title: string; description: string; preset_minutes: number | null;
-  department_id: string | null; status: string; chat_id: string | null; created_at: Date;
+  department_id: string | null; group_id: string | null;
+  status: string; chat_id: string | null; created_at: Date;
   created_via?: string | null;
   start_time: Date | null; end_time: Date | null;
   effective_start_time: Date | null; effective_end_time: Date | null;
@@ -195,7 +200,7 @@ type TechReqRow = {
 /** SELECT 列清单（task t 别名 + production_event pe LEFT JOIN 下的有效时间解析链）。 */
 const TASK_SELECT_COLS = `
   t.id, t.production_id, t.event_id, t.title, t.description,
-  t.preset_minutes, t.department_id, t.status, t.chat_id, t.created_via, t.created_at,
+  t.preset_minutes, t.department_id, t.group_id, t.status, t.chat_id, t.created_via, t.created_at,
   t.start_time, t.end_time,
   COALESCE(t.start_time,
     (SELECT MIN(esi.start_time) FROM task_schedule_item tsi
@@ -285,7 +290,7 @@ function rowToTechReq(
   return {
     id: r.id, productionId: r.production_id, eventId: r.event_id, scheduleItemIds,
     title: r.title, description: r.description,
-    presetMinutes: r.preset_minutes, departmentId: r.department_id,
+    presetMinutes: r.preset_minutes, departmentId: r.department_id, groupId: r.group_id,
     status: r.status, assignees, chatId: r.chat_id ?? null,
     createdVia: (r.created_via ?? "explicit") as "explicit" | "dept_auto" | "poc",
     createdAt: r.created_at.toISOString(),
@@ -1234,7 +1239,9 @@ export async function createEventTechReq(data: {
   id: string; productionId: string; eventId: string | null;
   scheduleItemIds: string[];
   title: string; description: string; presetMinutes: number | null;
-  departmentId: string | null; assignees: EventTechReqAssignee[];
+  /** 责任主体二选一：部门或用户组。两个都给会被 DB 的 task_subject_single CHECK 拒。 */
+  departmentId: string | null; groupId?: string | null;
+  assignees: EventTechReqAssignee[];
   startTime?: string | null; endTime?: string | null;
   milestoneIds?: string[];
   createdVia?: "explicit" | "poc";
@@ -1246,10 +1253,10 @@ export async function createEventTechReq(data: {
     await client.query(
       `INSERT INTO task
          (id, production_id, event_id, title, description, preset_minutes,
-          department_id, start_time, end_time, created_via)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          department_id, group_id, start_time, end_time, created_via)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [data.id, data.productionId, data.eventId, data.title, data.description,
-       data.presetMinutes, data.departmentId,
+       data.presetMinutes, data.departmentId, data.groupId ?? null,
        data.startTime ?? null, data.endTime ?? null, data.createdVia ?? "explicit"]
     );
     // schedule 绑定蕴含 event 绑定：无 event 或跨 event 的 item 直接过滤丢弃
@@ -1281,10 +1288,17 @@ export async function createEventTechReq(data: {
     }
     await client.query("COMMIT");
     // Write resource grants after transaction commit (best-effort; failures don't roll back the req)
-    await writeTechReqGrants(data.id, data.productionId, data.departmentId, data.createdBy, data.eventId);
+    await writeTechReqGrants(
+      data.id, data.productionId,
+      taskSubjectOf({ departmentId: data.departmentId, groupId: data.groupId }),
+      data.createdBy, data.eventId,
+    );
     if (data.departmentId && data.eventId) {
       await writeTaskDeptEventVisibility(data.eventId, data.departmentId, data.productionId, data.createdBy);
     }
+    // 组绑定不在这里发 event 可见性行：组成员是活引用（部门加人自动进组），落行就要
+    // 在「部门加人」那个写点回溯补发。改由 canEnterEvent 的 Type B 判定实时算，
+    // userGroupIdsInEvent 已同时认 schedule 与 task 两条组通道。
     const created = await getTechReqByProduction(data.id, data.productionId);
     if (!created) throw new Error(`task not found after create: ${data.id}`);
     return created;
@@ -1301,6 +1315,8 @@ export async function updateTaskByProduction(
   fields: {
     title?: string; description?: string;
     presetMinutes?: number | null; departmentId?: string | null; status?: string;
+    /** 责任主体换到用户组；与 departmentId 互斥，DB CHECK 兜底 */
+    groupId?: string | null;
     startTime?: string | null; endTime?: string | null;
     /** 重绑/解绑 event；置 null 时连带清空 schedule 绑定（应用层不变量） */
     eventId?: string | null;
@@ -1312,6 +1328,7 @@ export async function updateTaskByProduction(
   if (fields.description   !== undefined) sets.push(`description    = $${vals.push(fields.description)}`);
   if (fields.presetMinutes !== undefined) sets.push(`preset_minutes = $${vals.push(fields.presetMinutes)}`);
   if (fields.departmentId  !== undefined) sets.push(`department_id  = $${vals.push(fields.departmentId)}`);
+  if (fields.groupId       !== undefined) sets.push(`group_id       = $${vals.push(fields.groupId)}`);
   if (fields.status        !== undefined) sets.push(`status         = $${vals.push(fields.status)}`);
   if (fields.startTime     !== undefined) sets.push(`start_time     = $${vals.push(fields.startTime)}`);
   if (fields.endTime       !== undefined) sets.push(`end_time       = $${vals.push(fields.endTime)}`);
@@ -2159,6 +2176,8 @@ export type MyTechReqFullEntry = {
   status: string;
   departmentId: string | null;
   departmentName: string | null;
+  groupId: string | null;
+  groupName: string | null;
   eventId: string | null;
   eventTitle: string | null;
   productionId: string;
@@ -2175,6 +2194,7 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
     department_id: string | null; department_name: string | null;
+    group_id: string | null; group_name: string | null;
     event_id: string | null; event_title: string | null;
     production_id: string; production_name: string;
     effective_start_time: Date | null; effective_end_time: Date | null;
@@ -2185,6 +2205,7 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
     `SELECT
        t.id, t.title, t.description, t.status, t.department_id,
        ed.name AS department_name,
+       t.group_id, eg.name AS group_name,
        pe.id AS event_id, pe.title AS event_title,
        t.production_id, p.name AS production_name,
        COALESCE(t.start_time,
@@ -2195,7 +2216,7 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
          (SELECT MAX(esi.end_time) FROM task_schedule_item tsi
           JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
          pe.end_time) AS effective_end_time,
-       (edm_poc.user_id IS NOT NULL) AS am_poc,
+       (edm_poc.user_id IS NOT NULL OR grp_poc.am IS NOT NULL) AS am_poc,
        (
          SELECT json_agg(json_build_object('userId', eta2.user_id, 'name', eta2.name)
                 ORDER BY eta2.name)
@@ -2213,15 +2234,27 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
      LEFT JOIN production_event pe ON pe.id = t.event_id
      JOIN production p ON p.id = t.production_id
      LEFT JOIN production_dept ed ON ed.id = t.department_id
+     LEFT JOIN event_group eg ON eg.id = t.group_id
      LEFT JOIN production_dept_member edm_poc
        ON edm_poc.dept_id = t.department_id
        AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
+     -- 责任主体是用户组时，「我是不是 POC」要解析组的当前定义（user 型直接比对，
+     -- dept 型看该部门现任 POC）。少了这段，绑组 task 会从组 POC 的任务页消失。
+     LEFT JOIN LATERAL (
+       SELECT 1 AS am
+       WHERE eg.id IS NOT NULL
+         AND (eg.poc_user_id = $1
+              OR EXISTS (SELECT 1 FROM production_dept_member pdm
+                          WHERE pdm.dept_id = eg.poc_dept_id
+                            AND pdm.user_id = $1 AND pdm.is_poc = true))
+     ) grp_poc ON true
      LEFT JOIN task_assignee eta
        ON eta.task_id = t.id AND eta.user_id = $1
      WHERE (t.event_id IS NULL OR pe.status != 'cancelled')
        AND (
-         (t.status = 'awaiting' AND edm_poc.user_id IS NOT NULL)
-         OR (t.status != 'awaiting' AND (eta.user_id IS NOT NULL OR edm_poc.user_id IS NOT NULL))
+         (t.status = 'awaiting' AND (edm_poc.user_id IS NOT NULL OR grp_poc.am IS NOT NULL))
+         OR (t.status != 'awaiting'
+             AND (eta.user_id IS NOT NULL OR edm_poc.user_id IS NOT NULL OR grp_poc.am IS NOT NULL))
        )
      ORDER BY pe.start_time NULLS LAST, t.created_at`,
     [userId]
@@ -2233,6 +2266,8 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
     status: r.status,
     departmentId: r.department_id,
     departmentName: r.department_name,
+    groupId: r.group_id,
+    groupName: r.group_name,
     eventId: r.event_id,
     eventTitle: r.event_title,
     productionId: r.production_id,
@@ -2252,6 +2287,9 @@ export type ProductionTechReqEntry = {
   status: string;
   departmentId: string | null;
   departmentName: string | null;
+  /** 责任主体是用户组时的组 id（与 departmentId 互斥）。rundown 按主体归列要用。 */
+  groupId: string | null;
+  groupName: string | null;
   eventId: string | null;
   eventTitle: string | null;
   eventStartTime: string | null;
@@ -2281,6 +2319,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
     department_id: string | null; department_name: string | null;
+    group_id: string | null; group_name: string | null;
     event_id: string | null; event_title: string | null; event_start_time: Date | null;
     start_time: Date | null; end_time: Date | null;
     effective_start_time: Date | null; effective_end_time: Date | null;
@@ -2291,6 +2330,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
     `SELECT
        t.id, t.title, t.description, t.status, t.department_id,
        ed.name AS department_name,
+       t.group_id, eg.name AS group_name,
        pe.id AS event_id, pe.title AS event_title, pe.start_time AS event_start_time,
        t.start_time, t.end_time,
        COALESCE(t.start_time,
@@ -2319,6 +2359,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
      FROM task t
      LEFT JOIN production_event pe ON pe.id = t.event_id
      LEFT JOIN production_dept ed ON ed.id = t.department_id
+     LEFT JOIN event_group eg ON eg.id = t.group_id
      WHERE t.production_id = $1 AND (t.event_id IS NULL OR pe.status != 'cancelled')
      ORDER BY COALESCE(t.start_time, pe.start_time) NULLS LAST, t.created_at`,
     [productionId]
@@ -2330,6 +2371,8 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
     status: r.status,
     departmentId: r.department_id,
     departmentName: r.department_name,
+    groupId: r.group_id,
+    groupName: r.group_name,
     eventId: r.event_id,
     eventTitle: r.event_title,
     eventStartTime: r.event_start_time?.toISOString() ?? null,

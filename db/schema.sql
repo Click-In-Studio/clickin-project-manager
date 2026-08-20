@@ -503,6 +503,98 @@ CREATE TABLE IF NOT EXISTS schedule_item_department (
   PRIMARY KEY (item_id, dept_id)
 );
 
+-- ── 用户组（add-event-group-1-entity.sql）────────────────────────────────────────────────
+-- 部门 + 人的集合，自带 POC。两型由 event_id 是否为 NULL 判定：
+--   A 型（event 非空）该 event 专属，门 = hasEventContentEdit
+--   B 型（event 为空）项目级常驻编制，门 = node:user_group/*，设 POC 另需 poc@edit
+-- 与 schedule_item_participant / _department **并联**，不是串联——直挂人/部门的路保留。
+
+CREATE TABLE IF NOT EXISTS event_group (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  event_id      TEXT        REFERENCES production_event(id) ON DELETE CASCADE,
+  name          TEXT        NOT NULL,
+  -- 刻意没有 location：组回答「谁」不回答「哪儿」，地点是 event_schedule_item 的属性
+  color         TEXT,
+  order_index   INTEGER     NOT NULL DEFAULT 0,
+  poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
+  poc_user_id   UUID        REFERENCES app_user(id)        ON DELETE SET NULL,
+  created_by    UUID        NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT event_group_poc_single CHECK (num_nonnulls(poc_dept_id, poc_user_id) <= 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_name_unique_idx
+  ON event_group (production_id, COALESCE(event_id, ''), name);
+CREATE INDEX IF NOT EXISTS event_group_production_idx ON event_group (production_id);
+CREATE INDEX IF NOT EXISTS event_group_event_idx      ON event_group (event_id) WHERE event_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS event_group_member (
+  group_id UUID        NOT NULL REFERENCES event_group(id)  ON DELETE CASCADE,
+  dept_id  UUID        REFERENCES production_dept(id)       ON DELETE CASCADE,
+  user_id  UUID        REFERENCES app_user(id)              ON DELETE CASCADE,
+  added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT event_group_member_one_kind CHECK (num_nonnulls(dept_id, user_id) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_member_dept_idx
+  ON event_group_member (group_id, dept_id) WHERE dept_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_member_user_idx
+  ON event_group_member (group_id, user_id) WHERE user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS schedule_item_group (
+  item_id  TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
+  group_id UUID NOT NULL REFERENCES event_group(id)         ON DELETE CASCADE,
+  PRIMARY KEY (item_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS schedule_item_group_group_idx ON schedule_item_group (group_id);
+
+-- ── 用户组冻结快照（add-event-group-3-freeze.sql）──────────────────────────────────
+-- 冻的是「event × group 的成员解析结果」，不是 group 本身——B 型组被 5 个 event 引用，
+-- 冻了 3 个，组本身照常改，只影响另外 2 个。故键含 event_id。
+-- 完整快照 = 人员 + 人员关系（via_dept_*，他当时以什么身份在场）+ 当时的 POC。
+-- 所有 *_name 是刻意的文本冗余：审计要「当时叫什么」，不随实体改名而漂。
+-- refreeze 追加不覆盖：unfreeze 置 released_at，再冻插新一版，历史全留。
+
+CREATE TABLE IF NOT EXISTS event_group_freeze (
+  event_id      TEXT        NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  -- 刻意不设 FK：快照自给自足，组行删掉后仍解析得出（CASCADE 会删审计，
+  -- SET NULL 与 PK 的 NOT NULL 冲突）
+  group_id      UUID        NOT NULL,
+  frozen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  released_at   TIMESTAMPTZ,
+  group_name    TEXT        NOT NULL,
+  poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
+  poc_dept_name TEXT,
+  poc_user_id   UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  poc_user_name TEXT,
+  frozen_by     UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  PRIMARY KEY (event_id, group_id, frozen_at)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_group_freeze_active_idx
+  ON event_group_freeze (event_id, group_id) WHERE released_at IS NULL;
+CREATE INDEX IF NOT EXISTS event_group_freeze_event_idx ON event_group_freeze (event_id);
+
+CREATE TABLE IF NOT EXISTS event_group_freeze_member (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id      TEXT        NOT NULL,
+  group_id      UUID        NOT NULL,
+  frozen_at     TIMESTAMPTZ NOT NULL,
+  user_id       UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  user_name     TEXT        NOT NULL,
+  via_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
+  via_dept_name TEXT,
+  FOREIGN KEY (event_id, group_id, frozen_at)
+    REFERENCES event_group_freeze (event_id, group_id, frozen_at) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS event_group_freeze_member_snapshot_idx
+  ON event_group_freeze_member (event_id, group_id, frozen_at);
+CREATE INDEX IF NOT EXISTS event_group_freeze_member_user_idx
+  ON event_group_freeze_member (user_id) WHERE user_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS schedule_item_participant (
   item_id TEXT NOT NULL REFERENCES event_schedule_item(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -539,6 +631,9 @@ CREATE TABLE IF NOT EXISTS task (
   description    TEXT NOT NULL DEFAULT '',
   preset_minutes INTEGER,
   department_id  UUID REFERENCES production_dept(id) ON DELETE SET NULL,
+  -- 责任主体的另一支（add-event-group-2-task-subject.sql）：绑用户组而非部门。与 department_id
+  -- 互斥（task_subject_single），POC 从组的当前定义解析，见 lib/task-poc.ts。
+  group_id       UUID REFERENCES event_group(id) ON DELETE SET NULL,
   status         TEXT NOT NULL DEFAULT 'pending',
   start_time     TIMESTAMPTZ,
   end_time       TIMESTAMPTZ,
@@ -550,8 +645,12 @@ CREATE TABLE IF NOT EXISTS task (
   -- 与 status 正交——status 是工作进度，本列是结构状态；重新绑定事件时清空。
   orphaned_at    TIMESTAMPTZ,
   CONSTRAINT task_time_order_check
-    CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time)
+    CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time),
+  -- 责任主体二选一：POC 必须是责任单点，否则「指派归 POC」没有唯一答案
+  CONSTRAINT task_subject_single CHECK (num_nonnulls(department_id, group_id) <= 1)
 );
+
+CREATE INDEX IF NOT EXISTS task_group_idx ON task (group_id) WHERE group_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS task_event_idx ON task(event_id);
 CREATE INDEX IF NOT EXISTS task_orphaned_idx ON task(production_id) WHERE orphaned_at IS NOT NULL;
@@ -1038,6 +1137,49 @@ CREATE TABLE IF NOT EXISTS task_milestone (
 );
 
 CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
+
+-- ── rundown 版面（add-event-group-4-rundown.sql）────────────────────────────────
+-- 组是跨 event 共享的，「在这场排第几列 / 显不显示 / 钉不钉左边」只能记在
+-- (event, group) 这一层。is_pinned = 横向滚动时钉在左侧，与冻结快照无关。
+-- 地点列是筛选条件不是地点实体——地点是 event_schedule_item 的属性。
+
+CREATE TABLE IF NOT EXISTS event_rundown_column (
+  id             UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id       TEXT    NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  group_id       UUID    REFERENCES event_group(id) ON DELETE CASCADE,
+  match_location TEXT,
+  order_index    INTEGER NOT NULL DEFAULT 0,
+  is_visible     BOOLEAN NOT NULL DEFAULT true,
+  is_pinned      BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT event_rundown_column_kind CHECK (num_nonnulls(group_id, match_location) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_column_group_idx
+  ON event_rundown_column (event_id, group_id) WHERE group_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_column_location_idx
+  ON event_rundown_column (event_id, match_location) WHERE match_location IS NOT NULL;
+CREATE INDEX IF NOT EXISTS event_rundown_column_event_idx ON event_rundown_column (event_id);
+
+CREATE TABLE IF NOT EXISTS event_rundown_placement (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id   TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  item_id    TEXT REFERENCES event_schedule_item(id) ON DELETE CASCADE,
+  task_id    TEXT REFERENCES task(id) ON DELETE CASCADE,
+  color      TEXT,
+  CONSTRAINT event_rundown_placement_entry CHECK (num_nonnulls(item_id, task_id) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_placement_item_idx
+  ON event_rundown_placement (event_id, item_id) WHERE item_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_placement_task_idx
+  ON event_rundown_placement (event_id, task_id) WHERE task_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS event_rundown_placement_column (
+  placement_id UUID NOT NULL REFERENCES event_rundown_placement(id)  ON DELETE CASCADE,
+  column_id    UUID NOT NULL REFERENCES event_rundown_column(id)     ON DELETE CASCADE,
+  PRIMARY KEY (placement_id, column_id)
+);
+
 
 -- ── Announcements ─────────────────────────────────────────────────────────────
 

@@ -4,14 +4,13 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   deleteTaskByProduction,
-  getEventDepartment,
   getProductionEvent,
   getTaskDependencies,
   getTechReqByProduction,
-  isUserDeptPoc,
   updateTaskByProduction,
 } from "@/lib/event-db";
 import { canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
+import { isTaskPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 
@@ -50,16 +49,20 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const body = (await req.json()) as {
     title?: string; description?: string;
-    presetMinutes?: number | null; departmentId?: string | null; status?: string;
+    presetMinutes?: number | null; departmentId?: string | null; groupId?: string | null;
+    status?: string;
     startTime?: string | null; endTime?: string | null;
     eventId?: string | null;
   };
 
-  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
-  // POC 上下文判定的前提是任务部门恒为本 production 部门）
-  if (typeof body.departmentId === "string"
-      && !(await getEventDepartment(body.departmentId, productionId)))
-    return Response.json({ error: "部门不存在" }, { status: 400 });
+  // 换责任主体（部门 ↔ 用户组）。字段都没给 = 不动，给了才解析并校验属于本 production。
+  const touchesSubject = body.departmentId !== undefined || body.groupId !== undefined;
+  let subjectCols: { departmentId: string | null; groupId: string | null } | null = null;
+  if (touchesSubject) {
+    const parsed = await parseTaskSubject(productionId, body);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    subjectCols = subjectColumns(parsed.subject);
+  }
 
   // 换绑事件 = 对目标 event 的 attach 操作，同创建时的挂载资格门
   // （event tasks@create，或 POC 路径：任务绑我 POC 的部门 + 目标 event details@view）。
@@ -70,8 +73,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const actor = toActor(session, permCtx);
     const canAttach =
       await hasEffectiveGrant(actor, productionId, "event", body.eventId, "tasks", "create")
-      || (existing.departmentId != null
-          && await isUserDeptPoc(existing.departmentId, session.userId)
+      // POC 路径：主体已泛化，组 POC 与部门 POC 同权（组自带 POC）
+      || (await isTaskPoc(productionId, existing, session.userId)
           && await hasEffectiveGrant(actor, productionId, "event", body.eventId, "details", "view"));
     if (!canAttach)
       return Response.json({ error: "对目标事件没有任务挂载资格" }, { status: 403 });
@@ -82,7 +85,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       title: body.title?.trim(),
       description: body.description,
       presetMinutes: body.presetMinutes,
-      departmentId: body.departmentId,
+      ...(subjectCols ?? {}),
       status: body.status,
       startTime: body.startTime,
       endTime: body.endTime,
@@ -119,7 +122,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
     // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
     || (task.createdVia !== "explicit" && task.departmentId != null
-        && await isUserDeptPoc(task.departmentId, session.userId));
+        && await isTaskPoc(productionId, task, session.userId));
   if (!canDelete)
     return Response.json({ error: "权限不足" }, { status: 403 });
 

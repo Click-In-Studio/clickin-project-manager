@@ -41,6 +41,8 @@ export default async function ProductionTasksPage({ params, searchParams }: {
           status: t.status,
           departmentId: t.departmentId,
           departmentName: t.departmentName,
+          groupId: t.groupId,
+          groupName: t.groupName,
           eventId: t.eventId,
           eventTitle: t.eventTitle,
           eventStartTime: null as string | null,

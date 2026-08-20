@@ -810,6 +810,180 @@
       "nullable": true
     }
   ],
+  "event_group": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "color",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "order_index",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "poc_dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "poc_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "event_group_freeze": [
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "frozen_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "released_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "group_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "poc_dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "poc_dept_name",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "poc_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "poc_user_name",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "frozen_by",
+      "type": "uuid",
+      "nullable": true
+    }
+  ],
+  "event_group_freeze_member": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "frozen_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "user_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "via_dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "via_dept_name",
+      "type": "text",
+      "nullable": true
+    }
+  ],
+  "event_group_member": [
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "added_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "event_participant": [
     {
       "column": "id",
@@ -937,6 +1111,87 @@
     },
     {
       "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
+  "event_rundown_column": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "match_location",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "order_index",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "is_visible",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "is_pinned",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    }
+  ],
+  "event_rundown_placement": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "item_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "task_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "color",
+      "type": "text",
+      "nullable": true
+    }
+  ],
+  "event_rundown_placement_column": [
+    {
+      "column": "placement_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "column_id",
       "type": "uuid",
       "nullable": false
     }
@@ -2276,6 +2531,18 @@
       "nullable": false
     }
   ],
+  "schedule_item_group": [
+    {
+      "column": "item_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
   "schedule_item_participant": [
     {
       "column": "item_id",
@@ -2577,6 +2844,11 @@
     {
       "column": "orphaned_at",
       "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
       "nullable": true
     }
   ],

@@ -83,6 +83,36 @@ export function hasEventDomainView(actor: GrantActor, productionId: string): Pro
   return hasAnyEffectiveGrant(actor, productionId, "event", EVENT_DOMAIN_VIEW_SUBS, "view");
 }
 
+/**
+ * 「在用户组里参加 = 原来的直接参加」——他是不是通过某个用户组参与了这个 event。
+ *
+ * Type B 上下文关系判定，**不落 grant 行**。这条是刻意的：组里放的「灯光部」是活
+ * 引用，灯光部后来加的人也该自动可见。若做成入组那刻 INSERT 一批 grant 行，那么
+ * 「部门加人」这个写点就得回溯给所有含该部门的组所在的每个 event 补发行——行同步
+ * 一定会漏。判定端实时算，部门加人下一次判定自动通过。
+ *
+ * 判定端新入口，已记入总表 §0.9。
+ */
+export async function isEventGroupParticipant(eventId: string, userId: string): Promise<boolean> {
+  const { userGroupIdsInEvent } = await import("./event-group-db");
+  return (await userGroupIdsInEvent(eventId, userId)).length > 0;
+}
+
+/**
+ * 进某个具体 event 的门：event 域 view 行，**或**通过用户组参与了这个 event。
+ *
+ * 与 hasEventDomainView 的区别是它认实例——组参与是「这一个 event」的关系，不是
+ * 整个域的资格。落到行为上：被 organizer 加进「进场对光小组」的音响负责人，即使
+ * 一行 event 域 view 都没有，也进得来看自己要干什么；但他仍然只到跟随视图
+ * （/events/<id>/view），详情页要实例行——参与不等于管理。
+ */
+export async function canEnterEvent(
+  actor: GrantActor, productionId: string, eventId: string,
+): Promise<boolean> {
+  if (await hasEventDomainView(actor, productionId)) return true;
+  return isEventGroupParticipant(eventId, actor.userId);
+}
+
 /** 事件内容写门（状态感知）：published → publication@edit；否则 details@edit。 */
 export function hasEventContentEdit(
   actor: GrantActor, productionId: string, eventId: string, status: string,
@@ -141,11 +171,12 @@ export async function canEditTechReq(
       : Promise.resolve(false),
   ]);
   if (hasReqGrant || hasEventGrant) return true;
-  // 规则（用户规范）：不论创建路径与进度，task 关联部门的 POC 恒可编辑内容并推进
+  // 规则（用户规范）：不论创建路径与进度，task 责任主体的 POC 恒可编辑内容并推进
   // 状态——上下文关系判定（Type B），部门后关联/POC 变更自动跟踪，无需行同步
-  const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
+  const { getTechReqByProduction } = await import("./event-db");
+  const { isTaskPoc } = await import("./task-poc");
   const req = await getTechReqByProduction(techReqId, productionId);
-  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  if (req && await isTaskPoc(productionId, req, permCtx.userId)) return true;
   return false;
 }
 
@@ -163,9 +194,10 @@ export async function canAssignTechReq(
   if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (permCtx.memberPermissions === null) return false;
   if (await hasGrant(permCtx.userId, productionId, "task", techReqId, "assignees", "edit")) return true;
-  const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
+  const { getTechReqByProduction } = await import("./event-db");
+  const { isTaskPoc } = await import("./task-poc");
   const req = await getTechReqByProduction(techReqId, productionId);
-  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  if (req && await isTaskPoc(productionId, req, permCtx.userId)) return true;
   return false;
 }
 
@@ -192,9 +224,19 @@ export async function canViewTechReq(
   if (await isUserReqAssignee(techReqId, permCtx.userId)) return true;
   // #236 policy.task_dept_visibility：关掉后已确认任务只对指派人与 POC 可见，
   // 部门其他成员看不到本部门在做什么。
-  if (techReqDeptId && await isPolicyOn(productionId, "policy.task_dept_visibility")) {
+  //
+  // 责任主体泛化后这条对**用户组**同样成立：绑组的 task 已确认 → 组成员全体可见。
+  // 「这件事交给进场对光小组」之后组里的 runner 看不到这条 task 是说不通的——
+  // 与部门那一支同一个策略开关，同一条「已确认才可见」的门槛。
+  if (await isPolicyOn(productionId, "policy.task_dept_visibility")) {
     const req = await getTechReqByProduction(techReqId, productionId);
-    if (req && req.status !== "awaiting" && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
+    if (req && req.status !== "awaiting") {
+      if (techReqDeptId && await isUserDeptMember(techReqDeptId, permCtx.userId)) return true;
+      if (req.groupId) {
+        const { isGroupMember } = await import("./event-group-db");
+        if (await isGroupMember(req.groupId, permCtx.userId)) return true;
+      }
+    }
   }
   return false;
 }
