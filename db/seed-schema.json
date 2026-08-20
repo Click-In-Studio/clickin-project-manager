@@ -984,6 +984,18 @@
       "default": "now()"
     }
   ],
+  "event_milestone": [
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "milestone_id",
+      "type": "text",
+      "nullable": false
+    }
+  ],
   "event_participant": [
     {
       "column": "id",
@@ -1913,6 +1925,120 @@
       "column": "claimed_at",
       "type": "timestamp with time zone",
       "nullable": true
+    }
+  ],
+  "production_material": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "category",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "department_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "status_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "location",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "quantity",
+      "type": "integer",
+      "nullable": false,
+      "default": "1"
+    },
+    {
+      "column": "notes",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "production_material_status": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "color",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "order_index",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "is_system",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "production_member": [

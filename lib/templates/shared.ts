@@ -50,6 +50,7 @@ export const OPEN_BASELINE: readonly string[] = [
   "node:event/*/details@view",
   "node:event/*/followers@create",
   "node:event/*/meta@view",
+  "node:material/*@view",
   "node:member/*/contact@view",
   "node:member/*/meta@view",
   "node:milestone/*@view",
@@ -140,6 +141,20 @@ export const SCRIPT_EDIT: readonly string[] = [
   "node:script/*/blocks/tags@edit",
   "node:script/*/blocks/type@edit",
   "node:script/*/mounts@create",
+];
+
+/**
+ * 物料台账的管理（道具 / 服化 / 舞美一类的执行位）。
+ *
+ * **刻意不挂进任何模版的默认发放**——「哪个部门默认管物料」是产品决定，各剧组
+ * 差异很大（有的道具组统管，有的各部门自管自的）。定义放在这里，等产品定了再
+ * 往对应模版的部门权限里挂；在那之前靠 owner 旁路与申请通道拿。
+ * 同 user_group 那批键的处理（#285）。
+ */
+export const MATERIAL_ADMIN: readonly string[] = [
+  "node:material/*@create",
+  "node:material/*@edit",
+  "node:material/*@delete",
 ];
 
 /** 通告与制作节点的管理（制作助理 / 制片 / 宣发一类的统筹位）。 */

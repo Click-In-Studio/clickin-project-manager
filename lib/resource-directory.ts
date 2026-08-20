@@ -15,6 +15,8 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   event: "SELECT id, COALESCE(title, id) AS label FROM production_event WHERE production_id = $1 ORDER BY created_at DESC",
   asset: "SELECT id, COALESCE(name, file_name) AS label FROM asset WHERE production_id = $1 ORDER BY created_at DESC",
   milestone: "SELECT id, COALESCE(name, id) AS label FROM milestone WHERE production_id = $1 ORDER BY end_date",
+  material: `SELECT id::text AS id, (code || ' ' || name) AS label FROM production_material
+             WHERE production_id = $1 ORDER BY category, code`,
   announcement: "SELECT id, COALESCE(title, id) AS label FROM production_announcement WHERE production_id = $1 ORDER BY created_at DESC",
   org_dept: "SELECT id::text AS id, name AS label FROM production_dept WHERE production_id = $1 ORDER BY display_order, name",
   role: "SELECT id, name AS label FROM production_role WHERE production_id = $1 AND NOT is_deprecated ORDER BY name",

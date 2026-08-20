@@ -10,7 +10,7 @@ import {
   updateTaskByProduction,
 } from "@/lib/event-db";
 import { canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
-import { isTaskPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
+import { isTaskPoc, resolveSubjectPatch } from "@/lib/task-poc";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 
@@ -56,13 +56,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   };
 
   // 换责任主体（部门 ↔ 用户组）。字段都没给 = 不动，给了才解析并校验属于本 production。
-  const touchesSubject = body.departmentId !== undefined || body.groupId !== undefined;
-  let subjectCols: { departmentId: string | null; groupId: string | null } | null = null;
-  if (touchesSubject) {
-    const parsed = await parseTaskSubject(productionId, body);
-    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
-    subjectCols = subjectColumns(parsed.subject);
-  }
+  // 每个字段只清它自己那一支：departmentId: null 不会顺手把用户组也解绑。
+  // 旧客户端（任务抽屉）不知道有组，绑组的 task 在它那里 departmentId 是空，
+  // 提交时发 null——按「重设整个主体」处理的话，点一下保存就把组吃掉了。
+  const patch = await resolveSubjectPatch(productionId, body, {
+    departmentId: existing.departmentId, groupId: existing.groupId,
+  });
+  if (!patch.ok) return Response.json({ error: patch.error }, { status: patch.status });
+  const subjectCols = patch.cols;
 
   // 换绑事件 = 对目标 event 的 attach 操作，同创建时的挂载资格门
   // （event tasks@create，或 POC 路径：任务绑我 POC 的部门 + 目标 event details@view）。

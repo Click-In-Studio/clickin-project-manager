@@ -62,6 +62,7 @@ export const GROUP_LABELS: Record<string, string> = {
   report: "报告",
   asset: "数字资产",
   org: "组织",
+  material: "物料台账",
   milestone: "里程碑",
   announcement: "公告",
 };
@@ -98,6 +99,7 @@ export const TYPE_LABELS: Record<string, string> = {
   dramaturgy: "构作",
   dramaturgy_view: "构作视图",
   event: "事件",
+  material: "物料",
   member: "成员",
   milestone: "里程碑",
   note: "备注",
