@@ -46,7 +46,6 @@ export type FrozenGroup = {
   groupId: string;
   frozenAt: string;
   groupName: string;
-  location: string;
   /** 当时的 POC —— 追责读这个，不是组的现任 POC */
   pocDeptId: string | null;
   pocDeptName: string | null;
@@ -123,12 +122,12 @@ export async function describeFrozenGroups(eventId: string): Promise<(FrozenGrou
   const pool = getPool();
   const heads = await pool.query<{
     event_id: string; group_id: string; frozen_at: Date;
-    group_name: string; location: string;
+    group_name: string;
     poc_dept_id: string | null; poc_dept_name: string | null;
     poc_user_id: string | null; poc_user_name: string | null;
     poc_user_still_member: boolean; poc_dept_still_exists: boolean; group_still_exists: boolean;
   }>(
-    `SELECT f.event_id, f.group_id, f.frozen_at, f.group_name, f.location,
+    `SELECT f.event_id, f.group_id, f.frozen_at, f.group_name,
             f.poc_dept_id, f.poc_dept_name, f.poc_user_id, f.poc_user_name,
             EXISTS (SELECT 1 FROM production_member pm
                      JOIN production_event pe ON pe.production_id = pm.production_id
@@ -183,7 +182,6 @@ export async function describeFrozenGroups(eventId: string): Promise<(FrozenGrou
     groupId: r.group_id,
     frozenAt: r.frozen_at.toISOString(),
     groupName: r.group_name,
-    location: r.location,
     pocDeptId: r.poc_dept_id,
     pocDeptName: r.poc_dept_name,
     pocUserId: r.poc_user_id,
@@ -240,9 +238,9 @@ export async function freezeEventGroups(
       const frozenAt = new Date().toISOString();
       const head = await client.query<{ frozen_at: Date }>(
         `INSERT INTO event_group_freeze
-           (event_id, group_id, frozen_at, group_name, location,
+           (event_id, group_id, frozen_at, group_name,
             poc_dept_id, poc_dept_name, poc_user_id, poc_user_name, frozen_by)
-         SELECT $1, g.id, $4::timestamptz, g.name, g.location,
+         SELECT $1, g.id, $4::timestamptz, g.name,
                 g.poc_dept_id,
                 (SELECT d.name FROM production_dept d WHERE d.id = g.poc_dept_id),
                 -- POC 部门型：把「当时该部门的实际 POC 那个人」一起冻下来。只记部门

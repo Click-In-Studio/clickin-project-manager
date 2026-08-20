@@ -1,4 +1,4 @@
--- 【用户组序列 3/3】冻结快照。刻意不对 event_group 挂 FK（见下），所以理论上与
+-- 【用户组序列 3/4】冻结快照。刻意不对 event_group 挂 FK（见下），所以理论上与
 -- 1/3 无 DDL 依赖；仍排在最后，因为读写它的代码依赖前两个。
 -- 用户组的冻结快照。
 --
@@ -53,7 +53,6 @@ CREATE TABLE IF NOT EXISTS event_group_freeze (
   frozen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   released_at   TIMESTAMPTZ,
   group_name    TEXT        NOT NULL,
-  location      TEXT        NOT NULL DEFAULT '',
   poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   poc_dept_name TEXT,
   poc_user_id   UUID        REFERENCES app_user(id) ON DELETE SET NULL,

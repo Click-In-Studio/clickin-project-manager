@@ -41,7 +41,6 @@ export type EventGroup = {
   /** null = B 型（项目级常驻编制）；非 null = A 型（该 event 专属） */
   eventId: string | null;
   name: string;
-  location: string;
   color: string | null;
   orderIndex: number;
   poc: EventGroupPoc;
@@ -60,7 +59,6 @@ type GroupRow = {
   production_id: string;
   event_id: string | null;
   name: string;
-  location: string;
   color: string | null;
   order_index: number;
   poc_dept_id: string | null;
@@ -81,7 +79,6 @@ function rowToGroup(r: GroupRow, members: EventGroupMember[]): EventGroup {
     productionId: r.production_id,
     eventId: r.event_id,
     name: r.name,
-    location: r.location,
     color: r.color,
     orderIndex: r.order_index,
     poc: rowToPoc(r),
@@ -342,7 +339,6 @@ export async function createEventGroup(params: {
   /** null = B 型项目级组 */
   eventId: string | null;
   name: string;
-  location?: string;
   color?: string | null;
   orderIndex?: number;
   members: EventGroupMember[];
@@ -358,13 +354,13 @@ export async function createEventGroup(params: {
     await assertMembersInProduction(client, params.productionId, members);
     const res = await client.query<{ id: string }>(
       `INSERT INTO event_group
-         (production_id, event_id, name, location, color, order_index,
+         (production_id, event_id, name, color, order_index,
           poc_dept_id, poc_user_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING id`,
       [
         params.productionId, params.eventId, params.name.trim(),
-        params.location ?? "", params.color ?? null, params.orderIndex ?? 0,
+        params.color ?? null, params.orderIndex ?? 0,
         params.poc?.kind === "dept" ? params.poc.id : null,
         params.poc?.kind === "user" ? params.poc.id : null,
         params.createdBy,
@@ -402,7 +398,6 @@ export async function updateEventGroup(
   productionId: string,
   fields: {
     name?: string;
-    location?: string;
     color?: string | null;
     orderIndex?: number;
     members?: EventGroupMember[];
@@ -427,7 +422,6 @@ export async function updateEventGroup(
     const sets: string[] = [];
     const vals: unknown[] = [groupId];
     if (fields.name      !== undefined) sets.push(`name        = $${vals.push(fields.name.trim())}`);
-    if (fields.location  !== undefined) sets.push(`location    = $${vals.push(fields.location)}`);
     if (fields.color     !== undefined) sets.push(`color       = $${vals.push(fields.color)}`);
     if (fields.orderIndex!== undefined) sets.push(`order_index = $${vals.push(fields.orderIndex)}`);
     if (fields.poc       !== undefined) {
@@ -467,6 +461,9 @@ export async function deleteEventGroup(groupId: string, productionId: string): P
         WHERE sig.group_id = $1
        UNION ALL
        SELECT t.event_id FROM task t WHERE t.group_id = $1 AND t.event_id IS NOT NULL
+       UNION ALL
+       -- 版面里的列也是活引用：直接删组会让 organizer 排好的列悄悄消失（CASCADE）
+       SELECT c.event_id FROM event_rundown_column c WHERE c.group_id = $1
      ) refs
      WHERE NOT EXISTS (
        SELECT 1 FROM event_group_freeze f
@@ -475,7 +472,7 @@ export async function deleteEventGroup(groupId: string, productionId: string): P
     [groupId],
   );
   if (Number(inUse.rows[0].n) > 0)
-    throw new EventGroupError("in_use", "该组仍被未冻结的事件引用（流程项或任务），先解除引用再删除");
+    throw new EventGroupError("in_use", "该组仍被未冻结的事件引用（流程项、任务或版面列），先解除引用再删除");
   await getPool().query("DELETE FROM event_group WHERE id = $1 AND production_id = $2", [groupId, productionId]);
 }
 

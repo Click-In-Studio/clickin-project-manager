@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 }
 
 /**
- * PATCH — 改名称 / 地点 / 颜色 / 排序 / 成员 / POC。
+ * PATCH — 改名称 / 颜色 / 排序 / 成员 / POC。
  *
  * POC 与其余字段的门**不同**：B 型组的 POC 跨 event 生效，独立一枚 `poc@edit`。
  * 同一次请求里既改成员又改 POC 时，两道门都要过。
@@ -59,7 +59,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!group) return Response.json({ error: "用户组不存在" }, { status: 404 });
 
   const body = (await req.json()) as {
-    name?: unknown; location?: unknown; color?: unknown;
+    name?: unknown; color?: unknown;
     orderIndex?: unknown; members?: unknown; poc?: unknown;
   };
 
@@ -89,8 +89,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const gate = await gateOf(group, productionId);
 
   const changesBeyondPoc =
-    body.name !== undefined || body.location !== undefined
-    || body.color !== undefined || body.orderIndex !== undefined || members !== undefined;
+    body.name !== undefined || body.color !== undefined
+    || body.orderIndex !== undefined || members !== undefined;
   if (changesBeyondPoc && !await canEditEventGroup(actor, productionId, group, gate))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (poc !== undefined && !await canSetEventGroupPoc(actor, productionId, group, gate))
@@ -99,7 +99,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const updated = await updateEventGroup(groupId, productionId, {
       name: typeof body.name === "string" ? body.name : undefined,
-      location: typeof body.location === "string" ? body.location : undefined,
       color: body.color === null || typeof body.color === "string" ? body.color as string | null : undefined,
       orderIndex: typeof body.orderIndex === "number" ? body.orderIndex : undefined,
       members,

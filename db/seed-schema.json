@@ -833,12 +833,6 @@
       "nullable": false
     },
     {
-      "column": "location",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
       "column": "color",
       "type": "text",
       "nullable": true
@@ -897,12 +891,6 @@
       "column": "group_name",
       "type": "text",
       "nullable": false
-    },
-    {
-      "column": "location",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
     },
     {
       "column": "poc_dept_id",
@@ -1123,6 +1111,87 @@
     },
     {
       "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    }
+  ],
+  "event_rundown_column": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "match_location",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "order_index",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "is_visible",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "is_pinned",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    }
+  ],
+  "event_rundown_placement": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "item_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "task_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "color",
+      "type": "text",
+      "nullable": true
+    }
+  ],
+  "event_rundown_placement_column": [
+    {
+      "column": "placement_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "column_id",
       "type": "uuid",
       "nullable": false
     }

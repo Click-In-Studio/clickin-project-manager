@@ -1,4 +1,4 @@
--- 【用户组序列 1/3】实体本身。2/3（task 责任主体）有 FK 指向本文件建的 event_group，
+-- 【用户组序列 1/4】实体本身。2/4（task 责任主体）有 FK 指向本文件建的 event_group，
 -- 必须先跑。文件名带序号是因为字母序里 `add-event-group-3-freeze` 会排到
 -- `add-event-group.sql` 前面（'-' < '.'），靠原名排序会把依赖序排反。
 -- 用户组（event_group）：由若干「部门」与「人」组成的集合，自带 POC。
@@ -27,9 +27,9 @@ CREATE TABLE IF NOT EXISTS event_group (
   -- NULL = B 型（项目级常驻编制）；非 NULL = A 型（该 event 专属）
   event_id      TEXT        REFERENCES production_event(id) ON DELETE CASCADE,
   name          TEXT        NOT NULL,
-  -- 这个组在哪儿（rundown 的地点行）。压成组的字段而不是第二层分组实体：
-  -- 「地点覆盖哪几列」本质就是「这几个组在同一个地方」。
-  location      TEXT        NOT NULL DEFAULT '',
+  -- 刻意没有 location：组回答「谁」，不回答「哪儿」。地点是事项的属性
+  -- （event_schedule_item.location），一个组的人 9 点在主剧场、14 点在 A3，
+  -- 组上存一份地点答不出这个，还会和事项那份打架。
   color         TEXT,
   order_index   INTEGER     NOT NULL DEFAULT 0,
   -- POC 二选一。应用层还要求它必须是本组成员（「以其中的一个部门/人为 POC」），

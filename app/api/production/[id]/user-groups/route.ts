@@ -79,7 +79,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
   const body = (await req.json()) as {
-    eventId?: unknown; name?: unknown; location?: unknown; color?: unknown;
+    eventId?: unknown; name?: unknown; color?: unknown;
     orderIndex?: unknown; members?: unknown; poc?: unknown;
   };
 
@@ -104,7 +104,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       productionId,
       eventId,
       name,
-      location: typeof body.location === "string" ? body.location : "",
       color: typeof body.color === "string" ? body.color : null,
       orderIndex: typeof body.orderIndex === "number" ? body.orderIndex : 0,
       members,

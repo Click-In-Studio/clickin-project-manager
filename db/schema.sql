@@ -514,7 +514,7 @@ CREATE TABLE IF NOT EXISTS event_group (
   production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   event_id      TEXT        REFERENCES production_event(id) ON DELETE CASCADE,
   name          TEXT        NOT NULL,
-  location      TEXT        NOT NULL DEFAULT '',
+  -- 刻意没有 location：组回答「谁」不回答「哪儿」，地点是 event_schedule_item 的属性
   color         TEXT,
   order_index   INTEGER     NOT NULL DEFAULT 0,
   poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
@@ -565,7 +565,6 @@ CREATE TABLE IF NOT EXISTS event_group_freeze (
   frozen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   released_at   TIMESTAMPTZ,
   group_name    TEXT        NOT NULL,
-  location      TEXT        NOT NULL DEFAULT '',
   poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   poc_dept_name TEXT,
   poc_user_id   UUID        REFERENCES app_user(id) ON DELETE SET NULL,
@@ -1138,6 +1137,49 @@ CREATE TABLE IF NOT EXISTS task_milestone (
 );
 
 CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
+
+-- ── rundown 版面（add-event-group-4-rundown.sql）────────────────────────────────
+-- 组是跨 event 共享的，「在这场排第几列 / 显不显示 / 钉不钉左边」只能记在
+-- (event, group) 这一层。is_pinned = 横向滚动时钉在左侧，与冻结快照无关。
+-- 地点列是筛选条件不是地点实体——地点是 event_schedule_item 的属性。
+
+CREATE TABLE IF NOT EXISTS event_rundown_column (
+  id             UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id       TEXT    NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  group_id       UUID    REFERENCES event_group(id) ON DELETE CASCADE,
+  match_location TEXT,
+  order_index    INTEGER NOT NULL DEFAULT 0,
+  is_visible     BOOLEAN NOT NULL DEFAULT true,
+  is_pinned      BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT event_rundown_column_kind CHECK (num_nonnulls(group_id, match_location) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_column_group_idx
+  ON event_rundown_column (event_id, group_id) WHERE group_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_column_location_idx
+  ON event_rundown_column (event_id, match_location) WHERE match_location IS NOT NULL;
+CREATE INDEX IF NOT EXISTS event_rundown_column_event_idx ON event_rundown_column (event_id);
+
+CREATE TABLE IF NOT EXISTS event_rundown_placement (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id   TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  item_id    TEXT REFERENCES event_schedule_item(id) ON DELETE CASCADE,
+  task_id    TEXT REFERENCES task(id) ON DELETE CASCADE,
+  color      TEXT,
+  CONSTRAINT event_rundown_placement_entry CHECK (num_nonnulls(item_id, task_id) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_placement_item_idx
+  ON event_rundown_placement (event_id, item_id) WHERE item_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS event_rundown_placement_task_idx
+  ON event_rundown_placement (event_id, task_id) WHERE task_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS event_rundown_placement_column (
+  placement_id UUID NOT NULL REFERENCES event_rundown_placement(id)  ON DELETE CASCADE,
+  column_id    UUID NOT NULL REFERENCES event_rundown_column(id)     ON DELETE CASCADE,
+  PRIMARY KEY (placement_id, column_id)
+);
+
 
 -- ── Announcements ─────────────────────────────────────────────────────────────
 
