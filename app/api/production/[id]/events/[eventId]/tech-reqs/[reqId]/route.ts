@@ -3,7 +3,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, getEventTechReq, updateTaskByProduction, deleteTaskByProduction } from "@/lib/event-db";
-import { isTaskPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
+import { isTaskPoc, resolveSubjectPatch } from "@/lib/task-poc";
 import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -31,14 +31,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     status?: string;
   };
 
-  // 换责任主体（部门 ↔ 用户组）。都没给 = 不动
-  const touchesSubject = body.departmentId !== undefined || body.groupId !== undefined;
-  let subjectCols: { departmentId: string | null; groupId: string | null } | null = null;
-  if (touchesSubject) {
-    const parsed = await parseTaskSubject(productionId, body);
-    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
-    subjectCols = subjectColumns(parsed.subject);
-  }
+  // 换责任主体（部门 ↔ 用户组）。都没给 = 不动；每个字段只清它自己那一支：departmentId: null 不会顺手把用户组也解绑。
+  // 旧客户端（任务抽屉）不知道有组，绑组的 task 在它那里 departmentId 是空，
+  // 提交时发 null——按「重设整个主体」处理的话，点一下保存就把组吃掉了。
+  const patch = await resolveSubjectPatch(productionId, body, {
+    departmentId: existing.departmentId, groupId: existing.groupId,
+  });
+  if (!patch.ok) return Response.json({ error: patch.error }, { status: patch.status });
+  const subjectCols = patch.cols;
 
   const updated = await updateTaskByProduction(reqId, productionId, {
     title: body.title?.trim(),

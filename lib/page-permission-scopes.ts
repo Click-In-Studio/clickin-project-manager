@@ -55,6 +55,7 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:announcement/*@create",
     "node:announcement/*@edit",
     "node:announcement/*@delete",
+    "node:material/*@view",
     "node:milestone/*@view",
     "node:milestone/*@create",
     "node:milestone/*@edit",

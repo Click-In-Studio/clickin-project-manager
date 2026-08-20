@@ -17,7 +17,8 @@ export type ProductionAccess = {
 // 角色名单（ROLE_NAMES）已上移为项目模版的一个 slot，见 lib/production-template.ts
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import {
-  buildApprovalLadder, classifyApprovalNode, expandLevelRows, nextStage, stageAt, stageStatus,
+  buildApprovalLadder, classifyApprovalNode, DEFAULT_APPROVAL_TTL_HOURS,
+  expandLevelRows, nextStage, stageAt, stageStatus,
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
 } from "./approval-routing";
 import { isValidTtlInterval } from "./approval-ttl";
@@ -8044,9 +8045,6 @@ export async function listPendingApprovals(
   });
 }
 
-/** production_approval_config.ttl_hours 的列默认值——缺配置行时按此计时。
- *  与 db/add-approval-config-backfill.sql 里插入的 24 是同一个值，改要同改。 */
-const DEFAULT_APPROVAL_TTL_HOURS = 24;
 
 /** Called by the internal cron endpoint — 当前级超时未响应即升级到阶梯下一级。 */
 export async function escalateExpiredApprovals(): Promise<{ escalated: number }> {

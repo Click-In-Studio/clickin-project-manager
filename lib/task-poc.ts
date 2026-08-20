@@ -158,15 +158,28 @@ export type SubjectParse =
   | { ok: true; subject: TaskSubject | null }
   | { ok: false; status: 400; error: string };
 
+/** 校验一个候选主体属于本 production；不属于则回 400 文案。 */
+async function checkInProduction(
+  productionId: string,
+  subject: TaskSubject,
+): Promise<string | null> {
+  const table = subject.kind === "dept" ? "production_dept" : "event_group";
+  const { rows } = await getPool().query(
+    `SELECT 1 FROM ${table} WHERE id = $1 AND production_id = $2`,   // ddl-check-ignore
+    [subject.id, productionId],
+  );
+  if (rows.length) return null;
+  return subject.kind === "dept" ? "部门不存在" : "用户组不存在";
+}
+
 /**
- * 从请求体解析责任主体，并校验它属于本 production。
+ * 从请求体解析责任主体（**创建**用）。
  *
- * 四个 task 写入口（tasks POST/PATCH、tech-reqs POST/PATCH）都要做同一件事，
- * 抄四遍就会漂——尤其「跨剧组 id 不能骗过 POC 各门」这条防线，收敛前已经在
- * tasks/route.ts 的注释里被点过一次名了。
+ * 四个 task 写入口都要做同一件事，抄四遍就会漂——尤其「跨剧组 id 不能骗过 POC
+ * 各门」这条防线，收敛前已经在 tasks/route.ts 的注释里被点过一次名。
  *
  * 两者互斥在这里就拒（DB 的 task_subject_single CHECK 是兜底，不是主门）——
- * 让用户看到 400「部门与用户组只能二选一」，而不是一条约束违反的 500。
+ * 让用户看到 400「二选一」，而不是一条约束违反的 500。
  */
 export async function parseTaskSubject(
   productionId: string,
@@ -177,26 +190,72 @@ export async function parseTaskSubject(
   if (hasDept && hasGroup)
     return { ok: false, status: 400, error: "责任主体只能二选一：部门或用户组" };
 
-  if (hasDept) {
-    const { rows } = await getPool().query(
-      "SELECT 1 FROM production_dept WHERE id = $1 AND production_id = $2",
-      [body.departmentId, productionId],
-    );
-    if (!rows.length) return { ok: false, status: 400, error: "部门不存在" };
-    return { ok: true, subject: { kind: "dept", id: body.departmentId as string } };
+  const subject: TaskSubject | null =
+    hasDept  ? { kind: "dept",  id: body.departmentId as string }
+    : hasGroup ? { kind: "group", id: body.groupId as string }
+    : null;
+  if (subject) {
+    const err = await checkInProduction(productionId, subject);
+    if (err) return { ok: false, status: 400, error: err };
   }
-  if (hasGroup) {
-    const { rows } = await getPool().query(
-      "SELECT 1 FROM event_group WHERE id = $1 AND production_id = $2",
-      [body.groupId, productionId],
-    );
-    if (!rows.length) return { ok: false, status: 400, error: "用户组不存在" };
-    return { ok: true, subject: { kind: "group", id: body.groupId as string } };
-  }
-  return { ok: true, subject: null };
+  return { ok: true, subject };
 }
 
-/** 把主体摊回 task 的两列（写入口用）。 */
+export type SubjectPatch =
+  | { ok: true; cols: { departmentId: string | null; groupId: string | null } | null }
+  | { ok: false; status: 400; error: string };
+
+/**
+ * 从请求体解析责任主体的**改动**（PATCH 用）。与创建版的关键差别：
+ *
+ * **每个字段只清它自己那一支。** `departmentId: null` 只意味着「没有负责部门」，
+ * 不碰用户组；要解绑组得显式发 `groupId: null`。
+ *
+ * 这条不是洁癖，是修一个真实的数据丢失：任务抽屉初始化时做
+ * `setDrawerDeptId(task.departmentId ?? "")`，绑组的 task 这里是空串，提交时就发
+ * `departmentId: null`。若按「给了 departmentId 就重设整个主体」处理，任何人在抽屉里
+ * 点一下保存——哪怕一个字没改——都会把组绑定清掉，POC 随之消失，这条 task 谁都
+ * 编辑不了了。旧客户端不知道有组这回事，不能让它们的沉默变成删除。
+ *
+ * 返回 `cols: null` 表示这次请求不涉及主体，调用方不要动那两列。
+ */
+export async function resolveSubjectPatch(
+  productionId: string,
+  body: { departmentId?: unknown; groupId?: unknown },
+  current: { departmentId: string | null; groupId?: string | null },
+): Promise<SubjectPatch> {
+  const deptGiven  = body.departmentId !== undefined;
+  const groupGiven = body.groupId !== undefined;
+  if (!deptGiven && !groupGiven) return { ok: true, cols: null };
+
+  const nextDept  = typeof body.departmentId === "string" && body.departmentId !== ""
+    ? body.departmentId : null;
+  const nextGroup = typeof body.groupId === "string" && body.groupId !== ""
+    ? body.groupId : null;
+  if (nextDept && nextGroup)
+    return { ok: false, status: 400, error: "责任主体只能二选一：部门或用户组" };
+
+  // 设了一支 ⇒ 另一支被顶掉（互斥）；只清一支 ⇒ 另一支原样保留
+  let departmentId = current.departmentId;
+  let groupId = current.groupId ?? null;
+  if (nextDept)        { departmentId = nextDept; groupId = null; }
+  else if (nextGroup)  { groupId = nextGroup; departmentId = null; }
+  else {
+    if (deptGiven)  departmentId = null;
+    if (groupGiven) groupId = null;
+  }
+
+  const subject = departmentId ? { kind: "dept" as const, id: departmentId }
+    : groupId ? { kind: "group" as const, id: groupId } : null;
+  // 只校验这次新指定的那个——原样保留的那支本来就在库里
+  if (subject && ((nextDept && subject.kind === "dept") || (nextGroup && subject.kind === "group"))) {
+    const err = await checkInProduction(productionId, subject);
+    if (err) return { ok: false, status: 400, error: err };
+  }
+  return { ok: true, cols: { departmentId, groupId } };
+}
+
+/** 把主体摊回 task 的两列（创建入口用）。 */
 export function subjectColumns(subject: TaskSubject | null): {
   departmentId: string | null; groupId: string | null;
 } {
