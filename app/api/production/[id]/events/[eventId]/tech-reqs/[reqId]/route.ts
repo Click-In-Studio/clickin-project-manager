@@ -53,9 +53,12 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const techReq = await getEventTechReq(reqId, eventId);
+  // 边/本体删除单调性（M-15(d)）：本路由虽挂在 event 路径下，动作仍是**硬删 task 本体**
+  // （deleteTaskByProduction），故只认本体键。`event/<id>/tasks@delete` 是边键（摘边），
+  // 曾并进本门 → organizer 能硬删部门的 task，与「指派面独立」定谳冲突。
+  // 摘边走 PATCH /tasks/<id> { eventId: null }。
   const canDelete =
     await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", reqId, "*", "delete")
-    || await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "delete")
     // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
     // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
     || (techReq != null && techReq.createdVia !== "explicit" && techReq.departmentId != null

@@ -110,10 +110,44 @@ export function removeWikiPresence(wikiId: string, clientId: string): void {
   broadcast(wikiId, wikiPresenceFrame(wikiId));
 }
 
-/** 内容/标题更新广播（byClientId 供发起端自过滤） */
+/** 内容/标题/标签更新广播（byClientId 供发起端自过滤） */
 export function broadcastWikiUpdate(
   wikiId: string,
-  payload: { byClientId: string | null; title: string | null; body: string; updatedAt: string },
+  payload: {
+    byClientId: string | null; title: string | null; body: string; updatedAt: string;
+    /** 省略=标签未变（老帧形态），接收端不动本地标签。 */
+    tags?: string[];
+  },
 ): void {
   broadcast(wikiId, `event: update\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+// ─── 文档库级频道 ────────────────────────────────────────────────────────────
+// 结构变化（增/删/改名/移动/换标签）影响的是**别的**文档的页面：左侧树、
+// 以及"我正开着的这篇被删了"。这类事件不值得单开一条 SSE——同一个注册表
+// 里挂一个按 production 分组的 topic，文档 stream 路由顺带订阅它，客户端
+// 仍然只有一条 EventSource。
+//
+// topic 键与 wikiId 不可能相撞：wikiId 是 UUID，这里恒带 "library:" 前缀。
+
+function libraryTopic(productionId: string): string {
+  return `library:${productionId}`;
+}
+
+export type WikiLibraryChange = {
+  kind: "created" | "updated" | "deleted";
+  wikiId: string;
+};
+
+/** 文档 SSE 连接顺带订阅所属制作的库级频道（返回退订）。 */
+export function registerWikiLibrarySSE(
+  productionId: string,
+  connectionId: string,
+  push: SSEPush,
+): () => void {
+  return registerWikiSSE(libraryTopic(productionId), connectionId, push);
+}
+
+export function broadcastWikiLibraryChange(productionId: string, payload: WikiLibraryChange): void {
+  broadcast(libraryTopic(productionId), `event: library\ndata: ${JSON.stringify(payload)}\n\n`);
 }

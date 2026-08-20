@@ -44,6 +44,6 @@ describe("POST /api/internal/memory-distill", () => {
     const res = await POST(makeReq(`Bearer ${SECRET}`));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { summary: { distilled: number; noNewData: number; errors: unknown[] } };
-    expect(body.summary).toEqual({ distilled: 1, noNewData: 1, errors: [] });
+    expect(body.summary).toEqual({ distilled: 1, noNewData: 1, shrunk: 0, skipped: [], errors: [] });
   });
 });

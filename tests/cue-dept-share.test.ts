@@ -64,6 +64,12 @@ describe("dept 分享（zone + grant）", () => {
     await addCueListDeptAccess(listId, prodId, deptId, ownerId);
     // zone 资格行已写
     expect(await checkCueListFreeApprovalZone(memberId, prodId, listId, "edit")).toBe(true);
+    // #274：分享面发的行标 source='resource'——权限中心把它折叠只读并指回这里，
+    // 不给一个删了会被补回来的按钮
+    const shared = await getPool().query<{ source: string }>(
+      `SELECT DISTINCT source FROM production_dept_permission
+       WHERE dept_id = $1 AND permission_key LIKE $2`, [deptId, `node:cue_list/${listId}%`]);
+    expect(shared.rows).toEqual([{ source: "resource" }]);
 
     // 自确认 → 动词行集落地
     await selfConfirmCueListGrant(memberId, prodId, listId, "edit");
@@ -77,6 +83,23 @@ describe("dept 分享（zone + grant）", () => {
     expect(await checkCueListFreeApprovalZone(memberId, prodId, listId, "edit")).toBe(false);
     // 存续立即重算：资格消失 → 行收走
     expect(await activeRows(memberId, listId)).toEqual([]);
+  });
+
+  // #274：撤分享不该顺手抹掉别人在权限中心显式配过的同一枚键——那是一个人的决定，
+  // 不是这条分享通道的产物。撤完它仍在部门权限页可见、可删。
+  it("撤分享保留人手动配的同一枚实例键", async () => {
+    const pool = getPool();
+    await addCueListDeptAccess(listId, prodId, deptId, ownerId);
+    await pool.query(
+      `UPDATE production_dept_permission SET source = 'manual'
+       WHERE dept_id = $1 AND permission_key = $2`,
+      [deptId, `node:cue_list/${listId}@view`],
+    );
+    await removeCueListDeptAccess(listId, prodId, deptId);
+    const { rows } = await pool.query<{ permission_key: string; source: string }>(
+      `SELECT permission_key, source FROM production_dept_permission
+       WHERE dept_id = $1 AND permission_key LIKE $2`, [deptId, `node:cue_list/${listId}%`]);
+    expect(rows).toEqual([{ permission_key: `node:cue_list/${listId}@view`, source: "manual" }]);
   });
 });
 

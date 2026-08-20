@@ -1,6 +1,7 @@
 import { getPool } from "./pg";
 import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
 import { type PermissionContext } from "./permissions";
+import { isPolicyOn } from "./policy-db";
 import type { Asset } from "./asset-db";
 
 // ─── 批D：asset 可见性判定（隐私/公开模型）──────────────────────────────────
@@ -69,7 +70,9 @@ export async function canViewAsset(
   if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (await hasGrant(permCtx.userId, productionId, "asset", asset.id, "publication", "view")) return true;
   if (!await hasGrant(permCtx.userId, productionId, "asset", asset.id, face, "view")) return false;
-  if (asset.isPublic) return true;
+  // #236 policy.asset_public_enabled：关掉后 is_public 这条结构让渡失效，可见性只认
+  // 挂载边。形状 C 天然追溯——不落行，关掉即刻收缩（M-8）。
+  if (asset.isPublic && await isPolicyOn(productionId, "policy.asset_public_enabled")) return true;
   return anyMountHostVisible(permCtx, productionId, asset.id);
 }
 
@@ -122,9 +125,13 @@ export async function filterVisibleAssets<T extends Pick<Asset, "id" | "isPublic
   ]);
   const metaIds = new Set(meta.ids);
   const pubIds = new Set(pub.ids);
+  // 与 canViewAsset 同源：is_public 这条让渡受 policy.asset_public_enabled 管。
+  // 两处必须同读——列表与单实例判定分叉过一次（批D 教训），分叉即「列表看得见、
+  // 点进去 403」。
+  const publicOn = await isPolicyOn(productionId, "policy.asset_public_enabled");
   return assets.filter(a =>
     pub.wildcard || pubIds.has(a.id)
-    || ((meta.wildcard || metaIds.has(a.id)) && (a.isPublic || structIds.has(a.id))));
+    || ((meta.wildcard || metaIds.has(a.id)) && ((a.isPublic && publicOn) || structIds.has(a.id))));
 }
 
 // ─── 双门（挂载=两域各自的一等动作）─────────────────────────────────────────
@@ -155,13 +162,32 @@ export async function mountHostSidePermitted(
   return hasGrant(permCtx.userId, productionId, "script", "*", "mounts", "create");
 }
 
-/** 分享令牌规则："令牌含下载 ⟺ 发令牌者持有 file@view"（不能分享自己没有的能力）。 */
+/**
+ * 分享令牌规则："令牌含下载 ⟺ 发令牌者持有 file@view"（不能分享自己没有的能力）。
+ *
+ * ⚠ 那条规则管的是**不越过发令牌者自身能力**，**不是**"不越过项目意志"——上传者本人
+ * 就持 file@view（C-5 发的），故它对「我上传的我就能对外发全量」零约束。项目级的出口
+ * 由 policy.share_token_enabled 把守（#236 形状 C），两者**串联**：能力票 ∧ 项目开关。
+ *
+ * 出口为什么要单独一道：令牌受众不在 production_member 里、一行 grant 都不产生，
+ * 于是 TTL 全覆盖（M-11）、退出项目全撤、POC 卸任撤销**一条都覆盖不到它**——这是
+ * 全系统唯一把访问权发到权限系统之外的动作。
+ *
+ * 但**旁路照旧在门顶端**（§2.5 不变量：isAdmin ∨ isOwner 在每个门顶端恒真）。
+ * 曾把开关放在旁路之前，理由是「旁路不该绕过项目对外的意志」——那是错的：
+ * 破一次不变量就变成「除了这个门」，而且挡不住任何事（owner 被拦住转手就去把开关
+ * 打开，他本来就有 config 权），纯成本零收益。owner 想分享，本身就是项目的意志。
+ */
 export async function canCreateShareToken(
   permCtx: PermissionContext,
   productionId: string,
   asset: Pick<Asset, "id" | "isPublic">,
 ): Promise<{ allowed: boolean; downloadable: boolean }> {
   if (permCtx.isAdmin || permCtx.isOwner) return { allowed: true, downloadable: true };
+  // 项目关掉出口 ⇒ 普通持票人发不了（与能力票串联：能力票 ∧ 项目开关）
+  if (!await isPolicyOn(productionId, "policy.share_token_enabled")) {
+    return { allowed: false, downloadable: false };
+  }
   const allowed = await hasGrant(permCtx.userId, productionId, "asset", asset.id, "shares", "create")
     && await canViewAsset(permCtx, productionId, asset, "meta");
   if (!allowed) return { allowed: false, downloadable: false };

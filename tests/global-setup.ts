@@ -86,6 +86,11 @@ import {
   CUE_DOMAIN_REST_SNAPSHOT_PATH,
   type CueDomainRestSnapshot,
 } from "./cue-domain-rest-snapshot";
+import {
+  isSceneFieldGatesPreMigrationSchema,
+  createSceneFieldGatesPreMigrationData,
+  SCENE_FIELD_GATES_SNAPSHOT_PATH,
+} from "./scene-field-gates-snapshot";
 
 import {
   isLocalScriptDataPreMigrationSchema,
@@ -111,6 +116,17 @@ import {
   type WikiDefaultTreeSnapshot,
 } from "./wiki-default-tree-snapshot";
 import {
+  isDeptPermissionSourcePreMigrationSchema,
+  createDeptPermissionSourcePreMigrationData,
+  DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH,
+  type DeptPermissionSourceSnapshot,
+} from "./dept-permission-source-snapshot";
+import {
+  isGrantTemplateRetirePreMigrationSchema,
+  createGrantTemplateRetirePreMigrationData,
+  GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
+} from "./grant-template-retire-snapshot";
+import {
   isWikiCreateBaselinePreMigrationSchema,
   createWikiCreateBaselinePreMigrationData,
   WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
@@ -119,6 +135,7 @@ import {
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
+const TEST_OWNER = "00000000-0000-0000-0000-0000000000ff";
 
 export async function setup() {
   // Generate deterministic TEST_SEED for faker (workers inherit process.env).
@@ -130,6 +147,13 @@ export async function setup() {
   );
 
   const pool = getPool();
+
+  // grant_template 已退役（#163）。下面三支历史迁移的 PRE 判据都查这张表——表没了
+  // 它们的重放也就无从谈起（源表是它自己），统一用这个开关跳过。
+  const hasGrantTemplate = (await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'grant_template'`,
+  )).rows.length > 0;
 
   if (await isPreMigrationSchema(pool)) {
     // Migration path: DB is on the old schema (pre-internal-user-id).
@@ -147,6 +171,11 @@ export async function setup() {
   await pool.query(
     `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
     [TEST_USER],
+  );
+  // 建演出用的专用 owner（与 TEST_USER 分开，见 helpers.ts TEST_OWNER 注释）
+  await pool.query(
+    `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
+    [TEST_OWNER],
   );
   await pool.query(
     `INSERT INTO feishu_user (open_id, user_id, name, is_super_admin, created_at, updated_at)
@@ -331,9 +360,9 @@ export async function setup() {
 
   {
     // 批G G-1（制作人通配区间）：CI 迁移路径重放。PRE 判据：模板尚无通配主行。
-    const g1Pre = await pool.query(
+    const g1Pre = hasGrantTemplate ? await pool.query(
       `SELECT 1 FROM grant_template WHERE role_name = '制作人' AND permission_key = 'node:*/*@*'`,
-    );
+    ) : { rows: [1] };
     if (g1Pre.rows.length === 0) {
       const migrationSql = await readFile(
         path.resolve(process.cwd(), "db/migrate-producer-wildcard.sql"),
@@ -359,9 +388,9 @@ export async function setup() {
 
   {
     // 两个指派面（2026-08-13）：CI 迁移路径重放。PRE 判据：舞监模板尚无 event 通配 view。
-    const acPre = await pool.query(
+    const acPre = hasGrantTemplate ? await pool.query(
       `SELECT 1 FROM grant_template WHERE role_name = '舞台监督' AND permission_key = 'node:event/*@view'`,
-    );
+    ) : { rows: [1] };
     if (acPre.rows.length === 0) {
       const migrationSql = await readFile(
         path.resolve(process.cwd(), "db/migrate-event-assignee-callsheet.sql"),
@@ -385,8 +414,36 @@ export async function setup() {
     }
   }
 
+  {
+    // 角色模板对齐 + 退役键清理（2026-08-17）：PRE 判据=编剧模板尚无 blocks@edit。
+    // 必须在字段门迁移之前跑——它清 grant_template 的退役键残留，字段门那支
+    // 随后往同一张表补字段级键。
+    const pre = hasGrantTemplate ? await pool.query(
+      `SELECT 1 FROM grant_template
+       WHERE role_name = '编剧' AND permission_key = 'node:script/*/blocks@edit'`,
+    ) : { rows: [1] };
+    if (pre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-role-template-seed.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isSceneFieldGatesPreMigrationSchema(pool)) {
+    // scene 字段门对齐（2026-08-17）：PRE 判据=编剧模板尚无 meta/name@edit。
+    const sfgSnapshot = await createSceneFieldGatesPreMigrationData(pool, TEST_USER);
+    await writeFile(SCENE_FIELD_GATES_SNAPSHOT_PATH, JSON.stringify(sfgSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-scene-field-gates.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
   if (await isLocalScriptDataPreMigrationSchema(pool)) {
-    const snapshot = await createLocalScriptDataPreMigrationData(pool);
+    const snapshot = await createLocalScriptDataPreMigrationData(pool, TEST_USER);
     await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));
     const migrationSql = await readFile(
       path.resolve(process.cwd(), "db/migrate-script-comment-rehearsal-defaults.sql"),
@@ -445,10 +502,34 @@ export async function setup() {
 
   // wiki 创建资格基线回填（W3 部署缺口：grant_template 零读取，存量 role 无键）
   if (await isWikiCreateBaselinePreMigrationSchema(pool)) {
-    const baselineSnapshot = await createWikiCreateBaselinePreMigrationData(pool);
+    const baselineSnapshot = await createWikiCreateBaselinePreMigrationData(pool, TEST_USER);
     await writeFile(WIKI_CREATE_BASELINE_SNAPSHOT_PATH, JSON.stringify(baselineSnapshot));
     const migrationSql = await readFile(
       path.resolve(process.cwd(), "db/migrate-wiki-create-baseline.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // 部门权限行来源分道（#274）：先造四种待回填的行（含「无声明无归属的实例键」那种，
+  // 它是回填判据的考点），再应用迁移，迁移测试比对回填结果。
+  if (await isDeptPermissionSourcePreMigrationSchema(pool)) {
+    const sourceSnapshot = await createDeptPermissionSourcePreMigrationData(pool, TEST_USER);
+    await writeFile(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH, JSON.stringify(sourceSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-dept-permission-source.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // grant_template 退役（#163）：先把表内容整份快照下来，迁移测试拿它验证
+  // 项目模版常量一键不差地重现了这份模板，然后才 DROP。
+  if (await isGrantTemplateRetirePreMigrationSchema(pool)) {
+    const retireSnapshot = await createGrantTemplateRetirePreMigrationData(pool);
+    await writeFile(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH, JSON.stringify(retireSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-retire-grant-template.sql"),
       "utf8",
     );
     await pool.query(migrationSql);
@@ -457,6 +538,25 @@ export async function setup() {
 
 export async function teardown() {
   const pool = getPool();
+
+  // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
+  await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // 部门权限来源分道（#274）的工厂演出（migration path only）
+  {
+    let sourceSnapshot: DeptPermissionSourceSnapshot | null = null;
+    try {
+      sourceSnapshot = JSON.parse(
+        await readFile(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH, "utf8"),
+      ) as DeptPermissionSourceSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (sourceSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [sourceSnapshot.prodId]).catch(() => {});
+      await unlink(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // Clean up wiki-create-baseline migration factory data (migration path only).
   {

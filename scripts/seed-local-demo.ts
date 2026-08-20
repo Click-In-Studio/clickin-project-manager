@@ -28,6 +28,10 @@ import { createUserNotification } from "../lib/inbox-db";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
+if (process.env.NODE_ENV === "production") {
+  throw new Error("seed:local-demo 只能在本地运行——它会重建演示项目并写入虚拟成员。");
+}
+
 const pool = getPool();
 const PRODUCTION_ID = "demo-misty-harbor";
 const CST_OFFSET = 8 * 3_600_000;
@@ -48,11 +52,12 @@ function at(start: Date, dayOffset: number, hour: number, minute = 0) {
 
 async function main() {
   const userResult = await pool.query<{ id: string; name: string }>(
-    `SELECT au.id, COALESCE(NULLIF(up.display_name, ''), up.name, fu.name, '本地用户') AS name
+    // 显示名走 user_profile（identity 层），不再 join feishu_user——PR #234 之后
+    // feishu_user 只是同步源，不是取名的路径。
+    `SELECT au.id, COALESCE(NULLIF(up.display_name, ''), up.name, '本地用户') AS name
      FROM app_user au
      LEFT JOIN user_profile up ON up.user_id = au.id
-     LEFT JOIN feishu_user fu ON fu.user_id = au.id
-     ORDER BY fu.updated_at DESC NULLS LAST, au.created_at DESC
+     ORDER BY au.created_at DESC
      LIMIT 1`,
   );
   const user = userResult.rows[0];
@@ -71,18 +76,77 @@ async function main() {
       JSON.stringify({ stageDelimOpen: "（", stageDelimClose: "）", pageLayout: "a4", textLayoutMode: "center" }),
     ],
   );
+  // createProduction 自己已经落了 owner 的 production_member 行（#281），这里只补 roles
   await pool.query(
-    `INSERT INTO production_member (production_id, user_id, roles, status)
-     VALUES ($1, $2, ARRAY['制作人','导演','舞台监督','编剧']::text[], 'active')`,
+    `UPDATE production_member
+     SET roles = ARRAY['制作人','导演','舞台监督','编剧']::text[], status = 'active'
+     WHERE production_id = $1 AND user_id = $2`,
     [PRODUCTION_ID, user.id],
   );
 
+  await pool.query(
+    `INSERT INTO production_member_role (production_id, user_id, role_id)
+     SELECT $1, $2, id FROM production_role
+     WHERE production_id = $1 AND name = ANY($3::text[])
+     ON CONFLICT DO NOTHING`,
+    [PRODUCTION_ID, user.id, ["制作人", "导演", "舞台监督", "编剧"]],
+  );
+
+  // 部门：createProduction → applyProductionTemplate 已按项目类型（musical → 戏剧类）
+  // 灌好了一棵五组部门树。这里**不再另建一套平级部门**，否则 demo 项目会出现两个
+  // 「灯光」「演员」「舞美」。做法是按模版里的名字取 id，模版没有的（化妆 / 发型 /
+  // 宣传这类 demo 专用）才补一个顶层部门。
+  const DEMO_DEPTS: readonly (readonly [label: string, templateName: string | null])[] = [
+    ["戏剧构作",   "剧本部门"],
+    ["舞台管理",   "舞台监督组"],
+    ["灯光",       "灯光部"],
+    ["音响",       "音响部"],
+    ["服化道",     "服化部"],
+    ["导演组",     "导演部门"],
+    ["演员",       "演员"],
+    ["舞美",       "舞美设计"],
+    ["道具",       "道具设计"],
+    ["化妆",       null],
+    ["发型",       null],
+    ["服装",       null],
+    ["视频",       "多媒体部"],
+    ["舞台机械",   "舞台机械部"],
+    ["宣传",       null],
+    ["票务与前台", "外场部"],
+    ["制作管理",   "制作管理组"],
+  ];
+
+  const deptRows: [id: string, name: string, order: number][] = [];
+  for (const [index, [label, templateName]] of DEMO_DEPTS.entries()) {
+    const name = templateName ?? label;
+    const found = await pool.query<{ id: string }>(
+      "SELECT id FROM production_dept WHERE production_id = $1 AND name = $2 ORDER BY parent_id NULLS FIRST LIMIT 1",
+      [PRODUCTION_ID, name],
+    );
+    const id = found.rows[0]?.id ?? (await pool.query<{ id: string }>(
+      "INSERT INTO production_dept (production_id, name, display_order) VALUES ($1, $2, $3) RETURNING id",
+      [PRODUCTION_ID, name, 100 + index],
+    )).rows[0].id;
+    deptRows.push([id, name, index + 1]);
+  }
+
+  for (const [id] of deptRows.slice(0, 2)) {
+    await pool.query(
+      `INSERT INTO production_dept_member (production_id, user_id, dept_id, is_poc)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT DO NOTHING`,
+      [PRODUCTION_ID, user.id, id],
+    );
+  }
+
+  // dept 用 deptRows 的下标，id 在上面按模版名解析出来
   const demoMembers = [
-    { id: "30000000-0000-4000-8000-000000000001", name: "陈雨", roles: ["灯光设计"], dept: "10000000-0000-4000-8000-000000000003" },
-    { id: "30000000-0000-4000-8000-000000000002", name: "王澜", roles: ["音响设计"], dept: "10000000-0000-4000-8000-000000000004" },
-    { id: "30000000-0000-4000-8000-000000000003", name: "苏禾", roles: ["服装设计"], dept: "10000000-0000-4000-8000-000000000005" },
-    { id: "30000000-0000-4000-8000-000000000004", name: "林默", roles: ["演员"], dept: "10000000-0000-4000-8000-000000000001" },
+    { id: "30000000-0000-4000-8000-000000000001", name: "陈雨", roles: ["灯光设计"], deptIndex: 2 },
+    { id: "30000000-0000-4000-8000-000000000002", name: "王澜", roles: ["音响设计"], deptIndex: 3 },
+    { id: "30000000-0000-4000-8000-000000000003", name: "苏禾", roles: ["服装设计"], deptIndex: 4 },
+    { id: "30000000-0000-4000-8000-000000000004", name: "林默", roles: ["演员"],     deptIndex: 6 },
   ] as const;
+
   for (const member of demoMembers) {
     await pool.query("INSERT INTO app_user (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [member.id]);
     await pool.query(
@@ -93,55 +157,16 @@ async function main() {
     );
     await pool.query(
       `INSERT INTO production_member (production_id, user_id, roles, status, supervisor_id)
-       VALUES ($1,$2,$3::text[],'active',$4)`,
+       VALUES ($1,$2,$3::text[],'active',$4)
+       ON CONFLICT (production_id, user_id) DO UPDATE
+       SET roles = EXCLUDED.roles, status = EXCLUDED.status, supervisor_id = EXCLUDED.supervisor_id`,
       [PRODUCTION_ID, member.id, member.roles, user.id],
     );
-  }
-  await pool.query(
-    `INSERT INTO production_member_role (production_id, user_id, role_id)
-     SELECT $1, $2, id FROM production_role
-     WHERE production_id = $1 AND name = ANY($3::text[])
-     ON CONFLICT DO NOTHING`,
-    [PRODUCTION_ID, user.id, ["制作人", "导演", "舞台监督", "编剧"]],
-  );
-
-  const deptRows = [
-    ["10000000-0000-4000-8000-000000000001", "戏剧构作", 1],
-    ["10000000-0000-4000-8000-000000000002", "舞台管理", 2],
-    ["10000000-0000-4000-8000-000000000003", "灯光", 3],
-    ["10000000-0000-4000-8000-000000000004", "音响", 4],
-    ["10000000-0000-4000-8000-000000000005", "服化道", 5],
-    ["10000000-0000-4000-8000-000000000006", "导演组", 6],
-    ["10000000-0000-4000-8000-000000000007", "演员", 7],
-    ["10000000-0000-4000-8000-000000000008", "舞美", 8],
-    ["10000000-0000-4000-8000-000000000009", "道具", 9],
-    ["10000000-0000-4000-8000-000000000010", "化妆", 10],
-    ["10000000-0000-4000-8000-000000000011", "发型", 11],
-    ["10000000-0000-4000-8000-000000000012", "服装", 12],
-    ["10000000-0000-4000-8000-000000000013", "视频", 13],
-    ["10000000-0000-4000-8000-000000000014", "舞台机械", 14],
-    ["10000000-0000-4000-8000-000000000015", "宣传", 15],
-    ["10000000-0000-4000-8000-000000000016", "票务与前台", 16],
-    ["10000000-0000-4000-8000-000000000017", "制作管理", 17],
-  ] as const;
-  for (const [id, name, order] of deptRows) {
-    await pool.query(
-      `INSERT INTO production_dept (id, production_id, name, display_order) VALUES ($1, $2, $3, $4)`,
-      [id, PRODUCTION_ID, name, order],
-    );
-  }
-  for (const [id] of deptRows.slice(0, 2)) {
     await pool.query(
       `INSERT INTO production_dept_member (production_id, user_id, dept_id, is_poc)
-       VALUES ($1, $2, $3, true)`,
-      [PRODUCTION_ID, user.id, id],
-    );
-  }
-  for (const member of demoMembers) {
-    await pool.query(
-      `INSERT INTO production_dept_member (production_id, user_id, dept_id, is_poc)
-       VALUES ($1,$2,$3,false)`,
-      [PRODUCTION_ID, member.id, member.dept],
+       VALUES ($1,$2,$3,false)
+       ON CONFLICT DO NOTHING`,
+      [PRODUCTION_ID, member.id, deptRows[member.deptIndex][0]],
     );
     await pool.query(
       `INSERT INTO production_member_role (production_id, user_id, role_id)
@@ -406,20 +431,26 @@ async function main() {
     [PRODUCTION_ID, user.id],
   );
 
+  // 时长只能取 lib/approval-ttl 的档位（服务端白名单同一份表），别写 "30 days"
   const pendingApprovals = [
-    ["20000000-0000-4000-8000-000000000002", demoMembers[0].id, "cue_list", "demo-cuelist-lx", "edit", "ttl", "30 days", "灯光联排期间需要编辑 Cue 表并记录现场调整。"],
-    ["20000000-0000-4000-8000-000000000003", demoMembers[1].id, "event", "*", "publish", "ttl", "90 days", "音响组需要发布技术测试事件并同步 Call。"],
-    ["20000000-0000-4000-8000-000000000004", demoMembers[2].id, "scene", "demo-scene-2", "view", "ttl", "15 days", "服装设计需要查看第二场文本以核对快速换装点。"],
+    ["20000000-0000-4000-8000-000000000002", demoMembers[0].id, "cue_list", "demo-cuelist-lx", "edit", "ttl", "7 days", "灯光联排期间需要编辑 Cue 表并记录现场调整。"],
+    ["20000000-0000-4000-8000-000000000003", demoMembers[1].id, "event", "*", "publish", "ttl", "1 mon", "音响组需要发布技术测试事件并同步 Call。"],
+    ["20000000-0000-4000-8000-000000000004", demoMembers[2].id, "scene", "demo-scene-2", "view", "ttl", "1 day", "服装设计需要查看第二场文本以核对快速换装点。"],
     ["20000000-0000-4000-8000-000000000005", demoMembers[3].id, "scene", "*", "view", "permanent", null, "演员申请长期查看排练文本。"],
   ] as const;
   for (const [id, subjectId, resourceType, resourceId, permissionLevel, grantType, ttlDuration, note] of pendingApprovals) {
+    // 收件箱（listPendingApprovals）与鉴权只读 current_approver_ids / current_stage，
+    // 不再解析 escalation_chain——只写链的话这几条待办一条都不会出现在待办列表里。
     await pool.query(
       `INSERT INTO approval_request
          (id, production_id, subject_id, type, resource_type, resource_id, resource_sub,
-          permission_level, grant_type, ttl_duration, note, status, escalation_chain, created_at)
-       VALUES ($1,$2,$3,'resource_access',$4,$5,'*',$6,$7,$8::interval,$9,'pending_supervisor',$10::jsonb,now() - interval '2 hours')`,
+          permission_level, grant_type, ttl_duration, note, status,
+          current_stage, current_stage_depth, current_approver_ids, escalation_chain, created_at)
+       VALUES ($1,$2,$3,'resource_access',$4,$5,'*',$6,$7,$8::interval,$9,'pending_supervisor',
+               'supervisor',0,ARRAY[$11]::uuid[],$10::jsonb,now() - interval '2 hours')`,
       [id, PRODUCTION_ID, subjectId, resourceType, resourceId, permissionLevel, grantType, ttlDuration, note,
-       JSON.stringify([{ phase: "supervisor", approverIds: [user.id], notifiedAt: new Date().toISOString() }])],
+       JSON.stringify([{ phase: "supervisor", approverIds: [user.id], notifiedAt: new Date().toISOString() }]),
+       user.id],
     );
   }
 

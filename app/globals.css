@@ -22,7 +22,10 @@
   --foreground: #171717;
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
   --font-stage: 'KaiTi', 'STKaiti', 'Kaiti SC', 'SourceHanSerif', 'Source Han Serif CN', serif;
-  --font-lyric: 'STZhongsong', '华文中宋', 'SourceHanSerif', 'Source Han Serif CN', serif;
+  /* 歌词：华文中宋是商业字体（随 Office / 旧版 macOS 分发），只能赌本机有，不能自托管。
+     兜底刻意绕开思源宋体——一旦落回它就跟台词同字体（f2cb8d8 埋的坑，20148a3 修好
+     字体 404 后线上显形）。末端兜到系统宋体，保证任何机器上歌词都与台词可区分。 */
+  --font-lyric: 'STZhongsong', '华文中宋', 'Songti SC', 'STSong', 'SimSun', '宋体', serif;
 
   /* ── Design tokens ────────────────────────────────────────────────────────── */
   --ink:          #182a2a;
@@ -61,6 +64,35 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ── 路由切换骨架屏（配合各段 loading.tsx） ──────────────────────────────── */
+
+@keyframes skeleton-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+
+/* 延迟淡入：服务端够快时骨架来不及显形，避免快导航闪屏；
+   真的需要等待时才浮现。 */
+.skeleton-page {
+  animation: skeleton-in .22s ease-out .15s both;
+}
+
+.skeleton-bar {
+  background: rgba(24, 42, 42, .07);
+  border-radius: 6px;
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-page { animation: skeleton-in .01s .15s both; }
+  .skeleton-bar  { animation: none; }
 }
 
 /* Placeholder for contenteditable blocks */

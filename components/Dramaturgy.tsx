@@ -18,6 +18,7 @@ import ProductionTopMenu, {
   useProductionToolbar,
 } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
+import type { SceneFieldPerms } from "@/lib/scene-field-perms";
 
 type SceneViewMode = "list" | "table";
 
@@ -27,6 +28,8 @@ type Props = {
   versionId: string | null;
   initialScenes: MarkerProjection[];
   canEdit: boolean;
+  /** 逐字段编辑权限（scene 的每个字段各有一把钥匙，见 lib/scene-field-perms） */
+  fieldPerms: SceneFieldPerms;
   initialSceneId?: string;
 };
 
@@ -40,6 +43,7 @@ export default function Dramaturgy({
   versionId,
   initialScenes,
   canEdit,
+  fieldPerms,
   initialSceneId,
 }: Props) {
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
@@ -332,6 +336,7 @@ export default function Dramaturgy({
             productionName={productionName}
             initialScenes={scenes}
             canEdit={canEdit}
+            fieldPerms={fieldPerms}
             versionId={versionId}
             initialExpandedId={initialSceneId}
             embedded
@@ -342,6 +347,7 @@ export default function Dramaturgy({
             productionId={productionId}
             scenes={scenes}
             canEdit={canEdit}
+            fieldPerms={fieldPerms}
             versionId={versionId}
             viewConfig={tableConfig}
             onViewConfigChange={handleConfigChange}

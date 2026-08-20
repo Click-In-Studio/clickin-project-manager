@@ -14,7 +14,7 @@ import {
   createCueList, createCue, updateCue, deleteCue,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -120,7 +120,7 @@ describe("createVersion — 继承与 guard", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "VCS 继承测试");
+    await createProduction(PROD, "VCS 继承测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("g1b1", "块一内容")));
@@ -155,7 +155,7 @@ describe("createVersion — 继承与 guard", () => {
 
   it("跨演出 guard：fromVersionId 不属于本演出时 throw", async () => {
     const OTHER = "test-vcs-create-other";
-    await createProduction(OTHER, "另一演出");
+    await createProduction(OTHER, "另一演出", TEST_OWNER);
     const otherId = (await getActiveVersionId(OTHER))!;
     await expect(createVersion(PROD, otherId, "非法分支")).rejects.toThrow();
     await deleteProduction(OTHER);
@@ -172,7 +172,7 @@ describe("block CoW — applyPatchToDB 编辑路径", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Block CoW 测试");
+    await createProduction(PROD, "Block CoW 测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk1", "原始内容")));
     origSnap = (await snapshotId(v1Id, "bk1"))!;
@@ -224,7 +224,7 @@ describe("block CoW — 版本本地 remap，不级联子孙", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Block 不级联测试");
+    await createProduction(PROD, "Block 不级联测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk2", "初始内容")));
     origSnap = (await snapshotId(v1Id, "bk2"))!;
@@ -263,7 +263,7 @@ describe("block GC — 删除时 NOT EXISTS 守护", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Block GC 测试");
+    await createProduction(PROD, "Block GC 测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bgc1", "GC 测试块")));
     sharedSnap = (await snapshotId(v1Id, "bgc1"))!;
@@ -304,7 +304,7 @@ describe("cue CoW — updateCue refCount 分支", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Cue CoW 测试");
+    await createProduction(PROD, "Cue CoW 测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("g4-cue1", CL, "原始名", v1Id);
@@ -348,7 +348,7 @@ describe("cue CoW — DESCENDANTS_CTE 级联 vs 独立分叉隔离", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Cue 级联测试");
+    await createProduction(PROD, "Cue 级联测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("casc-cue1", CL, "初始", v1Id);
@@ -404,7 +404,7 @@ describe("cue GC — deleteCue 引用计数守护", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Cue GC 测试");
+    await createProduction(PROD, "Cue GC 测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("gc-cue1", CL, "GC 测试 cue", v1Id);
@@ -441,7 +441,7 @@ describe("cowBlockSnapshotForMount — version_only 与 tracking 模式", () => 
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "cowBlockSnapshotForMount 测试");
+    await createProduction(PROD, "cowBlockSnapshotForMount 测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     // Insert blocks that will be shared across all three versions
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("cm-vo", "version_only 测试块")));
@@ -501,7 +501,7 @@ describe("rollbackToVersion — 内容来自 target，血统指向 current", () 
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Rollback 测试");
+    await createProduction(PROD, "Rollback 测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("rb1", "V1 初始内容")));
     v1Snap = (await snapshotId(v1Id, "rb1"))!;
@@ -558,7 +558,7 @@ describe("并发安全 — pg_advisory_xact_lock 串行化", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "并发安全测试");
+    await createProduction(PROD, "并发安全测试", TEST_OWNER);
     vId = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, vId, ins(mkBlock("cc1", "并发块1")));
     await applyPatchToDB(PROD, vId, ins(mkBlock("cc2", "并发块2"), "cc1"));

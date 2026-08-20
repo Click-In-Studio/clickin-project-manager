@@ -34,7 +34,9 @@ export type ActionEffect =
   /** Approve an approval_request inline — first-action-wins, conflict is silently swallowed. */
   | { type: "approve_access_request"; requestId: string }
   /** Reject an approval_request inline — first-action-wins, conflict is silently swallowed. */
-  | { type: "reject_access_request"; requestId: string };
+  | { type: "reject_access_request"; requestId: string }
+  /** 转发给阶梯下一级（#140）——直属上级本人没有该权限时给的动作。 */
+  | { type: "escalate_access_request"; requestId: string };
 
 export type NotificationCategory = "info" | "action" | "warning";
 

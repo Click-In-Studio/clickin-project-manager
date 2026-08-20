@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKeyPicker";
+import { TYPE_LABELS } from "@/lib/permission-labels";
+import type { DeptPermissionView, DeptPermissionGroup } from "@/lib/perm-center-db";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -22,7 +24,7 @@ type Props = {
   productionId: string;
   productionName: string;
   depts: Dept[];
-  initialDeptRows: Record<string, string[]>;
+  initialDeptRows: Record<string, DeptPermissionView>;
   initialRoles: Role[];
   members: Member[];
   initialOverrides: Record<string, Record<string, boolean>>;
@@ -171,9 +173,16 @@ export default function AdminPermissionCenterClient({
   }
 
   // ── 部门权限行 ──
+  /** 只提交**人管的**那批键。服务端的 DELETE 同样限定 source='manual'，
+   *  两侧都不碰声明/归属在管的行（#274）。 */
   async function saveDeptKeys(deptId: string, keys: string[]) {
     const data = await api(`/departments/${deptId}/permissions`, { method: "PUT", body: JSON.stringify({ keys }) });
-    if (data) setDeptRows(prev => ({ ...prev, [deptId]: (data.keys as string[]) ?? keys }));
+    if (data) {
+      setDeptRows(prev => ({
+        ...prev,
+        [deptId]: { manual: (data.keys as string[]) ?? keys, groups: prev[deptId]?.groups ?? [] },
+      }));
+    }
   }
 
   // ── 角色权限键集 ──
@@ -203,7 +212,14 @@ export default function AdminPermissionCenterClient({
     [overrides],
   );
   const deptKeyCount = useMemo(
-    () => Object.values(deptRows).reduce((n, keys) => n + keys.length, 0),
+    () => Object.values(deptRows).reduce((n, v) => n + v.manual.length, 0),
+    [deptRows],
+  );
+  // 别处在管的实例行：一场演出跑几个月能堆几百条（每个事件 × 每个归属部门 = 2 行），
+  // 与人管的那十几行分开计数，否则这个数字没有任何意义
+  const deptInstanceCount = useMemo(
+    () => Object.values(deptRows).reduce(
+      (n, v) => n + v.groups.reduce((m, g) => m + g.keys.length, 0), 0),
     [deptRows],
   );
 
@@ -231,7 +247,8 @@ export default function AdminPermissionCenterClient({
         background: "var(--line)", marginBottom: 18,
       }}>
         {[
-          [String(deptKeyCount), "部门权限行", "免审批区间"],
+          [String(deptKeyCount), "部门权限行",
+            deptInstanceCount > 0 ? `另有 ${deptInstanceCount} 条实例行由别处在管` : "免审批区间"],
           [String(roles.reduce((n, r) => n + r.permissions.length, 0)), "角色权限键", `${roles.length} 个角色`],
           [String(overrideCount), "人事 override", "个人 allow / deny"],
         ].map(([num, label, hint]) => (
@@ -289,7 +306,7 @@ export default function AdminPermissionCenterClient({
                     </span>
                     {dept.kind === "group" && <Badge tone="amber">组</Badge>}
                     <span style={{ fontSize: 10, color: selectedDeptId === dept.id ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
-                      {(deptRows[dept.id] ?? []).length}
+                      {(deptRows[dept.id]?.manual ?? []).length}
                     </span>
                   </button>
                 ))}
@@ -346,14 +363,14 @@ export default function AdminPermissionCenterClient({
                     <p style={{ margin: "0 0 14px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
                       部门权限行是免审批区间：成员自确认进入部门即获得，伞语义沿子部门下传，退出部门自动撤销。
                     </p>
-                    <p style={SECTION_LABEL}>权限行（{(deptRows[selectedDept.id] ?? []).length}）</p>
-                    {(deptRows[selectedDept.id] ?? []).map(k => (
+                    <p style={SECTION_LABEL}>权限行（{(deptRows[selectedDept.id]?.manual ?? []).length}）</p>
+                    {(deptRows[selectedDept.id]?.manual ?? []).map(k => (
                       <KeyRow
                         key={k} nodeKey={k}
-                        onRemove={caps.deptEdit ? () => saveDeptKeys(selectedDept.id, (deptRows[selectedDept.id] ?? []).filter(x => x !== k)) : undefined}
+                        onRemove={caps.deptEdit ? () => saveDeptKeys(selectedDept.id, (deptRows[selectedDept.id]?.manual ?? []).filter(x => x !== k)) : undefined}
                       />
                     ))}
-                    {(deptRows[selectedDept.id] ?? []).length === 0 && (
+                    {(deptRows[selectedDept.id]?.manual ?? []).length === 0 && (
                       <p style={{ fontSize: 12, color: "var(--muted)" }}>无权限行</p>
                     )}
                     {caps.deptEdit && (
@@ -361,10 +378,11 @@ export default function AdminPermissionCenterClient({
                         <PermissionKeyPicker
                           productionId={productionId}
                           vocabulary={vocabulary} busy={busy}
-                          onAdd={key => saveDeptKeys(selectedDept.id, [...(deptRows[selectedDept.id] ?? []), key])}
+                          onAdd={key => saveDeptKeys(selectedDept.id, [...(deptRows[selectedDept.id]?.manual ?? []), key])}
                         />
                       </div>
                     )}
+                    <ManagedElsewhere groups={deptRows[selectedDept.id]?.groups ?? []} />
                   </div>
                 ) : <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧部门</p>
               )}
@@ -448,6 +466,63 @@ export default function AdminPermissionCenterClient({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+/** 别处在管的实例行：按资源实例折叠，只读 + 指路。
+ *
+ *  为什么不给删按钮：这些行由声明表或资源归属信号在管，在这儿删会被下次传播补回来，
+ *  且会让 resource_dept_manage 与区间行打架——给一个删不掉的删按钮比不给更糟。
+ *  真要收回就去它的来源处（改声明 / 撤分享 / 改事件归属）。 */
+function ManagedElsewhere({ groups }: { groups: DeptPermissionGroup[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (groups.length === 0) return null;
+  const total = groups.reduce((n, g) => n + g.keys.length, 0);
+
+  const WHERE: Record<DeptPermissionGroup["source"], string> = {
+    template: "由「权限模版」页的部门声明行在管",
+    resource: "由该资源自己的归属 / 分享面在管",
+  };
+
+  return (
+    <div style={{ marginTop: 26, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+      <p style={{ ...SECTION_LABEL, color: "var(--muted)" }}>
+        别处在管（{groups.length} 个资源 · {total} 键）
+      </p>
+      <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
+        这些行随资源自动增减，不在此处编辑——建 Cue 表、分享给部门、事件归属部门时发出。
+        要收回请去它的来源处。
+      </p>
+      {groups.map(g => {
+        const gid = `${g.source}:${g.resourceType}:${g.resourceId}`;
+        const expanded = open === gid;
+        return (
+          <div key={gid} style={{ borderBottom: "1px solid var(--line)" }}>
+            <button
+              onClick={() => setOpen(expanded ? null : gid)}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, width: "100%",
+                padding: "7px 0", border: "none", background: "transparent",
+                cursor: "pointer", textAlign: "left",
+              }}
+            >
+              <span style={{ fontSize: 10, color: "var(--muted)", width: 10 }}>{expanded ? "▾" : "▸"}</span>
+              <Badge tone="neutral">{TYPE_LABELS[g.resourceType] ?? g.resourceType}</Badge>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {g.label}
+              </span>
+              <span style={{ fontSize: 10, color: "var(--muted)" }}>{g.keys.length} 键</span>
+            </button>
+            {expanded && (
+              <div style={{ padding: "0 0 8px 18px" }}>
+                <p style={{ margin: "0 0 6px", fontSize: 10, color: "var(--muted)" }}>{WHERE[g.source]}</p>
+                {g.keys.map(k => <KeyRow key={k} nodeKey={k} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

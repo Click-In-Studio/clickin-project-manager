@@ -1,4 +1,5 @@
 import { getPool } from "./pg";
+import { policyFilteredRows } from "./policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "./resource-grant-db";
 import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki-db";
 import { keyBetween } from "./lex-order";
@@ -397,24 +398,33 @@ export async function setEventParticipants(
     // 被指派自动授权：meta+details view（五层模型第②层——不用 '*' 通配，
     // 那会把 call_sheet/tasks/reports 层白送）。写入即独立事实：移除参与者
     // **不**自动撤行（撤销走 sweep/手动；模板只是模板）。
-    if (unique.length > 0) {
+    // #236：定式 R-1 的行集先过策略开关（event.participant）。
+    const participantRows = await policyFilteredRows(
+      productionId, "event", "participant", [["meta", "view"], ["details", "view"]], client,
+    );
+    if (unique.length > 0 && participantRows.length > 0) {
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
-         SELECT $1, u, 'event', $3, s.sub, 'view', 'assigned', $4
+         SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
          FROM unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES ('meta'), ('details')) AS s(sub)
+         CROSS JOIN UNNEST($5::text[], $6::text[]) AS s(sub, verb)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
-        [productionId, unique.map(p => p.userId), eventId, assignedBy],
+        [productionId, unique.map(p => p.userId), eventId, assignedBy,
+         participantRows.map(r => r[0]), participantRows.map(r => r[1])],
       );
     }
     // 部门加入 event（批C C3）：参与部门的 POC 获得 draft report 可见
     // （event/<id>/reports@view）——发布前给本部门写 note 的前提，POC 本人无需在场。
     const deptIds = [...new Set(unique.map(p => p.departmentId).filter((d): d is string => d !== null))];
-    if (deptIds.length > 0) {
+    // #236：定式 R-2 单行（event.dept_poc:reports@view），开关关就整段不发。
+    const deptPocReports = (await policyFilteredRows(
+      productionId, "event", "dept_poc", [["reports", "view"]], client,
+    )).length > 0;
+    if (deptIds.length > 0 && deptPocReports) {
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -519,24 +529,59 @@ export async function setEventStageManagers(
     // 跟组舞监自动行集（用户规范，无需发布即生效）：
     // details/call_sheet/tasks 可见 + 本 event 报告 CRUD。
     // 移除舞监不撤行（行是独立事实，撤销走 sweep/手动）。
-    if (unique.length > 0) {
+    // #236：定式 R-3 的十行集先过策略开关（event.stage_manager）。
+    // R-3 行集（2026-08-18 由 10 行扩到 12 行：加 assignees@create/delete）。
+    // 此前只有创建者能定参会名单，关掉那一档就只剩兜底——而跟组舞监是 per-event
+    // 结构数据，才是能立住的持钥方（role 不保证存在）。
+    const smRows = await policyFilteredRows(
+      productionId, "event", "stage_manager",
+      [["meta", "view"], ["details", "view"], ["publication", "view"],
+       ["call_sheet", "view"], ["call_sheet", "edit"],
+       ["tasks", "view"], ["reports", "view"],
+       ["reports", "create"], ["reports", "edit"], ["reports", "delete"],
+       ["assignees", "create"], ["assignees", "delete"]],
+      client,
+    );
+    if (unique.length > 0 && smRows.length > 0) {
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,
             permission_level, grant_source, confirmed_by)
          SELECT $1, u, 'event', $3, s.sub, s.verb, 'assigned', $4
          FROM unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES
-           ('meta', 'view'), ('details', 'view'), ('publication', 'view'),
-           ('call_sheet', 'view'), ('call_sheet', 'edit'),
-           ('tasks', 'view'), ('reports', 'view'),
-           ('reports', 'create'), ('reports', 'edit'), ('reports', 'delete')
-         ) AS s(sub, verb)
+         CROSS JOIN UNNEST($5::text[], $6::text[]) AS s(sub, verb)
          ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
            WHERE is_revoked = false
          DO NOTHING`,
-        [productionId, unique.map(m => m.userId), eventId, assignedBy],
+        [productionId, unique.map(m => m.userId), eventId, assignedBy,
+         smRows.map(r => r[0]), smRows.map(r => r[1])],
       );
+
+      // 该 event 已有的报告要补发——否则「先建报告、后设舞监」的顺序下舞监拿不到。
+      // 与 C-3 建报告时发给当时的跟组舞监互为两个方向，合起来与顺序无关。
+      const reportRows = await policyFilteredRows(
+        productionId, "report", "stage_manager",
+        [["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+         ["*", "delete"]],
+        client,
+      );
+      if (reportRows.length > 0) {
+        await client.query(
+          `INSERT INTO production_member_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by)
+           SELECT DISTINCT $1, u, 'report', er.id, s.sub, s.verb, 'assigned', $4::uuid
+           FROM event_report er
+           CROSS JOIN unnest($2::uuid[]) AS u
+           CROSS JOIN UNNEST($5::text[], $6::text[]) AS s(sub, verb)
+           WHERE er.event_id = $3
+           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+             WHERE is_revoked = false
+           DO NOTHING`,
+          [productionId, unique.map(m => m.userId), eventId, assignedBy,
+           reportRows.map(r => r[0]), reportRows.map(r => r[1])],
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (err) {
@@ -619,10 +664,27 @@ export async function updateProductionEvent(
 }
 
 export async function deleteProductionEvent(id: string, productionId: string): Promise<void> {
-  await getPool().query(
-    "DELETE FROM production_event WHERE id = $1 AND production_id = $2",
-    [id, productionId]
-  );
+  // #236 形状 L：task.event_id 是 `ON DELETE SET NULL`——**数据库层会静默把关联 task
+  // 变成孤儿**，应用代码事后根本查不到它们。所以必须在删除**之前**把受影响的 task
+  // 捞出来，同一事务内按 policy.orphan_task_disposition 处置。
+  // 事务内而非异步：异步留窗口期，「删完还在列表里」的不一致直接暴露给用户。
+  const { tasksLosingHost, disposeOrphanedTasks } = await import("./task-orphan");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const orphans = await tasksLosingHost(client, productionId, id);
+    await client.query(
+      "DELETE FROM production_event WHERE id = $1 AND production_id = $2",
+      [id, productionId],
+    );
+    await disposeOrphanedTasks(client, productionId, orphans);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Schedule Items ───────────────────────────────────────────────────────────
@@ -1278,6 +1340,13 @@ export async function updateTaskByProduction(
       `UPDATE task SET ${sets.join(", ")} WHERE id = $1 AND production_id = $2 RETURNING id`,
       vals
     );
+    // #236 形状 L：解绑 = 失去宿主（task.event_id 是单个 FK，宿主集合直接降为空，
+    // M-15(e) 的「唯一边」对 task 结构上白送）。同事务内按档位处置；重绑则清标记。
+    if (res.rows[0] && fields.eventId !== undefined) {
+      const { disposeOrphanedTasks, clearOrphanMark } = await import("./task-orphan");
+      if (fields.eventId === null) await disposeOrphanedTasks(client, productionId, [id]);
+      else await clearOrphanMark(client, productionId, id);
+    }
     await client.query("COMMIT");
     if (!res.rows[0]) return null;
   } catch (err) {
@@ -1412,21 +1481,37 @@ export async function setTechReqAssignees(
     // 排练时间地点）。不写 event_participant（名单是 organizer 的产品面）；
     // 移除 assignee 不撤行（行是独立事实）。
     if (assignees.length > 0) {
-      await client.query(
-        `INSERT INTO production_member_grant
-           (production_id, user_id, resource_type, resource_id, resource_sub,
-            permission_level, grant_source, confirmed_by)
-         SELECT pe.production_id, u, 'event', pe.id, s.sub, 'view', 'assigned', u
-         FROM task etr
-         JOIN production_event pe ON pe.id = etr.event_id
-         CROSS JOIN unnest($2::uuid[]) AS u
-         CROSS JOIN (VALUES ('meta'), ('details'), ('publication')) AS s(sub)
-         WHERE etr.id = $1
-         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-           WHERE is_revoked = false
-         DO NOTHING`,
-        [reqId, assignees.map(a => a.userId)],
+      // #236：定式 R-4 先过策略开关（event.assignee）。本函数签名里没有 productionId，
+      // 原 SQL 从 task→event 推出来；开关要按演出读，故先查一次。
+      const { rows: pidRows } = await client.query<{ production_id: string }>(
+        `SELECT pe.production_id FROM task etr
+         JOIN production_event pe ON pe.id = etr.event_id WHERE etr.id = $1`,
+        [reqId],
       );
+      const assigneeRows = pidRows[0]
+        ? await policyFilteredRows(
+            pidRows[0].production_id, "event", "assignee",
+            [["meta", "view"], ["details", "view"], ["publication", "view"]], client,
+          )
+        : [];
+      if (assigneeRows.length > 0) {
+        await client.query(
+          `INSERT INTO production_member_grant
+             (production_id, user_id, resource_type, resource_id, resource_sub,
+              permission_level, grant_source, confirmed_by)
+           SELECT pe.production_id, u, 'event', pe.id, s.sub, s.verb, 'assigned', u
+           FROM task etr
+           JOIN production_event pe ON pe.id = etr.event_id
+           CROSS JOIN unnest($2::uuid[]) AS u
+           CROSS JOIN UNNEST($3::text[], $4::text[]) AS s(sub, verb)
+           WHERE etr.id = $1
+           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+             WHERE is_revoked = false
+           DO NOTHING`,
+          [reqId, assignees.map(a => a.userId),
+           assigneeRows.map(r => r[0]), assigneeRows.map(r => r[1])],
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (err) {
@@ -2205,12 +2290,29 @@ export async function listEventMilestoneIds(eventId: string, productionId: strin
   return res.rows.map(row => row.milestone_id);
 }
 
-export async function setEventRelations(
+/** 事件下的任务 id（关联面板读侧；不做权限过滤，调用方负责）。 */
+export async function listEventTaskIds(eventId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ id: string }>(
+    "SELECT id FROM task WHERE production_id = $1 AND event_id = $2 ORDER BY id",
+    [productionId, eventId],
+  );
+  return res.rows.map(row => row.id);
+}
+
+/**
+ * 事件 ↔ 里程碑关联的全量覆盖写。
+ *
+ * 只管 event_milestone 这一张边表。**不要**把 task.event_id 的重绑放进来——
+ * 换绑 event 是 task 侧的写入，带三件连带动作（清 task_schedule_item、#236 形状 L
+ * 的孤儿处置 disposeOrphanedTasks / clearOrphanMark），全部在 updateTaskByProduction
+ * 里，绕过它就会留下孤儿标记不一致的 task 和悬空的日程绑定。
+ */
+export async function setEventMilestones(
   eventId: string,
   productionId: string,
-  taskIds: string[],
   milestoneIds: string[],
 ): Promise<void> {
+  const unique = [...new Set(milestoneIds)];
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -2220,59 +2322,32 @@ export async function setEventRelations(
     );
     if (!event.rowCount) throw new Error("事件不存在");
 
-    if (taskIds.length) {
-      const tasks = await client.query<{ id: string; event_id: string | null }>(
-        "SELECT id, event_id FROM task WHERE production_id = $1 AND id = ANY($2::text[]) FOR UPDATE",
-        [productionId, taskIds],
-      );
-      if (tasks.rowCount !== taskIds.length) throw new Error("包含不存在的任务");
-      if (tasks.rows.some(task => task.event_id && task.event_id !== eventId)) {
-        throw new Error("不能从其他事件直接移入任务，请先在任务详情中解绑");
-      }
-    }
-
-    if (milestoneIds.length) {
+    if (unique.length) {
       const milestones = await client.query(
         "SELECT id FROM milestone WHERE production_id = $1 AND id = ANY($2::text[])",
-        [productionId, milestoneIds],
+        [productionId, unique],
       );
-      if (milestones.rowCount !== milestoneIds.length) throw new Error("包含不存在的里程碑");
+      if (milestones.rowCount !== unique.length) throw new Error("包含不存在的里程碑");
     }
 
-    await client.query(
-      `DELETE FROM task_schedule_item
-       WHERE task_id IN (
-         SELECT id FROM task
-         WHERE production_id = $1 AND event_id = $2 AND NOT (id = ANY($3::text[]))
-       )`,
-      [productionId, eventId, taskIds],
-    );
-    await client.query(
-      "UPDATE task SET event_id = NULL WHERE production_id = $1 AND event_id = $2 AND NOT (id = ANY($3::text[]))",
-      [productionId, eventId, taskIds],
-    );
-    if (taskIds.length) {
-      await client.query(
-        "UPDATE task SET event_id = $1 WHERE production_id = $2 AND id = ANY($3::text[])",
-        [eventId, productionId, taskIds],
-      );
-    }
     await client.query("DELETE FROM event_milestone WHERE event_id = $1", [eventId]);
-    if (milestoneIds.length) {
+    if (unique.length) {
       await client.query(
         `INSERT INTO event_milestone (event_id, milestone_id)
          SELECT $1, id FROM milestone WHERE production_id = $2 AND id = ANY($3::text[])`,
-        [eventId, productionId, milestoneIds],
+        [eventId, productionId, unique],
       );
     }
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
 }
+
+
 
 export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
   const res = await getPool().query<{

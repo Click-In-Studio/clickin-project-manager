@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
+
+/** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
+function lastSessionStorageKey(productionId: string | null): string {
+  return `clickin-ai-last-session:${productionId ?? "personal"}`;
+}
 
 type SessionSummary = {
   key: string;
@@ -31,11 +39,14 @@ export default function AgentPopout({
   onClose,
   productionId,
   productionName,
+  currentWikiId,
 }: {
   open: boolean;
   onClose: () => void;
   productionId: string | null;
   productionName: string | null;
+  /** 当前所在的 wiki 文档页 id（非文档页/文档库根页为 null）——驱动"附带当前文档" chip。 */
+  currentWikiId: string | null;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
@@ -45,10 +56,17 @@ export default function AgentPopout({
   const [streaming, setStreaming] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [previewToolCallId, setPreviewToolCallId] = useState<string | null>(null);
+  const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
+  const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
+  const [docAttached, setDocAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeKeyRef = useRef<string | null>(null);
   activeKeyRef.current = activeKey;
+  const pathname = usePathname();
+  const router = useRouter();
 
   const inScope = useCallback(
     (key: string) => {
@@ -87,21 +105,40 @@ export default function AgentPopout({
     }
   }, [productionId, activeKey, inScope]);
 
+  // 按语境记住最后一次活跃的会话——重开 popout/刷新页面后自动接回去，
+  // 不用每次都从空白开始。恢复逻辑见下面依赖 openSession 的那个 effect。
+  useEffect(() => {
+    if (!activeKey) return;
+    try { localStorage.setItem(lastSessionStorageKey(productionId), activeKey); } catch { /* 配额满等，忽略 */ }
+  }, [activeKey, productionId]);
+
+  // 附带当前文档 chip：换文档/离开文档页时重取标题+tag、默认重新勾选附带。
+  // 只取标题/tag/id——不拉正文（下面注释解释为什么）。
+  useEffect(() => {
+    if (!currentWikiId || !productionId) { setCurrentDocTitle(null); setCurrentDocTags([]); return; }
+    setDocAttached(true);
+    let alive = true;
+    fetch(`/api/production/${productionId}/wiki/${currentWikiId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { wiki?: { title: string | null; tags?: string[] } } | null) => {
+        if (!alive) return;
+        setCurrentDocTitle(data?.wiki?.title ?? null);
+        setCurrentDocTags(data?.wiki?.tags ?? []);
+      })
+      .catch(() => { if (alive) { setCurrentDocTitle(null); setCurrentDocTags([]); } });
+    return () => { alive = false; };
+  }, [currentWikiId, productionId]);
+
+  // 点击 popout 外部不自动收起——和左侧剧本页折叠导航的浮出面板同一套交互
+  // 惯例，只能靠 ✕ 按钮或再点一次 AI 按钮关掉。Escape 仍保留（标准可访问性
+  // 惯例，和"点外面"是两回事，不在这次要去掉的范围内）。
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      if ((target as HTMLElement).closest?.("[data-ai-toggle]")) return;
-      onClose();
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", handler);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", handler);
       document.removeEventListener("keydown", onKey);
     };
   }, [open, onClose]);
@@ -109,6 +146,14 @@ export default function AgentPopout({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [bubbles, streaming]);
+
+  // 输入框随内容平滑长高（ChatGPT 等主流 webchat 的惯例），封顶后转内部滚动。
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
 
   // 读一条 NDJSON/SSE 聊天流进气泡列表——"发送" 和 "接回运行中会话" 共用。
   const consumeStream = useCallback(async (res: Response, forKey: string) => {
@@ -132,6 +177,22 @@ export default function AgentPopout({
     }, 5_000);
 
     let streamKey = forKey;
+    // 本轮调过、但还没收到 tool-end 的 wiki_propose 调用 id。刷新挂在每个
+    // 工具**结束**的那一刻（此时写库已提交），而不是整轮流关闭时——否则
+    // AI 还在往下说，页面就一直停在调用前的样子。
+    const pendingWikiWrites = new Set<string>();
+    // tool-end 一个都没来（流被掐断/事件缺 id）时的收尾兜底。
+    let sawWikiWrite = false;
+
+    // 兜底路径，不是主路径：正文/标签/树结构的同步都走 wiki 协作 SSE
+    // （lib/wiki-collab.ts，任何来源的写入都推，不止 AI）。但文档库首页
+    // 没有打开任何文档、也就没有那条 SSE 连接，AI 在那儿建文档只能靠这里
+    // 刷；流被掐断丢帧时同理。刷新幂等，多刷一次不出问题。
+    const refreshWikiPage = () => {
+      if (!pathname || !productionId) return;
+      if (!pathname.startsWith(`/production/${productionId}/wiki`)) return;
+      router.refresh();
+    };
 
     const apply = (line: StreamLine) => {
       if (activeKeyRef.current !== streamKey) return;
@@ -162,6 +223,16 @@ export default function AgentPopout({
               }
               continue;
             }
+            if (line.type === "tool" && line.name?.includes("wiki_propose")) {
+              sawWikiWrite = true;
+              if (line.id) pendingWikiWrites.add(line.id);
+            }
+            // 被拒/失败的调用同样有 tool-end，会白刷一次——刷新幂等且便宜，
+            // 不值得为此再去后端 join 一次调用结果。
+            if (line.type === "tool-end" && line.id && pendingWikiWrites.delete(line.id)) {
+              sawWikiWrite = false;
+              refreshWikiPage();
+            }
             apply(line);
           } catch {
             // skip malformed line
@@ -171,12 +242,15 @@ export default function AgentPopout({
     } finally {
       clearInterval(watchdog);
       setStreaming(false);
+      // 兜底：tool-end 没到（流被掐断、事件缺 id）时，收尾再刷一次。正常
+      // 路径上每个 wiki 写工具结束时就刷过了，这里不会重复触发。
+      if (sawWikiWrite || pendingWikiWrites.size > 0) refreshWikiPage();
       setBubbles((prev) =>
         prev.map((b) => (b.kind === "assistant" && b.streaming ? { kind: "assistant", text: b.text } : b))
       );
       refreshSessions();
     }
-  }, [refreshSessions]);
+  }, [refreshSessions, pathname, productionId, router]);
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
@@ -207,6 +281,17 @@ export default function AgentPopout({
     }
   }, [consumeStream]);
 
+  // 恢复上次活跃会话：session 列表拉到、当前还没有 activeKey 时，若这个
+  // 语境存过一个还在（没被删/没过期出 scopedSessions）的会话 id，接回去。
+  useEffect(() => {
+    if (activeKey || sessions.length === 0) return;
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(lastSessionStorageKey(productionId)); } catch { /* 忽略 */ }
+    if (!stored) return;
+    const match = scopedSessions.find((s) => s.key === stored);
+    if (match) openSession(match.key, match.status);
+  }, [sessions, productionId, activeKey, scopedSessions, openSession]);
+
   const newSession = useCallback(async () => {
     setPickerOpen(false);
     const res = await fetch("/api/agent/sessions", {
@@ -221,8 +306,8 @@ export default function AgentPopout({
   }, [productionId]);
 
   const send = useCallback(async () => {
-    const message = input.trim();
-    if (!message) return;
+    const raw = input.trim();
+    if (!raw) return;
     let key = activeKey;
     if (!key) {
       const res = await fetch("/api/agent/sessions", {
@@ -235,7 +320,18 @@ export default function AgentPopout({
       setActiveKey(key);
     }
     setInput("");
-    setBubbles((prev) => [...prev, { kind: "user", text: message }]);
+    setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
+
+    // 附带当前文档：只带标题/tag/id 这几个指针字段，不塞正文——AI 已经有
+    // wiki_read(id) 工具，需要正文自己按 id 取；把整篇文章暴力拼进每条消息
+    // 既浪费 token，文档一大还可能顶爆上下文。信封形态与"为什么挂在用户
+    // 消息上而不是 system prompt"见 lib/agent-ui-context.ts。
+    const message = buildUiContextMessage(
+      raw,
+      docAttached && currentWikiId && currentDocTitle
+        ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
+        : null,
+    );
 
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
@@ -250,7 +346,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -470,6 +566,16 @@ export default function AgentPopout({
                   {b.approval.description && (
                     <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">{b.approval.description}</p>
                   )}
+                  {/* 不是所有 approval 都对应一个 wiki proposal（未来会有别的写工具）——
+                      按钮始终渲染，找不到详情让 modal 自己兜底，省一次预探测往返。 */}
+                  {b.approval.toolCallId && productionId && (
+                    <button
+                      onClick={() => setPreviewToolCallId(b.approval.toolCallId!)}
+                      className="mt-1.5 text-[11px] font-medium text-zinc-500 underline hover:text-zinc-800"
+                    >
+                      查看详情
+                    </button>
+                  )}
                   {b.decision ? (
                     <p className="mt-2 text-xs font-medium text-zinc-600">
                       {b.decision.startsWith("allow") ? "✓ 已允许" : b.decision === "deny" ? "✕ 已拒绝" : `已处理（${b.decision}）`}
@@ -556,10 +662,29 @@ export default function AgentPopout({
           })()}
       </div>
 
+      {/* 附带当前文档：仅在文档页出现，默认勾选、可点掉 */}
+      {currentWikiId && currentDocTitle && (
+        <div className="flex shrink-0 items-center border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setDocAttached((v) => !v)}
+            title={docAttached ? "点击取消附带" : "点击重新附带"}
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+              docAttached
+                ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                : "border-[var(--line)] text-[var(--muted)] line-through"
+            }`}
+          >
+            📎 附带《{currentDocTitle}》
+          </button>
+        </div>
+      )}
+
       {/* 输入区 */}
       <div className="shrink-0 border-t border-[var(--line)] p-3">
         <div className="flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -568,9 +693,9 @@ export default function AgentPopout({
                 send();
               }
             }}
-            rows={Math.min(6, Math.max(1, input.split("\n").length))}
+            rows={1}
             placeholder={streaming ? "回复中，输入消息将注入本轮…" : "输入消息，Enter 发送"}
-            className="max-h-40 flex-1 resize-none rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
           />
           {streaming ? (
             <button
@@ -589,6 +714,15 @@ export default function AgentPopout({
           </button>
         </div>
       </div>
+
+      {previewToolCallId && productionId && (
+        <WikiProposalPreviewModal
+          open={!!previewToolCallId}
+          onClose={() => setPreviewToolCallId(null)}
+          productionId={productionId}
+          toolCallId={previewToolCallId}
+        />
+      )}
     </div>
   );
 }

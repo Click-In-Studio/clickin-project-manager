@@ -127,6 +127,23 @@
       "column": "expires_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "current_stage",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "current_stage_depth",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "current_approver_ids",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::uuid[]"
     }
   ],
   "asset": [
@@ -1064,35 +1081,6 @@
       "nullable": false
     }
   ],
-  "grant_template": [
-    {
-      "column": "id",
-      "type": "uuid",
-      "nullable": false,
-      "default": "gen_random_uuid()"
-    },
-    {
-      "column": "production_type",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "role_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "permission_key",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    }
-  ],
   "milestone": [
     {
       "column": "id",
@@ -1247,7 +1235,7 @@
     {
       "column": "owner_id",
       "type": "uuid",
-      "nullable": true
+      "nullable": false
     },
     {
       "column": "watermark_enabled",
@@ -1475,6 +1463,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": false,
+      "default": "'manual'::text"
     }
   ],
   "production_event": [
@@ -1904,6 +1898,73 @@
     },
     {
       "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "production_policy": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "policy_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "value",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "updated_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "production_policy_audit": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false,
+      "default": "nextval('production_policy_audit_id_seq'::regclass)"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "policy_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "old_value",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "new_value",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "changed_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "changed_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
@@ -2524,6 +2585,11 @@
       "column": "end_time",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "orphaned_at",
+      "type": "timestamp with time zone",
+      "nullable": true
     }
   ],
   "task_assignee": [
@@ -2977,6 +3043,99 @@
       "column": "target_wiki_id",
       "type": "uuid",
       "nullable": false
+    }
+  ],
+  "wiki_proposal": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tool_call_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "proposed_by",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "parent_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "summary",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "has_permission",
+      "type": "boolean",
+      "nullable": false
+    },
+    {
+      "column": "permission_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'pending'::text"
+    },
+    {
+      "column": "created_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "resolved_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "action",
+      "type": "text",
+      "nullable": false,
+      "default": "'create'::text"
+    },
+    {
+      "column": "target_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "tags",
+      "type": "ARRAY",
+      "nullable": true
     }
   ],
   "wiki_revision": [

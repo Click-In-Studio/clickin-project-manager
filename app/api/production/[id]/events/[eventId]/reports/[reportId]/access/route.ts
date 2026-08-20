@@ -7,7 +7,7 @@ import { getProductionEvent, getEventReport } from "@/lib/event-db";
 import {
   getReportAccess,
   selfConfirmResourceGrant,
-  checkResourceFreeApprovalZone,
+  checkNodeFreeApprovalZone,
 } from "@/lib/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
@@ -56,8 +56,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (level !== "edit" && level !== "manage")
     return Response.json({ error: "无效的权限级别" }, { status: 400 });
 
-  const inZone = await checkResourceFreeApprovalZone(
-    session.userId, productionId, "report", reportId, "report:edit", level,
+  // 区间判定与 GET 的 getReportAccess 同源（checkNodeFreeApprovalZone）：
+  // 旧的 checkResourceFreeApprovalZone 查 dept.permissions 数组 + 伪键 'report:edit'，
+  // 两者都已退役（批C 清伪键、PR #229 DROP 该列）——GET 说"可自我确认"、POST 却 500。
+  const inZone = await checkNodeFreeApprovalZone(
+    session.userId, productionId, "report", reportId, level,
   );
   if (!inZone)
     return Response.json({ error: "不在免审批区间，无法自我确认" }, { status: 403 });

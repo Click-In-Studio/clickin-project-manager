@@ -46,9 +46,9 @@ export async function createRoleCueTypePreMigrationData(
   const roleId = `r_${prodId}_灯光设计`;
   const cueType = `灯光`;
 
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
     prodId,
-    faker.company.name(),
+    faker.company.name(), testUserId,
   ]);
   await pool.query(
     "INSERT INTO version (id, production_id, name, created_at) VALUES ($1, $2, $3, NOW())",

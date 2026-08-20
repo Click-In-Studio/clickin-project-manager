@@ -14,6 +14,7 @@
  *      the OLD schema and returns a typed snapshot.
  *   2. Add corresponding invariance tests in the migration test file.
  */
+import { randomUUID } from "node:crypto";
 import os from "os";
 import path from "path";
 import type { Pool } from "pg";
@@ -105,9 +106,15 @@ export async function createPreMigrationData(
     id: `inv-${faker.string.alphanumeric(6).toLowerCase()}`,
     name: faker.company.name(),
   };
+  // owner_id NOT NULL：本工厂跑在 global-setup 插入 TEST_USER **之前**，故自建 owner。
+  const ownerId = randomUUID();
   await pool.query(
-    `INSERT INTO production (id, name) VALUES ($1, $2)`,
-    [production.id, production.name],
+    `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
+    [ownerId],
+  );
+  await pool.query(
+    `INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)`,
+    [production.id, production.name, ownerId],
   );
 
   // ── production_member: old schema PK is (production_id, open_id) ─────────

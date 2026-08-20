@@ -14,10 +14,13 @@ export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-import { ROLE_NAMES } from "./permissions";
+// 角色名单（ROLE_NAMES）已上移为项目模版的一个 slot，见 lib/production-template.ts
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
-import { CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS } from "./resource-grant-db";
-import { seedRoleFromTemplate } from "./grant-template";
+import {
+  buildApprovalLadder, classifyApprovalNode, expandLevelRows, nextStage, stageAt, stageStatus,
+  type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
+} from "./approval-routing";
+import { isValidTtlInterval } from "./approval-ttl";
 
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -1761,15 +1764,22 @@ async function seedCueListCreatorAccessInTx(
   client: PoolClient,
   data: { id: string; productionId: string; template: string | null; createdBy: string },
 ): Promise<void> {
+  // #236：创建者行集先过策略开关。注意 grant_source 虽写 self_confirmed，这是**创建
+  // 定式**发的、不是用户点「自我确认」，故属形状 A 的论域（真正的自确认写点不接开关）。
+  const { policyFilteredRows } = await import("./policy-db");
+  const cueRows = await policyFilteredRows(
+    data.productionId, "cue_list", "creator",
+    [["*", "view"], ["*", "edit"], ["*", "delete"],
+     ["cues", "create"], ["cues", "delete"], ["grants", "edit"]],
+    client,
+  );
   await client.query(
     `WITH creator_grants AS (
        INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT $1, $3, 'cue_list', $2, s.sub, s.verb, 'self_confirmed', $3
-       FROM (VALUES ('*', 'view'), ('*', 'edit'), ('*', 'delete'),
-                    ('cues', 'create'), ('cues', 'delete'),
-                    ('grants', 'edit')) AS s(sub, verb)
+       FROM UNNEST($5::text[], $6::text[]) AS s(sub, verb)
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING
@@ -1789,8 +1799,9 @@ async function seedCueListCreatorAccessInTx(
        ON CONFLICT (production_id, dept_id, resource_type, resource_id, resource_sub)
        DO NOTHING
      ), dept_permissions AS (
-       INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-       SELECT $1, eligible_depts.dept_id, k.key
+       INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+       -- source='resource'：由该表的归属信号在管（#274），权限中心折叠只读
+       SELECT $1, eligible_depts.dept_id, k.key, 'resource'
        FROM eligible_depts
        CROSS JOIN (VALUES
          ('node:cue_list/' || $2 || '@view'),
@@ -1805,7 +1816,8 @@ async function seedCueListCreatorAccessInTx(
      SELECT $1, $3, 'cue_list', $2, $3
      WHERE NOT EXISTS (SELECT 1 FROM eligible_depts)
      ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub) DO NOTHING`,
-    [data.productionId, data.id, data.createdBy, data.template],
+    [data.productionId, data.id, data.createdBy, data.template,
+     cueRows.map((r) => r[0]), cueRows.map((r) => r[1])],
   );
 }
 
@@ -2464,7 +2476,8 @@ async function ensureEmptyScriptBlocksForEmptyScenesInTx(
 export async function createProduction(
   id: string,
   name: string,
-  ownerUserId?: string,
+  /** 必填：production.owner_id NOT NULL，且 owner 是 M-14(c) 责任链的终点，不允许无主演出。 */
+  ownerUserId: string,
   productionType?: string,
   productionTypeLabel?: string | null,
 ): Promise<void> {
@@ -2474,48 +2487,18 @@ export async function createProduction(
     [
       id,
       name,
-      ownerUserId ?? null,
+      ownerUserId,
       productionType ?? null,
       productionTypeLabel ?? null,
       JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
     ],
   );
-  // Phase 3: ensure approval config row exists (default 24h TTL)
-  await pool.query(
-    "INSERT INTO production_approval_config (production_id, ttl_hours) VALUES ($1, 24) ON CONFLICT DO NOTHING",
-    [id],
-  );
   await createInitialVersion(id);
-  await seedProductionRoles(id);
-}
-
-/** Populate production_role + production_role_permission + production_role_cue_type from templates. */
-export async function seedProductionRoles(productionId: string): Promise<void> {
-  const pool = getPool();
-  const prodType = (await pool.query<{ type: string | null }>(
-    "SELECT type FROM production WHERE id = $1", [productionId],
-  )).rows[0]?.type ?? null;
-
-  // #227：cue 模版类型注册表随项目 seed（声明行/建表资格另走 §3.5 声明表）
-  const { seedCueTemplateTypes } = await import("./cue-template-db");
-  await seedCueTemplateTypes(productionId);
-
-  // 终局（批G G-2）：角色行从 ROLE_NAMES 结构名单建；权限内容全部经
-  // seedRoleFromTemplate 从 grant_template 表灌入（代码模板已退役）
-  for (const roleName of ROLE_NAMES) {
-    const roleId = `r_${productionId}_${encodeURIComponent(roleName)}`;
-    await pool.query(
-      `INSERT INTO production_role (id, production_id, name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (production_id, name) DO NOTHING`,
-      [roleId, productionId, roleName],
-    );
-    const roleRow = await pool.query<{ id: string }>(
-      "SELECT id FROM production_role WHERE production_id = $1 AND name = $2",
-      [productionId, roleName],
-    );
-    await seedRoleFromTemplate(roleRow.rows[0].id, roleName, prodType);
-  }
+  // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
+  // 策略档位、审批 TTL——统一由项目模版按类型灌入，整体一个事务。
+  // 见 lib/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
+  const { applyProductionTemplate } = await import("./production-template");
+  await applyProductionTemplate(id, productionType ?? null);
 }
 
 /** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
@@ -4639,11 +4622,21 @@ export async function createProductionRole(productionId: string, name: string): 
     [id, productionId, name],
   );
   const row = res.rows[0];
-  // 批A：自定义角色也获得成员基础模板键（'*'；若名字命中模板角色则一并 seed）
+  // 自定义角色也获得基线键；名字命中本项目模版里的角色则一并 seed 那份。
+  // 这仍是「创建时 seed」而非运行时读模版——判定端一行都不查模版。
   const prodType = (await getPool().query<{ type: string | null }>(
     "SELECT type FROM production WHERE id = $1", [productionId],
   )).rows[0]?.type ?? null;
-  await seedRoleFromTemplate(row.id, name, prodType);
+  const { resolveTemplate } = await import("./production-template");
+  const { roleKeys } = await import("./template-seeders/roles");
+  const keys = roleKeys(resolveTemplate(prodType).roles, name);
+  if (keys.length > 0) {
+    await getPool().query(
+      `INSERT INTO production_role_permission (role_id, permission_key)
+       SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+      [row.id, keys],
+    );
+  }
   const seeded = await getPool().query<{ permission_key: string }>(
     "SELECT permission_key FROM production_role_permission WHERE role_id = $1", [row.id],
   );
@@ -7260,10 +7253,23 @@ export type ApprovalRequest = {
   resourceSub: string | null;
   permissionLevel: string | null;
   grantType: "permanent" | "ttl" | null;
-  ttlDuration: string | null;
+  /**
+   * 展示用中文串（"7天"），仅供渲染。**不是**提交侧的线格式——
+   * SubmitAccessRequestParams.ttlDuration 要的是 Postgres INTERVAL 字面量
+   * （"7 days"），两者不可互相回灌。要算剩余时长请用 expiresAt。
+   */
+  ttlDurationLabel: string | null;
   note: string | null;
   status: "pending_supervisor" | "pending_resource" | "approved" | "rejected" | "cancelled";
   escalationChain: ApprovalChainEntry[];
+  /** 当前审批阶梯级（#140）；已 resolve 的申请为 null。 */
+  currentStage: ApprovalStageName | null;
+  currentApproverIds: string[];
+  /**
+   * 当前查看者能否直接批准。false = 只能向上转发（直属上级本人没有这个权限）。
+   * 由 listPendingApprovals 按级填充，其余读取路径为 null（不适用）。
+   */
+  canFinalize: boolean | null;
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
@@ -7272,12 +7278,19 @@ export type ApprovalRequest = {
 };
 
 export type ApprovalChainEntry = {
+  /** 旧两段式字段，保留给存量行与既有 UI；新写入按 stage 派生。 */
   phase: "supervisor" | "resource";
+  /** #140 阶梯级名与层深（存量行无此字段）。 */
+  stage?: ApprovalStageName;
+  depth?: number;
+  canFinalize?: boolean;
   approverIds: string[];
   notifiedAt: string;
-  action?: "approved" | "rejected";
+  action?: "approved" | "rejected" | "escalated";
   actorId?: string;
   actedAt?: string;
+  /** escalated 的原因：超时自动升级 / 审批人手动转发。 */
+  escalationReason?: "timeout" | "forwarded";
 };
 
 type ApprovalRow = {
@@ -7291,16 +7304,45 @@ type ApprovalRow = {
   resource_sub: string | null;
   permission_level: string | null;
   grant_type: string | null;
-  ttl_duration: string | null;
+  ttl_duration: PgInterval | string | null;
   note: string | null;
   status: string;
   escalation_chain: ApprovalChainEntry[];
+  current_stage: string | null;
+  current_stage_depth: number | null;
+  current_approver_ids: string[] | null;
   created_at: Date;
   resolved_at: Date | null;
   resolved_by: string | null;
   granted_at: Date | null;
   expires_at: Date | null;
 };
+
+/**
+ * node-postgres 把 INTERVAL 列解析成 postgres-interval 对象（如 '7 days' → { days: 7 }），
+ * 不是字符串。裸传给前端会触发 "Objects are not valid as a React child"。
+ */
+export type PgInterval = {
+  years?: number; months?: number; days?: number;
+  hours?: number; minutes?: number; seconds?: number; milliseconds?: number;
+};
+
+// 必须覆盖 PgInterval 的每个字段：漏一个就是静默丢数据。
+// 例：'1.5 seconds'::interval → { seconds: 1, milliseconds: 500 }，
+// 漏掉 milliseconds 会渲染成 "1秒"；'500 ms' 更会整条塌成 null。
+const INTERVAL_UNITS: [keyof PgInterval, string][] = [
+  ["years", "年"], ["months", "个月"], ["days", "天"],
+  ["hours", "小时"], ["minutes", "分钟"], ["seconds", "秒"], ["milliseconds", "毫秒"],
+];
+
+export function formatPgInterval(v: PgInterval | string | null | undefined): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.trim() || null;  // 兼容 type parser 被改回字符串的情况
+  const parts = INTERVAL_UNITS
+    .filter(([k]) => typeof v[k] === "number" && v[k] !== 0)
+    .map(([k, label]) => `${v[k]}${label}`);
+  return parts.join("") || null;
+}
 
 function rowToApproval(r: ApprovalRow): ApprovalRequest {
   return {
@@ -7314,10 +7356,13 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     resourceSub: r.resource_sub,
     permissionLevel: r.permission_level,
     grantType: (r.grant_type as "permanent" | "ttl" | null),
-    ttlDuration: r.ttl_duration,
+    ttlDurationLabel: formatPgInterval(r.ttl_duration),
     note: r.note,
     status: r.status as ApprovalRequest["status"],
     escalationChain: r.escalation_chain ?? [],
+    currentStage: (r.current_stage as ApprovalStageName | null) ?? null,
+    currentApproverIds: r.current_approver_ids ?? [],
+    canFinalize: null,
     createdAt: r.created_at.toISOString(),
     resolvedAt: r.resolved_at ? r.resolved_at.toISOString() : null,
     resolvedBy: r.resolved_by,
@@ -7384,62 +7429,230 @@ async function describeResource(
   return `${resourceDesc}的${levelLabel}权限`;
 }
 
-/** Returns user_ids who should approve resource access (POCs → production owner fallback). */
-async function findResourceApprovers(
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-  resourceSub: string,
-): Promise<string[]> {
-  // 1. POCs of depts that manage the resource
-  const deptRes = await getPool().query<{ user_id: string }>(
-    `SELECT pdm.user_id
-     FROM resource_dept_manage rdm
-     JOIN production_dept_member pdm
-       ON pdm.dept_id = rdm.dept_id
-      AND pdm.production_id = rdm.production_id
-      AND pdm.is_poc = true
-     WHERE rdm.production_id = $1
-       AND rdm.resource_type = $2
-       AND (rdm.resource_id = $3 OR rdm.resource_id = '*')
-       AND (rdm.resource_sub = $4 OR rdm.resource_sub = '*')`,
-    [productionId, resourceType, resourceId, resourceSub],
-  );
+// ─── 审批路由接入（#140）──────────────────────────────────────────────────────
+// 「谁来批」全部由 lib/approval-routing.ts 的阶梯算出，此处只负责落库、通知、状态机。
+// 收件箱（listPendingApprovals）与鉴权（authorizeApprovalAction）只读
+// current_approver_ids，不再各自重算路由——三处漂移的老账在此了结。
 
-  // 2. Individual person managers
-  const personRes = await getPool().query<{ user_id: string }>(
-    `SELECT user_id
-     FROM resource_person_manage
-     WHERE production_id = $1
-       AND resource_type = $2
-       AND (resource_id = $3 OR resource_id = '*')
-       AND (resource_sub = $4 OR resource_sub = '*')`,
-    [productionId, resourceType, resourceId, resourceSub],
-  );
+export class ApprovalRequestError extends Error {
+  constructor(public reason: "no_entry" | "invalid_ttl" | "no_approver") {
+    super(reason);
+    this.name = "ApprovalRequestError";
+  }
+}
 
-  const configured = [
-    ...deptRes.rows.map((r) => r.user_id),
-    ...personRes.rows.map((r) => r.user_id),
-  ];
-  const unique = [...new Set(configured)];
-  if (unique.length > 0) return unique;
+function approvalTargetOf(req: ApprovalRow): ApprovalTarget {
+  return {
+    productionId:    req.production_id,
+    subjectId:       req.subject_id,
+    resourceType:    req.resource_type ?? "",
+    resourceId:      req.resource_id ?? "*",
+    resourceSub:     req.resource_sub ?? "*",
+    permissionLevel: req.permission_level ?? "",
+  };
+}
 
-  // 3. Fallback: members with "制作人" role
-  const producerRes = await getPool().query<{ user_id: string }>(
-    `SELECT user_id FROM production_member
-     WHERE production_id = $1 AND '制作人' = ANY(roles)`,
-    [productionId],
+function currentPositionOf(req: ApprovalRow): StagePosition | null {
+  return req.current_stage
+    ? { stage: req.current_stage as ApprovalStageName, depth: req.current_stage_depth ?? 0 }
+    : null;
+}
+
+function isPendingStatus(status: string): boolean {
+  return status === "pending_supervisor" || status === "pending_resource";
+}
+
+function chainEntryFor(stage: ApprovalStage): ApprovalChainEntry {
+  return {
+    phase: stage.stage === "supervisor" ? "supervisor" : "resource",
+    stage: stage.stage,
+    depth: stage.depth,
+    canFinalize: stage.canFinalize,
+    approverIds: stage.approverIds,
+    notifiedAt: new Date().toISOString(),
+  };
+}
+
+async function loadApproval(requestId: string): Promise<ApprovalRow | null> {
+  const { rows } = await getPool().query<ApprovalRow>(
+    `SELECT * FROM approval_request WHERE id = $1`,
+    [requestId],
   );
-  if (producerRes.rows.length > 0) {
-    return producerRes.rows.map((r) => r.user_id);
+  return rows[0] ?? null;
+}
+
+/**
+ * 给 escalation_chain 末条补字段（批准/拒绝/转发的落点）。
+ * 单条 SQL 完成读改写——旧代码是「读出整条链 → JS 改 → 整条写回」，
+ * 期间若有别的升级追加了条目就会被覆盖掉。
+ */
+async function markLastChainEntry(requestId: string, patch: Partial<ApprovalChainEntry>): Promise<void> {
+  await getPool().query(
+    `UPDATE approval_request
+     SET escalation_chain = jsonb_set(
+           escalation_chain,
+           ARRAY[(jsonb_array_length(escalation_chain) - 1)::text],
+           (escalation_chain -> -1) || $2::jsonb)
+     WHERE id = $1 AND jsonb_array_length(escalation_chain) > 0`,
+    [requestId, JSON.stringify(patch)],
+  );
+}
+
+async function expireRequestNotifications(requestId: string): Promise<void> {
+  await getPool().query(
+    `UPDATE user_notification SET expired_at = now()
+     WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+    [requestId],
+  );
+}
+
+/**
+ * 把申请推进到指定级：给旧末条补落点、追加新级条目、改写 current_*，
+ * 并对「当前级」做乐观锁 —— 手动转交与 cron 超时升级可能撞车，
+ * WHERE 里带上原级 → 只有一个能成。
+ *
+ * 补旧条目与追加新条目必须在同一条 SQL 里：分两步做的话，落败的一方会先把
+ * 赢家刚写下的新条目当成"旧末条"改掉。
+ */
+async function advanceToStage(
+  req: ApprovalRow,
+  stage: ApprovalStage,
+  markPrev: Partial<ApprovalChainEntry>,
+): Promise<boolean> {
+  const { rows } = await getPool().query<{ id: string }>(
+    `UPDATE approval_request
+     SET status = $2,
+         current_stage = $3,
+         current_stage_depth = $4,
+         current_approver_ids = $5::uuid[],
+         escalation_chain =
+           CASE WHEN jsonb_array_length(escalation_chain) > 0
+                THEN jsonb_set(
+                       escalation_chain,
+                       ARRAY[(jsonb_array_length(escalation_chain) - 1)::text],
+                       (escalation_chain -> -1) || $10::jsonb)
+                ELSE escalation_chain
+           END || $6::jsonb
+     WHERE id = $1
+       AND status = $7
+       AND current_stage IS NOT DISTINCT FROM $8
+       AND current_stage_depth = $9
+     RETURNING id`,
+    [
+      req.id, stageStatus(stage.stage), stage.stage, stage.depth, stage.approverIds,
+      JSON.stringify([chainEntryFor(stage)]),
+      req.status, req.current_stage, req.current_stage_depth ?? 0,
+      JSON.stringify(markPrev),
+    ],
+  );
+  return rows.length > 0;
+}
+
+const STAGE_LABELS: Record<ApprovalStageName, string> = {
+  supervisor:   "直属上级",
+  holder:       "资源持有者",
+  dept_poc:     "共管部门负责人",
+  ancestor_poc: "上级部门负责人",
+  producer:     "制作人",
+  owner:        "演出所有者",
+};
+
+type StageNotifyContext = "new" | "timeout" | "forwarded";
+
+/** 通知某一级的审批人。无权终局的直属上级拿到的是「转发」而非「批准」。 */
+async function notifyStage(
+  req: ApprovalRow,
+  stage: ApprovalStage,
+  context: StageNotifyContext,
+): Promise<void> {
+  if (stage.approverIds.length === 0) return;
+
+  const nameRes = await getPool().query<{ name: string }>(
+    `SELECT name FROM user_profile WHERE user_id = $1`,
+    [req.subject_id],
+  );
+  const subjectName = nameRes.rows[0]?.name ?? "成员";
+  const desc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
+  const suffix = context === "timeout"   ? "（上一级审批超时，已自动升级）"
+               : context === "forwarded" ? "（由上一级转发）"
+               : "";
+  const requestId = req.id;
+
+  const actions = stage.canFinalize
+    ? [
+        { id: "approve", presentation: "primary_button" as const, label: "批准", effects: [{ type: "approve_access_request" as const, requestId }] },
+        { id: "reject",  presentation: "secondary_button" as const, label: "拒绝", effects: [{ type: "reject_access_request" as const, requestId }] },
+      ]
+    : [
+        // #140：上级本人没有这个权限 → 只能向上转发，不能批准
+        { id: "escalate", presentation: "primary_button" as const, label: "向上转交", effects: [{ type: "escalate_access_request" as const, requestId }] },
+        { id: "reject",   presentation: "secondary_button" as const, label: "拒绝",   effects: [{ type: "reject_access_request" as const, requestId }] },
+      ];
+
+  const body = stage.canFinalize
+    ? `${subjectName} 申请获得${desc}${suffix}，请审批。${req.note ? `\n\n申请理由：${req.note}` : ""}`
+    : `${subjectName} 申请获得${desc}${suffix}。你本人尚未持有该权限，只能向上转交给下一级审批人。${req.note ? `\n\n申请理由：${req.note}` : ""}`;
+
+  await notifyUsers({
+    userIds: stage.approverIds,
+    productionId: req.production_id,
+    kind: "approval_request_pending",
+    entityType: "approval_request",
+    entityId: requestId,
+    title: `${subjectName} 申请 ${desc}${suffix}`,
+    body,
+    viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    category: "action",
+    actionRequired: true,
+    approvalRequestId: requestId,
+    actions,
+    buildExternalMessage: async () => ({
+      text: `${subjectName} 申请 ${desc}${suffix}，请处理`,
+      title: `资源申请待${stage.canFinalize ? "审批" : "转交"}（${STAGE_LABELS[stage.stage]}）`,
+      primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    }),
+  });
+}
+
+/**
+ * 审批动作鉴权。返回 canFinalize=false 表示「在场但只能转发」。
+ *
+ * owner 恒可介入；制作人可介入非敏感申请（PRD：制作人可随时介入本演出待处理
+ * 申请）；敏感节点恒过 owner，制作人代批不了。
+ */
+async function authorizeApprovalAction(
+  req: ApprovalRow,
+  actorId: string,
+): Promise<{ authorized: boolean; canFinalize: boolean }> {
+  const ownerRes = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM production WHERE id = $1 AND owner_id = $2) AS ok`,
+    [req.production_id, actorId],
+  );
+  if (ownerRes.rows[0]?.ok) return { authorized: true, canFinalize: true };
+
+  const nodeClass = classifyApprovalNode(
+    req.resource_type ?? "", req.resource_sub ?? "*", req.permission_level ?? "",
+  );
+  if (nodeClass !== "sensitive") {
+    const producerRes = await getPool().query<{ ok: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM production_member
+         WHERE production_id = $1 AND user_id = $2 AND '制作人' = ANY(roles)
+       ) AS ok`,
+      [req.production_id, actorId],
+    );
+    if (producerRes.rows[0]?.ok) return { authorized: true, canFinalize: true };
   }
 
-  // 4. Final fallback: production owner (always exists)
-  const ownerRes = await getPool().query<{ owner_id: string }>(
-    `SELECT owner_id FROM production WHERE id = $1`,
-    [productionId],
-  );
-  return ownerRes.rows[0]?.owner_id ? [ownerRes.rows[0].owner_id] : [];
+  if (!(req.current_approver_ids ?? []).includes(actorId)) {
+    return { authorized: false, canFinalize: false };
+  }
+  // 非 supervisor 级恒可终局；supervisor 级按「本人是否持有该权限」现算
+  if (req.current_stage !== "supervisor") return { authorized: true, canFinalize: true };
+
+  const ladder = await buildApprovalLadder(approvalTargetOf(req));
+  const stage = stageAt(ladder, { stage: "supervisor", depth: req.current_stage_depth ?? 0 });
+  return { authorized: true, canFinalize: stage?.canFinalize ?? false };
 }
 
 export type SubmitAccessRequestParams = {
@@ -7449,6 +7662,7 @@ export type SubmitAccessRequestParams = {
   resourceSub?: string;
   permissionLevel: string;
   grantType?: "permanent" | "ttl";
+  /** Postgres INTERVAL 字面量，且必须来自 TTL_OPTIONS（lib/approval-ttl.ts）。 */
   ttlDuration?: string | null;
   note?: string | null;
 };
@@ -7460,20 +7674,31 @@ export async function submitAccessRequest(
 ): Promise<ApprovalRequest> {
   const resourceId = params.resourceId ?? "*";
   const resourceSub = params.resourceSub ?? "*";
-
-  // Check if requester has a supervisor in this production
-  const supervisorRes = await getPool().query<{ supervisor_id: string | null }>(
-    `SELECT supervisor_id FROM production_member
-     WHERE production_id = $1 AND user_id = $2`,
-    [productionId, userId],
-  );
-  const supervisorId = supervisorRes.rows[0]?.supervisor_id ?? null;
-
-  const initialStatus = supervisorId ? "pending_supervisor" : "pending_resource";
   const requestType = params.type ?? "resource_access";
+  const grantType = params.grantType ?? "permanent";
+  // #256：'ttl' 不带时长会一路 NULL 到 expires_at，而 NULL 等于永久。
+  // 白名单校验放在这里而非只在路由——任何调用方都过这道门。
+  const ttlDuration = grantType === "ttl" ? params.ttlDuration ?? null : null;
+  if (grantType === "ttl" && !isValidTtlInterval(ttlDuration)) {
+    throw new ApprovalRequestError("invalid_ttl");
+  }
+
+  // ROOT 节点（批F 三态）owner-only、连审批通道都没有——申请不该被收下
+  if (classifyApprovalNode(params.resourceType, resourceSub, params.permissionLevel) === "root") {
+    throw new ApprovalRequestError("no_entry");
+  }
+
+  const ladder = await buildApprovalLadder({
+    productionId, subjectId: userId,
+    resourceType: params.resourceType,
+    resourceId, resourceSub,
+    permissionLevel: params.permissionLevel,
+  });
+  const firstStage = ladder[0];
+  if (!firstStage) throw new ApprovalRequestError("no_approver");
 
   // 覆盖式申请自动完成（2026-08-16 用户反馈）：同人同目标同级别的旧 pending 申请
-  // 被新申请取代（如先申 1 天 TTL 又申 30 天）——自动 cancel 并过期其待办通知，
+  // 被新申请取代（如先申 1 天 TTL 又申 1 月）——自动 cancel 并过期其待办通知，
   // 否则旧申请的审批待办永远挂着，审批人收件箱堆积。
   // 与新申请 INSERT 同事务（AI review）：中途失败不能留"旧的已撤、新的没建"半态；
   // IS NOT DISTINCT FROM 兼容存量 NULL resource_id/sub（新写入恒 '*'，老行可能 NULL）
@@ -7483,7 +7708,8 @@ export async function submitAccessRequest(
     await supersedeClient.query("BEGIN");
     const superseded = await supersedeClient.query<{ id: string }>(
       `UPDATE approval_request
-       SET status = 'cancelled', resolved_at = now()
+       SET status = 'cancelled', resolved_at = now(),
+           current_stage = NULL, current_approver_ids = '{}'
        WHERE production_id = $1 AND subject_id = $2 AND type = $3
          AND resource_type = $4
          AND resource_id IS NOT DISTINCT FROM $5
@@ -7504,17 +7730,22 @@ export async function submitAccessRequest(
       `INSERT INTO approval_request
          (production_id, subject_id, type,
           resource_type, resource_id, resource_sub,
-          permission_level, grant_type, ttl_duration, note, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10,$11)
+          permission_level, grant_type, ttl_duration, note, status,
+          current_stage, current_stage_depth, current_approver_ids, escalation_chain)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10,$11,$12,$13,$14::uuid[],$15::jsonb)
        RETURNING *`,
       [
         productionId, userId, requestType,
         params.resourceType, resourceId, resourceSub,
         params.permissionLevel,
-        params.grantType ?? "permanent",
-        params.ttlDuration ?? null,
+        grantType,
+        ttlDuration,
         params.note ?? null,
-        initialStatus,
+        stageStatus(firstStage.stage),
+        firstStage.stage,
+        firstStage.depth,
+        firstStage.approverIds,
+        JSON.stringify([chainEntryFor(firstStage)]),
       ],
     );
     request = insertRes.rows[0];
@@ -7526,359 +7757,172 @@ export async function submitAccessRequest(
     supersedeClient.release();
   }
 
-  // Get subject display name and resource description for notifications
-  const nameRes = await getPool().query<{ name: string }>(
-    `SELECT name FROM user_profile WHERE user_id = $1`,
-    [userId],
-  );
-  const subjectName = nameRes.rows[0]?.name ?? "成员";
-  const resourceDesc = await describeResource(params.resourceType, resourceId, params.permissionLevel);
-
-  if (supervisorId) {
-    // Notify supervisor
-    const chain: ApprovalChainEntry = {
-      phase: "supervisor",
-      approverIds: [supervisorId],
-      notifiedAt: new Date().toISOString(),
-    };
-    await getPool().query(
-      `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
-      [JSON.stringify([chain]), request.id],
-    );
-    await notifyUser({
-      userId: supervisorId,
-      productionId,
-      kind: "approval_request_pending",
-      entityType: "approval_request",
-      entityId: request.id,
-      title: `${subjectName} 申请 ${resourceDesc}`,
-      body: `${subjectName} 申请获得${resourceDesc}，请审批。${request.note ? `\n\n申请理由：${request.note}` : ""}`,
-      viewHref: `${SERVER_URL}/production/${productionId}/access-requests`,
-      category: "action",
-      actionRequired: true,
-      approvalRequestId: request.id,
-      actions: [
-        { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: request.id }] },
-        { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: request.id }] },
-      ],
-      buildExternalMessage: async () => ({
-        text: `${subjectName} 申请 ${resourceDesc}，请审批`,
-        title: `资源申请待审批`,
-        primaryUrl: `${SERVER_URL}/production/${productionId}/access-requests`,
-      }),
-    });
-  } else {
-    // Notify resource approvers
-    const approverIds = await findResourceApprovers(productionId, params.resourceType, resourceId, resourceSub);
-    if (approverIds.length > 0) {
-      const chain: ApprovalChainEntry = {
-        phase: "resource",
-        approverIds,
-        notifiedAt: new Date().toISOString(),
-      };
-      await getPool().query(
-        `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
-        [JSON.stringify([chain]), request.id],
-      );
-      await notifyUsers({
-        userIds: approverIds,
-        productionId,
-        kind: "approval_request_pending",
-        entityType: "approval_request",
-        entityId: request.id,
-        title: `${subjectName} 申请 ${resourceDesc}`,
-        body: `${subjectName} 申请获得${resourceDesc}，请审批。${request.note ? `\n\n申请理由：${request.note}` : ""}`,
-        viewHref: `${SERVER_URL}/production/${productionId}/access-requests`,
-        category: "action",
-        actionRequired: true,
-        approvalRequestId: request.id,
-        actions: [
-          { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: request.id }] },
-          { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: request.id }] },
-        ],
-        buildExternalMessage: async () => ({
-          text: `${subjectName} 申请 ${resourceDesc}，请审批`,
-          title: `资源申请待审批`,
-          primaryUrl: `${SERVER_URL}/production/${productionId}/access-requests`,
-        }),
-      });
-    }
-  }
-
-  const finalRes = await getPool().query<ApprovalRow>(
-    `SELECT * FROM approval_request WHERE id = $1`,
-    [request.id],
-  );
-  return rowToApproval(finalRes.rows[0]);
+  await notifyStage(request, firstStage, "new");
+  return rowToApproval(request);
 }
 
 export async function approveAccessRequest(
   requestId: string,
   actorId: string,
-): Promise<{ ok: true; request: ApprovalRequest } | { ok: false; reason: "not_found" | "conflict" | "unauthorized" }> {
-  const loadRes = await getPool().query<ApprovalRow>(
-    `SELECT * FROM approval_request WHERE id = $1`,
-    [requestId],
+): Promise<
+  | { ok: true; request: ApprovalRequest }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "forward_only" }
+> {
+  const req = await loadApproval(requestId);
+  if (!req) return { ok: false, reason: "not_found" };
+  if (!isPendingStatus(req.status)) return { ok: false, reason: "conflict" };
+
+  const auth = await authorizeApprovalAction(req, actorId);
+  if (!auth.authorized) return { ok: false, reason: "unauthorized" };
+  // 直属上级本人没有该权限 → 只能转发（#140）
+  if (!auth.canFinalize) return { ok: false, reason: "forward_only" };
+
+  // first-action-wins：状态与所在级都要没被别人动过
+  // expires_at 全程由 SQL（now() + ttl_duration）算出，JS 侧不参与
+  const updateRes = await getPool().query<{ id: string }>(
+    `UPDATE approval_request
+     SET status = 'approved',
+         resolved_at = now(),
+         resolved_by = $2,
+         granted_at = now(),
+         current_stage = NULL,
+         current_approver_ids = '{}',
+         expires_at = CASE WHEN grant_type = 'ttl' AND ttl_duration IS NOT NULL
+                            THEN now() + ttl_duration
+                            ELSE NULL END
+     WHERE id = $1 AND status = $3
+       AND current_stage IS NOT DISTINCT FROM $4
+     RETURNING id`,
+    [requestId, actorId, req.status, req.current_stage],
   );
-  if (!loadRes.rows[0]) return { ok: false, reason: "not_found" };
-  const req = loadRes.rows[0];
+  if (!updateRes.rows[0]) return { ok: false, reason: "conflict" };
 
-  if (req.status !== "pending_supervisor" && req.status !== "pending_resource") {
-    return { ok: false, reason: "conflict" };
-  }
+  await markLastChainEntry(requestId, {
+    action: "approved", actorId, actedAt: new Date().toISOString(),
+  });
 
-  // Authorization check
-  const authorized = await isApprover(req, actorId);
-  if (!authorized) return { ok: false, reason: "unauthorized" };
+  const fresh = await loadApproval(requestId);
 
-  if (req.status === "pending_supervisor") {
-    // Transition: pending_supervisor → pending_resource (first-action-wins)
-    const updateRes = await getPool().query<{ id: string }>(
-      `UPDATE approval_request
-       SET status = 'pending_resource'
-       WHERE id = $1 AND status = 'pending_supervisor'
-       RETURNING id`,
-      [requestId],
-    );
-    if (!updateRes.rows[0]) return { ok: false, reason: "conflict" };
-
-    // Record in escalation_chain
-    const chain: ApprovalChainEntry[] = req.escalation_chain ?? [];
-    const supervisorEntry = chain.find((e) => e.phase === "supervisor");
-    if (supervisorEntry) {
-      supervisorEntry.action = "approved";
-      supervisorEntry.actorId = actorId;
-      supervisorEntry.actedAt = new Date().toISOString();
-    }
-
-    // Notify resource approvers
-    const approverIds = await findResourceApprovers(
-      req.production_id,
-      req.resource_type ?? "",
-      req.resource_id ?? "*",
-      req.resource_sub ?? "*",
-    );
-
-    const resourceEntry: ApprovalChainEntry = {
-      phase: "resource",
-      approverIds,
-      notifiedAt: new Date().toISOString(),
-    };
-    chain.push(resourceEntry);
-
-    await getPool().query(
-      `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
-      [JSON.stringify(chain), requestId],
-    );
-
-    // Self-skip: if the supervisor is also a resource approver, auto-approve resource phase now
-    if (approverIds.includes(actorId)) {
-      return approveAccessRequest(requestId, actorId);
-    }
-
-    if (approverIds.length > 0) {
-      const nameRes = await getPool().query<{ name: string }>(
-        `SELECT name FROM user_profile WHERE user_id = $1`,
-        [req.subject_id],
-      );
-      const subjectName = nameRes.rows[0]?.name ?? "成员";
-      const resourceDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
-      await notifyUsers({
-        userIds: approverIds,
-        productionId: req.production_id,
-        kind: "approval_request_pending",
-        entityType: "approval_request",
-        entityId: requestId,
-        title: `${subjectName} 申请 ${resourceDesc}`,
-        body: `${subjectName} 申请获得${resourceDesc}（已通过直属上级审批），请审批。`,
-        viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
-        category: "action",
-        actionRequired: true,
-        approvalRequestId: requestId,
-        actions: [
-          { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId }] },
-          { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId }] },
-        ],
-        buildExternalMessage: async () => ({
-          text: `${subjectName} 申请 ${resourceDesc}（已通过直属上级审批），请审批`,
-          title: `资源申请待审批`,
-          primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
-        }),
-      });
-    }
+  // 终局（批G G-2）：atomic_permission 类型申请已随原子键退役（表已 DROP）——
+  // 历史 pending 申请（若有）按无效处理，不再发行
+  if (req.type === "atomic_permission") {
+    // 原子键机制已退役；生成端已节点化（403 redirect+modal），此处仅防历史 pending。
+    console.warn(`[approval] 跳过旧格式 atomic_permission 申请 ${requestId}（不发行）`);
   } else {
-    // pending_resource → approved (first-action-wins)
-    const now = new Date();
-    const expiresAt = req.grant_type === "ttl" && req.ttl_duration
-      ? new Date(now.getTime()) // will be set in SQL
-      : null;
-
-    const updateRes = await getPool().query<{ id: string }>(
-      `UPDATE approval_request
-       SET status = 'approved',
-           resolved_at = now(),
-           resolved_by = $2,
-           granted_at = now(),
-           expires_at = CASE WHEN grant_type = 'ttl' AND ttl_duration IS NOT NULL
-                              THEN now() + ttl_duration
-                              ELSE NULL END
-       WHERE id = $1 AND status = 'pending_resource'
-       RETURNING id`,
-      [requestId, actorId],
-    );
-    if (!updateRes.rows[0]) return { ok: false, reason: "conflict" };
-
-    // Update escalation_chain
-    const chain: ApprovalChainEntry[] = req.escalation_chain ?? [];
-    const resourceEntry = chain.find((e) => e.phase === "resource");
-    if (resourceEntry) {
-      resourceEntry.action = "approved";
-      resourceEntry.actorId = actorId;
-      resourceEntry.actedAt = new Date().toISOString();
+    // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
+    // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
+    // 展开表与「上级是否已持有该权限」的判定共用 expandLevelRows，两侧不会漂移。
+    const rows = expandLevelRows(req.resource_type ?? "", req.resource_sub ?? "*", req.permission_level ?? "");
+    for (const [sub, verb] of rows) {
+      await getPool().query(
+        `INSERT INTO production_member_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by, approval_id, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [
+          req.production_id,
+          req.subject_id,
+          req.resource_type,
+          req.resource_id ?? "*",
+          sub,
+          verb,
+          actorId,
+          requestId,
+          fresh?.expires_at ?? null,
+        ],
+      );
     }
-    await getPool().query(
-      `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
-      [JSON.stringify(chain), requestId],
-    );
-
-    // Reload to get expires_at
-    const freshRes = await getPool().query<ApprovalRow>(
-      `SELECT * FROM approval_request WHERE id = $1`,
-      [requestId],
-    );
-    const fresh = freshRes.rows[0];
-
-    // 终局（批G G-2）：atomic_permission 类型申请已随原子键退役（表已 DROP）——
-    // 历史 pending 申请（若有）按无效处理，不再发行
-    if (req.type === "atomic_permission") {
-      // 原子键机制已退役；生成端已节点化（403 redirect+modal），此处仅防历史 pending。
-      console.warn(`[approval] 跳过旧格式 atomic_permission 申请 ${requestId}（不发行）`);
-    } else {
-      // 批A：REST 化域（cue_list）的伪级别申请在发行时展开为动词行集；
-      // 未迁移域仍写单行。蕴含由授权时发多行表达（总表 §0）。
-      const setsByType: Record<string, Record<string, ReadonlyArray<readonly [string, string]>>> = {
-        cue_list: CUE_LIST_LEVEL_ROW_SETS,
-        event: EVENT_LEVEL_ROW_SETS,
-        task: TASK_LEVEL_ROW_SETS,
-        report: REPORT_LEVEL_ROW_SETS,
-        note: NOTE_LEVEL_ROW_SETS,
-        wiki: WIKI_LEVEL_ROW_SETS,
-      };
-      const rows: ReadonlyArray<readonly [string, string]> =
-        setsByType[req.resource_type ?? ""]?.[req.permission_level ?? ""]
-          ?? [[req.resource_sub ?? "*", req.permission_level!] as const];
-      for (const [sub, verb] of rows) {
-        await getPool().query(
-          `INSERT INTO production_member_grant
-             (production_id, user_id, resource_type, resource_id, resource_sub,
-              permission_level, grant_source, confirmed_by, approval_id, expires_at)
-           VALUES ($1,$2,$3,$4,$5,$6,'approval',$7,$8,$9)
-           ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-             WHERE is_revoked = false
-           DO NOTHING`,
-          [
-            req.production_id,
-            req.subject_id,
-            req.resource_type,
-            req.resource_id ?? "*",
-            sub,
-            verb,
-            actorId,
-            requestId,
-            fresh?.expires_at ?? null,
-          ],
-        );
-      }
-    }
-
-    // Expire any pending action notifications for this request
-    await getPool().query(
-      `UPDATE user_notification
-       SET expired_at = now()
-       WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
-      [requestId],
-    );
-
-    // Notify requester
-    const approvedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
-    await notifyUser({
-      userId: req.subject_id,
-      productionId: req.production_id,
-      kind: "approval_request_result",
-      entityType: "approval_request",
-      entityId: requestId,
-      title: "资源访问申请已批准",
-      body: `你申请的${approvedDesc}已获批准。`,
-      viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
-      category: "info",
-      approvalRequestId: requestId,
-      buildExternalMessage: async () => ({
-        text: `你申请的${approvedDesc}已获批准`,
-        title: `资源申请已批准`,
-        primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
-      }),
-    });
   }
 
-  const finalRes = await getPool().query<ApprovalRow>(
-    `SELECT * FROM approval_request WHERE id = $1`,
-    [requestId],
-  );
-  return { ok: true, request: rowToApproval(finalRes.rows[0]) };
+  await expireRequestNotifications(requestId);
+
+  const approvedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
+  await notifyUser({
+    userId: req.subject_id,
+    productionId: req.production_id,
+    kind: "approval_request_result",
+    entityType: "approval_request",
+    entityId: requestId,
+    title: "资源访问申请已批准",
+    body: `你申请的${approvedDesc}已获批准。`,
+    viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    category: "info",
+    approvalRequestId: requestId,
+    buildExternalMessage: async () => ({
+      text: `你申请的${approvedDesc}已获批准`,
+      title: `资源申请已批准`,
+      primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    }),
+  });
+
+  const finalRow = fresh ?? (await loadApproval(requestId))!;
+  return { ok: true, request: rowToApproval(finalRow) };
+}
+
+/**
+ * 向上转发（#140）：当前级处理不了 —— 直属上级没有该权限，或部门负责人认为
+ * 该由上级定 —— 就把申请推到阶梯的下一级。转发不是拒绝，链路完整记在
+ * escalation_chain 里。
+ */
+export async function escalateAccessRequest(
+  requestId: string,
+  actorId: string,
+): Promise<
+  | { ok: true; request: ApprovalRequest }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "no_next_stage" }
+> {
+  const req = await loadApproval(requestId);
+  if (!req) return { ok: false, reason: "not_found" };
+  if (!isPendingStatus(req.status)) return { ok: false, reason: "conflict" };
+
+  const auth = await authorizeApprovalAction(req, actorId);
+  if (!auth.authorized) return { ok: false, reason: "unauthorized" };
+
+  const ladder = await buildApprovalLadder(approvalTargetOf(req));
+  const next = nextStage(ladder, currentPositionOf(req));
+  if (!next) return { ok: false, reason: "no_next_stage" };
+
+  const moved = await advanceToStage(req, next, {
+    action: "escalated", actorId, actedAt: new Date().toISOString(), escalationReason: "forwarded",
+  });
+  if (!moved) return { ok: false, reason: "conflict" };
+
+  await expireRequestNotifications(requestId);
+  const fresh = await loadApproval(requestId);
+  if (fresh) await notifyStage(fresh, next, "forwarded");
+
+  return { ok: true, request: rowToApproval(fresh ?? req) };
 }
 
 export async function rejectAccessRequest(
   requestId: string,
   actorId: string,
 ): Promise<{ ok: true; request: ApprovalRequest } | { ok: false; reason: "not_found" | "conflict" | "unauthorized" }> {
-  const loadRes = await getPool().query<ApprovalRow>(
-    `SELECT * FROM approval_request WHERE id = $1`,
-    [requestId],
-  );
-  if (!loadRes.rows[0]) return { ok: false, reason: "not_found" };
-  const req = loadRes.rows[0];
+  const req = await loadApproval(requestId);
+  if (!req) return { ok: false, reason: "not_found" };
+  if (!isPendingStatus(req.status)) return { ok: false, reason: "conflict" };
 
-  if (req.status !== "pending_supervisor" && req.status !== "pending_resource") {
-    return { ok: false, reason: "conflict" };
-  }
-
-  const authorized = await isApprover(req, actorId);
-  if (!authorized) return { ok: false, reason: "unauthorized" };
+  const auth = await authorizeApprovalAction(req, actorId);
+  if (!auth.authorized) return { ok: false, reason: "unauthorized" };
 
   const updateRes = await getPool().query<{ id: string }>(
     `UPDATE approval_request
-     SET status = 'rejected', resolved_at = now(), resolved_by = $2
+     SET status = 'rejected', resolved_at = now(), resolved_by = $2,
+         current_stage = NULL, current_approver_ids = '{}'
      WHERE id = $1 AND status = $3
      RETURNING id`,
     [requestId, actorId, req.status],
   );
   if (!updateRes.rows[0]) return { ok: false, reason: "conflict" };
 
-  // Update escalation_chain
-  const chain: ApprovalChainEntry[] = req.escalation_chain ?? [];
-  const currentEntry = chain.find((e) =>
-    (req.status === "pending_supervisor" && e.phase === "supervisor") ||
-    (req.status === "pending_resource" && e.phase === "resource"),
-  );
-  if (currentEntry) {
-    currentEntry.action = "rejected";
-    currentEntry.actorId = actorId;
-    currentEntry.actedAt = new Date().toISOString();
-  }
-  await getPool().query(
-    `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
-    [JSON.stringify(chain), requestId],
-  );
+  await markLastChainEntry(requestId, {
+    action: "rejected", actorId, actedAt: new Date().toISOString(),
+  });
+  await expireRequestNotifications(requestId);
 
-  // Expire pending action notifications
-  await getPool().query(
-    `UPDATE user_notification
-     SET expired_at = now()
-     WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
-    [requestId],
-  );
-
-  // Notify requester
   const rejectedDesc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
   await notifyUser({
     userId: req.subject_id,
@@ -7898,11 +7942,8 @@ export async function rejectAccessRequest(
     }),
   });
 
-  const finalRes = await getPool().query<ApprovalRow>(
-    `SELECT * FROM approval_request WHERE id = $1`,
-    [requestId],
-  );
-  return { ok: true, request: rowToApproval(finalRes.rows[0]) };
+  const finalRow = await loadApproval(requestId);
+  return { ok: true, request: rowToApproval(finalRow ?? req) };
 }
 
 export async function cancelAccessRequest(
@@ -7911,7 +7952,8 @@ export async function cancelAccessRequest(
 ): Promise<{ ok: true } | { ok: false; reason: "not_found" | "conflict" }> {
   const res = await getPool().query<{ id: string }>(
     `UPDATE approval_request
-     SET status = 'cancelled', resolved_at = now()
+     SET status = 'cancelled', resolved_at = now(),
+         current_stage = NULL, current_approver_ids = '{}'
      WHERE id = $1
        AND subject_id = $2
        AND status IN ('pending_supervisor', 'pending_resource')
@@ -7923,14 +7965,7 @@ export async function cancelAccessRequest(
     return exists.rows[0] ? { ok: false, reason: "conflict" } : { ok: false, reason: "not_found" };
   }
 
-  // Expire pending action notifications
-  await getPool().query(
-    `UPDATE user_notification
-     SET expired_at = now()
-     WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
-    [requestId],
-  );
-
+  await expireRequestNotifications(requestId);
   return { ok: true };
 }
 
@@ -7949,6 +7984,10 @@ export async function listMyAccessRequests(
   return res.rows.map(rowToApproval);
 }
 
+/**
+ * 我的待办：只读 current_approver_ids（路由已在写入时算好）。
+ * canFinalize 取自当前级的链条目——false 表示前端该显示「转发」而非「批准」。
+ */
 export async function listPendingApprovals(
   actorId: string,
   productionId?: string,
@@ -7962,173 +8001,57 @@ export async function listPendingApprovals(
     `SELECT ar.*, COALESCE(NULLIF(up.display_name, ''), up.name, '成员') AS subject_name
      FROM approval_request ar
      LEFT JOIN user_profile up ON up.user_id = ar.subject_id
-     WHERE (
-       -- Supervisor phase: I am the supervisor of the requester in this production
-       (ar.status = 'pending_supervisor' AND EXISTS (
-         SELECT 1 FROM production_member pm
-         WHERE pm.production_id = ar.production_id
-           AND pm.user_id = ar.subject_id
-           AND pm.supervisor_id = $1
-       ))
-       OR
-       -- Resource phase: I am a POC of a dept that manages this resource
-       (ar.status = 'pending_resource' AND EXISTS (
-         SELECT 1 FROM resource_dept_manage rdm
-         JOIN production_dept_member pdm
-           ON pdm.dept_id = rdm.dept_id
-          AND pdm.production_id = rdm.production_id
-          AND pdm.user_id = $1
-          AND pdm.is_poc = true
-         WHERE rdm.production_id = ar.production_id
-           AND rdm.resource_type = ar.resource_type
-           AND (rdm.resource_id = ar.resource_id OR rdm.resource_id = '*')
-           AND (rdm.resource_sub = ar.resource_sub OR rdm.resource_sub = '*')
-       ))
-       OR
-       -- Resource phase: I am the production owner and no POC exists
-       (ar.status = 'pending_resource' AND EXISTS (
-         SELECT 1 FROM production p
-         WHERE p.id = ar.production_id AND p.owner_id = $1
-           AND NOT EXISTS (
-             SELECT 1 FROM resource_dept_manage rdm
-             JOIN production_dept_member pdm
-               ON pdm.dept_id = rdm.dept_id
-              AND pdm.production_id = rdm.production_id
-              AND pdm.is_poc = true
-             WHERE rdm.production_id = ar.production_id
-               AND rdm.resource_type = ar.resource_type
-               AND (rdm.resource_id = ar.resource_id OR rdm.resource_id = '*')
-               AND (rdm.resource_sub = ar.resource_sub OR rdm.resource_sub = '*')
-           )
-       ))
-     )
+     WHERE ar.status IN ('pending_supervisor', 'pending_resource')
+       AND ar.current_approver_ids @> ARRAY[$1]::uuid[]
      ${prodClause}
      ORDER BY ar.created_at ASC`,
     params,
   );
-  return res.rows.map(rowToApproval);
+  return res.rows.map((r) => {
+    const approval = rowToApproval(r);
+    const last = approval.escalationChain[approval.escalationChain.length - 1];
+    return { ...approval, canFinalize: last?.canFinalize ?? true };
+  });
 }
 
-/** Called by the internal cron endpoint — advances pending requests past TTL. */
-export async function escalateExpiredApprovals(): Promise<{ escalated: number }> {
-  const pool = getPool();
+/** production_approval_config.ttl_hours 的列默认值——缺配置行时按此计时。
+ *  与 db/add-approval-config-backfill.sql 里插入的 24 是同一个值，改要同改。 */
+const DEFAULT_APPROVAL_TTL_HOURS = 24;
 
-  // pending_supervisor past TTL → advance to pending_resource
-  const supervisorExpiredRes = await pool.query<ApprovalRow>(
-    `UPDATE approval_request ar
-     SET status = 'pending_resource'
-     FROM production_approval_config pac
-     WHERE pac.production_id = ar.production_id
-       AND ar.status = 'pending_supervisor'
-       AND ar.created_at < now() - (pac.ttl_hours || ' hours')::INTERVAL
-     RETURNING ar.*`,
+/** Called by the internal cron endpoint — 当前级超时未响应即升级到阶梯下一级。 */
+export async function escalateExpiredApprovals(): Promise<{ escalated: number }> {
+  // 计时起点是「当前级被通知的时刻」（链末条 notifiedAt），不是申请创建时刻——
+  // 否则五级阶梯会在同一个 TTL 里被连着跳完。
+  //
+  // LEFT JOIN + COALESCE 而非 INNER JOIN：production_approval_config 是 Phase 3
+  // 才加的表，建表 SQL 没有回填，早于它的演出一行都没有。INNER JOIN 会让这些
+  // 演出的申请**永远**匹配不上、一次也升不了级（线上 8 个演出全部缺行，整条
+  // 升级链自 Phase 7 起就是死的）。缺配置=按列默认值计时，不是"不升级"。
+  const { rows } = await getPool().query<ApprovalRow>(
+    `SELECT ar.* FROM approval_request ar
+     LEFT JOIN production_approval_config pac ON pac.production_id = ar.production_id
+     WHERE ar.status IN ('pending_supervisor', 'pending_resource')
+       AND COALESCE((ar.escalation_chain -> -1 ->> 'notifiedAt')::timestamptz, ar.created_at)
+           < now() - (COALESCE(pac.ttl_hours, $1) || ' hours')::INTERVAL`,
+    [DEFAULT_APPROVAL_TTL_HOURS],
   );
 
-  const escalated = supervisorExpiredRes.rowCount ?? 0;
+  let escalated = 0;
+  for (const row of rows) {
+    const ladder = await buildApprovalLadder(approvalTargetOf(row));
+    const next = nextStage(ladder, currentPositionOf(row));
+    if (!next) continue;  // 已在链顶（owner），只等人处理，不再升级
 
-  // For each escalated request, notify resource approvers
-  for (const row of supervisorExpiredRes.rows) {
-    const approverIds = await findResourceApprovers(
-      row.production_id,
-      row.resource_type ?? "",
-      row.resource_id ?? "*",
-      row.resource_sub ?? "*",
-    );
-    if (approverIds.length === 0) continue;
-
-    const nameRes = await pool.query<{ name: string }>(
-      `SELECT name FROM user_profile WHERE user_id = $1`,
-      [row.subject_id],
-    );
-    const subjectName = nameRes.rows[0]?.name ?? "成员";
-
-    const chain: ApprovalChainEntry[] = row.escalation_chain ?? [];
-    const supervisorEntry = chain.find((e) => e.phase === "supervisor");
-    if (supervisorEntry) {
-      supervisorEntry.action = "approved"; // escalated = treated as approved
-      supervisorEntry.actedAt = new Date().toISOString();
-    }
-    const resourceEntry: ApprovalChainEntry = {
-      phase: "resource",
-      approverIds,
-      notifiedAt: new Date().toISOString(),
-    };
-    chain.push(resourceEntry);
-
-    await pool.query(
-      `UPDATE approval_request SET escalation_chain = $1 WHERE id = $2`,
-      [JSON.stringify(chain), row.id],
-    );
-
-    const escalateDesc = await describeResource(row.resource_type ?? "", row.resource_id ?? "*", row.permission_level ?? "");
-    await notifyUsers({
-      userIds: approverIds,
-      productionId: row.production_id,
-      kind: "approval_request_pending",
-      entityType: "approval_request",
-      entityId: row.id,
-      title: `${subjectName} 申请 ${escalateDesc}（直属上级超时，已自动升级）`,
-      body: `${subjectName} 申请获得${escalateDesc}，直属上级审批已超时，请直接审批。`,
-      viewHref: `${SERVER_URL}/production/${row.production_id}/access-requests`,
-      category: "action",
-      actionRequired: true,
-      approvalRequestId: row.id,
-      actions: [
-        { id: "approve", presentation: "primary_button", label: "批准", effects: [{ type: "approve_access_request", requestId: row.id }] },
-        { id: "reject",  presentation: "secondary_button", label: "拒绝",  effects: [{ type: "reject_access_request",  requestId: row.id }] },
-      ],
-      buildExternalMessage: async () => ({
-        text: `${subjectName} 申请 ${escalateDesc}，直属上级审批超时，请直接审批`,
-        title: `资源申请待审批（已升级）`,
-        primaryUrl: `${SERVER_URL}/production/${row.production_id}/access-requests`,
-      }),
+    const moved = await advanceToStage(row, next, {
+      action: "escalated", actedAt: new Date().toISOString(), escalationReason: "timeout",
     });
+    if (!moved) continue;
+    escalated++;
+
+    await expireRequestNotifications(row.id);
+    const fresh = await loadApproval(row.id);
+    if (fresh) await notifyStage(fresh, next, "timeout");
   }
 
   return { escalated };
-}
-
-/** Check if actorId is authorized to act on this request at its current phase. */
-async function isApprover(req: ApprovalRow, actorId: string): Promise<boolean> {
-  if (req.status === "pending_supervisor") {
-    const res = await getPool().query<{ exists: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM production_member
-         WHERE production_id = $1 AND user_id = $2 AND supervisor_id = $3
-       ) AS exists`,
-      [req.production_id, req.subject_id, actorId],
-    );
-    return res.rows[0]?.exists ?? false;
-  }
-
-  if (req.status === "pending_resource") {
-    // POC of a managing dept
-    const pocRes = await getPool().query<{ exists: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM resource_dept_manage rdm
-         JOIN production_dept_member pdm
-           ON pdm.dept_id = rdm.dept_id
-          AND pdm.production_id = rdm.production_id
-          AND pdm.user_id = $1
-          AND pdm.is_poc = true
-         WHERE rdm.production_id = $2
-           AND rdm.resource_type = $3
-           AND (rdm.resource_id = $4 OR rdm.resource_id = '*')
-           AND (rdm.resource_sub = $5 OR rdm.resource_sub = '*')
-       ) AS exists`,
-      [actorId, req.production_id, req.resource_type, req.resource_id ?? "*", req.resource_sub ?? "*"],
-    );
-    if (pocRes.rows[0]?.exists) return true;
-
-    // Fallback: production owner (when no POC exists)
-    const ownerRes = await getPool().query<{ exists: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM production WHERE id = $1 AND owner_id = $2
-       ) AS exists`,
-      [req.production_id, actorId],
-    );
-    return ownerRes.rows[0]?.exists ?? false;
-  }
-
-  return false;
 }

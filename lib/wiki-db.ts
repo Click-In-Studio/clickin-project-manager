@@ -1,6 +1,7 @@
 import { getPool } from "./pg";
 import { keyBetween } from "./lex-order";
-import { writeWikiGrants } from "./resource-grant-db";
+import { writeWikiGrants, WIKI_LEVEL_ROW_SETS, type WikiLevel } from "./resource-grant-db";
+import { broadcastWikiLibraryChange } from "./wiki-collab";
 import type { Mention } from "./event-db";
 
 // ─── wiki 文档库 W3：wiki 首次成为一等主体（此前只经 report/note 边消费）────────
@@ -158,11 +159,21 @@ async function tailSortKey(productionId: string, parentId: string | null): Promi
   return keyBetween(res.rows[0]?.sort_key ?? null, null);
 }
 
+/** 空串 → null（=根目录）。父 id 直接进 $n::uuid，空串会炸成
+ *  "invalid input syntax for type uuid"——而"没有父文档"最自然的表达
+ *  恰恰是空串，MCP 工具那边模型就这么传（人也一样）。在 db 层收口，
+ *  所有写入来源（REST / MCP / 归档管线）一次性受益。 */
+function normalizeParentId(v: string | null | undefined): string | null {
+  return typeof v === "string" && v.trim() === "" ? null : (v ?? null);
+}
+
 export async function createWiki(params: {
   productionId: string; title: string; body?: string;
   parentId?: string | null; createdBy: string;
+  /** revision provenance（如 "ai-proposed"）——默认 writeRevision 自己的 "user"。 */
+  origin?: string;
 }): Promise<WikiDoc & { tags: string[] }> {
-  const parentId = params.parentId ?? null;
+  const parentId = normalizeParentId(params.parentId);
   if (parentId && !await validateParent(params.productionId, null, parentId)) {
     throw new Error("父文档不存在");
   }
@@ -176,8 +187,12 @@ export async function createWiki(params: {
   const id = res.rows[0].id;
   // §0.9 C-6：创建者 manage 行集 + person 归属
   await writeWikiGrants(id, params.productionId, params.createdBy);
-  await writeRevision(id, params.title, body, [], params.createdBy);
+  await writeRevision(id, params.title, body, [], params.createdBy, params.origin ?? "user");
   await syncWikiLinks(id, params.productionId, body);
+  // 结构变化推给同制作在线的页面（左侧树）——放在 db 层而非各调用处，
+  // 是为了让所有写入来源（REST 路由 / MCP 工具 / 报告归档管线）自动同步，
+  // 不必每加一个入口就记得补一次广播。无监听者时是纯 no-op。
+  broadcastWikiLibraryChange(params.productionId, { kind: "created", wikiId: id });
   return (await getWiki(id, params.productionId))!;
 }
 
@@ -190,14 +205,18 @@ export async function updateWiki(
     /** 协作：客户端 base 正文——与行内现值不同时在行锁事务内做行级三路合并
      *（AI review：读取-合并-写回不加锁会被并发覆盖，合并保障失效） */
     mergeBase?: string;
+    /** revision provenance（如 "ai-proposed"）——默认 writeRevision 自己的 "user"。 */
+    origin?: string;
   },
   authorUserId: string,
 ): Promise<(WikiDoc & { tags: string[] }) | null> {
   const existing = await getWiki(id, productionId);
   if (!existing) return null;
 
-  if (patch.parentId !== undefined && patch.parentId !== null) {
-    if (!await validateParent(productionId, id, patch.parentId)) throw new Error("非法的父文档（不存在或成环）");
+  // 空串按"移到根"处理（同 createWiki，见 normalizeParentId）
+  const nextParentId = patch.parentId !== undefined ? normalizeParentId(patch.parentId) : undefined;
+  if (nextParentId) {
+    if (!await validateParent(productionId, id, nextParentId)) throw new Error("非法的父文档（不存在或成环）");
   }
 
   const sets: string[] = ["updated_at = now()"];
@@ -205,7 +224,7 @@ export async function updateWiki(
   const push = (frag: string, v: unknown) => { vals.push(v); sets.push(`${frag}$${vals.length}`); };
   if (patch.title !== undefined) push("title = ", patch.title);
   if (patch.mentions !== undefined) push("mentions = ", JSON.stringify(patch.mentions));
-  if (patch.parentId !== undefined) push("parent_id = ", patch.parentId);
+  if (nextParentId !== undefined) push("parent_id = ", nextParentId);
   if (patch.sortKey !== undefined) push("sort_key = ", patch.sortKey);
 
   if (patch.body !== undefined && patch.mergeBase !== undefined) {
@@ -249,11 +268,18 @@ export async function updateWiki(
     }
   }
 
+  // 结构变化（标题/父/排序/标签）才推库级帧——正文 autosave 每几秒一次，
+  // 让它触发全树刷新等于给所有在线页面加一个高频抖动源。
+  if (patch.title !== undefined || patch.parentId !== undefined
+      || patch.sortKey !== undefined || patch.tags !== undefined) {
+    broadcastWikiLibraryChange(productionId, { kind: "updated", wikiId: id });
+  }
+
   // 内容变化才落 revision / 重建链接
   if (patch.title !== undefined || patch.body !== undefined || patch.mentions !== undefined) {
     const next = await getWiki(id, productionId);
     if (next) {
-      await writeRevision(id, next.title, next.body, next.mentions, authorUserId);
+      await writeRevision(id, next.title, next.body, next.mentions, authorUserId, patch.origin ?? "user");
       if (patch.body !== undefined) await syncWikiLinks(id, productionId, next.body);
     }
   }
@@ -293,6 +319,9 @@ export async function deleteWiki(
     [productionId, id],
   );
   await pool.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
+  // 正开着这篇的人要靠这一帧离场——否则下一次软刷新会撞进 notFound()，
+  // 整个人被弹出工程环境（见 WikiDocClient 的 library 监听）。
+  broadcastWikiLibraryChange(productionId, { kind: "deleted", wikiId: id });
   return { ok: true };
 }
 
@@ -443,6 +472,68 @@ export async function listWikiDeptShares(id: string): Promise<string[]> {
   return res.rows.map(r => r.dept_id);
 }
 
+// 个人分享面（grant 行集）——share 路由与 MCP 的 wiki_set_grant 共用这一份实现，
+// 别把 production_member_grant 的 SQL 抄第二遍：档位行集口径分叉了就是权限事故。
+
+export type WikiSharePerson = { userId: string; level: WikiLevel };
+
+/** 反推分享档：grants@edit → manage，*@edit → edit，否则 view（与 WIKI_LEVEL_ROW_SETS 对偶）。 */
+export async function listWikiSharePeople(wikiId: string, productionId: string): Promise<WikiSharePerson[]> {
+  const res = await getPool().query<{ user_id: string; subs: string[] }>(
+    `SELECT user_id::text AS user_id, array_agg(resource_sub || '@' || permission_level) AS subs
+     FROM production_member_grant
+     WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2
+       AND NOT is_revoked AND (expires_at IS NULL OR expires_at > NOW())
+     GROUP BY user_id`,
+    [productionId, wikiId],
+  );
+  return res.rows.map(r => ({
+    userId: r.user_id,
+    level: (r.subs.includes("grants@edit") ? "manage" : r.subs.includes("*@edit") ? "edit" : "view") as WikiLevel,
+  }));
+}
+
+/** 发行个人分享行集。对方不是本项目成员 → 不发行任何行（分享面不越过成员门）。 */
+export async function addWikiSharePerson(
+  wikiId: string, productionId: string,
+  args: { userId: string; level: WikiLevel; confirmedBy: string },
+): Promise<"ok" | "not_member" | "invalid_level"> {
+  const rows = WIKI_LEVEL_ROW_SETS[args.level];
+  if (!rows) return "invalid_level";
+  const pool = getPool();
+  const member = await pool.query(
+    `SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2::uuid`,
+    [productionId, args.userId],
+  );
+  if (!member.rows[0]) return "not_member";
+  for (const [sub, verb] of rows) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2::uuid, 'wiki', $3, $4, $5, 'direct', $6::uuid)
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, args.userId, wikiId, sub, verb, args.confirmedBy],
+    );
+  }
+  return "ok";
+}
+
+/** 撤销某人在这篇文档上的全部个人分享行（结构面的部门/公开分享不受影响）。 */
+export async function removeWikiSharePerson(
+  wikiId: string, productionId: string, userId: string,
+): Promise<void> {
+  await getPool().query(
+    `UPDATE production_member_grant
+     SET is_revoked = true, revoked_reason = 'manual'
+     WHERE production_id = $1 AND user_id = $2::uuid
+       AND resource_type = 'wiki' AND resource_id = $3 AND NOT is_revoked`,
+    [productionId, userId, wikiId],
+  );
+}
+
 // ─── 链接图（标题级列出——§4.1，内容点击处过门）───────────────────────────────
 
 export type WikiRef = { id: string; title: string | null };
@@ -452,6 +543,18 @@ export async function listBacklinks(wikiId: string, productionId: string): Promi
     `SELECT w.id::text AS id, w.title FROM wiki_link l
      JOIN wiki w ON w.id = l.source_wiki_id
      WHERE l.target_wiki_id = $1::uuid AND w.production_id = $2
+     ORDER BY w.updated_at DESC`,
+    [wikiId, productionId],
+  );
+  return res.rows;
+}
+
+/** 出链（该文档链接到谁）——与 listBacklinks 对称，同一张已同步好的 wiki_link 边表。 */
+export async function listOutgoingLinks(wikiId: string, productionId: string): Promise<WikiRef[]> {
+  const res = await getPool().query<{ id: string; title: string | null }>(
+    `SELECT w.id::text AS id, w.title FROM wiki_link l
+     JOIN wiki w ON w.id = l.target_wiki_id
+     WHERE l.source_wiki_id = $1::uuid AND w.production_id = $2
      ORDER BY w.updated_at DESC`,
     [wikiId, productionId],
   );

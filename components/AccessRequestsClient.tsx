@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
 import type { ApprovalRequest } from "@/lib/db";
+import { TTL_OPTIONS, displayTtlLabel, type TtlOptionValue } from "@/lib/approval-ttl";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -110,8 +111,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 }) {
   const [resourceType, setResourceType]       = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
-  const [grantType, setGrantType]             = useState<"permanent" | "ttl">("permanent");
-  const [ttlDays, setTtlDays]                 = useState<15 | 30 | 90 | 180>(30);
+  const [ttlOption, setTtlOption]             = useState<TtlOptionValue>("permanent");
   const [note, setNote]                       = useState("");
   const [submitting, setSubmitting]           = useState(false);
   const [error, setError]                     = useState<string | null>(null);
@@ -129,14 +129,16 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
     setSubmitting(true);
     setError(null);
     try {
+      // #256：选「临时」必须连时长一起发。只发 grantType 的话服务端算不出
+      // expires_at，批准后拿到的是永久权限，与页面显示的「临时」正相反。
       const res = await fetch(`/api/production/${productionId}/access-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceType,
           permissionLevel,
-          grantType,
-          ttlDuration: grantType === "ttl" ? `${ttlDays} days` : null,
+          grantType: ttlOption === "permanent" ? "permanent" : "ttl",
+          ttlDuration: TTL_OPTIONS.find((o) => o.value === ttlOption)?.interval ?? null,
           note: note.trim() || null,
         }),
       });
@@ -177,48 +179,42 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
         </select>
       </div>
 
-      <div style={{ display: "flex", gap: 16 }}>
-        {(["permanent", "ttl"] as const).map((v) => (
-          <label key={v} style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-            <input type="radio" name="grantType" value={v} checked={grantType === v} onChange={() => setGrantType(v)} />
-            {v === "permanent" ? "永久" : "临时"}
-          </label>
-        ))}
-      </div>
 
-      {grantType === "ttl" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>权限有效期</label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 7 }}>
-            {([15, 30, 90, 180] as const).map(days => {
-              const active = ttlDays === days;
-              return (
-                <button
-                  key={days}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setTtlDays(days)}
-                  style={{
-                    border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
-                    borderRadius: 8,
-                    padding: "9px 4px",
-                    background: active ? "var(--ink)" : "var(--paper)",
-                    color: active ? "#fff" : "var(--muted)",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  {days} 天
-                </button>
-              );
-            })}
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
+        {/* 档位只能来自 lib/approval-ttl 的 TTL_OPTIONS——服务端按同一份表白名单校验，
+            页面自己硬编码天数会被 400 挡掉（#256 的成因，见该文件顶部注释）。 */}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${TTL_OPTIONS.length}, minmax(0, 1fr))`, gap: 7 }}>
+          {TTL_OPTIONS.map((o) => {
+            const active = ttlOption === o.value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setTtlOption(o.value)}
+                style={{
+                  border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
+                  borderRadius: 8,
+                  padding: "9px 4px",
+                  background: active ? "var(--ink)" : "var(--paper)",
+                  color: active ? "#fff" : "var(--muted)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+        {ttlOption !== "permanent" && (
           <small style={{ fontSize: 10, color: "var(--muted)" }}>
             审批通过后开始计时，到期将自动失效。
           </small>
-        </div>
-      )}
+        )}
+      </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>申请理由（选填）</label>
@@ -247,16 +243,20 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
-function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
+function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
   req: ApprovalRequest;
   canAct?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
+  onEscalate?: () => void;
   onCancel?: () => void;
   acting?: boolean;
 }) {
   const label = resourceLabel(req);
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
+  // #140：canFinalize === false = 我是直属上级但本人没有这个权限，只能向上转交
+  const forwardOnly = canAct && req.canFinalize === false;
+  const ttlLabel = displayTtlLabel(req.ttlDurationLabel);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -267,7 +267,7 @@ function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
           <span style={{
             fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600,
             background: "var(--surface-2)", color: "var(--muted)",
-          }}>临时权限</span>
+          }}>临时权限{ttlLabel ? ` · ${ttlLabel}` : ""}</span>
         )}
       </div>
 
@@ -293,7 +293,7 @@ function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
 
       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
         申请于 {fmtDate(req.createdAt)}
-        {req.ttlDuration && <span style={{ marginLeft: 8 }}>· 时效 {req.ttlDuration}</span>}
+        {ttlLabel && <span style={{ marginLeft: 8 }}>· 时效 {ttlLabel}</span>}
       </p>
 
       {/* Note */}
@@ -306,15 +306,29 @@ function RequestDetail({ req, canAct, onApprove, onReject, onCancel, acting }: {
 
       {/* Actions */}
       {isPending && (
-        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "flex", gap: 8 }}>
-          {canAct ? (
-            <>
-              <button style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={acting} onClick={onApprove}>批准</button>
-              <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onReject}>拒绝</button>
-            </>
-          ) : (
-            <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onCancel}>撤回申请</button>
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+          {forwardOnly && (
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
+              你本人尚未持有该权限，无法批准，只能向上转交给下一级审批人。
+            </p>
           )}
+          <div style={{ display: "flex", gap: 8 }}>
+            {canAct ? (
+              <>
+                {forwardOnly ? (
+                  <button style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={acting} onClick={onEscalate}>向上转交</button>
+                ) : (
+                  <button style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={acting} onClick={onApprove}>批准</button>
+                )}
+                <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onReject}>拒绝</button>
+                {!forwardOnly && (
+                  <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onEscalate}>向上转交</button>
+                )}
+              </>
+            ) : (
+              <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onCancel}>撤回申请</button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -338,6 +352,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   const [loadingMine, setLoadingMine]         = useState(true);
   const [loadingPending, setLoadingPending]   = useState(true);
   const [acting, setActing]                   = useState<string | null>(null);
+  const [actionError, setActionError]         = useState<string | null>(null);
   const [rightPanel, setRightPanel]           = useState<RightPanel>(null);
 
   // Mobile accordion
@@ -379,14 +394,39 @@ export default function AccessRequestsClient({ productionId, productionName }: P
 
   async function handleApprove(reqId: string) {
     setActing(reqId);
+    setActionError(null);
     try {
       const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/approve`, { method: "POST" });
-      if (res.ok) await Promise.all([fetchMine(), fetchPending()]);
+      if (res.ok) {
+        await Promise.all([fetchMine(), fetchPending()]);
+      } else {
+        // forward_only（只能转交）等服务端判定要显示出来，否则按钮像是没反应
+        const data = await res.json().catch(() => ({}));
+        setActionError((data as { error?: string }).error ?? "审批失败");
+        await fetchPending();
+      }
+    } finally { setActing(null); }
+  }
+
+  /** #140：转交到审批阶梯的下一级——不是拒绝，链路完整记在 escalation_chain。 */
+  async function handleEscalate(reqId: string) {
+    setActing(reqId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/escalate`, { method: "POST" });
+      if (res.ok) {
+        await Promise.all([fetchMine(), fetchPending()]);
+        setRightPanel(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setActionError((data as { error?: string }).error ?? "转交失败");
+      }
     } finally { setActing(null); }
   }
 
   async function handleReject(reqId: string) {
     setActing(reqId);
+    setActionError(null);
     try {
       const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/reject`, { method: "POST" });
       if (res.ok) await Promise.all([fetchMine(), fetchPending()]);
@@ -482,11 +522,23 @@ export default function AccessRequestsClient({ productionId, productionName }: P
             {req.note && (
               <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>{req.note}</p>
             )}
+            {req.canFinalize === false && canAct && (
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
+                你本人尚未持有该权限，只能向上转交。
+              </p>
+            )}
+            {actionError && acting !== req.id && (
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
+            )}
             {(req.status === "pending_supervisor" || req.status === "pending_resource") && (
               <div style={{ display: "flex", gap: 8 }}>
                 {canAct ? (
                   <>
-                    <button style={{ ...PRIMARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleApprove(req.id)}>批准</button>
+                    {req.canFinalize === false ? (
+                      <button style={{ ...PRIMARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleEscalate(req.id)}>向上转交</button>
+                    ) : (
+                      <button style={{ ...PRIMARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleApprove(req.id)}>批准</button>
+                    )}
                     <button style={{ ...SECONDARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleReject(req.id)}>拒绝</button>
                   </>
                 ) : (
@@ -555,7 +607,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
         ]).map(([t, label]) => (
           <button
             key={t}
-            onClick={() => { setTab(t); setRightPanel(null); }}
+            onClick={() => { setTab(t); setRightPanel(null); setActionError(null); }}
             style={{
               background: "none", border: "none",
               borderBottom: tab === t ? "2px solid var(--ink)" : "2px solid transparent",
@@ -649,14 +701,20 @@ export default function AccessRequestsClient({ productionId, productionName }: P
                 onClose={() => setRightPanel(null)}
               />
             ) : rightPanel?.type === "detail" ? (
-              <RequestDetail
-                req={rightPanel.req}
-                canAct={rightPanel.canAct}
-                acting={acting === rightPanel.req.id}
-                onApprove={() => void handleApprove(rightPanel.req.id)}
-                onReject={() => void handleReject(rightPanel.req.id)}
-                onCancel={() => void handleCancel(rightPanel.req.id)}
-              />
+              <>
+                <RequestDetail
+                  req={rightPanel.req}
+                  canAct={rightPanel.canAct}
+                  acting={acting === rightPanel.req.id}
+                  onApprove={() => void handleApprove(rightPanel.req.id)}
+                  onReject={() => void handleReject(rightPanel.req.id)}
+                  onEscalate={() => void handleEscalate(rightPanel.req.id)}
+                  onCancel={() => void handleCancel(rightPanel.req.id)}
+                />
+                {actionError && (
+                  <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
+                )}
+              </>
             ) : (
               <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
                 {tab === "mine" ? "选择左侧申请查看详情，或点击「申请资源权限」发起新申请" : "选择左侧申请进行审批"}

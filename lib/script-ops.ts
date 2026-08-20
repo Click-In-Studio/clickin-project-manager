@@ -180,16 +180,98 @@ export function patchAffectsMarkerProjection(patch: ScriptPatch, prevState: Scri
 // ─── Permission classification ────────────────────────────────────────────────
 
 // 批E2：needed 集合全节点化（node: 键统一走 hasGrant 行判定）
-export type ScriptPermissions = {
-  "node:script/*/blocks@edit": boolean;
-  "node:scene/*@edit": boolean;
-  "node:script/*/rehearsal_marks@create": boolean;
+//
+// scene 面逐字段（2026-08-17）：marker block 就是 scene 在剧本里的化身，改它的
+// markerMeta 等同于在构作页改同名字段。原先无论增删改一律给 `scene/*@edit`
+// 一把总钥匙，与项目模版的字段级键对不上（模板发 synopsis@edit，判定
+// 却查 scene/*@edit，两边永不相交）。此处与 SCENE_FIELD_SUBS 逐键对应。
+export type ScriptPermissionKey =
+  | "node:script/*/blocks@edit"
+  | "node:script/*/rehearsal_marks@create"
+  | "node:character/*@edit"
+  | "node:scene/*@create"
+  | "node:scene/*@edit"
+  | "node:scene/*@delete"
+  | "node:scene/*/meta/name@edit"
+  | "node:scene/*/meta/type@edit"
+  | "node:scene/*/synopsis@edit"
+  | "node:scene/*/action_line@edit"
+  | "node:scene/*/music@edit"
+  | "node:scene/*/stage_notes@edit"
+  | "node:scene/*/meta/expected_duration@edit";
+
+/** 保留旧名以免下游 import 断裂（判定端只消费键集合，不消费这个对象形态）。 */
+export type ScriptPermissions = Record<ScriptPermissionKey, boolean>;
+
+/** markerMeta 字段 → 节点键。与 app/api/production/[id]/scenes/[sceneId] 的
+ *  SCENE_FIELD_SUBS 同源：同一个字段，两条写入路径要求同一把钥匙。 */
+const MARKER_META_FIELD_KEYS: Record<string, ScriptPermissionKey> = {
+  name: "node:scene/*/meta/name@edit",
+  synopsis: "node:scene/*/synopsis@edit",
+  actionLine: "node:scene/*/action_line@edit",
+  music: "node:scene/*/music@edit",
+  stageNotes: "node:scene/*/stage_notes@edit",
+  expectedDuration: "node:scene/*/meta/expected_duration@edit",
 };
 
-function addMarkerPermission(block: Block, needed: Set<keyof ScriptPermissions>): void {
+function isSceneMarker(block: Block): boolean {
+  return block.type === "chapter_marker" || block.type === "scene_marker";
+}
+
+/** marker 的存在性变化：插入=scene create，删除=scene delete。 */
+function addMarkerLifecyclePermission(
+  block: Block,
+  verb: "create" | "delete",
+  needed: Set<ScriptPermissionKey>,
+): void {
   if (block.type === "rehearsal_marker") {
     needed.add("node:script/*/rehearsal_marks@create");
-  } else if (block.type === "chapter_marker" || block.type === "scene_marker") {
+  } else if (isSceneMarker(block)) {
+    needed.add(verb === "create" ? "node:scene/*@create" : "node:scene/*@delete");
+  }
+}
+
+/** marker 的位置变化：scene 结构面（重排），不是字段写。 */
+function addMarkerReorderPermission(block: Block, needed: Set<ScriptPermissionKey>): void {
+  if (block.type === "rehearsal_marker") {
+    needed.add("node:script/*/rehearsal_marks@create");
+  } else if (isSceneMarker(block)) {
+    needed.add("node:scene/*@edit");
+  }
+}
+
+/** marker 的内容变化：逐字段比对，只要真正动了的字段的钥匙。 */
+function addMarkerUpdatePermission(
+  prev: Block,
+  next: Block,
+  needed: Set<ScriptPermissionKey>,
+): void {
+  if (prev.type === "rehearsal_marker" || next.type === "rehearsal_marker") {
+    needed.add("node:script/*/rehearsal_marks@create");
+    if (!isSceneMarker(prev) && !isSceneMarker(next)) return;
+  }
+  if (!isSceneMarker(prev) && !isSceneMarker(next)) return;
+
+  // 章节 ↔ 场次转换
+  if (prev.type !== next.type && isSceneMarker(prev) && isSceneMarker(next)) {
+    needed.add("node:scene/*/meta/type@edit");
+  }
+  // marker block 的正文即标题
+  if (prev.content !== next.content) needed.add("node:scene/*/meta/name@edit");
+
+  const prevMeta = prev.markerMeta ?? {};
+  const nextMeta = next.markerMeta ?? {};
+  for (const [field, key] of Object.entries(MARKER_META_FIELD_KEYS)) {
+    const before = (prevMeta as Record<string, unknown>)[field] ?? "";
+    const after = (nextMeta as Record<string, unknown>)[field] ?? "";
+    if (before !== after) needed.add(key);
+  }
+  // 归属改变 = 结构面
+  if ((prevMeta.parentMarkerId ?? null) !== (nextMeta.parentMarkerId ?? null)) {
+    needed.add("node:scene/*@edit");
+  }
+  if ((prevMeta.number ?? "") !== (nextMeta.number ?? "")) {
+    // 场次号由 marker 顺序派生，没有独立的改号入口——号变即结构变
     needed.add("node:scene/*@edit");
   }
 }
@@ -201,22 +283,37 @@ function addMarkerPermission(block: Block, needed: Set<keyof ScriptPermissions>)
 export function requiredPermissions(
   patch: ScriptPatch,
   prevState: ScriptState,
-): Set<keyof ScriptPermissions> {
-  const needed = new Set<keyof ScriptPermissions>();
+): Set<ScriptPermissionKey> {
+  const needed = new Set<ScriptPermissionKey>();
   const prevBlockMap = new Map(prevState.blocks.map((b) => [b.id, b]));
 
-  if (patch.charOps.length > 0) needed.add("node:scene/*@edit");
-  if (patch.sceneOps.some((op) => op.op === "upsert" || op.op === "delete" || op.op === "reorder")) needed.add("node:scene/*@edit");
+  // 角色操作要的是角色权限——原先查 scene/*@edit 是复制残留
+  if (patch.charOps.length > 0) needed.add("node:character/*@edit");
+
+  // scene 明细行：改名走 meta/name@edit（与构作页 REST 同一把钥匙），号/归属
+  // 变动才算结构面。若这里笼统给 scene/*@edit，改名就又需要结构钥匙——
+  // 等于把总钥匙换了个名字。
+  const prevSceneMap = new Map(prevState.scenes.map((s) => [s.id, s]));
+  for (const op of patch.sceneOps) {
+    if (op.op === "delete") { needed.add("node:scene/*@delete"); continue; }
+    if (op.op === "reorder") { needed.add("node:scene/*@edit"); continue; }
+    const old = prevSceneMap.get(op.scene.id);
+    if (!old) { needed.add("node:scene/*@create"); continue; }
+    if (old.name !== op.scene.name) needed.add("node:scene/*/meta/name@edit");
+    if (old.number !== op.scene.number || (old.parentId ?? null) !== (op.scene.parentId ?? null)) {
+      needed.add("node:scene/*@edit");
+    }
+  }
 
   for (const op of patch.blockOps) {
     if (op.op === "insert") {
-      if (isMarkerBlock(op.block)) addMarkerPermission(op.block, needed);
+      if (isMarkerBlock(op.block)) addMarkerLifecyclePermission(op.block, "create", needed);
       else needed.add("node:script/*/blocks@edit");
       continue;
     }
     if (op.op === "delete") {
       const old = prevBlockMap.get(op.id);
-      if (old && isMarkerBlock(old)) addMarkerPermission(old, needed);
+      if (old && isMarkerBlock(old)) addMarkerLifecyclePermission(old, "delete", needed);
       else needed.add("node:script/*/blocks@edit");
       continue;
     }
@@ -229,7 +326,7 @@ export function requiredPermissions(
       if (prevTextOrder !== nextTextOrder) needed.add("node:script/*/blocks@edit");
       for (const block of nextBlocks) {
         if (isMarkerBlock(block) && prevIndexById.get(block.id) !== nextIndexById.get(block.id)) {
-          addMarkerPermission(block, needed);
+          addMarkerReorderPermission(block, needed);
         }
       }
       continue;
@@ -240,11 +337,14 @@ export function requiredPermissions(
     if (!old) { needed.add("node:script/*/blocks@edit"); continue; }
 
     if (isMarkerBlock(op.block) || isMarkerBlock(old)) {
+      // marker ↔ 正文块的互转会同时改变剧本正文构成
       if (op.block.type !== old.type && (!isMarkerBlock(op.block) || !isMarkerBlock(old))) {
         needed.add("node:script/*/blocks@edit");
+        addMarkerLifecyclePermission(isMarkerBlock(old) ? old : op.block,
+          isMarkerBlock(old) ? "delete" : "create", needed);
+        continue;
       }
-      addMarkerPermission(op.block, needed);
-      addMarkerPermission(old, needed);
+      addMarkerUpdatePermission(old, op.block, needed);
       continue;
     }
 

@@ -1,3 +1,4 @@
+import { TEST_OWNER } from "./helpers";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -84,7 +85,7 @@ async function mutateInChildProcess(
 }
 
 async function run() {
-  await createProduction(productionId, "Marker integration test");
+  await createProduction(productionId, "Marker integration test", TEST_OWNER);
   try {
     const sourceVersionId = await getActiveVersionId(productionId);
     assert.ok(sourceVersionId);

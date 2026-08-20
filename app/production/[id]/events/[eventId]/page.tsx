@@ -12,6 +12,7 @@ import {
   listEventTechReqs,
   listEventReports,
   listEventMilestoneIds,
+  listMyTechReqsFull,
   listProductionTechReqs,
 
   listEventDepartments,
@@ -62,6 +63,12 @@ export default async function EventDetailPage({
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
+  // 关联面的任务候选清单与 /api/production/[id]/tasks 同门：没有 task/*@view 就只给
+  // 「与我相关」，否则等于把全项目每条任务的标题 SSR 进 HTML（planning 页已是此口径）。
+  const canViewAllTasks = await hasEffectiveGrant(
+    toActor(session, prodPermCtx), productionId, "task", "*", "*", "view",
+  );
+
   const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions, relationTasks, milestoneOptions, eventMilestoneIds] =
     await Promise.all([
       listScheduleItemsWithParticipants(eventId),
@@ -73,7 +80,9 @@ export default async function EventDetailPage({
       listProductionMembersWithRoles(productionId),
       getSelfParticipantRole(eventId, session.userId),
       listVersions(productionId),
-      listProductionTechReqs(productionId),
+      canViewAllTasks
+        ? listProductionTechReqs(productionId)
+        : listMyTechReqsFull(session.userId).then(rows => rows.filter(t => t.productionId === productionId)),
       listMilestones(productionId),
       listEventMilestoneIds(eventId, productionId),
     ]);

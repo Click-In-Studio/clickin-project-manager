@@ -62,8 +62,8 @@ export async function createCueDomainRestPreMigrationData(
   const productionId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
   const cueListId = `cl_${faker.string.alphanumeric(8).toLowerCase()}`;
 
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
-    productionId, `批A迁移工厂-${faker.string.alphanumeric(4)}`,
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
+    productionId, `批A迁移工厂-${faker.string.alphanumeric(4)}`, testUserId,
   ]);
   await pool.query(
     "INSERT INTO cue_list (id, production_id, name, notes, created_by) VALUES ($1, $2, '迁移表', '', $3)",

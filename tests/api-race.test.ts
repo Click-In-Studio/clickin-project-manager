@@ -15,7 +15,7 @@ import {
   addProductionMember, setMemberRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 import type { Block, ScriptState } from "@/lib/script-types";
 
 // ── Route handlers ────────────────────────────────────────────────────────────
@@ -77,10 +77,10 @@ const extraProds: string[] = []; // productions created inside tests
 
 beforeAll(async () => {
   await Promise.all([
-    createProduction(RACE_PROD, "竞态-走位表"),
-    createProduction(RENAME_PROD, "竞态-重命名"),
+    createProduction(RACE_PROD, "竞态-走位表", TEST_OWNER),
+    createProduction(RENAME_PROD, "竞态-重命名", TEST_OWNER),
     (async () => {
-      await createProduction(SCRIPT_PROD, "竞态-剧本");
+      await createProduction(SCRIPT_PROD, "竞态-剧本", TEST_OWNER);
       await addProductionMember(SCRIPT_PROD, TEST_USER);
       await setMemberRoles(SCRIPT_PROD, TEST_USER, ["制作人"]);
       // E1：scene 结构操作已行化（normalizeRehearsalMarkOwnershipInTx 使 update 触发

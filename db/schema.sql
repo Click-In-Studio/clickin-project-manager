@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS production (
   type              TEXT,
   type_label        TEXT,
   language          TEXT,
-  owner_id          UUID REFERENCES app_user(id),
+  owner_id          UUID NOT NULL REFERENCES app_user(id),
   watermark_enabled BOOLEAN NOT NULL DEFAULT false
 );
 
@@ -546,11 +546,15 @@ CREATE TABLE IF NOT EXISTS task (
   chat_id        TEXT,
   created_via    TEXT NOT NULL DEFAULT 'explicit'
                  CHECK (created_via IN ('explicit', 'dept_auto', 'poc')),
+  -- #236 形状 L：失去最后一个宿主 event 的时刻（NULL=有宿主/从未失去）。
+  -- 与 status 正交——status 是工作进度，本列是结构状态；重新绑定事件时清空。
+  orphaned_at    TIMESTAMPTZ,
   CONSTRAINT task_time_order_check
     CHECK (start_time IS NULL OR end_time IS NULL OR end_time >= start_time)
 );
 
 CREATE INDEX IF NOT EXISTS task_event_idx ON task(event_id);
+CREATE INDEX IF NOT EXISTS task_orphaned_idx ON task(production_id) WHERE orphaned_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS task_production_idx ON task(production_id);
 
 -- 绑定 schedule item（多对多；应用层不变量：item 必须属于 task.event_id）
@@ -655,6 +659,35 @@ CREATE TABLE IF NOT EXISTS wiki_revision (
 );
 
 CREATE INDEX IF NOT EXISTS wiki_revision_wiki_idx ON wiki_revision (wiki_id, created_at);
+
+-- AI propose staging（add-wiki-proposal.sql + add-wiki-proposal-actions.sql +
+-- add-wiki-proposal-tag.sql）：production.wiki_propose_* 工具调用的落地凭证，
+-- 覆盖 create/update/delete/move/tag 五种动作。不复用 wiki_revision.origin——
+-- 该表是「已发生的真实历史」，没有拒绝/拦截态。target_wiki_id=被操作的既有
+-- 文档（create 没有）；parent_wiki_id 对 create/move 是「新父」，对
+-- update/delete/tag 不使用；tags 只有 tag 动作用（整体替换语义）。
+CREATE TABLE IF NOT EXISTS wiki_proposal (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  tool_call_id    TEXT        NOT NULL,
+  proposed_by     UUID        NOT NULL REFERENCES app_user(id),
+  action          TEXT        NOT NULL DEFAULT 'create'
+                    CHECK (action IN ('create', 'update', 'delete', 'move', 'tag')),
+  target_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  parent_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  title           TEXT        NULL,
+  body            TEXT        NOT NULL DEFAULT '',
+  tags            TEXT[]      NULL,
+  summary         TEXT        NOT NULL DEFAULT '',
+  has_permission  BOOLEAN     NOT NULL,
+  permission_key  TEXT        NOT NULL,
+  status          TEXT        NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'applied', 'blocked_no_permission', 'blocked_business_rule', 'rejected')),
+  created_wiki_id UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at     TIMESTAMPTZ NULL,
+  CONSTRAINT wiki_proposal_production_tool_call_uniq UNIQUE (production_id, tool_call_id)
+);
 
 -- 默认文档树（add-wiki-default-tree.sql）：production 级 wiki 配置
 --（未来扩展：改配置=改根目录名/开关默认目录）；锚点是普通 wiki，锚认 id 不认位置
@@ -799,11 +832,24 @@ CREATE TABLE IF NOT EXISTS approval_request (
 
   escalation_chain  JSONB NOT NULL DEFAULT '[]',
 
+  -- #140 审批阶梯位置（add-approval-ladder.sql）：路由由 lib/approval-routing.ts
+  -- 单点算出后写在这里，收件箱与鉴权只读 current_approver_ids，不再各自重算。
+  current_stage        TEXT    NULL CHECK (current_stage IS NULL OR current_stage IN (
+                         'supervisor', 'holder', 'dept_poc', 'ancestor_poc', 'producer', 'owner'
+                       )),
+  current_stage_depth  INTEGER NOT NULL DEFAULT 0,
+  current_approver_ids UUID[]  NOT NULL DEFAULT '{}',
+
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   resolved_at     TIMESTAMPTZ NULL,
   resolved_by     UUID NULL REFERENCES app_user(id),
   granted_at      TIMESTAMPTZ NULL,
-  expires_at      TIMESTAMPTZ NULL
+  expires_at      TIMESTAMPTZ NULL,
+
+  -- #256（add-approval-ttl-check.sql）：'ttl' 必须带时长，否则 expires_at 落 NULL
+  -- = 永久权限，与申请人/审批人看到的「临时」相反。
+  CONSTRAINT approval_request_ttl_duration_required
+    CHECK (grant_type IS DISTINCT FROM 'ttl' OR ttl_duration IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS approval_request_production_status_idx
@@ -811,6 +857,10 @@ CREATE INDEX IF NOT EXISTS approval_request_production_status_idx
 
 CREATE INDEX IF NOT EXISTS approval_request_subject_idx
   ON approval_request (subject_id, production_id);
+
+CREATE INDEX IF NOT EXISTS approval_request_current_approvers_idx
+  ON approval_request USING GIN (current_approver_ids)
+  WHERE status IN ('pending_supervisor', 'pending_resource');
 
 -- ── Notifications ─────────────────────────────────────────────────────────────
 
@@ -1257,6 +1307,33 @@ CREATE INDEX IF NOT EXISTS rpm_production_resource_idx
 
 -- ── Production Approval Config（Phase 3）──────────────────────────────────────
 -- 演出级审批 TTL 配置，演出创建时自动写入默认行。
+-- ── 策略配置中心（#236）────────────────────────────────────────────────────────
+-- 【政策】类定式的 production 级开关。value 是 TEXT 不是 BOOLEAN（形状 C/L 有多档键）；
+-- 合法取值由 lib/policy-keys.ts 白名单校验，SQL 侧不设 CHECK（新增键零 migration）。
+-- 落全量键、不稀疏：缺行回落代码默认会让改默认值静默改变存量演出行为。
+CREATE TABLE IF NOT EXISTS production_policy (
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  policy_key    TEXT        NOT NULL,
+  value         TEXT        NOT NULL,
+  updated_by    UUID        NULL REFERENCES app_user(id),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (production_id, policy_key)
+);
+
+-- 策略改动是项目级、影响所有人的动作，比单条 grant 更需要留痕。
+CREATE TABLE IF NOT EXISTS production_policy_audit (
+  id            BIGSERIAL   PRIMARY KEY,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  policy_key    TEXT        NOT NULL,
+  old_value     TEXT        NOT NULL,
+  new_value     TEXT        NOT NULL,
+  changed_by    UUID        NULL REFERENCES app_user(id),
+  changed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS production_policy_audit_prod_time_idx
+  ON production_policy_audit (production_id, changed_at DESC);
+
 CREATE TABLE IF NOT EXISTS production_approval_config (
   production_id TEXT        PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
   ttl_hours     INTEGER     NOT NULL DEFAULT 24
@@ -1265,44 +1342,12 @@ CREATE TABLE IF NOT EXISTS production_approval_config (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── Grant Template（权限REST化 批A，总表 §0.7/§0.8）──────────────────────────
--- 纯全局权限模板（ROLE_TEMPLATE_PERMISSIONS 的 DB 镜像）：production_type（NULL=通用）
--- × 角色名（'*'=成员基础）→ permission_key。仅作 fallback/seed；演出内实际资格在
--- production_role_permission / production_dept_permission / production_member_permission。
--- permission_key 词汇：原子键（迁移期）或节点串 node:<type>/<id>[/<sub>]@<verb>。
-
-CREATE TABLE IF NOT EXISTS grant_template (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_type TEXT        NULL,
-  role_name       TEXT        NOT NULL,
-  permission_key  TEXT        NOT NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS grant_template_unique_idx
-  ON grant_template (COALESCE(production_type, ''), role_name, permission_key);
-
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'script:comment')
-ON CONFLICT DO NOTHING;
-
--- 全局通用模板种子（批A cue 域，保真迁移；见 add-grant-template.sql）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:cue_list/*/meta@view'),
-  ('*', 'node:cue_list/*/cues@view'),
-  ('*', 'node:cue_list/*/cues/comments@create')
-ON CONFLICT DO NOTHING;
-
--- wiki 文档库 W3（add-wiki-create-template.sql）：全员创建资格（读面仍默认不可见）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:wiki/*@create')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO grant_template (role_name, permission_key)
-SELECT r.name, 'node:cue_list/*@create'
-FROM (VALUES ('音响设计'), ('灯光设计'), ('多媒体设计'), ('舞美设计'), ('服化设计'),
-             ('舞台监督'), ('作曲'), ('编曲'), ('音乐导演')) AS r(name)
-ON CONFLICT DO NOTHING;
+-- ── Grant Template：已退役（#163，migrate-retire-grant-template.sql）──────────
+-- 全局角色权限模板（production_type × role_name → permission_key）此前在这张表里。
+-- 它是 bootstrap（运行时零读取、只在建演出/建角色时 seed），但放 DB 且无界面会漂
+-- ——线上 108 行里 69 行仓库从没记录过。职责已由项目模版接手：
+--   lib/production-template.ts（机制）+ lib/templates/*.ts（内容）
+-- 且必须接手：那张表的取数是并集，per-type 只能加不能减，而多套模版要削基线。
 
 -- ── Production Dept Permission（批A，六步链第 3 步资格源）──────────────────────
 -- dept 免审批区间；取代 production_dept.permissions 数组的终局形态。
@@ -1312,6 +1357,14 @@ CREATE TABLE IF NOT EXISTS production_dept_permission (
   production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   dept_id        UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
   permission_key TEXT        NOT NULL,
+  -- 这一行由谁在管（#274）。按「要改它得去哪儿」划分，不是按谁创建的：
+  --   manual   人在权限中心配的 / 项目模版灌的静态区间行 —— 就在权限中心改
+  --   template cue 声明行实例化 —— 去权限模版页改声明
+  --   resource 资源自身的归属或分享面（建表定式 / cue 表分享 / 事件归属）—— 去该资源页改
+  -- 同一枚键只有一行（下方 UNIQUE），故自动通道用 DO UPDATE 升级 manual → template/resource：
+  -- 撤声明 / 撤分享时那一行本来就会被按键形收走，标成 manual 会让界面撒谎。
+  source         TEXT        NOT NULL DEFAULT 'manual'
+                             CHECK (source IN ('manual', 'template', 'resource')),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (dept_id, permission_key)
 );
@@ -1388,94 +1441,3 @@ CREATE TABLE IF NOT EXISTS production_invite_claim (
 
 CREATE INDEX IF NOT EXISTS production_invite_claim_token_idx
   ON production_invite_claim (token);
-
--- 全局模板种子（批B event 域，保真迁移；见 add-task-verbs.sql）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:event/*/meta@view'),
-  ('*', 'node:event/*/details@view'),
-  ('*', 'node:event/*/followers@create')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO grant_template (role_name, permission_key)
-SELECT r.name, k.key
-FROM (VALUES ('舞台监督'), ('制作人')) AS r(name)
-CROSS JOIN (VALUES
-  ('node:event/*@create'),
-  ('node:event/*/chat@create'),
-  ('node:event/*/call_sheet@view'),
-  ('node:event/*/reports@view'),
-  ('node:event/*/publication@view'),
-  ('node:task/*@view'),
-  ('node:task/*@delete')
-) AS k(key)
-ON CONFLICT DO NOTHING;
-
-INSERT INTO grant_template (role_name, permission_key)
-SELECT r.name, 'node:task/*@view'
-FROM (VALUES ('导演'), ('副导演'), ('音乐导演')) AS r(name)
-ON CONFLICT DO NOTHING;
-
--- 批C：制作人的报告挂接资格（原 report:create）
--- production 域基线（2026-08-13）：view 面基线非 sensitive（越基线，改它越敏感）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:production/*/meta@view'),
-  ('*', 'node:production/*/mounts@view')
-ON CONFLICT DO NOTHING;
-
--- 两个指派面（2026-08-13）：舞监 role=全内容 view+发布/撤回；名单/call 面见行集
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('舞台监督', 'node:event/*@view'),
-  ('舞台监督', 'node:event/*/publication@create'),
-  ('舞台监督', 'node:event/*/publication@delete'),
-  ('助理舞台监督', 'node:event/*@view'),
-  ('助理舞台监督', 'node:event/*/publication@create'),
-  ('助理舞台监督', 'node:event/*/publication@delete')
-ON CONFLICT DO NOTHING;
-
--- 批G G-1：制作人通配区间（收敛历史枚举 seed；主行+保留段四行=永久稳定全集；
--- RESERVED_TYPES=production/producer 不被类型通配穿透）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('制作人', 'node:*/*@*'),
-  ('制作人', 'node:*/*/grants@*'),
-  ('制作人', 'node:*/*/publication@*'),
-  ('制作人', 'node:*/*/assignees@*'),
-  ('制作人', 'node:*/*/imports@create')
-ON CONFLICT DO NOTHING;
-
--- 批C C3：导演任意部门发 note（dept 锚通配）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('导演', 'node:dept/*/notes@create')
-ON CONFLICT DO NOTHING;
-
--- 批D：asset 能力票（全员三枚，MEMBER_BASE 保真）+ 制作人 any 全系
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:asset/*/meta@view'),
-  ('*', 'node:asset/*/file@view'),
-  ('*', 'node:asset/*/shares@create')
-ON CONFLICT DO NOTHING;
-
--- 批F：通讯录并入 member 树（MEMBER_BASE 保真：contacts:view → meta+contact 两面）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:member/*/meta@view'),
-  ('*', 'node:member/*/contact@view')
-ON CONFLICT DO NOTHING;
-
--- 批E PR-E2：script 成员默认（MEMBER_BASE 保真：script:view / script:comment）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:script/*/blocks@view'),
-  ('*', 'node:script/*/comments@create')
-ON CONFLICT DO NOTHING;
-
--- 批E PR-E1：scene/character 三态目录默认（MEMBER_BASE 保真）
-INSERT INTO grant_template (role_name, permission_key) VALUES
-  ('*', 'node:scene/*/meta@view'),
-  ('*', 'node:scene/*/synopsis@view'),
-  ('*', 'node:scene/*/action_line@view'),
-  ('*', 'node:scene/*/music@view'),
-  ('*', 'node:scene/*/stage_notes@view'),
-  ('*', 'node:character/*/meta@view'),
-  ('*', 'node:character/*/gender@view'),
-  ('*', 'node:character/*/biography@view'),
-  ('*', 'node:character/*/role_type@view'),
-  ('*', 'node:character/*/members@view')
-ON CONFLICT DO NOTHING;

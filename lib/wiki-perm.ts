@@ -1,4 +1,5 @@
 import { getPool } from "./pg";
+import { isPolicyOn } from "./policy-db";
 import { hasGrant, listGrantedResourceIds, type GrantActor } from "./grant-check";
 import { hasEventDomainView } from "./event-permissions";
 
@@ -47,7 +48,10 @@ export async function canViewWiki(
     [wikiId, productionId],
   );
   if (!w.rows[0]) return false;
-  if (w.rows[0].is_public) return true;
+  // #236 policy.wiki_public_enabled：关掉后 is_public 失效，可见性只认个人行 /
+  // 部门分享 / 挂载边。注意 wiki 的 is_public 比 asset 的宽一档——它是**无条件全员
+  // 可见**（绕过所有 grant），asset 那个只是免除挂载要求、仍需能力票。
+  if (w.rows[0].is_public && await isPolicyOn(productionId, "policy.wiki_public_enabled")) return true;
   if (await hasGrant(actor.userId, productionId, "wiki", wikiId, "*", "view")) return true;
   const deptShare = await pool.query(
     `SELECT 1 FROM wiki_dept_share ws
@@ -90,15 +94,18 @@ export async function listVisibleWikiIds(
   if (granted.wildcard) return { wildcard: true, ids: new Set() };
   for (const id of granted.ids) ids.add(id);
 
+  // 与 canViewWiki 同源：is_public 这条让渡受 policy.wiki_public_enabled 管。
+  // 单实例判定与列表判定**必须同读**——分叉即「列表看得见、点进去 403」（批D 教训）。
+  const wikiPublicOn = await isPolicyOn(productionId, "policy.wiki_public_enabled");
   const structural = await pool.query<{ id: string }>(
     `SELECT w.id::text AS id FROM wiki w
      WHERE w.production_id = $1 AND (
-       w.is_public
+       ($3 AND w.is_public)
        OR EXISTS (SELECT 1 FROM wiki_dept_share ws
                   JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
                   WHERE ws.wiki_id = w.id AND pdm.user_id = $2::uuid AND pdm.production_id = $1)
      )`,
-    [productionId, actor.userId],
+    [productionId, actor.userId, wikiPublicOn],
   );
   for (const r of structural.rows) ids.add(r.id);
 

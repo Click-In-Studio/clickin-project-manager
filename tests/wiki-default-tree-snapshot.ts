@@ -50,8 +50,8 @@ export async function createWikiDefaultTreePreMigrationData(
   const eventTitle = "迁移工厂联排";
   const deptName = "迁移工厂灯光";
 
-  await pool.query("INSERT INTO production (id, name) VALUES ($1, $2)", [
-    prodId, faker.company.name(),
+  await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
+    prodId, faker.company.name(), testUserId,
   ]);
 
   const eventId = `ev${faker.string.alphanumeric(8).toLowerCase()}`;

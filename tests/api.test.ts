@@ -9,7 +9,7 @@ import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId } from "@/lib/db";
 import { deleteProductionEvent } from "@/lib/event-db";
-import { TEST_USER } from "./helpers";
+import { TEST_USER, TEST_OWNER } from "./helpers";
 import { makeProduction, makeBlocks, cleanupProduction } from "./factories";
 import { getPool } from "@/lib/pg";
 
@@ -17,7 +17,6 @@ import { getPool } from "@/lib/pg";
 import {
   GET as listProductionsHandler,
   POST as createProductionHandler,
-  DELETE as deleteProductionHandler,
 } from "@/app/api/productions/route";
 import {
   GET as listCueListsHandler,
@@ -141,15 +140,31 @@ describe("auth guard — GET /api/productions", () => {
 // ── POST /api/productions — authorization ──────────────────────────────────────
 
 describe("POST /api/productions — authorization", () => {
-  it("non-admin → 403", async () => {
+  it("未登录 → 401", async () => {
+    const res = await createProductionHandler(
+      req("/api/productions", { method: "POST", body: JSON.stringify({ name: "无会话不应创建" }) }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  // 建项目不是全局特权（#280 之前）。这条曾断言非 admin → 403：那道门在 isAdmin 恒 false
+  // 之后变成无人能过，线上没人建得了项目。红了说明门被退回 isAdmin —— 别改断言，改路由。
+  it("普通登录用户 → 201，且创建者即 owner", async () => {
     const res = await createProductionHandler(
       req("/api/productions", {
         method: "POST",
-        body: JSON.stringify({ name: "不应该创建" }),
+        body: JSON.stringify({ name: "普通用户建的项目" }),
         session: userSession(),
       }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    created.push({ type: "production", id });
+
+    const owner = await getPool().query<{ owner_id: string }>(
+      "SELECT owner_id FROM production WHERE id = $1", [id],
+    );
+    expect(owner.rows[0]?.owner_id).toBe(TEST_USER);
   });
 });
 
@@ -269,7 +284,7 @@ describe("POST /api/production/[id]/cuelists — archived guard", () => {
   const ARCH_PROD = "test-api-arch-prod";
 
   beforeAll(async () => {
-    await createProduction(ARCH_PROD, "API归档测试演出");
+    await createProduction(ARCH_PROD, "API归档测试演出", TEST_OWNER);
     // Archive via the route handler (exercises the archive route too)
     await archiveProdHandler(
       req(`/api/production/${ARCH_PROD}/archive`, {
@@ -368,56 +383,6 @@ describe("POST /api/production/[id]/events — happy path", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/productions
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("DELETE /api/productions — auth guard", () => {
-  it("no cookie → 401", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: "x" }) }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("non-admin → 403", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: AP_PROD }), session: userSession() }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("DELETE /api/productions — input validation", () => {
-  it("missing id → 400", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({}), session: adminSession() }),
-    );
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("DELETE /api/productions — happy path", () => {
-  const DEL_PROD = "test-api-del-prod";
-
-  beforeAll(async () => {
-    await createProduction(DEL_PROD, "API删除测试演出");
-  });
-
-  it("admin deletes production → 200 and production is gone", async () => {
-    const res = await deleteProductionHandler(
-      req("/api/productions", { method: "DELETE", body: JSON.stringify({ id: DEL_PROD }), session: adminSession() }),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
-    expect(body.ok).toBe(true);
-
-    const listRes = await listProductionsHandler(req("/api/productions", { session: adminSession() }));
-    const { productions } = (await listRes.json()) as { productions: { id: string }[] };
-    expect(productions.some((p) => p.id === DEL_PROD)).toBe(false);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/production/[id] — rename
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -447,7 +412,7 @@ describe("PATCH /api/production/[id] — member without manage_permissions → 4
   const NOPERM_PROD = "test-api-noperm";
 
   beforeAll(async () => {
-    await createProduction(NOPERM_PROD, "无权限测试演出");
+    await createProduction(NOPERM_PROD, "无权限测试演出", TEST_OWNER);
     await addProductionMember(NOPERM_PROD, TEST_USER); // no "制作人" role assigned
   });
 
@@ -482,7 +447,7 @@ describe("PATCH /api/production/[id] — happy path", () => {
   const RENAME_PROD = "test-api-rename";
 
   beforeAll(async () => {
-    await createProduction(RENAME_PROD, "重命名测试演出（原名）");
+    await createProduction(RENAME_PROD, "重命名测试演出（原名）", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -564,7 +529,7 @@ describe("POST /api/production/[id]/versions — happy path", () => {
   const VER_PROD = "test-api-ver";
 
   beforeAll(async () => {
-    await createProduction(VER_PROD, "版本测试演出");
+    await createProduction(VER_PROD, "版本测试演出", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -657,7 +622,7 @@ describe("POST /api/production/[id]/members — happy path", () => {
   const MBR_PROD = "test-api-mbr";
 
   beforeAll(async () => {
-    await createProduction(MBR_PROD, "成员测试演出");
+    await createProduction(MBR_PROD, "成员测试演出", TEST_OWNER);
   });
 
   afterAll(async () => {
@@ -818,7 +783,7 @@ describe("PATCH /api/script/[id] — script:edit adminBypass:false", () => {
   let scriptPermVersionId = "";
 
   beforeAll(async () => {
-    await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出");
+    await createProduction(SCRIPT_PERM_PROD, "剧本权限测试演出", TEST_OWNER);
     await addProductionMember(SCRIPT_PERM_PROD, TEST_USER);
     scriptPermVersionId = (await getActiveVersionId(SCRIPT_PERM_PROD))!;
     // 批E2 行化：blocks@view 穿读门；comments@create 供下方评论测试（原 script:comment）

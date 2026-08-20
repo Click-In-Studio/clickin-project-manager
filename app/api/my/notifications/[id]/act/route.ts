@@ -15,7 +15,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getUserNotification, markNotificationActed, rsvpCallTime } from "@/lib/inbox-db";
-import { approveAccessRequest, rejectAccessRequest } from "@/lib/db";
+import { approveAccessRequest, escalateAccessRequest, rejectAccessRequest } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import type { ActionEffect } from "@/lib/inbox-db";
 import type { PoolClient } from "pg";
@@ -44,12 +44,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // Self-managed effects (approve/reject access requests) manage their own
     // transactions internally. Run them outside the pool-client transaction so
     // there is no false expectation that a ROLLBACK on client would undo them.
-    const selfManaged = action.effects.filter(
-      (e) => e.type === "approve_access_request" || e.type === "reject_access_request",
-    );
-    const transactional = action.effects.filter(
-      (e) => e.type !== "approve_access_request" && e.type !== "reject_access_request",
-    );
+    // 类型谓词而非 string[] 断言：断言会把字面量类型抹平，打错的 effect 名
+    // 会静默不匹配而不是编译期报错。
+    type SelfManagedEffect = Extract<ActionEffect, {
+      type: "approve_access_request" | "reject_access_request" | "escalate_access_request";
+    }>;
+    const isSelfManaged = (e: ActionEffect): e is SelfManagedEffect =>
+      e.type === "approve_access_request"
+      || e.type === "reject_access_request"
+      || e.type === "escalate_access_request";
+    const selfManaged = action.effects.filter(isSelfManaged);
+    const transactional = action.effects.filter((e) => !isSelfManaged(e));
 
     // Invariant: an action must not mix multiple self-managed effects, because
     // partial failure (second throws after first committed) has no rollback path.
@@ -175,6 +180,7 @@ async function executeEffect(
 
     case "approve_access_request":
     case "reject_access_request":
+    case "escalate_access_request":
       // Handled by executeSelfManagedEffect — should not reach here.
       break;
 
@@ -194,6 +200,7 @@ async function executeSelfManagedEffect(
       const result = await approveAccessRequest(effect.requestId, userId);
       if (!result.ok) {
         if (result.reason === "unauthorized") throw new Error("无权审批");
+        if (result.reason === "forward_only") throw new Error("你尚未持有该权限，只能向上转交给下一级审批人");
         if (result.reason === "not_found") {
           // Stale notification with a bad requestId — log but don't surface to user.
           console.warn("[notifications/act] approve_access_request: requestId not found", effect.requestId);
@@ -209,6 +216,19 @@ async function executeSelfManagedEffect(
         if (result.reason === "not_found") {
           console.warn("[notifications/act] reject_access_request: requestId not found", effect.requestId);
         }
+      }
+      break;
+    }
+    case "escalate_access_request": {
+      // #140：无权终局的直属上级把申请推给阶梯下一级
+      const result = await escalateAccessRequest(effect.requestId, userId);
+      if (!result.ok) {
+        if (result.reason === "unauthorized") throw new Error("无权处理此申请");
+        if (result.reason === "no_next_stage") throw new Error("已到审批链顶端，无法继续转发");
+        if (result.reason === "not_found") {
+          console.warn("[notifications/act] escalate_access_request: requestId not found", effect.requestId);
+        }
+        // conflict = 已被他人处理或已升级；静默吞掉
       }
       break;
     }

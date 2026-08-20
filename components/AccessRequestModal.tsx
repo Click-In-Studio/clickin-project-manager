@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { TTL_OPTIONS, type TtlOptionValue } from "@/lib/approval-ttl";
 
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,8 @@ type Props = {
    * When unset: free-form mode with resource type / level selectors.
    */
   permission?: string;
+  /** 预填申请理由（如 AI 调用触发的固定文案）——预填但仍可编辑，不锁死。 */
+  initialNote?: string;
   onSubmitted?: () => void;
 };
 
@@ -119,13 +122,14 @@ export default function AccessRequestModal({
   onClose,
   productionId,
   permission,
+  initialNote,
   onSubmitted,
 }: Props) {
   // Free-form mode state (only used when permission is NOT set)
   const [resourceType,    setResourceType]    = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
 
-  const [ttlOption,  setTtlOption]  = useState<"permanent" | "30m" | "1h" | "1d" | "1w">("permanent");
+  const [ttlOption,  setTtlOption]  = useState<TtlOptionValue>("permanent");
   const [note,       setNote]       = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -136,11 +140,11 @@ export default function AccessRequestModal({
     setResourceType(RESOURCE_OPTIONS[0].type);
     setPermissionLevel(RESOURCE_OPTIONS[0].levels[0].value);
     setTtlOption("permanent");
-    setNote("");
+    setNote(initialNote ?? "");
     setError(null);
     setDone(false);
     setSubmitting(false);
-  }, [open]);
+  }, [open, initialNote]);
 
   useEffect(() => {
     if (!open) return;
@@ -194,7 +198,7 @@ export default function AccessRequestModal({
           resourceSub: postResourceSub,
           permissionLevel: postPermissionLevel,
           grantType: ttlOption === "permanent" ? "permanent" : "ttl",
-          ttlDuration: ({ "30m": "30 minutes", "1h": "1 hour", "1d": "1 day", "1w": "7 days" } as Record<string, string>)[ttlOption] ?? null,
+          ttlDuration: TTL_OPTIONS.find((o) => o.value === ttlOption)?.interval ?? null,
           note: note.trim() || null,
         }),
       });
@@ -224,7 +228,7 @@ export default function AccessRequestModal({
   const NODE_TYPE_LABELS: Record<string, string> = {
     task: "任务", event: "事件", cue_list: "Cue 表", scene: "章节/段落",
     character: "角色", script: "剧本", asset: "附件", member: "人员",
-    report: "报告", note: "备注", dept: "部门", production: "项目",
+    report: "报告", note: "备注", dept: "部门", production: "项目", wiki: "文档",
   };
   const NODE_VERB_LABELS: Record<string, string> = {
     view: "查看", edit: "编辑", create: "创建", delete: "删除", manage: "管理", "*": "全部操作",
@@ -371,14 +375,12 @@ export default function AccessRequestModal({
                 <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
                 <select
                   value={ttlOption}
-                  onChange={(e) => setTtlOption(e.target.value as typeof ttlOption)}
+                  onChange={(e) => setTtlOption(e.target.value as TtlOptionValue)}
                   style={fieldStyle}
                 >
-                  <option value="permanent">长期</option>
-                  <option value="30m">30 分钟</option>
-                  <option value="1h">1 小时</option>
-                  <option value="1d">1 天</option>
-                  <option value="1w">1 周</option>
+                  {TTL_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
 

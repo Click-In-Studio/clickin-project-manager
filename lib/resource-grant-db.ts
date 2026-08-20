@@ -3,126 +3,28 @@
  *
  * 支持 cue_list / event / report / tech_req / note 等资源类型。
  *
- * 免审批区间（自我确认条件）：
- *   - edit 级：user 是某个 resource_dept_manage 管理该资源的 dept 的成员，
- *              且该 dept 的 permissions[] 含 '<resource_type>:edit'，或 user 是该 dept 的 POC
- *   - manage 级：user 是上述 dept 的 POC
+ * 免审批区间（自我确认条件，checkNodeFreeApprovalZone / checkCueListFreeApprovalZone）：
+ *   - edit 级：user 所在 dept 持有该实例的节点区间键（production_dept_permission，
+ *              含 `node:<type>/*@edit` 通配），或 user 是管理该资源（rdm）的 dept 的 POC
+ *   - manage 级：user 是管理该资源的 dept 的 POC（代码规则，总表 §0.8 已知例外）
  */
 import { getPool } from "./pg";
+import { policyFilteredRows } from "./policy-db";
 import type { Pool, PoolClient } from "pg";
 
 /** 可注入连接：调用方在事务内传 client，缺省用池（W5 AI review——多步写点须同事务） */
 type Queryable = Pool | PoolClient;
 
 // ─── Generic resource grant helpers ──────────────────────────────────────────
-
-/**
- * Returns the highest active permission level for a user on any resource instance,
- * or null if no active grant exists.
- */
-export async function getResourceGrantLevel(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-): Promise<string | null> {
-  const { rows } = await getPool().query<{ permission_level: string }>(
-    `SELECT rg.permission_level
-     FROM production_member_grant rg
-     JOIN resource_permission_level rpl
-       ON rpl.resource_type = rg.resource_type
-       AND rpl.permission_level = rg.permission_level
-     WHERE rg.production_id = $1
-       AND rg.user_id = $2
-       AND rg.resource_type = $3
-       AND rg.resource_id = $4
-       AND NOT rg.is_revoked
-       AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-     ORDER BY rpl.sort_order DESC
-     LIMIT 1`,
-    [productionId, userId, resourceType, resourceId],
-  );
-  return rows[0]?.permission_level ?? null;
-}
-
-/**
- * Checks if the user's highest active level on a resource meets or exceeds the required level.
- * sort_order defines the ordering (higher = more permissive).
- */
-export async function hasResourceGrantLevel(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-  requiredLevel: string,
-): Promise<boolean> {
-  const { rows } = await getPool().query<{ ok: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM production_member_grant rg
-       JOIN resource_permission_level rpl
-         ON rpl.resource_type = rg.resource_type
-         AND rpl.permission_level = rg.permission_level
-       JOIN resource_permission_level rpl_req
-         ON rpl_req.resource_type = $3
-         AND rpl_req.permission_level = $5
-       WHERE rg.production_id = $1
-         AND rg.user_id = $2
-         AND rg.resource_type = $3
-         AND rg.resource_id = $4
-         AND NOT rg.is_revoked
-         AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-         AND rpl.sort_order >= rpl_req.sort_order
-     ) AS ok`,
-    [productionId, userId, resourceType, resourceId, requiredLevel],
-  );
-  return rows[0]?.ok ?? false;
-}
-
-/**
- * Checks whether user is in the free-approval zone for a resource.
- * permKey: the permission key that must appear in dept.permissions[]
- *   (e.g. 'event:edit', 'report:edit', 'tech_req:edit')
- * For manage level, only POC qualifies; for edit level, POC or dept-permission qualifies.
- */
-export async function checkResourceFreeApprovalZone(
-  userId: string,
-  productionId: string,
-  resourceType: string,
-  resourceId: string,
-  permKey: string,
-  level: "edit" | "manage",
-): Promise<boolean> {
-  if (level === "manage") {
-    const { rows } = await getPool().query(
-      `SELECT 1
-       FROM resource_dept_manage rdm
-       JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-       WHERE rdm.production_id = $1
-         AND rdm.resource_type = $2
-         AND rdm.resource_id = $3
-         AND pdm.user_id = $4
-         AND pdm.is_poc = true
-       LIMIT 1`,
-      [productionId, resourceType, resourceId, userId],
-    );
-    return rows.length > 0;
-  }
-  const { rows } = await getPool().query(
-    `SELECT 1
-     FROM resource_dept_manage rdm
-     JOIN production_dept_member pdm ON pdm.dept_id = rdm.dept_id
-     JOIN production_dept pd ON pd.id = pdm.dept_id
-     WHERE rdm.production_id = $1
-       AND rdm.resource_type = $2
-       AND rdm.resource_id = $3
-       AND pdm.user_id = $4
-       AND (pdm.is_poc = true OR $5 = ANY(pd.permissions))
-     LIMIT 1`,
-    [productionId, resourceType, resourceId, userId, permKey],
-  );
-  return rows.length > 0;
-}
+//
+// 已退役（2026-08-17，随 checkResourceFreeApprovalZone 一并清理）：
+//   getResourceGrantLevel / hasResourceGrantLevel —— 按 resource_permission_level.sort_order
+//     做等级比较，与非线性不变量（总表 §0.1「权限=原子行的集合，无任何蕴含」）正面冲突，
+//     且全库零消费点。判定一律走 hasGrant（行精确命中）。
+//   checkResourceFreeApprovalZone —— dept 区间查 dept.permissions[] 数组 + 伪键
+//     （'report:edit' 等）。伪键随批C 清零、数组列随 PR #229 并表批 DROP，函数却留着，
+//     报告自确认路由的 edit 档因此必 500。通用替代：checkNodeFreeApprovalZone（下方，
+//     查 production_dept_permission 节点键）。
 
 /**
  * Writes a self_confirmed production_member_grant for any resource type.
@@ -435,8 +337,13 @@ export async function writeEventGrants(
   createdBy: string,
 ): Promise<void> {
   const pool = getPool();
-  // 批B：创建者获 EVENT manage 行集（动词行取代 manage 单行）
-  for (const [sub, verb] of EVENT_LEVEL_ROW_SETS.manage) {
+  // 批B：创建者获 EVENT manage 行集（动词行取代 manage 单行）。
+  // #236：行集先过一遍 production 级策略开关——**裁在写点，不裁在 EVENT_LEVEL_ROW_SETS**，
+  // 那张表同时是审批发行与「上级有没有这个权限」的定义（M-12），裁到表上会连带砍掉审批面。
+  const eventRows = await policyFilteredRows(
+    productionId, "event", "creator", EVENT_LEVEL_ROW_SETS.manage, pool,
+  );
+  for (const [sub, verb] of eventRows) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -461,8 +368,9 @@ export async function writeEventGrants(
     [productionId, eventId, createdBy],
   );
   await pool.query(
-    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
-     SELECT $1, rdm.dept_id, k.key
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+     -- source='resource'：由事件的归属信号在管（#274）
+     SELECT $1, rdm.dept_id, k.key, 'resource'
      FROM resource_dept_manage rdm
      CROSS JOIN LATERAL (VALUES
        ('node:event/' || $2 || '@view'),
@@ -502,8 +410,11 @@ export async function writeReportGrants(
   db: Queryable = getPool(),
 ): Promise<void> {
   const pool = db;
-  // 批C：创建者获 REPORT manage 行集（动词行取代 manage 单行）
-  for (const [sub, verb] of REPORT_LEVEL_ROW_SETS.manage) {
+  // 批C：创建者获 REPORT manage 行集。#236：先过策略开关（同 writeEventGrants 的理由）。
+  const reportRows = await policyFilteredRows(
+    productionId, "report", "creator", REPORT_LEVEL_ROW_SETS.manage, pool,
+  );
+  for (const [sub, verb] of reportRows) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -515,6 +426,32 @@ export async function writeReportGrants(
       [productionId, createdBy, reportId, sub, verb],
     );
   }
+  // 报告的**结构性**持钥方＝该 event 的跟组舞监（2026-08-18）。
+  // 此前只靠舞监 role 模版的 node:report/*@delete，而 role 不保证存在（ROLE_NAMES 是
+  // 默认模版名单不是白名单），剧组删了或改名就没有非兜底持钥方了。跟组舞监是
+  // per-event 结构数据（event_stage_manager），指派了就存在。role 模版行保留作便利。
+  const smRows = await policyFilteredRows(
+    productionId, "report", "stage_manager",
+    [["publication", "create"], ["publication", "edit"], ["publication", "delete"],
+     ["*", "delete"]],
+    pool,
+  );
+  if (smRows.length > 0) {
+    await pool.query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       SELECT DISTINCT $1, esm.user_id, 'report', $2, s.sub, s.verb, 'assigned', esm.user_id
+       FROM event_stage_manager esm
+       CROSS JOIN UNNEST($4::text[], $5::text[]) AS s(sub, verb)
+       WHERE esm.event_id = $3
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [productionId, reportId, eventId, smRows.map((r) => r[0]), smRows.map((r) => r[1])],
+    );
+  }
+
   // Inherit dept managers from parent event
   await pool.query(
     `INSERT INTO resource_dept_manage
@@ -549,7 +486,12 @@ export async function writeWikiGrants(
   db: Queryable = getPool(),
 ): Promise<void> {
   const pool = db;
-  for (const [sub, verb] of WIKI_LEVEL_ROW_SETS.manage) {
+  // #236：先过策略开关。wiki 无外部归属信号，其 grants@edit 由 M-14 存在性子句强制
+  // 保留、根本不在词汇表里，故本行集只有 *@delete 可配。
+  const wikiRows = await policyFilteredRows(
+    productionId, "wiki", "creator", WIKI_LEVEL_ROW_SETS.manage, pool,
+  );
+  for (const [sub, verb] of wikiRows) {
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
@@ -588,19 +530,32 @@ export async function writeTechReqGrants(
 ): Promise<void> {
   const pool = getPool();
   if (eventDeptId) {
+    // #236：POC 行集先过策略开关。`task.dept_poc:*@delete` **默认关**，于是本写点
+    // 不再无条件发删除行——这正好把 V-1（「organizer 显式创建的 task，部门 POC 无
+    // 自动删除权」）从空转救活：路由第三分支的 created_via 上下文规则此前被这里发出
+    // 的行盖住，第一分支直接命中。
+    //
+    // 因此**不需要**在本写点按 created_via 分叉（原处方如此，已被更好的机制取代）：
+    //   开关关（默认）⇒ 谁都不发 *@delete 行，dept_auto 路径的 POC 仍由路由的上下文
+    //     分支恒可删 —— 与 V-1 完全等价
+    //   开关开        ⇒ 关联部门 POC 一律拿到删除行 —— 即「任务归执行部门」那一档
+    const pocRows = await policyFilteredRows(
+      productionId, "task", "dept_poc",
+      [["*", "view"], ["*", "edit"], ["assignees", "edit"], ["*", "delete"], ["grants", "edit"]],
+      pool,
+    );
     await pool.query(
       `INSERT INTO production_member_grant
          (production_id, user_id, resource_type, resource_id, resource_sub,
           permission_level, grant_source, confirmed_by)
        SELECT DISTINCT $1, pdm.user_id, 'task', $2, s.sub, s.verb, 'direct', pdm.user_id
        FROM production_dept_member pdm
-       CROSS JOIN (VALUES ('*', 'view'), ('*', 'edit'), ('assignees', 'edit'),
-                          ('*', 'delete'), ('grants', 'edit')) AS s(sub, verb)
+       CROSS JOIN UNNEST($4::text[], $5::text[]) AS s(sub, verb)
        WHERE pdm.dept_id = $3 AND pdm.is_poc = true
        ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
          WHERE is_revoked = false
        DO NOTHING`,
-      [productionId, reqId, eventDeptId],
+      [productionId, reqId, eventDeptId, pocRows.map((r) => r[0]), pocRows.map((r) => r[1])],
     );
     await pool.query(
       `INSERT INTO resource_dept_manage
@@ -906,13 +861,14 @@ export async function addCueListDeptAccess(
     [productionId, deptId, cueListId, establishedBy],
   );
   await getPool().query(
-    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key)
+    `INSERT INTO production_dept_permission (production_id, dept_id, permission_key, source)
+     -- source='resource'：由该表的分享面在管（#274）
      SELECT $1, $2, unnest(ARRAY[
        'node:cue_list/' || $3 || '@view',
        'node:cue_list/' || $3 || '@edit',
        'node:cue_list/' || $3 || '/cues@create',
        'node:cue_list/' || $3 || '/cues@delete'
-     ]) ON CONFLICT (dept_id, permission_key) DO NOTHING`,
+     ]), 'resource' ON CONFLICT (dept_id, permission_key) DO UPDATE SET source = 'resource'`,
     [productionId, deptId, cueListId],
   );
 }
@@ -933,8 +889,11 @@ export async function removeCueListDeptAccess(
   // 撤 zone 资格行，并对该 dept 成员立即重算存续（资格消失 → self_confirmed 行收走，
   // 不等下次偶然的 role/dept 变动）
   await getPool().query(
+    // 不碰 source='manual'：那是有人在权限中心显式发过的一枚，撤分享不该顺手抹掉
+    // 别人的决定（#274）。撤完在部门权限页仍可见、可删。
     `DELETE FROM production_dept_permission
-     WHERE dept_id = $1 AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
+     WHERE dept_id = $1 AND source <> 'manual'
+       AND permission_key LIKE 'node:cue_list/' || $2 || '%'`,
     [deptId, cueListId],
   );
   const { rows: members } = await getPool().query<{ user_id: string }>(

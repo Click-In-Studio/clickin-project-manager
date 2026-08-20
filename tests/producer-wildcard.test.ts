@@ -145,7 +145,15 @@ describe("两个指派面（2026-08-13 用户定稿）", () => {
     expect(pairs).toContain("publication@delete");        // 与撤回
   });
 
-  it("跟组舞监十行集：含 call_sheet@edit，不含 assignees（排 call 不动名单）", async () => {
+  // ⟳ 2026-08-18 修订 2026-08-13 定谳：跟组舞监**默认拿到** assignees c/d。
+  //
+  // 原定谳「排 call 不动名单」并不是错的——它是**当时没有开关**的产物。那会儿要表达
+  // 「严格剧组不该让舞监动名单」，唯一手段就是写死不发；而排 call 却不能定谁来，
+  // 对多数剧组是别扭的。策略键上线后，正确表达变成**默认发 + 可关**
+  // （event.stage_manager:assignees@create/delete，默认 on）。
+  //
+  // 这是个通用模式：**很多写死的定谳，本质是当时无法表达的策略**。
+  it("跟组舞监行集：含 call_sheet@edit 与 assignees c/d（默认档），关掉开关即回到旧定谳", async () => {
     const { setEventStageManagers } = await import("@/lib/event-db");
     const { getPool } = await import("@/lib/pg");
     const u = (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
@@ -161,7 +169,33 @@ describe("两个指派面（2026-08-13 用户定稿）", () => {
     const pairs = rows.map(r => `${r.resource_sub}@${r.permission_level}`);
     expect(pairs).toContain("call_sheet@edit");
     expect(pairs).toContain("call_sheet@view");
-    expect(pairs.some(p => p.startsWith("assignees"))).toBe(false);
+    expect(pairs).toContain("assignees@create");
+    expect(pairs).toContain("assignees@delete");
     await getPool().query("DELETE FROM production_event WHERE id = $1", [ev]);
+
+    // 严格剧组关掉两键 ⇒ 回到 2026-08-13 的形态（排 call 不动名单）
+    const { setPolicies } = await import("@/lib/policy-db");
+    const { POLICY_OFF, POLICY_ON } = await import("@/lib/policy-keys");
+    await setPolicies(prodId, {
+      "event.stage_manager:assignees@create": POLICY_OFF,
+      "event.stage_manager:assignees@delete": POLICY_OFF,
+    }, u);
+    const ev2 = `ev_sm2_${Date.now().toString(36)}`;
+    await getPool().query(
+      "INSERT INTO production_event (id, production_id, title, created_by, status) VALUES ($1, $2, 'SM测试2', $3, 'draft')",
+      [ev2, prodId, u]);
+    await setEventStageManagers(ev2, [{ userId: u, name: "SM" }], prodId, u);
+    const { rows: strict } = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM production_member_grant
+       WHERE user_id = $1 AND resource_type = 'event' AND resource_id = $2 AND NOT is_revoked`,
+      [u, ev2]);
+    const strictPairs = strict.map(r => `${r.resource_sub}@${r.permission_level}`);
+    expect(strictPairs).toContain("call_sheet@edit");
+    expect(strictPairs.some(p => p.startsWith("assignees"))).toBe(false);
+    await setPolicies(prodId, {
+      "event.stage_manager:assignees@create": POLICY_ON,
+      "event.stage_manager:assignees@delete": POLICY_ON,
+    }, u);
+    await getPool().query("DELETE FROM production_event WHERE id = $1", [ev2]);
   });
 });
