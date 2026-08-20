@@ -17,6 +17,9 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   milestone: "SELECT id, COALESCE(name, id) AS label FROM milestone WHERE production_id = $1 ORDER BY end_date",
   material: `SELECT id::text AS id, (code || ' ' || name) AS label FROM production_material
              WHERE production_id = $1 ORDER BY category, code`,
+  // 权限键的 id 位指向预算科目——「只能看/管舞美那一档预算」是真实需求
+  finance: `SELECT id::text AS id, name AS label FROM production_budget_category
+            WHERE production_id = $1 ORDER BY order_index, name`,
   announcement: "SELECT id, COALESCE(title, id) AS label FROM production_announcement WHERE production_id = $1 ORDER BY created_at DESC",
   org_dept: "SELECT id::text AS id, name AS label FROM production_dept WHERE production_id = $1 ORDER BY display_order, name",
   role: "SELECT id, name AS label FROM production_role WHERE production_id = $1 AND NOT is_deprecated ORDER BY name",
