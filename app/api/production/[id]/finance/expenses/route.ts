@@ -12,8 +12,13 @@ type Ctx = { params: Promise<{ id: string }> };
 /**
  * GET — 支出列表。
  *
- * 门是 finance 域的 expenses@view 面，与 budget@view 分开——看总盘子和看每一笔花在
- * 哪儿是两档信任（有的剧组 PSM/SM 看得到支出，设计人员只看得到预算档位）。
+ * 两档，不是一道门：
+ *   - 持 expenses@view：全项目每一笔。与 budget@view 分开——看总盘子和看每一笔
+ *     花在哪儿是两档信任。
+ *   - 不持：**我交的 ∪ 待我批的**。这两块靠上下文放行，不需要任何权限键——
+ *     自己交的单子自己看不见是荒唐的；被阶梯算成审批人却看不见要批什么也是。
+ *
+ * 所以这个端点不再 403。返回集合的宽窄由身份决定，调用方不必先问自己有没有权限。
  */
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
@@ -21,9 +26,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "finance", "*", "expenses", "view"))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-  return Response.json({ expenses: await listExpenses(productionId) });
+  const all = await hasEffectiveGrant(
+    toActor(session, access.permCtx), productionId, "finance", "*", "expenses", "view");
+  const expenses = all
+    ? await listExpenses(productionId)
+    : await listExpenses(productionId, { submittedBy: session.userId, pendingFor: session.userId });
+  return Response.json({ expenses, scope: all ? "all" : "own" });
 }
 
 /**

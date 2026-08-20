@@ -17,6 +17,7 @@ import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { createEventGroup } from "@/lib/event-group-db";
 import { resolveSubjectPatch } from "@/lib/task-poc";
+import { canCreateMaterial, canWriteMaterial } from "@/lib/material-perm";
 import {
   createMaterial, createMaterialStatus, deleteMaterial, deleteMaterialStatus,
   getMaterial, listMaterials, listMaterialStatuses, MaterialError, updateMaterial,
@@ -248,5 +249,114 @@ describe("7. PATCH 的名字校验与 POST 对称", () => {
     const res = await patchMaterial(req(ownerId, { name: newName }), ctx());
     expect(res.status).toBe(200);
     expect((await getMaterial(m.id, prodId))?.name).toBe(newName);
+  });
+});
+
+/**
+ * 责任方 POC 的上下文判定。
+ *
+ * 中心命题：**各部门自管自的剧组，一个权限键都不用发。**
+ * 注意所有用例都用非 owner 的人——owner 在 hasEffectiveGrant 里直接旁路，
+ * 拿他测等于什么都没测（这个坑记在 feedback_owner_bypass）。
+ */
+describe("8. 责任方的 POC 管自己那一摊", () => {
+  let deptB: string, pocA: string, pocB: string, stranger: string;
+  const actor = (userId: string) => ({ userId, isAdmin: false, isOwner: false });
+
+  beforeAll(async () => {
+    ({ rows: [{ id: deptB }] } = await getPool().query<{ id: string }>(
+      `INSERT INTO production_dept (production_id, name) VALUES ($1, $2) RETURNING id`,
+      [prodId, `服装${shortId()}`],
+    ));
+    for (const [tag, dept] of [["pocA", deptId], ["pocB", deptB]] as const) {
+      const u = (await upsertFeishuUser(`test-open-${shortId()}`, `${tag}${shortId()}`, null, false)).userId;
+      await addProductionMember(prodId, u);
+      await getPool().query(
+        `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc) VALUES ($1,$2,$3,true)`,
+        [prodId, dept, u],
+      );
+      if (tag === "pocA") pocA = u; else pocB = u;
+    }
+    stranger = (await upsertFeishuUser(`test-open-${shortId()}`, `路人${shortId()}`, null, false)).userId;
+    await addProductionMember(prodId, stranger);
+  });
+
+  it("挂在 A 部门的物料：A 的 POC 能改能删，B 的 POC 和路人都不能", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `M${shortId()}`, name: `A 部门的箱子${shortId()}`,
+      subject: { kind: "dept", id: deptId }, createdBy: ownerId,
+    });
+    for (const verb of ["edit", "delete"] as const) {
+      expect(await canWriteMaterial(actor(pocA), prodId, m, verb)).toBe(true);
+      expect(await canWriteMaterial(actor(pocB), prodId, m, verb)).toBe(false);
+      expect(await canWriteMaterial(actor(stranger), prodId, m, verb)).toBe(false);
+    }
+  });
+
+  it("用户组做责任方时同样成立（组 POC ≠ 部门 POC，走的是同一个 isSubjectPoc）", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `M${shortId()}`, name: `组的物料${shortId()}`,
+      subject: { kind: "group", id: groupId }, createdBy: ownerId,
+    });
+    // groupId 的 POC 是 deptId 这个部门 → 该部门的 POC 都算
+    expect(await canWriteMaterial(actor(pocA), prodId, m, "edit")).toBe(true);
+    expect(await canWriteMaterial(actor(pocB), prodId, m, "edit")).toBe(false);
+  });
+
+  it("无责任方的物料谁都改不了——它属于台账公共部分，只有域级键能动", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `M${shortId()}`, name: `无主物料${shortId()}`,
+      subject: null, createdBy: ownerId,
+    });
+    expect(await canWriteMaterial(actor(pocA), prodId, m, "edit")).toBe(false);
+    expect(await canWriteMaterial(actor(pocB), prodId, m, "edit")).toBe(false);
+  });
+
+  it("建物料：只能建到自己是 POC 的那一方名下，不能替别人建", async () => {
+    expect(await canCreateMaterial(actor(pocA), prodId, { kind: "dept", id: deptId })).toBe(true);
+    expect(await canCreateMaterial(actor(pocA), prodId, { kind: "dept", id: deptB })).toBe(false);
+    // 无责任方 = 公共部分，POC 身份不够
+    expect(await canCreateMaterial(actor(pocA), prodId, null)).toBe(false);
+    expect(await canCreateMaterial(actor(stranger), prodId, { kind: "dept", id: deptId })).toBe(false);
+  });
+
+  it("owner 依然畅通（旁路在 hasEffectiveGrant 里，不该被这条判定挡住）", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `M${shortId()}`, name: `owner 测${shortId()}`,
+      subject: { kind: "dept", id: deptB }, createdBy: ownerId,
+    });
+    expect(await canWriteMaterial(
+      { userId: ownerId, isAdmin: false, isOwner: true }, prodId, m, "delete")).toBe(true);
+  });
+});
+
+/**
+ * 收敛棘轮：物料本身的三个写点（建 / 改 / 删）一律走 lib/material-perm，
+ * 不许各写各的 hasEffectiveGrant。
+ *
+ * 状态表的 CRUD 不在此列——状态没有「责任方」，它是剧组级的一张小字典，
+ * 只是碰巧共用 material 这个域键。故按**动词**筛，且放过 statuses/ 那一支。
+ */
+describe("9. 判定收敛", () => {
+  it("物料写点不直接对 material 域调 hasEffectiveGrant", async () => {
+    const { readFileSync, readdirSync } = await import("fs");
+    const { join } = await import("path");
+    const base = "app/api/production/[id]/materials";
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name === "route.ts") files.push(full);
+      }
+    };
+    walk(base);
+    // [^;]* 而不是 [^)]*——参数里就有括号（toActor(session, ...)），按 ) 断会在走到
+    // "material" 之前就停下，棘轮永远绿。按语句边界断才拦得住。（验红过。）
+    const offenders = files
+      .filter(f => !f.includes("statuses"))
+      .filter(f => /hasEffectiveGrant\([^;]*"material"[^;]*"(create|edit|delete)"/.test(
+        readFileSync(f, "utf8")));
+    expect(offenders).toEqual([]);
   });
 });
