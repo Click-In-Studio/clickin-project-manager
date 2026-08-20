@@ -3,7 +3,8 @@ import { hasEventDomainView } from "@/lib/event-permissions";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { createEventTechReq, getEventDepartment, getProductionEvent, isUserDeptPoc, listEventTechReqs } from "@/lib/event-db";
+import { createEventTechReq, getEventDepartment, getProductionEvent, listEventTechReqs } from "@/lib/event-db";
+import { isDeptSubjectPoc } from "@/lib/task-poc";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { batchGetFeishuOpenIds } from "@/lib/db";
 import { feishuPlatform } from "@/lib/platform/feishu";
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 路径三前提=对该 event 有 details 视图（"对看得见的东西反应"）：宽松剧组经
   // 成员模板通配行命中；严格剧组（模板撤掉 details@view）未被授视图的 POC 发不了
   const viaPoc = departmentId !== null
-    && await isUserDeptPoc(departmentId, session.userId)
+    && await isDeptSubjectPoc(productionId, departmentId, session.userId)
     && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "details", "view");
   if (!viaPoc
       && !await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "create"))
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if ((body.assignees?.length ?? 0) > 0) {
     const canDirectAssign =
       await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "assignees", "edit")
-      || (departmentId !== null && await isUserDeptPoc(departmentId, session.userId));
+      || (departmentId !== null && await isDeptSubjectPoc(productionId, departmentId, session.userId));
     if (!canDirectAssign)
       return Response.json({ error: "你没有直接指派的权限——请绑定部门后交由部门 POC 分配" }, { status: 403 });
   }

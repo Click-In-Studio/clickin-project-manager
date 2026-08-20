@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventDepartment, getEventTechReq, isUserDeptPoc, updateTaskByProduction, deleteTaskByProduction } from "@/lib/event-db";
+import { getProductionEvent, getEventDepartment, getEventTechReq, updateTaskByProduction, deleteTaskByProduction } from "@/lib/event-db";
+import { isTaskPoc } from "@/lib/task-poc";
 import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
@@ -29,7 +30,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     presetMinutes?: number | null; departmentId?: string | null; status?: string;
   };
 
-  // departmentId 必须属于本 production（isUserDeptPoc 不限 production）
+  // departmentId 必须属于本 production——POC 判定已自带 production 作用域，
+  // 这道校验回更准的 400
   if (typeof body.departmentId === "string"
       && !(await getEventDepartment(body.departmentId, productionId)))
     return Response.json({ error: "部门不存在" }, { status: 400 });
@@ -62,7 +64,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
     // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
     || (techReq != null && techReq.createdVia !== "explicit" && techReq.departmentId != null
-        && await isUserDeptPoc(techReq.departmentId, session.userId));
+        && await isTaskPoc(productionId, techReq, session.userId));
   if (!canDelete)
     return Response.json({ error: "权限不足" }, { status: 403 });
 

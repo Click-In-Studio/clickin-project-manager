@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getTechReqByProduction, updateTaskByProduction, isUserReqAssignee, isUserDeptPoc } from "@/lib/event-db";
+import { getTechReqByProduction, updateTaskByProduction, isUserReqAssignee } from "@/lib/event-db";
+import { isTaskPoc } from "@/lib/task-poc";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 
@@ -35,7 +36,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const [isAssignee, isPoc] = await Promise.all([
     isUserReqAssignee(taskId, session.userId),
-    existing.departmentId ? isUserDeptPoc(existing.departmentId, session.userId) : Promise.resolve(false),
+    isTaskPoc(productionId, existing, session.userId),
   ]);
   if (!isAssignee && !isPoc && !hasFullEdit)
     return Response.json({ error: "权限不足" }, { status: 403 });

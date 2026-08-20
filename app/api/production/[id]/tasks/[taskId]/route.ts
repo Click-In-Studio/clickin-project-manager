@@ -8,10 +8,10 @@ import {
   getProductionEvent,
   getTaskDependencies,
   getTechReqByProduction,
-  isUserDeptPoc,
   updateTaskByProduction,
 } from "@/lib/event-db";
 import { canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
+import { isTaskPoc } from "@/lib/task-poc";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 
@@ -55,8 +55,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     eventId?: string | null;
   };
 
-  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
-  // POC 上下文判定的前提是任务部门恒为本 production 部门）
+  // departmentId 必须属于本 production——POC 判定已自带 production 作用域，
+  // 这道校验回更准的 400，并保证任务部门恒为本 production 部门
   if (typeof body.departmentId === "string"
       && !(await getEventDepartment(body.departmentId, productionId)))
     return Response.json({ error: "部门不存在" }, { status: 400 });
@@ -71,7 +71,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const canAttach =
       await hasEffectiveGrant(actor, productionId, "event", body.eventId, "tasks", "create")
       || (existing.departmentId != null
-          && await isUserDeptPoc(existing.departmentId, session.userId)
+          && await isTaskPoc(productionId, existing, session.userId)
           && await hasEffectiveGrant(actor, productionId, "event", body.eventId, "details", "view"));
     if (!canAttach)
       return Response.json({ error: "对目标事件没有任务挂载资格" }, { status: 403 });
@@ -119,7 +119,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     // 删除权按创建路径区分（用户规范）：organizer 显式创建的 task，部门 POC 无自动
     // 删除权；dept_auto（关联部门自动创建）路径的 POC 恒可删（上下文判定）
     || (task.createdVia !== "explicit" && task.departmentId != null
-        && await isUserDeptPoc(task.departmentId, session.userId));
+        && await isTaskPoc(productionId, task, session.userId));
   if (!canDelete)
     return Response.json({ error: "权限不足" }, { status: 403 });
 

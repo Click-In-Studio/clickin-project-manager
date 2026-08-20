@@ -4,11 +4,11 @@ import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
+import { isDeptSubjectPoc } from "@/lib/task-poc";
 import {
   createEventTechReq,
   getEventDepartment,
   getProductionEvent,
-  isUserDeptPoc,
   listMyTechReqsFull,
   listProductionTechReqs,
 } from "@/lib/event-db";
@@ -62,8 +62,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
   const eventId = body.eventId ?? null;
 
-  // departmentId 必须属于本 production（isUserDeptPoc 不限 production，
-  // 不先校验会被跨剧组部门 id 骗过 POC 各门 + 绑入跨剧组部门）
+  // departmentId 必须属于本 production——POC 判定已自带 production 作用域，
+  // 这道校验留着是为了回更准的 400「部门不存在」，并挡住绑入跨剧组部门
   if (typeof body.departmentId === "string"
       && !(await getEventDepartment(body.departmentId, productionId)))
     return Response.json({ error: "部门不存在" }, { status: 400 });
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (!event) return Response.json({ error: "事件不存在" }, { status: 404 });
     // 路径三（部门 POC 对可见 event 主动发起本部门 task）：前提是对该 event 有 details 视图
     viaPoc = typeof body.departmentId === "string"
-      && await isUserDeptPoc(body.departmentId, session.userId)
+      && await isDeptSubjectPoc(productionId, body.departmentId, session.userId)
       && await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "details", "view");
     if (!viaPoc
         && !await hasEffectiveGrant(toActor(session, permCtx), productionId, "event", eventId, "tasks", "create"))
@@ -95,7 +95,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if ((body.assignees?.length ?? 0) > 0) {
     const canDirectAssign =
       await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "assignees", "edit")
-      || (typeof body.departmentId === "string" && await isUserDeptPoc(body.departmentId, session.userId));
+      || (typeof body.departmentId === "string"
+          && await isDeptSubjectPoc(productionId, body.departmentId, session.userId));
     if (!canDirectAssign)
       return Response.json({ error: "你没有直接指派的权限——请绑定部门后交由部门 POC 分配" }, { status: 403 });
   }

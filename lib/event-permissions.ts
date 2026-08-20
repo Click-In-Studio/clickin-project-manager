@@ -141,11 +141,12 @@ export async function canEditTechReq(
       : Promise.resolve(false),
   ]);
   if (hasReqGrant || hasEventGrant) return true;
-  // 规则（用户规范）：不论创建路径与进度，task 关联部门的 POC 恒可编辑内容并推进
+  // 规则（用户规范）：不论创建路径与进度，task 责任主体的 POC 恒可编辑内容并推进
   // 状态——上下文关系判定（Type B），部门后关联/POC 变更自动跟踪，无需行同步
-  const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
+  const { getTechReqByProduction } = await import("./event-db");
+  const { isTaskPoc } = await import("./task-poc");
   const req = await getTechReqByProduction(techReqId, productionId);
-  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  if (req && await isTaskPoc(productionId, req, permCtx.userId)) return true;
   return false;
 }
 
@@ -163,9 +164,10 @@ export async function canAssignTechReq(
   if (permCtx.isAdmin || permCtx.isOwner) return true;
   if (permCtx.memberPermissions === null) return false;
   if (await hasGrant(permCtx.userId, productionId, "task", techReqId, "assignees", "edit")) return true;
-  const { getTechReqByProduction, isUserDeptPoc } = await import("./event-db");
+  const { getTechReqByProduction } = await import("./event-db");
+  const { isTaskPoc } = await import("./task-poc");
   const req = await getTechReqByProduction(techReqId, productionId);
-  if (req?.departmentId && await isUserDeptPoc(req.departmentId, permCtx.userId)) return true;
+  if (req && await isTaskPoc(productionId, req, permCtx.userId)) return true;
   return false;
 }
 
