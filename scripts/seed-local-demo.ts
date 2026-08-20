@@ -25,6 +25,8 @@ import {
 import { createWiki } from "../lib/wiki-db";
 import { createAsset } from "../lib/asset-db";
 import { createUserNotification } from "../lib/inbox-db";
+import { createMaterial, listMaterialStatuses } from "../lib/material-db";
+import { approveExpense, createBudgetCategory, submitExpense } from "../lib/finance-db";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
@@ -465,6 +467,81 @@ async function main() {
   await createUserNotification({ userId: user.id, productionId: PRODUCTION_ID, kind: "task_due", entityType: "task", entityId: "demo-task-light", title: "灯塔追光任务临近截止", body: "请在技术联排前完成机位与安全绳确认。", viewHref: `/production/${PRODUCTION_ID}/tasks/demo-task-light`, category: "warning", actionRequired: true });
   await createUserNotification({ userId: user.id, productionId: PRODUCTION_ID, kind: "script_update", entityType: "version", entityId: versionId, title: "排练稿 V1 已更新", body: "第二场结尾与终曲歌词已调整。", viewHref: `/production/${PRODUCTION_ID}/script?v=${versionId}`, category: "action" });
 
+  // ── 物料台账 ────────────────────────────────────────────────────────────────
+  // 状态按 order_index 取，不写状态名：系统预设可能改名，剧组也能加自己的状态
+  // （db/add-material-ledger.sql 的立意是「自由列表不是状态机」）。
+  const statuses = await listMaterialStatuses(PRODUCTION_ID);
+  const st = (i: number) => statuses[i % statuses.length]?.id ?? null;
+  const demoMaterials: [string, string, string, number, number, string][] = [
+    ["PR-014", "旧式黄铜航海罗盘", "道具", 0, 0, "A-03"],
+    ["CS-021", "林澈第二场深蓝风衣", "服装", 3, 1, "C-12"],
+    ["EQ-008", "手持船笛效果器", "设备", 2, 2, "主剧场"],
+    ["SC-005", "灯塔栏杆模块", "布景", 1, 3, "制作工坊"],
+    ["PR-019", "无署名旧信件（8 份）", "道具", 0, 0, "A-07"],
+  ];
+  for (const [code, mName, category, statusIdx, deptIdx, location] of demoMaterials) {
+    await createMaterial({
+      productionId: PRODUCTION_ID, code, name: mName, category,
+      subject: { kind: "dept", id: deptRows[deptIdx].id },
+      statusId: st(statusIdx), location, quantity: 1, createdBy: user.id,
+    });
+  }
+
+  // ── 财务 ────────────────────────────────────────────────────────────────────
+  // 金额是字符串（NUMERIC(14,2)，见 lib/money.ts 的由来）。挂 deptId 会同时往
+  // resource_dept_manage 写一行，于是该部门 POC 自动成为这条预算线的审批人。
+  const demoCategories: [string, string, number][] = [
+    ["创作与版权", "120000.00", 0],
+    ["舞美制作", "280000.00", 1],
+    ["演员与排练", "190000.00", 2],
+    ["宣传与场租", "160000.00", 3],
+  ];
+  const catIds: string[] = [];
+  for (const [cName, amount, deptIdx] of demoCategories) {
+    const cat = await createBudgetCategory({
+      productionId: PRODUCTION_ID, name: cName, amount,
+      deptId: deptRows[deptIdx].id, orderIndex: catIds.length, createdBy: user.id,
+    });
+    catIds.push(cat.id);
+  }
+
+  // 支出走 submitExpense 而不是直接 INSERT——它会跑 buildApprovalLadder 把
+  // current_approver_ids 算出来，收件箱和授权判定都读那一列。绕过它造出来的行
+  // 在库里看着没问题，在收件箱里却永远不出现。
+  //
+  // 最后一列是「是否批掉」。必须留几笔已批的：BudgetCategory.spent 只统计
+  // **已批准**的支出，全是 pending 的话财务页会是「已使用 ¥0 + 四条空进度条」，
+  // 看着像功能坏了。也必须留几笔待审批的，否则收件箱里没有可演示的待办。
+  const demoExpenses: [string, number, string, boolean][] = [
+    ["剧本改编版权金", 0, "42000.00", true],
+    ["终曲编曲首付款", 0, "18000.00", true],
+    ["作曲尾款", 0, "12400.00", true],
+    ["灯塔主体结构制作", 1, "96000.00", true],
+    ["转台租赁（技术周）", 1, "48900.00", true],
+    ["布景喷绘", 1, "24000.00", true],
+    ["舞台模型材料", 1, "8600.00", false],
+    ["演员排练津贴（三月）", 2, "68000.00", true],
+    ["形体指导课时", 2, "16500.00", true],
+    ["A3 排练厅场租", 2, "12000.00", true],
+    ["主视觉设计", 3, "18200.00", true],
+    ["首演场地定金", 3, "25000.00", true],
+    ["预告片拍摄", 3, "32000.00", false],
+  ];
+  for (const [title, catIdx, amount, approve] of demoExpenses) {
+    const exp = await submitExpense({
+      productionId: PRODUCTION_ID, categoryId: catIds[catIdx], title, amount,
+      note: "", submittedBy: user.id,
+    });
+    if (!approve) continue;
+    // 阶梯可能要走好几级（直属上级 → 资源持有者 → 共管部门 POC → …），
+    // approve 返回 forwarded=true 就是「转给下一级了」，得继续推到终局。
+    // 上限只是防呆：阶梯是有限的，真转不完说明 nextStage 出了问题。
+    for (let i = 0; i < 8; i++) {
+      const r = await approveExpense(exp.id, PRODUCTION_ID, user.id);
+      if (!r.ok || !r.forwarded) break;
+    }
+  }
+
   const summary = await pool.query<{ table_name: string; count: string }>(
     `SELECT 'projects' AS table_name, count(*)::text AS count FROM production WHERE id = $1
      UNION ALL SELECT 'script blocks', count(*)::text FROM script WHERE production_id = $1
@@ -477,7 +554,12 @@ async function main() {
      UNION ALL SELECT 'reports', count(*)::text FROM event_report er JOIN production_event pe ON pe.id=er.event_id WHERE pe.production_id = $1
      UNION ALL SELECT 'announcements', count(*)::text FROM production_announcement WHERE production_id = $1
      UNION ALL SELECT 'assets', count(*)::text FROM asset WHERE production_id = $1
-     UNION ALL SELECT 'notifications', count(*)::text FROM user_notification WHERE production_id = $1`,
+     UNION ALL SELECT 'notifications', count(*)::text FROM user_notification WHERE production_id = $1
+     UNION ALL SELECT 'materials', count(*)::text FROM production_material WHERE production_id = $1
+     UNION ALL SELECT 'budget categories', count(*)::text FROM production_budget_category WHERE production_id = $1
+     UNION ALL SELECT 'expenses', count(*)::text FROM production_expense WHERE production_id = $1
+     UNION ALL SELECT '  · approved', count(*)::text FROM production_expense WHERE production_id = $1 AND status = 'approved'
+     UNION ALL SELECT '  · pending', count(*)::text FROM production_expense WHERE production_id = $1 AND status = 'pending'`,
     [PRODUCTION_ID],
   );
   console.log(`Demo project ready for ${user.name}: /production/${PRODUCTION_ID}`);
