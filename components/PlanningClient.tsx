@@ -1242,11 +1242,10 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { setLayoutError(data.error ?? "版面保存失败"); return; }
-    // 用服务端回来的 id 回填——新建的列在本地是 `new-*`，条目钉列要引用真实 id
-    setColumns(current => current.map((c, i) => {
-      const server = (data.columns ?? [])[i] as ServerRundownColumn | undefined;
-      return server ? { ...c, id: server.id } : c;
-    }));
+    // 用服务端回来的 id 回填——新建的列在本地是 `new-*`，条目钉列要引用真实 id。
+    // 服务端按 order_index 返回，而 order_index 就是这次入参的下标，故按位对齐。
+    const serverColumns = (data.columns ?? []) as ServerRundownColumn[];
+    setColumns(next.map((c, i) => serverColumns[i] ? { ...c, id: serverColumns[i].id } : c));
   }, [productionId, eventId]);
 
   /** 条目表现落库：颜色 + 钉列。 */
@@ -1272,13 +1271,16 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     if (!res.ok) setLayoutError((await res.json().catch(() => ({}))).error ?? "事项表现保存失败");
   }, [productionId, eventId]);
 
-  /** 改列的展示属性（显隐 / 粘性）——只动版面，不动用户组。 */
+  /**
+   * 改列的展示属性（显隐 / 粘性）——只动版面，不动用户组。
+   *
+   * 先算好 next 再 setColumns，**不在 updater 里发请求**：updater 必须是纯函数，
+   * StrictMode 下它会被调两次，副作用写在里面就会打两次 PUT。
+   */
   function updateColumn(id: string, patch: Partial<RundownColumn>) {
-    setColumns(current => {
-      const next = current.map(column => column.id === id ? { ...column, ...patch } : column);
-      void saveLayout(next);
-      return next;
-    });
+    const next = columns.map(column => column.id === id ? { ...column, ...patch } : column);
+    setColumns(next);
+    void saveLayout(next);
   }
 
   /**
@@ -1369,16 +1371,14 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     const sourceId = dragColumnId.current;
     dragColumnId.current = null;
     if (!sourceId || sourceId === targetId) return;
-    setColumns(current => {
-      const next = [...current];
-      const from = next.findIndex(column => column.id === sourceId);
-      const to = next.findIndex(column => column.id === targetId);
-      if (from < 0 || to < 0) return current;
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      void saveLayout(next);
-      return next;
-    });
+    const from = columns.findIndex(column => column.id === sourceId);
+    const to = columns.findIndex(column => column.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...columns];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setColumns(next);
+    void saveLayout(next);
   }
 
   function entryKey(selection: RundownEntrySelection): string {
