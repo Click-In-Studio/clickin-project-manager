@@ -252,7 +252,17 @@ jobs:
                 },
                 body: JSON.stringify({
                   model: 'claude-sonnet-5',
-                  max_tokens: 5000,
+                  // claude-sonnet-5 是推理模型，省略 thinking 时默认跑 adaptive，
+                  // 而 max_tokens 是 **CoT + 正文的总预算**——不是正文预算。
+                  // 原来的 5000 被思维链吃掉大半，review 正文写到一半就撞顶：
+                  // #288 那次切在 "…or accept and note the deliberate t"。
+                  // 这与 30037e2（蒸馏被思维链饿死）是同一个坑，那次 content 直接
+                  // 空掉还报了错，这次拿到的是**非空但截断**的字符串，一路静默贴出去。
+                  // 16000 是官方对非流式请求的推荐默认值。
+                  max_tokens: 16000,
+                  // 显式写出思考档位：让"这是个推理模型"在代码里可见，
+                  // 而不是靠默认行为。review 要看全 diff，用 high。
+                  output_config: { effort: 'high' },
                   system: systemPrompt,
                   messages: [{ role: 'user', content: userPrompt }],
                 }),
@@ -261,17 +271,22 @@ jobs:
               const data = await res.json();
               const text = (data.content ?? []).find(b => b.type === 'text')?.text;
               if (!text) console.log(`Empty content. stop_reason=${data.stop_reason} content_types=${JSON.stringify((data.content ?? []).map(b => b.type))}`);
-              return text ?? null;
+              // stop_reason 一并带回来：撞预算时正文是**非空但截断**的，光看文本
+              // 分不出来"它只有这么多话说"和"它被切了"。
+              return { text: text ?? null, stopReason: data.stop_reason, usage: data.usage };
             };
 
             let aiResponse;
+            let truncated = false;
             try {
-              aiResponse = await callClaude();
-              if (!aiResponse) {
+              let res = await callClaude();
+              if (!res.text) {
                 console.log('Retrying after empty response…');
-                aiResponse = await callClaude();
+                res = await callClaude();
               }
-              aiResponse = aiResponse ?? '(empty response)';
+              aiResponse = res.text ?? '(empty response)';
+              truncated = res.stopReason === 'max_tokens';
+              console.log(`stop_reason=${res.stopReason} output_tokens=${res.usage?.output_tokens}`);
             } catch (err) {
               console.log(`Anthropic API request failed: ${err.message}`);
               return;
@@ -280,10 +295,23 @@ jobs:
             // ── Post or update comment ─────────────────────────────────────────
             const now = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
             const actionsUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/pr-automation.yml`;
+            // 横幅必须在**正文之前**：这个修复的前提就是"读者会在没察觉截断的
+            // 情况下读完并停下"，把提示放在（可能很长的）截断正文之后，等于重演
+            // 它要解决的那个问题。#289 的 AI review 抓到了这条。
+            const emptyResponse = aiResponse === '(empty response)';
+            const banner =
+              truncated && emptyResponse
+                // 30037e2 那个形态：思维链把预算吃光，正文一个字都没写出来
+                ? '> ⚠️ **模型的思维链吃光了输出预算，正文为空。** 需要提高 `max_tokens` 后用下面的链接重跑。'
+                : truncated
+                ? '> ⚠️ **本次 review 因输出预算截断，下面不是完整意见。** 提高 `max_tokens` 后用下面的链接重跑。'
+                : null;
+
             const body = [
               MARKER,
               '## 🤖 AI Code Review',
               '',
+              ...(banner ? [banner, ''] : []),
               aiResponse,
               '',
               `---`,
