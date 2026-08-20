@@ -76,76 +76,66 @@ async function main() {
       JSON.stringify({ stageDelimOpen: "（", stageDelimClose: "）", pageLayout: "a4", textLayoutMode: "center" }),
     ],
   );
-  // createProduction 自己已经落了 owner 的 production_member 行（#281），这里只补 roles
-  await pool.query(
-    `UPDATE production_member
-     SET roles = ARRAY['制作人','导演','舞台监督','编剧']::text[], status = 'active'
-     WHERE production_id = $1 AND user_id = $2`,
-    [PRODUCTION_ID, user.id],
-  );
+  // 部门与角色不写名字。这个脚本每次跑都是先 DELETE 再 createProduction 重建
+  // demo-misty-harbor，部门树和角色名单就是上一行 applyProductionTemplate 刚灌进去的
+  // 那批——不存在「剧组改过名」的中间状态，按项目自己的定序取用即可。硬写模版当前的
+  // 部门名反而会在模版改动时静默失配。
+  const leafDepts = (await pool.query<{ id: string; name: string }>(
+    `SELECT d.id, d.name
+     FROM production_dept d
+     WHERE d.production_id = $1
+       AND NOT EXISTS (SELECT 1 FROM production_dept c WHERE c.parent_id = d.id)
+     ORDER BY d.display_order, d.name`,
+    [PRODUCTION_ID],
+  )).rows;
+  if (leafDepts.length < 4) throw new Error("建项目的模版没有灌出足够的部门，demo 数据无处安放");
 
+  const projectRoles = (await pool.query<{ name: string }>(
+    // 模版是一个事务灌完的，created_at 全同 → 实际按名字定序。只要是确定的就行，
+    // demo 需要的是「项目里真实存在的几个角色」，不是某几个特定角色。
+    "SELECT name FROM production_role WHERE production_id = $1 AND NOT is_deprecated ORDER BY created_at, name",
+    [PRODUCTION_ID],
+  )).rows.map(row => row.name);
+  if (!projectRoles.length) throw new Error("建项目的模版没有灌出角色名单");
+
+  /** demo 的任务 / 成员按下标引用部门，取项目实际的叶子部门轮转。 */
+  const deptRows = Array.from({ length: 7 }, (_, i) => leafDepts[i % leafDepts.length]);
+
+  for (const dept of deptRows.slice(0, 2)) {
+    await pool.query(
+      `INSERT INTO production_dept_member (production_id, user_id, dept_id, is_poc)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT DO NOTHING`,
+      [PRODUCTION_ID, user.id, dept.id],
+    );
+  }
+
+  // 角色同理按项目名单取，不写死「灯光设计」这类名字
+  const demoMembers = [
+    { id: "30000000-0000-4000-8000-000000000001", name: "陈雨", deptIndex: 2 },
+    { id: "30000000-0000-4000-8000-000000000002", name: "王澜", deptIndex: 3 },
+    { id: "30000000-0000-4000-8000-000000000003", name: "苏禾", deptIndex: 4 },
+    { id: "30000000-0000-4000-8000-000000000004", name: "林默", deptIndex: 6 },
+  ].map((member, index) => ({ ...member, roles: [projectRoles[index % projectRoles.length]] }));
+
+  // owner 的 role 只是显示（权限走 isOwner 旁路），取项目名单的前几个即可。
+  // upsert 而不是 INSERT/UPDATE 二选一：当前 main 的 createProduction 不落 owner 的
+  // production_member 行，fix/owner-not-in-list 落——两种情形下这句都成立。
+  const ownerRoles = projectRoles.slice(0, 4);
+  await pool.query(
+    `INSERT INTO production_member (production_id, user_id, roles, status)
+     VALUES ($1, $2, $3::text[], 'active')
+     ON CONFLICT (production_id, user_id) DO UPDATE
+     SET roles = EXCLUDED.roles, status = EXCLUDED.status`,
+    [PRODUCTION_ID, user.id, ownerRoles],
+  );
   await pool.query(
     `INSERT INTO production_member_role (production_id, user_id, role_id)
      SELECT $1, $2, id FROM production_role
      WHERE production_id = $1 AND name = ANY($3::text[])
      ON CONFLICT DO NOTHING`,
-    [PRODUCTION_ID, user.id, ["制作人", "导演", "舞台监督", "编剧"]],
+    [PRODUCTION_ID, user.id, ownerRoles],
   );
-
-  // 部门：createProduction → applyProductionTemplate 已按项目类型（musical → 戏剧类）
-  // 灌好了一棵五组部门树。这里**不再另建一套平级部门**，否则 demo 项目会出现两个
-  // 「灯光」「演员」「舞美」。做法是按模版里的名字取 id，模版没有的（化妆 / 发型 /
-  // 宣传这类 demo 专用）才补一个顶层部门。
-  const DEMO_DEPTS: readonly (readonly [label: string, templateName: string | null])[] = [
-    ["戏剧构作",   "剧本部门"],
-    ["舞台管理",   "舞台监督组"],
-    ["灯光",       "灯光部"],
-    ["音响",       "音响部"],
-    ["服化道",     "服化部"],
-    ["导演组",     "导演部门"],
-    ["演员",       "演员"],
-    ["舞美",       "舞美设计"],
-    ["道具",       "道具设计"],
-    ["化妆",       null],
-    ["发型",       null],
-    ["服装",       null],
-    ["视频",       "多媒体部"],
-    ["舞台机械",   "舞台机械部"],
-    ["宣传",       null],
-    ["票务与前台", "外场部"],
-    ["制作管理",   "制作管理组"],
-  ];
-
-  const deptRows: [id: string, name: string, order: number][] = [];
-  for (const [index, [label, templateName]] of DEMO_DEPTS.entries()) {
-    const name = templateName ?? label;
-    const found = await pool.query<{ id: string }>(
-      "SELECT id FROM production_dept WHERE production_id = $1 AND name = $2 ORDER BY parent_id NULLS FIRST LIMIT 1",
-      [PRODUCTION_ID, name],
-    );
-    const id = found.rows[0]?.id ?? (await pool.query<{ id: string }>(
-      "INSERT INTO production_dept (production_id, name, display_order) VALUES ($1, $2, $3) RETURNING id",
-      [PRODUCTION_ID, name, 100 + index],
-    )).rows[0].id;
-    deptRows.push([id, name, index + 1]);
-  }
-
-  for (const [id] of deptRows.slice(0, 2)) {
-    await pool.query(
-      `INSERT INTO production_dept_member (production_id, user_id, dept_id, is_poc)
-       VALUES ($1, $2, $3, true)
-       ON CONFLICT DO NOTHING`,
-      [PRODUCTION_ID, user.id, id],
-    );
-  }
-
-  // dept 用 deptRows 的下标，id 在上面按模版名解析出来
-  const demoMembers = [
-    { id: "30000000-0000-4000-8000-000000000001", name: "陈雨", roles: ["灯光设计"], deptIndex: 2 },
-    { id: "30000000-0000-4000-8000-000000000002", name: "王澜", roles: ["音响设计"], deptIndex: 3 },
-    { id: "30000000-0000-4000-8000-000000000003", name: "苏禾", roles: ["服装设计"], deptIndex: 4 },
-    { id: "30000000-0000-4000-8000-000000000004", name: "林默", roles: ["演员"],     deptIndex: 6 },
-  ] as const;
 
   for (const member of demoMembers) {
     await pool.query("INSERT INTO app_user (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [member.id]);
@@ -166,7 +156,7 @@ async function main() {
       `INSERT INTO production_dept_member (production_id, user_id, dept_id, is_poc)
        VALUES ($1,$2,$3,false)
        ON CONFLICT DO NOTHING`,
-      [PRODUCTION_ID, member.id, deptRows[member.deptIndex][0]],
+      [PRODUCTION_ID, member.id, deptRows[member.deptIndex].id],
     );
     await pool.query(
       `INSERT INTO production_member_role (production_id, user_id, role_id)
@@ -342,7 +332,7 @@ async function main() {
       versionId,
     });
     await pool.query("UPDATE production_event SET status = $2 WHERE id = $1", [spec.id, spec.day < 0 ? "completed" : "published"]);
-    await pool.query("INSERT INTO event_participant (id,event_id,user_id,name,department_id,role) VALUES ($1,$2,$3,$4,$5,'participant')", [`demo-participant-${spec.id}`, spec.id, user.id, user.name, deptRows[1][0]]);
+    await pool.query("INSERT INTO event_participant (id,event_id,user_id,name,department_id,role) VALUES ($1,$2,$3,$4,$5,'participant')", [`demo-participant-${spec.id}`, spec.id, user.id, user.name, deptRows[1].id]);
     await pool.query("INSERT INTO event_stage_manager (event_id,user_id,name) VALUES ($1,$2,$3)", [spec.id, user.id, user.name]);
   }
 
@@ -380,26 +370,26 @@ async function main() {
     ["demo-call-costume", "demo-event-costume", 6, 10, 30, "素颜到场，携带基础鞋"],
   ] as const;
   for (const [id, eventId, day, hour, minute, notes] of calls) {
-    await createEventCallTime({ id, eventId, userId: user.id, name: user.name, departmentId: deptRows[1][0], callAt: at(weekStart, day, hour, minute), scheduleItemId: null, notes });
+    await createEventCallTime({ id, eventId, userId: user.id, name: user.name, departmentId: deptRows[1].id, callAt: at(weekStart, day, hour, minute), scheduleItemId: null, notes });
   }
 
   const taskSpecs = [
-    { id: "demo-task-script", eventId: "demo-event-table-read", title: "整理围读后的剧本修改清单", description: "按场次归纳文本、人物动机与节奏问题。", dept: deptRows[0][0], status: "in_progress", days: [0, 2], milestone: "demo-milestone-workshop" },
-    { id: "demo-task-light", eventId: "demo-event-tech", title: "确认灯塔追光位与安全绳", description: "完成追光机位复测并上传现场照片。", dept: deptRows[2][0], status: "pending", days: [3, 4], milestone: "demo-milestone-tech" },
-    { id: "demo-task-costume", eventId: "demo-event-costume", title: "补齐林澈第二套服装配件", description: "核对帽饰、腰带与备用纽扣。", dept: deptRows[4][0], status: "pending", days: [4, 6], milestone: "demo-milestone-workshop" },
-    { id: "demo-task-sound", eventId: "demo-event-tech", title: "导出第二场环境声版本", description: "制作带低频船笛的 B 版供联排比较。", dept: deptRows[3][0], status: "done", days: [1, 3], milestone: "demo-milestone-tech" },
-    { id: "demo-task-letter", eventId: "demo-event-props", title: "制作三版旧信件道具", description: "分别准备排练版、近景版与备用版。", dept: deptRows[4][0], status: "in_progress", days: [0, 3], milestone: "demo-milestone-workshop" },
-    { id: "demo-task-score", eventId: "demo-event-vocal", title: "标记二重唱呼吸点", description: "同步更新钢琴谱与演员谱。", dept: deptRows[0][0], status: "pending", days: [0, 1], milestone: "demo-milestone-workshop" },
-    { id: "demo-task-fog", eventId: "demo-event-cue", title: "确认雾机浓度与触发点", description: "记录三档浓度并确认演员视线安全。", dept: deptRows[2][0], status: "awaiting", days: [8, 12], milestone: "demo-milestone-tech" },
-    { id: "demo-task-radio", eventId: "demo-event-cue", title: "规划无线麦频点表", description: "完成 16 路频点规划与备份频率。", dept: deptRows[3][0], status: "in_progress", days: [7, 12], milestone: "demo-milestone-tech" },
-    { id: "demo-task-quickchange", eventId: "demo-event-dress", title: "测试第二幕快速换装", description: "目标在 95 秒内完成换装与复位。", dept: deptRows[4][0], status: "pending", days: [10, 16], milestone: "demo-milestone-tech" },
-    { id: "demo-task-safety", eventId: "demo-event-safety", title: "整理安全培训签到表", description: "确认全体演职人员完成培训。", dept: deptRows[1][0], status: "pending", days: [8, 10], milestone: "demo-milestone-tech" },
-    { id: "demo-task-preview", eventId: "demo-event-preview", title: "设计预演反馈问卷", description: "涵盖节奏、叙事清晰度与视听体验。", dept: deptRows[0][0], status: "pending", days: [14, 19], milestone: "demo-milestone-premiere" },
-    { id: "demo-task-front", eventId: "demo-event-premiere", title: "确认首演前台动线", description: "核对检票、寄存、迟到观众入场规则。", dept: deptRows[1][0], status: "awaiting", days: [24, 30], milestone: "demo-milestone-premiere" },
-    { id: "demo-task-program", eventId: "demo-event-premiere", title: "终校首演节目册", description: "核对演职员名单、赞助信息与版权声明。", dept: deptRows[0][0], status: "in_progress", days: [20, 28], milestone: "demo-milestone-premiere" },
-    { id: "demo-task-standalone-budget", eventId: null, title: "更新技术合成预算", description: "汇总灯光、音响与耗材追加项。", dept: deptRows[1][0], status: "pending", days: [5, 9], milestone: "demo-milestone-tech" },
-    { id: "demo-task-standalone-cast", eventId: null, title: "确认替补演员排班", description: "完成首演周替补与 understudy 排班。", dept: deptRows[0][0], status: "in_progress", days: [11, 15], milestone: "demo-milestone-premiere" },
-    { id: "demo-task-standalone-archive", eventId: null, title: "建立首演周归档目录", description: "创建日报、照片、录像与问题单目录。", dept: deptRows[1][0], status: "pending", days: [22, 27], milestone: "demo-milestone-premiere" },
+    { id: "demo-task-script", eventId: "demo-event-table-read", title: "整理围读后的剧本修改清单", description: "按场次归纳文本、人物动机与节奏问题。", dept: deptRows[0].id, status: "in_progress", days: [0, 2], milestone: "demo-milestone-workshop" },
+    { id: "demo-task-light", eventId: "demo-event-tech", title: "确认灯塔追光位与安全绳", description: "完成追光机位复测并上传现场照片。", dept: deptRows[2].id, status: "pending", days: [3, 4], milestone: "demo-milestone-tech" },
+    { id: "demo-task-costume", eventId: "demo-event-costume", title: "补齐林澈第二套服装配件", description: "核对帽饰、腰带与备用纽扣。", dept: deptRows[4].id, status: "pending", days: [4, 6], milestone: "demo-milestone-workshop" },
+    { id: "demo-task-sound", eventId: "demo-event-tech", title: "导出第二场环境声版本", description: "制作带低频船笛的 B 版供联排比较。", dept: deptRows[3].id, status: "done", days: [1, 3], milestone: "demo-milestone-tech" },
+    { id: "demo-task-letter", eventId: "demo-event-props", title: "制作三版旧信件道具", description: "分别准备排练版、近景版与备用版。", dept: deptRows[4].id, status: "in_progress", days: [0, 3], milestone: "demo-milestone-workshop" },
+    { id: "demo-task-score", eventId: "demo-event-vocal", title: "标记二重唱呼吸点", description: "同步更新钢琴谱与演员谱。", dept: deptRows[0].id, status: "pending", days: [0, 1], milestone: "demo-milestone-workshop" },
+    { id: "demo-task-fog", eventId: "demo-event-cue", title: "确认雾机浓度与触发点", description: "记录三档浓度并确认演员视线安全。", dept: deptRows[2].id, status: "awaiting", days: [8, 12], milestone: "demo-milestone-tech" },
+    { id: "demo-task-radio", eventId: "demo-event-cue", title: "规划无线麦频点表", description: "完成 16 路频点规划与备份频率。", dept: deptRows[3].id, status: "in_progress", days: [7, 12], milestone: "demo-milestone-tech" },
+    { id: "demo-task-quickchange", eventId: "demo-event-dress", title: "测试第二幕快速换装", description: "目标在 95 秒内完成换装与复位。", dept: deptRows[4].id, status: "pending", days: [10, 16], milestone: "demo-milestone-tech" },
+    { id: "demo-task-safety", eventId: "demo-event-safety", title: "整理安全培训签到表", description: "确认全体演职人员完成培训。", dept: deptRows[1].id, status: "pending", days: [8, 10], milestone: "demo-milestone-tech" },
+    { id: "demo-task-preview", eventId: "demo-event-preview", title: "设计预演反馈问卷", description: "涵盖节奏、叙事清晰度与视听体验。", dept: deptRows[0].id, status: "pending", days: [14, 19], milestone: "demo-milestone-premiere" },
+    { id: "demo-task-front", eventId: "demo-event-premiere", title: "确认首演前台动线", description: "核对检票、寄存、迟到观众入场规则。", dept: deptRows[1].id, status: "awaiting", days: [24, 30], milestone: "demo-milestone-premiere" },
+    { id: "demo-task-program", eventId: "demo-event-premiere", title: "终校首演节目册", description: "核对演职员名单、赞助信息与版权声明。", dept: deptRows[0].id, status: "in_progress", days: [20, 28], milestone: "demo-milestone-premiere" },
+    { id: "demo-task-standalone-budget", eventId: null, title: "更新技术合成预算", description: "汇总灯光、音响与耗材追加项。", dept: deptRows[1].id, status: "pending", days: [5, 9], milestone: "demo-milestone-tech" },
+    { id: "demo-task-standalone-cast", eventId: null, title: "确认替补演员排班", description: "完成首演周替补与 understudy 排班。", dept: deptRows[0].id, status: "in_progress", days: [11, 15], milestone: "demo-milestone-premiere" },
+    { id: "demo-task-standalone-archive", eventId: null, title: "建立首演周归档目录", description: "创建日报、照片、录像与问题单目录。", dept: deptRows[1].id, status: "pending", days: [22, 27], milestone: "demo-milestone-premiere" },
   ] as const;
   for (const task of taskSpecs) {
     await createEventTechReq({
