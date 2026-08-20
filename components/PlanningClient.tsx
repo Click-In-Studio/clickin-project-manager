@@ -149,6 +149,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
             title: title.trim(),
             startTime: start,
             endTime: end,
+            // 选择器在 task 模式下已是单选，这里取到的就是用户选的那一个
             departmentId: allMembers ? null : [...departmentIds][0] ?? null,
             eventId: taskEventId || null,
             description: "由项目日历快捷创建。",
@@ -187,7 +188,12 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
           {([['event', '事件', '自动生成执行日程'], ['task', '任务', '同步进入任务与甘特']] as const).map(([value, label, hint]) => {
             const active = kind === value;
             return (
-              <button key={value} type="button" onClick={() => setKind(value)} style={{ border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`, borderRadius: 9, padding: "10px 11px", background: active ? "var(--ink)" : "var(--paper)", color: active ? "#fff" : "var(--ink)", textAlign: "left", cursor: "pointer" }}>
+              <button key={value} type="button" onClick={() => {
+                setKind(value);
+                // event（多选）切到 task（单选）时把已选收敛成一个，
+                // 否则会带着一串选中项进来但只有一个生效
+                if (value === "task") setDepartmentIds(current => current.size > 1 ? new Set([[...current][0]]) : current);
+              }} style={{ border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`, borderRadius: 9, padding: "10px 11px", background: active ? "var(--ink)" : "var(--paper)", color: active ? "#fff" : "var(--ink)", textAlign: "left", cursor: "pointer" }}>
                 <b style={{ display: "block", fontSize: 12 }}>{label}</b>
                 <small style={{ display: "block", marginTop: 3, color: active ? "#bdcbc7" : "var(--muted)", fontSize: 9 }}>{hint}</small>
               </button>
@@ -222,7 +228,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
           )}
           <div>
             <span style={{ display: "block", marginBottom: 5, fontSize: 11, color: "var(--muted)" }}>
-              {kind === "event" ? "参与部门（可多选）" : "负责部门（任务以第一个选中部门为主责）"}
+              {kind === "event" ? "参与部门（可多选）" : "责任部门（任务的责任方唯一，只能选一个）"}
             </span>
             <div className={styles.multiPicker}>
               <button
@@ -242,6 +248,12 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
                     onClick={() => {
                       setAllMembers(false);
                       setDepartmentIds(current => {
+                        // 任务的责任主体是**单值**（POC 从它推），所以这里是单选：
+                        // 让用户多选却只取第一个，等于静默丢弃他的选择
+                        if (kind === "task") {
+                          if (current.has(dept.id)) { setAllMembers(true); return new Set(); }
+                          return new Set([dept.id]);
+                        }
                         const next = new Set(current);
                         if (next.has(dept.id)) next.delete(dept.id); else next.add(dept.id);
                         if (next.size === 0) setAllMembers(true);
@@ -1416,7 +1428,10 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       if (!task?.effectiveStartTime || !task.effectiveEndTime) return;
       const startTime = isoAtMinutes(task.effectiveStartTime, minuteOfDay);
       const endTime = new Date(new Date(startTime).getTime() + dragging.duration * 60_000).toISOString();
-      await saveTaskTime(task, startTime, endTime, lane.departmentIds[0] ?? task.departmentId);
+      // 拖拽**只改时间**。原来还顺手把 departmentId 改成 lane.departmentIds[0]——
+      // 那是 POC 的来源，用一个"挪一下位置"的轻手势改责任方是事故；何况取 [0] 会
+      // 在列有多个部门时静默丢弃其余。落到哪一列已经由 placements 记下了。
+      await saveTaskTime(task, startTime, endTime);
     }
   }
 
@@ -1463,13 +1478,14 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     setItems(current => current.map(entry => entry.id === item.id ? { ...entry, startTime, endTime } : entry));
   }
 
-  async function saveTaskTime(task: EventTechReq, startTime: string, endTime: string, departmentId = task.departmentId) {
+  /** 只改时间。责任方（department_id / group_id）不在这里动——见 dropEntryAt 的注释。 */
+  async function saveTaskTime(task: EventTechReq, startTime: string, endTime: string) {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startTime, endTime, departmentId }),
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startTime, endTime }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error ?? "任务时间保存失败");
-    setEventTasks(current => current.map(entry => entry.id === task.id ? { ...entry, departmentId, startTime, endTime, effectiveStartTime: startTime, effectiveEndTime: endTime } : entry));
+    setEventTasks(current => current.map(entry => entry.id === task.id ? { ...entry, startTime, endTime, effectiveStartTime: startTime, effectiveEndTime: endTime } : entry));
   }
 
   async function saveSelectedEntry(selection: RundownEntrySelection, draft: { title: string; description: string; start: string; end: string; location: string; itemType: string; status: string; laneIds: string[]; color: string }) {
@@ -1479,28 +1495,51 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     setEntryColors(nextColors);
     setEntryLaneOverrides(nextLanes);
     void savePlacements(nextColors, nextLanes);
+    // 选中的列拆成两类：绑用户组的走组通道，纯部门派生的（"全部"视图的兜底列）
+    // 才落 departmentIds。原来一律 flatMap(lane.departmentIds) 压扁成部门，有两个
+    // 问题：组里的**个人成员**（那个助理舞监、几个 runner）从头到尾没参与计算，
+    // 而且 setScheduleItemDepartments 是全量覆盖，事项原有的部门会被顺手删掉。
+    const chosen = draft.laneIds.map(id => lanes.find(lane => lane.id === id)).filter((l): l is RundownColumn => !!l);
+    const chosenGroupIds = [...new Set(chosen.map(l => l.groupId).filter((g): g is string => !!g))];
+    const chosenDeptIds = [...new Set(chosen.filter(l => !l.groupId).flatMap(l => l.departmentIds))];
+
     if (selection.kind === "item") {
       const item = items.find(entry => entry.id === selection.id);
       if (!item) return;
-      const selectedDepartments = [...new Set(draft.laneIds.flatMap(id => lanes.find(lane => lane.id === id)?.departmentIds ?? []))];
+      // 没有任何纯部门列被选中时不动 departmentIds——避免"选了两个组"把事项原有的
+      // 部门关联清空
+      const deptPatch = chosenDeptIds.length ? { departmentIds: chosenDeptIds } : {};
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draft.title, notes: draft.description, startTime: draft.start, endTime: draft.end, location: draft.location, itemType: draft.itemType, departmentIds: selectedDepartments }),
+        body: JSON.stringify({ title: draft.title, notes: draft.description, startTime: draft.start, endTime: draft.end, location: draft.location, itemType: draft.itemType, ...deptPatch }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "日程保存失败");
-      setItems(current => current.map(entry => entry.id === item.id ? { ...entry, title: draft.title, notes: draft.description, startTime: draft.start, endTime: draft.end, location: draft.location, itemType: draft.itemType, departmentIds: selectedDepartments } : entry));
+
+      const groupRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}/groups`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupIds: chosenGroupIds }),
+      });
+      if (!groupRes.ok) throw new Error((await groupRes.json().catch(() => ({}))).error ?? "人员组绑定失败");
+
+      setItems(current => current.map(entry => entry.id === item.id ? { ...entry, title: draft.title, notes: draft.description, startTime: draft.start, endTime: draft.end, location: draft.location, itemType: draft.itemType, ...(chosenDeptIds.length ? { departmentIds: chosenDeptIds } : {}) } : entry));
     } else {
       const task = eventTasks.find(entry => entry.id === selection.id);
       if (!task) return;
-      const departmentId = draft.laneIds.flatMap(id => lanes.find(lane => lane.id === id)?.departmentIds ?? [])[0] ?? task.departmentId;
+      // task 的责任主体是**单值**（POC 必须唯一）。选了正好一个组 → 绑组；
+      // 选了正好一个纯部门列且只带一个部门 → 绑部门；其余情况（多选、混选）
+      // 不猜，保持原样——猜错等于改了责任方。
+      const subject =
+        chosenGroupIds.length === 1 && chosenDeptIds.length === 0 ? { groupId: chosenGroupIds[0] }
+        : chosenGroupIds.length === 0 && chosenDeptIds.length === 1 ? { departmentId: chosenDeptIds[0] }
+        : {};
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draft.title, description: draft.description, startTime: draft.start, endTime: draft.end, status: draft.status, departmentId }),
+        body: JSON.stringify({ title: draft.title, description: draft.description, startTime: draft.start, endTime: draft.end, status: draft.status, ...subject }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "任务保存失败");
-      setEventTasks(current => current.map(entry => entry.id === task.id ? { ...entry, title: draft.title, description: draft.description, status: draft.status, departmentId, startTime: draft.start, endTime: draft.end, effectiveStartTime: draft.start, effectiveEndTime: draft.end } : entry));
+      setEventTasks(current => current.map(entry => entry.id === task.id ? { ...entry, ...data.task, title: draft.title, description: draft.description, status: draft.status, startTime: draft.start, endTime: draft.end, effectiveStartTime: draft.start, effectiveEndTime: draft.end } : entry));
     }
   }
 

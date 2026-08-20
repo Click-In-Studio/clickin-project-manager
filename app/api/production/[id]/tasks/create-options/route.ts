@@ -6,6 +6,7 @@ import { getProductionPermissionContext, listProductionMembersWithRoles, listMil
 import { listProductionEvents } from "@/lib/event-db";
 import { listProductionDepts } from "@/lib/dept-db";
 import { filterDraftVisibleEvents } from "@/lib/event-permissions";
+import { listEventGroups } from "@/lib/event-group-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -86,8 +87,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       requiresPocDept: !f.canAttach,
     }));
 
+  // 用户组同样是 task 的责任主体（部门 | 用户组，见 lib/task-poc.ts）。不给的话
+  // 任务抽屉的责任方下拉只有部门，一条绑组的 task 在那里显示成「暂不指定」——
+  // 用户看不到真实责任方，一点保存就会把它清掉。
+  const userGroups = (await listEventGroups(productionId)).map(g => ({ id: g.id, name: g.name }));
+
   return Response.json({
     pocDepts,
+    userGroups,
     members,
     depts: pickerDepts,
     canAssignAnyone,

@@ -88,8 +88,29 @@ type CreateOptions = {
   canAssignAnyone: boolean;
   milestones: { id: string; name: string; endDate: string }[];
   events: { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[];
+  /** 用户组也是 task 的责任主体（部门 | 用户组，二选一） */
+  userGroups: { id: string; name: string }[];
   canCreateStandalone: boolean;
 };
+
+/**
+ * 抽屉里的「责任方」是**一个**下拉，值域是部门 ∪ 用户组，用前缀区分。
+ * task 的责任主体必须唯一（POC 从它推），所以不能做成两个各自可选的字段。
+ */
+type SubjectValue = `dept:${string}` | `group:${string}` | "";
+
+function subjectValueOf(task: { departmentId: string | null; groupId: string | null }): SubjectValue {
+  if (task.departmentId) return `dept:${task.departmentId}`;
+  if (task.groupId) return `group:${task.groupId}`;
+  return "";
+}
+
+/** 下拉值 → PATCH body 的主体字段。空 = 清空主体（两支都置 null）。 */
+function subjectBody(v: SubjectValue): { departmentId: string | null; groupId: string | null } {
+  if (v.startsWith("dept:")) return { departmentId: v.slice(5), groupId: null };
+  if (v.startsWith("group:")) return { departmentId: null, groupId: v.slice(6) };
+  return { departmentId: null, groupId: null };
+}
 
 const FIELD_LABEL: React.CSSProperties = {
   display: "block", marginBottom: 5, fontSize: 10, fontWeight: 700,
@@ -509,7 +530,7 @@ export default function ProductionTasksClient({
   const [drawerStart, setDrawerStart] = useState("");
   const [drawerEnd, setDrawerEnd] = useState("");
   const [drawerEventId, setDrawerEventId] = useState("");
-  const [drawerDeptId, setDrawerDeptId] = useState("");
+  const [drawerSubject, setDrawerSubject] = useState<SubjectValue>("");
   const [drawerOptions, setDrawerOptions] = useState<CreateOptions | null>(null);
   const [drawerError, setDrawerError] = useState<string | null>(null);
 
@@ -592,7 +613,7 @@ export default function ProductionTasksClient({
     setDrawerStart(isoToDatetimeLocal(task.startTime));
     setDrawerEnd(isoToDatetimeLocal(task.endTime));
     setDrawerEventId(task.eventId ?? "");
-    setDrawerDeptId(task.departmentId ?? "");
+    setDrawerSubject(subjectValueOf(task));
     setDrawerError(null);
     setDrawerEditing(true);
     if (!drawerOptions) {
@@ -618,13 +639,17 @@ export default function ProductionTasksClient({
           startTime: drawerStart ? datetimeLocalToIso(drawerStart) : null,
           endTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : null,
           eventId: drawerEventId || null,
-          departmentId: drawerDeptId || null,
+          ...subjectBody(drawerSubject),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setDrawerError(data.error ?? "保存失败"); return; }
       const eventTitle = drawerOptions?.events.find(event => event.id === drawerEventId)?.title ?? null;
-      const departmentName = drawerOptions?.depts.find(dept => dept.id === drawerDeptId)?.name ?? null;
+      const sub = subjectBody(drawerSubject);
+      const departmentName = sub.departmentId
+        ? drawerOptions?.depts.find(dept => dept.id === sub.departmentId)?.name ?? null : null;
+      const groupName = sub.groupId
+        ? drawerOptions?.userGroups.find(g => g.id === sub.groupId)?.name ?? null : null;
       const patch: ProductionTechReqEntry = {
         ...task,
         ...data.task,
@@ -632,8 +657,10 @@ export default function ProductionTasksClient({
         description: drawerDescription,
         eventId: drawerEventId || null,
         eventTitle,
-        departmentId: drawerDeptId || null,
+        departmentId: sub.departmentId,
         departmentName,
+        groupId: sub.groupId,
+        groupName,
         startTime: drawerStart ? datetimeLocalToIso(drawerStart) : null,
         endTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : null,
         effectiveStartTime: drawerStart ? datetimeLocalToIso(drawerStart) : data.task?.effectiveStartTime ?? task.effectiveStartTime,
@@ -1181,10 +1208,17 @@ export default function ProductionTasksClient({
                   </select>
                 </label>
                 <label>
-                  <span style={FIELD_LABEL}>负责部门</span>
-                  <select value={drawerDeptId} onChange={e => setDrawerDeptId(e.target.value)} style={FIELD_INPUT}>
+                  <span style={FIELD_LABEL}>责任方</span>
+                  <select value={drawerSubject} onChange={e => setDrawerSubject(e.target.value as SubjectValue)} style={FIELD_INPUT}>
                     <option value="">暂不指定</option>
-                    {(drawerOptions?.depts ?? []).map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
+                    <optgroup label="部门">
+                      {(drawerOptions?.depts ?? []).map(dept => <option key={dept.id} value={`dept:${dept.id}`}>{dept.name}</option>)}
+                    </optgroup>
+                    {(drawerOptions?.userGroups ?? []).length > 0 && (
+                      <optgroup label="用户组">
+                        {(drawerOptions?.userGroups ?? []).map(g => <option key={g.id} value={`group:${g.id}`}>{g.name}</option>)}
+                      </optgroup>
+                    )}
                   </select>
                 </label>
                 {drawerError && <p style={{ margin: 0, color: "var(--danger)", fontSize: 11 }}>{drawerError}</p>}
