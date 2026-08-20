@@ -745,11 +745,12 @@ function genVersionId(): string {
 }
 
 /** Creates the very first empty version for a brand-new production. */
-export async function createInitialVersion(productionId: string): Promise<string> {
+/** 传 external ＝调用方已经在事务里了，就用它的连接，BEGIN/COMMIT/release 全归调用方。 */
+export async function createInitialVersion(
+  productionId: string, external?: PoolClient,
+): Promise<string> {
   const versionId = genVersionId();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
+  const write = async (client: PoolClient) => {
     await client.query(
       "INSERT INTO version (id, production_id, name, status) VALUES ($1, $2, '初稿', 'editing')",
       [versionId, productionId]
@@ -758,6 +759,15 @@ export async function createInitialVersion(productionId: string): Promise<string
       "UPDATE production SET active_version_id = $1 WHERE id = $2",
       [versionId, productionId]
     );
+  };
+  if (external) {
+    await write(external);
+    return versionId;
+  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await write(client);
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2481,24 +2491,47 @@ export async function createProduction(
   productionType?: string,
   productionTypeLabel?: string | null,
 ): Promise<void> {
-  const pool = getPool();
-  await pool.query(
-    "INSERT INTO production (id, name, owner_id, type, type_label, script_config) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
-    [
-      id,
-      name,
-      ownerUserId,
-      productionType ?? null,
-      productionTypeLabel ?? null,
-      JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
-    ],
-  );
-  await createInitialVersion(id);
-  // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
-  // 策略档位、审批 TTL——统一由项目模版按类型灌入，整体一个事务。
-  // 见 lib/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
+  // 建项目全程一个事务：production 行、owner 的成员行、初始 version、模版灌入，
+  // 要么全成要么全不成。以前是三段各自提交（裸 pool.query + createInitialVersion 自己
+  // 一个事务 + 模版自己一个事务），中途抛错就在库里留一个没有 version、没有模版的半成品
+  // 项目——路由 catch 后回 500，用户以为没建成，项目却还在。以前这种残骸只有 admin
+  // 的全量列表看得见，创建放开（#281）+ owner 可见（#282）之后它会直接出现在建项目
+  // 的人自己的列表里，必须一次做干净。
   const { applyProductionTemplate } = await import("./production-template");
-  await applyProductionTemplate(id, productionType ?? null);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "INSERT INTO production (id, name, owner_id, type, type_label, script_config) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+      [
+        id,
+        name,
+        ownerUserId,
+        productionType ?? null,
+        productionTypeLabel ?? null,
+        JSON.stringify({ useRehearsalMarks: usesRehearsalMarksByDefault(productionType) }),
+      ],
+    );
+    // owner 同时落一行 production_member：建项目的人当然在项目里。不给 roles——owner 的
+    // 权限走 isOwner 旁路（见 hasEffectiveGrant 族与 requireAdminAccess），这行只管「在不在
+    // 项目里」，不碰自动授权。以前建项目的人恒是 admin（列表走全量分支），少这行看不出来；
+    // 创建放开后（#281）owner 建完就从自己的项目列表里消失了。
+    await client.query(
+      "INSERT INTO production_member (production_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [id, ownerUserId],
+    );
+    await createInitialVersion(id, client);
+    // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
+    // 策略档位、审批 TTL——统一由项目模版按类型灌入。
+    // 见 lib/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
+    await applyProductionTemplate(id, productionType ?? null, client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
@@ -2564,10 +2597,14 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
       `SELECT ${PROD_COLS} FROM production ORDER BY ${orderBy}`
     );
   } else {
+    // owner 单列一条可见路径：owner 不必是成员（getProductionPermissionContext 就是
+    // isAdmin/isOwner/isMember 三取一），内连接 production_member 会把「owner 但没有成员行」
+    // 的项目整个藏掉。LEFT JOIN + OR owner_id 才与权限判定同口径。
     res = await getPool().query<ProductionRow>(
       `SELECT ${PROD_COLS_P} FROM production p
-       JOIN production_member pm ON pm.production_id = p.id
-       WHERE pm.user_id = $1 ORDER BY ${orderBy}`,
+       LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
+       WHERE pm.user_id IS NOT NULL OR p.owner_id = $1
+       ORDER BY ${orderBy}`,
       [opts.userId]
     );
   }
@@ -2612,7 +2649,7 @@ export async function listMyProductionsWithRoles(
             ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
-     WHERE ($2 OR pm.user_id IS NOT NULL)
+     WHERE ($2 OR pm.user_id IS NOT NULL OR p.owner_id = $1)
      ORDER BY ${orderBy}`,
     [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
   );

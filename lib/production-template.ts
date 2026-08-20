@@ -258,20 +258,26 @@ export function validateAllTemplates(): string[] {
 export async function applyProductionTemplate(
   productionId: string,
   productionType: string | null,
-  pool: Pool = getPool(),
+  db: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  await applyTemplate(productionId, resolveTemplate(productionType), productionType, pool);
+  await applyTemplate(productionId, resolveTemplate(productionType), productionType, db);
 }
 
 /** 应用**指定**模版。建项目走上面那个（类型是模版的唯一入口）；本函数供测试
- *  与将来可能的运维入口显式指定模版用。 */
+ *  与将来可能的运维入口显式指定模版用。
+ *
+ *  传 Pool（默认）＝自己开一个事务做完；传 PoolClient ＝调用方已经在事务里了，就用它，
+ *  BEGIN/COMMIT/release 全归调用方——createProduction 靠这个把「建行＋灌模版」并进
+ *  同一个事务，失败不留半成品项目。 */
 export async function applyTemplate(
   productionId: string,
   template: ProductionTemplate,
   productionType: string | null = null,
-  pool: Pool = getPool(),
+  db: Pool | PoolClient = getPool(),
 ): Promise<void> {
-  const client = await pool.connect();
+  // Pool 有 connect、PoolClient 有 release——用后者区分，前者在两种类型上都存在。
+  const joined = "release" in db;
+  const client = joined ? (db as PoolClient) : await (db as Pool).connect();
   const ids = new Map<string, Map<string, string>>();
   const ctx: SeedContext = {
     productionId,
@@ -284,6 +290,11 @@ export async function applyTemplate(
       ids.set(ns, bucket);
     },
   };
+  if (joined) {
+    // 已在调用方的事务里：直接写，出错让它冒泡由调用方回滚。
+    for (const seeder of SEEDERS) await seeder.seed(template, ctx);
+    return;
+  }
   try {
     await client.query("BEGIN");
     for (const seeder of SEEDERS) await seeder.seed(template, ctx);
