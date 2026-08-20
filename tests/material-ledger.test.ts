@@ -9,6 +9,9 @@
  *   6. 编号在剧组内唯一，跨剧组不管
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { NextRequest } from "next/server";
+import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { PATCH as patchMaterial } from "@/app/api/production/[id]/materials/[materialId]/route";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
@@ -204,5 +207,46 @@ describe("列表与删除", () => {
 
     await deleteMaterial(m.id, prodId);
     expect(await getMaterial(m.id, prodId)).toBeNull();
+  });
+});
+
+describe("7. PATCH 的名字校验与 POST 对称", () => {
+  // 与财务预算科目同一处毛病、同一处修法：db 层 trim 之后空串照落，
+  // 拦截点只能在路由。见 tests/finance.test.ts 的同名 describe。
+  function req(userId: string, body: unknown) {
+    const r = new NextRequest("http://localhost/api/x", {
+      method: "PATCH", body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+    r.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return r;
+  }
+
+  it("name 为空串 / 纯空白都被拒，且物料名不变", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `M${shortId()}`, name: `改名物料${shortId()}`,
+      subject: null, createdBy: ownerId,
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, materialId: m.id }) });
+
+    for (const bad of ["", "   "]) {
+      const res = await patchMaterial(req(ownerId, { name: bad }), ctx());
+      expect(res.status).toBe(400);
+    }
+    expect((await getMaterial(m.id, prodId))?.name).toBe(m.name);
+  });
+
+  it("正常改名仍然通得过", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `M${shortId()}`, name: `原名${shortId()}`,
+      subject: null, createdBy: ownerId,
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, materialId: m.id }) });
+    const newName = `新名${shortId()}`;
+    const res = await patchMaterial(req(ownerId, { name: newName }), ctx());
+    expect(res.status).toBe(200);
+    expect((await getMaterial(m.id, prodId))?.name).toBe(newName);
   });
 });

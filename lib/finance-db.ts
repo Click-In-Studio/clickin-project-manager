@@ -70,6 +70,15 @@ export type Expense = {
   createdAt: string;
 };
 
+/**
+ * 金额的线格式：最多 12 位整数 + 最多两位小数，非负。
+ *
+ * 放在这里而不是各路由各写一份——三个入口（建科目 / 改科目 / 建支出）本来就抄了三遍，
+ * 抄本之间一旦漂移，就会出现「这个口能存、那个口存不进」的怪事，而两边都不报错。
+ * 与 NUMERIC(14,2) 对齐：12 位整数 + 2 位小数 = 14。
+ */
+export const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
+
 export class FinanceError extends Error {
   constructor(
     readonly reason: "duplicate_name" | "no_approver" | "conflict" | "not_pending" | "forward_only",

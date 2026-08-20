@@ -4,11 +4,11 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getEventDepartment } from "@/lib/event-db";
 import {
+  AMOUNT_RE,
   deleteBudgetCategory, FinanceError, getBudgetCategory, updateBudgetCategory,
 } from "@/lib/finance-db";
 
 type Ctx = { params: Promise<{ id: string; categoryId: string }> };
-const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id: productionId, categoryId } = await ctx.params;
@@ -25,6 +25,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = (await req.json()) as {
     name?: unknown; amount?: unknown; deptId?: unknown; orderIndex?: unknown; notes?: unknown;
   };
+  // 给了 name 就必须是非空的。db 层只 trim 不拒，DDL 只有 NOT NULL——
+  // 少了这道，PATCH {name:"   "} 会静静落成一个空名科目，而 POST 明明是拦的
+  if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim()))
+    return Response.json({ error: "科目名不能为空" }, { status: 400 });
   if (body.amount !== undefined && !AMOUNT_RE.test(String(body.amount)))
     return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
   if (typeof body.deptId === "string" && body.deptId && !(await getEventDepartment(body.deptId, productionId)))

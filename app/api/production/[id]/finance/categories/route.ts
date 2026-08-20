@@ -3,12 +3,11 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getEventDepartment } from "@/lib/event-db";
-import { createBudgetCategory, FinanceError, listBudgetCategories } from "@/lib/finance-db";
+import { AMOUNT_RE, createBudgetCategory, FinanceError, listBudgetCategories } from "@/lib/finance-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 /** 金额只接受「最多两位小数的非负数」字符串——不过 JS number，避免精度丢失。 */
-const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
 
 /**
  * GET — 预算科目（含各科目已批准支出的合计）。

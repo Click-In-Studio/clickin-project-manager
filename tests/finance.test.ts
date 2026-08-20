@@ -11,6 +11,9 @@
  *   8. 删科目不连坐删支出（已发生的钱不因整理科目表而消失）
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { NextRequest } from "next/server";
+import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { PATCH as patchCategory } from "@/app/api/production/[id]/finance/categories/[categoryId]/route";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
@@ -322,5 +325,47 @@ describe("同名科目与列表口径", () => {
     expect((await listExpenses(other)).length).toBe(0);
     expect((await listExpenses(prodId)).length).toBeGreaterThan(0);
     await cleanupProduction(other).catch(() => {});
+  });
+});
+
+describe("10. PATCH 的名字校验与 POST 对称", () => {
+  // db 层只 trim 不拒、DDL 只有 NOT NULL，所以空名唯一的拦截点在路由。
+  // POST 拦了、PATCH 没拦 = 同一个字段两个口两套规矩，从 UI 上看就是
+  // 「新建时不让我留空，改的时候却让我改成空的」。
+  function req(userId: string, body: unknown) {
+    const r = new NextRequest("http://localhost/api/x", {
+      method: "PATCH", body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+    r.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return r;
+  }
+
+  it("name 为空串 / 纯空白都被拒，且科目名不变", async () => {
+    const cat = await createBudgetCategory({
+      productionId: prodId, name: `改名科目${shortId()}`, amount: "100.00", createdBy: ownerId,
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, categoryId: cat.id }) });
+
+    for (const bad of ["", "   "]) {
+      const res = await patchCategory(req(ownerId, { name: bad }), ctx());
+      expect(res.status).toBe(400);
+    }
+    // 名字确实没被动过
+    const after = (await listBudgetCategories(prodId)).find(c => c.id === cat.id);
+    expect(after?.name).toBe(cat.name);
+  });
+
+  it("正常改名仍然通得过（别把门焊死了）", async () => {
+    const cat = await createBudgetCategory({
+      productionId: prodId, name: `原名${shortId()}`, amount: "1.00", createdBy: ownerId,
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, categoryId: cat.id }) });
+    const newName = `新名${shortId()}`;
+    const res = await patchCategory(req(ownerId, { name: newName }), ctx());
+    expect(res.status).toBe(200);
+    expect((await listBudgetCategories(prodId)).find(c => c.id === cat.id)?.name).toBe(newName);
   });
 });

@@ -3,11 +3,11 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import {
+  AMOUNT_RE,
   FinanceError, getBudgetCategory, listExpenses, submitExpense,
 } from "@/lib/finance-db";
 
 type Ctx = { params: Promise<{ id: string }> };
-const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
 
 /**
  * GET — 支出列表。
