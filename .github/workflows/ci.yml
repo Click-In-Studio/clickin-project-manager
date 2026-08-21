@@ -38,7 +38,12 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector 官方镜像 = postgres:16 + vector 扩展（agent 记忆索引需要）。
+        # 版本**钉死 0.6.0** 与服务器 apt 的 postgresql-16-pgvector 0.6.0 对齐
+        # ——浮动 tag（:pg16）会跟最新版走，0.7+ 特性（halfvec/迭代扫描等）
+        # 混进 SQL 时 CI 照样绿、上线才炸（review #297 finding 1）。
+        # 服务器升级 pgvector 时同步改这里。
+        image: pgvector/pgvector:0.6.0-pg16
         env:
           POSTGRES_USER: script_editor
           POSTGRES_PASSWORD: testpassword

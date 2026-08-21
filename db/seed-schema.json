@@ -28,6 +28,208 @@
       "default": "now()"
     }
   ],
+  "agent_memory_chunk": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "scope_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "scope_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "text",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "text_tokens",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "embedding",
+      "type": "USER-DEFINED",
+      "nullable": true
+    },
+    {
+      "column": "importance",
+      "type": "smallint",
+      "nullable": true
+    },
+    {
+      "column": "triggers",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "origin_class",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "session_kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "observed_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "supersedes_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "author_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_embedding_cache": [
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "embedding",
+      "type": "USER-DEFINED",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_index_meta": [
+    {
+      "column": "id",
+      "type": "smallint",
+      "nullable": false,
+      "default": "1"
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dim",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_recall_log": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "chunk_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "query_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "ai_usage": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tokens",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "announcement_read": [
     {
       "column": "announcement_id",

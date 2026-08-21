@@ -94,6 +94,32 @@ export function buildMcpServer(): McpServer {
     });
   }
 
+  // my.memory_search 单独注册（唯一带 query 入参的 my.* 工具）。
+  // 检索面语义（MindWeave《OpenClaw记忆检索机制调研与移植设计》§4.3）：
+  // 只搜该用户自己的记忆（scope='user'）；episodic 只可检索、永不自动注入。
+  // fail-closed：embedding 供应商异常时明确报不可用，不静默退化。
+  s.registerTool("my.memory_search", {
+    description:
+      `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——注入的记忆摘要只覆盖精粹与最近几天，更早的内容必须靠本工具检索。${MY_SCOPE_NOTE}`,
+    inputSchema: {
+      query: z.string().min(1).describe("检索词（自然语言即可，支持语义匹配；也可用人名/项目名/关键词精确检索）"),
+      ...callerShape,
+    },
+    annotations: READ_ONLY,
+  }, async ({ query, _caller_user_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    const { searchMemory, formatSearchResult, MemoryUnavailableError } = await import("../agent-memory/search");
+    try {
+      const result = await searchMemory(_caller_user_id, query);
+      return { content: [{ type: "text" as const, text: formatSearchResult(result, query) }] };
+    } catch (err) {
+      if (err instanceof MemoryUnavailableError) {
+        return { content: [{ type: "text" as const, text: err.message }] };
+      }
+      throw err;
+    }
+  });
+
   // ─── production.* 项目工具（与 my.* 的语义分界）─────────────────────────
   // 权限门在前：非成员 → 明确"权限被拒绝"（不是空结果）；仅在关联制作的
   // 会话可用（_caller_production_id 由插件按 sessionKey 覆写，个人会话
@@ -457,7 +483,13 @@ export function startMcpServer(): void {
     }
     try {
       const { appendRunRecord } = await import("../agent-memory/store");
-      appendRunRecord(userId, record as import("../agent-memory/store").RunRecord);
+      const rec = record as import("../agent-memory/store").RunRecord;
+      appendRunRecord(userId, rec);
+      // episodic 入检索索引：fire-and-forget——索引失败绝不阻塞上报路径
+      // （OpenClaw 设计原则五；文本车道/向量车道的降级都在索引器内处理）
+      import("../agent-memory/index-db")
+        .then(({ indexEpisodicRun }) => indexEpisodicRun(userId, rec))
+        .catch((err) => console.error("[mcp] episodic 索引失败（不影响上报）:", err));
       res.json({ ok: true });
     } catch (err) {
       console.error("[mcp] /memory-run error:", err);

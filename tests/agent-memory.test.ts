@@ -66,6 +66,9 @@ afterAll(async () => {
   if (server) await new Promise<void>((r) => server.close(() => r()));
   delete g.__mcpHttpServer;
   await cleanupProduction(prodId).catch(() => {});
+  // 蒸馏/上报现在会同步写检索索引（agent_memory_chunk），清掉本测试用户的行
+  const { getPool } = await import("@/lib/pg");
+  await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
 });
 
 describe("store：字节偏移增量语义", () => {

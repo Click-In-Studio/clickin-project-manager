@@ -125,6 +125,12 @@ OPENAI_API_KEY=sk-xxxxxxxx
 # DEEPSEEK_MODEL=deepseek-chat
 
 INTERNAL_NOTIFY_SECRET=any-local-secret # 定时通知 cron 鉴权 Bearer token
+
+# ── Agent 记忆检索（可选；不配则记忆检索走纯关键词模式）─────────────────────
+# EMBEDDING_PROVIDER=dashscope          # dashscope（有 key 时的默认）| none（纯关键词）| fake（测试）
+# EMBEDDING_API_KEY=sk-xxxxxxxx         # DashScope API key（百炼控制台获取）
+# EMBEDDING_MODEL=text-embedding-v4     # 默认；换模型=索引身份变化，须跑 memory-index-backfill --rebuild
+# EMBEDDING_BASE_URL=…                  # 默认 DashScope compatible-mode，一般不用改
 ```
 
 ### 数据库初始化
