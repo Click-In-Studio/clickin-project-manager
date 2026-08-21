@@ -238,7 +238,12 @@ jobs:
         run: |
           SHARED="/var/www/production-manager/shared"
           WS_DIR="/home/openclaw/.openclaw/workspace-team"
-          TREE_HASH=$(git rev-parse HEAD:openclaw-workspace)
+          # 同步清单单一来源：scp 载荷与变更指纹都从它派生——指纹只覆盖真正
+          # 会被复制的文件（README.md 是仓库侧说明不进 workspace，它的变更
+          # 不触发同步、也不影响跳过判定）。
+          WS_FILES="AGENTS.md SOUL.md IDENTITY.md TOOLS.md HEARTBEAT.md USER.md"
+          PATHS=""; for f in $WS_FILES; do PATHS="$PATHS openclaw-workspace/$f"; done
+          TREE_HASH=$(git ls-tree HEAD -- $PATHS | git hash-object --stdin)
           REMOTE_HASH=$(ssh prod "cat $SHARED/openclaw-workspace.tree-hash 2>/dev/null" < /dev/null || true)
 
           if [ "$TREE_HASH" = "$REMOTE_HASH" ]; then
@@ -247,18 +252,18 @@ jobs:
           fi
 
           echo "Workspace changed: ${REMOTE_HASH:-<none>} → $TREE_HASH"
-          ssh prod "rm -rf /tmp/openclaw-workspace.new && mkdir -p /tmp/openclaw-workspace.new" < /dev/null
-          # 只同步纳管的 workspace 文件本身；README.md 是仓库侧说明，不进 workspace
-          scp openclaw-workspace/AGENTS.md openclaw-workspace/SOUL.md \
-              openclaw-workspace/IDENTITY.md openclaw-workspace/TOOLS.md \
-              openclaw-workspace/HEARTBEAT.md openclaw-workspace/USER.md \
-              prod:/tmp/openclaw-workspace.new/
-          ssh prod "
-            sudo install -d -o openclaw -g openclaw $WS_DIR &&
-            sudo install -o openclaw -g openclaw -m 0644 /tmp/openclaw-workspace.new/*.md $WS_DIR/ &&
-            rm -rf /tmp/openclaw-workspace.new &&
-            echo '$TREE_HASH' > $SHARED/openclaw-workspace.tree-hash
-          " < /dev/null ||
+          # 全程软失败：workspace 同步是增强项，任何一步挂掉都不阻塞主应用
+          # 部署，只留 warning（与插件同步段的失败语义一致）。
+          {
+            ssh prod "rm -rf /tmp/openclaw-workspace.new && mkdir -p /tmp/openclaw-workspace.new" < /dev/null &&
+            scp $PATHS prod:/tmp/openclaw-workspace.new/ &&
+            ssh prod "
+              sudo install -d -o openclaw -g openclaw $WS_DIR &&
+              sudo install -o openclaw -g openclaw -m 0644 /tmp/openclaw-workspace.new/*.md $WS_DIR/ &&
+              rm -rf /tmp/openclaw-workspace.new &&
+              echo '$TREE_HASH' > $SHARED/openclaw-workspace.tree-hash
+            " < /dev/null
+          } ||
             echo '::warning::openclaw workspace sync failed — AGENTS.md on server may be stale'
 
       # ── 10. Clean up old releases (keep latest 5) ────────────────────────────
