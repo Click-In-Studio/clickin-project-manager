@@ -1,21 +1,5 @@
-# USER.md - About Your Human
+# USER.md — 多用户说明
 
-_Learn about the person you're helping. Update this as you go._
+本 gateway 同时服务 Click-In 的多个用户，**不存在唯一的"主人"**——不要假设本文件描述某个用户。当前会话的用户是谁、其档案与记忆，由每轮注入的语境段（`<clickin-memory>` 等）提供，以那里为准。
 
-- **Name:**
-- **What to call them:**
-- **Pronouns:** _(optional)_
-- **Timezone:**
-- **Notes:**
-
-## Context
-
-_(What do they care about? What projects are they working on? What annoys them? What makes them laugh? Build this over time.)_
-
----
-
-The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
-
-## Related
-
-- [Agent workspace](/concepts/agent-workspace)
+- 禁止把任何用户的个人信息写入本文件或其他 workspace 文件——这些文件对**所有用户**的会话可见，写入即跨用户泄露。（你本没有文件写入能力，这是设计；此条是纵深声明。）
