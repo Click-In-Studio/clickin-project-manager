@@ -64,6 +64,39 @@ describe("applyStreamLine", () => {
     expect(b[1]).toMatchObject({ done: true });
   });
 
+  it("tool line carries input; tool-result merges result before tool-end", () => {
+    let b: Bubble[] = [];
+    b = applyStreamLine(b, { type: "tool", name: "clickin__production-wiki_read", id: "t1", input: { wikiId: "w1" } });
+    expect(b[0]).toEqual({
+      kind: "tool", name: "clickin__production-wiki_read", id: "t1", done: false, input: { wikiId: "w1" },
+    });
+    // gateway 实序：tool 流的 result 先于 item 流的 end 到达
+    b = applyStreamLine(b, { type: "tool-result", id: "t1", result: { content: [{ type: "text", text: "正文" }] } });
+    expect(b[0]).toMatchObject({ done: false, result: { content: [{ type: "text", text: "正文" }] } });
+    b = applyStreamLine(b, { type: "tool-end", id: "t1" });
+    expect(b[0]).toMatchObject({ done: true, input: { wikiId: "w1" }, result: { content: [{ type: "text", text: "正文" }] } });
+  });
+
+  it("tool-result marks failure via isError and matches by id among multiple calls", () => {
+    let b: Bubble[] = [
+      { kind: "tool", name: "a", id: "t1", done: false },
+      { kind: "tool", name: "b", id: "t2", done: false },
+    ];
+    b = applyStreamLine(b, { type: "tool-result", id: "t1", result: "拒绝", isError: true });
+    expect(b[0]).toMatchObject({ id: "t1", isError: true, result: "拒绝" });
+    expect(b[1]).toEqual({ kind: "tool", name: "b", id: "t2", done: false });
+  });
+
+  it("tool-result without id is dropped (never guessed onto a bubble); unmatched id is a no-op", () => {
+    // 并发多调用下"猜最后一个未完成气泡"会张冠李戴——无 id 宁缺毋滥。
+    const prev: Bubble[] = [
+      { kind: "tool", name: "a", id: "t1", done: true },
+      { kind: "tool", name: "b", id: "t2", done: false },
+    ];
+    expect(applyStreamLine(prev, { type: "tool-result", result: "ok" })).toEqual(prev);
+    expect(applyStreamLine(prev, { type: "tool-result", id: "t9", result: "孤儿" })).toEqual(prev);
+  });
+
   it("approval card appends and resolves by id", () => {
     let b: Bubble[] = [{ kind: "user", text: "propose 一下" }];
     b = applyStreamLine(b, { type: "approval", approval });

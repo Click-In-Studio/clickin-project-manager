@@ -6,6 +6,7 @@ import { GATEWAY_CLIENT_CAPS, GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "@
 import { GATEWAY_URL, getGatewayToken, isGatewayConfigured } from "./config";
 import * as device from "./device";
 import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./types";
+import { TOOL_PAYLOAD_MAX_CHARS } from "./types";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 import { stripUiContext } from "@/lib/agent-ui-context";
 
@@ -230,6 +231,12 @@ interface AgentEventPayload {
     delta?: string;
     text?: string;
     replace?: boolean;
+    // 仅 stream:"tool" 事件携带（gateway 源码 handleToolExecutionStart/End）：
+    // phase "start" 带 args（sanitize 后的完整调用参数），phase "result" 带
+    // result（MCP 结果对象）与 isError。stream:"item" 的 tool 条目不带这些。
+    args?: unknown;
+    result?: unknown;
+    isError?: boolean;
   };
 }
 
@@ -403,13 +410,20 @@ function attemptConnect(): Promise<GatewayStatus> {
             payload.stream === "item" &&
             payload.data?.kind === "tool" &&
             (payload.data?.phase === "start" || payload.data?.phase === "end");
+          // stream:"tool" 是同一批调用的"详情通道"：start 带 sanitize 后的
+          // 完整参数 args，result 带结果与 isError（gateway 源码
+          // handleToolExecutionStart/End 双流并发，toolCallId 一致）。
+          // update（partialResult 进度噪声）不放行。
+          const isToolDetail =
+            payload.stream === "tool" &&
+            (payload.data?.phase === "start" || payload.data?.phase === "result");
           // delta 或 text 任一存在都放行：实测两种形态并存（replace 快照
           // delta 为空串、增量事件带 delta），只认 delta 会把假设外的
           // 纯快照事件在门口静默扔掉——不报错、只是内容没了。
           const isAssistantText =
             payload.stream === "assistant" &&
             (typeof payload.data?.delta === "string" || typeof payload.data?.text === "string");
-          if (isToolLifecycle || isAssistantText) s.events.emit(`session:${payload.sessionKey}`, payload);
+          if (isToolLifecycle || isToolDetail || isAssistantText) s.events.emit(`session:${payload.sessionKey}`, payload);
           return;
         }
         if (evt.event === "plugin.approval.requested") {
@@ -579,6 +593,8 @@ export interface ChatStreamEvent {
   // only approval surface.
   // "question"/"question-resolved": ask_user 的 question.* 通道——问题挂着
   // 时 run 阻塞在 waitAnswer，卡片必须可见可答。
+  // "tool-result": stream:"tool" 的 result 阶段——完整调用结果 + 是否失败，
+  // 在 "tool-end"（item 流的 done 标记）之前到达，按 toolId 归并到同一气泡。
   type:
     | "delta"
     | "replace"
@@ -587,6 +603,7 @@ export interface ChatStreamEvent {
     | "aborted"
     | "error"
     | "tool"
+    | "tool-result"
     | "tool-end"
     | "approval"
     | "approval-resolved"
@@ -596,6 +613,11 @@ export interface ChatStreamEvent {
   errorMessage?: string;
   toolName?: string;
   toolId?: string;
+  /** "tool" 事件的调用参数（stream:"tool" start 的 args，可能缺席）。 */
+  toolInput?: unknown;
+  /** "tool-result" 事件的调用结果（MCP 结果对象，可能缺席）。 */
+  toolResult?: unknown;
+  toolIsError?: boolean;
   approval?: ApprovalRequest;
   approvalId?: string;
   decision?: string;
@@ -752,6 +774,37 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
         }
         return;
       }
+      // stream:"tool" 详情通道：start（带 args）先于 item 流的 start 到达，
+      // 所以气泡由这里创建、携带参数；item 流的 start 随后被 seenToolCalls
+      // 去重。result 带完整结果，归并进已有气泡；done 标记仍由 item 流的
+      // "end" 负责（两者都会来）。顺序不是猜的，是上游强制的：gateway 的
+      // handleToolExecutionStart 在同一同步调用里先 emit tool 流再 emit
+      // item 流，两者走同一条 websocket（单连接 FIFO 投递）——若这条契约
+      // 破裂（item 先到），退化行为是气泡无参数，不炸。
+      if (agentPayload.stream === "tool") {
+        const toolId = agentPayload.data?.toolCallId ?? "";
+        if (agentPayload.data?.phase === "result") {
+          onEvent({
+            type: "tool-result",
+            text: "",
+            toolId: toolId || undefined,
+            toolResult: agentPayload.data?.result,
+            toolIsError: agentPayload.data?.isError === true,
+          });
+          return;
+        }
+        if (toolId && !seenToolCalls.has(toolId)) {
+          seenToolCalls.add(toolId);
+          onEvent({
+            type: "tool",
+            text: "",
+            toolName: agentPayload.data?.name || "工具",
+            toolId,
+            toolInput: agentPayload.data?.args,
+          });
+        }
+        return;
+      }
       const id = agentPayload.data?.toolCallId ?? agentPayload.data?.itemId ?? agentPayload.data?.name ?? "";
       if (agentPayload.data?.phase === "end") {
         onEvent({ type: "tool-end", text: "", toolId: id || undefined });
@@ -833,7 +886,16 @@ export async function getChatHistory(sessionKey: string): Promise<ChatTranscript
       continue;
     }
     if (m.role === "toolResult") {
-      if (m.toolName) entries.push({ role: "tool", name: m.toolName, id: m.toolCallId || undefined });
+      if (m.toolName) {
+        // 展示用途，截断保护：单条 wiki_read 结果可能是整篇文档。
+        const result = blocksToText(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
+        entries.push({
+          role: "tool",
+          name: m.toolName,
+          id: m.toolCallId || undefined,
+          ...(result ? { result } : {}),
+        });
+      }
       continue;
     }
     if (m.role !== "assistant") continue;

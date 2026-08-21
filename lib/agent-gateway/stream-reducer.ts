@@ -34,7 +34,9 @@ export type QuestionInfo = {
 export type Bubble =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming?: boolean }
-  | { kind: "tool"; name: string; id?: string; done: boolean }
+  // input/result：调用参数与结果（relay 超限时为 {truncated, preview} 包裹），
+  // 供气泡点开看详情；历史回放只有 result 文本，input 恒缺席。
+  | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean }
   | { kind: "approval"; approval: ApprovalInfo; decision?: string; resolving?: boolean }
   // status：answered/cancelled/expired；未定 = 待答卡片
   | { kind: "question"; question: QuestionInfo; status?: string; resolving?: boolean }
@@ -45,7 +47,8 @@ export type StreamLine =
   | { type: "final"; text: string; fallback?: boolean }
   | { type: "aborted"; text: string }
   | { type: "error"; error: string }
-  | { type: "tool"; name?: string; id?: string }
+  | { type: "tool"; name?: string; id?: string; input?: unknown }
+  | { type: "tool-result"; id?: string; result?: unknown; isError?: boolean }
   | { type: "tool-end"; id?: string }
   | { type: "approval"; approval?: ApprovalInfo }
   | { type: "approval-resolved"; id?: string; decision?: string }
@@ -81,7 +84,27 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       if (last?.kind === "assistant" && last.streaming) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
       }
-      next.push({ kind: "tool", name: line.name || "工具", id: line.id, done: false });
+      next.push({ kind: "tool", name: line.name || "工具", id: line.id, done: false, ...(line.input !== undefined ? { input: line.input } : {}) });
+      return next;
+    }
+    case "tool-result": {
+      // 结果先于 done 标记到达（gateway 的 tool 流早于 item 流的 end）。
+      // 只按 id 精确归并；无 id 一律丢弃——gateway 的 result 事件恒带
+      // toolCallId，无 id 说明链路异常，此时并发多调用下"猜最后一个未完成
+      // 气泡"（tool-end 的兜底）会把结果安到错误的调用上：done 标记错了
+      // 只差一个勾，结果文本错了是实打实的张冠李戴，宁缺毋滥。
+      if (!line.id) return next;
+      for (let i = next.length - 1; i >= 0; i--) {
+        const b = next[i];
+        if (b.kind === "tool" && b.id === line.id) {
+          next[i] = {
+            ...b,
+            ...(line.result !== undefined ? { result: line.result } : {}),
+            ...(line.isError ? { isError: true } : {}),
+          };
+          break;
+        }
+      }
       return next;
     }
     case "tool-end": {
