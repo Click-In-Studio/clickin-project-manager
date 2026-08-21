@@ -1,5 +1,11 @@
 import type { NextRequest } from "next/server";
-import { consumeExpectedSteerFinal, fetchLatestAssistantText, subscribeToSession, waitForRunOutcome } from "./client";
+import {
+  createSteerOwner,
+  fetchLatestAssistantText,
+  fetchSessionRunState,
+  subscribeToSession,
+  waitForRunOutcome,
+} from "./client";
 import type { ChatStreamEvent } from "./client";
 
 function sleep(ms: number): Promise<void> {
@@ -20,6 +26,12 @@ export interface StartRunResult {
  * request originated the run — any number of listeners can watch the same
  * session's live events.
  *
+ * 静默不等于结束（MindWeave 同名调研）：tool call 期间事件流完全静默，和
+ * run 已结束在流上不可区分，所以这里的计时器语义是"提问"而非"判决"——
+ * 安静 quietTimeoutMs 后去问权威来源（sessions.list 的 status）"还在跑
+ * 吗"，回答"是"就继续等，只有回答"否"才走 chat.history 兜底收尾；瞬时
+ * 查询失败按"还在跑"处理（限次），不能成为砍掉活着的回复的理由。
+ *
  * Known limitation of the attach-only path: there's no way to fetch
  * "whatever text already streamed" for an in-progress run, so a freshly
  * attached watcher only sees text from the moment it attached onward;
@@ -28,17 +40,28 @@ export interface StartRunResult {
 export function createChatStreamResponse(
   req: NextRequest,
   sessionKey: string,
-  options: { startRun?: () => Promise<StartRunResult>; overallTimeoutMs?: number } = {}
+  options: { startRun?: () => Promise<StartRunResult>; quietTimeoutMs?: number } = {}
 ): Response {
-  const { startRun, overallTimeoutMs = 180_000 } = options;
+  const { startRun, quietTimeoutMs = 180_000 } = options;
   const POLL_INTERVAL_MS = 1000;
+  // 权威查询失败（unknown）后的重试间隔与限次：网关短暂重连不该断流，但
+  // 持续查不到也不能让连接永远挂着。
+  const UNKNOWN_RETRY_MS = 15_000;
+  const MAX_UNKNOWN_STREAK = 3;
 
   const encoder = new TextEncoder();
   let closed = false;
   let unsubscribe: (() => void) | null = null;
+  // 本连接持有的 steer 期望——连接关闭（正常收尾和客户端中断都算）随之
+  // 释放，没有孤儿，也就不需要 TTL 去猜谁是孤儿。
+  const steerOwner = createSteerOwner(sessionKey);
 
   const stream = new ReadableStream({
     async start(controller) {
+      // 幂等去重：gateway 会在一秒内重发同一句话的全量快照 30+ 次，每次
+      // 下发对前端都可能是一次完整的 markdown 重渲染。与上次下发内容完全
+      // 相同的 delta 帧不再发。
+      let lastSentDelta: string | null = null;
       function send(obj: unknown) {
         if (closed) return;
         // SSE 帧格式（data: <json>\n\n）而非裸 NDJSON：Cloudflare 与 nginx
@@ -48,6 +71,11 @@ export function createChatStreamResponse(
         // 出现（连响应头都被攒着）。剧本/cue 的 SSE 同链路一直实时，即证。
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       }
+      function sendDelta(text: string) {
+        if (text === lastSentDelta) return;
+        lastSentDelta = text;
+        send({ type: "delta", text });
+      }
       function finish(obj?: unknown) {
         if (closed) return;
         // send() no-ops once closed is true, so the terminal payload has to
@@ -56,13 +84,20 @@ export function createChatStreamResponse(
         if (obj) send(obj);
         closed = true;
         unsubscribe?.();
+        steerOwner.release();
         controller.close();
       }
 
-      req.signal.addEventListener("abort", () => {
+      const onClientGone = () => {
         closed = true;
         unsubscribe?.();
-      });
+        steerOwner.release();
+      };
+      req.signal.addEventListener("abort", onClientGone);
+      // 已 aborted 的 signal 上 addEventListener 永远不会回调——请求在
+      // start() 运行前就断掉时必须显式收尾，否则这条连接的循环会一直跑
+      // 到权威说结束，steer owner 也随之泄漏。
+      if (req.signal.aborted) onClientGone();
 
       // Two possible text sources with SEPARATE buffers, never mixed: the
       // "chat" stream's own delta/final (full-text-so-far, fine for a plain
@@ -76,29 +111,35 @@ export function createChatStreamResponse(
       // that came from a chat-delta snapshot duplicates content.
       let usingAgentStream = false;
       let agentText = "";
+      // 段内一旦收到过累计快照（replace，text 为权威累计值），后续的裸增量
+      // （delta-only）一律忽略：Gateway 实测会把同一段文本以两种形态各发一
+      // 遍（replace:true/text:X 与 delta:X），对后者做 += 就是双份文本；而
+      // 协议里每个 assistant 事件都带累计 text，真正的新增内容必然会以下
+      // 一个快照到达，忽略增量不会丢字。从未见过快照的构建（纯增量形态）
+      // 不受影响，照常累加。这是"以累计值赋值，而不是识别重复再丢弃"——
+      // 后者分不清 Gateway 重述和模型真的又说了一遍同样的话。
+      let agentSnapshotSeen = false;
       let chatText = "";
       const liveText = () => (usingAgentStream ? agentText : chatText);
       let sessionDone = false;
-      let deadline = Date.now() + overallTimeoutMs;
-      // An approval gate pauses the run gateway-side (up to its own timeout)
-      // and the continued run needs time of its own afterward — push this
-      // stream's deadline out so it doesn't cut the exchange short.
+      // "安静计时器"：任何事件到达都重置。到点≠结束，只是该去问权威来源了。
+      let deadline = Date.now() + quietTimeoutMs;
       const extendDeadline = () => {
-        deadline = Date.now() + overallTimeoutMs;
+        deadline = Date.now() + quietTimeoutMs;
       };
       // steerChatRun() registers pending steers under the *canonical*
       // sessionKey the Gateway echoes back — for a brand-new session that
       // differs from the pre-canonical key this request arrived with, so
-      // consumeExpectedSteerFinal has to check under the canonical key.
+      // the steer owner has to be attached under the canonical key too.
       let canonicalSessionKey = sessionKey;
 
       function handleSessionEvent(evt: ChatStreamEvent) {
+        // 每个事件都是"还活着"的证据——安静计时器随之重置。
+        extendDeadline();
         if (evt.type === "approval") {
           // A write tool hit its confirmation gate — surface the card; the
           // run stays paused gateway-side until resolved (or times out to
-          // deny), so extend this stream's own deadline to outlive the
-          // approval window plus the continued run.
-          extendDeadline();
+          // deny).
           // TODO(卡片排障): 临时探针，配合 client.ts 的 routed 行三段定位
           // 断点（路由/转发/前端）；谜底揭晓后移除本行
           console.log(`[agent-gateway] relay forwarding approval ${evt.approval?.id} (closed=${closed})`);
@@ -106,9 +147,18 @@ export function createChatStreamResponse(
           return;
         }
         if (evt.type === "approval-resolved") {
-          // The continued (or denied) run needs fresh time after the gate.
-          extendDeadline();
           send({ type: "approval-resolved", id: evt.approvalId, decision: evt.decision });
+          return;
+        }
+        if (evt.type === "question") {
+          // ask_user 的问题卡片。回答之前 run 阻塞在 question.waitAnswer、
+          // 会话状态保持 running——安静计时器到点后的权威查询自然会续命，
+          // 直到有人回答或问题过期，这里无需再为它单独延时。
+          send({ type: "question", question: evt.question });
+          return;
+        }
+        if (evt.type === "question-resolved") {
+          send({ type: "question-resolved", id: evt.questionId, status: evt.questionStatus });
           return;
         }
         if (evt.type === "tool-end") {
@@ -121,27 +171,33 @@ export function createChatStreamResponse(
           // to a fresh segment.
           usingAgentStream = true;
           agentText = "";
+          agentSnapshotSeen = false;
+          lastSentDelta = null;
           send({ type: "tool", name: evt.toolName, id: evt.toolId });
           return;
         }
         if (evt.type === "delta") {
           usingAgentStream = true;
+          // 快照在场时增量必是重述（见 agentSnapshotSeen 声明处）。
+          if (agentSnapshotSeen) return;
           agentText += evt.text;
-          send({ type: "delta", text: agentText });
+          sendDelta(agentText);
           return;
         }
         if (evt.type === "replace") {
           // Cumulative snapshot — authoritative for the current segment,
-          // replaces whatever accumulated so far.
+          // replaces whatever accumulated so far. 赋值天然幂等：同一快照
+          // 重发 16 次结果不变，配合 sendDelta 的累计值比较也只下发一帧。
           usingAgentStream = true;
+          agentSnapshotSeen = true;
           agentText = evt.text;
-          send({ type: "delta", text: agentText });
+          sendDelta(agentText);
           return;
         }
         if (evt.type === "chat-delta") {
           if (usingAgentStream) return;
           chatText = evt.text;
-          send({ type: "delta", text: chatText });
+          sendDelta(chatText);
           return;
         }
         // final/aborted/error mark the session's work done by default — but
@@ -149,9 +205,9 @@ export function createChatStreamResponse(
         // event for the run that triggered it isn't the end of the whole
         // exchange, just one of (at least) two runs this connection covers.
         if (evt.type === "final") {
-          if (consumeExpectedSteerFinal(canonicalSessionKey)) {
+          if (steerOwner.consume()) {
             if (!usingAgentStream) chatText = evt.text;
-            send({ type: "delta", text: liveText() });
+            sendDelta(liveText());
             return;
           }
           sessionDone = true;
@@ -159,16 +215,16 @@ export function createChatStreamResponse(
           return;
         }
         if (evt.type === "aborted") {
-          if (consumeExpectedSteerFinal(canonicalSessionKey)) {
+          if (steerOwner.consume()) {
             if (!usingAgentStream) chatText = evt.text;
-            send({ type: "delta", text: liveText() });
+            sendDelta(liveText());
             return;
           }
           sessionDone = true;
           finish({ type: "aborted", text: usingAgentStream ? agentText : evt.text });
           return;
         }
-        if (consumeExpectedSteerFinal(canonicalSessionKey)) return;
+        if (steerOwner.consume()) return;
         // error: genuinely terminal.
         sessionDone = true;
         finish({ type: "error", error: evt.errorMessage || "Agent run did not complete" });
@@ -192,6 +248,7 @@ export function createChatStreamResponse(
         // that one too — redundant but harmless when they're already equal.
         if (started.sessionKey !== sessionKey) {
           canonicalSessionKey = started.sessionKey;
+          steerOwner.attachKey(canonicalSessionKey);
           const secondUnsubscribe = subscribeToSession(started.sessionKey, handleSessionEvent);
           const firstUnsubscribe = unsubscribe;
           unsubscribe = () => {
@@ -220,18 +277,35 @@ export function createChatStreamResponse(
         // connection (server restarted mid-stream) — without one, a client
         // watchdog can't exist and a severed stream hangs its reader forever.
         let lastPing = Date.now();
-        while (!sessionDone && !closed && Date.now() < deadline) {
+        let unknownStreak = 0;
+        while (!sessionDone && !closed) {
           await sleep(POLL_INTERVAL_MS);
           if (Date.now() - lastPing >= 15_000) {
             lastPing = Date.now();
             send({ type: "ping" });
           }
+          if (Date.now() < deadline) continue;
+          // 安静够久了——问一次权威来源，而不是直接判死。
+          const runState = await fetchSessionRunState(canonicalSessionKey);
+          if (sessionDone || closed) break;
+          if (runState === "running") {
+            unknownStreak = 0;
+            extendDeadline();
+            continue;
+          }
+          if (runState === "unknown" && ++unknownStreak < MAX_UNKNOWN_STREAK) {
+            deadline = Date.now() + UNKNOWN_RETRY_MS;
+            continue;
+          }
+          // not-running（或权威来源连续多次答不上来）→ 收尾。
+          break;
         }
         if (!sessionDone && !closed) {
-          // fallback: true 让客户端知道这个 final 来自 chat.history 兜底
-          // （可能是上一轮已渲染的旧文本）——只有带此标记的 final 才做
-          // 与上一条气泡的去重，正常回复即使文本相同也不会被误吞。
-          const text = await fetchLatestAssistantText(started.sessionKey);
+          // 权威来源确认 run 已结束但 final 事件没到（事件丢失 / attach 晚
+          // 于结束）——从 chat.history 兜底。fallback: true 让客户端知道这
+          // 个 final 来自兜底：只有带此标记的 final 才做与上一条气泡的去重，
+          // 且前端在流被掐断（工具/提问未收尾）时提示"回复可能不完整"。
+          const text = await fetchLatestAssistantText(canonicalSessionKey);
           finish({ type: "final", text: text || liveText(), fallback: true });
         }
       } catch (err) {

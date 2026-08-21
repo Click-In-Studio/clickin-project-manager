@@ -13,7 +13,8 @@ const BASE = "http://127.0.0.1:3199";
 
 type FakeStore = {
   client: unknown; status: { state: string }; connecting: null; events: EventEmitter;
-  pendingApprovals: Map<string, unknown>; denyReasons: Map<string, unknown>; pendingSteers: Map<string, number[]>;
+  pendingApprovals: Map<string, unknown>; denyReasons: Map<string, unknown>; steerOwners: Map<string, Set<{ pending: number }>>;
+  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
 };
 const g = globalThis as unknown as {
   __mcpHttpServer?: { close: (cb?: () => void) => void };
@@ -29,7 +30,7 @@ beforeAll(async () => {
   savedStore = g.__clickinAgentGateway;
   g.__clickinAgentGateway = {
     client: null, status: { state: "connected" }, connecting: null, events: new EventEmitter(),
-    pendingApprovals: new Map(), denyReasons: new Map(), pendingSteers: new Map(),
+    pendingApprovals: new Map(), denyReasons: new Map(), steerOwners: new Map(), questionSessions: new Map(),
   };
   const { startMcpServer } = await import("@/lib/mcp/server");
   startMcpServer();

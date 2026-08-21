@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
+import {
+  applyStreamLine,
+  type Bubble,
+  type QuestionInfo,
+  type QuestionItem,
+  type StreamLine,
+} from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
@@ -276,6 +282,22 @@ export default function AgentPopout({
       if (activeKeyRef.current === key) setLoadingHistory(false);
     }
     if (status === "running") {
+      // 待答的 ask_user 问题卡片先恢复再接流：question.list 是真实事实来源，
+      // 卡片看不见就等于 agent 在隐形卡死（run 阻塞在 waitAnswer 直到过期）。
+      // 经 reducer 注入以复用按 id 去重——实时 question 事件再来也不会重卡。
+      try {
+        const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`);
+        if (qres.ok) {
+          const data = (await qres.json()) as { questions?: QuestionInfo[] };
+          if (activeKeyRef.current === key && data.questions?.length) {
+            setBubbles((prev) =>
+              data.questions!.reduce((acc, q) => applyStreamLine(acc, { type: "question", question: q }), prev)
+            );
+          }
+        }
+      } catch {
+        // 恢复失败不挡接流；卡片还有实时事件这条路
+      }
       const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`);
       consumeStream(res, key);
     }
@@ -379,6 +401,36 @@ export default function AgentPopout({
       setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "确认请求处理失败" }]);
     }
   }, []);
+
+  const answerQuestion = useCallback(
+    async (questionId: string, payload: { answers: Record<string, string[]> } | { cancel: true }) => {
+      setBubbles((prev) =>
+        prev.map((b) => (b.kind === "question" && b.question.id === questionId ? { ...b, resolving: true } : b))
+      );
+      const res = await fetch("/api/agent/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: questionId, ...payload }),
+      }).catch(() => null);
+      if (!res?.ok) {
+        const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+        setBubbles((prev) =>
+          prev.map((b) => (b.kind === "question" && b.question.id === questionId ? { ...b, resolving: false } : b))
+        );
+        setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "回答提交失败" }]);
+        return;
+      }
+      // 乐观翻状态；question-resolved 事件回来会按 id 再翻一次（幂等）。
+      // 事件仍然要转发渲染——回答也可能来自别的 OpenClaw 客户端。
+      const status = "cancel" in payload ? "cancelled" : "answered";
+      setBubbles((prev) =>
+        prev.map((b) =>
+          b.kind === "question" && b.question.id === questionId ? { ...b, status, resolving: false } : b
+        )
+      );
+    },
+    []
+  );
 
   const removeSession = useCallback(async (key: string) => {
     if (!confirm("删除这个对话？")) return;
@@ -636,6 +688,19 @@ export default function AgentPopout({
               </div>
             );
           }
+          if (b.kind === "question") {
+            return (
+              <div key={i} className="flex justify-start">
+                <QuestionCard
+                  question={b.question}
+                  status={b.status}
+                  resolving={b.resolving}
+                  onSubmit={(answers) => answerQuestion(b.question.id, { answers })}
+                  onCancel={() => answerQuestion(b.question.id, { cancel: true })}
+                />
+              </div>
+            );
+          }
           return (
             <p key={i} className="text-center text-xs text-zinc-400">
               {b.text}
@@ -648,7 +713,8 @@ export default function AgentPopout({
             const activelyRendering =
               (last?.kind === "assistant" && last.streaming) ||
               (last?.kind === "tool" && !last.done) ||
-              (last?.kind === "approval" && !last.decision);
+              (last?.kind === "approval" && !last.decision) ||
+              (last?.kind === "question" && !last.status);
             if (activelyRendering) return null;
             return (
               <div className="flex justify-start">
@@ -723,6 +789,139 @@ export default function AgentPopout({
           toolCallId={previewToolCallId}
         />
       )}
+    </div>
+  );
+}
+
+/** ask_user 问题卡片：AI 主动向人索取输入，run 阻塞到有人回答或问题过期
+ * （默认 15 分钟）。单题单选且不允许自由文本时点选项即提交；其余情况选完
+ * 按"提交回答"。isSecret 按凭据对待：password 输入框、不回显。 */
+function QuestionCard({
+  question,
+  status,
+  resolving,
+  onSubmit,
+  onCancel,
+}: {
+  question: QuestionInfo;
+  status?: string;
+  resolving?: boolean;
+  onSubmit: (answers: Record<string, string[]>) => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
+
+  const quickSubmit =
+    question.questions.length === 1 && !question.questions[0].multiSelect && !question.questions[0].isOther;
+
+  const toggle = (item: QuestionItem, label: string) => {
+    if (quickSubmit) {
+      onSubmit({ [item.questionId]: [label] });
+      return;
+    }
+    setSelected((prev) => {
+      const cur = prev[item.questionId] ?? [];
+      const next = item.multiSelect
+        ? cur.includes(label)
+          ? cur.filter((l) => l !== label)
+          : [...cur, label]
+        : cur.includes(label)
+          ? []
+          : [label];
+      return { ...prev, [item.questionId]: next };
+    });
+  };
+
+  // 每题必答（选项或自由文本至少一样）才可提交；凑不齐返回 null。
+  const collectAnswers = (): Record<string, string[]> | null => {
+    const out: Record<string, string[]> = {};
+    for (const item of question.questions) {
+      const chosen = [...(selected[item.questionId] ?? [])];
+      const other = (otherText[item.questionId] ?? "").trim();
+      if (other) chosen.push(other);
+      if (chosen.length === 0) return null;
+      out[item.questionId] = chosen;
+    }
+    return out;
+  };
+  const ready = collectAnswers() !== null;
+
+  if (status) {
+    const label =
+      status === "answered" ? "✓ 已回答" : status === "cancelled" ? "已取消提问" : status === "expired" ? "已过期" : `已处理（${status}）`;
+    return (
+      <div className="max-w-[92%] rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-3 text-sm">
+        <p className="font-medium text-zinc-800">❓ AI 提问{question.questions.length > 1 ? `（${question.questions.length} 题）` : `：${question.questions[0]?.question ?? ""}`}</p>
+        <p className="mt-1.5 text-xs font-medium text-zinc-600">{label}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[92%] rounded-xl border border-indigo-300 bg-indigo-50 px-3.5 py-3 text-sm">
+      <p className="font-medium text-zinc-800">❓ AI 需要你的选择才能继续</p>
+      {question.questions.map((item) => (
+        <div key={item.questionId} className="mt-2">
+          <p className="text-xs text-zinc-700">
+            <span className="mr-1.5 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700">
+              {item.header}
+            </span>
+            {item.question}
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {item.options.map((opt) => {
+              const active = (selected[item.questionId] ?? []).includes(opt.label);
+              return (
+                <button
+                  key={opt.label}
+                  disabled={resolving}
+                  title={opt.description}
+                  onClick={() => toggle(item, opt.label)}
+                  className={`rounded-md px-2.5 py-1 text-xs disabled:opacity-40 ${
+                    active
+                      ? "bg-indigo-600 text-white"
+                      : "border border-indigo-300 bg-white text-zinc-700 hover:bg-indigo-100"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          {item.isOther && (
+            <input
+              type={item.isSecret ? "password" : "text"}
+              autoComplete={item.isSecret ? "new-password" : "off"}
+              value={otherText[item.questionId] ?? ""}
+              onChange={(e) => setOtherText((prev) => ({ ...prev, [item.questionId]: e.target.value }))}
+              placeholder={item.isSecret ? "输入（不会回显在对话里）" : "其他：自由输入…"}
+              className="mt-1.5 w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-xs focus:border-indigo-500 focus:outline-none"
+            />
+          )}
+        </div>
+      ))}
+      <div className="mt-2.5 flex gap-2">
+        {!quickSubmit && (
+          <button
+            disabled={resolving || !ready}
+            onClick={() => {
+              const answers = collectAnswers();
+              if (answers) onSubmit(answers);
+            }}
+            className="rounded-md bg-indigo-600 px-3 py-1 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+          >
+            提交回答
+          </button>
+        )}
+        <button
+          disabled={resolving}
+          onClick={onCancel}
+          className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-40"
+        >
+          取消提问
+        </button>
+      </div>
     </div>
   );
 }

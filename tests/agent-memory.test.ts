@@ -28,7 +28,8 @@ type FakeStore = {
   events: EventEmitter;
   pendingApprovals: Map<string, unknown>;
   denyReasons: Map<string, unknown>;
-  pendingSteers: Map<string, number[]>;
+  steerOwners: Map<string, Set<{ pending: number }>>;
+  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
 };
 const g = globalThis as unknown as {
   __mcpHttpServer?: { close: (cb?: () => void) => void };
@@ -47,7 +48,7 @@ beforeAll(async () => {
     events: new EventEmitter(),
     pendingApprovals: new Map(),
     denyReasons: new Map(),
-    pendingSteers: new Map(),
+    steerOwners: new Map(), questionSessions: new Map(),
   };
   userName = `测试记忆${shortId()}`;
   userId = (await upsertFeishuUser(`test-open-${shortId()}`, userName, null, false)).userId;

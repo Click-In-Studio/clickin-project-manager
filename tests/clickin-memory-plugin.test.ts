@@ -25,7 +25,8 @@ type FakeStore = {
   events: EventEmitter;
   pendingApprovals: Map<string, { sessionKey?: string; toolCallId?: string; ts: number }>;
   denyReasons: Map<string, { reason: string; ts: number }>;
-  pendingSteers: Map<string, number[]>;
+  steerOwners: Map<string, Set<{ pending: number }>>;
+  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
 };
 
 const g = globalThis as unknown as {
@@ -48,7 +49,7 @@ beforeAll(async () => {
     events: new EventEmitter(),
     pendingApprovals: new Map(),
     denyReasons: new Map(),
-    pendingSteers: new Map(),
+    steerOwners: new Map(), questionSessions: new Map(),
   };
 
   // 起真实 MCP server：/deny-reason、/wiki-proposal 端点 + tools/list（annotations 加载也走真请求）

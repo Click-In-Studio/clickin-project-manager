@@ -69,8 +69,8 @@ export async function GET(req: NextRequest) {
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
 
-  // Shorter cap than a fresh send: if nothing arrives quickly, the run most
-  // likely already finished before this attach landed — fail fast to
-  // chat.history instead of sitting idle for 180s.
-  return createChatStreamResponse(req, sessionKey, { overallTimeoutMs: 20_000 });
+  // Shorter quiet window than a fresh send: attach 上来 20s 没动静，多半是
+  // run 在 attach 落地前就已结束——尽快触发一次权威状态查询：确实结束就走
+  // chat.history 收尾；还在跑（长工具调用静默期）则继续等，不会误杀。
+  return createChatStreamResponse(req, sessionKey, { quietTimeoutMs: 20_000 });
 }
