@@ -68,13 +68,22 @@ describe("parseAnnotations", () => {
 });
 
 describe("chunkMarkdown", () => {
-  it("逐条目一块（不打包，hash 按条稳定）；纯标题行并入下一块", () => {
+  it("逐条目一块（不打包，hash 按条稳定）；节标题语境跨空行持续", () => {
     const md = "### 偏好\n\n- 条目一\n\n- 条目二";
     const chunks = chunkMarkdown(md);
     expect(chunks).toHaveLength(2);
     expect(chunks[0].text).toBe("### 偏好\n- 条目一");
-    expect(chunks[1].text).toBe("- 条目二");
+    // review #299 边界：空行隔开的后续条目不丢节标题
+    expect(chunks[1].text).toBe("### 偏好\n- 条目二");
     expect(chunks[0].contentHash).toBe(sha256(chunks[0].text));
+  });
+  it("混合形态（节内首条同块、后条隔空行）与换节：标题各归各", () => {
+    const md = "### 标题\n- 条目A\n\n- 条目B\n\n### 新节\n- 条目C";
+    expect(chunkMarkdown(md).map((c) => c.text)).toEqual([
+      "### 标题\n- 条目A",
+      "### 标题\n- 条目B",
+      "### 新节\n- 条目C",
+    ]);
   });
   it("无空行的连续 bullet（真实蒸馏输出形态）也逐条拆，节标题附到每条", () => {
     const md = "### 偏好与习惯\n- 条目A <!-- importance: 5 -->\n- 条目B <!-- trigger: 短语 --> <!-- importance: 7 -->\n\n### 结论\n- 条目C";

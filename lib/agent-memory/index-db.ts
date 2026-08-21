@@ -101,7 +101,8 @@ export function stripAnnotations(text: string): string {
  * 多个 bullet 行（真实蒸馏输出的条目间**没有空行**，只按空行拆会把整个
  * 小节当一条——trigger 注入整段、24 条注释合并成 6 块），再按 bullet 逐条
  * 拆。小节标题附到该节每条头上（保留语境；标题变更导致全节重嵌可接受，
- * 低频）。纯标题块挂到下一块；超长单块硬切（带重叠）。确定性纯函数。 */
+ * 低频），标题语境跨空行持续到下一个标题；超长单块硬切（带重叠）。
+ * 确定性纯函数。 */
 export function chunkMarkdown(markdown: string): MemoryChunk[] {
   const blocks = markdown
     .split(/\n{2,}/)
@@ -111,28 +112,29 @@ export function chunkMarkdown(markdown: string): MemoryChunk[] {
   const BULLET_RE = /^[-*]\s/;
   const HEADING_RE = /^(#{1,6}\s|\*\*[^\n]+\*\*$)/;
 
-  // 纯标题块（各级 # 或孤立加粗行）挂到下一块头上
+  // 逐行状态机（标题语境**跨空行持续**到下一个标题为止——review #299 边界：
+  // 节内条目被空行隔开的混合形态，后续条目不丢节标题；现网数据今天虽无此
+  // 形态，蒸馏 LLM 排版会漂移，趁本 PR 全量 rebuild 一并做对）：
+  // 标题行更新语境；bullet 行开新条目；其余行归当前条目续行；空行（块界）
+  // 结束当前条目。每条目带当前节标题落块。
   const merged: string[] = [];
-  let pendingHeading: string | null = null;
-  for (const block of blocks) {
-    if (HEADING_RE.test(block) && !block.includes("\n")) {
-      pendingHeading = pendingHeading ? `${pendingHeading}\n${block}` : block;
-      continue;
+  let heading: string | null = null;
+  let headingUsed = true; // 无条目的孤儿标题在被替换/收尾时单独成块，不丢内容
+  let cur: string | null = null;
+  const flush = () => {
+    if (cur !== null) {
+      merged.push(heading ? `${heading}\n${cur}` : cur);
+      headingUsed = true;
     }
-
-    // 块内逐行状态机：标题行更新语境；bullet 行开新条目；其余行是上一条
-    // 的续行。每条目带上当前小节标题落块。
-    let heading = pendingHeading;
-    pendingHeading = null;
-    let cur: string | null = null;
-    const flush = () => {
-      if (cur !== null) merged.push(heading ? `${heading}\n${cur}` : cur);
-      cur = null;
-    };
+    cur = null;
+  };
+  for (const block of blocks) {
     for (const line of block.split("\n")) {
       if (HEADING_RE.test(line) && !BULLET_RE.test(line)) {
         flush();
+        if (heading && !headingUsed) merged.push(heading);
         heading = line;
+        headingUsed = false;
       } else if (BULLET_RE.test(line)) {
         flush();
         cur = line;
@@ -142,9 +144,9 @@ export function chunkMarkdown(markdown: string): MemoryChunk[] {
         cur = line;
       }
     }
-    flush();
+    flush(); // 空行=条目边界：非 bullet 散段落不跨空行粘连
   }
-  if (pendingHeading) merged.push(pendingHeading);
+  if (heading && !headingUsed) merged.push(heading);
 
   const pieces: string[] = [];
   for (const block of merged) {
