@@ -21,6 +21,9 @@ const UI_CONTEXT_RULE = `## 界面上下文说明
 const USER_CONTEXT_MAX = 1000;
 const PRODUCTION_CONTEXT_MAX = 1000;
 const MEMORY_MAX = 4000;
+/** 注释头寸：蒸馏正文上限 3000 字符（不含注释），注释每行 ≤60 字符 ×
+ * 约 30-40 行 ≈ 2000——大窗读预留这么多，剥完注释后正文仍够 MEMORY_MAX。 */
+const ANNOTATION_HEADROOM = 2000;
 const RECENT_DAYS = 3;
 const RECENT_MAX_ENTRIES = 5;
 const RECENT_MAX_CHARS = 2000;
@@ -98,7 +101,7 @@ export async function buildInjectContext(
     // 大窗读：MEMORY.md 的行尾注释（importance/trigger）注入前会被剥掉，
     // 若按 MEMORY_MAX 直接读，注释字符会先吃掉正文预算——多读一截，
     // 剥完再按预算截断（见下）
-    readMemory(userId, MEMORY_MAX + 2000),
+    readMemory(userId, MEMORY_MAX + ANNOTATION_HEADROOM),
     readRecentRuns(userId, {
       days: RECENT_DAYS,
       maxEntries: RECENT_MAX_ENTRIES,

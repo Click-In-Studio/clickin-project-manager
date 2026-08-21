@@ -475,6 +475,10 @@ export function startMcpServer(): void {
   // （trigger recall）随 recall 字段返回。GET 保留一版向后兼容（旧插件在
   // 新后端下无 recall，其余行为不变——CD 同步插件与后端同批发布，兼容窗
   // 只在发布间隙存在）。
+  // 鉴权模型与本文件其余 loopback 端点一致（review #298 finding 2 核实）：
+  // Express app 只绑 127.0.0.1（见 createMcpExpressApp 调用），与 GET 版/
+  // /memory-run 同信任域——能打到这里的进程已在机器内，userId 由插件从
+  // sessionKey 解析注入，不做二次鉴权。
   app.post("/inject-context", async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as { userId?: unknown; sessionKey?: unknown; prompt?: unknown };
     const userId = typeof body.userId === "string" ? body.userId : "";

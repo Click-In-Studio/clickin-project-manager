@@ -92,7 +92,7 @@ export async function searchMemory(userId: string, query: string): Promise<Memor
           .query("INSERT INTO ai_usage (user_id, kind, model, tokens) VALUES ($1, 'embedding_query', $2, $3)", [
             userId, embeddingModel(), q.totalTokens,
           ])
-          .catch(() => {});
+          .catch((e) => console.error("[memory-search] 用量记账失败（忽略）:", e));
       }
     } catch (err) {
       if (err instanceof EmbeddingUnavailableError) {

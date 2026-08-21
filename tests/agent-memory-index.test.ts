@@ -265,6 +265,11 @@ describe("stripAnnotations", () => {
     const s = stripAnnotations("- 条目 <!-- trigger: a, b --> <!-- importance: 9 -->\n- 无注释条目");
     expect(s).toBe("- 条目\n- 无注释条目");
   });
+  it("只剥 importance/trigger 注释；其他 HTML 注释与畸形注释原样保留", async () => {
+    const { stripAnnotations } = await import("@/lib/agent-memory/index-db");
+    expect(stripAnnotations("- 条目 <!-- 普通备注 -->")).toBe("- 条目 <!-- 普通备注 -->");
+    expect(stripAnnotations("- 条目 <!-- importance: 9")).toBe("- 条目 <!-- importance: 9"); // 未闭合不剥
+  });
 });
 
 // ── 降级与 fail-closed ──────────────────────────────────────────────────────

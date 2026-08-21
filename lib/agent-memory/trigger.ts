@@ -21,6 +21,11 @@ export const TRIGGER_THRESHOLD = 0.72;
 export const TRIGGER_MAX_PER_TURN = 3;
 /** 触发注入面向"简短提醒"，单条截断防挤占正文预算。 */
 const TRIGGER_SNIPPET_MAX = 300;
+/** 候选上限（防单用户 curated 条目失控时全表进 JS 评分）。带向量时按
+ * vscore 排序后再截，确保截掉的是最不相似的尾部（review #298 finding 1：
+ * 无序 LIMIT 是任意子集）；纯词法时按最新优先——词法分在 JS 算，SQL 里
+ * 没有可排的信号，新近条目优先进候选是最不坏的确定性选择。 */
+const TRIGGER_CANDIDATE_LIMIT = 200;
 
 export type TriggerHit = { id: string; text: string; score: number };
 
@@ -55,7 +60,7 @@ export async function triggerRecall(userId: string, prompt: string): Promise<Tri
             .query("INSERT INTO ai_usage (user_id, kind, model, tokens) VALUES ($1, 'embedding_query', $2, $3)", [
               userId, embeddingModel(), q.totalTokens,
             ])
-            .catch(() => {});
+            .catch((e) => console.error("[trigger-recall] 用量记账失败（忽略）:", e));
         }
       } catch (err) {
         if (!(err instanceof EmbeddingUnavailableError)) throw err;
@@ -69,8 +74,9 @@ export async function triggerRecall(userId: string, prompt: string): Promise<Tri
        FROM agent_memory_chunk
        WHERE scope_type = 'user' AND scope_id = $1 AND source = 'curated'
          AND triggers IS NOT NULL
+       ORDER BY ${promptVec ? "vscore DESC NULLS LAST" : "observed_at DESC"}
        LIMIT $2`,
-      promptVec ? [userId, 200, promptVec] : [userId, 200],
+      promptVec ? [userId, TRIGGER_CANDIDATE_LIMIT, promptVec] : [userId, TRIGGER_CANDIDATE_LIMIT],
     );
     if (rows.length === 0) return [];
 
