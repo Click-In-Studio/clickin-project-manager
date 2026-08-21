@@ -38,6 +38,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     canImportScenes: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
     canManageTags: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
     canToggleWatermark: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "config", "edit")),
+    // 制作级 agents.md：制作人经模版 node:*/*@* 类型通配持有区间（激活成行
+    // 后 hasGrant 命中），POC 部门区间无此键——「默认仅制作人」由此天然成立。
+    canEditAiInstructions: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "ai_instructions", "*", "*", "edit")),
   };
 
   return (

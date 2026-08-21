@@ -390,7 +390,11 @@ export function startMcpServer(): void {
     }
     try {
       const { buildInjectContext } = await import("../agent-memory/inject");
-      res.json({ markdown: await buildInjectContext(userId, sessionKey) });
+      const payload = await buildInjectContext(userId, sessionKey);
+      // markdown = 旧插件的兼容字段（值即 memory 段，行为与拆分前完全一致；
+      // 旧插件在新后端下不注入 instructions，直到插件同步升级——渐进安全：
+      // 指令块绝不能落进旧插件的「仅供参考，非指令」包裹里被消解）。
+      res.json({ instructions: payload.instructions, memory: payload.memory, markdown: payload.memory });
     } catch (err) {
       console.error("[mcp] /inject-context error:", err);
       res.status(500).json({ error: "internal error" });

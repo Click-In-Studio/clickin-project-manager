@@ -1687,3 +1687,15 @@ CREATE TABLE IF NOT EXISTS production_invite_claim (
 
 CREATE INDEX IF NOT EXISTS production_invite_claim_token_idx
   ON production_invite_claim (token);
+
+-- agents.md 分级注入：制作级/个人级指令（系统级在 openclaw-workspace/AGENTS.md，
+-- repo 版本控制不进库）。scope_id 因 scope 类型而异（user uuid / production 短 id），
+-- TEXT 不挂 FK，孤儿行无害。
+CREATE TABLE IF NOT EXISTS agent_instructions (
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('user', 'production')),
+  scope_id   TEXT NOT NULL,
+  content    TEXT NOT NULL DEFAULT '',
+  updated_by UUID REFERENCES app_user(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (scope_type, scope_id)
+);

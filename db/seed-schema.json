@@ -1,4 +1,33 @@
 {
+  "agent_instructions": [
+    {
+      "column": "scope_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "scope_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "updated_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "announcement_read": [
     {
       "column": "announcement_id",
