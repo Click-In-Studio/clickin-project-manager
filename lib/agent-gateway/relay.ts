@@ -12,6 +12,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// 工具参数/结果透传给前端前的大小闸：SSE 单帧塞几百 KB 会拖慢整条流
+// （浏览器端逐帧 JSON.parse + setState）。超限时退化为截断预览字符串，
+// 前端按 truncated 标记提示"已截断"。
+const TOOL_PAYLOAD_MAX_CHARS = 16_000;
+/** exported for unit tests */
+export function boundToolPayload(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) return undefined;
+    if (serialized.length <= TOOL_PAYLOAD_MAX_CHARS) return value;
+    return { truncated: true, preview: serialized.slice(0, TOOL_PAYLOAD_MAX_CHARS) };
+  } catch {
+    return undefined; // 不可序列化的 payload 直接丢弃，显示层退回"无记录"
+  }
+}
+
 export interface StartRunResult {
   runId: string;
   sessionKey: string;
@@ -165,6 +182,18 @@ export function createChatStreamResponse(
           send({ type: "tool-end", id: evt.toolId });
           return;
         }
+        if (evt.type === "tool-result") {
+          // 详情通道：完整调用结果，前端按 id 归并进已有工具气泡。不动
+          // 文本分段状态——分段边界由 "tool"（调用开始）定义。
+          const result = boundToolPayload(evt.toolResult);
+          send({
+            type: "tool-result",
+            id: evt.toolId,
+            ...(result !== undefined ? { result } : {}),
+            ...(evt.toolIsError ? { isError: true } : {}),
+          });
+          return;
+        }
         if (evt.type === "tool") {
           // A tool call is a segment boundary: pre-tool text has already
           // arrived (via "replace" snapshots), and whatever follows belongs
@@ -173,7 +202,8 @@ export function createChatStreamResponse(
           agentText = "";
           agentSnapshotSeen = false;
           lastSentDelta = null;
-          send({ type: "tool", name: evt.toolName, id: evt.toolId });
+          const input = boundToolPayload(evt.toolInput);
+          send({ type: "tool", name: evt.toolName, id: evt.toolId, ...(input !== undefined ? { input } : {}) });
           return;
         }
         if (evt.type === "delta") {

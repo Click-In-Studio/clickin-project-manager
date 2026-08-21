@@ -13,7 +13,9 @@ import {
 } from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import { toolLabel } from "@/lib/agent-tool-labels";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
+import ChevronIcon from "@/components/ChevronIcon";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -268,13 +270,13 @@ export default function AgentPopout({
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
       if (res.ok) {
         const data = (await res.json()) as {
-          messages: ({ role: "user" | "assistant"; content: string } | { role: "tool"; name: string; id?: string })[];
+          messages: ({ role: "user" | "assistant"; content: string } | { role: "tool"; name: string; id?: string; result?: string })[];
         };
         if (activeKeyRef.current !== key) return;
         setBubbles(
           data.messages.map((m) =>
             m.role === "tool"
-              ? { kind: "tool", name: m.name, id: m.id, done: true }
+              ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}) }
               : { kind: m.role, text: m.content }
           )
         );
@@ -640,10 +642,7 @@ export default function AgentPopout({
           if (b.kind === "tool") {
             return (
               <div key={i} className="flex justify-start">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-500">
-                  {b.done ? "✓" : <span className="inline-block h-2 w-2 animate-spin rounded-full border border-zinc-400 border-t-transparent" />}
-                  {b.name}
-                </span>
+                <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} />
               </div>
             );
           }
@@ -884,6 +883,120 @@ export default function AgentPopout({
           </div>
         </div>,
         document.body,
+      )}
+    </div>
+  );
+}
+
+/** 调用参数里插件注入的调用者身份字段（_caller_user_id 等）——对模型是
+ * 强制覆写的信道，对用户是噪声，展示时剥掉。 */
+function stripCallerFields(v: unknown): unknown {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (k.startsWith("_caller_")) continue;
+    out[k] = val;
+  }
+  return out;
+}
+
+/** 参数/结果 → 可读文本：MCP 结果对象取其 text 块；relay 的截断包裹标注
+ * "已截断"；其余 JSON pretty-print。空/无内容返回 ""（调用方隐藏该栏）。 */
+function formatToolPayload(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    const rec = v as Record<string, unknown>;
+    if (rec.truncated === true && typeof rec.preview === "string") {
+      return `${rec.preview}\n…（内容过长，已截断）`;
+    }
+    if (Array.isArray(rec.content)) {
+      const texts = (rec.content as unknown[])
+        .filter(
+          (b): b is { type: string; text: string } =>
+            typeof b === "object" && b !== null &&
+            (b as Record<string, unknown>).type === "text" &&
+            typeof (b as Record<string, unknown>).text === "string",
+        )
+        .map((b) => b.text);
+      if (texts.length > 0) return texts.join("\n");
+    }
+    if (Object.keys(rec).length === 0) return "";
+  }
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+/** 工具调用气泡：中文显示名 + 状态（转圈/✓/✗），有参数或结果时可点开
+ * 查看详情（openclaw dashboard 同款交互——不需要确认的调用也能看）。 */
+function ToolCallBubble({
+  name,
+  done,
+  isError,
+  input,
+  result,
+}: {
+  name: string;
+  done: boolean;
+  isError?: boolean;
+  input?: unknown;
+  result?: unknown;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const inputText = formatToolPayload(stripCallerFields(input));
+  const resultText = formatToolPayload(result);
+  const hasDetail = inputText !== "" || resultText !== "";
+  const failed = done && isError;
+
+  const statusIcon = failed ? (
+    <span className="text-red-500">✗</span>
+  ) : done ? (
+    "✓"
+  ) : (
+    <span className="inline-block h-2 w-2 animate-spin rounded-full border border-zinc-400 border-t-transparent" />
+  );
+
+  return (
+    <div className="max-w-[92%]">
+      <button
+        type="button"
+        disabled={!hasDetail}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        title={hasDetail ? (expanded ? "收起详情" : "查看详情") : undefined}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
+          failed ? "border-red-200 bg-red-50 text-red-600" : "border-zinc-200 bg-zinc-50 text-zinc-500"
+        } ${hasDetail ? "cursor-pointer hover:border-zinc-400 hover:text-zinc-700" : "cursor-default"}`}
+      >
+        {statusIcon}
+        {toolLabel(name)}
+        {hasDetail && <ChevronIcon direction={expanded ? "up" : "down"} size={10} />}
+      </button>
+      {expanded && hasDetail && (
+        <div className="mt-1 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+          <p className="font-mono text-[10px] text-zinc-400">{name}</p>
+          {inputText !== "" && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">参数</p>
+              <pre className="mt-0.5 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-zinc-600">
+                {inputText}
+              </pre>
+            </div>
+          )}
+          {resultText !== "" && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                {failed ? "结果（失败）" : "结果"}
+              </p>
+              <pre className="mt-0.5 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-zinc-600">
+                {resultText}
+              </pre>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

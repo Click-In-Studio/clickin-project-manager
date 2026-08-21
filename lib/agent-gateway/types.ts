@@ -17,4 +17,6 @@ export interface ChatSessionSummary {
 export type ChatTranscriptEntry =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string }
-  | { role: "tool"; name: string; id?: string };
+  // result：toolResult 历史条目自身的文本内容（调用结果）。参数在
+  // chat.history 里不存在（assistant 消息没有 toolCall 块），只有实时流有。
+  | { role: "tool"; name: string; id?: string; result?: string };
