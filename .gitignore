@@ -55,3 +55,8 @@ Trace-*.json
 
 # OpenClaw gateway device credentials (bearer token + private key)
 /data/agent-gateway/
+
+# openclaw-workspace/AGENTS.md 是系统级 agent 指令的版本控制源（CD 同步到
+# gateway workspace，见 openclaw-workspace/README.md）——必须入库，对上面
+# 的 AGENTS.md 通配规则开反例。
+!/openclaw-workspace/AGENTS.md
