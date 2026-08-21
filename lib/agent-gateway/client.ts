@@ -452,7 +452,15 @@ function attemptConnect(): Promise<GatewayStatus> {
         }
         if (evt.event === "question.requested") {
           const record = extractQuestionRecord(evt.payload);
-          if (!record) return;
+          if (!record) {
+            // 形状不认识就静默丢弃 = 复刻"看不见的卡死 run"。大声记录，
+            // 让协议形状漂移（gateway 升级换 payload）在日志里可见。
+            console.error(
+              "[agent-gateway] question.requested payload shape not recognized — question will be invisible:",
+              JSON.stringify(evt.payload)?.slice(0, 400),
+            );
+            return;
+          }
           if (!record.sessionKey) {
             // 无法路由到会话的问题会静默挂满 15 分钟然后过期——大声记录。
             console.error(`[agent-gateway] question ${record.id} has no sessionKey — cannot surface in webchat`);

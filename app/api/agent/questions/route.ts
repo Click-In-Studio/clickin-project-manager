@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getQuestionSessionKey, listSessionQuestions, resolveQuestion } from "@/lib/agent-gateway/client";
+import { getQuestionSessionKey, listSessionQuestions, resolveQuestion, sessionKeyOwnedBy } from "@/lib/agent-gateway/client";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 
 export const runtime = "nodejs";
@@ -49,13 +49,13 @@ export async function POST(req: NextRequest) {
 
   try {
     // 所有权：问题归属其 sessionKey，回答人必须是该会话的主人。归属查不到
-    // （已过期/已回答/伪造 id）按 404 收——不泄露问题是否存在。
+    // （已过期/已回答/伪造 id）和归属他人的会话**统一按 404 收**——403/404
+    // 分叉会让调用方用状态码探测某个 question id 是否存在，与 http.ts
+    // requireOwnership 的"不泄露存在性"约定相悖。
     const sessionKey = await getQuestionSessionKey(id);
-    if (!sessionKey) {
+    if (!sessionKey || !sessionKeyOwnedBy(sessionKey, auth.userId)) {
       return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
     }
-    const denied = requireOwnership(sessionKey, auth.userId);
-    if (denied) return denied;
 
     if (isCancel) {
       await resolveQuestion(id, { cancel: true });

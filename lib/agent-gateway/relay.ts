@@ -88,11 +88,16 @@ export function createChatStreamResponse(
         controller.close();
       }
 
-      req.signal.addEventListener("abort", () => {
+      const onClientGone = () => {
         closed = true;
         unsubscribe?.();
         steerOwner.release();
-      });
+      };
+      req.signal.addEventListener("abort", onClientGone);
+      // 已 aborted 的 signal 上 addEventListener 永远不会回调——请求在
+      // start() 运行前就断掉时必须显式收尾，否则这条连接的循环会一直跑
+      // 到权威说结束，steer owner 也随之泄漏。
+      if (req.signal.aborted) onClientGone();
 
       // Two possible text sources with SEPARATE buffers, never mixed: the
       // "chat" stream's own delta/final (full-text-so-far, fine for a plain
