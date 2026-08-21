@@ -120,6 +120,30 @@ export async function listBudgetCategories(productionId: string): Promise<Budget
   return res.rows.map(rowToCategory);
 }
 
+/**
+ * 科目表的**只读窄面**：只有名字与归属部门，没有额度、没有已用。
+ *
+ * 为什么单独一支而不是给 listBudgetCategories 加个开关：这两面的**门不一样**
+ * （categories@view vs budget@view）。用开关的话，一旦哪个调用方忘了传，
+ * 泄露的是全项目预算额度——而且不会报错。类型上就分开，忘不了。
+ *
+ * 科目名不敏感：它是项目的成本结构分类，报销时必须看得见才能选。敏感的是额度
+ * ——「有的剧组连设计人员都能看到预算」，「有的」说明那是剧组的选择。
+ */
+export type BudgetCategoryOption = { id: string; name: string; deptName: string | null };
+
+export async function listBudgetCategoryOptions(productionId: string): Promise<BudgetCategoryOption[]> {
+  const res = await getPool().query<{ id: string; name: string; dept_name: string | null }>(
+    `SELECT c.id, c.name, d.name AS dept_name
+       FROM production_budget_category c
+       LEFT JOIN production_dept d ON d.id = c.dept_id
+      WHERE c.production_id = $1
+      ORDER BY c.order_index, c.name`,
+    [productionId],
+  );
+  return res.rows.map(r => ({ id: r.id, name: r.name, deptName: r.dept_name }));
+}
+
 export async function getBudgetCategory(id: string, productionId: string): Promise<BudgetCategory | null> {
   const res = await getPool().query<CategoryRow>(
     `${CATEGORY_QUERY} WHERE c.id = $1 AND c.production_id = $2`,
@@ -285,10 +309,30 @@ const EXPENSE_QUERY = `
     LEFT JOIN production_budget_category c ON c.id = e.category_id
     LEFT JOIN user_profile up ON up.user_id = e.submitted_by`;
 
-export async function listExpenses(productionId: string): Promise<Expense[]> {
+/**
+ * 支出列表。不给 filter = 全项目（需要 expenses@view）。
+ *
+ * 两个筛法对应**上下文可见性**，不需要任何权限键：
+ *   - submittedBy：自己交的单子自己永远看得见。否则「谁都可以填报销单」会变成
+ *     「填完就消失」，除非把全剧组每一笔花在哪儿都摊开给他。
+ *   - pendingFor：待我审批的。POC 被 buildApprovalLadder 算进阶梯，就得有地方看见
+ *     要他批的东西——这条与他有没有 expenses@view 无关。
+ *
+ * 两个筛法同时给 = 并集（我交的 ∪ 待我批的），这正是普通成员在财务页看到的东西。
+ */
+export async function listExpenses(
+  productionId: string,
+  filter?: { submittedBy?: string; pendingFor?: string },
+): Promise<Expense[]> {
+  const params: unknown[] = [productionId];
+  const ors: string[] = [];
+  if (filter?.submittedBy) ors.push(`e.submitted_by = $${params.push(filter.submittedBy)}`);
+  if (filter?.pendingFor)
+    ors.push(`(e.status = 'pending' AND e.current_approver_ids @> ARRAY[$${params.push(filter.pendingFor)}]::uuid[])`);
+  const where = ors.length ? ` AND (${ors.join(" OR ")})` : "";
   const res = await getPool().query<ExpenseRow>(
-    `${EXPENSE_QUERY} WHERE e.production_id = $1 ORDER BY e.created_at DESC`,
-    [productionId],
+    `${EXPENSE_QUERY} WHERE e.production_id = $1${where} ORDER BY e.created_at DESC`,
+    params,
   );
   return res.rows.map(rowToExpense);
 }
@@ -306,6 +350,14 @@ export async function getExpense(id: string, productionId: string): Promise<Expe
  *
  * 只读 `current_approver_ids`——那一列在提交/升级时由路由算好写死，收件箱不重算
  * （与 listPendingApprovals 同口径，#140 的教训：路由写三遍会漂）。
+ */
+/**
+ * 跨项目的「待我审批」。单项目的同一问题用 listExpenses(pid, { pendingFor })——
+ * 两处走同一个判据（current_approver_ids 含我），只是这支不限项目，供将来的全局
+ * 收件箱用。判据写两遍会漂移，故这里只多一个 WHERE，其余共用 EXPENSE_QUERY。
+ *
+ * 尚无消费者：审批收件箱目前只渲染权限申请（components/AccessRequestsClient.tsx），
+ * 支出待办要不要并进同一个列表是 UX 决定。在那之前，POC 在财务页看得到要他批的东西。
  */
 export async function listPendingExpenses(actorId: string, productionId?: string): Promise<Expense[]> {
   const params: unknown[] = [actorId];

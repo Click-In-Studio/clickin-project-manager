@@ -47,6 +47,7 @@ function EventCard({
   onUnfollow: (eventId: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   async function toggle(e: React.MouseEvent) {
     e.preventDefault();
@@ -73,12 +74,27 @@ function EventCard({
   const statusText = STATUS_LABELS[event.status] ?? event.status;
 
   const go = (href: string) => { window.location.href = `${BASE_PATH}${href}`; };
+  const stopAndGo = (e: React.MouseEvent, href: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    go(href);
+  };
 
   // 原型 eventList article：grid 58px / 1fr / auto
   return (
-    <article style={{
+    <article
+      role="link"
+      tabIndex={0}
+      aria-label={`查看事件：${event.title}`}
+      onClick={e => { if (!(e.target as HTMLElement).closest("button,a")) go(detailHref); }}
+      onKeyDown={e => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); go(detailHref); } }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
       display: "grid", gridTemplateColumns: "58px 1fr auto", gap: 16,
-      padding: "18px 0", borderTop: first ? 0 : "1px solid var(--line)",
+      padding: "18px 10px", borderTop: first ? 0 : "1px solid var(--line)",
+      borderRadius: 9, background: hovered ? "var(--paper)" : "transparent",
+      cursor: "pointer", transition: "background .14s ease",
     }}>
       {/* 日期盒（54×59 边框盒 + serif 22px） */}
       <time style={{
@@ -115,16 +131,16 @@ function EventCard({
         </p>
         {/* inlineActions（原型：paper 底 script 色边框小按钮） */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          <button onClick={() => go(detailHref)} style={INLINE_ACTION_BTN}>
+          <button onClick={e => stopAndGo(e, detailHref)} style={INLINE_ACTION_BTN}>
             事件详情 <span style={{ marginLeft: 3 }}>→</span>
           </button>
           {canViewFull && (
-            <button onClick={() => go(`/production/${productionId}/events/${event.id}/callsheet`)} style={INLINE_ACTION_BTN}>
+            <button onClick={e => stopAndGo(e, `/production/${productionId}/events/${event.id}/callsheet`)} style={INLINE_ACTION_BTN}>
               执行流程 <span style={{ marginLeft: 3 }}>→</span>
             </button>
           )}
           {taskCount > 0 && (
-            <button onClick={() => go(`/production/${productionId}/tasks?event=${event.id}`)} style={INLINE_ACTION_BTN}>
+            <button onClick={e => stopAndGo(e, `/production/${productionId}/tasks?event=${event.id}`)} style={INLINE_ACTION_BTN}>
               {taskCount} 个任务 <span style={{ marginLeft: 3 }}>→</span>
             </button>
           )}
@@ -135,7 +151,9 @@ function EventCard({
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
         <span style={{
           width: "fit-content", padding: "5px 8px", borderRadius: 999,
-          background: "var(--stage-soft)", color: "var(--stage)", fontSize: 9, fontWeight: 700,
+          ...(STATUS_COLORS[event.status] ?? STATUS_COLORS.draft),
+          border: `1px solid ${event.status === "published" ? "#bfdbfe" : event.status === "completed" ? "#bbf7d0" : event.status === "cancelled" ? "#fecdd3" : "var(--line)"}`,
+          fontSize: 9, fontWeight: 700,
         }}>
           {statusText}
         </span>
@@ -213,11 +231,33 @@ function CreateEventModal({
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "创建失败"); return; }
+
+      // 事件与执行日程共用同一数据链：事件创建后立即生成默认流程项，
+      // 这样事件页新建的内容会同时出现在计划月历与执行日程。
+      const scheduleRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${data.event.id}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `${title.trim()} · 执行日程`,
+          itemType: eventType === "rehearsal" ? "scene_rehearsal" : eventType === "meeting" ? "meeting" : "custom",
+          startTime: resolvedStart,
+          endTime: resolvedEnd,
+          location: location.trim(),
+          notes: "由事件新建流程自动生成。",
+          departmentIds: notifyDeptIds,
+        }),
+      });
+      const scheduleData = await scheduleRes.json().catch(() => ({}));
+      if (!scheduleRes.ok) {
+        setError(`事件已创建，但执行日程生成失败：${scheduleData.error ?? "未知错误"}`);
+        onCreated(data.event);
+        return;
+      }
       if (notifyDeptIds.length > 0 && data.event?.id) {
         await fetch(`${BASE_PATH}/api/production/${productionId}/events/${data.event.id}/awaiting-reqs`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ departmentIds: notifyDeptIds }),
+          body: JSON.stringify({ departmentIds: notifyDeptIds, scheduleItemId: scheduleData.item?.id }),
         });
       }
       onCreated(data.event);
@@ -466,52 +506,38 @@ export default function EventsClient({
             </section>
           )}
 
-          {/* 定高 panel（与任务/报告/通知统一）：内部分组滚动 */}
-          <section style={{
-            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
-            padding: 22, height: "calc(100vh - 320px)", minHeight: 460,
-            display: "flex", flexDirection: "column",
-          }}>
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-              {events.length === 0 && (
-                <p style={{ textAlign: "center", fontSize: 13, color: "var(--muted)", padding: "48px 0" }}>暂无事件</p>
-              )}
-
-              {upcoming.length > 0 && (
-                <>
-                  <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>Upcoming</p>
-                  <h2 style={{ margin: "0 0 6px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>即将发生</h2>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    {upcoming.map((ev, i) => (
-                      <EventCard
-                        key={ev.id} event={ev} productionId={productionId} first={i === 0}
-                        role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
-                        taskCount={taskCounts[ev.id] ?? 0}
-                        onFollow={handleFollow} onUnfollow={handleUnfollow}
-                      />
-                    ))}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(430px, 100%), 1fr))", gap: 16, alignItems: "start" }}>
+            {([
+              { key: "upcoming", eyebrow: "Upcoming", title: "即将发生", items: upcoming },
+              { key: "past", eyebrow: "Past", title: "已过去", items: past },
+            ] as const).map(group => (
+              <section key={group.key} style={{
+                background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
+                padding: 22, height: "calc(100vh - 320px)", minHeight: 460,
+                display: "flex", flexDirection: "column",
+              }}>
+                <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                  <div>
+                    <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>{group.eyebrow}</p>
+                    <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{group.title}</h2>
                   </div>
-                </>
-              )}
-
-              {past.length > 0 && (
-                <>
-                  <p style={{ margin: `${upcoming.length > 0 ? 26 : 0}px 0 4px`, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>Past</p>
-                  <h2 style={{ margin: "0 0 6px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>已过去</h2>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    {past.map((ev, i) => (
-                      <EventCard
-                        key={ev.id} event={ev} productionId={productionId} first={i === 0}
-                        role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
-                        taskCount={taskCounts[ev.id] ?? 0}
-                        onFollow={handleFollow} onUnfollow={handleUnfollow}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
+                  <span style={{ color: "var(--muted)", fontSize: 10 }}>{group.items.length} 个事件</span>
+                </div>
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                  {group.items.length === 0 ? (
+                    <p style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", padding: "48px 0" }}>暂无{group.title}的事件</p>
+                  ) : group.items.map((ev, i) => (
+                    <EventCard
+                      key={ev.id} event={ev} productionId={productionId} first={i === 0}
+                      role={roles.get(ev.id) ?? null} canViewFull={canViewFull}
+                      taskCount={taskCounts[ev.id] ?? 0}
+                      onFollow={handleFollow} onUnfollow={handleUnfollow}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
         </>
       )}
 

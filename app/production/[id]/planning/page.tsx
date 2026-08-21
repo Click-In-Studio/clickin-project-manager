@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { toActor, hasEffectiveGrant } from "@/lib/grant-check";
 import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/event-permissions";
-import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import { listProductionEvents, listEventDepartments, listProductionTechReqs, listMyTechReqsFull } from "@/lib/event-db";
 import PlanningClient, { type PlanningTask } from "@/components/PlanningClient";
 
@@ -22,11 +22,12 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
   if (!(await hasEventDomainView(toActor(session, access.permCtx), id)))
     redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${id}`);
 
-  const [name, allEvents, milestones, departments, canViewAllTasks] = await Promise.all([
+  const [name, allEvents, milestones, departments, members, canViewAllTasks] = await Promise.all([
     getProductionName(id),
     listProductionEvents(id),
     listMilestones(id),
     listEventDepartments(id),
+    listProductionMembersWithRoles(id),
     hasEffectiveGrant(toActor(session, access.permCtx), id, "task", "*", "*", "view"),
   ]);
   if (!name) notFound();
@@ -43,6 +44,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
         startTime: t.startTime, endTime: t.endTime,
         effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
         isBlocked: t.isBlocked,
+        description: t.description,
       }))
     : (await listMyTechReqsFull(session.userId))
         .filter(t => t.productionId === id)
@@ -53,6 +55,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           startTime: null, endTime: null,
           effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
           isBlocked: false,
+          description: t.description,
         }));
 
   return (
@@ -64,6 +67,12 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
         tasks={tasks}
         milestones={milestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }))}
         departments={departments.map(d => ({ id: d.id, name: d.name }))}
+        members={members.map(member => ({
+          userId: member.userId,
+          name: member.name,
+          roles: member.roles,
+          departmentIds: departments.filter(dept => dept.memberUserIds.includes(member.userId) || dept.pocUserIds.includes(member.userId)).map(dept => dept.id),
+        }))}
       />
     </div>
   );

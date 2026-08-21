@@ -1013,6 +1013,18 @@
       "default": "now()"
     }
   ],
+  "event_milestone": [
+    {
+      "column": "event_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "milestone_id",
+      "type": "text",
+      "nullable": false
+    }
+  ],
   "event_participant": [
     {
       "column": "id",

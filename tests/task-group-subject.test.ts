@@ -25,7 +25,7 @@ import {
 import { canAssignTechReq, canEditTechReq, canViewTechReq, canEnterEvent } from "@/lib/event-permissions";
 import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/event-group-db";
 import { freezeEventGroups, unfreezeEventGroups } from "@/lib/event-group-freeze";
-import { isTaskPoc, taskSubjectOf, parseTaskSubject } from "@/lib/task-poc";
+import { isTaskPoc, taskSubjectOf, parseTaskSubject, resolveSubjectPatch } from "@/lib/task-poc";
 import { toActor } from "@/lib/grant-check";
 import type { PermissionContext } from "@/lib/permissions";
 
@@ -129,6 +129,57 @@ describe("1. 责任主体二选一", () => {
 
     const good = await parseTaskSubject(prodId, { groupId });
     expect(good).toEqual({ ok: true, subject: { kind: "group", id: groupId } });
+  });
+});
+
+describe("1b. PATCH 的主体语义：每个字段只清自己那一支", () => {
+  /**
+   * 这一条守的是一个真实的数据丢失：任务抽屉初始化时做
+   * `setDrawerDeptId(task.departmentId ?? "")`，绑组的 task 在那里是空串，提交时
+   * 就发 `departmentId: null`。若按「给了 departmentId 就重设整个主体」处理，
+   * 任何人点一下「保存任务信息」——哪怕一个字没改——组绑定就没了，POC 随之消失，
+   * 这条 task 谁都编辑不了。旧客户端不知道有组，不能让它的沉默变成删除。
+   */
+  it("绑组的 task 收到 departmentId:null 时，组绑定必须原样保留", async () => {
+    const cur = { departmentId: null, groupId };
+    const patch = await resolveSubjectPatch(prodId, { departmentId: null }, cur);
+    expect(patch).toEqual({ ok: true, cols: { departmentId: null, groupId } });
+  });
+
+  it("要解绑组得显式发 groupId:null", async () => {
+    const patch = await resolveSubjectPatch(prodId, { groupId: null }, { departmentId: null, groupId });
+    expect(patch).toEqual({ ok: true, cols: { departmentId: null, groupId: null } });
+  });
+
+  it("设一支会顶掉另一支（互斥）", async () => {
+    const toGroup = await resolveSubjectPatch(prodId, { groupId }, { departmentId: deptId, groupId: null });
+    expect(toGroup).toEqual({ ok: true, cols: { departmentId: null, groupId } });
+    const toDept = await resolveSubjectPatch(prodId, { departmentId: deptId }, { departmentId: null, groupId });
+    expect(toDept).toEqual({ ok: true, cols: { departmentId: deptId, groupId: null } });
+  });
+
+  it("两个字段都没给 = 完全不动主体", async () => {
+    const patch = await resolveSubjectPatch(prodId, {}, { departmentId: null, groupId });
+    expect(patch).toEqual({ ok: true, cols: null });
+  });
+
+  it("两个都给非空值 → 400；跨剧组 id → 400", async () => {
+    expect((await resolveSubjectPatch(prodId, { departmentId: deptId, groupId }, { departmentId: null, groupId: null })).ok).toBe(false);
+    const { prodId: otherProd } = await makeProduction(ownerId);
+    expect((await resolveSubjectPatch(otherProd, { groupId }, { departmentId: null, groupId: null })).ok).toBe(false);
+    await cleanupProduction(otherProd).catch(() => {});
+  });
+
+  it("端到端：绑组的 task 走一次「只发 departmentId:null」的 PATCH，组还在", async () => {
+    const task = await makeGroupTask();
+    const patch = await resolveSubjectPatch(prodId, { departmentId: null, title: "改个名" } as never, task);
+    expect(patch.ok).toBe(true);
+    if (patch.ok && patch.cols) {
+      await updateTaskByProduction(task.id, prodId, patch.cols);
+    }
+    const after = (await getTechReqByProduction(task.id, prodId))!;
+    expect(after.groupId).toBe(groupId);                    // 组还在
+    expect(await isTaskPoc(prodId, after, deptPocId)).toBe(true);  // POC 还认
   });
 });
 

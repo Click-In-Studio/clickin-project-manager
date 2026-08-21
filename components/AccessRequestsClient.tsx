@@ -179,11 +179,41 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
         </select>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
-        <select value={ttlOption} onChange={(e) => setTtlOption(e.target.value as TtlOptionValue)} style={fieldStyle}>
-          {TTL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        {/* 档位只能来自 lib/approval-ttl 的 TTL_OPTIONS——服务端按同一份表白名单校验，
+            页面自己硬编码天数会被 400 挡掉（#256 的成因，见该文件顶部注释）。 */}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${TTL_OPTIONS.length}, minmax(0, 1fr))`, gap: 7 }}>
+          {TTL_OPTIONS.map((o) => {
+            const active = ttlOption === o.value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setTtlOption(o.value)}
+                style={{
+                  border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
+                  borderRadius: 8,
+                  padding: "9px 4px",
+                  background: active ? "var(--ink)" : "var(--paper)",
+                  color: active ? "#fff" : "var(--muted)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+        {ttlOption !== "permanent" && (
+          <small style={{ fontSize: 10, color: "var(--muted)" }}>
+            审批通过后开始计时，到期将自动失效。
+          </small>
+        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -254,6 +284,12 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
           </span>
         )}
       </h2>
+
+      {req.subjectName && (
+        <p style={{ margin: "-8px 0 0", fontSize: 12, color: "var(--muted)" }}>
+          申请人：<b style={{ color: "var(--ink)" }}>{req.subjectName}</b>
+        </p>
+      )}
 
       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
         申请于 {fmtDate(req.createdAt)}
@@ -448,7 +484,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
             color: isSelected ? "#fff" : "var(--ink)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
-            {resourceLabel(req)}
+            {canAct && req.subjectName ? `${req.subjectName} · ` : ""}{resourceLabel(req)}
           </p>
           <p style={{ margin: 0, fontSize: 11, color: isSelected ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
             {STATUS_LABELS[req.status]} · {fmtDate(req.createdAt)}

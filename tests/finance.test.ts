@@ -22,7 +22,9 @@ import {
   approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,
   escalateExpiredExpenses, FinanceError, getExpense, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
+  listBudgetCategoryOptions,
 } from "@/lib/finance-db";
+import { GET as getExpenses } from "@/app/api/production/[id]/finance/expenses/route";
 
 let prodId: string;
 let ownerId: string, submitterId: string, deptPocId: string, strangerId: string;
@@ -367,5 +369,91 @@ describe("10. PATCH 的名字校验与 POST 对称", () => {
     const res = await patchCategory(req(ownerId, { name: newName }), ctx());
     expect(res.status).toBe(200);
     expect((await listBudgetCategories(prodId)).find(c => c.id === cat.id)?.name).toBe(newName);
+  });
+});
+
+/**
+ * 可见性分层。
+ *
+ * 中心命题：**报销是全员能力，所以「能填」不能以「能看全项目预算」为代价。**
+ * 四层由窄到宽——科目名（基线）／我交的 ∪ 待我批的（上下文）／全项目支出／额度。
+ */
+describe("11. 科目表的窄面不含金额", () => {
+  it("只有 id / name / deptName，没有 amount，也没有 spent", async () => {
+    const cat = await createBudgetCategory({
+      productionId: prodId, name: `窄面科目${shortId()}`, amount: "50000.00",
+      deptId, createdBy: ownerId,
+    });
+    const opts = await listBudgetCategoryOptions(prodId);
+    const found = opts.find(o => o.id === cat.id)!;
+    expect(found.name).toBe(cat.name);
+    expect(Object.keys(found).sort()).toEqual(["deptName", "id", "name"]);
+    // 宽面才有钱
+    expect((await listBudgetCategories(prodId)).find(c => c.id === cat.id)!.amount).toBe("50000.00");
+  });
+});
+
+describe("12. 支出的上下文可见性", () => {
+  it("自己交的自己看得见——否则「谁都可以填」等于「填完就消失」", async () => {
+    const e = await submitExpense({
+      productionId: prodId, categoryId: null, title: `我的单${shortId()}`,
+      amount: "88.00", submittedBy: submitterId,
+    });
+    const mine = await listExpenses(prodId, { submittedBy: submitterId });
+    expect(mine.map(x => x.id)).toContain(e.id);
+    // 别人看不到（他既不是提交人也不是审批人）
+    const others = await listExpenses(prodId, { submittedBy: strangerId, pendingFor: strangerId });
+    expect(others.map(x => x.id)).not.toContain(e.id);
+  });
+
+  it("待我审批的我看得见——阶梯把 POC 算进去了，就得有地方看见要批什么", async () => {
+    const cat = await createBudgetCategory({
+      productionId: prodId, name: `待批科目${shortId()}`, amount: "9000.00",
+      deptId, createdBy: ownerId,
+    });
+    const e = await submitExpense({
+      productionId: prodId, categoryId: cat.id, title: `等POC批${shortId()}`,
+      amount: "500.00", submittedBy: submitterId,
+    });
+    const fresh = (await getExpense(e.id, prodId))!;
+    expect(fresh.currentApproverIds.length).toBeGreaterThan(0);
+
+    const approver = fresh.currentApproverIds[0];
+    const seen = await listExpenses(prodId, { pendingFor: approver });
+    expect(seen.map(x => x.id)).toContain(e.id);
+  });
+
+  it("两个筛法是并集，不是交集", async () => {
+    const a = await submitExpense({
+      productionId: prodId, categoryId: null, title: `并集A${shortId()}`,
+      amount: "1.00", submittedBy: submitterId,
+    });
+    const both = await listExpenses(prodId, { submittedBy: submitterId, pendingFor: strangerId });
+    expect(both.map(x => x.id)).toContain(a.id);   // 交集的话这条会被滤掉
+  });
+});
+
+describe("13. 支出列表端点不再一刀切 403", () => {
+  function req(userId: string) {
+    const r = new NextRequest("http://localhost/api/x", { method: "GET" });
+    r.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return r;
+  }
+  const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+
+  it("无 expenses@view 的成员拿到 own 口径而不是 403", async () => {
+    const res = await getExpenses(req(strangerId), ctx());
+    expect(res.status).toBe(200);
+    const body = await res.json() as { scope: string; expenses: unknown[] };
+    expect(body.scope).toBe("own");
+  });
+
+  it("owner 拿到 all 口径", async () => {
+    const res = await getExpenses(req(ownerId), ctx());
+    const body = await res.json() as { scope: string; expenses: unknown[] };
+    expect(body.scope).toBe("all");
+    expect(body.expenses.length).toBeGreaterThan(0);
   });
 });

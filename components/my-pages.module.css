@@ -185,12 +185,188 @@
   margin-bottom: 24px;
 }
 
+.calendarHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.calendarRange {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.calendarControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.calendarPager,
+.calendarViewSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.calendarPager button,
+.calendarViewSwitch button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 11px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendarPager button:hover,
+.calendarViewSwitch button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.calendarViewSwitch button[aria-selected="true"] {
+  background: var(--ink);
+  color: #fff;
+}
+
 .weekGrid {
   display: grid;
   grid-template-columns: repeat(7, minmax(80px, 1fr));
   gap: 0;
   background: var(--surface);
   min-width: 560px;
+}
+
+.monthGridWrap {
+  overflow-x: auto;
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.monthWeekdays,
+.monthGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(92px, 1fr));
+  min-width: 644px;
+}
+
+.monthWeekdays {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.monthWeekdays span {
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-align: center;
+}
+
+.monthDay {
+  min-height: 104px;
+  padding: 9px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  transition: background .12s;
+}
+
+.monthDay:nth-child(7n) { border-right: 0; }
+.monthDay:nth-last-child(-n + 7) { border-bottom: 0; }
+.monthDay:hover { background: var(--paper); }
+.monthDayMuted { opacity: .42; }
+
+.monthDayNumber {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 13px;
+}
+
+.monthToday {
+  background: var(--script);
+  color: #fff;
+}
+
+.monthDayEvents {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.monthDayEvents > span {
+  overflow: hidden;
+  border-radius: 4px;
+  background: #f2e4d9;
+  padding: 3px 5px;
+  color: var(--stage);
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monthDayEvents small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.agendaList {
+  overflow: hidden;
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.agendaItem {
+  display: grid;
+  grid-template-columns: minmax(110px, 150px) 1fr;
+  gap: 18px;
+  align-items: center;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+
+.agendaItem:last-child { border-bottom: 0; }
+.agendaItem:hover { background: var(--paper); }
+.agendaItem time,
+.agendaItem > span { display: flex; flex-direction: column; gap: 3px; }
+.agendaItem b { color: var(--ink); font-size: 12px; }
+.agendaItem small,
+.agendaItem time span { color: var(--muted); font-size: 10px; }
+
+.callBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .eventCardGrid {
@@ -1060,6 +1236,21 @@
 .taskTitleCell small, .taskRelationCell small, .taskOwnerCell small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
 .taskTitleCell:hover b, .taskRelationCell:hover b { color: var(--stage); }
 .taskRowDone .taskTitleCell b { text-decoration: line-through; color: var(--muted); }
+.taskRowCompleting {
+  animation: taskCompleteHold 1.6s ease forwards;
+}
+.taskRowCompleting .taskCheckBtn {
+  animation: taskCheckPop .24s ease-out;
+}
+@keyframes taskCheckPop {
+  0% { transform: scale(.72); }
+  70% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@keyframes taskCompleteHold {
+  0%, 68% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(12px); }
+}
 .taskOwnerCell { min-width: 0; text-align: right; }
 .taskOwnerCell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

@@ -2315,6 +2315,78 @@ export async function listEventTaskCounts(productionId: string): Promise<Record<
   return Object.fromEntries(res.rows.map(r => [r.event_id, Number(r.count)]));
 }
 
+export async function listEventMilestoneIds(eventId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ milestone_id: string }>(
+    `SELECT em.milestone_id
+     FROM event_milestone em
+     JOIN production_event pe ON pe.id = em.event_id
+     JOIN milestone m ON m.id = em.milestone_id AND m.production_id = pe.production_id
+     WHERE em.event_id = $1 AND pe.production_id = $2
+     ORDER BY m.end_date, m.sort_order`,
+    [eventId, productionId],
+  );
+  return res.rows.map(row => row.milestone_id);
+}
+
+/** 事件下的任务 id（关联面板读侧；不做权限过滤，调用方负责）。 */
+export async function listEventTaskIds(eventId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ id: string }>(
+    "SELECT id FROM task WHERE production_id = $1 AND event_id = $2 ORDER BY id",
+    [productionId, eventId],
+  );
+  return res.rows.map(row => row.id);
+}
+
+/**
+ * 事件 ↔ 里程碑关联的全量覆盖写。
+ *
+ * 只管 event_milestone 这一张边表。**不要**把 task.event_id 的重绑放进来——
+ * 换绑 event 是 task 侧的写入，带三件连带动作（清 task_schedule_item、#236 形状 L
+ * 的孤儿处置 disposeOrphanedTasks / clearOrphanMark），全部在 updateTaskByProduction
+ * 里，绕过它就会留下孤儿标记不一致的 task 和悬空的日程绑定。
+ */
+export async function setEventMilestones(
+  eventId: string,
+  productionId: string,
+  milestoneIds: string[],
+): Promise<void> {
+  const unique = [...new Set(milestoneIds)];
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const event = await client.query(
+      "SELECT 1 FROM production_event WHERE id = $1 AND production_id = $2",
+      [eventId, productionId],
+    );
+    if (!event.rowCount) throw new Error("事件不存在");
+
+    if (unique.length) {
+      const milestones = await client.query(
+        "SELECT id FROM milestone WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, unique],
+      );
+      if (milestones.rowCount !== unique.length) throw new Error("包含不存在的里程碑");
+    }
+
+    await client.query("DELETE FROM event_milestone WHERE event_id = $1", [eventId]);
+    if (unique.length) {
+      await client.query(
+        `INSERT INTO event_milestone (event_id, milestone_id)
+         SELECT $1, id FROM milestone WHERE production_id = $2 AND id = ANY($3::text[])`,
+        [eventId, productionId, unique],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+
 export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;

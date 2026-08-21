@@ -1138,6 +1138,15 @@ CREATE TABLE IF NOT EXISTS task_milestone (
 
 CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
 
+-- Event 里程碑关联（事件可关注 0..n 个项目里程碑）
+CREATE TABLE IF NOT EXISTS event_milestone (
+  event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, milestone_id)
+);
+
+CREATE INDEX IF NOT EXISTS event_milestone_milestone_idx ON event_milestone(milestone_id);
+
 -- ── rundown 版面（add-event-group-4-rundown.sql）────────────────────────────────
 -- 组是跨 event 共享的，「在这场排第几列 / 显不显示 / 钉不钉左边」只能记在
 -- (event, group) 这一层。is_pinned = 横向滚动时钉在左侧，与冻结快照无关。

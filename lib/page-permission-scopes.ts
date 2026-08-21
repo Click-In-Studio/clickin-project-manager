@@ -55,6 +55,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:announcement/*@create",
     "node:announcement/*@edit",
     "node:announcement/*@delete",
+    // 财务页不设门（进得了项目就进得了），但这两枚是它的内容票：科目表只读面
+    // 与「填报销单」。跟 material/*@view 一样挂 base——AppShell 全局渲染，
+    // 页面自己没有 PageActivationGate 也能激活。
+    "node:finance/*/categories@view",
+    "node:finance/*/expenses@create",
     "node:material/*@view",
     "node:milestone/*@view",
     "node:milestone/*@create",
