@@ -370,3 +370,42 @@ describe("拒绝理由同帧注入（mark → middleware → append）", () => {
     expect(result).toBeUndefined();
   });
 });
+
+describe("before_prompt_build：指令/记忆双包裹（经真实 /inject-context 端到端）", () => {
+  // 两个包裹语义相反（instructions 须遵守 / memory 仅参考），指令落进
+  // 「非指令」包裹会被消解——这里穿真实 MCP 端点 + 真 DB 验证拆分。
+  it("user with personal instructions gets BOTH wrappers, instructions first", async () => {
+    const { userId } = await upsertFeishuUser(`test-open-${shortId()}`, `注入测试-${shortId()}`, null, false);
+    const { setAgentInstructions } = await import("@/lib/agent-instructions");
+    await setAgentInstructions("user", userId, "回复永远带一句押韵的话。", userId);
+    try {
+      const handler = hooks.get("before_prompt_build")!;
+      const out = (await handler(
+        { context: { pluginConfig: PLUGIN_CONFIG } },
+        { sessionKey: `agent:team:clickin:chat:${userId}:11111111-2222-3333-4444-555555555555` },
+      )) as { appendSystemContext?: string } | undefined;
+      const ctx = out?.appendSystemContext ?? "";
+      expect(ctx).toContain("<clickin-instructions>");
+      expect(ctx).toContain("回复永远带一句押韵的话。");
+      expect(ctx).toContain("<clickin-memory>");
+      // 指令块在记忆块之前，且指令内容不落进记忆包裹
+      expect(ctx.indexOf("<clickin-instructions>")).toBeLessThan(ctx.indexOf("<clickin-memory>"));
+      expect(ctx.indexOf("回复永远带一句押韵的话。")).toBeLessThan(ctx.indexOf("<clickin-memory>"));
+    } finally {
+      const { getPool } = await import("@/lib/pg");
+      await getPool().query(`DELETE FROM agent_instructions WHERE scope_id = $1`, [userId]);
+    }
+  });
+
+  it("user without instructions gets ONLY the memory wrapper", async () => {
+    const { userId } = await upsertFeishuUser(`test-open-${shortId()}`, `无指令注入-${shortId()}`, null, false);
+    const handler = hooks.get("before_prompt_build")!;
+    const out = (await handler(
+      { context: { pluginConfig: PLUGIN_CONFIG } },
+      { sessionKey: `agent:team:clickin:chat:${userId}:11111111-2222-3333-4444-555555555555` },
+    )) as { appendSystemContext?: string } | undefined;
+    const ctx = out?.appendSystemContext ?? "";
+    expect(ctx).not.toContain("<clickin-instructions>");
+    expect(ctx).toContain("<clickin-memory>");
+  });
+});

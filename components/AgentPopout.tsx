@@ -382,6 +382,45 @@ export default function AgentPopout({
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyReason, setDenyReason] = useState("");
 
+  // 「AI 偏好」= 个人级 agents.md（制作级在制作设置页，系统级不在线编辑）。
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [prefsText, setPrefsText] = useState("");
+  const [prefsBusy, setPrefsBusy] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
+
+  const openPrefs = useCallback(async () => {
+    setPrefsOpen(true);
+    setPrefsBusy(true);
+    setPrefsError(null);
+    try {
+      const res = await fetch("/api/agent/instructions");
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { user?: string };
+      setPrefsText(data.user ?? "");
+    } catch {
+      setPrefsError("读取失败，请重试");
+    } finally {
+      setPrefsBusy(false);
+    }
+  }, []);
+
+  const savePrefs = useCallback(async () => {
+    setPrefsBusy(true);
+    setPrefsError(null);
+    const res = await fetch("/api/agent/instructions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "user", content: prefsText }),
+    }).catch(() => null);
+    setPrefsBusy(false);
+    if (!res?.ok) {
+      const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+      setPrefsError(err.error || "保存失败，请重试");
+      return;
+    }
+    setPrefsOpen(false);
+  }, [prefsText]);
+
   const decideApproval = useCallback(async (approvalId: string, decision: string, reason?: string) => {
     setDenyingId(null);
     setDenyReason("");
@@ -505,6 +544,14 @@ export default function AgentPopout({
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-sm text-[var(--muted)] hover:bg-[var(--paper)]"
           >
             +
+          </button>
+          <button
+            type="button"
+            onClick={() => openPrefs()}
+            title="AI 偏好（个人指令）"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-sm text-[var(--muted)] hover:bg-[var(--paper)]"
+          >
+            ⚙
           </button>
           <button
             type="button"
@@ -788,6 +835,50 @@ export default function AgentPopout({
           productionId={productionId}
           toolCallId={previewToolCallId}
         />
+      )}
+
+      {prefsOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={() => !prefsBusy && setPrefsOpen(false)}>
+          <div
+            className="w-[520px] max-w-[92vw] rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-semibold text-[var(--ink)]">AI 偏好（个人指令）</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              写给 AI 助手的个人指令，在你的所有会话中生效。语言、语气、回复习惯等都可以写；
+              与制作级指令冲突时以制作级为准。指令不会改变你的任何权限。
+            </p>
+            <textarea
+              value={prefsText}
+              onChange={(e) => setPrefsText(e.target.value)}
+              disabled={prefsBusy}
+              maxLength={4000}
+              rows={10}
+              placeholder="例如：回复保持简短；专业术语保留英文原文；列清单时不超过 5 条…"
+              className="mt-3 w-full resize-none rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+            />
+            <div className="mt-1 flex items-center justify-between">
+              <span className="text-[11px] text-[var(--muted)]">{prefsText.length}/4000</span>
+              {prefsError && <span className="text-[11px] text-[var(--danger)]">{prefsError}</span>}
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => setPrefsOpen(false)}
+                disabled={prefsBusy}
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 disabled:opacity-40"
+              >
+                取消
+              </button>
+              <button
+                onClick={savePrefs}
+                disabled={prefsBusy}
+                className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              >
+                {prefsBusy ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

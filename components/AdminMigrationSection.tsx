@@ -6,7 +6,7 @@ const NO_PERMS: SettingsPerms = {
   canRename: false, canChangeAvatar: false, canEditDescription: false,
   canChangeType: false, canChangeLanguage: false, canArchive: false, canDelete: false,
   canImportContacts: false, canImportScript: false, canImportScenes: false,
-  canManageTags: false, canToggleWatermark: false,
+  canManageTags: false, canToggleWatermark: false, canEditAiInstructions: false,
 };
 
 export default function AdminMigrationSection({

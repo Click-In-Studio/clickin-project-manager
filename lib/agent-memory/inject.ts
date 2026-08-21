@@ -5,6 +5,7 @@
 import { buildUserContextMarkdown } from "@/lib/mcp/user-context";
 import { buildProductionContextMarkdown } from "@/lib/mcp/production-context";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { buildInstructionsBlock } from "@/lib/agent-instructions";
 import { readMemory, readRecentRuns } from "./store";
 
 // 界面上下文的常驻规则（静态 → 不影响 prompt caching）。载荷本身随每条用户
@@ -65,7 +66,15 @@ async function cachedProductionContext(userId: string, productionId: string): Pr
   return clipped;
 }
 
-export async function buildInjectContext(userId: string, excludeSessionKey?: string): Promise<string | null> {
+export interface InjectContextPayload {
+  /** agents.md 分级指令（制作级+个人级）——插件包 <clickin-instructions>
+   * （须遵守）。系统级不经这里（gateway workspace AGENTS.md 原生加载）。 */
+  instructions: string | null;
+  /** 档案/记忆/近期对话——插件包 <clickin-memory>（仅参考，非指令）。 */
+  memory: string | null;
+}
+
+export async function buildInjectContext(userId: string, excludeSessionKey?: string): Promise<InjectContextPayload> {
   // production 会话：从 sessionKey 解析制作维度，注入"当前制作"段
   // （段内做实时成员资格校验，被移出制作后不再注入）
   const identity = parseSessionIdentity(excludeSessionKey);
@@ -83,6 +92,14 @@ export async function buildInjectContext(userId: string, excludeSessionKey?: str
     }),
   ];
 
+  // 制作级指令借「当前制作」段的成员校验结果做门（productionContext 非 null
+  // = 实时成员校验已通过），不重复查询；查询失败按"无指令"降级——指令注入
+  // 是增强项，不能因它挂掉断整个注入链。
+  const instructions = await buildInstructionsBlock(userId, productionId, productionContext !== null).catch((err) => {
+    console.error(`[inject] 指令块组装异常（按无指令降级）user=${userId}:`, err);
+    return null;
+  });
+
   // 恒定段：无条件注入（哪怕这个用户还没有任何记忆/档案）——客户端何时附加
   // 界面上下文与后端有没有记忆无关，规则不到位就等于没有规则。
   const sections: string[] = [UI_CONTEXT_RULE];
@@ -97,5 +114,5 @@ export async function buildInjectContext(userId: string, excludeSessionKey?: str
     sections.push(`## 长期记忆摘要\n${demoted}`);
   }
   if (recent) sections.push(`## 近期对话（最近 ${RECENT_DAYS} 天）\n${recent}`);
-  return sections.join("\n\n");
+  return { instructions, memory: sections.join("\n\n") };
 }
