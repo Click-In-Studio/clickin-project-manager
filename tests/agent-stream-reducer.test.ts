@@ -77,4 +77,64 @@ describe("applyStreamLine", () => {
     expect(applyStreamLine(prev, { type: "ping" })).toEqual(prev);
     expect(applyStreamLine(prev, { type: "session", key: "agent:team:x" })).toEqual(prev);
   });
+
+  const question = {
+    id: "q-1",
+    questions: [
+      {
+        questionId: "pick_one",
+        header: "方案",
+        question: "先做哪个？",
+        options: [{ label: "A" }, { label: "B" }],
+      },
+    ],
+  };
+
+  it("question card settles streaming segment, appends, and dedups by id", () => {
+    let b: Bubble[] = [{ kind: "assistant", text: "我需要确认", streaming: true }];
+    b = applyStreamLine(b, { type: "question", question });
+    expect(b[0]).toEqual({ kind: "assistant", text: "我需要确认" });
+    expect(b[1]).toMatchObject({ kind: "question", question: { id: "q-1" } });
+    // 同一问题既来自 question.list 恢复又来自实时事件——第二次注入被吞
+    b = applyStreamLine(b, { type: "question", question });
+    expect(b).toHaveLength(2);
+  });
+
+  it("question-resolved flips the card status by id", () => {
+    let b: Bubble[] = [{ kind: "question", question }];
+    b = applyStreamLine(b, { type: "question-resolved", id: "q-1", status: "answered" });
+    expect(b[0]).toMatchObject({ kind: "question", status: "answered", resolving: false });
+  });
+
+  it("malformed question lines change nothing", () => {
+    const prev: Bubble[] = [{ kind: "user", text: "hi" }];
+    expect(applyStreamLine(prev, { type: "question" })).toEqual(prev);
+    expect(applyStreamLine(prev, { type: "question", question: { id: "x", questions: [] } })).toEqual(prev);
+  });
+
+  it("fallback final after an unfinished tool appends an incompleteness notice", () => {
+    // 兜底路径必须和正常路径可区分：工具还没收尾流就以兜底 final 结束，
+    // 说明本轮被掐断过，不能伪装成一次正常完成。
+    let b: Bubble[] = [
+      { kind: "assistant", text: "命令已在跑" },
+      { kind: "tool", name: "exec", id: "t1", done: false },
+    ];
+    b = applyStreamLine(b, { type: "final", text: "命令已在跑", fallback: true });
+    expect(b[b.length - 1]).toEqual({ kind: "notice", text: "本轮回复以兜底方式收尾，内容可能不完整" });
+  });
+
+  it("fallback final with everything settled adds no notice", () => {
+    let b: Bubble[] = [
+      { kind: "tool", name: "exec", id: "t1", done: true },
+      { kind: "assistant", text: "旧回复" },
+    ];
+    b = applyStreamLine(b, { type: "final", text: "新回复", fallback: true });
+    expect(b.some((x) => x.kind === "notice")).toBe(false);
+  });
+
+  it("fallback final after an unanswered question appends the notice", () => {
+    let b: Bubble[] = [{ kind: "question", question }];
+    b = applyStreamLine(b, { type: "final", text: "中间发言", fallback: true });
+    expect(b[b.length - 1]).toMatchObject({ kind: "notice" });
+  });
 });
