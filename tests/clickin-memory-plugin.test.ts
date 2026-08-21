@@ -409,3 +409,54 @@ describe("before_prompt_build：指令/记忆双包裹（经真实 /inject-conte
     expect(ctx).toContain("<clickin-memory>");
   });
 });
+
+describe("before_prompt_build：触发召回（M2，经真实 POST /inject-context 端到端）", () => {
+  // 本文件不配 EMBEDDING_*（mode=none）→ 触发召回走词法单路，正好验证
+  // 注入路径的降级纪律：embedding 缺席只少一路信号，不断轮次。
+  let userId: string;
+
+  beforeAll(async () => {
+    ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `触发召回-${shortId()}`, null, false));
+    const { indexCurated } = await import("@/lib/agent-memory/index-db");
+    // 写进真实记忆文件路径 + 索引（trigger 短语走 curated 索引列）
+    const { writeMemory } = await import("@/lib/agent-memory/store");
+    const md = "- 排练通告默认下午 2 点发出 <!-- trigger: 排练通告, 通告时间 --> <!-- importance: 7 -->";
+    writeMemory(userId, md);
+    await indexCurated("user", userId, md);
+  });
+
+  afterAll(async () => {
+    const { getPool } = await import("@/lib/pg");
+    await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
+  });
+
+  it("prompt 命中 trigger → recall 走 prependContext，且注释已剥", async () => {
+    const handler = hooks.get("before_prompt_build")!;
+    const out = (await handler(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt: "帮我确认下排练通告今天几点发" },
+      { sessionKey: `agent:team:clickin:chat:${userId}:11111111-2222-3333-4444-555555555555` },
+    )) as { appendSystemContext?: string; prependContext?: string } | undefined;
+
+    const recall = out?.prependContext ?? "";
+    expect(recall).toContain("<clickin-recall>");
+    expect(recall).toContain("排练通告默认下午 2 点发出");
+    expect(recall).not.toContain("importance:"); // 注释是索引信号，不进 prompt
+
+    // 缓存纪律：逐轮变化的 recall 绝不落进可缓存的 system prompt 段
+    const append = out?.appendSystemContext ?? "";
+    expect(append).not.toContain("<clickin-recall>");
+    // 长期记忆摘要段同样剥注释
+    expect(append).toContain("<clickin-memory>");
+    expect(append).not.toContain("<!--");
+  });
+
+  it("prompt 与 trigger 无关 → 无 prependContext（不触发即不注入）", async () => {
+    const handler = hooks.get("before_prompt_build")!;
+    const out = (await handler(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt: "今天天气怎么样" },
+      { sessionKey: `agent:team:clickin:chat:${userId}:11111111-2222-3333-4444-555555555555` },
+    )) as { appendSystemContext?: string; prependContext?: string } | undefined;
+    expect(out?.prependContext).toBeUndefined();
+    expect(out?.appendSystemContext ?? "").toContain("<clickin-memory>");
+  });
+});

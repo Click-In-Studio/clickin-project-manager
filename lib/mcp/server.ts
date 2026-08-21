@@ -471,6 +471,29 @@ export function startMcpServer(): void {
     }
   });
 
+  // POST 版（M2 起插件走这条）：body 多带本轮入站 prompt → 触发召回
+  // （trigger recall）随 recall 字段返回。GET 保留一版向后兼容（旧插件在
+  // 新后端下无 recall，其余行为不变——CD 同步插件与后端同批发布，兼容窗
+  // 只在发布间隙存在）。
+  app.post("/inject-context", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { userId?: unknown; sessionKey?: unknown; prompt?: unknown };
+    const userId = typeof body.userId === "string" ? body.userId : "";
+    const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : undefined;
+    const prompt = typeof body.prompt === "string" ? body.prompt : undefined;
+    if (!userId) {
+      res.status(400).json({ error: "missing userId" });
+      return;
+    }
+    try {
+      const { buildInjectContext } = await import("../agent-memory/inject");
+      const payload = await buildInjectContext(userId, sessionKey, prompt);
+      res.json({ instructions: payload.instructions, memory: payload.memory, recall: payload.recall });
+    } catch (err) {
+      console.error("[mcp] /inject-context POST error:", err);
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
   // episodic 上报端点（插件 agent_end 调用）——记忆文件所有权在后端
   // （插件进程写不进后端目录，也不该写），上报走 loopback HTTP。
   app.post("/memory-run", async (req: Request, res: Response) => {
