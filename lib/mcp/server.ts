@@ -5,6 +5,7 @@ import { z } from "zod";
 import http from "http";
 import type { Request, Response } from "express";
 import { WIKI_LINK_SYNTAX_NOTE } from "./wiki-link-syntax";
+import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 
 const rawPort = Number(process.env.MCP_PORT ?? 3101);
 const MCP_PORT = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3101;
@@ -335,6 +336,49 @@ export function buildMcpServer(): McpServer {
       wikiId, isPublic, deptIds, addPeople, removePeopleUserIds, summary,
     });
     return { content: [{ type: "text" as const, text }] };
+  });
+
+  // ─── agents.md 指令写工具（个人 / 制作两级）─────────────────────────────
+  // 非只读 → 插件 fail-closed 自动挂聊天栏确认卡（权限门原则①）；制作级
+  // 在批准后由工具函数重查 ai_instructions/*@edit（原则②：确认卡不是权限
+  // 判定的替身，无权限明确拒绝并指引申请路径）。当前生效内容每轮注入在
+  // <clickin-instructions> 块里，模型可直接读到，故无配套读工具。
+  s.registerTool("my.update_instructions", {
+    description:
+      "【个人设置】全量替换当前用户的个人 AI 指令（即 <clickin-instructions> 里「用户的个人指令」段），" +
+      "需要人工在聊天栏确认。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；" +
+      "传空字符串表示清空。仅影响该用户自己的会话。",
+    inputSchema: {
+      content: z.string().describe(`替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）`),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  }, async ({ content, _caller_user_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    const { updateMyInstructions } = await import("./instructions-tools");
+    return { content: [{ type: "text" as const, text: await updateMyInstructions(_caller_user_id, content) }] };
+  });
+
+  s.registerTool("production.update_instructions", {
+    description:
+      "全量替换当前对话关联制作的制作级 AI 指令（对全体成员的 AI 会话生效），需要人工在聊天栏确认；" +
+      "确认后若该用户没有编辑权限（默认仅制作人），调用会被直接拦截。content 是替换后的完整内容——" +
+      "先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。",
+    inputSchema: {
+      content: z.string().describe(`替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）`),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  }, async ({ content, _caller_user_id, _caller_production_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    const { updateProductionInstructions } = await import("./instructions-tools");
+    return {
+      content: [{
+        type: "text" as const,
+        text: await updateProductionInstructions(_caller_user_id, _caller_production_id, content),
+      }],
+    };
   });
 
   s.registerTool("users.query_sensitive", {

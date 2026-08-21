@@ -102,3 +102,38 @@ describe("buildInjectContext split payload", () => {
     expect(payload.memory).toContain("界面上下文说明");
   });
 });
+
+describe("MCP instruction tools", () => {
+  it("my.update_instructions replaces own scope and returns previous content", async () => {
+    const { updateMyInstructions } = await import("@/lib/mcp/instructions-tools");
+    await setAgentInstructions("user", userId, "旧偏好", userId);
+    const out = await updateMyInstructions(userId, "新偏好");
+    expect(out).toContain("✅");
+    expect(out).toContain("旧偏好"); // 误覆盖可恢复
+    expect(await getAgentInstructions("user", userId)).toBe("新偏好");
+  });
+
+  it("my.update_instructions with empty content clears", async () => {
+    const { updateMyInstructions } = await import("@/lib/mcp/instructions-tools");
+    const out = await updateMyInstructions(userId, "");
+    expect(out).toContain("清空");
+    expect(await getAgentInstructions("user", userId)).toBeNull();
+  });
+
+  it("over-length content is refused without writing", async () => {
+    const { updateMyInstructions } = await import("@/lib/mcp/instructions-tools");
+    await setAgentInstructions("user", userId, "保留", userId);
+    const out = await updateMyInstructions(userId, "长".repeat(4001));
+    expect(out).toContain("过长");
+    expect(await getAgentInstructions("user", userId)).toBe("保留");
+  });
+
+  it("production.update_instructions: non-member refused with explicit permission message, nothing written", async () => {
+    const { updateProductionInstructions } = await import("@/lib/mcp/instructions-tools");
+    // userId 不是 prodId 的成员（prodId 是 shortId 造的裸 id，无成员表行）
+    const out = await updateProductionInstructions(userId, prodId, "越权内容");
+    expect(out).toContain("⛔");
+    expect(out).toContain("权限");
+    expect(await getAgentInstructions("production", prodId)).not.toBe("越权内容");
+  });
+});

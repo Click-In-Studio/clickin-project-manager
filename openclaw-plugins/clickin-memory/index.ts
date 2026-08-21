@@ -404,6 +404,25 @@ export default definePluginEntry({
             ].filter((l): l is string => l !== null).join("\n"),
           };
         }
+        case "my-update_instructions":
+          return {
+            title: "修改你的个人 AI 指令",
+            description: [
+              "✍️ AI 请求全量替换你的个人指令（只影响你自己的会话，下一轮生效）。",
+              `新内容${typeof params.content === "string" && !params.content.trim() ? "：（清空）" : "预览："}`,
+              str(params.content, 360),
+            ].join("\n"),
+          };
+        case "production-update_instructions":
+          return {
+            title: "修改本制作的 AI 指令",
+            description: [
+              "✍️ AI 请求全量替换本制作的 AI 指令——对全体成员的 AI 会话生效。",
+              "批准后若你没有编辑权限（默认仅制作人），调用会被拦截、不会生效。",
+              `新内容${typeof params.content === "string" && !params.content.trim() ? "：（清空）" : "预览："}`,
+              str(params.content, 300),
+            ].join("\n"),
+          };
         case "users-query_sensitive":
           return {
             title: `查询你的登记联系方式`,
