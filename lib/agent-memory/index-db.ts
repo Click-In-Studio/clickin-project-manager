@@ -85,6 +85,14 @@ export function parseAnnotations(text: string): { importance: number | null; tri
   return { importance, triggers: triggers.length ? triggers.join(", ") : null };
 }
 
+/** 注入/展示前剥掉行尾注释元数据——注释是给索引器读的结构化信号，进
+ * prompt 只是噪音 token（还会教坏模型模仿着写）。 */
+export function stripAnnotations(text: string): string {
+  return text
+    .replace(/\s*<!--\s*(?:importance|trigger):[^>]*?-->/g, "")
+    .replace(/[ \t]+$/gm, "");
+}
+
 /** Markdown 分块：按空行拆语义块，**逐条目一块不打包**——打包会让相邻条目
  * 互相牵连 hash（蒸馏任何增改都导致整包重嵌、差量重建失效），逐条粒度才有
  * 「未变条目零 API 调用」与 trigger/importance 按条标注的语义。纯标题行并入
