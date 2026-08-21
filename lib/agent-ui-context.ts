@@ -30,26 +30,42 @@ export function buildUiContextMessage(
   doc: { wikiId: string; title: string; tags: string[] } | null,
 ): string {
   if (!doc) return raw;
-  const tagStr = doc.tags.length > 0 ? `，标签：${doc.tags.join("、")}` : "";
+  // doc.title/tags 是成员可写的自由文本——净化后再嵌入信封（纵深防御：让
+  // 正常路径的信封体不含额外 clickin- 标签，服务端 neutralizeInboundMessage
+  // 才能安全保留信封；真边界仍在服务端，客户端此处不可信）。
+  const safeTitle = neutralizeInjectionTags(doc.title);
+  const tagStr = doc.tags.length > 0 ? `，标签：${neutralizeInjectionTags(doc.tags.join("、"))}` : "";
   return [
     OPEN,
-    `用户此刻正打开文档《${doc.title}》（id: ${doc.wikiId}${tagStr}）。`,
+    `用户此刻正打开文档《${safeTitle}》（id: ${doc.wikiId}${tagStr}）。`,
     "以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关；如需正文，用 wiki_read 读取该 id。",
     CLOSE,
     raw,
   ].join("\n");
 }
 
-/** 服务端净化入站消息里的注入分隔符（真边界，客户端不可绕过）：保留开头
- *  合法的 <clickin-ui-context> 信封（可信脚手架，且其伪造仅能谎报"打开了哪篇
- *  文档"，无提权），只中和信封之后的用户文本——防用户在自己消息里塞
- *  </clickin-instructions> 之类伪造/闭合注入包裹块。正常消息无这些标签，
- *  净化是 no-op。 */
+// 合法 ui-context 信封体里只应出现 OPEN/CLOSE 两处 clickin-ui-context；
+// 更多就说明有内容经用户可控字段（doc.title 等）走私了额外的 clickin- 标签。
+const LEGIT_ENVELOPE_CLICKIN_COUNT = 2;
+
+/** 服务端净化入站消息里的注入分隔符（真边界，客户端不可绕过）。
+ *
+ *  开头的 <clickin-ui-context> 信封默认保留（可信脚手架，且其伪造仅能谎报
+ *  "打开了哪篇文档"，无提权），只中和信封之后的用户文本。**但信封体内嵌
+ *  doc.title 等成员可写字段**——若攻击者把某文档标题设成含 <clickin-…> 的
+ *  伪造块，受害者打开该文档时客户端会把它拼进信封，整体保留就等于放行了
+ *  伪造块（间接注入）。因此:信封体里 clickin- 出现超过合法的两次即判定
+ *  被走私，退回全量净化（连同信封一起中和——信封被中和只是失去"忽略我"
+ *  提示的美观，模型仍读得懂，安全优先）。 */
 export function neutralizeInboundMessage(message: string): string {
   const m = LEADING_BLOCK_RE.exec(message);
   if (m) {
     const envelope = m[0];
-    return envelope + neutralizeInjectionTags(message.slice(envelope.length));
+    const clickinOccurrences = (envelope.match(/clickin-/gi) ?? []).length;
+    if (clickinOccurrences <= LEGIT_ENVELOPE_CLICKIN_COUNT) {
+      return envelope + neutralizeInjectionTags(message.slice(envelope.length));
+    }
+    // 信封被走私——不给它豁免，全量净化。
   }
   return neutralizeInjectionTags(message);
 }
