@@ -901,7 +901,9 @@ function stripCallerFields(v: unknown): unknown {
 }
 
 /** 参数/结果 → 可读文本：MCP 结果对象取其 text 块；relay 的截断包裹标注
- * "已截断"；其余 JSON pretty-print。空/无内容返回 ""（调用方隐藏该栏）。 */
+ * "已截断"（preview 是掐断的 JSON 碎片、语法不保证完整，只能当纯文本渲染，
+ * 永远不得 JSON.parse——relay 侧 boundToolPayload 注释同款约定）；其余
+ * JSON pretty-print。空/无内容返回 ""（调用方隐藏该栏）。 */
 function formatToolPayload(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "string") return v;

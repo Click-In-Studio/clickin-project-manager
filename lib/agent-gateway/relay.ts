@@ -7,6 +7,7 @@ import {
   waitForRunOutcome,
 } from "./client";
 import type { ChatStreamEvent } from "./client";
+import { TOOL_PAYLOAD_MAX_CHARS } from "./types";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,8 +15,8 @@ function sleep(ms: number): Promise<void> {
 
 // 工具参数/结果透传给前端前的大小闸：SSE 单帧塞几百 KB 会拖慢整条流
 // （浏览器端逐帧 JSON.parse + setState）。超限时退化为截断预览字符串，
-// 前端按 truncated 标记提示"已截断"。
-const TOOL_PAYLOAD_MAX_CHARS = 16_000;
+// 前端按 truncated 标记提示"已截断"。注意 preview 是序列化 JSON 掐断的
+// 碎片、不保证语法完整——显示层只作纯文本渲染，永远不得 JSON.parse。
 /** exported for unit tests */
 export function boundToolPayload(value: unknown): unknown {
   if (value === undefined || value === null) return undefined;

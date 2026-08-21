@@ -87,15 +87,14 @@ describe("applyStreamLine", () => {
     expect(b[1]).toEqual({ kind: "tool", name: "b", id: "t2", done: false });
   });
 
-  it("tool-result without id falls back to last unfinished tool; unmatched id is a no-op", () => {
-    let b: Bubble[] = [
+  it("tool-result without id is dropped (never guessed onto a bubble); unmatched id is a no-op", () => {
+    // 并发多调用下"猜最后一个未完成气泡"会张冠李戴——无 id 宁缺毋滥。
+    const prev: Bubble[] = [
       { kind: "tool", name: "a", id: "t1", done: true },
       { kind: "tool", name: "b", id: "t2", done: false },
     ];
-    b = applyStreamLine(b, { type: "tool-result", result: "ok" });
-    expect(b[1]).toMatchObject({ id: "t2", result: "ok" });
-    const prev = [...b];
-    expect(applyStreamLine(b, { type: "tool-result", id: "t9", result: "孤儿" })).toEqual(prev);
+    expect(applyStreamLine(prev, { type: "tool-result", result: "ok" })).toEqual(prev);
+    expect(applyStreamLine(prev, { type: "tool-result", id: "t9", result: "孤儿" })).toEqual(prev);
   });
 
   it("approval card appends and resolves by id", () => {

@@ -6,6 +6,7 @@ import { GATEWAY_CLIENT_CAPS, GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "@
 import { GATEWAY_URL, getGatewayToken, isGatewayConfigured } from "./config";
 import * as device from "./device";
 import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./types";
+import { TOOL_PAYLOAD_MAX_CHARS } from "./types";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 import { stripUiContext } from "@/lib/agent-ui-context";
 
@@ -773,10 +774,13 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
         }
         return;
       }
-      // stream:"tool" 详情通道：start（带 args）先于 item 流的 start 到达
-      // （gateway 源码里同步先后两次 emit），所以气泡通常由这里创建、携带
-      // 参数；item 流的 start 随后被 seenToolCalls 去重。result 带完整结果，
-      // 归并进已有气泡；done 标记仍由 item 流的 "end" 负责（两者都会来）。
+      // stream:"tool" 详情通道：start（带 args）先于 item 流的 start 到达，
+      // 所以气泡由这里创建、携带参数；item 流的 start 随后被 seenToolCalls
+      // 去重。result 带完整结果，归并进已有气泡；done 标记仍由 item 流的
+      // "end" 负责（两者都会来）。顺序不是猜的，是上游强制的：gateway 的
+      // handleToolExecutionStart 在同一同步调用里先 emit tool 流再 emit
+      // item 流，两者走同一条 websocket（单连接 FIFO 投递）——若这条契约
+      // 破裂（item 先到），退化行为是气泡无参数，不炸。
       if (agentPayload.stream === "tool") {
         const toolId = agentPayload.data?.toolCallId ?? "";
         if (agentPayload.data?.phase === "result") {
@@ -884,7 +888,7 @@ export async function getChatHistory(sessionKey: string): Promise<ChatTranscript
     if (m.role === "toolResult") {
       if (m.toolName) {
         // 展示用途，截断保护：单条 wiki_read 结果可能是整篇文档。
-        const result = blocksToText(m.content).slice(0, 16_000);
+        const result = blocksToText(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
         entries.push({
           role: "tool",
           name: m.toolName,

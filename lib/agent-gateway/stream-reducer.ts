@@ -89,11 +89,14 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
     }
     case "tool-result": {
       // 结果先于 done 标记到达（gateway 的 tool 流早于 item 流的 end）。
-      // 按 id 精确归并；无 id 时退回"最后一个未完成的工具气泡"（与
-      // tool-end 同款兜底）。找不到就丢弃——结果没有独立气泡形态。
+      // 只按 id 精确归并；无 id 一律丢弃——gateway 的 result 事件恒带
+      // toolCallId，无 id 说明链路异常，此时并发多调用下"猜最后一个未完成
+      // 气泡"（tool-end 的兜底）会把结果安到错误的调用上：done 标记错了
+      // 只差一个勾，结果文本错了是实打实的张冠李戴，宁缺毋滥。
+      if (!line.id) return next;
       for (let i = next.length - 1; i >= 0; i--) {
         const b = next[i];
-        if (b.kind === "tool" && (line.id ? b.id === line.id : !b.done)) {
+        if (b.kind === "tool" && b.id === line.id) {
           next[i] = {
             ...b,
             ...(line.result !== undefined ? { result: line.result } : {}),
