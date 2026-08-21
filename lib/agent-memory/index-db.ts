@@ -165,13 +165,21 @@ function toVectorLiteral(v: number[]): string {
   return `[${v.join(",")}]`;
 }
 
+/** 用量归属：user 域记 user_id，production 域记 production_id——ai_usage 有
+ * CHECK 至少归一个主体（review #297：无主行对告警/核算都是废数据）。 */
+export type UsageAttribution = { userId?: string; productionId?: string };
+
+export function scopeAttribution(scopeType: "user" | "production", scopeId: string): UsageAttribution {
+  return scopeType === "user" ? { userId: scopeId } : { productionId: scopeId };
+}
+
 /** 用量账本（失败吞掉——记账绝不反噬业务路径）。 */
-async function logUsage(kind: string, tokens: number, userId: string | null): Promise<void> {
+async function logUsage(kind: string, tokens: number, attr: UsageAttribution): Promise<void> {
   if (tokens <= 0) return;
   try {
     await getPool().query(
-      "INSERT INTO ai_usage (user_id, kind, model, tokens) VALUES ($1, $2, $3, $4)",
-      [userId, kind, embeddingModel(), tokens],
+      "INSERT INTO ai_usage (user_id, production_id, kind, model, tokens) VALUES ($1, $2, $3, $4, $5)",
+      [attr.userId ?? null, attr.productionId ?? null, kind, embeddingModel(), tokens],
     );
   } catch (err) {
     console.error("[memory-index] 用量记账失败（忽略）:", err);
@@ -182,7 +190,7 @@ async function logUsage(kind: string, tokens: number, userId: string | null): Pr
  * 空 Map（调用方落 NULL embedding，关键词车道兜底）。 */
 async function embedWithCache(
   texts: Array<{ text: string; contentHash: string }>,
-  usageUserId: string | null,
+  usageAttr: UsageAttribution,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (texts.length === 0) return out;
@@ -210,7 +218,7 @@ async function embedWithCache(
     }
     throw err;
   }
-  await logUsage("embedding_index", result.totalTokens, usageUserId);
+  await logUsage("embedding_index", result.totalTokens, usageAttr);
 
   for (let i = 0; i < missing.length; i++) {
     const lit = toVectorLiteral(result.embeddings[i]);
@@ -233,7 +241,7 @@ async function embedWithCache(
 export async function indexCurated(scopeType: "user" | "production", scopeId: string, markdown: string): Promise<void> {
   const chunks = chunkMarkdown(markdown);
   const identityOk = await ensureIndexIdentity();
-  const vectors = identityOk ? await embedWithCache(chunks, scopeType === "user" ? scopeId : null) : new Map<string, string>();
+  const vectors = identityOk ? await embedWithCache(chunks, scopeAttribution(scopeType, scopeId)) : new Map<string, string>();
   if (!identityOk) {
     console.warn("[memory-index] 索引身份与配置不符，向量车道暂停——跑 scripts/memory-index-backfill.ts --rebuild 重建");
   }
@@ -281,7 +289,7 @@ export async function indexEpisodicRun(userId: string, rec: RunRecord): Promise<
   if (!text) return;
   const contentHash = sha256(text);
   const identityOk = await ensureIndexIdentity();
-  const vectors = identityOk ? await embedWithCache([{ text, contentHash }], userId) : new Map<string, string>();
+  const vectors = identityOk ? await embedWithCache([{ text, contentHash }], { userId }) : new Map<string, string>();
   const vec = vectors.get(contentHash) ?? null;
   const observedAt = rec.ts && !Number.isNaN(Date.parse(rec.ts)) ? rec.ts : new Date().toISOString();
 
@@ -302,24 +310,37 @@ export async function embedMissing(limit = 200): Promise<number> {
     throw new Error("索引身份与配置不符，先 --rebuild 重建");
   }
   const pool = getPool();
-  const { rows } = await pool.query<{ id: string; text: string; content_hash: string; scope_id: string; scope_type: string }>(
+  const { rows } = await pool.query<{ id: string; text: string; content_hash: string; scope_id: string; scope_type: "user" | "production" }>(
     "SELECT id, text, content_hash, scope_id, scope_type FROM agent_memory_chunk WHERE embedding IS NULL ORDER BY created_at LIMIT $1",
     [limit],
   );
   if (rows.length === 0) return 0;
-  const vectors = await embedWithCache(
-    rows.map((r) => ({ text: r.text, contentHash: r.content_hash })),
-    null,
-  );
-  let updated = 0;
+
+  // 按 scope 分组嵌入——用量归到块的归属主体，不因"批处理"就记无主账
+  // （review #297 finding 2：ai_usage 每行必须至少归一个主体）
+  const groups = new Map<string, typeof rows>();
   for (const r of rows) {
-    const vec = vectors.get(r.content_hash);
-    if (!vec) continue;
-    await pool.query(
-      "UPDATE agent_memory_chunk SET embedding = $1::vector, model = $2 WHERE id = $3 AND embedding IS NULL",
-      [vec, embeddingModel(), r.id],
+    const key = `${r.scope_type}:${r.scope_id}`;
+    const g = groups.get(key) ?? [];
+    g.push(r);
+    groups.set(key, g);
+  }
+
+  let updated = 0;
+  for (const group of groups.values()) {
+    const vectors = await embedWithCache(
+      group.map((r) => ({ text: r.text, contentHash: r.content_hash })),
+      scopeAttribution(group[0].scope_type, group[0].scope_id),
     );
-    updated++;
+    for (const r of group) {
+      const vec = vectors.get(r.content_hash);
+      if (!vec) continue;
+      await pool.query(
+        "UPDATE agent_memory_chunk SET embedding = $1::vector, model = $2 WHERE id = $3 AND embedding IS NULL",
+        [vec, embeddingModel(), r.id],
+      );
+      updated++;
+    }
   }
   return updated;
 }

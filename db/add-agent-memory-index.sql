@@ -110,6 +110,9 @@ CREATE INDEX IF NOT EXISTS agent_memory_recall_log_chunk_idx
 -- ── AI 用量账本（内部核算 + 失控告警；未来转嫁定价的数据地基）────────────────
 -- embedding 与 chat 共用一张表，按 kind 区分。M1 只接 embedding 两个 kind，
 -- chat 侧接入另行处理。
+-- 归属不变量（review #297 finding 2）：每行必须至少归到一个主体——无主行
+-- 对失控告警/分摊核算都是废数据。回填等批处理按块的 scope 分组归账
+-- （index-db.ts embedMissing），不允许"批量所以记不到人"。
 CREATE TABLE IF NOT EXISTS ai_usage (
   id            BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id       UUID        NULL,
@@ -117,7 +120,8 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   kind          TEXT        NOT NULL,
   model         TEXT        NOT NULL,
   tokens        INTEGER     NOT NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (user_id IS NOT NULL OR production_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS ai_usage_created_idx ON ai_usage (created_at);
