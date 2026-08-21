@@ -199,3 +199,22 @@ describe("schema fingerprint matches committed seed-schema.json", () => {
     }
   });
 });
+
+describe("openclaw-workspace files are fully tracked (gitignore guard)", () => {
+  it("every on-disk workspace file is in git — none silently ignored", async () => {
+    // #292 事故防回归：.gitignore 的裸 AGENTS.md 规则曾把
+    // openclaw-workspace/AGENTS.md 静默挡在库外，CD runner 工作树缺文件、
+    // scp 中止，六个 workspace 文件全没同步（deploy 仍 success 只留
+    // warning）。这里断言磁盘与 git 跟踪清单一致——未来任何 .gitignore
+    // 改动若再吞掉 workspace 文件，在 CI 就红，而不是在生产 CD 里静默失败。
+    const { execSync } = await import("node:child_process");
+    const onDisk = (await readdir(path.join(process.cwd(), "openclaw-workspace"))).filter((f) => f.endsWith(".md")).sort();
+    const tracked = execSync("git ls-files openclaw-workspace/", { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .map((p) => path.basename(p))
+      .sort();
+    expect(onDisk).toEqual(tracked);
+    expect(tracked).toContain("AGENTS.md"); // 曾经缺席的主角单独点名
+  });
+});
