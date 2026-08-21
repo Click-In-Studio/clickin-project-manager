@@ -38,7 +38,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector 官方镜像 = postgres:16 + vector 扩展（agent 记忆索引需要；
+        # 服务器是 apt 的 postgresql-16-pgvector 0.6.0，SQL 钉 0.6 兼容面）
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: script_editor
           POSTGRES_PASSWORD: testpassword

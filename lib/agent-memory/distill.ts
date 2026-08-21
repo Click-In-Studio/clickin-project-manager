@@ -85,6 +85,14 @@ export async function distillUser(userId: string): Promise<DistillResult> {
 
         writeMemory(userId, next.trim());
         commitDistill(userId, nextOffset);
+        // curated 重建检索索引：蒸馏是离线批处理，可以等；但索引失败不算
+        // 蒸馏失败（记忆文件已落盘是事实，索引可由回填脚本补）
+        try {
+          const { indexCurated } = await import("./index-db");
+          await indexCurated("user", userId, next.trim());
+        } catch (err) {
+          console.error(`[distill] ${userId} curated 索引重建失败（蒸馏本身已成功）:`, err);
+        }
         return {
           userId, status: "distilled", entries: entries.length,
           inputChars: maxChars, shrunk: i > 0,
