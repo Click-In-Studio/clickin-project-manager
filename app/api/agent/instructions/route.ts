@@ -2,36 +2,17 @@ import { type NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/agent-gateway/http";
 import {
   INSTRUCTIONS_MAX_LEN,
+  canEditProductionInstructions,
   getAgentInstructions,
   setAgentInstructions,
 } from "@/lib/agent-instructions";
-import { getProductionPermissionContext, getUserProfile } from "@/lib/db";
-import { canAccessNode } from "@/lib/grant-template";
 
 export const runtime = "nodejs";
 
 // agents.md 编辑面（个人 / 制作两级；系统级在 openclaw-workspace/ 版本控制，
-// 刻意无在线编辑）。制作级权限节点 ai_instructions/*@edit：制作人经模版
-// node:*/*@* 类型通配覆盖（区间→需自确认激活，与全站激活制一致），POC 的
-// 部门区间不含此键——「默认仅制作人、不给 POC」由此天然成立，模版零改动。
-// isAdmin 取 DB profile 真值——session.isAdmin 是恒 false 的死字段（#281）。
-
-async function productionEditAccess(userId: string, productionId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-  if (!profile) return false;
-  const access = await getProductionPermissionContext(userId, profile.isAdmin, productionId);
-  if (!access) return false;
-  const { permCtx } = access;
-  const decision = await canAccessNode(
-    { userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner },
-    productionId,
-    "ai_instructions",
-    "*",
-    "*",
-    "edit",
-  );
-  return decision.allowed;
-}
+// 刻意无在线编辑）。制作级编辑权判定见 canEditProductionInstructions
+// （lib/agent-instructions.ts，与 MCP 工具共用同一个门）。
+const productionEditAccess = canEditProductionInstructions;
 
 export async function GET(req: NextRequest) {
   const auth = requireUser(req.cookies);

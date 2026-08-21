@@ -14,6 +14,36 @@ import { getPool } from "@/lib/pg";
 
 export type InstructionScope = "user" | "production";
 
+/**
+ * 制作级指令的编辑权判定（REST 面与 MCP 工具共用）。权限节点
+ * ai_instructions/*@edit：制作人经模版 node:*\/*@* 类型通配覆盖（区间→
+ * 需自确认激活，与全站激活制一致），POC 的部门区间不含此键——「默认仅
+ * 制作人、不给 POC」由此天然成立。isAdmin 取 DB profile 真值——
+ * session.isAdmin 是恒 false 的死字段（#281）。
+ */
+export async function canEditProductionInstructions(userId: string, productionId: string): Promise<boolean> {
+  // 动态 import 是刻意的：本模块被 MCP 注入链静态引用（inject.ts →
+  // mcp/server.ts），lib/db / grant-template 的依赖树很重且有过 Turbopack
+  // 循环依赖 TDZ 前科——权限判定只在编辑面/写工具触发，按需加载让注入
+  // 链的静态依赖图保持最小（与 mcp/server.ts 的同一条纪律）。
+  const { getProductionPermissionContext, getUserProfile } = await import("@/lib/db");
+  const { canAccessNode } = await import("@/lib/grant-template");
+  const profile = await getUserProfile(userId);
+  if (!profile) return false;
+  const access = await getProductionPermissionContext(userId, profile.isAdmin, productionId);
+  if (!access) return false;
+  const { permCtx } = access;
+  const decision = await canAccessNode(
+    { userId, isAdmin: permCtx.isAdmin, isOwner: permCtx.isOwner },
+    productionId,
+    "ai_instructions",
+    "*",
+    "*",
+    "edit",
+  );
+  return decision.allowed;
+}
+
 /** 存储上限（PUT 校验）——注入预算（INJECT_MAX_PER_SCOPE）比它小，超出部分
  * 注入时截断但存储保留，编辑面回显完整内容。 */
 export const INSTRUCTIONS_MAX_LEN = 4000;

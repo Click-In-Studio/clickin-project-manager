@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
 import {
@@ -837,7 +838,10 @@ export default function AgentPopout({
         />
       )}
 
-      {prefsOpen && (
+      {/* portal 到 body：popout 容器带 transition-transform，transform 祖先会成为
+          fixed 子孙的 containing block——不传送的话这个 modal 会被困在 440px
+          侧栏里看不全（WikiProposalPreviewModal 同款问题同款修法）。 */}
+      {prefsOpen && createPortal(
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={() => !prefsBusy && setPrefsOpen(false)}>
           <div
             className="w-[520px] max-w-[92vw] rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
@@ -878,7 +882,8 @@ export default function AgentPopout({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
