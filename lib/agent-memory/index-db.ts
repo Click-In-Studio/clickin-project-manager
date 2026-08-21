@@ -93,26 +93,56 @@ export function stripAnnotations(text: string): string {
     .replace(/[ \t]+$/gm, "");
 }
 
-/** Markdown 分块：按空行拆语义块，**逐条目一块不打包**——打包会让相邻条目
- * 互相牵连 hash（蒸馏任何增改都导致整包重嵌、差量重建失效），逐条粒度才有
- * 「未变条目零 API 调用」与 trigger/importance 按条标注的语义。纯标题行并入
- * 下一块（独立标题块没有检索价值）；超长单块硬切（带重叠）。确定性纯函数。 */
+/** Markdown 分块：**逐条目一块不打包**——打包会让相邻条目互相牵连 hash
+ * （蒸馏任何增改都导致整包重嵌、差量重建失效），逐条粒度才有「未变条目零
+ * API 调用」与 trigger/importance 按条标注的语义。
+ *
+ * 两级拆分（线上蒸馏产物实测修正，M2 验收发现）：先按空行拆块；块内若含
+ * 多个 bullet 行（真实蒸馏输出的条目间**没有空行**，只按空行拆会把整个
+ * 小节当一条——trigger 注入整段、24 条注释合并成 6 块），再按 bullet 逐条
+ * 拆。小节标题附到该节每条头上（保留语境；标题变更导致全节重嵌可接受，
+ * 低频）。纯标题块挂到下一块；超长单块硬切（带重叠）。确定性纯函数。 */
 export function chunkMarkdown(markdown: string): MemoryChunk[] {
   const blocks = markdown
     .split(/\n{2,}/)
     .map((b) => b.trim())
     .filter(Boolean);
 
+  const BULLET_RE = /^[-*]\s/;
+  const HEADING_RE = /^(#{1,6}\s|\*\*[^\n]+\*\*$)/;
+
   // 纯标题块（各级 # 或孤立加粗行）挂到下一块头上
   const merged: string[] = [];
   let pendingHeading: string | null = null;
   for (const block of blocks) {
-    if (/^(#{1,6}\s|\*\*[^\n]+\*\*$)/.test(block) && !block.includes("\n")) {
+    if (HEADING_RE.test(block) && !block.includes("\n")) {
       pendingHeading = pendingHeading ? `${pendingHeading}\n${block}` : block;
       continue;
     }
-    merged.push(pendingHeading ? `${pendingHeading}\n${block}` : block);
+
+    // 块内逐行状态机：标题行更新语境；bullet 行开新条目；其余行是上一条
+    // 的续行。每条目带上当前小节标题落块。
+    let heading = pendingHeading;
     pendingHeading = null;
+    let cur: string | null = null;
+    const flush = () => {
+      if (cur !== null) merged.push(heading ? `${heading}\n${cur}` : cur);
+      cur = null;
+    };
+    for (const line of block.split("\n")) {
+      if (HEADING_RE.test(line) && !BULLET_RE.test(line)) {
+        flush();
+        heading = line;
+      } else if (BULLET_RE.test(line)) {
+        flush();
+        cur = line;
+      } else if (cur !== null) {
+        cur += `\n${line}`;
+      } else {
+        cur = line;
+      }
+    }
+    flush();
   }
   if (pendingHeading) merged.push(pendingHeading);
 

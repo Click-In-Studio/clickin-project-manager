@@ -76,6 +76,21 @@ describe("chunkMarkdown", () => {
     expect(chunks[1].text).toBe("- 条目二");
     expect(chunks[0].contentHash).toBe(sha256(chunks[0].text));
   });
+  it("无空行的连续 bullet（真实蒸馏输出形态）也逐条拆，节标题附到每条", () => {
+    const md = "### 偏好与习惯\n- 条目A <!-- importance: 5 -->\n- 条目B <!-- trigger: 短语 --> <!-- importance: 7 -->\n\n### 结论\n- 条目C";
+    const chunks = chunkMarkdown(md);
+    expect(chunks.map((c) => c.text)).toEqual([
+      "### 偏好与习惯\n- 条目A <!-- importance: 5 -->",
+      "### 偏好与习惯\n- 条目B <!-- trigger: 短语 --> <!-- importance: 7 -->",
+      "### 结论\n- 条目C",
+    ]);
+    // 注释按条归属，不再整节合并
+    expect(chunks[0].importance).toBe(5);
+    expect(chunks[1].importance).toBe(7);
+    expect(chunks[1].triggers).toBe("短语");
+    expect(chunks[2].importance).toBeNull();
+  });
+
   it("超长单块硬切且带重叠", () => {
     const long = "字".repeat(CHUNK_MAX_CHARS * 2);
     const chunks = chunkMarkdown(long);
