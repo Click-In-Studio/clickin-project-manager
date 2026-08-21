@@ -136,4 +136,22 @@ describe("MCP instruction tools", () => {
     expect(out).toContain("权限");
     expect(await getAgentInstructions("production", prodId)).not.toBe("越权内容");
   });
+
+  it("production.update_instructions: authorized caller (owner) replaces and gets previous content back", async () => {
+    // 权限门放行分支——canEditProductionInstructions 对 owner 短路通过，
+    // 全量替换写入正确 scope 且返回旧内容供误覆盖恢复。
+    const { updateProductionInstructions } = await import("@/lib/mcp/instructions-tools");
+    const { makeProduction, cleanupProduction } = await import("./factories");
+    const { prodId: ownedProd } = await makeProduction(userId);
+    try {
+      await setAgentInstructions("production", ownedProd, "旧口径", userId);
+      const out = await updateProductionInstructions(userId, ownedProd, "新口径");
+      expect(out).toContain("✅");
+      expect(out).toContain("旧口径");
+      expect(await getAgentInstructions("production", ownedProd)).toBe("新口径");
+    } finally {
+      await getPool().query(`DELETE FROM agent_instructions WHERE scope_id = $1`, [ownedProd]);
+      await cleanupProduction(ownedProd).catch(() => {});
+    }
+  });
 });

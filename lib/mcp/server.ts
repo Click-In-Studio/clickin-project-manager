@@ -352,7 +352,7 @@ export function buildMcpServer(): McpServer {
       content: z.string().describe(`替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）`),
       ...callerShape,
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   }, async ({ content, _caller_user_id }) => {
     if (!_caller_user_id) return NO_CALLER;
     const { updateMyInstructions } = await import("./instructions-tools");
@@ -368,7 +368,7 @@ export function buildMcpServer(): McpServer {
       content: z.string().describe(`替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）`),
       ...callerShape,
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   }, async ({ content, _caller_user_id, _caller_production_id }) => {
     if (!_caller_user_id) return NO_CALLER;
     if (!_caller_production_id) return NO_PRODUCTION;

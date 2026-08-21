@@ -22,6 +22,10 @@ export type InstructionScope = "user" | "production";
  * session.isAdmin 是恒 false 的死字段（#281）。
  */
 export async function canEditProductionInstructions(userId: string, productionId: string): Promise<boolean> {
+  // 动态 import 是刻意的：本模块被 MCP 注入链静态引用（inject.ts →
+  // mcp/server.ts），lib/db / grant-template 的依赖树很重且有过 Turbopack
+  // 循环依赖 TDZ 前科——权限判定只在编辑面/写工具触发，按需加载让注入
+  // 链的静态依赖图保持最小（与 mcp/server.ts 的同一条纪律）。
   const { getProductionPermissionContext, getUserProfile } = await import("@/lib/db");
   const { canAccessNode } = await import("@/lib/grant-template");
   const profile = await getUserProfile(userId);
