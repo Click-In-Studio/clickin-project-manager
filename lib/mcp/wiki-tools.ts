@@ -11,6 +11,7 @@ import {
   type WikiListEntry, type WikiRef,
 } from "@/lib/wiki-db";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { listProductionDepts } from "@/lib/dept-db";
 import { listProductionMembers } from "@/lib/db";
 import type { WikiLevel } from "@/lib/resource-grant-db";
@@ -74,7 +75,9 @@ export async function wikiTree(userId: string, productionId: string): Promise<st
   if (!resolved) return DENIED_NOT_MEMBER;
   const all = await listWikiLibrary(productionId);
   const visible = await filterVisible(resolved.actor, productionId, all);
-  return buildTreeText(visible);
+  // 文档标题/正文是成员可写的自由文本——读回给模型前中和注入分隔符，防有人
+  // 在文档里塞 <clickin-instructions> 之类经工具结果做间接注入。
+  return neutralizeInjectionTags(buildTreeText(visible));
 }
 
 // ─── wiki.backlinks ─────────────────────────────────────────────────────────
@@ -94,13 +97,13 @@ export async function wikiBacklinks(userId: string, productionId: string, wikiId
     listBacklinks(wikiId, productionId),
     listOutgoingLinks(wikiId, productionId),
   ]);
-  return [
+  return neutralizeInjectionTags([
     "谁链接到它（backlinks）：",
     formatRefs(incoming),
     "",
     "它链接到谁（outgoing）：",
     formatRefs(outgoing),
-  ].join("\n");
+  ].join("\n"));
 }
 
 // ─── wiki.read ──────────────────────────────────────────────────────────────
@@ -150,7 +153,8 @@ export async function wikiRead(userId: string, productionId: string, wikiId: str
     "",
     body,
   ].filter((l): l is string => l !== null);
-  return lines.join("\n");
+  // 标题/正文是成员可写的自由文本——中和注入分隔符再返回（间接注入防护）。
+  return neutralizeInjectionTags(lines.join("\n"));
 }
 
 // ─── wiki.search ────────────────────────────────────────────────────────────
@@ -161,7 +165,7 @@ export async function wikiSearch(userId: string, productionId: string, query: st
 
   const results = await searchWiki(productionId, query);
   const visible = await filterVisible(resolved.actor, productionId, results);
-  return visible.length === 0 ? "（没有匹配的文档）" : formatRefs(visible);
+  return visible.length === 0 ? "（没有匹配的文档）" : neutralizeInjectionTags(formatRefs(visible));
 }
 
 // ─── wiki.propose_* ─────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { startChatRun, steerChatRun } from "@/lib/agent-gateway/client";
 import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
 
 export const runtime = "nodejs";
 
@@ -20,13 +21,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { message, sessionKey, steer } = body;
-  if (!message || typeof message !== "string") {
+  const { message: rawMessage, sessionKey, steer } = body;
+  if (!rawMessage || typeof rawMessage !== "string") {
     return NextResponse.json({ error: "缺少 message" }, { status: 400 });
   }
-  if (message.length > 16_000) {
+  if (rawMessage.length > 16_000) {
     return NextResponse.json({ error: "消息过长（上限 16000 字符）" }, { status: 400 });
   }
+  // 服务端净化注入分隔符（真边界，客户端 buildUiContextMessage 的净化不可信）：
+  // 中和用户消息里伪造/闭合 <clickin-…> 包裹块的企图，保留合法 ui-context 信封。
+  const message = neutralizeInboundMessage(rawMessage);
   if (!sessionKey || typeof sessionKey !== "string") {
     return NextResponse.json({ error: "缺少 sessionKey" }, { status: 400 });
   }

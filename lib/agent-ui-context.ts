@@ -13,6 +13,8 @@
 // 展示侧一律剥掉：实时气泡本来就只渲染用户原文，历史回放与会话标题/预览经
 // stripUiContext 还原。
 
+import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
+
 const OPEN = "<clickin-ui-context>";
 const CLOSE = "</clickin-ui-context>";
 
@@ -20,7 +22,9 @@ const CLOSE = "</clickin-ui-context>";
 // 同名标签（我们自己永远只拼在最前面）。
 const LEADING_BLOCK_RE = new RegExp(`^${OPEN}[\\s\\S]*?${CLOSE}\\n*`);
 
-/** 把界面状态包成信封拼在用户原文之前；doc 为 null 时原样返回。 */
+/** 把界面状态包成信封拼在用户原文之前；doc 为 null 时原样返回。
+ *  注意：本函数在**客户端**调用，其净化不能当安全边界——分隔符净化在服务端
+ *  由 neutralizeInboundMessage 兜底（stream 路由），防直接构造 API 请求绕过。 */
 export function buildUiContextMessage(
   raw: string,
   doc: { wikiId: string; title: string; tags: string[] } | null,
@@ -34,6 +38,20 @@ export function buildUiContextMessage(
     CLOSE,
     raw,
   ].join("\n");
+}
+
+/** 服务端净化入站消息里的注入分隔符（真边界，客户端不可绕过）：保留开头
+ *  合法的 <clickin-ui-context> 信封（可信脚手架，且其伪造仅能谎报"打开了哪篇
+ *  文档"，无提权），只中和信封之后的用户文本——防用户在自己消息里塞
+ *  </clickin-instructions> 之类伪造/闭合注入包裹块。正常消息无这些标签，
+ *  净化是 no-op。 */
+export function neutralizeInboundMessage(message: string): string {
+  const m = LEADING_BLOCK_RE.exec(message);
+  if (m) {
+    const envelope = m[0];
+    return envelope + neutralizeInjectionTags(message.slice(envelope.length));
+  }
+  return neutralizeInjectionTags(message);
 }
 
 /** 剥掉开头的信封，还原用户实际打的字（展示用）。 */
