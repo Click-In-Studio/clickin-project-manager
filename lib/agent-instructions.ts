@@ -11,6 +11,7 @@
 // 覆写 + 工具端判定独立把守，prompt 里写什么都不影响那条边界。
 
 import { getPool } from "@/lib/pg";
+import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 
 export type InstructionScope = "user" | "production";
 
@@ -78,7 +79,9 @@ export async function setAgentInstructions(
 /** 注入用净化：标题防御性降级（#/##/### → ####，防与包裹块的 ### 段标题
  * 同级串段——与 memory 注入的降级同一思路）+ 预算截断。 */
 function sanitizeForInject(content: string): string {
-  const demoted = content.replace(/^#{1,3}(?=\s)/gm, "####");
+  // 先中和注入分隔符（防伪造/提前闭合包裹块），再降级标题、截断预算。
+  const safe = neutralizeInjectionTags(content);
+  const demoted = safe.replace(/^#{1,3}(?=\s)/gm, "####");
   return demoted.length > INJECT_MAX_PER_SCOPE
     ? `${demoted.slice(0, INJECT_MAX_PER_SCOPE)}\n…（指令过长已截断）`
     : demoted;

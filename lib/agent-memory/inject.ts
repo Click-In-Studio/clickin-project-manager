@@ -6,6 +6,7 @@ import { buildUserContextMarkdown } from "@/lib/mcp/user-context";
 import { buildProductionContextMarkdown } from "@/lib/mcp/production-context";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildInstructionsBlock } from "@/lib/agent-instructions";
+import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { readMemory, readRecentRuns } from "./store";
 
 // 界面上下文的常驻规则（静态 → 不影响 prompt caching）。载荷本身随每条用户
@@ -102,17 +103,20 @@ export async function buildInjectContext(userId: string, excludeSessionKey?: str
 
   // 恒定段：无条件注入（哪怕这个用户还没有任何记忆/档案）——客户端何时附加
   // 界面上下文与后端有没有记忆无关，规则不到位就等于没有规则。
+  // UI_CONTEXT_RULE 是可信脚手架（且刻意含字面 <clickin-ui-context> 以教模型
+  // 忽略它），不净化；其余段都含用户可控文本（bio、蒸馏记忆、对话原文），
+  // 注入前一律中和包裹分隔符，防伪造/提前闭合 <clickin-memory> 块。
   const sections: string[] = [UI_CONTEXT_RULE];
-  if (userContext) sections.push(userContext); // 自带 "## 当前用户" 标题
-  if (productionContext) sections.push(productionContext); // 自带 "## 当前制作" 标题
+  if (userContext) sections.push(neutralizeInjectionTags(userContext)); // 自带 "## 当前用户" 标题
+  if (productionContext) sections.push(neutralizeInjectionTags(productionContext)); // 自带 "## 当前制作" 标题
   if (memory) {
     // 防御性降级 MEMORY.md 内部标题（#/## → ###）：蒸馏产物若自带二级
     // 标题会与包裹标题同级，模型会把"长期记忆摘要"读成空标题、把内容
     // 归给后续小节（真机反馈）。蒸馏 prompt 已要求 ### 起步，此处兜底
     // 覆盖历史产物与模型不听话的情况。
-    const demoted = memory.replace(/^#{1,2}(?=\s)/gm, "###");
+    const demoted = neutralizeInjectionTags(memory).replace(/^#{1,2}(?=\s)/gm, "###");
     sections.push(`## 长期记忆摘要\n${demoted}`);
   }
-  if (recent) sections.push(`## 近期对话（最近 ${RECENT_DAYS} 天）\n${recent}`);
+  if (recent) sections.push(`## 近期对话（最近 ${RECENT_DAYS} 天）\n${neutralizeInjectionTags(recent)}`);
   return { instructions, memory: sections.join("\n\n") };
 }
