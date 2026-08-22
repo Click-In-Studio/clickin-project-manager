@@ -6,6 +6,7 @@ import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import type { UploadResult } from "./AssetUploadPanel";
 import MountPointAssets from "./MountPointAssets";
+import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset, AssetMount, AssetType } from "@/lib/asset-db";
@@ -286,6 +287,9 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                         ))}
                       </div>
                     )}
+                    <div className="mt-3">
+                      <RelatedWikiChips productionId={productionId} entityType="asset" entityId={a.id} />
+                    </div>
                   </div>
                 )}
               </div>

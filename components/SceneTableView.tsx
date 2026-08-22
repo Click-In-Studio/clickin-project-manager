@@ -4,6 +4,7 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 import type { SceneFieldPerms } from "@/lib/scene-field-perms";
 import MountPointAssets from "@/components/assets/MountPointAssets";
+import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { parseDuration, formatDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
 import ChevronIcon from "@/components/ChevronIcon";
@@ -542,6 +543,9 @@ export default function SceneTableView({
                 versionId={versionId ?? undefined}
                 display="compact"
               />
+              <div className="mt-2">
+                <RelatedWikiChips productionId={productionId} entityType="scene" entityId={scene.id} />
+              </div>
             </td>
           </tr>
         )}

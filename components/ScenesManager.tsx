@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import MountPointAssets from "./assets/MountPointAssets";
+import RelatedWikiChips from "./wiki/RelatedWikiChips";
 import type { SceneDetail } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
@@ -325,6 +326,9 @@ function SceneEditRow({
                 versionId={versionId}
                 display="compact"
               />
+            </div>
+            <div className="mt-3">
+              <RelatedWikiChips productionId={productionId} entityType="scene" entityId={scene.id} />
             </div>
           </td>
         </tr>

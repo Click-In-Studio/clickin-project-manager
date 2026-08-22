@@ -4681,6 +4681,18 @@ export async function getCue(id: string, cueListId: string): Promise<Cue | null>
   return res.rows.length ? rowToCue(res.rows[0]) : null;
 }
 
+/** cue → 所属 cue_list（production 归属校验内含）。cue 级权限门都长在 cue_list 上，
+ *  拿到宿主 list id 才能过门（wiki-refs 等只有 cueId 的入口用）。 */
+export async function getCueListIdForCue(cueId: string, productionId: string): Promise<string | null> {
+  const res = await getPool().query<{ cue_list_id: string }>(
+    `SELECT c.cue_list_id FROM cue c
+     JOIN cue_list cl ON cl.id = c.cue_list_id
+     WHERE c.id = $1 AND cl.production_id = $2`,
+    [cueId, productionId],
+  );
+  return res.rows[0]?.cue_list_id ?? null;
+}
+
 export async function listCues(cueListId: string, versionId?: string): Promise<Cue[]> {
   if (versionId) {
     const res = await getPool().query<CueRow>(

@@ -9,7 +9,8 @@ import type { Mention } from "./event-db";
 // 设计账本：MindWeave《wiki文档库-现状调研与实施路线》§4/§5。
 // · 树 = 内禀 parent_id + fractional sort_key；树层级不进权限路径
 // · 每次内容写入落 wiki_revision（线性历史）；origin 供 AI provenance
-// · 正文只存 id 引用（[#wiki:<id>] / /__cm__wiki:<id>），保存时服务端提取进 wiki_link
+// · 正文只存 id 引用（[#wiki:<id>] / /__cm__<kind>:<id>），保存时服务端提取进
+//   wiki_entity_link（wiki↔任意对象的引用边；边零权限语义，见 migrate-wiki-entity-link.sql）
 // · 删除：被挂载（report/note 边引用）的 wiki 不可删——边的生命周期归 W5 统一日
 
 export type WikiDoc = {
@@ -47,35 +48,81 @@ function rowToWiki(r: WikiRow): WikiDoc {
   };
 }
 
-// ─── wikilink 提取（两种序列化形态：纯 token 与 markdown 私有 href）────────────
+// ─── mention 边提取（两种序列化形态：纯 token 与 markdown 私有 href）───────────
 
+// 落边的 kind 全集：ContentMentionKind 去掉 page（页码不是实体）。
+// 锚定语义逐字继承 mention 体系（scene/block 稳定 id、cue 行 id——#302 换锚时同批切）。
+const EDGE_KINDS = new Set(["wiki", "scene", "rehearsal", "block", "cue", "asset"]);
+
+export type MentionEdge = { entityType: string; entityId: string };
+
+// 旧式裸 token（已废弃但存量正文仍在）只存在过 wiki 一种 kind
 const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
-const WIKI_HREF_RE = /\(\/__cm__wiki:([0-9a-fA-F-]{36})(?:[?&][^)]*)?\)/g;
+// 现行私有 href：/__cm__<kind>:<id>[?v=..][:aux]——id 截到 ):?& 为止，
+// 版本参数与 aux（asset 的挂载点定位）不属于实体身份，剥除
+const CM_HREF_RE = /\(\/__cm__([a-z_.]+):([^):?&\s]+)/g;
 // code fence / 行内码里的链接语法是"关于语法的文档"不是真引用（MindWeave
 // protectCodeSpans 同款教训）——提取前剥除代码上下文
 const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
-export function extractWikiLinkTargets(body: string): string[] {
+/** 正文 → 引用边（全 kind；block.<mode> 归一为 block，wiki id 归一小写）。 */
+export function extractMentionEdges(body: string): MentionEdge[] {
   const stripped = body.replace(CODE_SPAN_RE, "");
-  const out = new Set<string>();
-  for (const m of stripped.matchAll(WIKI_TOKEN_RE)) out.add(m[1].toLowerCase());
-  for (const m of stripped.matchAll(WIKI_HREF_RE)) out.add(m[1].toLowerCase());
-  return [...out];
+  const seen = new Set<string>();
+  const out: MentionEdge[] = [];
+  const add = (entityType: string, entityId: string) => {
+    const key = `${entityType} ${entityId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ entityType, entityId });
+  };
+  for (const m of stripped.matchAll(WIKI_TOKEN_RE)) add("wiki", m[1].toLowerCase());
+  for (const m of stripped.matchAll(CM_HREF_RE)) {
+    const kind = m[1].startsWith("block.") ? "block" : m[1];
+    if (!EDGE_KINDS.has(kind)) continue;
+    add(kind, kind === "wiki" ? m[2].toLowerCase() : m[2]);
+  }
+  return out;
 }
 
-/** 保存时同步 wiki_link（幻影链接——目标不存在/跨 production——不落行，FK 保证）。 */
+/** 兼容旧签名：正文中的 wiki 目标 id 列表（MCP 侧幻影目标替换仍在用）。 */
+export function extractWikiLinkTargets(body: string): string[] {
+  return extractMentionEdges(body)
+    .filter(e => e.entityType === "wiki")
+    .map(e => e.entityId);
+}
+
+/** 保存时重建派生边。只清 origin='wiki_body'——manual 边（Phase 2 显式建链）
+ *  不属于正文，重建不得触碰。派生边不做存在性校验直接落行：幻影/跨 production
+ *  的边永远不会被渲染（反向查询按 production_id 过滤且只从活宿主页发起，
+ *  wiki 侧读取处 join wiki 表过滤），正文里的死引用由 mention-resolve
+ *  呈现"#[已删除]"。 */
 async function syncWikiLinks(sourceId: string, productionId: string, body: string): Promise<void> {
-  const targets = extractWikiLinkTargets(body).filter(t => t !== sourceId);
-  const pool = getPool();
-  await pool.query(`DELETE FROM wiki_link WHERE source_wiki_id = $1::uuid`, [sourceId]);
-  if (targets.length === 0) return;
-  await pool.query(
-    `INSERT INTO wiki_link (source_wiki_id, target_wiki_id)
-     SELECT $1::uuid, w.id FROM wiki w
-     WHERE w.id = ANY($2::uuid[]) AND w.production_id = $3
-     ON CONFLICT DO NOTHING`,
-    [sourceId, targets, productionId],
-  );
+  const edges = extractMentionEdges(body)
+    .filter(e => !(e.entityType === "wiki" && e.entityId === sourceId));
+  // 删+插同事务：中途崩溃不留"边被清但没重建"的空窗（review #303-r2-1）
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM wiki_entity_link WHERE wiki_id = $1::uuid AND origin = 'wiki_body'`,
+      [sourceId],
+    );
+    if (edges.length > 0) {
+      await client.query(
+        `INSERT INTO wiki_entity_link (wiki_id, production_id, entity_type, entity_id, origin)
+         SELECT $1::uuid, $2, t, i, 'wiki_body' FROM unnest($3::text[], $4::text[]) AS u(t, i)
+         ON CONFLICT DO NOTHING`,
+        [sourceId, productionId, edges.map(e => e.entityType), edges.map(e => e.entityId)],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 async function writeRevision(
@@ -318,6 +365,11 @@ export async function deleteWiki(
     `DELETE FROM resource_person_manage WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2`,
     [productionId, id],
   );
+  // wiki_id 侧的边随 FK CASCADE；entity 侧（别的文档指向本文档）无 FK，
+  // 这里顺手清掉。scene/cue 等非 wiki 实体删除时的悬空边是设计内容忍
+  // （反向查询只从活宿主页发起），但 wiki 目标的删除入口在自己手里，一行清零。
+  await pool.query(
+    `DELETE FROM wiki_entity_link WHERE entity_type = 'wiki' AND entity_id = $1`, [id]);
   await pool.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
   // 正开着这篇的人要靠这一帧离场——否则下一次软刷新会撞进 notFound()，
   // 整个人被弹出工程环境（见 WikiDocClient 的 library 监听）。
@@ -539,26 +591,43 @@ export async function removeWikiSharePerson(
 export type WikiRef = { id: string; title: string | null };
 
 export async function listBacklinks(wikiId: string, productionId: string): Promise<WikiRef[]> {
+  // DISTINCT：同一来源可能同时有 body 边与 manual 边（PK 含 origin）
   const res = await getPool().query<{ id: string; title: string | null }>(
-    `SELECT w.id::text AS id, w.title FROM wiki_link l
-     JOIN wiki w ON w.id = l.source_wiki_id
-     WHERE l.target_wiki_id = $1::uuid AND w.production_id = $2
+    `SELECT DISTINCT w.id::text AS id, w.title, w.updated_at FROM wiki_entity_link l
+     JOIN wiki w ON w.id = l.wiki_id
+     WHERE l.entity_type = 'wiki' AND l.entity_id = $1 AND w.production_id = $2
      ORDER BY w.updated_at DESC`,
-    [wikiId, productionId],
+    [wikiId.toLowerCase(), productionId],
   );
-  return res.rows;
+  return res.rows.map(r => ({ id: r.id, title: r.title }));
 }
 
-/** 出链（该文档链接到谁）——与 listBacklinks 对称，同一张已同步好的 wiki_link 边表。 */
+/** 出链（该文档链接到谁）——与 listBacklinks 对称，同一张已同步好的边表。
+ *  join 用 w.id::text（entity_id 无类型，uuid cast 遇脏行会整查询炸掉）。 */
 export async function listOutgoingLinks(wikiId: string, productionId: string): Promise<WikiRef[]> {
   const res = await getPool().query<{ id: string; title: string | null }>(
-    `SELECT w.id::text AS id, w.title FROM wiki_link l
-     JOIN wiki w ON w.id = l.target_wiki_id
-     WHERE l.source_wiki_id = $1::uuid AND w.production_id = $2
+    `SELECT DISTINCT w.id::text AS id, w.title, w.updated_at FROM wiki_entity_link l
+     JOIN wiki w ON w.id::text = l.entity_id
+     WHERE l.wiki_id = $1::uuid AND l.entity_type = 'wiki' AND w.production_id = $2
      ORDER BY w.updated_at DESC`,
     [wikiId, productionId],
   );
-  return res.rows;
+  return res.rows.map(r => ({ id: r.id, title: r.title }));
+}
+
+/** 对象侧反向面板：引用了该实体的 wiki（标题级列出——§4.1，不过滤 wiki 可见性，
+ *  点击处由 wiki 页过门+申请）。production_id 过滤兼防跨剧组 mention 泄漏。 */
+export async function listWikiRefsForEntity(
+  productionId: string, entityType: string, entityId: string,
+): Promise<WikiRef[]> {
+  const res = await getPool().query<{ id: string; title: string | null }>(
+    `SELECT DISTINCT w.id::text AS id, w.title, w.updated_at FROM wiki_entity_link l
+     JOIN wiki w ON w.id = l.wiki_id
+     WHERE l.production_id = $1 AND l.entity_type = $2 AND l.entity_id = $3
+     ORDER BY w.updated_at DESC LIMIT 50`,
+    [productionId, entityType, entityId],
+  );
+  return res.rows.map(r => ({ id: r.id, title: r.title }));
 }
 
 /** unlinked references：正文含目标标题但无链接边的文档（pg_trgm 加速的 ILIKE）。 */
@@ -569,10 +638,10 @@ export async function listUnlinkedReferences(wikiId: string, productionId: strin
   if (!title) return [];
   const res = await getPool().query<{ id: string; title: string | null }>(
     `SELECT w.id::text AS id, w.title FROM wiki w
-     WHERE w.production_id = $1 AND w.id <> $2::uuid
+     WHERE w.production_id = $1 AND w.id::text <> $2
        AND w.body ILIKE '%' || $3 || '%'
-       AND NOT EXISTS (SELECT 1 FROM wiki_link l
-                       WHERE l.source_wiki_id = w.id AND l.target_wiki_id = $2::uuid)
+       AND NOT EXISTS (SELECT 1 FROM wiki_entity_link l
+                       WHERE l.wiki_id = w.id AND l.entity_type = 'wiki' AND l.entity_id = $2)
      ORDER BY w.updated_at DESC LIMIT 50`,
     [productionId, wikiId, title],
   );
