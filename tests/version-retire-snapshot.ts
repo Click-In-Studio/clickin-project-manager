@@ -62,6 +62,15 @@ export async function createVersionRetirePreMigrationData(
      VALUES ($1, $2, $3, 'reference', 'verretire.png', 'image/png', false, false, 'r2')`,
     [assetId, prodId, ownerUserId],
   );
+  // asset-rest 迁移测试的全库不变量：每个 asset 的 uploader 必须有 person 归属行。
+  // 裸 SQL 造的资产要自带这行，否则会把别支迁移的 integrity 层打红。
+  await pool.query(
+    `INSERT INTO resource_person_manage
+       (production_id, user_id, resource_type, resource_id, resource_sub, established_by)
+     VALUES ($1, $2, 'asset', $3, '*', $2)
+     ON CONFLICT DO NOTHING`,
+    [prodId, ownerUserId, assetId],
+  );
   await pool.query(
     `INSERT INTO asset_file (id, asset_id, r2_key, created_at)
      VALUES ($1, $3, 'r2/verretire-old', now() - interval '1 hour'),
