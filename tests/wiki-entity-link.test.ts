@@ -7,7 +7,7 @@ import {
   extractMentionEdges, listBacklinks, listWikiRefsForEntity,
 } from "@/lib/wiki-db";
 import { GET as wikiRefsGET } from "@/app/api/production/[id]/wiki-refs/route";
-import { makeProduction, makeScene, cleanupProduction } from "./factories";
+import { makeProduction, makeScene, cleanupProduction, shortId } from "./factories";
 
 // wiki↔entity 引用边（wiki_entity_link）：提取全 kind、派生重建只清 body 边、
 // 跨剧组防泄漏、对象侧反向面板端点的门。设计要点见 db/migrate-wiki-entity-link.sql。
@@ -167,5 +167,44 @@ describe("GET /wiki-refs", () => {
     const data = await res.json();
     // stranger 对该 wiki 无可见性，但标题级列出（§4.1 名字不敏感、内容敏感）
     expect((data.refs as { id: string; title: string | null }[]).map(r => r.id)).toContain(doc.id);
+  });
+
+  it("cue refs gated by the hosting cue_list's cues@view", async () => {
+    const cueListId = `t${shortId()}`;
+    const cueId = `tcue${shortId()}`;
+    await getPool().query(
+      "INSERT INTO cue_list (id, production_id, name, notes, created_by) VALUES ($1, $2, 'Q表', '', $3)",
+      [cueListId, prodId, creator]);
+    await getPool().query(
+      `INSERT INTO cue (id, cue_list_id, number, start_kind, end_kind) VALUES ($1, $2, '1', 'gap', 'gap')`,
+      [cueId, cueListId]);
+    const doc = await createWiki({
+      productionId: prodId, title: "cue 笔记", body: `[Q1](/__cm__cue:${cueId})`, createdBy: creator });
+
+    // 无 cue 域权限的成员 → 403
+    expect((await wikiRefsGET(makeReq(`type=cue&id=${cueId}`, creator), ctx())).status).toBe(403);
+
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'cue_list', $3, 'cues', 'view', 'direct', $2)`,
+      [prodId, creator, cueListId]);
+    const res = await wikiRefsGET(makeReq(`type=cue&id=${cueId}`, creator), ctx());
+    expect(res.status).toBe(200);
+    expect(((await res.json()).refs as { id: string }[]).map(r => r.id)).toContain(doc.id);
+  });
+
+  it("asset refs: foreign-production asset id → 403 (ownership check)", async () => {
+    const other = await makeProduction();
+    try {
+      const foreignAssetId = `as_${shortId()}`;
+      await getPool().query(
+        `INSERT INTO asset (id, production_id, uploader_user_id, file_name, storage_type)
+         VALUES ($1, $2, $3, 'x.png', 'r2')`,
+        [foreignAssetId, other.prodId, creator]);
+      expect((await wikiRefsGET(makeReq(`type=asset&id=${foreignAssetId}`, creator), ctx())).status).toBe(403);
+    } finally {
+      await cleanupProduction(other.prodId).catch(() => {});
+    }
   });
 });

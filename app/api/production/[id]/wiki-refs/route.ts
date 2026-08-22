@@ -23,7 +23,11 @@ async function hostViewPermitted(
     case "scene":
     case "rehearsal":
     case "block":
-      // 剧本域三 kind 同门（mention-resolve 同款：blocks@view）
+      // 剧本域三 kind 同门（mention-resolve 同款：blocks@view）。不校验 entityId
+      // 归属本 production（cue/asset 分支的归属校验是过门必需的副产品——门长在
+      // 实例上，先找宿主才知道门在哪；剧本域门是 production 级通配，无宿主可找）：
+      // 传外剧组 id 也只能查到 *本* production 的边（listWikiRefsForEntity 按
+      // production_id 过滤），返回的是本剧组 wiki 的标题级信息，观看者已过本域门
       return permCtx.isAdmin || permCtx.isOwner
         || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
     case "cue": {

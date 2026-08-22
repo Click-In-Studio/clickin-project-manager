@@ -100,18 +100,29 @@ export function extractWikiLinkTargets(body: string): string[] {
 async function syncWikiLinks(sourceId: string, productionId: string, body: string): Promise<void> {
   const edges = extractMentionEdges(body)
     .filter(e => !(e.entityType === "wiki" && e.entityId === sourceId));
-  const pool = getPool();
-  await pool.query(
-    `DELETE FROM wiki_entity_link WHERE wiki_id = $1::uuid AND origin = 'wiki_body'`,
-    [sourceId],
-  );
-  if (edges.length === 0) return;
-  await pool.query(
-    `INSERT INTO wiki_entity_link (wiki_id, production_id, entity_type, entity_id, origin)
-     SELECT $1::uuid, $2, t, i, 'wiki_body' FROM unnest($3::text[], $4::text[]) AS u(t, i)
-     ON CONFLICT DO NOTHING`,
-    [sourceId, productionId, edges.map(e => e.entityType), edges.map(e => e.entityId)],
-  );
+  // 删+插同事务：中途崩溃不留"边被清但没重建"的空窗（review #303-r2-1）
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM wiki_entity_link WHERE wiki_id = $1::uuid AND origin = 'wiki_body'`,
+      [sourceId],
+    );
+    if (edges.length > 0) {
+      await client.query(
+        `INSERT INTO wiki_entity_link (wiki_id, production_id, entity_type, entity_id, origin)
+         SELECT $1::uuid, $2, t, i, 'wiki_body' FROM unnest($3::text[], $4::text[]) AS u(t, i)
+         ON CONFLICT DO NOTHING`,
+        [sourceId, productionId, edges.map(e => e.entityType), edges.map(e => e.entityId)],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 async function writeRevision(
