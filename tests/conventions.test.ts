@@ -218,3 +218,44 @@ describe("openclaw-workspace files are fully tracked (gitignore guard)", () => {
     expect(tracked).toContain("AGENTS.md"); // 曾经缺席的主角单独点名
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. 模版发出的每个 resource_type 都必须在权限词汇表里
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("模版 resource_type ⊆ resource_permission_level 词汇表", () => {
+  // material 线上事故（2026-08-20）防回归：模版自 material 域接入起就发
+  // node:material/* 键，但词汇表从未登记 material 行。键落进
+  // production_role_permission（无 FK）静默通过，角色实化成员 grant 行时
+  // 才撞 production_member_grant_level_fk，整个授权操作失败。
+  // 本审计让「模版发键在先、词汇表登记在后」在 CI 就红，不再等线上。
+  it("所有模版键（角色 + 部门静态区间）的 resource_type 均已登记", async () => {
+    const { PRODUCTION_TEMPLATES } = await import("@/lib/production-template");
+
+    const keys = new Set<string>();
+    for (const template of Object.values(PRODUCTION_TEMPLATES)) {
+      for (const k of template.roles.baseline) keys.add(k);
+      for (const roleKeys of Object.values(template.roles.permissions)) {
+        for (const k of roleKeys) keys.add(k);
+      }
+      for (const deptKeys of Object.values(template.deptPermissions)) {
+        for (const k of deptKeys) keys.add(k);
+      }
+    }
+
+    const types = new Set<string>();
+    for (const key of keys) {
+      const m = /^node:([a-z_]+)\//.exec(key);
+      if (m) types.add(m[1]);
+    }
+    expect(types.size).toBeGreaterThan(0);
+
+    const { rows } = await getPool().query<{ resource_type: string }>(
+      "SELECT DISTINCT resource_type FROM resource_permission_level",
+    );
+    const vocabulary = new Set(rows.map((r) => r.resource_type));
+
+    const missing = [...types].filter((t) => !vocabulary.has(t)).sort();
+    expect(missing, `模版发出了词汇表未登记的 resource_type（会在角色实化时撞 FK）`).toEqual([]);
+  });
+});
