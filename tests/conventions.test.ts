@@ -230,6 +230,11 @@ describe("模版 resource_type ⊆ resource_permission_level 词汇表", () => {
   // 才撞 production_member_grant_level_fk，整个授权操作失败。
   // 本审计让「模版发键在先、词汇表登记在后」在 CI 就红，不再等线上。
   it("所有模版键（角色 + 部门静态区间）的 resource_type 均已登记", async () => {
+    // 覆盖面依据：lib/templates/ 下除 shared.ts 外的 7 个模版文件全部注册在
+    // PRODUCTION_TEMPLATES；shared.ts 是纯积木模块（被 7 个模版 import），
+    // 自身不独立发键。故审计 PRODUCTION_TEMPLATES 即审计全部模版键源。
+    // 若未来新增模版文件而忘了注册，resolveTemplate 也拿不到它——注册表
+    // 就是运行时的唯一取用面，不存在绕过审计又能生效的键源。
     const { PRODUCTION_TEMPLATES } = await import("@/lib/production-template");
 
     const keys = new Set<string>();
