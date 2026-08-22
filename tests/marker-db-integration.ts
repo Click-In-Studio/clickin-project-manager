@@ -38,14 +38,14 @@ function marker(id: string, type: Block["type"], parentMarkerId: string | null):
  * 版本退役 Phase B 后生产代码不再有分支入口——本测试需要的多版本共享态
  * 用裸 SQL 模拟遗留数据（复刻老 createVersion 的复制语义）。
  */
-async function legacyVersion(prodId: string, fromVersionId: string, name: string): Promise<string> {
+async function legacyVersion(prodId: string, fromVersionId: string): Promise<string> {
   const pool = getPool();
   const newVersionId = `ver_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   await pool.query(
-    `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config, marker_structure_revision)
-     SELECT $1, $2, $3, $4, 'editing', now(), COALESCE(script_config, '{}'::jsonb), marker_structure_revision
-     FROM version WHERE id = $4`,
-    [newVersionId, prodId, name, fromVersionId],
+    `INSERT INTO version (id, production_id, parent_version_id, created_at, script_config, marker_structure_revision)
+     SELECT $1, $2, $3, now(), COALESCE(script_config, '{}'::jsonb), marker_structure_revision
+     FROM version WHERE id = $3`,
+    [newVersionId, prodId, fromVersionId],
   );
   await pool.query(
     "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
@@ -139,7 +139,7 @@ async function run() {
     });
     await saveScriptConfig(productionId, sourceVersionId, scriptConfig);
 
-    const repairVersionId = await legacyVersion(productionId, sourceVersionId, "Parent repair");
+    const repairVersionId = await legacyVersion(productionId, sourceVersionId);
     const repairSceneId = `scene_${randomUUID()}`;
     const repairScene = marker(repairSceneId, "scene_marker", chapterId);
     await applyPatchToDB(productionId, repairVersionId, {
@@ -294,7 +294,7 @@ async function run() {
     );
     assert.equal(pageMapRowAfter.rows[0]?.xmin, pageMapRowBefore.rows[0]?.xmin);
 
-    const scopedSceneVersionId = await legacyVersion(productionId, sourceVersionId, "Scoped scene sync");
+    const scopedSceneVersionId = await legacyVersion(productionId, sourceVersionId);
     const laterSceneId = `scene_${randomUUID()}`;
     const laterScene = marker(laterSceneId, "scene_marker", chapterId);
     await applyPatchToDB(productionId, scopedSceneVersionId, {
@@ -437,7 +437,7 @@ async function run() {
 
     // 分支/rollback 已退役（Phase B）——遗留复制语义由 legacyVersion 覆盖：
     // marker_structure_revision 随复制继承。
-    const childId = await legacyVersion(productionId, sourceVersionId, "Child");
+    const childId = await legacyVersion(productionId, sourceVersionId);
     assert.equal(await revision(childId), "3");
   } finally {
     await deleteProduction(productionId);

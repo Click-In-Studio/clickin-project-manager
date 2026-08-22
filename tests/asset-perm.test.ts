@@ -49,13 +49,13 @@ beforeAll(async () => {
   const priv = await createAsset({
     productionId: prodId, uploaderUserId: uploader, assetType: "reference",
     fileName: "private.pdf", mimeType: "application/pdf",
-    isUniversal: true, storageType: "r2", isPublic: false,
+    storageType: "r2", isPublic: false,
   });
   privateAssetId = priv.asset.id;
   const pub = await createAsset({
     productionId: prodId, uploaderUserId: uploader, assetType: "reference",
     fileName: "public.pdf", mimeType: "application/pdf",
-    isUniversal: true, storageType: "r2", isPublic: true,
+    storageType: "r2", isPublic: true,
   });
   publicAssetId = pub.asset.id;
 

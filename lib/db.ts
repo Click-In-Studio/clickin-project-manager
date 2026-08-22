@@ -122,17 +122,13 @@ export async function getFirstRehearsalMarkerLabel(versionId: string): Promise<s
 }
 
 // ─── Version types ────────────────────────────────────────────────────────────
-
-export type VersionStatus = 'editing' | 'committed' | 'frozen' | 'archived';
+// 版本退役 Phase B：name/description/tags/status 列已删（migrate-version-retire.sql），
+// 版本只剩线性链结构，留作未来「历史记录 / checkpoint」地基。
 
 export type Version = {
   id: string;
   productionId: string;
-  name: string;
-  description: string;
-  tags: string[];
   parentVersionId: string | null;
-  status: VersionStatus;
   createdAt: string;
 };
 
@@ -687,11 +683,7 @@ function isMarkerBlockType(type: string | null | undefined): boolean {
 type VersionRow = {
   id: string;
   production_id: string;
-  name: string;
-  description: string;
-  tags: string[];
   parent_version_id: string | null;
-  status: VersionStatus;
   created_at: Date;
 };
 
@@ -699,11 +691,7 @@ function rowToVersion(r: VersionRow): Version {
   return {
     id: r.id,
     productionId: r.production_id,
-    name: r.name,
-    description: r.description,
-    tags: r.tags,
     parentVersionId: r.parent_version_id,
-    status: r.status,
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -718,7 +706,7 @@ export async function getVersionOpeningChapterId(versionId: string): Promise<str
 
 export async function getVersion(versionId: string): Promise<Version | null> {
   const res = await getPool().query<VersionRow>(
-    "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE id = $1",
+    "SELECT id, production_id, parent_version_id, created_at FROM version WHERE id = $1",
     [versionId]
   );
   return res.rows.length ? rowToVersion(res.rows[0]) : null;
@@ -745,7 +733,7 @@ export async function createInitialVersion(
   const versionId = genVersionId();
   const write = async (client: PoolClient) => {
     await client.query(
-      "INSERT INTO version (id, production_id, name, status) VALUES ($1, $2, '初稿', 'editing')",
+      "INSERT INTO version (id, production_id) VALUES ($1, $2)",
       [versionId, productionId]
     );
     await client.query(

@@ -410,12 +410,6 @@
       "nullable": true
     },
     {
-      "column": "is_universal",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
-    },
-    {
       "column": "is_public",
       "type": "boolean",
       "nullable": false,
@@ -587,23 +581,6 @@
       "column": "revoked_at",
       "type": "timestamp with time zone",
       "nullable": true
-    }
-  ],
-  "asset_version_rel": [
-    {
-      "column": "asset_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "version_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "asset_file_id",
-      "type": "text",
-      "nullable": false
     }
   ],
   "block_tag": [
@@ -3625,33 +3602,9 @@
       "nullable": false
     },
     {
-      "column": "name",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
-      "column": "description",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
-      "column": "tags",
-      "type": "ARRAY",
-      "nullable": false,
-      "default": "'{}'::text[]"
-    },
-    {
       "column": "parent_version_id",
       "type": "text",
       "nullable": true
-    },
-    {
-      "column": "status",
-      "type": "USER-DEFINED",
-      "nullable": false,
-      "default": "'editing'::version_status"
     },
     {
       "column": "created_at",

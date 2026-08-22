@@ -18,11 +18,6 @@ ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'chapter_marker';
 ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'scene_marker';
 ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'rehearsal_marker';
 
-DO $$ BEGIN
-  CREATE TYPE version_status AS ENUM ('editing', 'committed', 'frozen', 'archived');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
 -- ── Users ─────────────────────────────────────────────────────────────────────
 -- app_user is the internal identity anchor (UUID PK).
 -- feishu_user retains open_id as PK for Feishu-layer calls (bot, webhook, DMs).
@@ -91,14 +86,13 @@ CREATE TABLE IF NOT EXISTS production (
 
 -- ── Versions ──────────────────────────────────────────────────────────────────
 
+-- 版本退役 Phase B（migrate-version-retire.sql）：name/description/tags/status
+-- 已删——版本不再是用户概念。表本体与 parent_version_id 留作未来「历史记录 /
+-- checkpoint」的线性链地基。
 CREATE TABLE IF NOT EXISTS version (
   id                TEXT PRIMARY KEY,
   production_id     TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name              TEXT NOT NULL DEFAULT '',
-  description       TEXT NOT NULL DEFAULT '',
-  tags              TEXT[] NOT NULL DEFAULT '{}',
   parent_version_id TEXT REFERENCES version(id) ON DELETE SET NULL,
-  status            version_status NOT NULL DEFAULT 'editing',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   script_config     JSONB NOT NULL DEFAULT '{}',
   marker_structure_revision BIGINT NOT NULL DEFAULT 0
@@ -1025,7 +1019,6 @@ CREATE TABLE IF NOT EXISTS asset (
   asset_type        TEXT NOT NULL DEFAULT 'reference',
   file_name         TEXT NOT NULL,
   mime_type         TEXT,
-  is_universal      BOOLEAN NOT NULL DEFAULT true,
   -- 批D 隐私/公开：可见 = 能力票 ∧ (is_public ∨ ∃挂载边:宿主可见) ∨ publication@view。
   -- 存量迁移置 true（保真）；新建默认隐私
   is_public         BOOLEAN NOT NULL DEFAULT false,
@@ -1067,16 +1060,8 @@ CREATE INDEX IF NOT EXISTS asset_mount_production_idx ON asset_mount(production_
 CREATE INDEX IF NOT EXISTS asset_mount_point_idx ON asset_mount(mount_type, mount_id);
 CREATE INDEX IF NOT EXISTS asset_mount_asset_idx ON asset_mount(asset_id);
 
--- Links an asset (with a specific file version) to a script version.
-CREATE TABLE IF NOT EXISTS asset_version_rel (
-  asset_id      TEXT NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  version_id    TEXT NOT NULL REFERENCES version(id) ON DELETE CASCADE,
-  asset_file_id TEXT NOT NULL REFERENCES asset_file(id) ON DELETE CASCADE,
-  PRIMARY KEY (asset_id, version_id)
-);
-
-CREATE INDEX IF NOT EXISTS asset_version_rel_version_idx ON asset_version_rel(version_id);
-CREATE INDEX IF NOT EXISTS asset_version_rel_file_idx ON asset_version_rel(asset_file_id);
+-- asset_version_rel（资产文件按版本 pin）已随版本退役删除
+-- （migrate-version-retire.sql）：文件解析一律 latest-wins。
 
 -- Share tokens for public (unauthenticated) asset preview.
 -- one_time=true: token is consumed on first access, but streaming continues for 4h (grace period).

@@ -58,23 +58,21 @@ export async function cleanupProduction(prodId: string): Promise<void> {
 
 /**
  * 模拟「版本退役 Phase B」之前的遗留多版本数据：从 fromVersionId 复制出一个
- * 新的活跃版本（共享 snapshot / cue revision，ref_count 变为 2+），旧版本转为
- * committed 只读历史。生产代码已不再有制造这种状态的入口——这个工厂用裸 SQL
+ * 新的活跃版本（共享 snapshot / cue revision，ref_count 变为 2+），旧版本沦为
+ * 只读历史。生产代码已不再有制造这种状态的入口——这个工厂用裸 SQL
  * 复刻老 createVersion 的复制语义，专供 CoW（历史只读保护）分支的测试。
  */
 export async function makeLegacyVersion(
   prodId: string,
   fromVersionId: string,
-  name = "遗留版本",
 ): Promise<string> {
   const pool = getPool();
   const newVersionId = `ver_${faker.string.alphanumeric(10).toLowerCase()}`;
-  await pool.query("UPDATE version SET status = 'committed' WHERE id = $1", [fromVersionId]);
   await pool.query(
-    `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config, marker_structure_revision)
-     SELECT $1, $2, $3, $4, 'editing', now(), COALESCE(script_config, '{}'::jsonb), marker_structure_revision
-     FROM version WHERE id = $4`,
-    [newVersionId, prodId, name, fromVersionId],
+    `INSERT INTO version (id, production_id, parent_version_id, created_at, script_config, marker_structure_revision)
+     SELECT $1, $2, $3, now(), COALESCE(script_config, '{}'::jsonb), marker_structure_revision
+     FROM version WHERE id = $3`,
+    [newVersionId, prodId, fromVersionId],
   );
   await pool.query(
     "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",

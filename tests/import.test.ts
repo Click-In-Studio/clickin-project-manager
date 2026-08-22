@@ -720,7 +720,7 @@ describe("E: version-import hybrid — CoW block/cue isolation and GC", () => {
     await createCue({ id: CUE_E_ID, cueListId: CL_E_ID, number: "Q1", name: "混合测试Q", content: "", start: gap, end: gap, versionId: v1Id });
 
     // ── Step 3: fork v2 from v1（遗留多版本状态，工厂裸 SQL 模拟）──────────────
-    v2Id = await makeLegacyVersion(PROD_E, v1Id, "v2分支");
+    v2Id = await makeLegacyVersion(PROD_E, v1Id);
 
     // ── Step 4: CoW B2 in v2 — new snapshot sole-owned by v2 ──────────────────
     await applyPatchToDB(PROD_E, v2Id, {

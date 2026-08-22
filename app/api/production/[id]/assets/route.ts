@@ -51,7 +51,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       assetType: AssetType;
       name?: string | null;
       fileName: string;
-      isUniversal?: boolean;
     };
 
     if (body.storageType === "r2-multipart") {
@@ -80,7 +79,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const { asset, file } = await createAsset({
         productionId: id, uploaderUserId: session.userId,
         assetType: body.assetType ?? "reference", name: body.name ?? null,
-        fileName: body.fileName, mimeType, isUniversal: body.isUniversal ?? true,
+        fileName: body.fileName, mimeType,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
         fileSize: body.fileSize ?? null,
       });
@@ -108,7 +107,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const { asset, file } = await createAsset({
         productionId: id, uploaderUserId: session.userId,
         assetType: body.assetType ?? "reference", name: body.name ?? null,
-        fileName: body.fileName, mimeType, isUniversal: body.isUniversal ?? true,
+        fileName: body.fileName, mimeType,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
         fileSize: body.fileSize ?? null,
       });
@@ -122,7 +121,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const { asset, file } = await createAsset({
       productionId: id, uploaderUserId: session.userId,
       assetType: body.assetType ?? "reference", name: body.name ?? null,
-      fileName: body.fileName, mimeType: null, isUniversal: body.isUniversal ?? true,
+      fileName: body.fileName, mimeType: null,
       storageType: "feishu_link", feishuUrl: body.feishuUrl,
     });
     return Response.json({ asset, file }, { status: 201 });

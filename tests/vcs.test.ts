@@ -129,7 +129,7 @@ describe("makeLegacyVersion — 遗留多版本共享态", () => {
     await mkCueList(PROD, CL);
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("g1b1", "块一内容")));
     await mkCue("g1-cue1", CL, "首个走位", v1Id);
-    v2Id = await makeLegacyVersion(PROD, v1Id, "第二稿");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
   });
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
@@ -148,9 +148,9 @@ describe("makeLegacyVersion — 遗留多版本共享态", () => {
     expect(r1).toBe(r2);
   });
 
-  it("旧版本 status 变为 committed，新版本成为活跃 head", async () => {
-    expect((await getVersion(v1Id))?.status).toBe("committed");
+  it("新版本成为活跃 head，血统指向旧版本", async () => {
     expect(await getActiveVersionId(PROD)).toBe(v2Id);
+    expect((await getVersion(v2Id))?.parentVersionId).toBe(v1Id);
   });
 });
 
@@ -168,7 +168,7 @@ describe("block CoW — applyPatchToDB 编辑路径", () => {
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk1", "原始内容")));
     origSnap = (await snapshotId(v1Id, "bk1"))!;
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
   });
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
@@ -220,8 +220,8 @@ describe("block CoW — 版本本地 remap，不波及其他共享版本", () =>
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk2", "初始内容")));
     origSnap = (await snapshotId(v1Id, "bk2"))!;
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
-    v3Id = await makeLegacyVersion(PROD, v2Id, "V3");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
+    v3Id = await makeLegacyVersion(PROD, v2Id);
     // v1/v2/v3 共享同一 snapshot，现在编辑 v2（遗留中间版本）
     await applyPatchToDB(PROD, v2Id, upd(mkBlock("bk2", "V2 修改")));
   });
@@ -258,7 +258,7 @@ describe("block GC — 删除时 NOT EXISTS 守护", () => {
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bgc1", "GC 测试块")));
     sharedSnap = (await snapshotId(v1Id, "bgc1"))!;
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
     // V2 专属 block：共享态形成之后插入，V1 不持有
     await applyPatchToDB(PROD, v2Id, ins(mkBlock("bgc2", "V2 专属块")));
     v2OnlySnap = (await snapshotId(v2Id, "bgc2"))!;
@@ -299,7 +299,7 @@ describe("cue CoW — updateCue refCount 分支", () => {
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("g4-cue1", CL, "原始名", v1Id);
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
     origRev = (await cueRevisionId(v1Id, "g4-cue1"))!;
   });
 
@@ -342,8 +342,8 @@ describe("cue CoW — 版本本地 remap，不波及其他共享版本", () => {
     await mkCueList(PROD, CL);
     await mkCue("casc-cue1", CL, "初始", v1Id);
     // v1/v2/v3 共享同一 revision（refCount = 3），从 v2 触发 CoW
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
-    v3Id = await makeLegacyVersion(PROD, v2Id, "V3");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
+    v3Id = await makeLegacyVersion(PROD, v2Id);
     const rev = (await cueRevisionId(v2Id, "casc-cue1"))!;
     await updateCue(rev, CL, { name: "V2 改" }, v2Id);
   });
@@ -381,7 +381,7 @@ describe("cue GC — deleteCue 引用计数守护", () => {
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("gc-cue1", CL, "GC 测试 cue", v1Id);
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
     origRevId = (await cueRevisionId(v1Id, "gc-cue1"))!;
   });
 
@@ -416,8 +416,8 @@ describe("cowBlockSnapshotForMount — 本版本分裂", () => {
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("cm-vo", "共享测试块")));
     snapVo = (await snapshotId(v1Id, "cm-vo"))!;
-    v2Id = await makeLegacyVersion(PROD, v1Id, "V2");
-    v3Id = await makeLegacyVersion(PROD, v2Id, "V3");
+    v2Id = await makeLegacyVersion(PROD, v1Id);
+    v3Id = await makeLegacyVersion(PROD, v2Id);
     // An exclusive block only in v3 (refCount=1) for the noop test
     await applyPatchToDB(PROD, v3Id, ins(mkBlock("cm-noop", "仅 V3 的块")));
     snapNoop = (await snapshotId(v3Id, "cm-noop"))!;

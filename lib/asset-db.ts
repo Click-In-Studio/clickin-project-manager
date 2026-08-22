@@ -29,7 +29,6 @@ export type Asset = {
   name: string | null;
   fileName: string;
   mimeType: string | null;
-  isUniversal: boolean;
   isPublic: boolean;
   storageType: StorageType;
   feishuUrl: string | null;
@@ -64,14 +63,14 @@ export type AssetMount = {
 type AssetRow = {
   id: string; production_id: string; uploader_user_id: string;
   asset_type: string; name: string | null; file_name: string; mime_type: string | null;
-  is_universal: boolean; is_public: boolean; storage_type: string; feishu_url: string | null;
+  is_public: boolean; storage_type: string; feishu_url: string | null;
   created_at: Date;
 };
 function rowToAsset(r: AssetRow): Asset {
   return {
     id: r.id, productionId: r.production_id, uploaderUserId: r.uploader_user_id,
     assetType: r.asset_type as AssetType, name: r.name, fileName: r.file_name, mimeType: r.mime_type,
-    isUniversal: r.is_universal, isPublic: r.is_public, storageType: r.storage_type as StorageType,
+    isPublic: r.is_public, storageType: r.storage_type as StorageType,
     feishuUrl: r.feishu_url, createdAt: r.created_at.toISOString(),
   };
 }
@@ -113,7 +112,6 @@ export async function createAsset(params: {
   name?: string | null;
   fileName: string;
   mimeType: string | null;
-  isUniversal: boolean;
   isPublic?: boolean;
   storageType: StorageType;
   feishuUrl?: string | null;
@@ -128,10 +126,10 @@ export async function createAsset(params: {
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO asset (id, production_id, uploader_user_id, asset_type, name, file_name, mime_type,
-         is_universal, is_public, storage_type, feishu_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         is_public, storage_type, feishu_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [assetId, params.productionId, params.uploaderUserId, params.assetType, params.name ?? null,
-       params.fileName, params.mimeType, params.isUniversal, params.isPublic ?? false,
+       params.fileName, params.mimeType, params.isPublic ?? false,
        params.storageType, params.feishuUrl ?? null]
     );
     // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
