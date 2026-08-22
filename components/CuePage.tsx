@@ -10,6 +10,7 @@ import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
 import CueMountAssets from "@/components/assets/CueMountAssets";
+import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
@@ -381,6 +382,8 @@ function CueCommentsPanel({
           canEdit={true}
           display="panel"
         />
+
+        <RelatedWikiChips productionId={productionId} entityType="cue" entityId={cueId} />
 
         {topLevel.length === 0 && <p className="py-4 text-center text-xs text-zinc-300">暂无评论</p>}
         {topLevel.map(topC => (

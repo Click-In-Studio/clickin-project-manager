@@ -138,6 +138,12 @@ import {
   WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
   type WikiCreateBaselineSnapshot,
 } from "./wiki-create-baseline-snapshot";
+import {
+  isWikiEntityLinkPreMigrationSchema,
+  createWikiEntityLinkPreMigrationData,
+  WIKI_ENTITY_LINK_SNAPSHOT_PATH,
+  type WikiEntityLinkSnapshot,
+} from "./wiki-entity-link-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -553,6 +559,18 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // wiki 引用边泛化（wiki_link → wiki_entity_link）：先裸 SQL 造存量 wiki→wiki
+  // 边（应用代码已改写新表，不能走 createWiki），迁移测试验证平移。
+  if (await isWikiEntityLinkPreMigrationSchema(pool)) {
+    const wikiEntityLinkSnapshot = await createWikiEntityLinkPreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_ENTITY_LINK_SNAPSHOT_PATH, JSON.stringify(wikiEntityLinkSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-entity-link.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -560,6 +578,23 @@ export async function teardown() {
 
   // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
   await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // wiki 引用边泛化快照的工厂演出（migration path only）
+  {
+    let wikiEntityLinkSnapshot: WikiEntityLinkSnapshot | null = null;
+    try {
+      wikiEntityLinkSnapshot = JSON.parse(
+        await readFile(WIKI_ENTITY_LINK_SNAPSHOT_PATH, "utf8"),
+      ) as WikiEntityLinkSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (wikiEntityLinkSnapshot) {
+      // production 删除级联 wiki / wiki_entity_link
+      await pool.query("DELETE FROM production WHERE id = $1", [wikiEntityLinkSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_ENTITY_LINK_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // 版本退役收尾快照的工厂演出（migration path only）
   {

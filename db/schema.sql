@@ -713,14 +713,24 @@ CREATE INDEX IF NOT EXISTS wiki_mentions_idx   ON wiki USING GIN (mentions);
 CREATE INDEX IF NOT EXISTS wiki_title_trgm_idx ON wiki USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_ops);
 
--- 交叉引用边（保存时服务端解析正文提取；backlinks/unlinked references 数据基础）
-CREATE TABLE IF NOT EXISTS wiki_link (
-  source_wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
-  target_wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
-  PRIMARY KEY (source_wiki_id, target_wiki_id)
+-- 交叉引用边（wiki↔任意对象；backlinks/unlinked references/对象侧"相关 wiki"面板的数据基础）。
+-- entity 多态无 FK（scene/cue 等 TEXT short id、wiki UUID 存文本），存在性校验在应用层，
+-- 悬空边容忍（反向查询只从活宿主页发起）。production_id 反范式=反向查询过滤锚+跨剧组防泄漏。
+-- origin：'wiki_body'=正文保存时解析派生（全删全插只清这种）；'manual'=显式建链，重建不得触碰。
+-- 边零权限语义：不进任何可见性谓词——标题级列出、点击处由目标页过门（§4.1）。
+CREATE TABLE IF NOT EXISTS wiki_entity_link (
+  wiki_id       UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  entity_type   TEXT        NOT NULL,
+  entity_id     TEXT        NOT NULL,
+  origin        TEXT        NOT NULL DEFAULT 'wiki_body',
+  created_by    UUID        NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (wiki_id, entity_type, entity_id, origin)
 );
 
-CREATE INDEX IF NOT EXISTS wiki_link_target_idx ON wiki_link (target_wiki_id);
+CREATE INDEX IF NOT EXISTS wiki_entity_link_entity_idx
+  ON wiki_entity_link (production_id, entity_type, entity_id);
 
 -- 自由 tag（必可手写，非受控词表；production 归属经 wiki join）
 CREATE TABLE IF NOT EXISTS wiki_tag (

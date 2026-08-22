@@ -3751,16 +3751,43 @@
       "default": "now()"
     }
   ],
-  "wiki_link": [
+  "wiki_entity_link": [
     {
-      "column": "source_wiki_id",
+      "column": "wiki_id",
       "type": "uuid",
       "nullable": false
     },
     {
-      "column": "target_wiki_id",
-      "type": "uuid",
+      "column": "production_id",
+      "type": "text",
       "nullable": false
+    },
+    {
+      "column": "entity_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "entity_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "origin",
+      "type": "text",
+      "nullable": false,
+      "default": "'wiki_body'::text"
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "wiki_proposal": [
