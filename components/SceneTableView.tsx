@@ -544,7 +544,13 @@ export default function SceneTableView({
                 display="compact"
               />
               <div className="mt-2">
-                <RelatedWikiChips productionId={productionId} entityType="scene" entityId={scene.id} />
+                <RelatedWikiChips
+                  productionId={productionId}
+                  entityType="scene"
+                  entityId={scene.id}
+                  canEdit={canEdit}
+                  createDefaultTitle={`${scene.number}${scene.name ? ` ${scene.name}` : ""} · 大纲`}
+                />
               </div>
             </td>
           </tr>

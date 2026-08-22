@@ -15,7 +15,8 @@ import WikiPrintOverlay from "@/components/wiki/WikiPrintOverlay";
 import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import type { WikiDoc, WikiRef } from "@/lib/wiki-db";
+import type { WikiDoc, WikiRef, WikiEntityRef } from "@/lib/wiki-db";
+import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki-collab";
 import { mergeLines } from "@/lib/line-merge";
 import type { Mention } from "@/lib/event-db";
@@ -40,6 +41,7 @@ export default function WikiDocClient({
   departments,
   backlinks,
   unlinked,
+  entityRefs,
 }: {
   productionId: string;
   wiki: WikiDoc & { tags: string[] };
@@ -49,6 +51,7 @@ export default function WikiDocClient({
   departments: { id: string; name: string }[];
   backlinks: WikiRef[];
   unlinked: WikiRef[];
+  entityRefs: WikiEntityRef[];
 }) {
   const router = useRouter();
   const api = `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}`;
@@ -457,8 +460,9 @@ export default function WikiDocClient({
       </div>
 
       {/* 链接图面板：标题级列出（§4.1） */}
-      {(backlinks.length > 0 || unlinked.length > 0) && (
+      {(backlinks.length > 0 || unlinked.length > 0 || entityRefs.length > 0) && (
         <div className="px-8 py-4 border-t border-zinc-100 space-y-3">
+          <WikiEntityRefs productionId={productionId} wikiId={wiki.id} refs={entityRefs} canEdit={canEdit} />
           {backlinks.length > 0 && (
             <div>
               <p className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1.5">反向链接 {backlinks.length}</p>

@@ -4,9 +4,10 @@ import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import {
   createWiki, updateWiki, deleteWiki,
-  extractMentionEdges, listBacklinks, listWikiRefsForEntity,
+  extractMentionEdges, listBacklinks, listWikiRefsForEntity, listEntityRefsForWiki,
+  ensureDramaturgyRootAnchor,
 } from "@/lib/wiki-db";
-import { GET as wikiRefsGET } from "@/app/api/production/[id]/wiki-refs/route";
+import { GET as wikiRefsGET, POST as wikiRefsPOST, DELETE as wikiRefsDELETE } from "@/app/api/production/[id]/wiki-refs/route";
 import { makeProduction, makeScene, cleanupProduction, shortId } from "./factories";
 
 // wiki↔entity 引用边（wiki_entity_link）：提取全 kind、派生重建只清 body 边、
@@ -206,5 +207,98 @@ describe("GET /wiki-refs", () => {
     } finally {
       await cleanupProduction(other.prodId).catch(() => {});
     }
+  });
+});
+
+describe("manual edges & dramaturgy root (Phase 2)", () => {
+  const cookieFor = (userId: string) =>
+    `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin: false })}`;
+  const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+  const post = (userId: string, body: unknown) => wikiRefsPOST(
+    new NextRequest(`http://localhost/api/production/${prodId}/wiki-refs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookieFor(userId) },
+      body: JSON.stringify(body),
+    }), ctx());
+  const del = (userId: string, qs: string) => wikiRefsDELETE(
+    new NextRequest(`http://localhost/api/production/${prodId}/wiki-refs?${qs}`, {
+      method: "DELETE", headers: { Cookie: cookieFor(userId) },
+    }), ctx());
+
+  let linker: string;
+
+  beforeAll(async () => {
+    linker = await newMember(prodId);
+    users.push(linker);
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'script', '*', 'blocks', 'view', 'direct', $2)`,
+      [prodId, linker]);
+  });
+
+  it("POST rejects missing payload (400) and host-gate failure (403)", async () => {
+    expect((await post(linker, { entityType: "scene", entityId: sceneId })).status).toBe(400);
+    const noPerm = await newMember(prodId);
+    users.push(noPerm);
+    const doc = await createWiki({ productionId: prodId, title: "无权链", createdBy: noPerm });
+    expect((await post(noPerm, { entityType: "scene", entityId: sceneId, wikiId: doc.id })).status).toBe(403);
+  });
+
+  it("link existing doc → manual chip; DELETE removes only manual, body edge untouched", async () => {
+    const doc = await createWiki({
+      productionId: prodId, title: "手动链接目标",
+      body: `正文也提了 [场](/__cm__scene:${sceneId})`, createdBy: linker,
+    });
+    expect((await post(linker, { entityType: "scene", entityId: sceneId, wikiId: doc.id })).status).toBe(201);
+    let refs = await listWikiRefsForEntity(prodId, "scene", sceneId);
+    expect(refs.find(r => r.id === doc.id)?.manual).toBe(true);
+
+    // 解除 manual：body 边仍在 → chip 保留但 manual=false
+    expect((await del(linker, `type=scene&id=${sceneId}&wikiId=${doc.id}`)).status).toBe(200);
+    refs = await listWikiRefsForEntity(prodId, "scene", sceneId);
+    expect(refs.find(r => r.id === doc.id)?.manual).toBe(false);
+  });
+
+  it("linking a doc the actor cannot view → 403 (wiki-side gate)", async () => {
+    const secret = await createWiki({ productionId: prodId, title: "别人的私有文档", createdBy: creator });
+    expect((await post(linker, { entityType: "scene", entityId: sceneId, wikiId: secret.id })).status).toBe(403);
+  });
+
+  it("create-and-link: gated by wiki create; doc lands under 「戏剧构作」 root with a manual edge", async () => {
+    expect((await post(linker, { entityType: "scene", entityId: sceneId, createTitle: "第1场 · 大纲" })).status).toBe(403);
+
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'wiki', '*', '*', 'create', 'direct', $2)`,
+      [prodId, linker]);
+    const res = await post(linker, { entityType: "scene", entityId: sceneId, createTitle: "第1场 · 大纲" });
+    expect(res.status).toBe(201);
+    const { wiki } = await res.json();
+
+    const root = await getPool().query<{ id: string; title: string; is_public: boolean }>(
+      `SELECT w.id::text AS id, w.title, w.is_public FROM production_wiki_config c
+       JOIN wiki w ON w.id = c.dramaturgy_root_wiki_id WHERE c.production_id = $1`,
+      [prodId]);
+    expect(root.rows[0].title).toBe("戏剧构作");
+    expect(root.rows[0].is_public).toBe(true);
+    expect(wiki.parentId).toBe(root.rows[0].id);
+    expect((await listWikiRefsForEntity(prodId, "scene", sceneId)).find(r => r.id === wiki.id)?.manual).toBe(true);
+
+    // 懒建幂等 + 锚点删除保护
+    expect(await ensureDramaturgyRootAnchor(prodId)).toBe(root.rows[0].id);
+    expect(await deleteWiki(root.rows[0].id, prodId)).toEqual({ ok: false, reason: "anchor" });
+  });
+
+  it("listEntityRefsForWiki: non-wiki out-edges with manual flag, wiki kind excluded", async () => {
+    const target = await createWiki({ productionId: prodId, title: "出边目标", createdBy: linker });
+    const doc = await createWiki({
+      productionId: prodId, title: "出边来源",
+      body: `[场](/__cm__scene:${sceneId}) 与 [#wiki:${target.id}]`, createdBy: linker,
+    });
+    await post(linker, { entityType: "scene", entityId: sceneId, wikiId: doc.id });
+    const refs = await listEntityRefsForWiki(doc.id, prodId);
+    expect(refs).toEqual([{ entityType: "scene", entityId: sceneId, manual: true }]);
   });
 });

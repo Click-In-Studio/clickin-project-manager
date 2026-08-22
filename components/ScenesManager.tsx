@@ -328,7 +328,13 @@ function SceneEditRow({
               />
             </div>
             <div className="mt-3">
-              <RelatedWikiChips productionId={productionId} entityType="scene" entityId={scene.id} />
+              <RelatedWikiChips
+                productionId={productionId}
+                entityType="scene"
+                entityId={scene.id}
+                canEdit={canEdit}
+                createDefaultTitle={`${scene.number}${scene.name ? ` ${scene.name}` : ""} · 大纲`}
+              />
             </div>
           </td>
         </tr>
