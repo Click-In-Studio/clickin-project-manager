@@ -120,7 +120,6 @@ export async function createAsset(params: {
   r2Key?: string | null;
   thumbnailR2Key?: string | null;
   fileSize?: number | null;
-  versionId?: string | null;
 }): Promise<{ asset: Asset; file: AssetFile }> {
   const assetId = uid("ast");
   const fileId = uid("af");
@@ -171,12 +170,6 @@ export async function createAsset(params: {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [fileId, assetId, params.r2Key ?? null, params.thumbnailR2Key ?? null, params.fileSize ?? null]
     );
-    if (!params.isUniversal && params.versionId) {
-      await client.query(
-        `INSERT INTO asset_version_rel (asset_id, version_id, asset_file_id) VALUES ($1,$2,$3)`,
-        [assetId, params.versionId, fileId]
-      );
-    }
     await client.query("COMMIT");
     const assetRes = await getPool().query<AssetRow>(`SELECT * FROM asset WHERE id = $1`, [assetId]);
     return { asset: rowToAsset(assetRes.rows[0]), file: rowToAssetFile(fileRes.rows[0]) };
@@ -246,19 +239,12 @@ export async function getLatestAssetFile(assetId: string): Promise<AssetFile | n
   return res.rows[0] ? rowToAssetFile(res.rows[0]) : null;
 }
 
-/** Resolve the asset_file for a given (asset, version) pair. */
-export async function resolveAssetFile(assetId: string, versionId?: string | null): Promise<AssetFile | null> {
+/** Resolve the asset_file for an asset — latest-wins for every asset.
+ *  版本退役 Phase B：资产文件不再按版本 pin（asset_version_rel 停写，遗留行不读）。 */
+export async function resolveAssetFile(assetId: string): Promise<AssetFile | null> {
   const asset = await getAsset(assetId);
   if (!asset) return null;
-  if (asset.isUniversal) return getLatestAssetFile(assetId);
-  if (!versionId) return null;
-  const res = await getPool().query<AssetFileRow>(
-    `SELECT af.* FROM asset_file af
-     JOIN asset_version_rel avr ON avr.asset_file_id = af.id
-     WHERE avr.asset_id = $1 AND avr.version_id = $2`,
-    [assetId, versionId]
-  );
-  return res.rows[0] ? rowToAssetFile(res.rows[0]) : null;
+  return getLatestAssetFile(assetId);
 }
 
 /** Add a new file row for a universal asset (latest-wins on read). */
@@ -277,37 +263,6 @@ export async function addUniversalAssetFile(
   return rowToAssetFile(res.rows[0]);
 }
 
-/** Upload a new file version for a versioned asset, updating the relation. */
-export async function createAssetFileVersion(
-  assetId: string,
-  versionId: string,
-  r2Key: string,
-  thumbnailR2Key: string | null,
-  fileSize: number | null,
-): Promise<AssetFile> {
-  const fileId = uid("af");
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const res = await client.query<AssetFileRow>(
-      `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [fileId, assetId, r2Key, thumbnailR2Key, fileSize]
-    );
-    await client.query(
-      `INSERT INTO asset_version_rel (asset_id, version_id, asset_file_id) VALUES ($1,$2,$3)
-       ON CONFLICT (asset_id, version_id) DO UPDATE SET asset_file_id = EXCLUDED.asset_file_id`,
-      [assetId, versionId, fileId]
-    );
-    await client.query("COMMIT");
-    return rowToAssetFile(res.rows[0]);
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
 
 // ─── Mounts ───────────────────────────────────────────────────────────────────
 

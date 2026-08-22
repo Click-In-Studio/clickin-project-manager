@@ -1,17 +1,11 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getVersion } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import { filterVisibleAssets } from "@/lib/asset-perm";
 import { hasGrant } from "@/lib/grant-check";
 import { createAsset, listAssets, type AssetType } from "@/lib/asset-db";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
-
-async function validateVersion(productionId: string, versionId?: string | null) {
-  if (!versionId) return true;
-  const version = await getVersion(versionId);
-  return version?.productionId === productionId;
-}
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -58,18 +52,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       name?: string | null;
       fileName: string;
       isUniversal?: boolean;
-      versionId?: string | null;
     };
 
     if (body.storageType === "r2-multipart") {
       if (!body.r2Key || !body.fileId || !body.fileName || !body.uploadId || !Array.isArray(body.parts))
         return Response.json({ error: "缺少 r2Key / fileId / fileName / uploadId / parts" }, { status: 400 });
-      if (body.isUniversal === false && !body.versionId) {
-        return Response.json({ error: "版本相关 asset 需要提供 versionId" }, { status: 400 });
-      }
-      if (!(await validateVersion(id, body.versionId))) {
-        return Response.json({ error: "版本不存在" }, { status: 404 });
-      }
 
       // Fetch real ETags server-side — client-provided ETags are unreliable because
       // R2 CORS does not expose the ETag response header to browsers.
@@ -95,7 +82,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         assetType: body.assetType ?? "reference", name: body.name ?? null,
         fileName: body.fileName, mimeType, isUniversal: body.isUniversal ?? true,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
-        fileSize: body.fileSize ?? null, versionId: body.versionId ?? null,
+        fileSize: body.fileSize ?? null,
       });
       return Response.json({ asset, file }, { status: 201 });
     }
@@ -103,12 +90,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (body.storageType === "r2") {
       if (!body.r2Key || !body.fileId || !body.fileName)
         return Response.json({ error: "缺少 r2Key / fileId / fileName" }, { status: 400 });
-      if (body.isUniversal === false && !body.versionId) {
-        return Response.json({ error: "版本相关 asset 需要提供 versionId" }, { status: 400 });
-      }
-      if (!(await validateVersion(id, body.versionId))) {
-        return Response.json({ error: "版本不存在" }, { status: 404 });
-      }
 
       const mimeType = body.mimeType ?? "application/octet-stream";
       let thumbKey: string | null = null;
@@ -129,7 +110,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         assetType: body.assetType ?? "reference", name: body.name ?? null,
         fileName: body.fileName, mimeType, isUniversal: body.isUniversal ?? true,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
-        fileSize: body.fileSize ?? null, versionId: body.versionId ?? null,
+        fileSize: body.fileSize ?? null,
       });
       return Response.json({ asset, file }, { status: 201 });
     }
@@ -137,19 +118,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     // feishu_link
     if (!body.feishuUrl || !body.fileName)
       return Response.json({ error: "缺少 feishuUrl 或 fileName" }, { status: 400 });
-    if (body.isUniversal === false && !body.versionId) {
-      return Response.json({ error: "版本相关 asset 需要提供 versionId" }, { status: 400 });
-    }
-    if (!(await validateVersion(id, body.versionId))) {
-      return Response.json({ error: "版本不存在" }, { status: 404 });
-    }
 
     const { asset, file } = await createAsset({
       productionId: id, uploaderUserId: session.userId,
       assetType: body.assetType ?? "reference", name: body.name ?? null,
       fileName: body.fileName, mimeType: null, isUniversal: body.isUniversal ?? true,
       storageType: "feishu_link", feishuUrl: body.feishuUrl,
-      versionId: body.versionId ?? null,
     });
     return Response.json({ asset, file }, { status: 201 });
   }

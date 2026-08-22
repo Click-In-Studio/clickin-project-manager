@@ -45,9 +45,6 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   if (nonHead) return { error: nonHead };
   const resolved = await resolveProductionVersion(productionId, requestedVersionId);
   if (resolved.error) return resolved;
-  if (resolved.version.status !== "editing") {
-    return { error: Response.json({ error: "该版本不可编辑" }, { status: 403 }) };
-  }
   const result = await loadProduction(productionId, resolved.versionId);
   if (!result) return { error: Response.json({ error: "未找到版本" }, { status: 404 }) };
   return { permCtx, result, versionId: resolved.versionId };

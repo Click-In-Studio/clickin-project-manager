@@ -123,9 +123,6 @@ async function resolveImportVersionId(req: NextRequest, productionId: string): P
   if (!ver || ver.productionId !== productionId) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
   }
-  if (ver.status !== "editing") {
-    return Response.json({ error: "只能向编辑中的版本导入剧本" }, { status: 400 });
-  }
   const nonHead = await rejectNonHeadWrite(productionId, versionIdParam);
   if (nonHead) return nonHead;
   return versionIdParam;

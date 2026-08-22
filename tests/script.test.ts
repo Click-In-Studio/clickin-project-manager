@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getActiveVersionId, loadProduction, listVersions } from "@/lib/db";
+import { getActiveVersionId, loadProduction } from "@/lib/db";
 import { makeProduction, makeBlocks, cleanupProduction } from "./factories";
 
 let prodId: string;
@@ -17,10 +17,6 @@ afterAll(async () => {
 describe("versions", () => {
   it("getActiveVersionId returns a version for a new production", async () => {
     expect(await getActiveVersionId(prodId)).toBe(versionId);
-  });
-
-  it("listVersions returns at least 1 version", async () => {
-    expect((await listVersions(prodId)).length).toBeGreaterThanOrEqual(1);
   });
 });
 

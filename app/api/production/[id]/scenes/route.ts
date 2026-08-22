@@ -61,9 +61,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   if (nonHead) return nonHead;
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
-  if (resolved.version.status !== "editing") {
-    return Response.json({ error: "该版本不可编辑" }, { status: 403 });
-  }
   const result = await loadProduction(id, resolved.versionId);
   if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
 

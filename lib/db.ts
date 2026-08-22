@@ -708,14 +708,6 @@ function rowToVersion(r: VersionRow): Version {
   };
 }
 
-export async function listVersions(productionId: string): Promise<Version[]> {
-  const res = await getPool().query<VersionRow>(
-    "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE production_id = $1 ORDER BY created_at",
-    [productionId]
-  );
-  return res.rows.map(rowToVersion);
-}
-
 export async function getVersionOpeningChapterId(versionId: string): Promise<string | null> {
   const res = await getPool().query<{ id: string | null }>(
     "SELECT script_config->>'openingChapterMarkerId' AS id FROM version WHERE id = $1",

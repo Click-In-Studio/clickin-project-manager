@@ -102,7 +102,6 @@ export default function MountPointAssets({
           <AssetMountModal
             productionId={productionId}
             mountCtx={mountCtx}
-            versionId={versionId}
             onDone={() => { setShowModal(false); load(); onChange?.(); }}
             onClose={() => setShowModal(false)}
           />
@@ -161,7 +160,6 @@ export default function MountPointAssets({
         <AssetMountModal
           productionId={productionId}
           mountCtx={mountCtx}
-          versionId={versionId}
           onDone={() => { setShowModal(false); load(); onChange?.(); }}
           onClose={() => setShowModal(false)}
         />

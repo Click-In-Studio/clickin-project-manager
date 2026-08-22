@@ -9,13 +9,12 @@ type Tab = "select" | "upload";
 interface Props {
   productionId: string;
   mountCtx: MountContext;
-  versionId?: string | null;
   selectOnly?: boolean;
   onDone: (mount: { assetId: string; fileName: string }) => void;
   onClose: () => void;
 }
 
-export default function AssetMountModal({ productionId, mountCtx, versionId, selectOnly, onDone, onClose }: Props) {
+export default function AssetMountModal({ productionId, mountCtx, selectOnly, onDone, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("select");
   const [uploadedAssetId, setUploadedAssetId] = useState<string | null>(null);
 
@@ -51,7 +50,6 @@ export default function AssetMountModal({ productionId, mountCtx, versionId, sel
         {tab === "upload" ? (
           <AssetUploadPanel
             productionId={productionId}
-            versionId={versionId}
             onUploaded={handleUploadDone}
             onCancel={() => setTab("select")}
           />

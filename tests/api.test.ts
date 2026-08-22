@@ -662,17 +662,16 @@ describe("GET /api/production/[id] — auth guard", () => {
 });
 
 describe("GET /api/production/[id] — happy path", () => {
-  it("admin → 200 with state, versionId, versions", async () => {
+  it("admin → 200 with state and versionId", async () => {
     const res = await loadProdHandler(
       req(`/api/production/${AP_PROD}`, { session: adminSession() }),
       ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { state: { blocks: unknown[] }; versionId: string; versions: unknown[] };
+    const body = (await res.json()) as { state: { blocks: unknown[] }; versionId: string };
     expect(Array.isArray(body.state.blocks)).toBe(true);
     expect(body.state.blocks.length).toBeGreaterThan(0);
     expect(body.versionId).toBeTruthy();
-    expect(Array.isArray(body.versions)).toBe(true);
   });
 });
 

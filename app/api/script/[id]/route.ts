@@ -58,11 +58,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   const versionId = await resolveVersion(req, id);
   if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
 
-  const ver = await getVersion(versionId);
-  if (!ver || ver.status !== 'editing') {
-    return Response.json({ error: "该版本不可编辑" }, { status: 403 });
-  }
-
   // Load current state from DB for permission checking
   const current = await loadProduction(id, versionId);
   if (!current) return Response.json({ error: "版本不存在" }, { status: 404 });

@@ -145,7 +145,6 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
                 <p className="text-xs font-medium truncate">{a.name ?? a.fileName}</p>
                 <p className={`text-[10px] truncate ${selected === a.id ? "text-zinc-300" : "text-zinc-400"}`}>
                   {a.name ? `${a.fileName} · ` : ""}{ASSET_TYPE_LABELS[a.assetType]}
-                  {a.isUniversal ? "" : " · 版本相关"}
                 </p>
               </div>
             </button>
