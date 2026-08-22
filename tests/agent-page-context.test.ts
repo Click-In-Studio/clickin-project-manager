@@ -35,6 +35,11 @@ describe("derivePageKey", () => {
     // productionId 为 null 时项目路径也不识别（语境不符，宁可不带）
     expect(derivePageKey(`/production/${PID}/tasks`, null)).toBeNull();
   });
+
+  it("相邻前缀 id 不误归属：/production/<pid>xyz/… 不算 <pid> 的页面", () => {
+    expect(derivePageKey(`/production/${PID}xyz/tasks`, PID)).toBeNull();
+    expect(derivePageKey(`/production/${PID}xyz`, PID)).toBeNull();
+  });
 });
 
 describe("pageLabelFor / pageSuggestionsFor（allowlist 语义）", () => {

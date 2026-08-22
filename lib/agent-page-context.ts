@@ -25,8 +25,11 @@ export type PageSuggestion = {
  * - 其余（login/share/invite/unauthorized 等）返回 null：不附带页面信息
  */
 export function derivePageKey(pathname: string, productionId: string | null): string | null {
-  if (productionId && pathname.startsWith(`/production/${productionId}`)) {
-    const rest = pathname.slice(`/production/${productionId}`.length).replace(/^\//, "");
+  // 段边界显式判定：裸 startsWith 会把相邻前缀 id（/production/abc123ext/…
+  // 对 productionId=abc123）误归属到别的制作页面上。
+  const prefix = productionId ? `/production/${productionId}` : null;
+  if (prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    const rest = pathname.slice(prefix.length).replace(/^\//, "");
     if (!rest) return "prod:home";
     return `prod:${rest.split("/")[0]}`;
   }
