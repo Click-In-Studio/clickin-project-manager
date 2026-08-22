@@ -52,7 +52,6 @@ import MarkdownEditor from "@/components/MarkdownEditor";
 import type { MentionMember } from "@/components/SmartTextarea";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
-import type { Version } from "@/lib/db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 
@@ -71,14 +70,13 @@ function isSingleDayEvent(event: ProductionEvent): boolean {
 const SM_EVENT_TYPES = new Set(["rehearsal", "meeting"]);
 
 function InfoTab({
-  event, productionId, members, canEdit, departments, versions,
+  event, productionId, members, canEdit, departments,
   onUpdated, onDeleted, onTechReqsCreated,
 }: {
   event: ProductionEvent; productionId: string;
   members: MemberWithRoles[];
   canEdit: boolean;
   departments: EventDepartment[];
-  versions?: Version[];
   onUpdated: (ev: ProductionEvent) => void;
   onDeleted: () => void;
   onTechReqsCreated?: (reqs: EventTechReq[]) => void;
@@ -93,7 +91,7 @@ function InfoTab({
   const [endTime, setEndTime] = useState(toLocalInput(event.endTime));
   const [description, setDescription] = useState(event.description);
   const [stageManagers, setStageManagers] = useState<{ userId: string; name: string }[]>(event.stageManagers);
-  const [versionId, setVersionId] = useState<string | null>(event.versionId ?? null);
+  const versionId = event.versionId ?? null;
   const [notifyDeptIds, setNotifyDeptIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -193,21 +191,6 @@ function InfoTab({
               <input type="datetime-local" value={endTime} onChange={e => setEndTime(e.target.value)}
                 className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
             </div>
-          </div>
-        )}
-        {versions && versions.length > 0 && (
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">版本</label>
-            <select
-              value={versionId ?? ""}
-              onChange={e => setVersionId(e.target.value || null)}
-              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400"
-            >
-              <option value="">不限定版本</option>
-              {versions.map(v => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </select>
           </div>
         )}
         <div>
@@ -3073,7 +3056,6 @@ type Props = {
   initialReports: EventReport[];
   departments: EventDepartment[];
   members: MemberWithRoles[];
-  versions?: Version[];
   canEdit: boolean;
   canScheduleEdit: boolean;
   canAssignPeople: boolean;
@@ -3091,7 +3073,7 @@ type Props = {
 export default function EventDetailClient({
   productionId, event: initialEvent,
   initialScheduleItems, initialTechReqs, initialCallTimes,
-  initialReports, departments, members, versions,
+  initialReports, departments, members,
   canEdit: initialCanEdit, canScheduleEdit: initialCanScheduleEdit,
   canAssignPeople: initialCanAssignPeople, canCallEdit: initialCanCallEdit,
   canTechReqDelete, canWriteReport: initialCanWriteReport,
@@ -3321,7 +3303,7 @@ export default function EventDetailClient({
       {tab === "info" && (
         <InfoTab
           event={event} productionId={productionId} members={members} canEdit={canEdit}
-          departments={departments} versions={versions}
+          departments={departments}
           onUpdated={setEvent} onDeleted={handleDeleted}
           onTechReqsCreated={handleTechReqsCreated}
         />

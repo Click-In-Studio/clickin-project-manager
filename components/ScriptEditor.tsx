@@ -17,7 +17,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
-import type { TagGroup, BlockTagValue, Version, VersionStatus, SceneDetail } from "@/lib/db";
+import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
 import BlockMountAssets from "@/components/assets/BlockMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
@@ -7412,7 +7412,6 @@ export default function ScriptEditor({
   canEditSceneName = true,
   canEditRehearsalMark = true,
   canImport = false,
-  versionId: initialVersionId,
   initialSearchQuery,
 }: {
   scriptId?: string;
@@ -7426,32 +7425,21 @@ export default function ScriptEditor({
   canEditSceneName?: boolean;
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
-  versionId?: string | null;
   initialSearchQuery?: string;
 }) {
   const toolbarStage = useProductionToolbarStage();
   const effectiveScriptId = productionId ?? scriptId;
 
   // ── Version state ─────────────────────────────────────────────────────────────
-  const [activeVersionId, setActiveVersionId] = useState<string | null>(initialVersionId ?? null);
-  const [versions, setVersions] = useState<Version[]>([]);
-  const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null);
+  // 版本退役 Phase B：版本恒为 head（服务端解析活跃版本），无选择、无状态门。
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
 
-  // Persist active version to cookie so the server can restore it on next page load
-  useEffect(() => {
-    if (!productionId || !activeVersionId) return;
-    document.cookie = `ver_${productionId}=${encodeURIComponent(activeVersionId)}; path=/; max-age=31536000; SameSite=Lax`;
-  }, [productionId, activeVersionId]);
-
-  // Gate edit permissions by version status
-  const baseCanEditText = canEditTextProp && (versionStatus === "editing" || versionStatus === null);
-  const baseCanEditMetadata = canEditMetadataProp && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
-  const baseCanEditTextLayout = canEditSceneName && (versionStatus === "editing" || versionStatus === "committed" || versionStatus === null);
+  const baseCanEditText = canEditTextProp;
+  const baseCanEditMetadata = canEditMetadataProp;
+  const baseCanEditTextLayout = canEditSceneName;
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || canEditRehearsalMark;
   const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
-  const versionForcesLockedMode =
-    versionStatus === "committed" || versionStatus === "frozen" || versionStatus === "archived";
-  const isLockedMode = !baseCanEdit || manualLockedMode || versionForcesLockedMode;
+  const isLockedMode = !baseCanEdit || manualLockedMode;
   const canEditText = baseCanEditText && !isLockedMode;
   const canEditMetadata = baseCanEditMetadata && !isLockedMode;
   const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
@@ -7920,7 +7908,7 @@ export default function ScriptEditor({
 
   useEffect(() => {
     resetToolbarMeasurement();
-  }, [activeVersionId, versions.length, isLockedMode, canEditMetadata, resetToolbarMeasurement]);
+  }, [activeVersionId, isLockedMode, canEditMetadata, resetToolbarMeasurement]);
 
   // ── Display settings (cookie-persisted) ──────────────────────────────────────
   const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
@@ -8138,10 +8126,9 @@ export default function ScriptEditor({
   }, [clearDragCountBadge]);
 
   const toggleLockedMode = useCallback(() => {
-    if (versionForcesLockedMode) return;
     setPendingLockedMode(!manualLockedMode);
     closeToolbarMenu();
-  }, [closeToolbarMenu, manualLockedMode, versionForcesLockedMode]);
+  }, [closeToolbarMenu, manualLockedMode]);
 
   const confirmLockedModeChange = useCallback(() => {
     if (pendingLockedMode === null) return;
@@ -9238,8 +9225,8 @@ export default function ScriptEditor({
     const load = async () => {
       try {
         const r = await fetch(loadUrl);
-        // Production route returns { state, versionId, versions }; script route returns ScriptState directly.
-        type ProdResponse = { state: ScriptState; versionId: string; versions: Version[] };
+        // Production route returns { state, versionId, ... }; script route returns ScriptState directly.
+        type ProdResponse = { state: ScriptState; versionId: string };
         type ErrResponse = { error?: string };
         const body = await r.json() as ProdResponse | ScriptState | ErrResponse;
         if (cancelled) return;
@@ -9279,14 +9266,9 @@ export default function ScriptEditor({
 
         // Capture version info from production route response
         if (isProdResponse) {
-          const { versions: respVersions, versionId: respVid } = body as ProdResponse;
-          setVersions(respVersions);
+          const { versionId: respVid } = body as ProdResponse;
           const resolvedVid = respVid ?? activeVersionId;
-          if (resolvedVid) {
-            setActiveVersionId(resolvedVid);
-            const ver = respVersions.find((v: Version) => v.id === resolvedVid);
-            setVersionStatus(ver?.status ?? null);
-          }
+          if (resolvedVid) setActiveVersionId(resolvedVid);
         }
 
         setLoadState("ready");
@@ -11342,7 +11324,6 @@ export default function ScriptEditor({
   const selectionNotice = selectedBlockIds.size > 1
     ? `已选中 ${selectedBlockIds.size} 行`
     : "";
-  const forcedLockedModeSwitchClass = versionForcesLockedMode ? "bg-[#91a8ca]/50" : undefined;
   const safeWindowStart = blocks.length === 0
     ? 0
     : Math.min(windowRange.start, Math.max(0, blocks.length - 1));
@@ -11798,16 +11779,11 @@ export default function ScriptEditor({
                 onClick={toggleLockedMode}
                 data-production-toolbar-flex-content="true"
                 aria-pressed={isLockedMode}
-                disabled={versionForcesLockedMode}
                 style={toolbarShort || toolbarCompact ? undefined : REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE}
-                title={versionForcesLockedMode ? "该版本仅可使用排练模式" : "退出排练模式"}
-                className={`flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors ${
-                  versionForcesLockedMode
-                    ? "cursor-default text-[#91a8ca]"
-                    : "text-teal-600 hover:bg-teal-50 hover:text-teal-700"
-                } whitespace-nowrap`}
+                title="退出排练模式"
+                className="flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors text-teal-600 hover:bg-teal-50 hover:text-teal-700 whitespace-nowrap"
               >
-                <ModeSwitch active={isLockedMode} activeClassName={forcedLockedModeSwitchClass} />
+                <ModeSwitch active={isLockedMode} />
                 <span>{(toolbarShort || toolbarCompact) ? "排练" : "排练模式"}</span>
               </button>
             </div>
@@ -12037,17 +12013,11 @@ export default function ScriptEditor({
                     <div className="my-1 border-t border-zinc-50" />
                     <button
                       onClick={toggleLockedMode}
-                      disabled={versionForcesLockedMode}
-                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
-                        versionForcesLockedMode
-                          ? "cursor-not-allowed text-[#91a8ca]"
-                          : "text-zinc-600 hover:bg-zinc-50"
-                      }`}
-                      title={versionForcesLockedMode ? "该版本仅可使用排练模式" : undefined}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span>排练模式</span>
                       <span className="flex items-center">
-                        <ModeSwitch active={isLockedMode} activeClassName={forcedLockedModeSwitchClass} />
+                        <ModeSwitch active={isLockedMode} />
                       </span>
                     </button>
                   </>

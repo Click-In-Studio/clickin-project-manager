@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getVersion } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, resolveAssetFile } from "@/lib/asset-db";
 import { presignedGet } from "@/lib/r2";
 
@@ -11,12 +11,6 @@ function getPreviewType(mimeType: string | null): "image" | "video" | "audio" | 
   if (mimeType.startsWith("audio/")) return "audio";
   if (mimeType === "application/pdf") return "pdf";
   return null;
-}
-
-async function validateVersion(productionId: string, versionId?: string | null) {
-  if (!versionId) return true;
-  const version = await getVersion(versionId);
-  return version?.productionId === productionId;
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; assetId: string }> }) {
@@ -37,11 +31,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
       return Response.json({ previewType, url: asset.feishuUrl, mimeType: asset.mimeType });
     }
 
-    const versionId = req.nextUrl.searchParams.get("v") ?? undefined;
-    if (!(await validateVersion(id, versionId))) {
-      return Response.json({ error: "版本不存在" }, { status: 404 });
-    }
-    const file = await resolveAssetFile(assetId, versionId);
+    const file = await resolveAssetFile(assetId);
     if (!file?.r2Key) return Response.json({ error: "文件不存在" }, { status: 404 });
 
     const url = presignedGet(file.r2Key, 3600, {

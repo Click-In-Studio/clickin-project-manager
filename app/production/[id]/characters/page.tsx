@@ -5,7 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
-import { getProductionPermissionContext, getProductionName, listCharactersByVersion, listVersions } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
 import CharactersManager from "@/components/CharactersManager";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -28,17 +28,11 @@ export default async function CharactersPage({
   const canEdit = access.permCtx.isAdmin || access.permCtx.isOwner
     || await hasGrant(session.userId, id, "character", "*", "*", "edit");
 
-  const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
-
-  const [name, versions] = await Promise.all([
+  const [name, versionId] = await Promise.all([
     getProductionName(id),
-    listVersions(id),
+    getActiveVersionId(id),
   ]);
   if (!name) notFound();
-  const versionId = (cookieVersionId && versions.some(v => v.id === cookieVersionId) ? cookieVersionId : null)
-    ?? versions.find(v => v.status === "editing")?.id
-    ?? versions[0]?.id
-    ?? null;
   const characters = versionId ? await listCharactersByVersion(versionId) : [];
 
   return (

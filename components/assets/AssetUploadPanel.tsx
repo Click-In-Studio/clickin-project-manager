@@ -112,7 +112,6 @@ export type UploadResult = {
 
 interface Props {
   productionId: string;
-  versionId?: string | null;
   onUploaded: (result: UploadResult) => void;
   onCancel?: () => void;
 }
@@ -122,11 +121,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export default function AssetUploadPanel({ productionId, versionId, onUploaded, onCancel }: Props) {
+export default function AssetUploadPanel({ productionId, onUploaded, onCancel }: Props) {
   const [mode, setMode] = useState<UploadMode>("file");
   const [assetType, setAssetType] = useState<AssetType>("reference");
   const [name, setName] = useState("");
-  const [isUniversal, setIsUniversal] = useState(true);
   const [feishuUrl, setFeishuUrl] = useState("");
   const [feishuName, setFeishuName] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -206,8 +204,6 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
             fileName: feishuName.trim(),
             name: name.trim() || null,
             assetType,
-            isUniversal,
-            versionId: isUniversal ? null : (versionId ?? null),
           }),
         });
         if (!res.ok) {
@@ -230,8 +226,7 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
       const mimeType = file.type || "application/octet-stream";
       const assetMeta = {
         fileName: file.name, mimeType, fileSize: file.size,
-        name: name.trim() || null, assetType, isUniversal,
-        versionId: isUniversal ? null : (versionId ?? null),
+        name: name.trim() || null, assetType,
       };
 
       let r2Key: string, fileId: string;
@@ -614,15 +609,6 @@ export default function AssetUploadPanel({ productionId, versionId, onUploaded, 
           ))}
         </select>
       </div>
-
-      {/* Version scope */}
-      {versionId && (
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={!isUniversal} onChange={e => setIsUniversal(!e.target.checked)}
-            className="rounded" />
-          <span className="text-xs text-zinc-600">绑定到当前版本</span>
-        </label>
-      )}
 
       {error && <p className="text-xs text-red-500">{error}</p>}
 

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasAnyGrant } from "@/lib/grant-check";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId } from "@/lib/db";
 import AssetPageClient from "@/components/assets/AssetPageClient";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -21,7 +21,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
   if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
-  const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
+  const versionId = await getActiveVersionId(id);
 
   return (
     <>

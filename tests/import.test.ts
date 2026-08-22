@@ -10,10 +10,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   createProduction,
   importScriptToVersion, flushToDBVersioned,
-  getActiveVersionId, createVersion,
+  getActiveVersionId,
   createCueList, createCue, updateCue,
   applyPatchToDB,
 } from "@/lib/db";
+import { makeLegacyVersion } from "./factories";
 import { getPool } from "@/lib/pg";
 import { TEST_USER, TEST_OWNER } from "./helpers";
 import { initialKeys } from "@/lib/lex-order";
@@ -718,9 +719,8 @@ describe("E: version-import hybrid — CoW block/cue isolation and GC", () => {
     await createCueList({ id: CL_E_ID, productionId: PROD_E, name: "混合测试走位表", notes: "", abbr: null, template: null, createdBy: TEST_USER });
     await createCue({ id: CUE_E_ID, cueListId: CL_E_ID, number: "Q1", name: "混合测试Q", content: "", start: gap, end: gap, versionId: v1Id });
 
-    // ── Step 3: fork v2 from v1 (inherits script_version + cue_version) ────────
-    const v2 = await createVersion(PROD_E, v1Id, "v2分支");
-    v2Id = v2.id;
+    // ── Step 3: fork v2 from v1（遗留多版本状态，工厂裸 SQL 模拟）──────────────
+    v2Id = await makeLegacyVersion(PROD_E, v1Id);
 
     // ── Step 4: CoW B2 in v2 — new snapshot sole-owned by v2 ──────────────────
     await applyPatchToDB(PROD_E, v2Id, {

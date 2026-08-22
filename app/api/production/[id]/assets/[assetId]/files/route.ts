@@ -1,18 +1,12 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getVersion } from "@/lib/db";
-import { getAsset, addUniversalAssetFile, createAssetFileVersion } from "@/lib/asset-db";
+import { getProductionPermissionContext } from "@/lib/db";
+import { getAsset, addUniversalAssetFile } from "@/lib/asset-db";
 import { hasGrant } from "@/lib/grant-check";
 import { putR2Object, assetR2Key, thumbnailR2Key } from "@/lib/r2";
 import sharp from "sharp";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
-
-async function validateVersion(productionId: string, versionId?: string | null) {
-  if (!versionId) return true;
-  const version = await getVersion(versionId);
-  return version?.productionId === productionId;
-}
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { id, assetId } = await ctx.params;
@@ -31,13 +25,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
-  const versionId = formData.get("versionId") as string | null;
   if (!file) return Response.json({ error: "缺少 file 字段" }, { status: 400 });
-  if (!versionId && !asset.isUniversal)
-    return Response.json({ error: "版本相关 asset 需要提供 versionId" }, { status: 400 });
-  if (!(await validateVersion(id, versionId))) {
-    return Response.json({ error: "版本不存在" }, { status: 404 });
-  }
 
   const mimeType = file.type || "application/octet-stream";
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -55,9 +43,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
   await putR2Object(r2Key, buffer, mimeType);
 
-  const assetFile = asset.isUniversal || !versionId
-    ? await addUniversalAssetFile(assetId, r2Key, thumbKey, buffer.length)
-    : await createAssetFileVersion(assetId, versionId, r2Key, thumbKey, buffer.length);
+  const assetFile = await addUniversalAssetFile(assetId, r2Key, thumbKey, buffer.length);
 
   return Response.json({ file: assetFile }, { status: 201 });
 }

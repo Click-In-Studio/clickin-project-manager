@@ -182,9 +182,11 @@ describe("invariance verification", () => {
       "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
       [prodId, "迁移测试演出-助理职位", userId],
     );
+    // version.name 已随版本退役删除（migrate-version-retire.sql）——本工厂在
+    // 当前 schema 上无条件运行，不能再引用化石列
     await pool.query(
-      "INSERT INTO version (id, production_id, name, created_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT DO NOTHING",
-      [`${prodId}_v1`, prodId, "initial"],
+      "INSERT INTO version (id, production_id, created_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING",
+      [`${prodId}_v1`, prodId],
     );
     await pool.query(
       "UPDATE production SET active_version_id = $1 WHERE id = $2",

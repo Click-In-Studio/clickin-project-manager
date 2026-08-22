@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, cowBlockSnapshotForMount, cowCueRevisionForMount, getVersion } from "@/lib/db";
 import { getAsset, addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset-db";
 import { canViewAsset, canPublishAsset, mountHostSidePermitted } from "@/lib/asset-perm";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -161,6 +162,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (mode === "tracking" || mode === "version_only") {
     if (!body.versionId)
       return Response.json({ error: "tracking/version_only 模式需要提供 versionId" }, { status: 400 });
+    const nonHead = await rejectNonHeadWrite(id, body.versionId);
+    if (nonHead) return nonHead;
     if (!(await validateVersion(id, body.versionId))) {
       return Response.json({ error: "版本不存在" }, { status: 404 });
     }
@@ -169,9 +172,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     if (body.mountType === "block_snapshot") {
-      mountId = await cowBlockSnapshotForMount(body.versionId, mountId, mode);
+      mountId = await cowBlockSnapshotForMount(body.versionId, mountId);
     } else if (body.mountType === "cue_revision") {
-      mountId = await cowCueRevisionForMount(body.versionId, mountId, mode);
+      mountId = await cowCueRevisionForMount(body.versionId, mountId);
     }
   }
 

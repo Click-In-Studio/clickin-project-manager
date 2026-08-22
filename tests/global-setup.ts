@@ -127,6 +127,12 @@ import {
   GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
 } from "./grant-template-retire-snapshot";
 import {
+  isVersionRetirePreMigrationSchema,
+  createVersionRetirePreMigrationData,
+  VERSION_RETIRE_SNAPSHOT_PATH,
+  type VersionRetireSnapshot,
+} from "./version-retire-snapshot";
+import {
   isWikiCreateBaselinePreMigrationSchema,
   createWikiCreateBaselinePreMigrationData,
   WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
@@ -534,6 +540,19 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // 版本退役收尾（PR #300）：造一个「旧文件被版本 pin」的资产快照下来，
+  // 迁移测试验证 latest-wins 解析不丢文件，然后删 asset_version_rel /
+  // is_universal / version 化石列。
+  if (await isVersionRetirePreMigrationSchema(pool)) {
+    const versionRetireSnapshot = await createVersionRetirePreMigrationData(pool, TEST_OWNER);
+    await writeFile(VERSION_RETIRE_SNAPSHOT_PATH, JSON.stringify(versionRetireSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-version-retire.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -541,6 +560,22 @@ export async function teardown() {
 
   // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
   await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // 版本退役收尾快照的工厂演出（migration path only）
+  {
+    let versionRetireSnapshot: VersionRetireSnapshot | null = null;
+    try {
+      versionRetireSnapshot = JSON.parse(
+        await readFile(VERSION_RETIRE_SNAPSHOT_PATH, "utf8"),
+      ) as VersionRetireSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (versionRetireSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [versionRetireSnapshot.prodId]).catch(() => {});
+      await unlink(VERSION_RETIRE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // 部门权限来源分道（#274）的工厂演出（migration path only）
   {

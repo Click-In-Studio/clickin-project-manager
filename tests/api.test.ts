@@ -10,7 +10,7 @@ import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId } from "@/lib/db";
 import { deleteProductionEvent } from "@/lib/event-db";
 import { TEST_USER, TEST_OWNER } from "./helpers";
-import { makeProduction, makeBlocks, cleanupProduction } from "./factories";
+import { makeProduction, makeBlocks, cleanupProduction, makeLegacyVersion } from "./factories";
 import { getPool } from "@/lib/pg";
 
 // ── Route handlers under test ──────────────────────────────────────────────────
@@ -34,10 +34,6 @@ import {
   GET as loadProdHandler,
   PATCH as renameProdHandler,
 } from "@/app/api/production/[id]/route";
-import {
-  GET as listVersionsHandler,
-  POST as createVersionHandler,
-} from "@/app/api/production/[id]/versions/route";
 import {
   GET as getScriptHandler,
   PATCH as patchScriptHandler,
@@ -467,86 +463,51 @@ describe("PATCH /api/production/[id] — happy path", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/production/[id]/versions
+// 版本退役 Phase B：历史版本只读（head-only 写保护）
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("GET /api/production/[id]/versions — auth guard", () => {
-  it("no cookie → 401", async () => {
-    const res = await listVersionsHandler(
-      req(`/api/production/${AP_PROD}/versions`),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("non-member non-admin → 403", async () => {
-    const res = await listVersionsHandler(
-      req(`/api/production/${AP_PROD}/versions`, { session: userSession() }),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("GET /api/production/[id]/versions — happy path", () => {
-  it("admin → 200 with versions array", async () => {
-    const res = await listVersionsHandler(
-      req(`/api/production/${AP_PROD}/versions`, { session: adminSession() }),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { versions: { id: string }[] };
-    expect(Array.isArray(body.versions)).toBe(true);
-    expect(body.versions.length).toBeGreaterThanOrEqual(1);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/production/[id]/versions
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("POST /api/production/[id]/versions — auth guard", () => {
-  it("no cookie → 401", async () => {
-    const res = await createVersionHandler(
-      req(`/api/production/${AP_PROD}/versions`, { method: "POST", body: JSON.stringify({}) }),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("non-member non-admin → 403", async () => {
-    const res = await createVersionHandler(
-      req(`/api/production/${AP_PROD}/versions`, {
-        method: "POST", body: JSON.stringify({}), session: userSession(),
-      }),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("POST /api/production/[id]/versions — happy path", () => {
-  const VER_PROD = "test-api-ver";
+describe("head-only 写保护 — 历史版本只读", () => {
+  let headProdId = "";
+  let legacyVersionId = "";
+  let headVersionId = "";
 
   beforeAll(async () => {
-    await createProduction(VER_PROD, "版本测试演出", TEST_OWNER);
+    ({ prodId: headProdId, versionId: legacyVersionId } = await makeProduction());
+    await makeBlocks(headProdId, legacyVersionId, 1);
+    headVersionId = await makeLegacyVersion(headProdId, legacyVersionId);
   });
 
   afterAll(async () => {
-    await deleteProduction(VER_PROD).catch(() => {});
+    await cleanupProduction(headProdId).catch(() => {});
   });
 
-  it("admin creates version → 201 with version object", async () => {
-    const res = await createVersionHandler(
-      req(`/api/production/${VER_PROD}/versions`, {
-        method: "POST", body: JSON.stringify({ name: "测试版本" }), session: adminSession(),
-      }),
-      ctx({ id: VER_PROD }),
-    );
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { version: { id: string; name: string } };
-    expect(body.version.id).toBeTruthy();
-    expect(body.version.name).toBe("测试版本");
+  const patchWith = (v: string) => patchScriptHandler(
+    req(`/api/script/${headProdId}?v=${v}`, {
+      method: "PATCH", body: JSON.stringify({ clientSeq: 1, blockOps: [], charOps: [], sceneOps: [] }),
+      session: adminSession(),
+    }),
+    ctx({ id: headProdId }),
+  );
+
+  it("PATCH ?v=<历史版本> → 409（本演出的旧版本只读）", async () => {
+    expect((await patchWith(legacyVersionId)).status).toBe(409);
+  });
+
+  it("PATCH ?v=<head> → 200（活跃版本放行）", async () => {
+    expect((await patchWith(headVersionId)).status).toBe(200);
+  });
+
+  it("PATCH ?v=<不存在的版本> → 404（守卫自带归属判定，不误报 409）", async () => {
+    expect((await patchWith("ver_no_such_version")).status).toBe(404);
+  });
+
+  it("PATCH ?v=<别的演出的版本> → 404（跨演出 versionId 不泄露只读语义）", async () => {
+    const other = await makeProduction();
+    try {
+      expect((await patchWith(other.versionId)).status).toBe(404);
+    } finally {
+      await cleanupProduction(other.prodId).catch(() => {});
+    }
   });
 });
 
@@ -718,17 +679,16 @@ describe("GET /api/production/[id] — auth guard", () => {
 });
 
 describe("GET /api/production/[id] — happy path", () => {
-  it("admin → 200 with state, versionId, versions", async () => {
+  it("admin → 200 with state and versionId", async () => {
     const res = await loadProdHandler(
       req(`/api/production/${AP_PROD}`, { session: adminSession() }),
       ctx({ id: AP_PROD }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { state: { blocks: unknown[] }; versionId: string; versions: unknown[] };
+    const body = (await res.json()) as { state: { blocks: unknown[] }; versionId: string };
     expect(Array.isArray(body.state.blocks)).toBe(true);
     expect(body.state.blocks.length).toBeGreaterThan(0);
     expect(body.versionId).toBeTruthy();
-    expect(Array.isArray(body.versions)).toBe(true);
   });
 });
 

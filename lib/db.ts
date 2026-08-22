@@ -122,17 +122,13 @@ export async function getFirstRehearsalMarkerLabel(versionId: string): Promise<s
 }
 
 // ─── Version types ────────────────────────────────────────────────────────────
-
-export type VersionStatus = 'editing' | 'committed' | 'frozen' | 'archived';
+// 版本退役 Phase B：name/description/tags/status 列已删（migrate-version-retire.sql），
+// 版本只剩线性链结构，留作未来「历史记录 / checkpoint」地基。
 
 export type Version = {
   id: string;
   productionId: string;
-  name: string;
-  description: string;
-  tags: string[];
   parentVersionId: string | null;
-  status: VersionStatus;
   createdAt: string;
 };
 
@@ -687,11 +683,7 @@ function isMarkerBlockType(type: string | null | undefined): boolean {
 type VersionRow = {
   id: string;
   production_id: string;
-  name: string;
-  description: string;
-  tags: string[];
   parent_version_id: string | null;
-  status: VersionStatus;
   created_at: Date;
 };
 
@@ -699,21 +691,9 @@ function rowToVersion(r: VersionRow): Version {
   return {
     id: r.id,
     productionId: r.production_id,
-    name: r.name,
-    description: r.description,
-    tags: r.tags,
     parentVersionId: r.parent_version_id,
-    status: r.status,
     createdAt: r.created_at.toISOString(),
   };
-}
-
-export async function listVersions(productionId: string): Promise<Version[]> {
-  const res = await getPool().query<VersionRow>(
-    "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE production_id = $1 ORDER BY created_at",
-    [productionId]
-  );
-  return res.rows.map(rowToVersion);
 }
 
 export async function getVersionOpeningChapterId(versionId: string): Promise<string | null> {
@@ -726,7 +706,7 @@ export async function getVersionOpeningChapterId(versionId: string): Promise<str
 
 export async function getVersion(versionId: string): Promise<Version | null> {
   const res = await getPool().query<VersionRow>(
-    "SELECT id, production_id, name, description, tags, parent_version_id, status, created_at FROM version WHERE id = $1",
+    "SELECT id, production_id, parent_version_id, created_at FROM version WHERE id = $1",
     [versionId]
   );
   return res.rows.length ? rowToVersion(res.rows[0]) : null;
@@ -753,7 +733,7 @@ export async function createInitialVersion(
   const versionId = genVersionId();
   const write = async (client: PoolClient) => {
     await client.query(
-      "INSERT INTO version (id, production_id, name, status) VALUES ($1, $2, '初稿', 'editing')",
+      "INSERT INTO version (id, production_id) VALUES ($1, $2)",
       [versionId, productionId]
     );
     await client.query(
@@ -779,252 +759,10 @@ export async function createInitialVersion(
   return versionId;
 }
 
-/**
- * Creates a new Editing version branched from fromVersionId.
- * If fromVersionId is currently Editing, it is auto-committed first.
- * Content (blocks, scenes, characters, cues) is copied from fromVersionId.
- */
-export async function createVersion(
-  productionId: string,
-  fromVersionId: string,
-  name: string,
-): Promise<Version> {
-  const newVersionId = genVersionId();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-
-    const parentRes = await client.query<{ status: string; production_id: string }>(
-      "SELECT status, production_id FROM version WHERE id = $1",
-      [fromVersionId]
-    );
-    const parent = parentRes.rows[0];
-    if (!parent || parent.production_id !== productionId) {
-      throw new Error("Source version does not belong to production");
-    }
-    const parentStatus = parent.status;
-
-    if (parentStatus === 'editing') {
-      await client.query(
-        "UPDATE version SET status = 'committed' WHERE id = $1",
-        [fromVersionId]
-      );
-    }
-
-    const nowRes = await client.query<{ now: Date }>("SELECT now() AS now");
-    const now = nowRes.rows[0].now;
-
-    const versionInsert = await client.query(
-      `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config, marker_structure_revision)
-       SELECT $1, $2, $3, $4, 'editing', $5, COALESCE(script_config, '{}'::jsonb), marker_structure_revision
-       FROM version WHERE id = $4`,
-      [newVersionId, productionId, name, fromVersionId, now]
-    );
-    if ((versionInsert.rowCount ?? 0) === 0) throw new Error("Failed to create version: source version not found");
-
-    // Copy script blocks (same snapshots, new version entry)
-    await client.query(
-      "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
-      [newVersionId, fromVersionId]
-    );
-
-    // Copy cue revisions
-    await client.query(
-      "INSERT INTO cue_version (revision_id, version_id, cue_id) SELECT revision_id, $1, cue_id FROM cue_version WHERE version_id = $2",
-      [newVersionId, fromVersionId]
-    );
-
-    // Copy scene and character snapshots
-    await client.query(
-      `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id,
-                                  synopsis, action_line, music, stage_notes, expected_duration)
-       SELECT scene_id, $1, name, sort_order, parent_id,
-              synopsis, action_line, music, stage_notes, expected_duration
-       FROM scene_version WHERE version_id = $2`,
-      [newVersionId, fromVersionId]
-    );
-    await client.query(
-      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate, gender, biography, role_type)
-       SELECT character_id, $1, name, sort_order, is_aggregate, gender, biography, role_type FROM character_version WHERE version_id = $2`,
-      [newVersionId, fromVersionId]
-    );
-
-    // Copy asset version relations
-    await client.query(
-      `INSERT INTO asset_version_rel (asset_id, version_id, asset_file_id)
-       SELECT asset_id, $1, asset_file_id FROM asset_version_rel WHERE version_id = $2
-       ON CONFLICT (asset_id, version_id) DO NOTHING`,
-      [newVersionId, fromVersionId]
-    );
-
-    await client.query(
-      "UPDATE production SET active_version_id = $1 WHERE id = $2",
-      [newVersionId, productionId]
-    );
-
-    await client.query("COMMIT");
-    return {
-      id: newVersionId,
-      productionId,
-      name,
-      description: '',
-      tags: [],
-      parentVersionId: fromVersionId,
-      status: 'editing',
-      createdAt: now.toISOString(),
-    };
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * Rollback: commits the current editing version, then creates a new editing
- * version with the content of targetVersionId. Parent of the new version is
- * the current version (not the target).
- */
-export async function rollbackToVersion(
-  currentVersionId: string,
-  targetVersionId: string,
-  productionId: string,
-  name: string,
-): Promise<Version> {
-  const newVersionId = genVersionId();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-
-    const versionOwnerRes = await client.query<{ current_owner: string | null; target_owner: string | null }>(
-      `SELECT
-         (SELECT production_id FROM version WHERE id = $1) AS current_owner,
-         (SELECT production_id FROM version WHERE id = $2) AS target_owner`,
-      [currentVersionId, targetVersionId]
-    );
-    const owners = versionOwnerRes.rows[0];
-    if (owners?.current_owner !== productionId || owners?.target_owner !== productionId) {
-      throw new Error("Rollback versions do not belong to production");
-    }
-
-    await client.query(
-      "UPDATE version SET status = 'committed' WHERE id = $1",
-      [currentVersionId]
-    );
-
-    const nowRes = await client.query<{ now: Date }>("SELECT now() AS now");
-    const now = nowRes.rows[0].now;
-
-    const rollbackInsert = await client.query(
-      `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config, marker_structure_revision)
-       SELECT $1, $2, $3, $4, 'editing', $5, COALESCE(script_config, '{}'::jsonb), marker_structure_revision
-       FROM version WHERE id = $6`,
-      [newVersionId, productionId, name, currentVersionId, now, targetVersionId]
-    );
-    if ((rollbackInsert.rowCount ?? 0) === 0) throw new Error("Failed to create rollback version: target version not found");
-
-    // Copy content from targetVersionId (not currentVersionId)
-    await client.query(
-      "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
-      [newVersionId, targetVersionId]
-    );
-
-    await client.query(
-      "INSERT INTO cue_version (revision_id, version_id, cue_id) SELECT revision_id, $1, cue_id FROM cue_version WHERE version_id = $2",
-      [newVersionId, targetVersionId]
-    );
-
-    // Copy scene and character snapshots from the target (rollback source) version
-    await client.query(
-      `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id,
-                                  synopsis, action_line, music, stage_notes, expected_duration)
-       SELECT scene_id, $1, name, sort_order, parent_id,
-              synopsis, action_line, music, stage_notes, expected_duration
-       FROM scene_version WHERE version_id = $2`,
-      [newVersionId, targetVersionId]
-    );
-    await client.query(
-      `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate, gender, biography, role_type)
-       SELECT character_id, $1, name, sort_order, is_aggregate, gender, biography, role_type FROM character_version WHERE version_id = $2`,
-      [newVersionId, targetVersionId]
-    );
-
-    await client.query(
-      `INSERT INTO asset_version_rel (asset_id, version_id, asset_file_id)
-       SELECT asset_id, $1, asset_file_id FROM asset_version_rel WHERE version_id = $2
-       ON CONFLICT (asset_id, version_id) DO NOTHING`,
-      [newVersionId, targetVersionId]
-    );
-
-    await client.query(
-      "UPDATE production SET active_version_id = $1 WHERE id = $2",
-      [newVersionId, productionId]
-    );
-
-    await client.query("COMMIT");
-    return {
-      id: newVersionId,
-      productionId,
-      name,
-      description: '',
-      tags: [],
-      parentVersionId: currentVersionId,
-      status: 'editing',
-      createdAt: now.toISOString(),
-    };
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-export async function updateVersionMeta(
-  productionId: string,
-  versionId: string,
-  fields: { name?: string; description?: string; tags?: string[] },
-): Promise<void> {
-  const sets: string[] = [];
-  const vals: unknown[] = [versionId];
-  if (fields.name        !== undefined) sets.push(`name        = $${vals.push(fields.name)}`);
-  if (fields.description !== undefined) sets.push(`description = $${vals.push(fields.description)}`);
-  if (fields.tags        !== undefined) sets.push(`tags        = $${vals.push(fields.tags)}`);
-  if (!sets.length) return;
-  await getPool().query(
-    `UPDATE version SET ${sets.join(', ')} WHERE id = $1 AND production_id = $${vals.push(productionId)}`,
-    vals
-  );
-}
-
-export async function updateVersionStatus(
-  productionId: string,
-  versionId: string,
-  status: 'committed' | 'frozen' | 'archived',
-): Promise<void> {
-  if (status === 'frozen') {
-    // Freeze the target version and all its ancestors (except archived ones).
-    await getPool().query(
-      `WITH RECURSIVE ancestors AS (
-         SELECT id, parent_version_id, production_id FROM version WHERE id = $1 AND production_id = $2
-         UNION ALL
-         SELECT v.id, v.parent_version_id, v.production_id FROM version v
-         JOIN ancestors a ON v.id = a.parent_version_id
-         WHERE v.production_id = a.production_id
-       )
-       UPDATE version SET status = 'frozen'
-       WHERE id IN (SELECT id FROM ancestors)
-         AND status != 'archived'`,
-      [versionId, productionId]
-    );
-  } else {
-    await getPool().query(
-      "UPDATE version SET status = $1 WHERE id = $2 AND production_id = $3",
-      [status, versionId, productionId]
-    );
-  }
-}
+// 版本退役 Phase B：createVersion / rollbackToVersion / updateVersionMeta /
+// updateVersionStatus 已删除。版本从此线性：每个演出只有 createInitialVersion
+// 建的一条活跃版本，历史多版本数据只读保留。未来的「历史记录 / checkpoint」
+// 概念在此地基上另行设计，不复用分叉语义。
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
@@ -5069,37 +4807,6 @@ export async function updateCue(
     return;
   }
 
-  // Pre-check: if renaming, ensure the new number won't conflict in any descendant
-  // version that would be cascade-updated by CoW.
-  if (fields.number !== undefined) {
-    const conflictRes = await getPool().query<{ version_id: string }>(
-      `WITH RECURSIVE descendants AS (
-         SELECT id FROM version WHERE id = $1
-         UNION ALL
-         SELECT v.id FROM version v
-         INNER JOIN descendants d ON v.parent_version_id = d.id
-       ),
-       cascade_targets AS (
-         SELECT version_id FROM cue_version
-         WHERE revision_id = $2
-           AND version_id IN (SELECT id FROM descendants)
-       )
-       SELECT cv.version_id
-       FROM cue_version cv
-       JOIN cue c ON c.id = cv.revision_id
-       WHERE cv.version_id IN (SELECT version_id FROM cascade_targets)
-         AND c.cue_list_id = $3
-         AND c.number = $4
-         AND (c.cue_id IS DISTINCT FROM (SELECT cue_id FROM cue WHERE id = $2)
-              AND c.id != $2)
-       LIMIT 1`,
-      [versionId, id, cueListId, fields.number]
-    );
-    if (conflictRes.rows.length > 0) {
-      throw new Error(`CUE_NUMBER_CONFLICT:${conflictRes.rows[0].version_id}`);
-    }
-  }
-
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -5113,7 +4820,7 @@ export async function updateCue(
       const { sets, vals } = buildInPlaceUpdate();
       if (sets.length) await client.query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
     } else {
-      // CoW: fork a new physical row for versionId and its descendants
+      // CoW: fork a new physical row for versionId（共享修订属于遗留多版本数据，只读保护）
       const curRes = await client.query<{
         number: string; name: string; content: string; warning: boolean; cue_id: string | null;
         start_kind: string; start_snapshot_id: string | null; start_offset: number | null;
@@ -5149,18 +4856,10 @@ export async function updateCue(
         ]
       );
 
-      // Remap cue_version for versionId + all descendants still pointing to old revision
+      // Remap cue_version for versionId only（线性化后 head 无子孙，不存在级联目标）
       await client.query(
-        `WITH RECURSIVE descendants AS (
-           SELECT id FROM version WHERE id = $1
-           UNION ALL
-           SELECT v.id FROM version v
-           INNER JOIN descendants d ON v.parent_version_id = d.id
-         )
-         UPDATE cue_version SET revision_id = $2
-         WHERE revision_id = $3
-           AND version_id IN (SELECT id FROM descendants)`,
-        [versionId, newId, id]
+        "UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3",
+        [newId, id, versionId]
       );
       // Copy cue_revision asset mounts to the new revision (mirrors cowCue behaviour)
       await client.query(
@@ -5191,18 +4890,10 @@ export async function deleteCue(id: string, cueListId: string, versionId?: strin
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // Remove cue_version for versionId and all its descendants
+    // Remove cue_version for versionId only（线性化后 head 无子孙）
     await client.query(
-      `WITH RECURSIVE descendants AS (
-         SELECT id FROM version WHERE id = $1
-         UNION ALL
-         SELECT v.id FROM version v
-         INNER JOIN descendants d ON v.parent_version_id = d.id
-       )
-       DELETE FROM cue_version
-       WHERE revision_id = $2
-         AND version_id IN (SELECT id FROM descendants)`,
-      [versionId, id]
+      "DELETE FROM cue_version WHERE revision_id = $1 AND version_id = $2",
+      [id, versionId]
     );
     // Delete the physical row only if no version references it anymore
     const refRes = await client.query<{ count: string }>(
@@ -5233,7 +4924,7 @@ type CueFullRow = {
 };
 
 /** Insert a new physical cue row that is a copy of `cur` with `patch` applied,
- *  then remap cue_version for `versionId` and its descendants from old to new id.
+ *  then remap cue_version for `versionId` from old to new id.
  *  Must be called inside an open transaction on `client`. Returns the new revision id. */
 async function cowCue(
   client: PoolClient,
@@ -5260,16 +4951,8 @@ async function cowCue(
     ]
   );
   await client.query(
-    `WITH RECURSIVE descendants AS (
-       SELECT id FROM version WHERE id = $1
-       UNION ALL
-       SELECT v.id FROM version v
-       INNER JOIN descendants d ON v.parent_version_id = d.id
-     )
-     UPDATE cue_version SET revision_id = $2
-     WHERE revision_id = $3
-       AND version_id IN (SELECT id FROM descendants)`,
-    [versionId, newId, cur.id]
+    "UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3",
+    [newId, cur.id, versionId]
   );
   // Duplicate asset_mount entries pointing at the old revision
   await client.query(
@@ -5333,16 +5016,8 @@ async function removeCueFromVersion(
     );
   } else {
     await client.query(
-      `WITH RECURSIVE descendants AS (
-         SELECT id FROM version WHERE id = $1
-         UNION ALL
-         SELECT v.id FROM version v
-         INNER JOIN descendants d ON v.parent_version_id = d.id
-       )
-       DELETE FROM cue_version
-       WHERE revision_id = $2
-         AND version_id IN (SELECT id FROM descendants)`,
-      [versionId, revisionId]
+      "DELETE FROM cue_version WHERE revision_id = $1 AND version_id = $2",
+      [revisionId, versionId]
     );
   }
 }
@@ -5829,24 +5504,14 @@ export async function deleteBlockTag(blockId: string, groupId: string): Promise<
 
 // ─── Asset mount CoW helpers ──────────────────────────────────────────────────
 
-const DESCENDANTS_CTE = `
-  WITH RECURSIVE descendants AS (
-    SELECT id FROM version WHERE id = $1
-    UNION ALL
-    SELECT v.id FROM version v
-    JOIN descendants d ON v.parent_version_id = d.id
-  )`;
-
 /**
  * Copy-on-write a block snapshot for an asset mount operation.
- * tracking:     new snapshot covers current version + all descendants
- * version_only: new snapshot covers current version only
+ * 快照被遗留多版本共享时，为当前版本分裂出独立快照（保护历史版本只读）。
  * Returns the snapshot ID the mount should be created against.
  */
 export async function cowBlockSnapshotForMount(
   versionId: string,
   snapshotId: string,
-  mode: 'tracking' | 'version_only',
 ): Promise<string> {
   const client = await getPool().connect();
   try {
@@ -5884,19 +5549,10 @@ export async function cowBlockSnapshotForMount(
     );
     // block_tag rows are keyed by logical block_id, not snapshot_id — no copy needed.
 
-    if (mode === 'tracking') {
-      await client.query(
-        `${DESCENDANTS_CTE}
-         UPDATE script_version SET snapshot_id = $2
-         WHERE snapshot_id = $3 AND version_id IN (SELECT id FROM descendants)`,
-        [versionId, newSnapshotId, snapshotId]
-      );
-    } else {
-      await client.query(
-        'UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3',
-        [newSnapshotId, snapshotId, versionId]
-      );
-    }
+    await client.query(
+      'UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3',
+      [newSnapshotId, snapshotId, versionId]
+    );
 
     // Carry existing asset_mount entries to the new snapshot
     await client.query(
@@ -5922,14 +5578,12 @@ export async function cowBlockSnapshotForMount(
 
 /**
  * Copy-on-write a cue revision for an asset mount operation.
- * tracking:     new revision covers current version + all descendants
- * version_only: new revision covers current version only
+ * 修订被遗留多版本共享时，为当前版本分裂出独立修订（保护历史版本只读）。
  * Returns the revision ID the mount should be created against.
  */
 export async function cowCueRevisionForMount(
   versionId: string,
   revisionId: string,
-  mode: 'tracking' | 'version_only',
 ): Promise<string> {
   const client = await getPool().connect();
   try {
@@ -5975,19 +5629,10 @@ export async function cowCueRevisionForMount(
        cur.end_kind, cur.end_snapshot_id, cur.end_offset, cur.warning]
     );
 
-    if (mode === 'tracking') {
-      await client.query(
-        `${DESCENDANTS_CTE}
-         UPDATE cue_version SET revision_id = $2
-         WHERE revision_id = $3 AND version_id IN (SELECT id FROM descendants)`,
-        [versionId, newId, revisionId]
-      );
-    } else {
-      await client.query(
-        'UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3',
-        [newId, revisionId, versionId]
-      );
-    }
+    await client.query(
+      'UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3',
+      [newId, revisionId, versionId]
+    );
 
     // Carry existing asset_mount entries to the new revision
     await client.query(
