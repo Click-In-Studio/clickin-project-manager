@@ -245,6 +245,24 @@ describe("manual edges & dramaturgy root (Phase 2)", () => {
     expect((await post(noPerm, { entityType: "scene", entityId: sceneId, wikiId: doc.id })).status).toBe(403);
   });
 
+  it("POST rejects anonymous (401) and archived production (403)", async () => {
+    const anon = await wikiRefsPOST(
+      new NextRequest(`http://localhost/api/production/${prodId}/wiki-refs`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityType: "scene", entityId: sceneId, wikiId: "x" }),
+      }), ctx());
+    expect(anon.status).toBe(401);
+
+    await getPool().query(`UPDATE production SET archived_at = now() WHERE id = $1`, [prodId]);
+    try {
+      const res = await post(linker, { entityType: "scene", entityId: sceneId, wikiId: "x" });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toContain("归档");
+    } finally {
+      await getPool().query(`UPDATE production SET archived_at = NULL WHERE id = $1`, [prodId]);
+    }
+  });
+
   it("link existing doc → manual chip; DELETE removes only manual, body edge untouched", async () => {
     const doc = await createWiki({
       productionId: prodId, title: "手动链接目标",
